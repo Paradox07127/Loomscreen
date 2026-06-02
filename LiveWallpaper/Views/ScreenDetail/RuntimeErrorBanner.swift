@@ -6,7 +6,7 @@ import SwiftUI
 /// (error / warning / info).
 struct RuntimeErrorBanner: View {
     let error: WallpaperRuntimeError
-    /// `false` for backends that don't have a picker (shader / scene); the
+    /// `false` for wallpaper types without a picker (shader / scene); the
     /// banner hides the Re-pick button so it doesn't dead-end on a no-op.
     var canRePick: Bool = true
     let onRetry: () -> Void

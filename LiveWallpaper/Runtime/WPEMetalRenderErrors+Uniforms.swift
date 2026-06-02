@@ -128,12 +128,6 @@ struct WPESolidUniforms {
     var color: SIMD4<Float>
 }
 
-struct WPEComposeRegionUniforms {
-    var color: SIMD4<Float>
-    var texture0UVRect: SIMD4<Float>
-    var texture1UVRect: SIMD4<Float>
-}
-
 /// Layout MUST match `WPEComposeLayerUniforms` in `WPEMetalBuiltins.metal`.
 /// `flags.x` carries the WPE `CLEARALPHA` combo (1 = clear sampled alpha).
 struct WPEComposeLayerUniforms {

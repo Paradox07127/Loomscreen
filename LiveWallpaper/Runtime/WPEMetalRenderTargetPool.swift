@@ -88,8 +88,7 @@ final class WPEMetalRenderTargetPool {
         for target: WPERenderTarget,
         layer: WPERenderLayer,
         sceneSize: CGSize,
-        avoiding textureToAvoid: MTLTexture?,
-        legacyComposeLayer: Bool = false
+        avoiding textureToAvoid: MTLTexture?
     ) throws -> MTLTexture {
         let spec = targetSpec(for: target, layer: layer)
         let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
@@ -98,8 +97,7 @@ final class WPEMetalRenderTargetPool {
             spec: spec,
             layer: layer,
             sceneSize: sceneSize,
-            pixelFormat: pixelFormat,
-            legacyComposeLayer: legacyComposeLayer
+            pixelFormat: pixelFormat
         )
         let slot = slots[key] ?? Slot()
         slots[key] = slot
@@ -144,15 +142,13 @@ final class WPEMetalRenderTargetPool {
         spec: WPERenderFBO,
         layer: WPERenderLayer,
         sceneSize: CGSize,
-        pixelFormat: MTLPixelFormat,
-        legacyComposeLayer: Bool
+        pixelFormat: MTLPixelFormat
     ) -> WPEMetalRenderTargetKey {
         switch target {
         case .layerComposite:
             let localSize = Self.layerCompositeSize(
                 for: layer,
-                sceneSize: sceneSize,
-                legacyComposeLayer: legacyComposeLayer
+                sceneSize: sceneSize
             )
             return WPEMetalRenderTargetKey(
                 name: spec.name,
@@ -174,25 +170,13 @@ final class WPEMetalRenderTargetPool {
 
     private static func layerCompositeSize(
         for layer: WPERenderLayer,
-        sceneSize: CGSize,
-        legacyComposeLayer: Bool
+        sceneSize: CGSize
     ) -> CGSize {
         // WPE compose/project utility layers capture the full frame, so their
         // layer-composite target MUST be scene-sized. Sizing it to the object's
-        // scaled footprint was the root of the "picture-in-picture" inset. The
-        // legacy rollback gate restores that old footprint sizing wholesale.
+        // scaled footprint was the root of the "picture-in-picture" inset.
         if isSceneCaptureUtilityLayer(layer) {
-            guard legacyComposeLayer,
-                  layer.geometry != .identity,
-                  let size = layer.geometry.size else {
-                return sceneSize
-            }
-            let scaleX = finiteMagnitude(layer.geometry.scale.x, fallback: 1)
-            let scaleY = finiteMagnitude(layer.geometry.scale.y, fallback: 1)
-            return CGSize(
-                width: max(size.width * scaleX, 1),
-                height: max(size.height * scaleY, 1)
-            )
+            return sceneSize
         }
 
         guard layer.geometry != .identity,
@@ -207,14 +191,7 @@ final class WPEMetalRenderTargetPool {
     }
 
     private static func isSceneCaptureUtilityLayer(_ layer: WPERenderLayer) -> Bool {
-        WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath)
-    }
-
-    private static func finiteMagnitude(_ value: Double, fallback: CGFloat) -> CGFloat {
-        guard value.isFinite else {
-            return fallback
-        }
-        return CGFloat(abs(value))
+        WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath)
     }
 
     private func makeAllocation(key: WPEMetalRenderTargetKey, label: String) throws -> Allocation {

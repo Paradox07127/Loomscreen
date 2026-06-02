@@ -234,15 +234,12 @@ struct DeveloperToolsView: View {
               help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
         .init(key: "WPEAudioDebugLog", title: "Audio debug log",
               help: "Verbose audio-reactive DSP logging."),
-        .init(key: "WPE_METAL_LEGACY_COMPOSE_LAYER", title: "Legacy compose layer",
-              help: "Roll back to the pre-fix scaled-footprint compose-layer path."),
     ]
 
     private static let diagnosticStringKeys: [String] = [
         WPEWaterWavesDebugMode.defaultsKey,
         "WPEDumpScenePasses",
         "WPEDumpScenePassesAtTime",
-        "WPE_METAL_LEGACY_COMPOSE_SCENES",
     ]
 
     private var diagnosticsFlagsSection: some View {

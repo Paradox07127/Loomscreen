@@ -267,7 +267,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Classifies a `performLoad()` failure that is specific to the Metal
     /// renderer. Returning a non-nil reason promotes the error to
     /// `SceneRenderingError.metalRendererUnsupported`, which surfaces to the
-    /// user as the scene's load error (Metal is the only scene backend).
+    /// user as the scene's load error.
     private static func metalUnsupportedReason(for error: Error) -> String? {
         switch error {
         case let context as WPEMetalTextureLoadContextError:

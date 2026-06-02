@@ -172,9 +172,9 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
     }
 
-    /// Runs the Metal renderer's `load()` and records the outcome. Metal is the
-    /// only scene backend — any failure (including
-    /// `SceneRenderingError.metalRendererUnsupported`) surfaces as `loadError`.
+    /// Runs the Metal renderer's `load()` and records the outcome. Any failure
+    /// (including `SceneRenderingError.metalRendererUnsupported`) surfaces as
+    /// `loadError`.
     private func runLoad(_ renderer: WPEMetalSceneRenderer) async {
         do {
             try await renderer.load()

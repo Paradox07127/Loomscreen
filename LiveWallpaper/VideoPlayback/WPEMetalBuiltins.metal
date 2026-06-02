@@ -10,12 +10,6 @@ struct WPESolidUniforms {
     float4 color;
 };
 
-struct WPEComposeRegionUniforms {
-    float4 color;
-    float4 texture0UVRect;
-    float4 texture1UVRect;
-};
-
 struct WPEComposeLayerUniforms {
     float4 flags; // x = CLEARALPHA
 };
@@ -195,7 +189,7 @@ fragment half4 wpe_util_copy_fragment(
 // rotated layers into a distorted inset. The layer transform positions the
 // DOWNSTREAM effect (lens flare / DoF / foliage), not the compose capture.
 // Single-texture by design (WPE composelayer samples only g_Texture0); the
-// two-texture mix lives in wpe_compose_fragment for the legacy fallback path.
+// two-texture mix lives in wpe_compose_fragment for ordinary region composes.
 fragment half4 wpe_composelayer_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
@@ -218,29 +212,6 @@ fragment half4 wpe_compose_fragment(
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 a = float4(texture0.sample(linearSampler, in.uv));
     float4 b = float4(texture1.sample(linearSampler, in.uv));
-    float4 composed = mix(a, b, b.a);
-    return half4(float4(composed.rgb * uniforms.color.rgb, composed.a * uniforms.color.a));
-}
-
-fragment half4 wpe_compose_region_fragment(
-    WPEVertexOut in [[stage_in]],
-    texture2d<half, access::sample> texture0 [[texture(0)]],
-    texture2d<half, access::sample> texture1 [[texture(1)]],
-    constant WPEComposeRegionUniforms& uniforms [[buffer(0)]]
-) {
-    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float2 uv0 = clamp(
-        uniforms.texture0UVRect.xy + in.uv * uniforms.texture0UVRect.zw,
-        float2(0.0),
-        float2(1.0)
-    );
-    float2 uv1 = clamp(
-        uniforms.texture1UVRect.xy + in.uv * uniforms.texture1UVRect.zw,
-        float2(0.0),
-        float2(1.0)
-    );
-    float4 a = float4(texture0.sample(linearSampler, uv0));
-    float4 b = float4(texture1.sample(linearSampler, uv1));
     float4 composed = mix(a, b, b.a);
     return half4(float4(composed.rgb * uniforms.color.rgb, composed.a * uniforms.color.a));
 }

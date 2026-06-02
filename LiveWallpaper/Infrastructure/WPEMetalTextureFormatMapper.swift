@@ -1,10 +1,9 @@
 #if !LITE_BUILD
 import Metal
 
-/// Color-space intent for a Metal texture upload. Phase 2A H3 introduces this
-/// so the renderer can request sRGB-encoded pixel formats — matching the
-/// SpriteKit/CGImage fallback path — while data textures (masks, normal maps,
-/// future R8/RG8 channels) stay linear.
+/// Color-space intent for a Metal texture upload. The renderer can request
+/// sRGB-encoded pixel formats for color textures while data textures (masks,
+/// normal maps, future R8/RG8 channels) stay linear.
 enum WPEMetalColorSpace: Equatable, Sendable {
     case sRGB
     case linear

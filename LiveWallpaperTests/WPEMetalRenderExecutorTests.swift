@@ -1827,7 +1827,7 @@ private func copyPass() -> WPERenderPass {
 }
 
 private extension WPEMetalRenderExecutorTests {
-    @Test("Offscreen output is sRGB-tagged for SpriteKit gamma parity")
+    @Test("Offscreen output is sRGB-tagged for stable gamma")
     func outputTextureIsSRGB() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
@@ -2445,50 +2445,13 @@ private extension WPEMetalRenderExecutorTests {
 
     @Test("Scene-capture utility classifier matches compose/project models and tolerates a dependency prefix")
     func composeUtilityClassifierHandlesPathsAndDependencyPrefix() {
-        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/composelayer.json"))
-        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/projectlayer.json"))
-        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/fullscreenlayer.json"))
-        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("../3479521040/models/util/composelayer.json"))
-        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models\\util\\composelayer.json"))
-        #expect(!WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/solidlayer.json"))
-        #expect(!WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("materials/quadrants.png"))
-    }
-
-    @Test("Legacy rollback restores the scaled-footprint composite target")
-    func legacyRollbackRestoresScaledFootprintCompositeTarget() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let pool = WPEMetalRenderTargetPool(device: device)
-        let layer = WPERenderLayer(
-            objectID: "compose-legacy",
-            objectName: "ComposeLegacy",
-            imagePath: "models/util/composelayer.json",
-            materialPath: "materials/util/composelayer.json",
-            geometry: WPERenderLayerGeometry(
-                origin: SIMD3<Double>(512, 384, 0),
-                scale: SIMD3<Double>(2, 3, 1),
-                angles: SIMD3<Double>(0, 0, 0),
-                alignment: .center,
-                size: CGSize(width: 128, height: 64),
-                alpha: 1,
-                color: SIMD3<Double>(1, 1, 1),
-                brightness: 1
-            ),
-            compositeA: "_rt_imageLayerComposite_compose_legacy_a",
-            compositeB: "_rt_imageLayerComposite_compose_legacy_b",
-            localFBOs: [],
-            passes: []
-        )
-
-        let texture = try pool.texture(
-            for: .layerComposite(name: layer.compositeA),
-            layer: layer,
-            sceneSize: CGSize(width: 1024, height: 768),
-            avoiding: nil,
-            legacyComposeLayer: true
-        )
-
-        #expect(texture.width == 256)
-        #expect(texture.height == 192)
+        #expect(WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("models/util/composelayer.json"))
+        #expect(WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("models/util/projectlayer.json"))
+        #expect(WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("models/util/fullscreenlayer.json"))
+        #expect(WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("../3479521040/models/util/composelayer.json"))
+        #expect(WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("models\\util\\composelayer.json"))
+        #expect(!WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("models/util/solidlayer.json"))
+        #expect(!WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath("materials/quadrants.png"))
     }
 
     @Test("Composelayer CLEARALPHA clears the captured alpha")
@@ -2650,58 +2613,6 @@ private extension WPEMetalRenderExecutorTests {
 
         #expect(pixel.r >= 250)
         #expect(pixel.g <= 5)
-        #expect(pixel.b <= 5)
-        #expect(pixel.a >= 250)
-    }
-
-    @Test("Resolves previous to the prior render call's named FBO output")
-    func resolvesPreviousFromPriorNamedFBORender() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let executor = try WPEMetalRenderExecutor(device: device)
-
-        let fbo = WPERenderFBO(name: "_rt_History", scale: 1, format: "rgba8888")
-        let seedFBO = solidPass(
-            id: "layer.0",
-            color: [0, 1, 0, 1],
-            target: .fbo(name: fbo.name),
-            blending: "disabled"
-        )
-        let copyPreviousBackIntoSameFBO = copyPass(
-            id: "layer.0",
-            source: .previous,
-            target: .fbo(name: fbo.name),
-            blending: "disabled"
-        )
-        let copyFBOToScene = copyPass(
-            id: "layer.1",
-            source: .fbo(fbo.name),
-            target: .scene,
-            blending: "disabled"
-        )
-
-        _ = try executor.render(
-            pipeline: preparedPipeline(
-                localFBOs: [fbo],
-                passes: [preparedBuiltinPass(seedFBO, uniforms: ["g_Color": .vector([0, 1, 0, 1])])]
-            ),
-            size: CGSize(width: 4, height: 4),
-            textures: [:]
-        )
-        let output = try executor.render(
-            pipeline: preparedPipeline(
-                localFBOs: [fbo],
-                passes: [
-                    preparedBuiltinPass(copyPreviousBackIntoSameFBO, bindings: [0: .previous]),
-                    preparedBuiltinPass(copyFBOToScene, bindings: [0: .fbo(fbo.name)])
-                ]
-            ),
-            size: CGSize(width: 4, height: 4),
-            textures: [:]
-        )
-        let pixel = try readPixel(output, x: 2, y: 2)
-
-        #expect(pixel.r <= 5)
-        #expect(pixel.g >= 250)
         #expect(pixel.b <= 5)
         #expect(pixel.a >= 250)
     }

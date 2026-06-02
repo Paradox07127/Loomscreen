@@ -27,14 +27,6 @@ enum WPEMetalTargetID: Hashable {
 struct WPEMetalFrameState {
     let output: MTLTexture
     let sceneSize: CGSize
-    /// Optional workshop/scene identity used only for renderer rollback gates
-    /// (e.g. the legacy compose-layer denylist). Lower-level callers and tests
-    /// default to nil.
-    let sceneID: String?
-    /// Resolved once per frame from the rollback gate. When true, compose/project
-    /// utility layers revert to the legacy region path (footprint-sized composite
-    /// + object-quad scene draw) so the new fullscreen path can be disabled wholesale.
-    let legacyComposeLayer: Bool
     var latestSceneTexture: MTLTexture?
     var latestNamedTextures: [String: MTLTexture] = [:]
     var writtenTargets: Set<WPEMetalTargetID> = []
@@ -53,15 +45,11 @@ struct WPEMetalFrameState {
     init(
         output: MTLTexture,
         sceneSize: CGSize,
-        sceneID: String? = nil,
-        legacyComposeLayer: Bool = false,
         previousSceneTexture: MTLTexture? = nil,
         previousNamedTextures: [String: MTLTexture] = [:]
     ) {
         self.output = output
         self.sceneSize = sceneSize
-        self.sceneID = sceneID
-        self.legacyComposeLayer = legacyComposeLayer
         self.latestSceneTexture = previousSceneTexture
         self.latestNamedTextures = previousNamedTextures
     }

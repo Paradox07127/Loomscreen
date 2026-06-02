@@ -5,7 +5,7 @@ import Testing
 
 /// Phase 2.0 Day 5 lock: SceneRenderState transitions and SceneRenderingError
 /// → FallbackReason mapping. Pure value-level tests so they don't pull in
-/// SwiftUI / SpriteKit and stay snappy in CI.
+/// renderer/UI dependencies and stay snappy in CI.
 @Suite("WPESceneSection state machine")
 struct WPESceneSectionStateTests {
 

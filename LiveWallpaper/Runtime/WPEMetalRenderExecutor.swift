@@ -5,11 +5,10 @@ import LiveWallpaperProWPE
 import Metal
 import MetalKit
 
-/// Shared classifier + rollback gate for WPE compose/project utility layers,
-/// so the dispatcher, target pool, and executor branch on ONE definition
-/// (instead of three duplicated path checks) and read the rollback settings
-/// once per frame rather than per pass.
-enum WPEMetalComposeLayerCompatibility {
+/// Shared classifier for WPE compose/project utility layers, so the dispatcher,
+/// target pool, and executor branch on one definition instead of duplicating
+/// path checks.
+enum WPEMetalSceneCaptureUtilityModels {
     /// WPE `fullscreen`/`passthrough` utility models — `composelayer.json`,
     /// `projectlayer.json`, and `fullscreenlayer.json` (the post-process /
     /// depth-of-field carrier) — all capture the full frame and MUST render
@@ -30,38 +29,13 @@ enum WPEMetalComposeLayerCompatibility {
             || stripped == "models/util/projectlayer.json"
             || stripped == "models/util/fullscreenlayer.json"
     }
-
-    /// Per-scene rollback to the legacy region path. `WPE_METAL_LEGACY_COMPOSE_LAYER`
-    /// forces every scene; `WPE_METAL_LEGACY_COMPOSE_SCENES` is a comma-separated id list.
-    static func usesLegacyComposeLayer(sceneID: String?) -> Bool {
-        if boolSetting(named: "WPE_METAL_LEGACY_COMPOSE_LAYER") {
-            return true
-        }
-        guard let sceneID, !sceneID.isEmpty else {
-            return false
-        }
-        return sceneIDListSetting(named: "WPE_METAL_LEGACY_COMPOSE_SCENES").contains(sceneID)
-    }
-
-    private static func boolSetting(named key: String) -> Bool {
-        UserDefaults.standard.bool(forKey: key)
-            || ["1", "true", "yes", "on"].contains(ProcessInfo.processInfo.environment[key]?.lowercased() ?? "")
-    }
-
-    private static func sceneIDListSetting(named key: String) -> Set<String> {
-        Set([ProcessInfo.processInfo.environment[key], UserDefaults.standard.string(forKey: key)]
-            .compactMap { $0 }
-            .flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
-            .filter { !$0.isEmpty })
-    }
 }
 
 final class WPEMetalRenderExecutor {
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share
     /// a single sRGB pixel format so render pipelines built for the offscreen
     /// pass can be reused by `present()` without re-creation, and so the
-    /// rendered gamma matches the SpriteKit/CGImage fallback on the same
-    /// scene fixture.
+    /// rendered gamma stays stable across offscreen and onscreen passes.
     static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
 
     /// Debug bisect flag: when `defaults write Taijia.LiveWallpaper
@@ -159,10 +133,6 @@ final class WPEMetalRenderExecutor {
         previousFrameHistory = nil
     }
 
-    /// Resolved once per `render()` from the rollback gate so utility-layer
-    /// geometry/sizing can revert without threading the flag through every
-    /// dispatch call site.
-    private var activeLegacyComposeLayer = false
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
     /// (confirms the builtin effect_waterwaves path actually runs + the debug flag value reaching it).
     private var loggedWaterWavesDispatch = false
@@ -183,7 +153,6 @@ final class WPEMetalRenderExecutor {
         cameraUniforms: WPEMetalCameraUniforms = .identity,
         sceneID: String? = nil
     ) throws -> MTLTexture {
-        activeLegacyComposeLayer = WPEMetalComposeLayerCompatibility.usesLegacyComposeLayer(sceneID: sceneID)
         #if DEBUG
         scenePassDumps.removeAll()
         let dumpScenePasses = sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false
@@ -215,8 +184,6 @@ final class WPEMetalRenderExecutor {
         var frameState = WPEMetalFrameState(
             output: output,
             sceneSize: size,
-            sceneID: sceneID,
-            legacyComposeLayer: activeLegacyComposeLayer,
             previousSceneTexture: reusableHistory?.sceneTexture,
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
@@ -1113,7 +1080,8 @@ final class WPEMetalRenderExecutor {
             index: 0
         )
         // Parallax is a geometry translation applied in object-quad scene
-        // passes; the legacy raw-pointer UV shift is removed here too. (Plain
+        // passes; raw-pointer UV shifts are intentionally not applied here.
+        // (Plain
         // full-frame layers routed through this fullscreen copy don't parallax —
         // see the camera-parallax limitations note.)
         var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
@@ -1153,11 +1121,10 @@ final class WPEMetalRenderExecutor {
             return layer.parallaxDepth != 0 && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
         // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
-        // render fullscreen and copy the captured frame 1:1, never as a shrunken
-        // object quad — unless the per-scene legacy rollback gate restores the
-        // old object-quad behavior.
-        if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
-            return activeLegacyComposeLayer
+        // render fullscreen and copy the captured frame 1:1, never as a
+        // shrunken object quad.
+        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
+            return false
         }
         return true
     }
@@ -1216,32 +1183,6 @@ final class WPEMetalRenderExecutor {
                 0,
                 0
             )
-        )
-    }
-
-    func sceneCaptureUVRect(
-        for layer: WPERenderLayer,
-        sceneSize: CGSize,
-        sourceTexture: MTLTexture
-    ) -> SIMD4<Float> {
-        let quad = objectQuadUniforms(
-            for: layer,
-            sceneSize: sceneSize,
-            sourceTexture: sourceTexture
-        )
-        let sceneWidth = max(quad.sceneSizeAndRotation.x, 1)
-        let sceneHeight = max(quad.sceneSizeAndRotation.y, 1)
-        let width = max(quad.centerAndSize.z, 0.0001)
-        let height = max(quad.centerAndSize.w, 0.0001)
-        let centerX = quad.centerAndSize.x + sceneWidth * 0.5
-        let centerYFromBottom = quad.centerAndSize.y + sceneHeight * 0.5
-        let minX = (centerX - width * 0.5) / sceneWidth
-        let minY = (sceneHeight - (centerYFromBottom + height * 0.5)) / sceneHeight
-        return SIMD4<Float>(
-            minX,
-            minY,
-            width / sceneWidth,
-            height / sceneHeight
         )
     }
 
@@ -1368,8 +1309,7 @@ final class WPEMetalRenderExecutor {
                 for: target,
                 layer: layer,
                 sceneSize: frameState.sceneSize,
-                avoiding: textureToAvoid,
-                legacyComposeLayer: frameState.legacyComposeLayer
+                avoiding: textureToAvoid
             )
             return (targetID, texture)
         }

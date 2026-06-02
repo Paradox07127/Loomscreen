@@ -6,7 +6,7 @@ import SwiftUI
 /// Pro-only inspector card that mirrors Wallpaper Engine's right-hand
 /// property panel for an imported `.scene` workshop project.
 ///
-/// Companion to `WPEProjectCustomSettingsCard` (the HTML-web flavour).
+/// Companion to the HTML project settings card.
 /// The two diverge on three points:
 ///   - storage: scene overrides live on `SceneDescriptor.propertyOverrides`
 ///     rather than `HTMLConfig.wallpaperEngineProjectPropertiesByProject`

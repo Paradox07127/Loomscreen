@@ -509,7 +509,7 @@ struct WPESceneDetailView: View {
         case .resourceFailed(let diagnostic):
             return Self.fallbackReason(for: diagnostic)
         case .metalRendererUnsupported(let reason):
-            // Metal is the only scene backend, so this is a hard load failure.
+            // Metal renderer gaps are hard load failures.
             // Treat like a generic scene parse failure so the inspector still
             // shows a meaningful diagnostic.
             return .sceneParseFailed(reason)

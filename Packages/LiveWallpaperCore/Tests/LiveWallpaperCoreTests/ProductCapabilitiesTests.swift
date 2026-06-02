@@ -37,7 +37,7 @@ struct ProductCapabilitiesTests {
         #expect(Set(ProductCapabilities.pro.selectableWallpaperModes) == Set(WallpaperMode.allCases))
     }
 
-    @Test("Legacy `single` raw value decodes to .playlist (rollback compat)")
+    @Test("Legacy `single` raw value decodes to .playlist")
     func legacySingleDecodesToPlaylist() throws {
         let data = try JSONEncoder().encode("single")
         let decoded = try JSONDecoder().decode(WallpaperMode.self, from: data)

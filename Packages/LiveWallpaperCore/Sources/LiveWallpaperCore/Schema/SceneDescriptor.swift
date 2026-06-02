@@ -141,7 +141,7 @@ public enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
     /// All declared objects render via the image-only pipeline.
     case imageOnly
     /// Some objects are renderable but at least one is missing assets or
-    /// uses unsupported features. Runtime still mounts an SKScene.
+    /// uses unsupported features. Runtime still mounts the scene.
     case degraded
     /// No object can render — UI must fall back to the placeholder card.
     case unsupported

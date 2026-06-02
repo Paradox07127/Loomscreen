@@ -292,7 +292,7 @@ struct WPEMetalPointerSampler: Sendable {
 
 /// Camera/projection uniforms produced from `general.orthogonalprojection` +
 /// the scene camera. Mirrors the WPE convention of a top-left origin so UV
-/// math stays consistent with the existing CGImage/SpriteKit paths.
+/// math stays consistent across Metal scene passes.
 struct WPEMetalCameraUniforms: Equatable, Sendable {
     let renderSize: CGSize
     let viewProjectionMatrix: [Double]

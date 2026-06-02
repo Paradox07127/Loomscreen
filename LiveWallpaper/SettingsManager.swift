@@ -44,7 +44,8 @@ final class SettingsManager {
         static let appLanguage = AppLanguagePreference.storageKey
         /// Bumped each time we successfully migrate a blob out of UserDefaults
         /// into the file store. Lets us run the migration at most once even
-        /// though we keep the legacy keys for one version (rollback safety).
+        /// though we keep the legacy keys for one version as a compatibility
+        /// buffer.
         static let configMigrationVersion = "Settings.MigrationVersion"
     }
 

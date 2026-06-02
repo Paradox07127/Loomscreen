@@ -565,7 +565,7 @@ struct PlainVideoFrameRateCompositionPolicyTests {
 
 @Suite("ParticleEffect Codable")
 struct ParticleEffectCodableTests {
-    @Test("Unknown raw value decodes to .none (forward / rollback compatibility)")
+    @Test("Unknown raw value decodes to .none for compatibility")
     func unknownRawValueDecodesToNone() throws {
         let data = try JSONEncoder().encode("Lightning")
         let decoded = try JSONDecoder().decode(ParticleEffect.self, from: data)
