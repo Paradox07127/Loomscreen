@@ -14,24 +14,19 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
     let total: Int
     let summary: Summary
     let entries: [Entry]
-    /// Which renderer produced this report. Metal is the only scene renderer;
-    /// old archives without this field decode as `"metal"`.
-    let renderer: String
 
     init(
         generatedAt: Date,
         perSceneTimeoutSeconds: Double,
         total: Int,
         summary: Summary,
-        entries: [Entry],
-        renderer: String
+        entries: [Entry]
     ) {
         self.generatedAt = generatedAt
         self.perSceneTimeoutSeconds = perSceneTimeoutSeconds
         self.total = total
         self.summary = summary
         self.entries = entries
-        self.renderer = renderer
     }
 
     init(from decoder: any Decoder) throws {
@@ -41,7 +36,6 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
         total = try container.decode(Int.self, forKey: .total)
         summary = try container.decode(Summary.self, forKey: .summary)
         entries = try container.decode([Entry].self, forKey: .entries)
-        renderer = try container.decodeIfPresent(String.self, forKey: .renderer) ?? "metal"
     }
 
     struct Summary: Codable, Sendable {
@@ -60,11 +54,6 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
         let elapsedSeconds: Double
         let failureMessage: String?
         let resolution: ResolutionSummary
-        /// Renderer that produced this entry. Metal is the only scene
-        /// renderer; nil for skipped entries and old archives without this
-        /// field. Old archives carrying a `routedBy` key decode fine (it's
-        /// ignored).
-        let renderer: String?
         /// First-frame readback summary. Nil for skipped scenes and archives
         /// produced before the visual gate was added.
         let visual: VisualSummary?
@@ -107,9 +96,9 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
     }
 }
 
-/// Headless driver that runs `WPESceneRenderer.load()` against every
+/// Headless driver that runs `WPEMetalSceneRenderer.load()` against every
 /// imported scene workshop project and aggregates the outcome using the
-/// Metal scene renderer (the only scene backend).
+/// Metal scene renderer.
 /// Phase A.3: turns "57 unknown scenes" into "P pass / F fail / T timeout"
 /// with per-scene resolution diagnostics so Phase B has a target list.
 ///
@@ -140,7 +129,7 @@ final class WPECorpusPlaybackHarness {
     }
 
     private struct HeadlessSession {
-        let renderer: WPESceneRenderer
+        let renderer: WPEMetalSceneRenderer
         let window: NSWindow
     }
 
@@ -432,7 +421,7 @@ final class WPECorpusPlaybackHarness {
     }
 
     /// Races `renderer.load()` against a wall-clock timeout.
-    private func loadWithTimeout(renderer: WPESceneRenderer, seconds: Double) async throws {
+    private func loadWithTimeout(renderer: WPEMetalSceneRenderer, seconds: Double) async throws {
         let nanoseconds = Self.timeoutNanoseconds(for: seconds)
         let state = TimeoutRaceState()
         let loadTask = Task { @MainActor in
@@ -480,8 +469,7 @@ final class WPECorpusPlaybackHarness {
             perSceneTimeoutSeconds: configuration.perSceneTimeoutSeconds,
             total: total,
             summary: Self.summary(for: entries),
-            entries: entries,
-            renderer: "metal"
+            entries: entries
         )
     }
 
@@ -505,7 +493,6 @@ final class WPECorpusPlaybackHarness {
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             failureMessage: failureMessage,
             resolution: resolution,
-            renderer: "metal",
             visual: visual
         )
     }
@@ -527,16 +514,14 @@ final class WPECorpusPlaybackHarness {
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             failureMessage: failureMessage,
             resolution: .empty,
-            renderer: nil,
             visual: nil
         )
     }
 
     private static func visualSummary(
-        from renderer: WPESceneRenderer
+        from renderer: WPEMetalSceneRenderer
     ) -> WPECorpusPlaybackReport.Entry.VisualSummary? {
-        guard let metalRenderer = renderer as? WPEMetalSceneRenderer,
-              let texture = metalRenderer.renderedTexture,
+        guard let texture = renderer.renderedTexture,
               let stats = WPEMetalTextureVisualStats.analyze(texture: texture) else {
             return nil
         }

@@ -32,9 +32,9 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
     }
 
     /// HTML web projects already render their own `schemecolor` via CSS,
-    /// so the HTML inspector hides it (default `false`). WPE Metal/WebGL
-    /// scenes need it surfaced — that's the only colour control most
-    /// authors expose — so the Scene inspector calls this with `true`.
+    /// so the HTML inspector hides it (default `false`). WPE Metal scenes
+    /// need it surfaced — that's the only colour control most authors expose
+    /// — so the Scene inspector calls this with `true`.
     static func parse(
         data: Data,
         preferredLanguages: [String] = Locale.preferredLanguages,

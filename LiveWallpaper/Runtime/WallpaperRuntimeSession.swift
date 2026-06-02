@@ -55,9 +55,8 @@ protocol WallpaperPerformanceConfigurable: AnyObject {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile)
 }
 
-/// Implemented by scene-style renderers (Metal / WebGL) that own a
-/// display-link-equivalent and can re-target their render tempo at
-/// runtime. The plain-video path stays on the existing
+/// Implemented by renderers that own a display-link-equivalent and can
+/// re-target their render tempo at runtime. The plain-video path stays on the existing
 /// `WallpaperVideoPlayer.setFrameRateLimit` code path because its limit
 /// is interpreted as a compositing FPS via `AVVideoComposition`.
 @MainActor

@@ -298,7 +298,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             rotation: config?.transformRotationDegrees ?? 0
         )
 
-        let msaaForcer = HTMLWallpaperRuntimeScript.webglMSAAForcer()
+        let msaaForcer = HTMLWallpaperRuntimeScript.gpuCanvasMSAAForcer()
         let lifecycle = HTMLWallpaperRuntimeScript.lifecycleController(
             aggressiveSuspend: config?.aggressiveSuspend ?? false
         )
@@ -487,7 +487,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         if needsDocumentStartReload {
             // documentStart-only hooks (canvas upgrader, CSP meta tag,
-            // WebGL lose-context plumbing) cannot be retro-installed on
+            // GPU-context release plumbing) cannot be retro-installed on
             // a page that's already running. Reload so the freshly
             // re-registered user scripts execute against a clean DOM.
             reloadCurrentSource()

@@ -417,12 +417,11 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     // WPE's runtime treats an undefined combo as `0` inside `#if/#elif`
-    // expressions; the WebGL2 (ANGLE) preprocessor instead raises
-    // "unexpected token after conditional expression" for an unknown
-    // identifier. Scan the expanded source for uppercase identifiers
-    // referenced in preprocessor conditionals and emit `#define X 0` for
-    // any that the prelude / combo values / shader body itself hasn't
-    // already defined.
+    // expressions; strict shader preprocessors raise "unexpected token
+    // after conditional expression" for an unknown identifier. Scan the
+    // expanded source for uppercase identifiers referenced in preprocessor
+    // conditionals and emit `#define X 0` for any that the prelude / combo
+    // values / shader body itself hasn't already defined.
     private func implicitConditionalDefines(
         in source: String,
         knownCombos: [String: Int]

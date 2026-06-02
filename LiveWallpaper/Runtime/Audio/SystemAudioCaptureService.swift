@@ -7,7 +7,7 @@ import LiveWallpaperCore
 /// global stereo mixdown of every process' output), drives it into a single
 /// reusable `AudioSpectrumProcessor`, and publishes 64-bin stereo frames into a
 /// shared `AudioSpectrumBroker` that every audio-reactive surface (Metal scene
-/// uniforms, WebGL payload, HTML `wallpaperRegisterAudioListener`) reads.
+/// uniforms and the HTML `wallpaperRegisterAudioListener`) reads.
 ///
 /// This is the loopback source that mirrors Wallpaper Engine: the visualizer
 /// follows whatever the user is actually playing (Spotify, a game, a browser),

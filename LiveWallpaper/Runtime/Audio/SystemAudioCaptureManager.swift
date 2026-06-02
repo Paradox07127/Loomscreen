@@ -4,7 +4,7 @@ import LiveWallpaperCore
 
 /// App-wide owner of the single system-audio capture pipeline. There is exactly
 /// one tap + one `AudioSpectrumBroker` for the whole app; every audio-reactive
-/// surface (Metal scene uniforms, WebGL payload, HTML `wallpaperRegisterAudioListener`)
+/// surface (Metal scene uniforms and the HTML `wallpaperRegisterAudioListener`)
 /// reads snapshots from `broker`. This mirrors Wallpaper Engine: one loopback
 /// capture fanned out to N consumers and N displays — never a tap per renderer.
 ///

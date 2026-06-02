@@ -16,9 +16,8 @@ import Metal
 /// the classic green-tinted noise pattern. The decompression has to go
 /// through a sampling shader.
 ///
-/// The WebGL path needs this because WebKit ships without
-/// `WEBGL_compressed_texture_s3tc` by default, so every BC-compressed
-/// `.tex` would otherwise fall back to the magenta placeholder.
+/// The Metal texture loader uses this fallback when native BC upload is
+/// unavailable for a decoded `.tex`, avoiding the magenta placeholder path.
 enum WPETexMetalTranscoder {
 
     private static let device: MTLDevice? = MTLCreateSystemDefaultDevice()

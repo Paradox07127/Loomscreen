@@ -558,7 +558,7 @@ struct ContentSecurityInspector: View {
             icon: "bolt.slash.fill",
             iconColor: .yellow,
             title: "Aggressive Suspend",
-            info: "On suspend, force-release every WebGL context (loseContext). On resume, restore. Drops GPU usage to zero when the wallpaper is occluded or thermal-throttled, but some WebGL pages don't handle webglcontextrestored and stay black after the round-trip."
+            info: "On suspend, force-release every GPU canvas context. On resume, restore it. Drops GPU usage to zero when the wallpaper is occluded or thermal-throttled, but some pages do not handle context restore and stay black after the round-trip."
         ) {
             Toggle("", isOn: htmlConfigBinding(\.aggressiveSuspend))
                 .labelsHidden()

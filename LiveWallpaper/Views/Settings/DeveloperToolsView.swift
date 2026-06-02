@@ -71,7 +71,7 @@ struct DeveloperToolsView: View {
                     .truncationMode(.middle)
             }
         } else if let report = lastReport {
-            Text(verbatim: "[\(report.renderer)] \(summaryLabel(report.summary, total: report.total))")
+            Text(verbatim: summaryLabel(report.summary, total: report.total))
                 .foregroundStyle(.secondary)
         } else {
             Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
@@ -204,7 +204,7 @@ struct DeveloperToolsView: View {
                         .monospacedDigit()
                         .frame(width: 36, alignment: .trailing)
                 }
-                Text("Iterates every imported scene workshop project, runs `WPESceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
+                Text("Iterates every imported scene workshop project, runs `WPEMetalSceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

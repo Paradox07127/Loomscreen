@@ -278,21 +278,20 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
-    // MARK: - WebGL MSAA / canvas backing-store upgrader
+    // MARK: - GPU canvas MSAA / backing-store upgrader
 
-    /// Forces `antialias: true` on every WebGL / WebGL 2 context created by
-    /// the page. WPE Spine workshop boilerplates routinely do
-    /// `canvas.getContext('webgl', { alpha: false })` without an explicit
-    /// `antialias` field — on WebKit this lands as MSAA-off, leaving harsh
-    /// polygon-edge aliasing on Spine character meshes. Patching `getContext`
-    /// at `documentStart` lets us flip the default without modifying any
-    /// wallpaper code. No-op for 2D / bitmaprenderer contexts; idempotent
-    /// across page navigations.
-    static func webglMSAAForcer() -> String {
+    /// Forces `antialias: true` on GPU canvas contexts created by the page.
+    /// WPE Spine workshop boilerplates routinely request a GPU context without
+    /// an explicit `antialias` field — on WebKit this lands as MSAA-off,
+    /// leaving harsh polygon-edge aliasing on Spine character meshes. Patching
+    /// `getContext` at `documentStart` lets us flip the default without
+    /// modifying any wallpaper code. No-op for 2D / bitmaprenderer contexts;
+    /// idempotent across page navigations.
+    static func gpuCanvasMSAAForcer() -> String {
         return """
         (function () {
-            if (window.__lwWebGLMSAAInstalled__) return;
-            window.__lwWebGLMSAAInstalled__ = true;
+            if (window.__lwCanvasMSAAInstalled__) return;
+            window.__lwCanvasMSAAInstalled__ = true;
             try {
                 var proto = HTMLCanvasElement && HTMLCanvasElement.prototype;
                 if (!proto || !proto.getContext) return;
@@ -315,10 +314,10 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
-    /// Upgrades WebGL backing store to physical pixels for CSS-naive canvases
+    /// Upgrades GPU canvas backing stores to physical pixels for CSS-naive canvases
     /// (e.g. `canvas.width = window.innerWidth`) so retina output is not
     /// bilinear-upsampled by the compositor. Invariants:
-    /// - DPR scale applies only to WebGL canvases sized in CSS-pixel space;
+    /// - DPR scale applies only to GPU canvases sized in CSS-pixel space;
     ///   DPR-aware callers (spine-player, PIXI v8) pass through untouched.
     /// - `viewport` / `scissor` are scaled only when the default framebuffer
     ///   is bound; user FBOs keep author-specified rects. 2D canvases skipped.
@@ -370,7 +369,7 @@ enum HTMLWallpaperRuntimeScript {
                             var n = Number(v) || 0;
                             if (axis === 'w') this.__lwLogicalW__ = n;
                             else              this.__lwLogicalH__ = n;
-                            if (n <= 0 || !this.__lwIsWebGL__) {
+                            if (n <= 0 || !this.__lwIsGPUCanvas__) {
                                 this.__lwScale__ = 1;
                                 releaseStyle(this);
                                 desc.set.call(this, n);
@@ -406,8 +405,8 @@ enum HTMLWallpaperRuntimeScript {
                 var origGetContext = HTMLCanvasElement.prototype.getContext;
                 HTMLCanvasElement.prototype.getContext = function (type, attrs) {
                     if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-                        if (!this.__lwIsWebGL__) {
-                            this.__lwIsWebGL__ = true;
+                        if (!this.__lwIsGPUCanvas__) {
+                            this.__lwIsGPUCanvas__ = true;
                             var w = (typeof this.__lwLogicalW__ === 'number')
                                 ? this.__lwLogicalW__ : wDesc.get.call(this);
                             var h = (typeof this.__lwLogicalH__ === 'number')
@@ -517,10 +516,9 @@ enum HTMLWallpaperRuntimeScript {
     /// - `__lwSuspendAudioContexts__()` (provided by `masterAudioController`)
     ///   pauses every tracked `AudioContext`.
     ///
-    /// `aggressiveSuspend` opts into `WEBGL_lose_context.loseContext()` on
-    /// suspend and `restoreContext()` on resume. Disabled by default —
-    /// many pages don't handle `webglcontextrestored` and stay black after
-    /// the round-trip.
+    /// `aggressiveSuspend` opts into releasing GPU canvas contexts on suspend
+    /// and restoring them on resume. Disabled by default — many pages do not
+    /// handle context restore and stay black after the round-trip.
     static func lifecycleController(aggressiveSuspend: Bool) -> String {
         let aggressive = aggressiveSuspend ? "true" : "false"
         return """
@@ -534,7 +532,7 @@ enum HTMLWallpaperRuntimeScript {
             var suspended = false;
             var hiddenDescriptorBackup = null;
             var visibilityDescriptorBackup = null;
-            var webglContexts = [];
+            var gpuCanvasContexts = [];
 
             function captureDescriptor(name) {
                 try {
@@ -639,8 +637,8 @@ enum HTMLWallpaperRuntimeScript {
                 document.documentElement.classList.toggle('__lw-suspended__', paused);
             }
 
-            function collectWebGLContexts() {
-                webglContexts = [];
+            function collectGPUCanvasContexts() {
+                gpuCanvasContexts = [];
                 try {
                     var canvases = document.querySelectorAll('canvas');
                     for (var i = 0; i < canvases.length; i++) {
@@ -648,15 +646,15 @@ enum HTMLWallpaperRuntimeScript {
                         try { ctx = canvases[i].getContext('webgl2'); } catch (e) {}
                         if (!ctx) { try { ctx = canvases[i].getContext('webgl'); } catch (e) {} }
                         if (!ctx) { try { ctx = canvases[i].getContext('experimental-webgl'); } catch (e) {} }
-                        if (ctx) webglContexts.push(ctx);
+                        if (ctx) gpuCanvasContexts.push(ctx);
                     }
                 } catch (e) {}
             }
 
-            function loseWebGLContexts() {
-                collectWebGLContexts();
-                for (var i = 0; i < webglContexts.length; i++) {
-                    var ctx = webglContexts[i];
+            function releaseGPUCanvasContexts() {
+                collectGPUCanvasContexts();
+                for (var i = 0; i < gpuCanvasContexts.length; i++) {
+                    var ctx = gpuCanvasContexts[i];
                     try {
                         var ext = ctx.getExtension('WEBGL_lose_context');
                         if (ext) ext.loseContext();
@@ -664,15 +662,15 @@ enum HTMLWallpaperRuntimeScript {
                 }
             }
 
-            function restoreWebGLContexts() {
-                for (var i = 0; i < webglContexts.length; i++) {
-                    var ctx = webglContexts[i];
+            function restoreGPUCanvasContexts() {
+                for (var i = 0; i < gpuCanvasContexts.length; i++) {
+                    var ctx = gpuCanvasContexts[i];
                     try {
                         var ext = ctx.getExtension('WEBGL_lose_context');
                         if (ext) ext.restoreContext();
                     } catch (e) {}
                 }
-                webglContexts = [];
+                gpuCanvasContexts = [];
             }
 
             window.__lwSuspend__ = function () {
@@ -687,13 +685,13 @@ enum HTMLWallpaperRuntimeScript {
                 if (typeof window.__lwSuspendAudioContexts__ === 'function') {
                     window.__lwSuspendAudioContexts__();
                 }
-                if (aggressive) loseWebGLContexts();
+                if (aggressive) releaseGPUCanvasContexts();
             };
 
             window.__lwResume__ = function () {
                 if (!suspended) return;
                 suspended = false;
-                if (aggressive) restoreWebGLContexts();
+                if (aggressive) restoreGPUCanvasContexts();
                 if (typeof window.__lwResumeAudioContexts__ === 'function') {
                     window.__lwResumeAudioContexts__();
                 }

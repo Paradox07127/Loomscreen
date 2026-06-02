@@ -13,7 +13,7 @@ private struct WPEMetalTextureLoadContextError: Error {
 }
 
 @MainActor
-final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyRuntime, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
+final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
     /// Default frame rate target when not throttled and no user override
     /// has been applied. 30 FPS matches Wallpaper Engine's stock default
     /// (Almamu's reference open-source impl ships `maximumFPS = 30`; the

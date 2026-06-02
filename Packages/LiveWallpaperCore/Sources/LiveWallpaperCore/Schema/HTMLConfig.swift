@@ -106,13 +106,12 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// CDNs over HTTP).
     public var cspEnforcementEnabled: Bool = false
 
-    /// When `true`, suspend additionally calls
-    /// `WEBGL_lose_context.loseContext()` on every WebGL canvas so the GPU
-    /// driver fully releases the backing surface. Resume calls
-    /// `restoreContext()`. Useful for known-heavy WebGL wallpapers that
-    /// you want to pin to zero GPU when occluded. Off by default because
-    /// many WebGL pages don't listen for `webglcontextrestored` and stay
-    /// black after the round-trip.
+    /// When `true`, suspend additionally asks every GPU-backed canvas to
+    /// release its context so the driver fully releases the backing surface.
+    /// Resume restores those contexts. Useful for known-heavy HTML wallpapers
+    /// that you want to pin to zero GPU when occluded. Off by default because
+    /// some pages do not handle context restore and stay black after the
+    /// round-trip.
     public var aggressiveSuspend: Bool = false
 
     /// Per-project Wallpaper Engine web user property overrides. These are

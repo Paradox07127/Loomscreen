@@ -6,7 +6,7 @@ import Metal
 /// `MTLTexture` into an `NSImage` for `WPESceneDetailView`. Phase 2A's
 /// renderer left the Metal backend without a thumbnail; the detail view
 /// then fell into `.previewUnavailable`. Phase 2B Task 5 wires this
-/// snapshotter through `WPESceneRenderer.previewSnapshot`.
+/// snapshotter through `WPEMetalSceneRenderer.previewSnapshot`.
 ///
 /// The readback runs on a dedicated utility-QoS queue so a 4K mip-chain
 /// readback never blocks the main thread on a multi-display setup; the

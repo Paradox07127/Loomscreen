@@ -146,7 +146,7 @@ final class AmbientWallpaperSessionBuilder {
 
         let rendererFrame = CGRect(origin: .zero, size: frame.size)
         // Metal is the only scene renderer. A Metal failure surfaces as the
-        // session's loadError — there is no WebGL fallback.
+        // session's loadError without falling back to another backend.
         guard let device = MTLCreateSystemDefaultDevice() else {
             Logger.warning("Metal scene renderer unavailable on this Mac", category: .screenManager)
             return nil
