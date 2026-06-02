@@ -33,7 +33,7 @@ struct WPEMetalShaderDispatcher {
 
         switch WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) {
         case "solidcolor":
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: "wpe_solidcolor_fragment",
@@ -58,7 +58,7 @@ struct WPEMetalShaderDispatcher {
             }
 
         case "solidlayer":
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: "wpe_solidlayer_fragment",
@@ -86,7 +86,7 @@ struct WPEMetalShaderDispatcher {
             let fragmentName = pass.pass.shader == "commands/copy"
                 ? "wpe_copy_fragment"
                 : "wpe_util_copy_fragment"
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: fragmentName,
@@ -340,7 +340,7 @@ struct WPEMetalShaderDispatcher {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterUniforms>.stride, index: 0)
 
         case "genericimage2":
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: "wpe_genericimage2_fragment",
@@ -373,7 +373,7 @@ struct WPEMetalShaderDispatcher {
             }
 
         case "genericimage4":
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: "wpe_genericimage4_fragment",
@@ -693,7 +693,7 @@ struct WPEMetalShaderDispatcher {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericParticleUniforms>.stride, index: 0)
 
         case "effect_shake":
-            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+            let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
                 fragmentName: "wpe_effect_shake_fragment",
@@ -764,7 +764,7 @@ struct WPEMetalShaderDispatcher {
         depthPixelFormat: MTLPixelFormat
     ) throws {
         let result = try executor.compileCustomShader(for: pass)
-        let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+        let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         // Diagnostic for the hair/cloth "ghost": a displacement effect whose
         // custom .vert builds v_Direction / a resolution-scaled mask UV gets
         // that .vert discarded when usesObjectQuad forces the builtin

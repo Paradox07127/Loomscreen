@@ -1005,7 +1005,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 systems: particleSystems,
                 texturesByMaterial: particleTextures,
                 sceneSize: sceneRenderSize,
-                output: frame
+                output: frame,
+                cameraParallax: parallaxFrame
             )
         }
         if let textRenderer, !textObjects.isEmpty {
@@ -1266,6 +1267,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             sceneTransform: sceneTransform,
             spriteSheet: spriteSheet
         ) else { return }
+        system.parallaxDepth = object.parallaxDepth
         // Spread `startDelay + 2s` worth of spawn/integration across
         // the first frame so the user doesn't see a one-particle-
         // per-frame cold start — matches WPE's behaviour where the

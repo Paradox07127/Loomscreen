@@ -469,9 +469,11 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
                                   s * corner.x + c * corner.y);
     float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
     float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
+    // padding.xy = camera-parallax pixel offset for this system's depth.
+    float2 parallaxPixels = projection.padding.xy;
     float2 centerNDC = float2(
-        instance.positionAndSize.x / halfWidth,
-        instance.positionAndSize.y / halfHeight
+        (instance.positionAndSize.x + parallaxPixels.x) / halfWidth,
+        (instance.positionAndSize.y + parallaxPixels.y) / halfHeight
     );
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);

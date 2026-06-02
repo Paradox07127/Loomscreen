@@ -342,7 +342,8 @@ final class WPEMetalRenderExecutor {
         systems: [WPEParticleSystem],
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
         sceneSize: CGSize,
-        output: MTLTexture
+        output: MTLTexture,
+        cameraParallax: WPECameraParallaxFrame = .neutral
     ) throws {
         let alive = systems.filter { $0.liveInstanceCount > 0 }
         guard !alive.isEmpty else { return }
@@ -378,6 +379,11 @@ final class WPEMetalRenderExecutor {
                 blendMode: system.blendMode
             )
             encoder.setRenderPipelineState(pipelineState)
+            // Translate the whole system by its camera-parallax depth (pixels),
+            // carried in `padding.xy` and added to each particle's screen
+            // position in the vertex shader.
+            let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
+            projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
             var sprite = WPEParticleSpriteParams(grid: SIMD4<Float>(
@@ -1134,21 +1140,27 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    func usesObjectQuadGeometry(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> Bool {
-        guard layer.geometry != .identity else { return false }
-        switch pass.pass.target {
-        case .scene:
-            // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
-            // render fullscreen and copy the captured frame 1:1, never as a shrunken
-            // object quad — unless the per-scene legacy rollback gate restores the
-            // old object-quad behavior.
-            if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
-                return activeLegacyComposeLayer
-            }
-            return true
-        default:
-            return false
+    func usesObjectQuadGeometry(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        cameraParallax: WPECameraParallaxFrame = .neutral
+    ) -> Bool {
+        guard case .scene = pass.pass.target else { return false }
+        if layer.geometry == .identity {
+            // Identity full-frame layers normally take the fullscreen copy path.
+            // Route them through the object quad (an identical full-scene quad)
+            // only when there's an actual parallax shift to apply, leaving the
+            // common no-parallax path byte-for-byte unchanged.
+            return layer.parallaxDepth != 0 && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
+        // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
+        // render fullscreen and copy the captured frame 1:1, never as a shrunken
+        // object quad — unless the per-scene legacy rollback gate restores the
+        // old object-quad behavior.
+        if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
+            return activeLegacyComposeLayer
+        }
+        return true
     }
 
     func objectQuadUniforms(
@@ -1160,6 +1172,18 @@ final class WPEMetalRenderExecutor {
         let geometry = layer.geometry
         let sceneWidth = Float(max(sceneSize.width, 1))
         let sceneHeight = Float(max(sceneSize.height, 1))
+        // Identity (full-frame) layers map to a scene-sized quad centered at the
+        // origin — identical coverage + UV to `wpe_fullscreen_vertex` — plus the
+        // camera-parallax shift. (Only reached when parallax is active; see
+        // `usesObjectQuadGeometry`.)
+        if geometry == .identity {
+            let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
+            return WPEObjectQuadUniforms(
+                centerAndSize: SIMD4<Float>(parallax.x, parallax.y, sceneWidth, sceneHeight),
+                sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
+                uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
+            )
+        }
         let baseWidth = Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
         let baseHeight = Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
         let scaleX = Float(geometry.scale.x)
@@ -1414,7 +1438,7 @@ final class WPEMetalRenderExecutor {
         depthPixelFormat: MTLPixelFormat,
         uniforms: U
     ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
+        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         encoder.setRenderPipelineState(try renderPipeline(
             vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
             fragmentName: fragmentName,
@@ -1544,7 +1568,7 @@ final class WPEMetalRenderExecutor {
         encoder: MTLRenderCommandEncoder,
         depthPixelFormat: MTLPixelFormat
     ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
+        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         encoder.setRenderPipelineState(try renderPipeline(
             vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
             fragmentName: "wpe_effect_opacity_fragment",
