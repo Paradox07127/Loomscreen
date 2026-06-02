@@ -377,8 +377,9 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // GameMode signal piggybacks on frontmost-app activations — flipping
-        // to / from Steam, Epic, Battle.net etc. flips `GameModeDetector.isActive`.
+        // GameMode + per-app pause rules (frontmost trigger) piggyback on
+        // frontmost-app activations — flipping to / from Steam, a game, or a
+        // rule-listed app re-evaluates the policy.
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -387,6 +388,24 @@ final class ScreenManager {
                 self.updatePlaybackState()
             }
             .store(in: &cleanupTasks)
+
+        // Per-app pause rules with the "while running" trigger need to react to
+        // launch / quit too (an app can start without becoming frontmost). These
+        // fire only on actual launch/quit, so there's no idle cost.
+        Publishers.Merge(
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification),
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+            guard let self else { return }
+            // Cheap no-op unless a "running"-trigger rule exists.
+            guard SettingsManager.shared.loadGlobalSettings()
+                .applicationPerformanceRules.contains(where: { $0.trigger == .running }) else { return }
+            self.refreshPerformancePolicyForAllScreens()
+            self.updatePlaybackState()
+        }
+        .store(in: &cleanupTasks)
 
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
             .sink { [weak self] _ in
@@ -598,6 +617,7 @@ final class ScreenManager {
         let powerSource = powerMonitor.currentPowerSource
         let thermalState = ProcessInfo.processInfo.thermalState
         let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
+        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
 
         for screen in screens {
             let isHidden = hiddenScreens[screen.id] ?? false
@@ -638,6 +658,7 @@ final class ScreenManager {
                 powerSource: powerSource,
                 isHiddenByFullScreen: shouldApplyFullScreenPolicy,
                 isWindowOccluding: shouldApplyOcclusionPolicy,
+                isApplicationRuleActive: isApplicationRuleActive,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1041,6 +1062,7 @@ final class ScreenManager {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let thermalState = ProcessInfo.processInfo.thermalState
         let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
+        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
 
         var updatedScreens = false
 
@@ -1056,6 +1078,7 @@ final class ScreenManager {
                 powerSource: powerSource,
                 isHiddenByFullScreen: isHiddenByFullScreen,
                 isWindowOccluding: isWindowOccluding,
+                isApplicationRuleActive: isApplicationRuleActive,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1116,6 +1139,7 @@ final class ScreenManager {
         powerSource: PowerMonitor.PowerSource,
         isHiddenByFullScreen: Bool,
         isWindowOccluding: Bool,
+        isApplicationRuleActive: Bool,
         thermalState: ProcessInfo.ThermalState,
         isGameModeActive: Bool
     ) -> WallpaperPerformanceProfile {
@@ -1124,6 +1148,7 @@ final class ScreenManager {
             powerSource: powerSource,
             isHiddenByFullScreen: isHiddenByFullScreen,
             isWindowOccluding: isWindowOccluding,
+            isApplicationRuleActive: isApplicationRuleActive,
             thermalState: thermalState,
             isGameModeActive: isGameModeActive
         )
@@ -1131,11 +1156,16 @@ final class ScreenManager {
         return profile
     }
 
+    private func currentApplicationRuleActive(_ globalSettings: GlobalSettings) -> Bool {
+        ApplicationPerformanceRuleEngine.isActive(for: globalSettings)
+    }
+
     private func refreshPerformancePolicyForAllScreens() {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let powerSource = powerMonitor.currentPowerSource
         let thermalState = ProcessInfo.processInfo.thermalState
         let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
+        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
 
         for screen in screens {
             let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
@@ -1149,6 +1179,7 @@ final class ScreenManager {
                 powerSource: powerSource,
                 isHiddenByFullScreen: isHiddenByFullScreen,
                 isWindowOccluding: isWindowOccluding,
+                isApplicationRuleActive: isApplicationRuleActive,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1617,6 +1648,7 @@ final class ScreenManager {
                     fullScreenDetector.isDesktopHidden(for: screen.id),
                 isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
                     fullScreenDetector.isDesktopOccluded(for: screen.id),
+                isApplicationRuleActive: currentApplicationRuleActive(globalSettings),
                 thermalState: ProcessInfo.processInfo.thermalState,
                 isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
             )
@@ -1641,6 +1673,7 @@ final class ScreenManager {
                 fullScreenDetector.isDesktopHidden(for: screen.id),
             isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
                 fullScreenDetector.isDesktopOccluded(for: screen.id),
+            isApplicationRuleActive: currentApplicationRuleActive(globalSettings),
             thermalState: ProcessInfo.processInfo.thermalState,
             isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )

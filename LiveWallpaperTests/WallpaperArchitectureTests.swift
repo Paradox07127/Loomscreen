@@ -777,6 +777,7 @@ struct WallpaperPolicyEngineTests {
             powerSource: .battery(level: 80),
             isHiddenByFullScreen: false,
             isWindowOccluding: false,
+            isApplicationRuleActive: false,
             thermalState: .nominal,
             isGameModeActive: false
         )
@@ -797,6 +798,7 @@ struct WallpaperPolicyEngineTests {
             powerSource: .external,
             isHiddenByFullScreen: true,
             isWindowOccluding: false,
+            isApplicationRuleActive: false,
             thermalState: .nominal,
             isGameModeActive: false
         )

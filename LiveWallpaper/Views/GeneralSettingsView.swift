@@ -16,6 +16,8 @@ struct GeneralSettingsView: View {
     @State private var pauseOnFullScreen: Bool
     @State private var pauseInGameMode: Bool
     @State private var pauseOnWindowOcclusion: Bool
+    @State private var applicationRules: [ApplicationPerformanceRule]
+    @State private var showAppExceptions = false
     @State private var showInDock: Bool
     /// Slider value held in MB for UI ergonomics — converted to bytes when
     /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
@@ -65,6 +67,7 @@ struct GeneralSettingsView: View {
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _pauseInGameMode = State(initialValue: settings.pauseInGameMode)
         _pauseOnWindowOcclusion = State(initialValue: settings.pauseOnWindowOcclusion)
+        _applicationRules = State(initialValue: settings.applicationPerformanceRules)
         _showInDock = State(initialValue: settings.showInDock)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
@@ -254,6 +257,7 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = settings.pauseOnFullScreen
         pauseInGameMode = settings.pauseInGameMode
         pauseOnWindowOcclusion = settings.pauseOnWindowOcclusion
+        applicationRules = settings.applicationPerformanceRules
         showInDock = settings.showInDock
         developerModeEnabled = settings.developerModeEnabled
         audioResponseEnabled = settings.audioResponseEnabled
@@ -562,8 +566,25 @@ struct GeneralSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            SettingRow(
+                icon: "hand.raised",
+                iconColor: .blue,
+                title: "App Exceptions",
+                subtitle: applicationRules.isEmpty
+                    ? "Pause wallpapers while chosen apps are in use"
+                    : "Active for \(applicationRules.count) app\(applicationRules.count == 1 ? "" : "s")"
+            ) {
+                Button("Edit…") { showAppExceptions = true }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel(Text("Edit application exceptions"))
+            }
         } header: {
             Text("Performance")
+        }
+        .sheet(isPresented: $showAppExceptions) {
+            AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
         }
     }
 
@@ -1016,6 +1037,7 @@ struct GeneralSettingsView: View {
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.pauseInGameMode = pauseInGameMode
         settings.pauseOnWindowOcclusion = pauseOnWindowOcclusion
+        settings.applicationPerformanceRules = applicationRules
         settings.showInDock = showInDock
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.developerModeEnabled = developerModeEnabled
@@ -1060,6 +1082,7 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = true
         pauseInGameMode = true
         pauseOnWindowOcclusion = false
+        applicationRules = []
         showInDock = false
         developerModeEnabled = false
         weatherLocation = .default

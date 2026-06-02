@@ -610,6 +610,7 @@ final class PlaybackCoordinator {
             powerSource: powerMonitor.currentPowerSource,
             isHiddenByFullScreen: isHiddenByFullScreen,
             isWindowOccluding: isWindowOccluding,
+            isApplicationRuleActive: ApplicationPerformanceRuleEngine.isActive(for: globalSettings),
             thermalState: ProcessInfo.processInfo.thermalState,
             isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )

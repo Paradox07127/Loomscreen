@@ -8,10 +8,12 @@ enum WallpaperPolicyEngine {
         powerSource: PowerMonitor.PowerSource,
         isHiddenByFullScreen: Bool,
         isWindowOccluding: Bool,
+        isApplicationRuleActive: Bool,
         thermalState: ProcessInfo.ThermalState,
         isGameModeActive: Bool
     ) -> WallpaperPerformanceProfile {
         let shouldSuspend = isGameModeActive ||
+            isApplicationRuleActive ||
             shouldPauseForPower(globalSettings: globalSettings, powerSource: powerSource) ||
             shouldSuspendForThermal(thermalState) ||
             shouldApplyFullScreenPolicy(

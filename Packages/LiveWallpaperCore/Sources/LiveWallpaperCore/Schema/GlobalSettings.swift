@@ -40,6 +40,10 @@ public struct GlobalSettings: Codable, Sendable {
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
     public var recentWPEImports: [WPEHistoryEntry] = []
+    /// Per-app "pause the wallpaper while this app is in use" rules. Empty by
+    /// default; evaluated event-driven off NSWorkspace activation/launch/quit
+    /// notifications, so it adds no idle cost.
+    public var applicationPerformanceRules: [ApplicationPerformanceRule] = []
     /// Per-screen cap on how much RAM the video pipeline may pin to keep a
     /// short looped clip resident (and avoid `~4 MB/s` continuous disk reads
     /// at playback bitrate). 0 disables caching entirely. The total RAM
@@ -98,6 +102,7 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcutsEnabled: Bool = true,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
+        applicationPerformanceRules: [ApplicationPerformanceRule] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
         developerModeEnabled: Bool = false,
         audioResponseEnabled: Bool = false
@@ -114,6 +119,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.globalShortcutsEnabled = globalShortcutsEnabled
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
+        self.applicationPerformanceRules = applicationPerformanceRules
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.developerModeEnabled = developerModeEnabled
         self.audioResponseEnabled = audioResponseEnabled
@@ -135,6 +141,7 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcutsEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .globalShortcutsEnabled)) ?? true
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
+        applicationPerformanceRules = (try? c.decodeIfPresent([ApplicationPerformanceRule].self, forKey: .applicationPerformanceRules)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
         developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? false
