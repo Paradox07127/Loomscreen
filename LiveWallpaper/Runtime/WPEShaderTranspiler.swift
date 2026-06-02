@@ -1201,15 +1201,29 @@ struct WPEShaderTranspiler {
     /// float-declared scalar in `int(...)`. Only bare-identifier subscripts of known float locals
     /// are touched, so integer indices and expression subscripts are left unchanged.
     private static func rewriteFloatArraySubscripts(_ source: String) -> String {
-        let declPattern = #"\bfloat\s+([A-Za-z_]\w*)\s*="#
-        guard let declRegex = try? NSRegularExpression(pattern: declPattern) else { return source }
+        let floatDeclPattern = #"\bfloat\s+([A-Za-z_]\w*)\s*="#
+        let nonFloatDeclPattern = #"\b(?:int|uint|bool|float[234]|int[234]|uint[234]|bool[234])\s+([A-Za-z_]\w*)\b"#
+        guard let floatDeclRegex = try? NSRegularExpression(pattern: floatDeclPattern),
+              let nonFloatDeclRegex = try? NSRegularExpression(pattern: nonFloatDeclPattern) else {
+            return source
+        }
         let range = NSRange(source.startIndex..., in: source)
         var floatVars: Set<String> = []
-        for match in declRegex.matches(in: source, range: range) {
+        for match in floatDeclRegex.matches(in: source, range: range) {
             if let nameRange = Range(match.range(at: 1), in: source) {
                 floatVars.insert(String(source[nameRange]))
             }
         }
+        // Scope guard: this pass is name-based, not scope-aware. If a name is ALSO declared as an
+        // int/vector/bool elsewhere in the shader (e.g. one function's `float i` vs another's
+        // `for (int i)`), leave its subscripts alone rather than rewriting an unrelated int index.
+        var nonFloatVars: Set<String> = []
+        for match in nonFloatDeclRegex.matches(in: source, range: range) {
+            if let nameRange = Range(match.range(at: 1), in: source) {
+                nonFloatVars.insert(String(source[nameRange]))
+            }
+        }
+        floatVars.subtract(nonFloatVars)
         guard !floatVars.isEmpty else { return source }
 
         var result = source
