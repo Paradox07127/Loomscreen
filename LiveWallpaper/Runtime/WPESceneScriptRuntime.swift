@@ -128,10 +128,23 @@ final class WPESceneScriptInstance {
 
         let createScriptProperties: @convention(block) () -> JSValue = {
             let proxy = JSValue(newObjectIn: context)!
-            let chainable: @convention(block) (JSValue) -> JSValue = { _ in proxy }
+            // Each `add*({ name, value, ... })` registers a script property; expose
+            // its default `value` on the returned object so `scriptProperties.<name>`
+            // resolves (e.g. a clock's `delimiter` → ":" instead of `undefined`,
+            // which otherwise stringifies into the rendered text). Returns the proxy
+            // so the builder calls chain; `finish()` (no args) just returns it.
+            let register: @convention(block) (JSValue) -> JSValue = { config in
+                if config.isObject,
+                   let nameValue = config.objectForKeyedSubscript("name"),
+                   nameValue.isString, let name = nameValue.toString(), !name.isEmpty,
+                   let value = config.objectForKeyedSubscript("value"), !value.isUndefined {
+                    proxy.setObject(value, forKeyedSubscript: name as NSString)
+                }
+                return proxy
+            }
             for name in ["addCheckbox", "addText", "addSlider", "addColor",
                          "addCombo", "addFile", "addUserShortcut", "addGroup", "finish"] {
-                proxy.setObject(chainable, forKeyedSubscript: name as NSString)
+                proxy.setObject(register, forKeyedSubscript: name as NSString)
             }
             return proxy
         }

@@ -65,7 +65,7 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.tickString() == "static")
     }
 
-    @Test("createScriptProperties chain doesn't crash")
+    @Test("createScriptProperties exposes each property's default value")
     func createScriptPropertiesChain() throws {
         let script = """
         export var scriptProperties = createScriptProperties()
@@ -77,8 +77,25 @@ struct WPESceneScriptRuntimeTests {
         }
         """
         let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
-        let result = instance.tickString()
-        #expect(result.hasSuffix("OK"))
+        // The registered default (':') must be readable, not undefined.
+        #expect(instance.tickString() == ":OK")
+    }
+
+    @Test("Clock-style script reads property defaults, not 'undefined'")
+    func clockScriptPropertyDefaults() throws {
+        // Reproduces the VHS clock bug: a missing `delimiter`/`use24hFormat`
+        // default stringified to "undefined" between the hours and minutes.
+        let script = """
+        export var scriptProperties = createScriptProperties()
+            .addCheckbox({name: 'use24hFormat', value: true})
+            .addText({name: 'delimiter', value: ':'})
+            .finish();
+        export function update(value) {
+            return '03' + scriptProperties.delimiter + '30' + '/' + scriptProperties.use24hFormat;
+        }
+        """
+        let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
+        #expect(instance.tickString() == "03:30/true")
     }
 
     @Test("engine.getTimeOfDay returns 0..1")
