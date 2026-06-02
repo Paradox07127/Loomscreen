@@ -527,7 +527,10 @@ final class WPEMetalRenderExecutor {
         attachment.isBlendingEnabled = true
         attachment.rgbBlendOperation = .add
         attachment.alphaBlendOperation = .add
-        attachment.sourceRGBBlendFactor = .one
+        // font.frag returns STRAIGHT (non-premultiplied) alpha — vec4(rgb, a) —
+        // so source RGB must be scaled by sourceAlpha. Using .one (premultiplied)
+        // over-contributed RGB and haloed semi-transparent text / AA edges.
+        attachment.sourceRGBBlendFactor = .sourceAlpha
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.sourceAlphaBlendFactor = .one
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha

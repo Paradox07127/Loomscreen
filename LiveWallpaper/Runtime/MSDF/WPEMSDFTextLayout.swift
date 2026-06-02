@@ -25,6 +25,11 @@ struct WPEMSDFTextLayout {
         fontID: String
     ) -> WPEMSDFTextMesh? {
         guard !object.text.isEmpty else { return nil }
+        // The MSDF path lays out a SINGLE line. Hard line breaks or text that
+        // would wrap under maxWidth are laid out differently by the CoreText
+        // framesetter fallback, so defer those whole objects to CoreText instead
+        // of compressing/mispositioning them (correctness over coverage).
+        if object.text.contains(where: \.isNewline) { return nil }
         let attributed = attributedString(for: object, font: font)
         let line = CTLineCreateWithAttributedString(attributed)
         var ascent: CGFloat = 0
@@ -33,18 +38,19 @@ struct WPEMSDFTextLayout {
         let rawLineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
         let naturalHeight = max(ascent + descent + leading, 1)
         let padding = CGFloat(max(object.padding, 0))
-        let maxWidth = object.maxWidth.map { CGFloat(max($0, 1)) }
-        let fittedLineWidth = maxWidth.map { min(max(rawLineWidth, 1), $0) } ?? max(rawLineWidth, 1)
-        let xScale = rawLineWidth > 0 ? Double(fittedLineWidth / rawLineWidth) : 1
+        if let maxWidth = object.maxWidth.map({ CGFloat(max($0, 1)) }), rawLineWidth > maxWidth + 0.5 {
+            return nil // would wrap → CoreText framesetter handles it
+        }
+        let lineWidth = max(rawLineWidth, 1)
         let boxSize = object.boxSize.map {
             CGSize(width: max($0.x, 1), height: max($0.y, 1))
         } ?? CGSize(
-            width: fittedLineWidth + padding * 2,
+            width: lineWidth + padding * 2,
             height: naturalHeight + padding * 2
         )
         let innerWidth = max(boxSize.width - padding * 2, 1)
         let innerHeight = max(boxSize.height - padding * 2, 1)
-        let alignedLineWidth = min(fittedLineWidth, innerWidth)
+        let alignedLineWidth = min(lineWidth, innerWidth)
         let xOffset = padding + horizontalOffset(
             alignment: object.horizontalAlignment,
             lineWidth: alignedLineWidth,
@@ -69,15 +75,19 @@ struct WPEMSDFTextLayout {
             let range = CFRange(location: 0, length: glyphCount)
             var glyphs = [CGGlyph](repeating: 0, count: glyphCount)
             var positions = [CGPoint](repeating: .zero, count: glyphCount)
-            var advances = [CGSize](repeating: .zero, count: glyphCount)
             CTRunGetGlyphs(run, range, &glyphs)
             CTRunGetPositions(run, range, &positions)
-            CTRunGetAdvances(run, range, &advances)
 
             for index in 0..<glyphCount {
                 let glyph = glyphs[index]
                 let key = WPEMSDFGlyphKey(fontID: fontID, glyph: glyph, pixelSize: pixelSize)
-                guard let entry = atlas.requestEntry(for: key, generator: generator, font: font) else {
+                let entry: WPEMSDFAtlasEntry
+                switch atlas.requestEntry(for: key, generator: generator, font: font) {
+                case .ready(let ready):
+                    entry = ready
+                case .skip:
+                    continue // whitespace / no-outline glyph: advance, draw nothing
+                case .pending:
                     isComplete = false
                     continue
                 }
@@ -85,15 +95,14 @@ struct WPEMSDFTextLayout {
                 let bearing = entry.metrics.bearing / pathUnitsToEm
                 let glyphWidth = Double(entry.metrics.cellSize.width) / entry.metrics.scale
                 let glyphHeight = Double(entry.metrics.cellSize.height) / entry.metrics.scale
-                let x = Double(xOffset) + Double(position.x) * xScale + bearing.x * xScale
+                let x = Double(xOffset) + Double(position.x) + bearing.x
                 let y = Double(baseline) - Double(position.y) - (bearing.y + glyphHeight)
                 appendQuad(
                     page: entry.page,
-                    rect: CGRect(x: x, y: y, width: glyphWidth * xScale, height: glyphHeight),
+                    rect: CGRect(x: x, y: y, width: glyphWidth, height: glyphHeight),
                     uvRect: entry.uvRect,
                     perPage: &perPage
                 )
-                _ = advances[index]
             }
         }
 

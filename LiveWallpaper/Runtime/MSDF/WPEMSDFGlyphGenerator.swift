@@ -23,24 +23,21 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         let advance = advanceForGlyph(glyph, font: font)
         let pathUnitsToEm = pathUnitsToEmUnits(font: font)
 
-        guard let path = CTFontCreatePathForGlyph(font, glyph, nil) else {
-            return neutralResult(
-                cellSide: cellSide,
-                padding: padding,
-                advance: advance * pathUnitsToEm,
-                emUnitsPerPixel: pathUnitsToEm
-            )
+        // No outline (whitespace / control / unsupported color glyph) → nil, so
+        // the atlas marks it `.skip` (advance past it, draw nothing) instead of
+        // emitting a 0.5-filled quad that the MSDF shader renders as a gray box.
+        guard let path = CTFontCreatePathForGlyph(font, glyph, nil), !path.isEmpty else {
+            return nil
         }
 
         var shape = buildShape(from: path)
-        let sourceBounds = shape.bounds()
-        guard !shape.contours.isEmpty, !sourceBounds.isNull else {
-            return neutralResult(
-                cellSide: cellSide,
-                padding: padding,
-                advance: advance * pathUnitsToEm,
-                emUnitsPerPixel: pathUnitsToEm
-            )
+        // Tight bounds from the actual curve (boundingBoxOfPath), not the Bézier
+        // control points, so off-curve handles can't inflate the cell mapping
+        // and shrink/misplace the glyph.
+        let sourceBounds = path.boundingBoxOfPath
+        guard !shape.contours.isEmpty, !sourceBounds.isNull,
+              sourceBounds.width > 0 || sourceBounds.height > 0 else {
+            return nil
         }
 
         let sourceWidth = Double(sourceBounds.width)
@@ -50,12 +47,7 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         let heightScale = sourceHeight > WPEMSDFGeometryMath.epsilon ? available / sourceHeight : Double.greatestFiniteMagnitude
         let scale = min(widthScale, heightScale)
         guard scale.isFinite, scale > WPEMSDFGeometryMath.epsilon else {
-            return neutralResult(
-                cellSide: cellSide,
-                padding: padding,
-                advance: advance * pathUnitsToEm,
-                emUnitsPerPixel: pathUnitsToEm
-            )
+            return nil
         }
 
         let contentWidth = sourceWidth * scale
@@ -116,25 +108,6 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         return (padding, cellSide)
     }
 
-    private func neutralResult(
-        cellSide: Int,
-        padding: Int,
-        advance: WPEMSDFPoint,
-        emUnitsPerPixel: Double
-    ) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics) {
-        let metrics = WPEMSDFGlyphMetrics(
-            cellSize: CGSize(width: cellSide, height: cellSide),
-            bearing: WPEMSDFPoint(0, 0),
-            advance: advance,
-            scale: 1,
-            translate: WPEMSDFPoint(Double(padding), Double(padding)),
-            emUnitsPerPixel: emUnitsPerPixel
-        )
-        return (
-            bitmap: WPEMSDFBitmap(width: cellSide, height: cellSide, fill: Self.neutralFill),
-            metrics: metrics
-        )
-    }
 
     private func buildShape(from path: CGPath) -> WPEMSDFShape {
         var contours: [WPEMSDFContour] = []

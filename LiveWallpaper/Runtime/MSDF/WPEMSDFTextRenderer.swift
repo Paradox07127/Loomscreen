@@ -137,7 +137,13 @@ final class WPEMSDFTextRenderer {
     }
 
     private func resolveFont(for object: WPESceneTextObject) -> CTFont {
-        let size = effectiveFontSize(for: object)
+        font(for: object, size: effectiveFontSize(for: object))
+    }
+
+    /// The scene's font (custom file or HelveticaNeue fallback) at an explicit
+    /// size. Used both for the final glyph font and for box measurement, so
+    /// box-fit is computed with the SAME typeface that will be rendered.
+    private func font(for object: WPESceneTextObject, size: CGFloat) -> CTFont {
         if let path = object.fontRelativePath {
             registerFontIfNeeded(path)
             if let url = try? resolver.resolveExistingFileURL(relativePath: path),
@@ -161,7 +167,7 @@ final class WPEMSDFTextRenderer {
     private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
         let base = CGFloat(max(object.pointSize, 1))
         guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }
-        let font = CTFontCreateWithName("HelveticaNeue" as CFString, base, nil)
+        let font = font(for: object, size: base)
         let attributed = CFAttributedStringCreate(nil, object.text as CFString, [kCTFontAttributeName: font] as CFDictionary)!
         let line = CTLineCreateWithAttributedString(attributed)
         var ascent: CGFloat = 0

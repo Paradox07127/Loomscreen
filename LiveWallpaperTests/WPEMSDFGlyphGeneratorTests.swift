@@ -58,13 +58,27 @@ struct WPEMSDFGlyphGeneratorTests {
         #expect(first.bitmap.pixels == second.bitmap.pixels)
     }
 
-    @Test("Whitespace glyph produces a valid neutral bitmap without crashing")
-    func whitespaceGlyphIsNeutral() throws {
+    @Test("Whitespace glyph has no outline → generator returns nil (atlas marks it skip)")
+    func whitespaceGlyphReturnsNil() throws {
+        // A space has no drawable outline. Returning nil lets the atlas mark it
+        // `.skip` (advance, draw nothing) instead of emitting a 0.5-filled quad
+        // that the MSDF shader would render as a gray box.
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
         let generator = WPEMSDFGlyphGenerator()
-        let result = try #require(generator.generate(glyph: glyph(" ", font: font), font: font))
-        // No contours → neutral 0.5 fill: opaque, everywhere outside.
-        #expect(result.bitmap.pixels.allSatisfy { $0.w == 1 })
-        #expect(result.bitmap.pixels.allSatisfy { median($0) <= 0.5 + 1e-6 })
+        #expect(generator.generate(glyph: glyph(" ", font: font), font: font) == nil)
+    }
+
+    @Test("Counter glyph (O) is filled on the ring and empty in the hole")
+    func counterGlyphHoleIsOutside() throws {
+        // Guards the winding/orientation handling for glyphs with holes: the
+        // enclosed counter must read as OUTSIDE (median < 0.5) while the ring
+        // reads INSIDE (median > 0.5) — i.e. the hole isn't filled / inverted.
+        let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
+        let generator = WPEMSDFGlyphGenerator()
+        let result = try #require(generator.generate(glyph: glyph("O", font: font), font: font))
+        let bitmap = result.bitmap
+        let center = bitmap[bitmap.width / 2, bitmap.height / 2]
+        #expect(median(center) < 0.5)                       // hole = outside
+        #expect(bitmap.pixels.contains { median($0) > 0.5 }) // ring = inside
     }
 }
