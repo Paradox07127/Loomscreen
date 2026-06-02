@@ -571,13 +571,16 @@ vertex WPETextOverlayVertexOut wpe_text_overlay_vertex(
         u.centerAndSize.w / halfHeight
     );
     WPETextOverlayVertexOut out;
-    // WPE authors text in a top-left-origin space (y grows downward) and image
-    // layers map that to NDC via the camera's top-left ortho matrix. This
-    // overlay pass has no such matrix, so negate Y here — otherwise the text is
-    // placed in the wrong vertical half AND rendered upside-down (both halves of
-    // the same missing flip).
-    float2 ndc = centerNDC + cornerNDC;
-    out.position = float4(ndc.x, -ndc.y, 0.0, 1.0);
+    // The vertical POSITION (centerNDC.y) is already correct in WPE's text
+    // space — the clock sits next to Miku's face — so it must NOT be flipped.
+    // Only the glyph's own vertical extent (cornerNDC.y) was inverted, which
+    // rendered the text upside-down; negate just that so the text reads upright
+    // while staying in the right place. X is untouched.
+    out.position = float4(
+        centerNDC.x + cornerNDC.x,
+        centerNDC.y - cornerNDC.y,
+        0.0, 1.0
+    );
     out.uv = uv;
     return out;
 }
