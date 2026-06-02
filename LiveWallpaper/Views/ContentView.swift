@@ -64,6 +64,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
             scheduleNavigationChange { selectedNavigation = .general }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
+            scheduleNavigationChange { selectedNavigation = .workshop }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             scheduleDefaultDisplaySelection()
         }

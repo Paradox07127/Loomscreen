@@ -75,6 +75,12 @@ extension Notification.Name {
     /// visibility and falls back the selection if the entry disappears.
     public static let developerModeDidChange = Notification.Name("DeveloperModeDidChange")
 
+    /// Request the main window to navigate to the Steam Workshop pane (e.g. the
+    /// scene detail's "Find in Workshop" link). `ContentView` switches the
+    /// sidebar selection; `WorkshopPaneView` picks up any pending search target
+    /// from `WorkshopDeepLink` on appear / receipt.
+    public static let openWorkshopPane = Notification.Name("OpenWorkshopPane")
+
     /// `SMAppService.register/unregister` produced an outcome that needs
     /// user-visible follow-up (approval pending, app not in /Applications/,
     /// or thrown error). `userInfo["reason"]: LoginItemFailure`.

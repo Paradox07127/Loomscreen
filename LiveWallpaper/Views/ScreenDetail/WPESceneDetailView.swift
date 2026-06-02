@@ -15,6 +15,7 @@ struct WPESceneDetailView: View {
     let onClearWallpaper: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.featureCatalog) private var featureCatalog
     @State private var state: SceneRenderState = .idle
     /// Presents the full diagnostic log in a resizable glass terminal window.
     /// Opened from the metadata info button (any state) or the error banner's
@@ -333,27 +334,64 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Workshop ID — a link to the item's Steam Workshop page (the real detail
-    /// page with author / tags / rating / size) when it's a numeric Steam ID;
-    /// plain text for locally-imported projects whose ID isn't a Steam item.
+    /// Workshop ID. For a numeric Steam item it's an actionable link: when the
+    /// in-app Workshop pane is available it offers both "Find in Workshop"
+    /// (jumps to Browse Online scoped to this item) and "Open Steam Page";
+    /// otherwise it's a plain web link. Locally-imported projects whose ID isn't
+    /// a Steam item render as plain text.
     @ViewBuilder
     private var workshopIDLabel: some View {
         if isSteamWorkshopID, let url = steamWorkshopURL {
-            Button {
-                NSWorkspace.shared.open(url)
-            } label: {
-                Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID link. The placeholder is the numeric Workshop ID.")
-                    .font(.caption)
-                    .foregroundStyle(Color.accentColor)
+            #if DIRECT_DISTRIBUTION
+            if featureCatalog.isEnabled(.wpeImport) {
+                Menu {
+                    Button {
+                        WorkshopDeepLink.requestSearch(origin.title)
+                        NotificationCenter.default.post(name: .openWorkshopPane, object: nil)
+                    } label: {
+                        Label("Find in Workshop", systemImage: "magnifyingglass")
+                    }
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Open Steam Page", systemImage: "safari")
+                    }
+                } label: {
+                    workshopIDText.foregroundStyle(Color.accentColor)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(Text("Find this item in the Workshop, or open its Steam page"))
+                .accessibilityLabel(Text("Workshop ID \(origin.workshopID). Find in Workshop or open the Steam page.", comment: "A11y label for the Workshop ID menu. The placeholder is the numeric Workshop ID."))
+            } else {
+                workshopIDWebLink(url)
             }
-            .buttonStyle(.plain)
-            .help(Text("Open this item's Steam Workshop page"))
-            .accessibilityLabel(Text("Workshop ID \(origin.workshopID). Opens the Steam Workshop page.", comment: "A11y label for the Workshop ID link. The placeholder is the numeric Workshop ID."))
+            #else
+            workshopIDWebLink(url)
+            #endif
         } else {
-            Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID. The placeholder is the Workshop ID.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            workshopIDText.foregroundStyle(.secondary)
         }
+    }
+
+    /// The bare "Workshop ID 12345" caption, shared by every rendering branch.
+    private var workshopIDText: Text {
+        Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID. The placeholder is the Workshop ID.")
+            .font(.caption)
+    }
+
+    /// Plain web link to the Steam Workshop page (used when the in-app Workshop
+    /// pane isn't available in this build).
+    private func workshopIDWebLink(_ url: URL) -> some View {
+        Button {
+            NSWorkspace.shared.open(url)
+        } label: {
+            workshopIDText.foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .help(Text("Open this item's Steam Workshop page"))
+        .accessibilityLabel(Text("Workshop ID \(origin.workshopID). Opens the Steam Workshop page.", comment: "A11y label for the Workshop ID link. The placeholder is the numeric Workshop ID."))
     }
 
     private var isSteamWorkshopID: Bool {

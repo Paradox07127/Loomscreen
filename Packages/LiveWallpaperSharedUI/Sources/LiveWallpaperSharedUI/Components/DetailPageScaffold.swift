@@ -31,25 +31,28 @@ public struct DetailPageScaffold<Header: View, Content: View>: View {
     }
 }
 
-public struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View {
+public struct DetailHeaderBar<Title: View, Metadata: View, Actions: View, Center: View>: View {
     public let systemImage: String
     public let tint: Color
     private let title: Title
     private let metadata: Metadata
     private let actions: Actions
+    private let center: Center
 
     public init(
         systemImage: String,
         tint: Color = .accentColor,
         @ViewBuilder title: () -> Title,
         @ViewBuilder metadata: () -> Metadata,
-        @ViewBuilder actions: () -> Actions
+        @ViewBuilder actions: () -> Actions,
+        @ViewBuilder center: () -> Center = { EmptyView() }
     ) {
         self.systemImage = systemImage
         self.tint = tint
         self.title = title()
         self.metadata = metadata()
         self.actions = actions()
+        self.center = center()
     }
 
     public var body: some View {
@@ -79,6 +82,12 @@ public struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View 
             }
             .layoutPriority(1)
 
+            // Optional center accessory (e.g. a segmented control). Sat between
+            // two flexible spacers so it stays optically centered and fills the
+            // otherwise-empty band; collapses to the original single gap when the
+            // caller omits it (EmptyView contributes no width).
+            Spacer(minLength: DesignTokens.Spacing.md)
+            center
             Spacer(minLength: DesignTokens.Spacing.md)
 
             actions

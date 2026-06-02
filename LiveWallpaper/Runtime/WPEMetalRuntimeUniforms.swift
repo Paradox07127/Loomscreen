@@ -171,7 +171,20 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
             "g_AudioSpectrum32Left": .vector(s32L),
             "g_AudioSpectrum32Right": .vector(s32R),
             "g_AudioSpectrum64Left": .vector(s64L),
-            "g_AudioSpectrum64Right": .vector(s64R)
+            "g_AudioSpectrum64Right": .vector(s64R),
+            // WPE 2.8 neutral frame defaults. Shaders ignore entries they do not
+            // declare, so these are zero-cost for non-2.8 passes and only matter
+            // when a 2.8 shader binds them. `g_RenderVar0…3` default to zero,
+            // which disables every optional font effect (outline/blur/shadow).
+            "g_RenderVar0": .vector([0, 0, 0, 0]),
+            "g_RenderVar1": .vector([0, 0, 0, 0]),
+            "g_RenderVar2": .vector([0, 0, 0, 0]),
+            "g_RenderVar3": .vector([0, 0, 0, 0]),
+            // SDR pass-through identity for combine_video_hdr.frag, whose math is
+            // `maxHDR = g_HDRParams.y * 2; rgb = saturate(rgb / maxHDR) * maxHDR`.
+            // `.y = 0.5` ⇒ maxHDR = 1.0 ⇒ exact pass-through for [0,1] input
+            // (`.y = 0` would divide by zero → NaN/black). `.x` is unused here.
+            "g_HDRParams": .vector([1, 0.5])
         ]
     }
 

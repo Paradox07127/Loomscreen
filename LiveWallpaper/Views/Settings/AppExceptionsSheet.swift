@@ -39,7 +39,7 @@ struct AppExceptionsSheet: View {
     @ViewBuilder
     private var content: some View {
         if rules.isEmpty {
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Image(systemName: "app.badge.checkmark")
                     .font(.system(size: 32, weight: .light))
                     .foregroundStyle(.tertiary)
@@ -48,6 +48,14 @@ struct AppExceptionsSheet: View {
                 Text("Add apps like Xcode, Final Cut Pro, or a game.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                Button {
+                    addApp()
+                } label: {
+                    Label("Add Application…", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .padding(.top, 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
