@@ -17,10 +17,6 @@ struct ScreenDetailHeader: View {
     /// Scene-only: pick a Wallpaper Engine project folder and apply it. `nil`
     /// where scenes aren't available (Lite), which also hides the button.
     var onApplyScene: (() -> Void)? = nil
-    /// Wallpaper-type segmented control, rendered in the header's center slot so
-    /// the page's primary control fills the band that used to sit empty (and is
-    /// no longer duplicated in the window title bar).
-    let centerAccessory: AnyView
 
     var body: some View {
         DetailHeaderBar(
@@ -115,8 +111,7 @@ struct ScreenDetailHeader: View {
                         .accessibilityLabel(Text(clearAccessibilityLabel))
                     }
                 }
-            },
-            center: { centerAccessory }
+            }
         )
     }
 

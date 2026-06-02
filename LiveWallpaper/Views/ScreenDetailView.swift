@@ -234,6 +234,11 @@ struct ScreenDetailView: View {
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                wallpaperTypePicker
+            }
+        }
         .confirmDestructive($pendingDestructive)
         .onAppear { scheduleConfigurationLoad() }
         .onDisappear { cleanupPreviewPlayer() }
@@ -275,8 +280,7 @@ struct ScreenDetailView: View {
             onApplyToAll: requestApplyToAll,
             onSelectVideo: showFilePicker,
             onClearWallpaper: clearCurrentWallpaper,
-            onApplyScene: applySceneAction,
-            centerAccessory: AnyView(wallpaperTypePicker)
+            onApplyScene: applySceneAction
         )
     }
 
