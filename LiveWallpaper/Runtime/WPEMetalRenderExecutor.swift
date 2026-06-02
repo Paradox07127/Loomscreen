@@ -231,16 +231,27 @@ final class WPEMetalRenderExecutor {
                 // blit the first pass's resolved source (the background
                 // image) straight to scene. Lets us prove the upload +
                 // present chain works at the layer's native resolution
-                // before the effect shaders join the mix.
-                try encodeCopy(
-                    reference: firstSource,
-                    target: .scene,
-                    layer: layer.graphLayer,
-                    runtimeUniforms: runtimeUniforms,
-                    textures: textures,
-                    commandBuffer: commandBuffer,
-                    frameState: &frameState
-                )
+                // before the effect shaders join the mix. Debug-only path, so
+                // a layer whose first source isn't a sampleable texture (e.g. a
+                // solidlayer/util color layer whose source is `models/util/
+                // solidlayer.json`) is skipped rather than aborting the whole
+                // scene with a RESOURCE_MISS.
+                do {
+                    try encodeCopy(
+                        reference: firstSource,
+                        target: .scene,
+                        layer: layer.graphLayer,
+                        runtimeUniforms: runtimeUniforms,
+                        textures: textures,
+                        commandBuffer: commandBuffer,
+                        frameState: &frameState
+                    )
+                } catch {
+                    Logger.warning(
+                        "[WPE.bypass] skipped layer \(layer.graphLayer.objectID): source \(firstSource) not blittable (\(error))",
+                        category: .wpeRender
+                    )
+                }
                 didEncode = true
                 continue
             }
