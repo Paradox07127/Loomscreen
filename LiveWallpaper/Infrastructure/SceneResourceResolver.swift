@@ -137,17 +137,17 @@ struct SceneResourceResolver: Sendable {
             throw ResolveError.materialUnresolved(reason: "Reference depth exceeded for \(relativePath)")
         }
 
-        guard provider.exists(atRelativePath: relativePath) else {
+        let payload: Data
+        do {
+            payload = try providerData(relativePath)
+        } catch ResolveError.pathEscape {
+            // An escaping reference aborts the multi-root cascade (unlike a plain
+            // miss, which falls through to built-ins / engine assets).
+            throw ResolveError.pathEscape
+        } catch {
             if relativePath.contains("models/util/") {
                 throw ResolveError.materialUnresolved(reason: "Built-in WPE layer \(relativePath) is not available on macOS")
             }
-            throw ResolveError.fileMissing
-        }
-
-        let payload: Data
-        do {
-            payload = try provider.data(atRelativePath: relativePath)
-        } catch {
             throw ResolveError.fileMissing
         }
         let parsed: Any

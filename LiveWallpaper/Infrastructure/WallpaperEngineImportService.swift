@@ -656,8 +656,20 @@ struct WPECachedContentResolver {
         guard WPEPathSafety.contains(cacheURL, in: safeSupportRoot) else {
             return nil
         }
-        guard let entryURL = resourceURL(root: cacheURL, relativePath: entryFile),
-              fileManager.fileExists(atPath: entryURL.path) else {
+        let entryURLCandidate = resourceURL(root: cacheURL, relativePath: entryFile)
+        let entryExistsInCache = entryURLCandidate.map { fileManager.fileExists(atPath: $0.path) } ?? false
+
+        // Package-backed scene: scene.json lives in the source `scene.pkg`, not
+        // the metadata-only cache. Rebuild the in-place descriptor from source.
+        if origin.originalType == .scene, !entryExistsInCache {
+            return packageBackedSceneContent(
+                for: origin,
+                cacheRelativePath: cacheRelativePath,
+                entryFile: entryFile
+            )
+        }
+
+        guard let entryURL = entryURLCandidate, entryExistsInCache else {
             return nil
         }
 
@@ -723,6 +735,70 @@ struct WPECachedContentResolver {
         case .application, .unknown:
             return nil
         }
+    }
+
+    /// Rebuilds a package-backed scene descriptor from its source `scene.pkg`
+    /// (favorites/history reconstruction for in-place scenes whose cache holds
+    /// only `project.json`). Returns `nil` if the source can't be opened.
+    private func packageBackedSceneContent(
+        for origin: WPEOrigin,
+        cacheRelativePath: String,
+        entryFile: String
+    ) -> WallpaperContent? {
+        var isStale = false
+        guard let folderURL = try? URL(
+            resolvingBookmarkData: origin.sourceFolderBookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let packageURL = folderURL.appendingPathComponent("scene.pkg", isDirectory: false)
+        guard fileManager.fileExists(atPath: packageURL.path),
+              let provider = try? WPEPackageSceneAssetProvider(packageURL: packageURL),
+              let sceneData = try? provider.data(atRelativePath: entryFile),
+              let document = try? WPESceneDocumentParser.parse(data: sceneData) else {
+            return nil
+        }
+
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            origin: origin
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            primaryProvider: provider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
+        let synthesizedProject = WallpaperEngineProject(
+            workshopID: origin.workshopID,
+            title: origin.title,
+            entryFile: entryFile,
+            type: origin.originalType,
+            previewFileName: origin.previewFileName,
+            propertyCount: 0,
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            requiresWindowsPlugin: origin.requiresWindowsPlugin
+        )
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: synthesizedProject,
+            scenePackageEntries: provider.entryNames
+        )
+        return .scene(SceneDescriptor(
+            workshopID: origin.workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: tier,
+            assetStorage: .packageSource(fileName: packageURL.lastPathComponent),
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
+        ))
     }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {
