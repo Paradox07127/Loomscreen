@@ -371,7 +371,11 @@ fragment half4 wpe_genericimage2_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * uniforms.color.a * uniforms.alphaMaskUV.x;
-    return half4(float4(rgb * alpha, alpha));
+    // Straight (non-premultiplied) alpha: the pipeline blend factors are
+    // .sourceAlpha/.oneMinusSourceAlpha (WPEMetalPipelineCache), so pre-
+    // multiplying here would apply alpha twice (rgb*alpha²) and punch holes
+    // through semi-transparent texels (e.g. puppet hair edges).
+    return half4(float4(rgb, alpha));
 }
 
 fragment half4 wpe_genericimage4_fragment(
@@ -388,7 +392,8 @@ fragment half4 wpe_genericimage4_fragment(
     }
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
-    return half4(float4(rgb * alpha, alpha));
+    // Straight (non-premultiplied) alpha — see wpe_genericimage2_fragment.
+    return half4(float4(rgb, alpha));
 }
 
 struct WPEGenericParticleUniforms {

@@ -19,6 +19,20 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
+    init(
+        primaryProvider: any WPESceneAssetProvider,
+        dependencyMounts: [WPEAssetMount] = [],
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil
+    ) {
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryProvider: primaryProvider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
+        )
+    }
+
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
         let sceneSize = CGSize(
             width: CGFloat(document.general.orthogonalProjection.width),
@@ -394,8 +408,7 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func loadPuppetBounds(path: String) -> WPEPuppetBounds? {
         do {
-            let url = try resolver.resolveExistingFileURL(relativePath: path)
-            let data = try Data(contentsOf: url)
+            let data = try resolver.data(relativePath: path)
             let model = try WPEMdlParser.parse(data: data)
             guard model.version >= 21 else { return nil }
             return WPEPuppetBounds(model: model)
@@ -462,15 +475,9 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     private func readJSONObject(path: String) throws -> [String: Any] {
-        let url: URL
-        do {
-            url = try resolver.resolveExistingFileURL(relativePath: path)
-        } catch {
-            throw WPERenderGraphError.fileMissing(path)
-        }
         let data: Data
         do {
-            data = try Data(contentsOf: url)
+            data = try resolver.data(relativePath: path)
         } catch {
             throw WPERenderGraphError.fileMissing(path)
         }

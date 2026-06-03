@@ -1610,6 +1610,7 @@ final class ScreenManager {
             let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
+                origin: configuration.wpeOrigin,
                 frame: screen.frame,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineRoot
@@ -1722,8 +1723,8 @@ final class ScreenManager {
             if !bindings.isEmpty {
                 let patch = WPEScenePropertyPatch(
                     bindingsByProperty: bindings,
-                    oldValues: effectiveSceneValues(for: current),
-                    newValues: effectiveSceneValues(for: descriptor)
+                    oldValues: effectiveSceneValues(for: current, origin: configuration.wpeOrigin),
+                    newValues: effectiveSceneValues(for: descriptor, origin: configuration.wpeOrigin)
                 )
                 if sceneSession.applyScenePropertyPatch(patch) {
                     configuration.activeWallpaper = .scene(descriptor)
@@ -1743,21 +1744,42 @@ final class ScreenManager {
     #if !LITE_BUILD
     /// Effective property values (schema defaults merged with the descriptor's
     /// overrides) used to diff old vs new settings for incremental apply.
-    private func effectiveSceneValues(for descriptor: SceneDescriptor) -> [String: WallpaperEngineProjectPropertyValue] {
-        guard WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath),
-              let supportRoot = try? FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: false
-              ).appendingPathComponent("LiveWallpaper", isDirectory: true) else {
-            return descriptor.propertyOverrides
+    /// Package-/source-backed scenes read `project.json` in place from the source
+    /// folder (zero-cache); legacy `.cache` scenes read the extracted directory.
+    private func effectiveSceneValues(
+        for descriptor: SceneDescriptor,
+        origin: WPEOrigin?
+    ) -> [String: WallpaperEngineProjectPropertyValue] {
+        switch descriptor.assetStorage {
+        case .cache:
+            guard WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath),
+                  let supportRoot = try? FileManager.default.url(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask,
+                    appropriateFor: nil,
+                    create: false
+                  ).appendingPathComponent("LiveWallpaper", isDirectory: true) else {
+                return descriptor.propertyOverrides
+            }
+            let cacheRoot = supportRoot.appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
+            return WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                descriptor: descriptor,
+                cacheRootURL: cacheRoot
+            )
+        case .sourceDirectory, .packageSource:
+            guard let origin,
+                  case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                    origin.sourceFolderBookmark, target: .transient
+                  ) else {
+                return descriptor.propertyOverrides
+            }
+            return SecurityScopedBookmarkResolver.withScopedAccess(resolved.url) { _ in
+                WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                    descriptor: descriptor,
+                    cacheRootURL: resolved.url
+                )
+            }
         }
-        let cacheRoot = supportRoot.appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
-        return WallpaperEngineProjectPropertySchema.effectiveSceneValues(
-            descriptor: descriptor,
-            cacheRootURL: cacheRoot
-        )
     }
     #endif
 

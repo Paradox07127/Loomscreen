@@ -54,6 +54,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     nonisolated(unsafe) private var activeEngineAssetsRootURL: URL?
     private let entryResolver: SceneResourceResolver
     private let resourceResolver: WPEMultiRootResourceResolver
+    /// Non-nil for package-/source-backed scenes — threaded into the graph and
+    /// pipeline builders so they resolve from the same in-place source. `nil`
+    /// keeps the legacy directory-backed (cache root URL) construction.
+    private let sceneAssetProvider: (any WPESceneAssetProvider)?
+    /// Root holding `project.json` for the property schema. For package-/source-
+    /// backed scenes this is the source folder (zero-cache — nothing extracted);
+    /// `nil` falls back to `cacheRootURL` (legacy extracted cache).
+    private let projectManifestRootURL: URL?
     private let resolutionTracer: WPEResolutionTracer
     private let mtkView: WPEInteractiveMTKView
     private let executor: WPEMetalRenderExecutor
@@ -166,6 +174,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     init(
         descriptor: SceneDescriptor,
         cacheRootURL: URL,
+        assetProvider: (any WPESceneAssetProvider)? = nil,
+        projectManifestRootURL: URL? = nil,
         dependencyMounts: [WPEAssetMount],
         engineAssetsRootURL: URL? = nil,
         frame: CGRect,
@@ -187,13 +197,25 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // be a lie.
         let effectiveEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.activeEngineAssetsRootURL = effectiveEngineAssetsRootURL
-        self.entryResolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
-        self.resourceResolver = WPEMultiRootResourceResolver(
-            primaryRootURL: cacheRootURL,
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: effectiveEngineAssetsRootURL,
-            tracer: resolutionTracer
-        )
+        self.sceneAssetProvider = assetProvider
+        self.projectManifestRootURL = projectManifestRootURL
+        if let assetProvider {
+            self.entryResolver = SceneResourceResolver(provider: assetProvider, cacheRootURL: cacheRootURL)
+            self.resourceResolver = WPEMultiRootResourceResolver(
+                primaryProvider: assetProvider,
+                dependencyMounts: dependencyMounts,
+                engineAssetsRootURL: effectiveEngineAssetsRootURL,
+                tracer: resolutionTracer
+            )
+        } else {
+            self.entryResolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
+            self.resourceResolver = WPEMultiRootResourceResolver(
+                primaryRootURL: cacheRootURL,
+                dependencyMounts: dependencyMounts,
+                engineAssetsRootURL: effectiveEngineAssetsRootURL,
+                tracer: resolutionTracer
+            )
+        }
         self.resolutionTracer = resolutionTracer
         self.executor = executor
         self.textureLoader = WPEMetalTextureLoader(device: device)
@@ -340,11 +362,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("read.entry", "resolving \(descriptor.entryFile)")
         onProgress?("Reading scene")
         try Task.checkCancellation()
-        let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
+        let entryReader = entryResolver
         let sceneDescriptor = descriptor
-        let sceneCacheRoot = cacheRootURL
+        // project.json lives at the source folder for in-place scenes, the cache
+        // dir for legacy ones — the property schema reads from here.
+        let sceneCacheRoot = projectManifestRootURL ?? cacheRootURL
         let document = try await Task.detached(priority: .userInitiated) {
-            let data = try Data(contentsOf: entryURL)
+            let data = try entryReader.data(relativePath: sceneDescriptor.entryFile)
             let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
                 descriptor: sceneDescriptor,
                 cacheRootURL: sceneCacheRoot
@@ -359,12 +383,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let cacheRoot = cacheRootURL
         let mounts = dependencyMounts
         let engineRoot = engineAssetsRootURL
+        let provider = sceneAssetProvider
         let graph = try await Task.detached(priority: .userInitiated) {
-            try WPERenderGraphBuilder(
-                cacheRootURL: cacheRoot,
-                dependencyMounts: mounts,
-                engineAssetsRootURL: engineRoot
-            ).build(document: document)
+            let builder = provider.map {
+                WPERenderGraphBuilder(primaryProvider: $0, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
+            } ?? WPERenderGraphBuilder(cacheRootURL: cacheRoot, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
+            return try builder.build(document: document)
         }.value
         debugStage("graph.build.done", "layers=\(graph.layers.count)")
         try Task.checkCancellation()
@@ -372,11 +396,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("pipeline.build", "begin")
         onProgress?("Preparing render pipeline")
         let pipeline = try await Task.detached(priority: .userInitiated) {
-            try WPERenderPipelineBuilder(
-                cacheRootURL: cacheRoot,
-                dependencyMounts: mounts,
-                engineAssetsRootURL: engineRoot
-            ).build(graph: graph)
+            let builder = provider.map {
+                WPERenderPipelineBuilder(primaryProvider: $0, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
+            } ?? WPERenderPipelineBuilder(cacheRootURL: cacheRoot, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
+            return try builder.build(graph: graph)
         }.value
         let passCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
         debugStage("pipeline.build.done", "passes=\(passCount)")
@@ -1185,8 +1208,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func resolveMSDFFontFragmentSource() -> String? {
         let candidates = ["shaders/font.frag", "shaders/effects/font.frag"]
         for path in candidates {
-            guard let url = try? resourceResolver.resolveExistingFileURL(relativePath: path),
-                  let data = try? Data(contentsOf: url),
+            guard let data = try? resourceResolver.data(relativePath: path),
                   let source = String(data: data, encoding: .utf8) else {
                 continue
             }
@@ -1204,8 +1226,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func parseParticleMaterial(at relativePath: String) -> ParticleMaterialDescriptor? {
-        guard let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: relativePath),
-              let materialData = try? Data(contentsOf: materialURL),
+        guard let materialData = try? entryResolver.data(relativePath: relativePath),
               let materialJSON = try? JSONSerialization.jsonObject(with: materialData) as? [String: Any],
               let passes = materialJSON["passes"] as? [[String: Any]],
               let firstPass = passes.first else {
@@ -1241,8 +1262,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         var seen = Set<String>()
         for probe in probes where seen.insert(probe).inserted {
-            guard let url = try? resourceResolver.resolveExistingFileURL(relativePath: probe),
-                  let data = try? Data(contentsOf: url) else {
+            guard let data = try? resourceResolver.data(relativePath: probe) else {
                 continue
             }
             if let sheet = WPEParticleSpriteSheetParser.parse(data: data, atlasPixelSize: atlasPixelSize) {
@@ -1303,8 +1323,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func loadParticleDefinition(at particlePath: String) -> WPEParticleDefinition? {
-        guard let particleURL = try? entryResolver.resolveExistingFileURL(relativePath: particlePath),
-              let data = try? Data(contentsOf: particleURL) else {
+        guard let data = try? entryResolver.data(relativePath: particlePath) else {
             return nil
         }
         return WPEParticleDefinitionParser.parse(data: data)

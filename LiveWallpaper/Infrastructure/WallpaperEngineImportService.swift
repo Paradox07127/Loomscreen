@@ -267,6 +267,19 @@ final class WallpaperEngineImportService {
 
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
+            // Default: read the packaged scene in place from scene.pkg — no
+            // extraction, so no second multi-GB copy in wpe-cache. Falls back to
+            // extracting into the cache only when the package can't be opened or
+            // parsed for in-place use.
+            if let packageResult = await finishScenePackageBackedImport(
+                project: project,
+                pkgURL: pkgURL,
+                sourceFolderURL: folderURL,
+                sourceBookmark: sourceBookmark
+            ) {
+                return packageResult
+            }
+
             let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
             guard case .success(let cacheURL) = cacheResult else {
                 if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
@@ -359,6 +372,71 @@ final class WallpaperEngineImportService {
             cacheRelativePath: cacheRelativePath(for: project),
             entryFile: project.entryFile,
             capabilityTier: tier,
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
+        )
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
+        )
+
+        if tier == .unsupported {
+            return .unsupported(origin: origin)
+        }
+        return .ready(.scene(descriptor), origin: origin)
+    }
+
+    /// Imports a packaged scene to read in place from `scene.pkg` (no
+    /// extraction). Returns `nil` when the package can't be opened/parsed for
+    /// in-place use, so the caller falls back to extracting into the cache.
+    private func finishScenePackageBackedImport(
+        project: WallpaperEngineProject,
+        pkgURL: URL,
+        sourceFolderURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult? {
+        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+              let sceneData = try? provider.data(atRelativePath: project.entryFile) else {
+            return nil
+        }
+        let document: WPESceneDocument
+        do {
+            document = try WPESceneDocumentParser.parse(data: sceneData)
+        } catch {
+            return nil
+        }
+
+        // Zero-cache: assets and project.json are read in place from the source,
+        // so nothing is kept in wpe-cache. Remove any stale prior extraction for
+        // this id — frees its disk and ensures the source `.pkg` is never treated
+        // as a redundant, reclaimable copy (no completion manifest survives).
+        try? await cache.purge(workshopID: project.workshopID)
+
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            origin: nil
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            primaryProvider: provider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: project,
+            scenePackageEntries: provider.entryNames
+        )
+        let descriptor = SceneDescriptor(
+            workshopID: project.workshopID,
+            cacheRelativePath: cacheRelativePath(for: project),
+            entryFile: project.entryFile,
+            capabilityTier: tier,
+            assetStorage: .packageSource(fileName: pkgURL.lastPathComponent),
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             preflightTier: preflight.tier,
             preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
@@ -577,8 +655,20 @@ struct WPECachedContentResolver {
         guard WPEPathSafety.contains(cacheURL, in: safeSupportRoot) else {
             return nil
         }
-        guard let entryURL = resourceURL(root: cacheURL, relativePath: entryFile),
-              fileManager.fileExists(atPath: entryURL.path) else {
+        let entryURLCandidate = resourceURL(root: cacheURL, relativePath: entryFile)
+        let entryExistsInCache = entryURLCandidate.map { fileManager.fileExists(atPath: $0.path) } ?? false
+
+        // Package-backed scene: scene.json lives in the source `scene.pkg`, not
+        // the metadata-only cache. Rebuild the in-place descriptor from source.
+        if origin.originalType == .scene, !entryExistsInCache {
+            return packageBackedSceneContent(
+                for: origin,
+                cacheRelativePath: cacheRelativePath,
+                entryFile: entryFile
+            )
+        }
+
+        guard let entryURL = entryURLCandidate, entryExistsInCache else {
             return nil
         }
 
@@ -644,6 +734,70 @@ struct WPECachedContentResolver {
         case .application, .unknown:
             return nil
         }
+    }
+
+    /// Rebuilds a package-backed scene descriptor from its source `scene.pkg`
+    /// (favorites/history reconstruction for in-place scenes whose cache holds
+    /// only `project.json`). Returns `nil` if the source can't be opened.
+    private func packageBackedSceneContent(
+        for origin: WPEOrigin,
+        cacheRelativePath: String,
+        entryFile: String
+    ) -> WallpaperContent? {
+        var isStale = false
+        guard let folderURL = try? URL(
+            resolvingBookmarkData: origin.sourceFolderBookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+
+        let packageURL = folderURL.appendingPathComponent("scene.pkg", isDirectory: false)
+        guard fileManager.fileExists(atPath: packageURL.path),
+              let provider = try? WPEPackageSceneAssetProvider(packageURL: packageURL),
+              let sceneData = try? provider.data(atRelativePath: entryFile),
+              let document = try? WPESceneDocumentParser.parse(data: sceneData) else {
+            return nil
+        }
+
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            origin: origin
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            primaryProvider: provider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
+        let synthesizedProject = WallpaperEngineProject(
+            workshopID: origin.workshopID,
+            title: origin.title,
+            entryFile: entryFile,
+            type: origin.originalType,
+            previewFileName: origin.previewFileName,
+            propertyCount: 0,
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            requiresWindowsPlugin: origin.requiresWindowsPlugin
+        )
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: synthesizedProject,
+            scenePackageEntries: provider.entryNames
+        )
+        return .scene(SceneDescriptor(
+            workshopID: origin.workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: tier,
+            assetStorage: .packageSource(fileName: packageURL.lastPathComponent),
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
+        ))
     }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {

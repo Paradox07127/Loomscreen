@@ -134,11 +134,26 @@ final class WPESceneScriptInstance {
             // which otherwise stringifies into the rendered text). Returns the proxy
             // so the builder calls chain; `finish()` (no args) just returns it.
             let register: @convention(block) (JSValue) -> JSValue = { config in
-                if config.isObject,
-                   let nameValue = config.objectForKeyedSubscript("name"),
-                   nameValue.isString, let name = nameValue.toString(), !name.isEmpty,
-                   let value = config.objectForKeyedSubscript("value"), !value.isUndefined {
+                guard config.isObject,
+                      let nameValue = config.objectForKeyedSubscript("name"),
+                      nameValue.isString, let name = nameValue.toString(), !name.isEmpty else {
+                    return proxy
+                }
+                // Explicit default (addCheckbox/addText/addSlider/addColor).
+                if let value = config.objectForKeyedSubscript("value"), !value.isUndefined {
                     proxy.setObject(value, forKeyedSubscript: name as NSString)
+                    return proxy
+                }
+                // `addCombo` carries no top-level `value`; WPE defaults a combo to
+                // its FIRST option's value. Without this the combo resolves to
+                // `undefined`, so date/clock scripts that branch on it (e.g.
+                // `if (scriptProperties.monthFormat == 1)`) take no branch and then
+                // throw on `months[...]`/`day[...]` → the text silently reverts to
+                // its placeholder. Mirror WPE: fall back to options[0].value.
+                if let options = config.objectForKeyedSubscript("options"), options.isArray,
+                   let first = options.atIndex(0), first.isObject,
+                   let optionValue = first.objectForKeyedSubscript("value"), !optionValue.isUndefined {
+                    proxy.setObject(optionValue, forKeyedSubscript: name as NSString)
                 }
                 return proxy
             }

@@ -208,6 +208,51 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.resourceLocation == .cache)
     }
 
+    @Test("Packaged scene imports in place (.packageSource) without extracting the payload")
+    func packagedSceneImportsInPlaceWithoutExtraction() async throws {
+        let pngBytes = try makeFixturePNG(width: 4, height: 4)
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1",
+                "name": "Layer 1",
+                "type": "image",
+                "image": "materials/layer1.png",
+                "origin": "0.5 0.5 0",
+                "scale": "1 1 1",
+                "alpha": 1.0,
+                "blendmode": "normal"
+            }]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer1.png", Array(pngBytes))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+        guard case .ready(.scene(let descriptor), _) = result else {
+            Issue.record("Expected .ready scene, got \(result)")
+            return
+        }
+        #expect(descriptor.assetStorage == .packageSource(fileName: "scene.pkg"))
+        #expect(descriptor.capabilityTier == .imageOnly)
+
+        // Zero-cache: the package is read in place, so NOTHING is written to
+        // wpe-cache for this id (assets and project.json both stay at the source).
+        let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
+    }
+
     @Test("Unpacked scene folder with valid scene.json + image asset returns ready cache-backed scene content")
     func unpackedSceneFolderWithAssetReturnsReady() async throws {
         let pngBytes = try makeFixturePNG(width: 4, height: 4)
