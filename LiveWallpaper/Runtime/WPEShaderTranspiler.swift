@@ -647,13 +647,6 @@ struct WPEShaderTranspiler {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
         var inner = String(source[openBrace.upperBound..<closeBrace.lowerBound])
-        if preserveTexCoordZW {
-            // `preserveTexCoordZW` is true exactly for effects/waterwaves; keep its displaced
-            // sample's ALPHA from the undisplaced UV so the wave distorts color inside the
-            // silhouette instead of punching animated transparent holes when the displaced UV
-            // lands in the sprite's alpha-cut margin (the head-top "hole").
-            inner = preserveWaterWavesSourceAlpha(inner)
-        }
         inner = applySubstitutions(
             inner,
             rewriteProgramScopeConsts: false,
@@ -1105,23 +1098,6 @@ struct WPEShaderTranspiler {
             return source.replacingOccurrences(of: "v_TexCoord.zw", with: "v_TexCoord.xy")
         }
         return source
-    }
-
-    /// waterwaves.frag ends with `gl_FragColor = texSample2D(g_Texture0, texCoord);`, sampling the
-    /// DISPLACED UV — including its alpha. Near the sprite's alpha-cut edges the displaced UV lands
-    /// in transparent texels, so the silhouette gets animated holes (the head-top defect). Keep the
-    /// displaced RGB but take alpha from the UNDISPLACED `v_TexCoord.xy`, so the wave ripples color
-    /// within the existing silhouette. Operates on the raw GLSL main body (before texSample2D→sample
-    /// lowering); tolerant of whitespace; a no-op if the canonical line isn't present.
-    private static func preserveWaterWavesSourceAlpha(_ glslMainBody: String) -> String {
-        let pattern = #"gl_FragColor\s*=\s*texSample2D\(\s*g_Texture0\s*,\s*texCoord\s*\)\s*;"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return glslMainBody }
-        let range = NSRange(glslMainBody.startIndex..., in: glslMainBody)
-        return regex.stringByReplacingMatches(
-            in: glslMainBody,
-            range: range,
-            withTemplate: "gl_FragColor = vec4(texSample2D(g_Texture0, texCoord).rgb, texSample2D(g_Texture0, v_TexCoord.xy).a);"
-        )
     }
 
     /// Only `effects/waterwaves` has a transpiler-synthesized `v_TexCoord.zw` that matches its
