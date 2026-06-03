@@ -135,27 +135,28 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Scene descriptor cache escapes app support: \(descriptor.cacheRelativePath)", category: .screenManager)
             return nil
         }
-        // Package-/source-backed scenes read assets in place; only the legacy
-        // cache backing requires the extracted directory to exist. The cache
-        // root URL is still passed through for the small `project.json` the
-        // property schema reads (kept even for package-backed imports).
-        let assetProvider = sceneAssetProvider(descriptor: descriptor, origin: origin, fileManager: fileManager)
-        switch descriptor.assetStorage {
-        case .cache:
+        // Package-/source-backed scenes read assets — and `project.json` — in
+        // place from the source, leaving wpe-cache empty for that id. Only the
+        // legacy `.cache` backing requires the extracted directory to exist.
+        guard let assets = sceneAssets(
+            descriptor: descriptor,
+            origin: origin,
+            cacheURL: cacheURL,
+            fileManager: fileManager
+        ) else {
+            Logger.warning("Scene source unavailable for in-place read: \(descriptor.workshopID)", category: .screenManager)
+            return nil
+        }
+        if descriptor.assetStorage == .cache {
             guard fileManager.fileExists(atPath: cacheURL.path) else {
                 Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
-                return nil
-            }
-        case .sourceDirectory, .packageSource:
-            guard assetProvider != nil else {
-                Logger.warning("Scene source unavailable for in-place read: \(descriptor.workshopID)", category: .screenManager)
                 return nil
             }
         }
 
         let entryAvailable: Bool
-        if let assetProvider {
-            entryAvailable = assetProvider.exists(atRelativePath: descriptor.entryFile)
+        if let provider = assets.provider {
+            entryAvailable = provider.exists(atRelativePath: descriptor.entryFile)
         } else {
             entryAvailable = (try? SceneResourceResolver(cacheRootURL: cacheURL)
                 .resolveExistingFileURL(relativePath: descriptor.entryFile)) != nil
@@ -177,7 +178,8 @@ final class AmbientWallpaperSessionBuilder {
             renderer = try WPEMetalSceneRenderer(
                 descriptor: descriptor,
                 cacheRootURL: cacheURL,
-                assetProvider: assetProvider,
+                assetProvider: assets.provider,
+                projectManifestRootURL: assets.projectRoot,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineAssetsRootURL,
                 frame: rendererFrame,
@@ -197,36 +199,44 @@ final class AmbientWallpaperSessionBuilder {
         return session
     }
 
-    /// Builds the in-place asset provider for a scene. Returns `nil` for legacy
-    /// `.cache` scenes (the renderer then defaults to the cache directory) and
-    /// for source-/package-backed scenes whose source can't be opened (the
-    /// caller treats that as a failed build).
-    private func sceneAssetProvider(
+    /// Resolves both the in-place asset provider AND the `project.json` root for
+    /// a scene. Legacy `.cache` scenes get a `nil` provider (renderer defaults to
+    /// the cache directory) with the cache dir as project root. Source-/package-
+    /// backed scenes get an in-place provider with the *source folder* as project
+    /// root (where `project.json` sits next to the assets), so nothing is cached;
+    /// returns `nil` if that source can't be opened. The returned provider owns
+    /// the source's security scope for its lifetime, which also covers the
+    /// renderer's `project.json` reads under the same root.
+    private func sceneAssets(
         descriptor: SceneDescriptor,
         origin: WPEOrigin?,
+        cacheURL: URL,
         fileManager: FileManager
-    ) -> (any WPESceneAssetProvider)? {
+    ) -> (provider: (any WPESceneAssetProvider)?, projectRoot: URL)? {
         switch descriptor.assetStorage {
         case .cache:
-            return nil
+            return (nil, cacheURL)
         case .sourceDirectory:
             guard let source = resolveSourceFolder(origin: origin) else { return nil }
-            let provider = WPEDirectorySceneAssetProvider(rootURL: source.url)
-            return WPESecurityScopedSceneAssetProvider(
-                wrapped: provider, scopedURL: source.url, didStartAccessing: source.didStart
+            let provider = WPESecurityScopedSceneAssetProvider(
+                wrapped: WPEDirectorySceneAssetProvider(rootURL: source.url),
+                scopedURL: source.url,
+                didStartAccessing: source.didStart
             )
+            return (provider, source.url)
         case .packageSource(let fileName):
             guard let source = resolveSourceFolder(origin: origin) else { return nil }
             let packageURL = source.url.appendingPathComponent(fileName, isDirectory: false)
             guard fileManager.fileExists(atPath: packageURL.path),
-                  let provider = try? WPEPackageSceneAssetProvider(packageURL: packageURL) else {
+                  let pkg = try? WPEPackageSceneAssetProvider(packageURL: packageURL) else {
                 if source.didStart { source.url.stopAccessingSecurityScopedResource() }
                 Logger.warning("Scene package missing/unreadable: \(packageURL.lastPathComponent)", category: .screenManager)
                 return nil
             }
-            return WPESecurityScopedSceneAssetProvider(
-                wrapped: provider, scopedURL: source.url, didStartAccessing: source.didStart
+            let provider = WPESecurityScopedSceneAssetProvider(
+                wrapped: pkg, scopedURL: source.url, didStartAccessing: source.didStart
             )
+            return (provider, source.url)
         }
     }
 

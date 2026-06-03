@@ -154,31 +154,6 @@ actor WallpaperEngineCache {
         }
     }
 
-    /// Creates a metadata-only cache directory for a package-backed scene: it
-    /// holds just `project.json` (copied from the source folder) so the property
-    /// schema / inspector keep working, while the scene's heavy assets are read
-    /// in place from `scene.pkg`. No payload is extracted and no completion
-    /// manifest is written — so this directory is never mistaken for a finished
-    /// extraction by the reclaimer or size accounting.
-    func ensureProjectManifestCache(workshopID: String, sourceFolderURL: URL) throws -> URL {
-        let cacheURL = try cacheDirectory(for: workshopID)
-        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
-        // If this id was previously extracted, drop the completion manifest so the
-        // source `.pkg` — now the live asset source — is never treated as a
-        // redundant, reclaimable copy by `WPEDownloadArchiveReclaimer`.
-        let manifest = manifestURL(in: cacheURL)
-        if fileManager.fileExists(atPath: manifest.path) {
-            try? fileManager.removeItem(at: manifest)
-        }
-        let destination = cacheURL.appendingPathComponent("project.json")
-        let source = sourceFolderURL.appendingPathComponent("project.json")
-        if !fileManager.fileExists(atPath: destination.path),
-           fileManager.fileExists(atPath: source.path) {
-            try? fileManager.copyItem(at: source, to: destination)
-        }
-        return cacheURL
-    }
-
     /// Workshop IDs whose extracted payload currently lives under the cache root.
     func listAvailableWorkshopIDs() -> Set<String> {
         listWorkshopIDs(requireCompletedManifest: false)

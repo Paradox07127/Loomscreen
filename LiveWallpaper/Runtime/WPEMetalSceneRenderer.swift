@@ -58,6 +58,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// pipeline builders so they resolve from the same in-place source. `nil`
     /// keeps the legacy directory-backed (cache root URL) construction.
     private let sceneAssetProvider: (any WPESceneAssetProvider)?
+    /// Root holding `project.json` for the property schema. For package-/source-
+    /// backed scenes this is the source folder (zero-cache — nothing extracted);
+    /// `nil` falls back to `cacheRootURL` (legacy extracted cache).
+    private let projectManifestRootURL: URL?
     private let resolutionTracer: WPEResolutionTracer
     private let mtkView: WPEInteractiveMTKView
     private let executor: WPEMetalRenderExecutor
@@ -171,6 +175,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         descriptor: SceneDescriptor,
         cacheRootURL: URL,
         assetProvider: (any WPESceneAssetProvider)? = nil,
+        projectManifestRootURL: URL? = nil,
         dependencyMounts: [WPEAssetMount],
         engineAssetsRootURL: URL? = nil,
         frame: CGRect,
@@ -193,6 +198,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let effectiveEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.activeEngineAssetsRootURL = effectiveEngineAssetsRootURL
         self.sceneAssetProvider = assetProvider
+        self.projectManifestRootURL = projectManifestRootURL
         if let assetProvider {
             self.entryResolver = SceneResourceResolver(provider: assetProvider, cacheRootURL: cacheRootURL)
             self.resourceResolver = WPEMultiRootResourceResolver(
@@ -358,7 +364,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         try Task.checkCancellation()
         let entryReader = entryResolver
         let sceneDescriptor = descriptor
-        let sceneCacheRoot = cacheRootURL
+        // project.json lives at the source folder for in-place scenes, the cache
+        // dir for legacy ones — the property schema reads from here.
+        let sceneCacheRoot = projectManifestRootURL ?? cacheRootURL
         let document = try await Task.detached(priority: .userInitiated) {
             let data = try entryReader.data(relativePath: sceneDescriptor.entryFile)
             let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(

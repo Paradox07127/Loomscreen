@@ -409,12 +409,11 @@ final class WallpaperEngineImportService {
             return nil
         }
 
-        // Best-effort metadata-only cache (just project.json) so the property
-        // schema / inspector keep working; heavy assets stay in the package.
-        _ = try? await cache.ensureProjectManifestCache(
-            workshopID: project.workshopID,
-            sourceFolderURL: sourceFolderURL
-        )
+        // Zero-cache: assets and project.json are read in place from the source,
+        // so nothing is kept in wpe-cache. Remove any stale prior extraction for
+        // this id — frees its disk and ensures the source `.pkg` is never treated
+        // as a redundant, reclaimable copy (no completion manifest survives).
+        try? await cache.purge(workshopID: project.workshopID)
 
         let dependencyMounts = WPEDependencyMountResolver().mounts(
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,

@@ -247,13 +247,10 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.assetStorage == .packageSource(fileName: "scene.pkg"))
         #expect(descriptor.capabilityTier == .imageOnly)
 
-        // The package is read in place: the cache holds only `project.json` — the
-        // scene.json + materials payload is NOT extracted (the whole point).
+        // Zero-cache: the package is read in place, so NOTHING is written to
+        // wpe-cache for this id (assets and project.json both stay at the source).
         let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
-        let cached = ((try? FileManager.default.contentsOfDirectory(atPath: sceneCache.path)) ?? []).sorted()
-        #expect(cached == ["project.json"])
-        #expect(!FileManager.default.fileExists(atPath: sceneCache.appendingPathComponent("scene.json").path))
-        #expect(!FileManager.default.fileExists(atPath: sceneCache.appendingPathComponent("materials").path))
+        #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }
 
     @Test("Unpacked scene folder with valid scene.json + image asset returns ready cache-backed scene content")
