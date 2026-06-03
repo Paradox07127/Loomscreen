@@ -1058,13 +1058,13 @@ final class WPEMetalRenderExecutor {
         // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind),
         // reusing the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
         //
-        // OFF BY DEFAULT: the baked MDLA bone motion is subtle (verified ≤~11px at the hair) and the
-        // prominent puppet animation is the masked waterwaves effect. The earlier "torso perturbed"
-        // artifact was a skinning bug — MDLA channels are parent-LOCAL, but the palette composed them
-        // as world transforms, binding vertices to the wrong bones. `WPEPuppetAnimationEvaluator` now
-        // composes the skeleton hierarchy (passing `model.bones`). Still gated for on-device review:
-        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
-        let skinningAllowed = UserDefaults.standard.bool(forKey: "WPEPuppetEnableSkinning")
+        // ON BY DEFAULT: hierarchy-composed MDLA skinning is the puppet's natural idle sway and is
+        // confirmed correct on-device (frame-0 palette == identity, finite-guarded, bounded). The
+        // earlier "torso perturbed" artifact was a since-fixed bug — MDLA channels are parent-LOCAL,
+        // but the palette had composed them as world transforms. No UI toggle anymore; a hidden
+        // override remains only as an escape hatch for a pathological puppet (no rebuild needed):
+        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool NO`.
+        let skinningAllowed = UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? true
         let animationLayers = skinningAllowed ? puppetAnimationLayers(for: layer, model: model) : []
         let resolvedPalette = animationLayers.isEmpty
             ? []
