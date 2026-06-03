@@ -150,6 +150,12 @@ final class WPEMetalRenderExecutor {
     /// `WPEMetalSceneRenderer` can PNG-dump them and localize which pass draws
     /// a given artifact. Memory-bounded — cleared at the start of every render().
     private(set) var scenePassDumps: [(label: String, texture: MTLTexture)] = []
+    /// Diagnostic: when `WPEDumpLayerPasses` (UserDefault) equals a layer
+    /// objectID, snapshot that ONE layer's destination texture after EVERY
+    /// pass (base image + each effect FBO), so we can localize which pass on a
+    /// single puppet/layer introduces an artifact. Scoped to one object to
+    /// stay memory-safe (capturing every pass scene-wide would OOM the GPU).
+    private var dumpLayerPassesID: String?
     #endif
 
     func render(
@@ -163,6 +169,10 @@ final class WPEMetalRenderExecutor {
         #if DEBUG
         scenePassDumps.removeAll()
         let dumpScenePasses = sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false
+        dumpLayerPassesID = {
+            let id = UserDefaults.standard.string(forKey: "WPEDumpLayerPasses")
+            return (id?.isEmpty == false) ? id : nil
+        }()
         #endif
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
@@ -864,6 +874,23 @@ final class WPEMetalRenderExecutor {
             frameState: &frameState,
             avoiding: readsCurrentTarget ? initialPreviousTextureForTarget : nil
         )
+
+        #if DEBUG
+        // Per-pass FBO isolation for one layer: snapshot this pass's destination
+        // after the draw (function-scope defer runs at encode() exit) so we can
+        // see exactly which pass on the layer introduces an artifact.
+        let shouldDumpLayerPass = dumpLayerPassesID != nil && layer.objectID == dumpLayerPassesID
+        defer {
+            if shouldDumpLayerPass {
+                captureScenePassIfDumping(
+                    true,
+                    label: "L\(layer.objectID)-\(pass.pass.id)",
+                    output: destination.texture,
+                    commandBuffer: commandBuffer
+                )
+            }
+        }
+        #endif
 
         try snapshotFullFrameBufferIfAliasingScene(
             pass: pass,
