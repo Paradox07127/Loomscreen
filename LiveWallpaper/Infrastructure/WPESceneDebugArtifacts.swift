@@ -215,6 +215,39 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         }
         recordNote(name: "pass-list.txt", contents: lines.joined(separator: "\n"))
         appendLog("[pass-list] wrote \(pipeline.layers.reduce(0) { $0 + $1.passes.count }) pass entries")
+        recordLayerPlacements(pipeline)
+    }
+
+    /// One-shot per-scene dump of every layer's resolved placement plus each puppet's MDAT anchors,
+    /// so a body-split rig's parent/child mis-placement can be diagnosed numerically (read-only).
+    func recordLayerPlacements(_ pipeline: WPEPreparedRenderPipeline) {
+        guard isEnabled else { return }
+        func fmt(_ v: SIMD3<Double>) -> String { String(format: "(%.1f,%.1f,%.1f)", v.x, v.y, v.z) }
+        func fmt2(_ v: SIMD2<Double>) -> String { String(format: "(%.1f,%.1f)", v.x, v.y) }
+        var lines: [String] = []
+        for layer in pipeline.layers {
+            let g = layer.graphLayer.geometry
+            let sizeStr = g.size.map { String(format: "%.0fx%.0f", $0.width, $0.height) } ?? "nil"
+            lines.append(
+                "id=\(layer.graphLayer.objectID) name=\(layer.graphLayer.objectName) "
+                + "puppet=\(layer.puppetModel != nil ? 1 : 0) "
+                + "parent=\(layer.graphLayer.parentObjectID ?? "-") attach=\(layer.graphLayer.attachment ?? "-") "
+                + "origin=\(fmt(g.origin)) size=\(sizeStr) meshCenter=\(fmt2(g.puppetMeshCenter)) "
+                + "scale=\(fmt(g.scale)) angles=\(fmt(g.angles)) align=\(g.alignment)"
+            )
+            if let model = layer.puppetModel, !model.attachments.isEmpty {
+                for a in model.attachments {
+                    let bind = a.bindMatrix
+                    let bt = bind.count >= 16 ? String(format: "MDAT_T=(%.1f,%.1f)", bind[12], bind[13]) : "MDAT_T=?"
+                    let bone = model.bones.first { $0.index == a.boneIndex }
+                    let bw = bone.flatMap { $0.rawMatrix.count >= 16 ? $0.rawMatrix : nil }
+                    let bwt = bw.map { String(format: "boneWorld_T=(%.1f,%.1f)", $0[12], $0[13]) } ?? "boneWorld_T=?"
+                    lines.append("    anchor \(a.name) -> bone \(a.boneIndex)  \(bt)  \(bwt)")
+                }
+            }
+        }
+        recordNote(name: "layer-placements.txt", contents: lines.joined(separator: "\n"))
+        appendLog("[placements] wrote \(pipeline.layers.count) layer placements")
     }
 
     func recordFirstFrameStats(_ stats: WPEMetalTextureVisualStats) {
