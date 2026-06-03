@@ -62,7 +62,17 @@ struct WPEMSDFTextLayout {
             naturalHeight: naturalHeight,
             innerHeight: innerHeight
         )
-        let utf16 = Array(object.text.utf16)
+        // Per-UTF16-unit whitespace flags using grapheme-level Character.isWhitespace
+        // (expanded across each character's UTF-16 units) so a glyph's source can
+        // be classified in O(1) by its CTRun string index.
+        var whitespaceByUTF16: [Bool] = []
+        whitespaceByUTF16.reserveCapacity(object.text.utf16.count)
+        for character in object.text {
+            let isWhitespace = character.isWhitespace
+            for _ in 0..<String(character).utf16.count {
+                whitespaceByUTF16.append(isWhitespace)
+            }
+        }
         let runs = CTLineGetGlyphRuns(line) as! [CTRun]
         var perPage: [Int: [WPEMSDFTextVertex]] = [:]
         var isComplete = true
@@ -100,7 +110,7 @@ struct WPEMSDFTextLayout {
                     // A NON-whitespace glyph with no MSDF outline (emoji / color /
                     // unsupported) must NOT be silently dropped — fall the whole
                     // object back to CoreText so it renders correctly.
-                    if Self.isWhitespace(stringIndices[index], in: utf16) { continue }
+                    if Self.isWhitespace(stringIndices[index], flags: whitespaceByUTF16) { continue }
                     return nil
                 }
                 let position = positions[index]
@@ -201,12 +211,11 @@ struct WPEMSDFTextLayout {
         return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
     }
 
-    /// Whether the source character at `utf16Index` is whitespace (so a missing
-    /// outline is expected and the glyph can be safely advanced past).
-    private static func isWhitespace(_ utf16Index: CFIndex, in utf16: [UInt16]) -> Bool {
-        guard utf16Index >= 0, utf16Index < utf16.count,
-              let scalar = Unicode.Scalar(UInt32(utf16[utf16Index])) else { return false }
-        return scalar.properties.isWhitespace
+    /// Whether the source character at the glyph's UTF-16 offset is whitespace
+    /// (so a missing outline is expected and the glyph can be safely advanced
+    /// past). Backed by grapheme-level `Character.isWhitespace`.
+    private static func isWhitespace(_ utf16Offset: CFIndex, flags: [Bool]) -> Bool {
+        utf16Offset >= 0 && utf16Offset < flags.count && flags[utf16Offset]
     }
 }
 #endif
