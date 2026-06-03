@@ -2234,6 +2234,87 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    // Guards the head-hole bug: a semi-transparent layer that flows through a
+    // multi-pass premultiplied effect chain must NOT lose RGB by alpha^N.
+    // A half-alpha red (255,0,0,128) premultiplies to ~(128,0,0,128); the old
+    // straight-alpha + .sourceAlpha pipeline re-premultiplied every pass and
+    // decayed red toward ~16 after four passes. Premultiplied render targets
+    // keep it at ~128.
+    @Test("Premultiplied FBO copy chain preserves semi-transparent RGB contribution")
+    func premultipliedFBOCopyChainPreservesSemiTransparentRGBContribution() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 1,
+            height: 1,
+            bytes: Data([255, 0, 0, 128])
+        )
+
+        let compositeA = "_rt_imageLayerComposite_layer_a"
+        let compositeB = "_rt_imageLayerComposite_layer_b"
+        let base = WPERenderPass(
+            id: "alpha.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: compositeA),
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copy0 = copyPass(
+            id: "alpha.1",
+            source: .fbo(compositeA),
+            target: .layerComposite(name: compositeB),
+            blending: "premultiplied"
+        )
+        let copy1 = copyPass(
+            id: "alpha.2",
+            source: .fbo(compositeB),
+            target: .layerComposite(name: compositeA),
+            blending: "premultiplied"
+        )
+        let sceneCopy = copyPass(
+            id: "alpha.3",
+            source: .fbo(compositeA),
+            target: .scene,
+            blending: "premultiplied"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    base,
+                    bindings: [0: .image("materials/base.png")],
+                    uniforms: ["g_Color": .vector([1, 1, 1, 1])]
+                ),
+                preparedBuiltinPass(copy0, bindings: [0: .fbo(compositeA)]),
+                preparedBuiltinPass(copy1, bindings: [0: .fbo(compositeB)]),
+                preparedBuiltinPass(sceneCopy, bindings: [0: .fbo(compositeA)])
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 4),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        // Premultiplied red at alpha 0.5 ≈ 128. The buggy alpha^N decay would
+        // drop this below ~40 after four passes.
+        #expect(pixel.r >= 100, "RGB contribution decayed across the chain; got \(pixel)")
+        #expect(pixel.g <= 8)
+        #expect(pixel.b <= 8)
+    }
+
     @Test("Scene alias does not bootstrap from the previous frame")
     func sceneAliasDoesNotBootstrapFromPreviousFrame() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

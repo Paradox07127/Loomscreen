@@ -31,6 +31,65 @@ struct WPEShaderCompileRequest: Sendable, Hashable {
     /// `textures` array. Index → logical name. The executor maps these to
     /// MTL texture slots.
     let textureBindings: [Int: String]
+    /// Texture slots whose bound source is a WPE render target (`previous` or
+    /// an FBO/layer composite). Those textures already store premultiplied
+    /// RGB, so the transpiler un-premultiplies them before running the
+    /// shader's straight-alpha math.
+    let premultipliedInputSlots: Set<Int>
+    /// Whether the translated fragment should premultiply its straight-alpha
+    /// final color before returning, to match a premultiplied render-target
+    /// pipeline.
+    let premultipliedOutput: Bool
+
+    init(
+        shaderName: String,
+        processedVertexSource: String,
+        processedFragmentSource: String,
+        sourceHash: String,
+        comboValues: [String: Int],
+        textureBindings: [Int: String],
+        premultipliedInputSlots: Set<Int> = [],
+        premultipliedOutput: Bool = false
+    ) {
+        self.shaderName = shaderName
+        self.processedVertexSource = processedVertexSource
+        self.processedFragmentSource = processedFragmentSource
+        self.sourceHash = sourceHash
+        self.comboValues = comboValues
+        self.textureBindings = textureBindings
+        self.premultipliedInputSlots = premultipliedInputSlots
+        self.premultipliedOutput = premultipliedOutput
+    }
+
+    /// Cache key that distinguishes premultiplied-alpha translation variants of
+    /// an otherwise identical shader source (same `sourceHash`).
+    var translationCacheKey: String {
+        var key = sourceHash
+        if premultipliedOutput {
+            key += "|pma-output"
+        }
+        if !premultipliedInputSlots.isEmpty {
+            key += "|pma-inputs:"
+                + premultipliedInputSlots.sorted().map(String.init).joined(separator: ",")
+        }
+        return key
+    }
+
+    func replacingPremultipliedAlphaSettings(
+        inputSlots: Set<Int>,
+        output: Bool
+    ) -> WPEShaderCompileRequest {
+        WPEShaderCompileRequest(
+            shaderName: shaderName,
+            processedVertexSource: processedVertexSource,
+            processedFragmentSource: processedFragmentSource,
+            sourceHash: sourceHash,
+            comboValues: comboValues,
+            textureBindings: textureBindings,
+            premultipliedInputSlots: inputSlots,
+            premultipliedOutput: output
+        )
+    }
 }
 
 struct WPEShaderCompileResult: @unchecked Sendable {

@@ -567,11 +567,11 @@ final class WPEMetalRenderExecutor {
     }
 
     private func compileMSDFFontShader(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        if let cached = translatedShaderCache[request.sourceHash] {
+        if let cached = translatedShaderCache[request.translationCacheKey] {
             return cached
         }
         let result = try shaderCompiler.compile(request)
-        translatedShaderCache[request.sourceHash] = result
+        translatedShaderCache[request.translationCacheKey] = result
         return result
     }
 
@@ -872,6 +872,8 @@ final class WPEMetalRenderExecutor {
         switch normalized {
         case "add",
              "additive",
+             "premultipliedadditive",
+             "premultipliedmultiply",
              "darken",
              "lighten",
              "multiply",
@@ -2471,8 +2473,24 @@ final class WPEMetalRenderExecutor {
     /// Mirrors WPEMetalPipelineCache.applyBlendMode so the translated pipeline path uses the same blend arithmetic as built-ins.
     private static func applyBlendMode(_ mode: String, to attachment: MTLRenderPipelineColorAttachmentDescriptor) {
         switch mode {
-        case "disabled":
+        case "disabled", "premultiplieddisabled":
             attachment.isBlendingEnabled = false
+        case "premultiplied", "premultipliednormal", "premultipliedtranslucent", "premultipliednormalmapped":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        case "premultipliedadditive":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .one
         case "additive":
             attachment.isBlendingEnabled = true
             attachment.rgbBlendOperation = .add
@@ -2481,6 +2499,8 @@ final class WPEMetalRenderExecutor {
             attachment.destinationRGBBlendFactor = .one
             attachment.sourceAlphaBlendFactor = .one
             attachment.destinationAlphaBlendFactor = .one
+        case "premultipliedmultiply":
+            fallthrough
         case "multiply":
             attachment.isBlendingEnabled = true
             attachment.rgbBlendOperation = .add
@@ -2502,6 +2522,44 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// Texture slots whose bound source is a WPE render target (an FBO/layer
+    /// composite or the previous-frame buffer). Those targets already store
+    /// premultiplied RGB, so a transpiled straight-alpha shader must
+    /// un-premultiply them before running its original math.
+    private static func premultipliedInputSlots(for pass: WPEPreparedRenderPass) -> Set<Int> {
+        var slots = Set<Int>()
+        for slot in 0..<WPEShaderTranspiler.customTextureSlotCount {
+            let reference = pass.textureBindings[slot]
+                ?? pass.pass.binds[slot]
+                ?? pass.pass.textures[slot]
+                ?? (slot == 0 ? pass.pass.source : nil)
+            if let reference, isPremultipliedRenderTarget(reference) {
+                slots.insert(slot)
+            }
+        }
+        return slots
+    }
+
+    private static func isPremultipliedRenderTarget(_ reference: WPETextureReference) -> Bool {
+        switch reference {
+        case .fbo, .previous:
+            return true
+        case .image, .asset:
+            return false
+        }
+    }
+
+    /// True when the pass targets the premultiplied render-target path, so a
+    /// transpiled straight-alpha shader must premultiply its final output.
+    private static func usesPremultipliedOutput(blendMode: String) -> Bool {
+        blendMode
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .hasPrefix("premultiplied")
+    }
+
     /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over the given prepared pass.
     func compileCustomShader(
         for pass: WPEPreparedRenderPass
@@ -2512,6 +2570,8 @@ final class WPEMetalRenderExecutor {
         let processor = WPEShaderPreprocessor { _, _ in
             nil
         }
+        let premultipliedInputSlots = Self.premultipliedInputSlots(for: pass)
+        let premultipliedOutput = Self.usesPremultipliedOutput(blendMode: pass.pass.blending)
         let request: WPEShaderCompileRequest
         do {
             request = try processor.process(
@@ -2528,6 +2588,9 @@ final class WPEMetalRenderExecutor {
                         }
                     }
                 )
+            ).replacingPremultipliedAlphaSettings(
+                inputSlots: premultipliedInputSlots,
+                output: premultipliedOutput
             )
         } catch let error as WPEShaderCompilerError {
             WPESceneDebugArtifacts.shared.recordShaderFailure(
@@ -2544,12 +2607,12 @@ final class WPEMetalRenderExecutor {
                 reason: String(describing: error)
             )
         }
-        if let cached = translatedShaderCache[request.sourceHash] {
+        if let cached = translatedShaderCache[request.translationCacheKey] {
             return cached
         }
         do {
             let result = try shaderCompiler.compile(request)
-            translatedShaderCache[request.sourceHash] = result
+            translatedShaderCache[request.translationCacheKey] = result
             return result
         } catch let error as WPEShaderCompilerError {
             switch error {

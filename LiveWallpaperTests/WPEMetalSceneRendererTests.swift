@@ -46,7 +46,7 @@ struct WPEMetalSceneRendererTests {
 
         #expect(renderer.hasPresentedFrame)
         #expect(renderer.renderGraph?.layers.count == 1)
-        #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidcolor")
+        #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidlayer")
     }
 
     @Test("Loads material texture bindings before rendering")

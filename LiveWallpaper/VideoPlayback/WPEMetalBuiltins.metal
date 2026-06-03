@@ -219,7 +219,9 @@ fragment half4 wpe_composelayer_fragment(
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 color = float4(texture0.sample(linearSampler, in.uv));
     if (uniforms.flags.x > 0.5) {
-        color.a = 0.0;
+        // Premultiplied transparent = all channels zero (zeroing only alpha
+        // would leave premultiplied rgb that re-adds under premultiplied over).
+        color = float4(0.0);
     }
     return half4(color);
 }
@@ -233,8 +235,17 @@ fragment half4 wpe_compose_fragment(
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 a = float4(texture0.sample(linearSampler, in.uv));
     float4 b = float4(texture1.sample(linearSampler, in.uv));
-    float4 composed = mix(a, b, b.a);
-    return half4(float4(composed.rgb * uniforms.color.rgb, composed.a * uniforms.color.a));
+    // Both inputs are premultiplied: composite b over a with the
+    // premultiplied over operator (src + dst*(1-src.a)).
+    float4 composed = float4(
+        b.rgb + a.rgb * (1.0 - b.a),
+        b.a + a.a * (1.0 - b.a)
+    );
+    float alphaScale = saturate(uniforms.color.a);
+    return half4(float4(
+        composed.rgb * uniforms.color.rgb * alphaScale,
+        composed.a * alphaScale
+    ));
 }
 
 // Phase 2D-C: pre-compiled WPE effect set. Each fragment ships hand-written
@@ -371,11 +382,12 @@ fragment half4 wpe_genericimage2_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * uniforms.color.a * uniforms.alphaMaskUV.x;
-    // Straight (non-premultiplied) alpha: the pipeline blend factors are
-    // .sourceAlpha/.oneMinusSourceAlpha (WPEMetalPipelineCache), so pre-
-    // multiplying here would apply alpha twice (rgb*alpha²) and punch holes
-    // through semi-transparent texels (e.g. puppet hair edges).
-    return half4(float4(rgb, alpha));
+    // Premultiplied-alpha render target: the layer-FBO / effect-chain passes
+    // blend with srcRGB=.one (WPEMetalPipelineCache "premultiplied" mode), so
+    // the shader stores rgb*alpha. Opaque texels are unchanged (rgb*1=rgb);
+    // semi-transparent texels (puppet hair edges) no longer decay by alpha^N
+    // across the effect chain.
+    return half4(float4(rgb * alpha, alpha));
 }
 
 fragment half4 wpe_genericimage4_fragment(
@@ -392,8 +404,8 @@ fragment half4 wpe_genericimage4_fragment(
     }
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
-    // Straight (non-premultiplied) alpha — see wpe_genericimage2_fragment.
-    return half4(float4(rgb, alpha));
+    // Premultiplied-alpha render target — see wpe_genericimage2_fragment.
+    return half4(float4(rgb * alpha, alpha));
 }
 
 struct WPEGenericParticleUniforms {
@@ -635,8 +647,12 @@ fragment half4 wpe_effect_opacity_fragment(
         float2 maskUV = in.uv * float2(uniforms.maskScaleX, uniforms.maskScaleY);
         mask = float(texture1.sample(linearSampler, maskUV).r);
     }
-    float alpha = sampled.a * mask * saturate(uniforms.opacity);
-    return half4(float4(sampled.rgb * alpha, alpha));
+    // Input is premultiplied; scale rgb and alpha by the same factor so the
+    // premultiplied invariant holds (rgb stays = straightRGB * alpha). The old
+    // `sampled.rgb * alpha` re-multiplied the already-premultiplied rgb by the
+    // new alpha (rgb*a^2), collapsing semi-transparent regions to a hole.
+    float factor = mask * saturate(uniforms.opacity);
+    return half4(float4(sampled.rgb * factor, sampled.a * factor));
 }
 
 struct WPEScrollUniforms {

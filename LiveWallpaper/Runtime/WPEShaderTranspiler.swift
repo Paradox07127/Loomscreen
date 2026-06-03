@@ -60,7 +60,9 @@ struct WPEShaderTranspiler {
     static func translateFragment(
         shaderName: String,
         preprocessedSource: String,
-        comboValues: [String: Int] = [:]
+        comboValues: [String: Int] = [:],
+        premultipliedInputSlots: Set<Int> = [],
+        premultipliedOutput: Bool = false
     ) throws -> WPEShaderTranslationResult {
         let scrubbedSource = Self.scrubFragmentOutDeclarations(preprocessedSource)
         let activeSource = Self.stripInactivePreprocessorBranches(in: scrubbedSource)
@@ -139,12 +141,15 @@ struct WPEShaderTranspiler {
         let translatedHelpers = applySubstitutions(
             preMain + "\n" + postMain,
             varyingTypesByName: varyingTypesByName,
-            preserveTexCoordZW: preserveTexCoordZW
+            preserveTexCoordZW: preserveTexCoordZW,
+            premultipliedInputSlots: premultipliedInputSlots
         )
         let translatedMain = translateMain(
             mainBody,
             varyingTypesByName: varyingTypesByName,
-            preserveTexCoordZW: preserveTexCoordZW
+            preserveTexCoordZW: preserveTexCoordZW,
+            premultipliedInputSlots: premultipliedInputSlots,
+            premultiplyOutput: premultipliedOutput
         )
         let helperResources = rewriteHelperResourceAccess(
             helpers: translatedHelpers,
@@ -160,7 +165,9 @@ struct WPEShaderTranspiler {
             varyings: varyings,
             helpers: helperResources.helpers,
             mainBody: helperResources.mainBody,
-            comboValues: comboValues
+            comboValues: comboValues,
+            premultipliedInputSlots: premultipliedInputSlots,
+            premultipliedOutput: premultipliedOutput
         )
 
         var layout: [WPEUniformSlot] = []
@@ -642,7 +649,9 @@ struct WPEShaderTranspiler {
     private static func translateMain(
         _ source: String,
         varyingTypesByName: [String: String] = [:],
-        preserveTexCoordZW: Bool = false
+        preserveTexCoordZW: Bool = false,
+        premultipliedInputSlots: Set<Int> = [],
+        premultiplyOutput: Bool = false
     ) -> String {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
@@ -651,7 +660,8 @@ struct WPEShaderTranspiler {
             inner,
             rewriteProgramScopeConsts: false,
             varyingTypesByName: varyingTypesByName,
-            preserveTexCoordZW: preserveTexCoordZW
+            preserveTexCoordZW: preserveTexCoordZW,
+            premultipliedInputSlots: premultipliedInputSlots
         )
 
         let usesGLOut = inner.contains("gl_FragColor")
@@ -669,9 +679,10 @@ struct WPEShaderTranspiler {
             }
             inner = "float4 out_color = float4(0.0);\n"
                 + inner
-                + "\nreturn out_color;\n"
+                + "\nreturn \(premultiplyOutput ? "wpe_premultiply_output(out_color)" : "out_color");\n"
         } else {
-            inner = inner + "\nreturn float4(0.0);\n"
+            let zero = premultiplyOutput ? "wpe_premultiply_output(float4(0.0))" : "float4(0.0)"
+            inner = inner + "\nreturn \(zero);\n"
         }
         return inner
     }
@@ -683,7 +694,8 @@ struct WPEShaderTranspiler {
         _ source: String,
         rewriteProgramScopeConsts: Bool = true,
         varyingTypesByName: [String: String] = [:],
-        preserveTexCoordZW: Bool = false
+        preserveTexCoordZW: Bool = false,
+        premultipliedInputSlots: Set<Int> = []
     ) -> String {
         var s = source
 
@@ -709,8 +721,8 @@ struct WPEShaderTranspiler {
             s = rewriteProgramScopeConstDeclarations(s)
         }
         s = rewriteReservedIdentifiers(s)
-        s = rewriteTextureLodCalls(s)
-        s = rewriteTextureCalls(s)
+        s = rewriteTextureLodCalls(s, premultipliedInputSlots: premultipliedInputSlots)
+        s = rewriteTextureCalls(s, premultipliedInputSlots: premultipliedInputSlots)
         s = rewriteTexCoordTextureSampleUVFallback(s)
         s = rewriteTextureSampleNarrowing(s)
         s = rewriteVector4TextureSampleLocalsInSampleCoordinates(s)
@@ -941,7 +953,7 @@ struct WPEShaderTranspiler {
     /// Texture-sample locals are float4, but WPE effects also use them as 2D
     /// offset vectors inside later texture coordinates.
     private static func rewriteVector4TextureSampleLocalsInSampleCoordinates(_ source: String) -> String {
-        let declarationPattern = #"\bfloat4\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[A-Za-z_][A-Za-z0-9_]*\.sample\s*\("#
+        let declarationPattern = #"\bfloat4\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*\.sample|wpe_unpremultiply_sample)\s*\("#
         guard let declarationRegex = try? NSRegularExpression(pattern: declarationPattern) else {
             return source
         }
@@ -1022,7 +1034,8 @@ struct WPEShaderTranspiler {
     /// GLSL permits assigning a texture sample to narrower vector/scalar locals.
     /// Metal samples return float4, so make the intended channel extraction explicit.
     private static func rewriteTextureSampleNarrowing(_ source: String) -> String {
-        let pattern = #"\b(float|float2|float3)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*\.sample\([^;\n]+\))\s*;"#
+        let samplePattern = #"(?:[A-Za-z_][A-Za-z0-9_]*\.sample|wpe_unpremultiply_sample)\([^;\n]+\)"#
+        let pattern = #"\b(float|float2|float3)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("# + samplePattern + #")\s*;"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return source
         }
@@ -1358,7 +1371,10 @@ struct WPEShaderTranspiler {
     /// is the MSL explicit-LOD specifier; without this the literal `textureLod`
     /// survives and `makeLibrary` fails. Runs before `rewriteTextureCalls` so the
     /// `texture(` pass never sees `textureLod`.
-    private static func rewriteTextureLodCalls(_ source: String) -> String {
+    private static func rewriteTextureLodCalls(
+        _ source: String,
+        premultipliedInputSlots: Set<Int> = []
+    ) -> String {
         var result = ""
         result.reserveCapacity(source.count)
         var index = source.startIndex
@@ -1398,12 +1414,18 @@ struct WPEShaderTranspiler {
                         let sampler = source[argStart..<firstComma]
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         let uv = rewriteTextureLodCalls(
-                            String(source[source.index(after: firstComma)..<lodComma])
+                            String(source[source.index(after: firstComma)..<lodComma]),
+                            premultipliedInputSlots: premultipliedInputSlots
                         ).trimmingCharacters(in: .whitespacesAndNewlines)
                         let lod = rewriteTextureLodCalls(
-                            String(source[source.index(after: lodComma)..<cursor])
+                            String(source[source.index(after: lodComma)..<cursor]),
+                            premultipliedInputSlots: premultipliedInputSlots
                         ).trimmingCharacters(in: .whitespacesAndNewlines)
-                        result += "\(sampler).sample(linearSampler, \(uv), level(\(lod)))"
+                        var sample = "\(sampler).sample(linearSampler, \(uv), level(\(lod)))"
+                        if shouldUnpremultiplySample(sampler: sampler, premultipliedInputSlots: premultipliedInputSlots) {
+                            sample = "wpe_unpremultiply_sample(\(sample))"
+                        }
+                        result += sample
                         index = source.index(after: cursor)
                         continue
                     }
@@ -1416,7 +1438,10 @@ struct WPEShaderTranspiler {
     }
 
     /// Rewrite `texture(<sampler>, <uv>)` calls (already canonicalised by the preprocessor) into Metal `<sampler>.sample(linearSampler, uv)` form.
-    private static func rewriteTextureCalls(_ source: String) -> String {
+    private static func rewriteTextureCalls(
+        _ source: String,
+        premultipliedInputSlots: Set<Int> = []
+    ) -> String {
         var result = ""
         result.reserveCapacity(source.count)
         var index = source.startIndex
@@ -1449,7 +1474,11 @@ struct WPEShaderTranspiler {
                         let argStart = source.index(index, offsetBy: needle.count)
                         let sampler = source[argStart..<comma].trimmingCharacters(in: .whitespacesAndNewlines)
                         let uv = source[source.index(after: comma)..<cursor].trimmingCharacters(in: .whitespacesAndNewlines)
-                        result += "\(sampler).sample(linearSampler, \(uv))"
+                        var sample = "\(sampler).sample(linearSampler, \(uv))"
+                        if shouldUnpremultiplySample(sampler: sampler, premultipliedInputSlots: premultipliedInputSlots) {
+                            sample = "wpe_unpremultiply_sample(\(sample))"
+                        }
+                        result += sample
                         index = source.index(after: cursor)
                         continue
                     }
@@ -1459,6 +1488,17 @@ struct WPEShaderTranspiler {
             index = source.index(after: index)
         }
         return result
+    }
+
+    /// A sampler slot bound to a premultiplied render target must be
+    /// un-premultiplied before the shader's straight-alpha math runs.
+    private static func shouldUnpremultiplySample(
+        sampler: String,
+        premultipliedInputSlots: Set<Int>
+    ) -> Bool {
+        guard !premultipliedInputSlots.isEmpty,
+              let slot = textureSlot(for: sampler) else { return false }
+        return premultipliedInputSlots.contains(slot)
     }
 
     // MARK: - Helper resource threading
@@ -1885,7 +1925,9 @@ struct WPEShaderTranspiler {
         varyings: [WPEVaryingDecl],
         helpers: String,
         mainBody: String,
-        comboValues: [String: Int] = [:]
+        comboValues: [String: Int] = [:],
+        premultipliedInputSlots: Set<Int> = [],
+        premultipliedOutput: Bool = false
     ) -> String {
         let warningCleanHelpers = neutralizeMetalStdlibMacroRedefinitions(helpers)
         let warningCleanMainBody = neutralizeMetalStdlibMacroRedefinitions(mainBody)
@@ -1921,6 +1963,23 @@ struct WPEShaderTranspiler {
         out.append("inline float clamp(int value, int lower, float upper) { return metal::clamp(float(value), float(lower), upper); }")
         out.append("inline float clamp(int value, float lower, int upper) { return metal::clamp(float(value), lower, float(upper)); }")
         out.append("inline float clamp(float value, int lower, int upper) { return metal::clamp(value, float(lower), float(upper)); }")
+        if !premultipliedInputSlots.isEmpty {
+            // Recover straight-alpha color from a premultiplied render-target
+            // sample so the original WPE shader math operates in straight space.
+            out.append("inline float4 wpe_unpremultiply_sample(float4 color) {")
+            out.append("    float a = color.a;")
+            out.append("    color.rgb = a > 0.00001 ? color.rgb / a : float3(0.0);")
+            out.append("    return color;")
+            out.append("}")
+        }
+        if premultipliedOutput {
+            // Premultiply the shader's straight-alpha output for the
+            // premultiplied render-target pipeline.
+            out.append("inline float4 wpe_premultiply_output(float4 color) {")
+            out.append("    float a = metal::clamp(color.a, 0.0, 1.0);")
+            out.append("    return float4(color.rgb * a, a);")
+            out.append("}")
+        }
         appendCompatibilityPrelude(to: &out, helpers: warningCleanHelpers)
         out.append("")
 

@@ -92,8 +92,29 @@ final class WPEMetalPipelineCache {
         to attachment: MTLRenderPipelineColorAttachmentDescriptor
     ) {
         switch mode {
-        case "disabled":
+        case "disabled", "premultiplieddisabled":
             attachment.isBlendingEnabled = false
+
+        // Premultiplied-alpha render-target blend modes (emitted by
+        // WPERenderGraphBuilder for the layer-FBO / effect-chain / composite
+        // passes). Sources already store premultiplied RGB, so srcRGB=.one.
+        case "premultiplied", "premultipliednormal", "premultipliedtranslucent", "premultipliednormalmapped":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        case "premultipliedadditive":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .one
 
         case "additive":
             attachment.isBlendingEnabled = true
@@ -103,6 +124,9 @@ final class WPEMetalPipelineCache {
             attachment.destinationRGBBlendFactor = .one
             attachment.sourceAlphaBlendFactor = .one
             attachment.destinationAlphaBlendFactor = .one
+
+        case "premultipliedmultiply":
+            fallthrough
 
         case "multiply":
             attachment.isBlendingEnabled = true

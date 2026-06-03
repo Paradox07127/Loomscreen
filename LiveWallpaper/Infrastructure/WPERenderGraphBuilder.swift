@@ -426,7 +426,7 @@ struct WPERenderGraphBuilder: Sendable {
                 binds: binds,
                 constants: merged.constants,
                 combos: merged.combos,
-                blending: merged.blending,
+                blending: merged.blending.premultipliedRenderTargetBlendMode,
                 cullMode: merged.cullMode,
                 depthTest: merged.depthTest,
                 depthWrite: merged.depthWrite
@@ -500,7 +500,11 @@ struct WPERenderGraphBuilder: Sendable {
             path: path,
             passes: [
                 WPEMaterialPass(
-                    shader: "solidcolor",
+                    // Premultiplied render targets: use the `solidlayer` builtin
+                    // (outputs rgb*alpha) rather than `solidcolor` (straight),
+                    // so transparent solid layers composite correctly under the
+                    // premultiplied blend the graph now routes this pass to.
+                    shader: "solidlayer",
                     textures: [:],
                     constants: [
                         "g_Color": .vector([color.x, color.y, color.z, object.alpha])
@@ -969,6 +973,50 @@ private extension WPERenderTarget {
     }
 }
 
+private extension String {
+    /// Map an authored WPE blend mode onto the premultiplied render-target
+    /// variant used by the layer-FBO / effect-chain / composite passes.
+    /// Idempotent: already-premultiplied modes are returned unchanged.
+    var premultipliedRenderTargetBlendMode: String {
+        switch normalizedBlendModeKey {
+        case "premultiplied",
+             "premultipliednormal",
+             "premultipliedtranslucent",
+             "premultipliednormalmapped",
+             "premultipliedadditive",
+             "premultiplieddisabled",
+             "premultipliedmultiply":
+            return self
+        case "disabled":
+            return "premultipliedDisabled"
+        case "add", "additive", "oneone", "oneoneone":
+            return "premultipliedAdditive"
+        case "multiply":
+            return "premultipliedMultiply"
+        default:
+            return "premultiplied"
+        }
+    }
+
+    /// Blend mode for an intermediate FBO pass that simply writes its source
+    /// into a freshly-cleared target (plain premultiplied over).
+    var premultipliedIntermediateBlendMode: String {
+        switch normalizedBlendModeKey {
+        case "disabled", "premultiplieddisabled":
+            return "premultipliedDisabled"
+        default:
+            return "premultiplied"
+        }
+    }
+
+    private var normalizedBlendModeKey: String {
+        lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+}
+
 private extension Array where Element == WPERenderPass {
     func movingFirstBlendModeToFinalPass() -> [WPERenderPass] {
         guard count > 1,
@@ -978,7 +1026,7 @@ private extension Array where Element == WPERenderPass {
         }
 
         var result = self
-        result[0] = first.replacingBlending("normal")
+        result[0] = first.replacingBlending(first.blending.premultipliedIntermediateBlendMode)
         result[result.count - 1] = last.replacingBlending(first.blending)
         return result
     }

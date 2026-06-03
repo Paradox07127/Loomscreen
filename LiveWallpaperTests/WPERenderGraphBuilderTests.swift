@@ -382,11 +382,11 @@ struct WPERenderGraphBuilderTests {
         ])
         let compositePass = try #require(maskLayer.passes.first)
         let scenePass = try #require(maskLayer.passes.dropFirst().first)
-        #expect(compositePass.blending == "normal")
+        #expect(compositePass.blending == "premultiplied")
         #expect(scenePass.shader == "materials/util/copy.json")
         #expect(scenePass.source == .fbo("_rt_imageLayerComposite_16613_a"))
         #expect(scenePass.textures[0] == .fbo("_rt_imageLayerComposite_16613_a"))
-        #expect(scenePass.blending == "translucent")
+        #expect(scenePass.blending == "premultiplied")
         #expect(maskedLayer.passes.last?.textures[1] == .fbo("_rt_imageLayerComposite_16613_a"))
         #expect(maskedLayer.passes.last?.target == .scene)
     }
@@ -586,7 +586,7 @@ struct WPERenderGraphBuilderTests {
         let pass = try #require(layer.passes.first)
 
         #expect(layer.materialPath == "models/util/solidlayer.json")
-        #expect(pass.shader == "solidcolor")
+        #expect(pass.shader == "solidlayer")
         #expect(pass.target == .scene)
         #expect(pass.constants["g_Color"]?.vectorValue == [0.8, 0.4, 0.2, 0.5])
     }
@@ -638,7 +638,7 @@ struct WPERenderGraphBuilderTests {
         let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
         let layer = try #require(graph.layers.first)
 
-        #expect(layer.passes.map(\.blending) == ["normal", "translucent"])
+        #expect(layer.passes.map(\.blending) == ["premultiplied", "premultiplied"])
         #expect(layer.passes[1].target == .scene)
     }
 
