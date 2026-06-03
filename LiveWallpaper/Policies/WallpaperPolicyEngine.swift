@@ -49,18 +49,7 @@ enum WallpaperPolicyEngine {
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource
     ) -> Bool {
-        guard powerSource.isOnBattery else { return false }
-
-        if globalSettings.globalPauseOnBattery {
-            return true
-        }
-
-        guard let minimumBatteryLevel = globalSettings.minimumBatteryLevel,
-              case .battery(let level) = powerSource else {
-            return false
-        }
-
-        return level < minimumBatteryLevel
+        powerSource.isOnBattery && globalSettings.globalPauseOnBattery
     }
 
     static func shouldApplyFullScreenPolicy(

@@ -4,7 +4,6 @@ public struct GlobalSettings: Codable, Sendable {
     public var globalPauseOnBattery: Bool
     public var preservePlaybackOnLock: Bool
     public var startOnLogin: Bool
-    public var minimumBatteryLevel: Double?
     public var pauseOnFullScreen: Bool
     /// Auto-pause when the foreground app looks like a game (matches a known
     /// launcher bundle id, or macOS is in Low Power Mode). Lets the user
@@ -100,7 +99,6 @@ public struct GlobalSettings: Codable, Sendable {
         globalPauseOnBattery: Bool = false,
         preservePlaybackOnLock: Bool = false,
         startOnLogin: Bool = false,
-        minimumBatteryLevel: Double? = nil,
         pauseOnFullScreen: Bool = true,
         pauseInGameMode: Bool = true,
         pauseOnWindowOcclusion: Bool = false,
@@ -118,7 +116,6 @@ public struct GlobalSettings: Codable, Sendable {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
         self.startOnLogin = startOnLogin
-        self.minimumBatteryLevel = minimumBatteryLevel
         self.pauseOnFullScreen = pauseOnFullScreen
         self.pauseInGameMode = pauseInGameMode
         self.pauseOnWindowOcclusion = pauseOnWindowOcclusion
@@ -139,7 +136,6 @@ public struct GlobalSettings: Codable, Sendable {
         globalPauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .globalPauseOnBattery) ?? false
         preservePlaybackOnLock = try c.decodeIfPresent(Bool.self, forKey: .preservePlaybackOnLock) ?? false
         startOnLogin = try c.decodeIfPresent(Bool.self, forKey: .startOnLogin) ?? false
-        minimumBatteryLevel = try c.decodeIfPresent(Double.self, forKey: .minimumBatteryLevel)
         pauseOnFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseOnFullScreen) ?? true
         // Existing installs never saw this key — default to true so the
         // behavior matches the original hardcoded GameMode pause.

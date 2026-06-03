@@ -11,8 +11,6 @@ struct GeneralSettingsView: View {
     @State private var globalPauseOnBattery: Bool
     @State private var startOnLogin: Bool
     @State private var preservePlaybackOnLock: Bool
-    @State private var minimumBatteryLevel: Double?
-    @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
     @State private var pauseInGameMode: Bool
     @State private var pauseOnWindowOcclusion: Bool
@@ -62,8 +60,6 @@ struct GeneralSettingsView: View {
         _globalPauseOnBattery = State(initialValue: settings.globalPauseOnBattery)
         _startOnLogin = State(initialValue: settings.startOnLogin)
         _preservePlaybackOnLock = State(initialValue: settings.preservePlaybackOnLock)
-        _minimumBatteryLevel = State(initialValue: settings.minimumBatteryLevel)
-        _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _pauseInGameMode = State(initialValue: settings.pauseInGameMode)
         _pauseOnWindowOcclusion = State(initialValue: settings.pauseOnWindowOcclusion)
@@ -252,8 +248,6 @@ struct GeneralSettingsView: View {
         globalPauseOnBattery = settings.globalPauseOnBattery
         startOnLogin = settings.startOnLogin
         preservePlaybackOnLock = settings.preservePlaybackOnLock
-        minimumBatteryLevel = settings.minimumBatteryLevel
-        useBatteryThreshold = settings.minimumBatteryLevel != nil
         pauseOnFullScreen = settings.pauseOnFullScreen
         pauseInGameMode = settings.pauseInGameMode
         pauseOnWindowOcclusion = settings.pauseOnWindowOcclusion
@@ -387,8 +381,6 @@ struct GeneralSettingsView: View {
             performanceSection
 
             audioResponseSection
-
-            powerSection
 
             weatherSection
 
@@ -527,6 +519,15 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode"))
             }
 
+            SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
+                Toggle("", isOn: $globalPauseOnBattery)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: globalPauseOnBattery) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Pause on battery"))
+                    .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
+            }
+
             SettingRow(
                 icon: "hand.raised",
                 iconColor: .blue,
@@ -594,7 +595,7 @@ struct GeneralSettingsView: View {
                 }
             }
         } header: {
-            Text("Performance")
+            Text("Performance & Battery")
         }
     }
 
@@ -674,80 +675,6 @@ struct GeneralSettingsView: View {
         settings.weatherLocation = weatherLocation
         SettingsManager.shared.saveGlobalSettings(settings)
         postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
-    }
-
-    /// Power-related preferences in a single section. Previously split
-    /// into "Power Saving" + "Battery Threshold" — they cover the same
-    /// surface (battery behavior) and reading them as two separate cards
-    /// implied a deeper distinction than actually exists.
-    @ViewBuilder
-    private var powerSection: some View {
-        Section {
-            SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
-                Toggle("", isOn: $globalPauseOnBattery)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .onChange(of: globalPauseOnBattery) { _, _ in updateGlobalSettings() }
-                    .accessibilityLabel(Text("Pause on battery"))
-                    .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
-            }
-
-            SettingRow(icon: "battery.50", iconColor: .orange, title: "Use battery threshold", subtitle: "Pause videos when battery drops below a specific level") {
-                Toggle("", isOn: $useBatteryThreshold)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .onChange(of: useBatteryThreshold) { _, newValue in
-                        if !newValue {
-                            minimumBatteryLevel = nil
-                        } else if minimumBatteryLevel == nil {
-                            minimumBatteryLevel = 0.2
-                        }
-                        updateGlobalSettings()
-                    }
-                    .accessibilityLabel(Text("Use battery threshold"))
-                    .accessibilityHint(Text("Pause videos when battery drops below a specific level"))
-            }
-
-            if useBatteryThreshold {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Spacer()
-                        BatteryLevelIndicator(level: minimumBatteryLevel ?? 0.2)
-                        Spacer()
-                    }
-
-                    HStack {
-                        Text("Pause when battery below:")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2))
-                            .font(.headline)
-                            .foregroundStyle(
-                                (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
-                                    (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
-                            )
-                            .frame(width: 44, alignment: .trailing)
-                    }
-
-                    Slider(value: Binding(
-                        get: { minimumBatteryLevel ?? 0.2 },
-                        set: { newValue in
-                            minimumBatteryLevel = newValue
-                            updateGlobalSettings()
-                        }
-                    ), in: 0.05...0.5, step: 0.05)
-                    .accessibilityLabel(Text("Minimum battery level"))
-                    .accessibilityValue(Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2)))
-                    .accessibilityHint(Text("Set the battery level below which wallpapers will pause"))
-                }
-                .padding(.leading, 52)
-                .padding(.bottom, 8)
-                .animation(.snappy(duration: 0.2), value: useBatteryThreshold)
-            }
-        } header: {
-            Text("Power")
-        }
     }
 
     // MARK: - About Tab
@@ -1043,7 +970,6 @@ struct GeneralSettingsView: View {
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
-        settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.pauseInGameMode = pauseInGameMode
         settings.pauseOnWindowOcclusion = pauseOnWindowOcclusion
@@ -1087,8 +1013,6 @@ struct GeneralSettingsView: View {
         globalPauseOnBattery = false
         startOnLogin = false
         preservePlaybackOnLock = false
-        minimumBatteryLevel = nil
-        useBatteryThreshold = false
         pauseOnFullScreen = true
         pauseInGameMode = true
         pauseOnWindowOcclusion = false
@@ -1106,37 +1030,4 @@ struct GeneralSettingsView: View {
         screenManager.refreshScreens(preserveRuntimeSessions: false)
     }
 
-}
-
-struct BatteryLevelIndicator: View {
-    let level: Double
-
-    var batteryColor: Color {
-        if level < 0.2 {
-            return .red
-        } else if level < 0.3 {
-            return .orange
-        } else {
-            return .green
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.gray, lineWidth: 2)
-                    .frame(width: 160, height: 30)
-
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(batteryColor)
-                    .padding(3)
-                    .frame(width: 160 * level, height: 30)
-            }
-
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.gray)
-                .frame(width: 4, height: 16)
-        }
-    }
 }
