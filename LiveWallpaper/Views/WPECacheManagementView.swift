@@ -20,6 +20,11 @@ struct WPECacheManagementView: View {
     /// already unpacked into the cache — reclaimable without losing wallpapers.
     @State private var reclaimableArchiveBytes: Int64 = 0
     @State private var lastReclaimedBytes: UInt64?
+    /// Reachable scene ids (applied / bookmarked / recent / deps), refreshed
+    /// alongside stats. Drives the keep-set for "Clear Unused" so its button
+    /// state, confirmation count, and action all agree — and so it's computed
+    /// once per refresh rather than per render.
+    @State private var reachableIDs: Set<String> = []
 
     private let cache: WallpaperEngineCache
 
@@ -33,7 +38,7 @@ struct WPECacheManagementView: View {
                 summaryRow
             } header: {
                 HStack {
-                    Text("Imported Project Cache")
+                    Text("Imported Project Cache (Legacy)")
                     Spacer()
                     if let stats {
                         Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")
@@ -47,6 +52,11 @@ struct WPECacheManagementView: View {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Text("New scenes read their assets in place from the source, so this cache only holds older imports. Unreferenced leftovers are reclaimed automatically at startup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -69,14 +79,14 @@ struct WPECacheManagementView: View {
                         .destructiveControlTint()
                         .controlSize(.regular)
 
-                        Button {
+                        Button(role: .destructive) {
                             confirmPurgeOlderThan(days: 30)
                         } label: {
                             Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
                         }
                         .destructiveControlTint()
                         .controlSize(.regular)
-                        .disabled(stats.entries.allSatisfy { ($0.lastUsed ?? .distantPast) > Date().addingTimeInterval(-30 * 86_400) })
+                        .disabled(unusedCandidates(olderThanDays: 30).isEmpty)
 
                         Spacer()
                     }
@@ -153,6 +163,7 @@ struct WPECacheManagementView: View {
                     Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(videoStats.totalBytes))) · \(videoStats.fileCount)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("Video cache totals \(byteFormatter.string(fromByteCount: Int64(videoStats.totalBytes))) across \(videoStats.fileCount) files"))
                 }
             }
         } footer: {
@@ -201,7 +212,7 @@ struct WPECacheManagementView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Moves the source .pkg of items you've already imported to the Trash (recoverable). Your wallpapers keep working — they render from the cache.")
+                    Text("Moves the source .pkg of legacy imports (already unpacked into the cache) to the Trash (recoverable). Wallpapers that read in place from their source are left untouched.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -288,9 +299,11 @@ struct WPECacheManagementView: View {
         isLoading = true
         let snapshot = await cache.stats()
         stats = snapshot
+        reachableIDs = WPESceneReachability.referencedWorkshopIDs()
         isLoading = false
         #if DIRECT_DISTRIBUTION
         let cachedIDs = await cache.listCompletedWorkshopIDs()
+            .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
         reclaimableArchiveBytes = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
         }.value
@@ -303,6 +316,7 @@ struct WPECacheManagementView: View {
     /// refreshes so the reclaimable figure drops to zero.
     private func reclaimArchives() async {
         let cachedIDs = await cache.listCompletedWorkshopIDs()
+            .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
         let result = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaim(cachedIDs: cachedIDs)
         }.value
@@ -341,9 +355,19 @@ struct WPECacheManagementView: View {
         }
     }
 
+    /// Entries old enough to count as "unused" that are also unreachable
+    /// (not applied / bookmarked / recent). Single definition shared by the
+    /// button's disabled state, the confirmation count, and the purge itself.
+    private func unusedCandidates(olderThanDays days: Int) -> [WPECacheStats.Entry] {
+        let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
+        return (stats?.entries ?? []).filter {
+            !reachableIDs.contains($0.workshopID) && ($0.lastUsed ?? .distantPast) <= cutoff
+        }
+    }
+
     private func purgeOlderThan(days: Int) async {
         let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
-        let freed = await cache.purgeOlderThan(cutoff)
+        let freed = await cache.purgeOlderThan(cutoff, keepingIDs: reachableIDs)
         lastFreedBytes = freed
         await refreshStats()
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
@@ -351,8 +375,7 @@ struct WPECacheManagementView: View {
 
     /// Surface the unified Liquid Glass confirmation so users see exactly which entries (count + total size) are about to be removed before bulk purging.
     private func confirmPurgeOlderThan(days: Int) {
-        let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
-        let candidates = (stats?.entries ?? []).filter { ($0.lastUsed ?? .distantPast) <= cutoff }
+        let candidates = unusedCandidates(olderThanDays: days)
         let totalBytes = candidates.reduce(UInt64(0)) { $0 + $1.sizeBytes }
         let size = byteFormatter.string(fromByteCount: Int64(totalBytes))
         pendingDestructive = PendingDestructive(
@@ -390,6 +413,7 @@ struct WPECacheManagementView: View {
         (stats?.totalBytes ?? 0) > 1_073_741_824
     }
 
+
     private func displayTitle(for workshopID: String) -> String {
         let history = SettingsManager.shared.loadGlobalSettings().recentWPEImports
         return history.first(where: { $0.origin.workshopID == workshopID })?.origin.title ?? workshopID
@@ -402,18 +426,24 @@ struct WPECacheManagementView: View {
         return "\(size) · used \(relative)"
     }
 
-    private var byteFormatter: ByteCountFormatter {
+    // Backed by shared instances — these formatters are otherwise rebuilt on
+    // every access (per cache row, per refresh), which is a measurable allocation
+    // cost in a list that updates often.
+    private var byteFormatter: ByteCountFormatter { Self.sharedByteFormatter }
+    private var relativeFormatter: RelativeDateTimeFormatter { Self.sharedRelativeFormatter }
+
+    private static let sharedByteFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB, .useGB]
         f.countStyle = .file
         f.includesUnit = true
         return f
-    }
+    }()
 
-    private var relativeFormatter: RelativeDateTimeFormatter {
+    private static let sharedRelativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
         return f
-    }
+    }()
 }
 #endif

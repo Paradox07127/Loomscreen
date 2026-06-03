@@ -261,7 +261,7 @@ struct SceneResourceResolver: Sendable {
     /// file itself; package-backed materializes a staged temporary.
     func resolveExistingFileURL(relativePath: String) throws -> URL {
         do {
-            return try provider.stagedURL(atRelativePath: relativePath, purpose: .fileConsumer).url
+            return try provider.stagedURL(atRelativePath: relativePath)
         } catch WPESceneAssetProviderError.invalidRelativePath {
             throw ResolveError.pathEscape
         } catch {

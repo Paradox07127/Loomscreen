@@ -122,11 +122,26 @@ struct WPEInPlaceAssetReadingTests {
         try pkg.write(to: pkgURL)
 
         let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
-        let staged = try provider.stagedURL(atRelativePath: "audio/clip.mp3", purpose: .audioPlayback)
-        defer { staged.release() }
+        let stagedURL = try provider.stagedURL(atRelativePath: "audio/clip.mp3")
 
-        #expect(FileManager.default.fileExists(atPath: staged.url.path))
-        #expect(try Data(contentsOf: staged.url) == payload)
+        #expect(FileManager.default.fileExists(atPath: stagedURL.path))
+        #expect(try Data(contentsOf: stagedURL) == payload)
+    }
+
+    @Test("Package entry lookup is case-insensitive and first-match-wins on collision")
+    func packageEntryFirstMatchWins() throws {
+        let root = try makeTempDir()
+        let pkg = makePackageData([
+            (name: "Material.json", data: Data("first".utf8)),
+            (name: "material.json", data: Data("second".utf8)),
+        ])
+        let pkgURL = root.appendingPathComponent("scene.pkg")
+        try pkg.write(to: pkgURL)
+
+        let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
+        // The prebuilt lowercased index resolves any case to the first stored entry.
+        #expect(try provider.data(atRelativePath: "material.json") == Data("first".utf8))
+        #expect(try provider.data(atRelativePath: "MATERIAL.JSON") == Data("first".utf8))
     }
 
     // MARK: - SceneDescriptor.assetStorage

@@ -116,9 +116,9 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .resetAllSettings:
             return "All preferences, screen configurations, playlists, schedules, and bookmarks return to their defaults. This cannot be undone."
         case .clearAllWPECache(let count, let byteSize):
-            return "Removes \(count) extracted project\(count == 1 ? "" : "s") · \(byteSize). Source folders on disk are untouched; re-applying a wallpaper will re-extract on demand."
+            return "Removes \(count) legacy extracted project\(count == 1 ? "" : "s") · \(byteSize). Original source folders are untouched; wallpapers whose source is still available read in place from it instead."
         case .removeWPECacheEntry(let displayName):
-            return "'\(displayName)' will be re-extracted next time you apply it. The history entry and original source folder stay untouched."
+            return "'\(displayName)' will read its assets directly from the source folder next time you apply it (if still available). The history entry and original source folder stay untouched."
         case .applyConfigurationToAllDisplays(let count):
             return "This replaces the wallpaper on \(count) other display\(count == 1 ? "" : "s") with the same content and settings as this one."
         case .clearCurrentWallpaper(let displayName):

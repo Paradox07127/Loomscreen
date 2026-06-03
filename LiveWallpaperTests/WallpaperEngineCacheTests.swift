@@ -209,6 +209,76 @@ struct WallpaperEngineCacheTests {
         #expect(afterStats.totalBytes == 0)
     }
 
+    @Test("collectOrphans() drops unreferenced workshops and keeps referenced ones")
+    func collectOrphansDropsUnreferenced() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "orphans")
+        defer { env.cleanup() }
+
+        let keepURL = try await env.cache.ensureExtracted(workshopID: "keep", sourcePkgURL: env.pkgURL)
+        let dropURL = try await env.cache.ensureExtracted(workshopID: "drop", sourcePkgURL: env.pkgURL)
+        #expect(FileManager.default.fileExists(atPath: keepURL.path))
+        #expect(FileManager.default.fileExists(atPath: dropURL.path))
+
+        let freed = await env.cache.collectOrphans(keepIDs: ["keep"])
+
+        #expect(freed > 0)
+        #expect(FileManager.default.fileExists(atPath: keepURL.path), "referenced scene must survive")
+        #expect(!FileManager.default.fileExists(atPath: dropURL.path), "unreferenced scene must be reclaimed")
+        let remaining = await env.cache.stats().entries.map(\.workshopID)
+        #expect(remaining == ["keep"])
+    }
+
+    @Test("collectOrphans() reclaims stale extraction sidecars but spares young ones")
+    func collectOrphansSidecarAgeGate() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "sidecars")
+        defer { env.cleanup() }
+        let live = try await env.cache.ensureExtracted(workshopID: "live", sourcePkgURL: env.pkgURL)
+
+        let fm = FileManager.default
+        let staleSidecar = env.cacheRoot.appendingPathComponent("999.inflight", isDirectory: true)
+        let youngSidecar = env.cacheRoot.appendingPathComponent("888.replaced", isDirectory: true)
+        for sidecar in [staleSidecar, youngSidecar] {
+            try fm.createDirectory(at: sidecar, withIntermediateDirectories: true)
+            try Data([0x00, 0x01]).write(to: sidecar.appendingPathComponent("partial.bin"))
+        }
+        // Age the stale sidecar well past the GC threshold; leave the other fresh.
+        try fm.setAttributes([.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: staleSidecar.path)
+
+        _ = await env.cache.collectOrphans(keepIDs: ["live"])
+
+        #expect(!fm.fileExists(atPath: staleSidecar.path), "stale crash sidecar must be reclaimed")
+        #expect(fm.fileExists(atPath: youngSidecar.path), "young sidecar (possible live extraction) must be spared")
+        #expect(fm.fileExists(atPath: live.path), "referenced scene must be untouched")
+    }
+
+    @Test("purgeOlderThan() never removes ids in the keep-set")
+    func purgeOlderThanRespectsKeepSet() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "keepset")
+        defer { env.cleanup() }
+        _ = try await env.cache.ensureExtracted(workshopID: "keep", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "drop", sourcePkgURL: env.pkgURL)
+
+        // Future cutoff → both are "older than cutoff"; only the non-kept id goes.
+        let freed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60), keepingIDs: ["keep"])
+
+        #expect(freed > 0)
+        #expect(await env.cache.stats().entries.map(\.workshopID) == ["keep"])
+    }
+
+    @Test("collectOrphans() keeps everything when all ids are referenced and frees nothing")
+    func collectOrphansNoOpWhenAllReferenced() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "all-kept")
+        defer { env.cleanup() }
+
+        _ = try await env.cache.ensureExtracted(workshopID: "one", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "two", sourcePkgURL: env.pkgURL)
+
+        let freed = await env.cache.collectOrphans(keepIDs: ["one", "two"])
+
+        #expect(freed == 0)
+        #expect(await env.cache.stats().entries.count == 2)
+    }
+
     @Test("purgeOlderThan() only drops entries whose lastUsed predates the cutoff")
     func purgeOlderThanScopesByLastUsed() async throws {
         let env = try TempCacheEnvironment.make(workshopID: "older")

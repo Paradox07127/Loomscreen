@@ -29,13 +29,13 @@ struct WPEDirectorySceneAssetProvider: WPESceneAssetProvider {
         }
     }
 
-    func stagedURL(atRelativePath relativePath: String, purpose: WPESceneAssetURLPurpose) throws -> WPEStagedAssetURL {
+    func stagedURL(atRelativePath relativePath: String) throws -> URL {
         let url = try strictURL(for: relativePath)
         guard isRegularFile(url) else {
             throw WPESceneAssetProviderError.fileMissing(relativePath)
         }
-        // The project file itself satisfies the consumer — no copy, no release.
-        return WPEStagedAssetURL(url: url)
+        // The project file itself satisfies the consumer — no copy.
+        return url
     }
 
     func exists(atRelativePath relativePath: String) -> Bool {

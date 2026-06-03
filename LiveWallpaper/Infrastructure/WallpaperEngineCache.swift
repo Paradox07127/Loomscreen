@@ -179,7 +179,7 @@ actor WallpaperEngineCache {
         var ids: Set<String> = []
         for child in children {
             let id = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(id), !isExtractionSidecar(id) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if cacheHasPayload(child), !requireCompletedManifest || readManifest(in: child) != nil {
                 ids.insert(id)
@@ -227,7 +227,7 @@ actor WallpaperEngineCache {
 
         for child in children {
             let workshopID = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID), !isExtractionSidecar(workshopID) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
 
             let bytes = directoryByteCount(at: child)
@@ -255,7 +255,7 @@ actor WallpaperEngineCache {
         var freed: UInt64 = 0
         for child in children {
             let workshopID = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID), !isExtractionSidecar(workshopID) else { continue }
             let bytes = directoryByteCount(at: child)
             do {
                 try fileManager.removeItem(at: child)
@@ -268,12 +268,17 @@ actor WallpaperEngineCache {
         return freed
     }
 
-    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or directory mtime) is older than `cutoff`.
+    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or
+    /// directory mtime) is older than `cutoff`. `keepingIDs` are never removed —
+    /// the caller passes the reachable set (applied / bookmarked / recent) so a
+    /// scene the user still uses is never treated as "unused" just because its
+    /// extraction is old.
     @discardableResult
-    func purgeOlderThan(_ cutoff: Date) -> UInt64 {
+    func purgeOlderThan(_ cutoff: Date, keepingIDs: Set<String> = []) -> UInt64 {
         let snapshot = stats()
         var freed: UInt64 = 0
         for entry in snapshot.entries {
+            guard !keepingIDs.contains(entry.workshopID) else { continue }
             guard let lastUsed = entry.lastUsed, lastUsed < cutoff else { continue }
             do {
                 try purge(workshopID: entry.workshopID)
@@ -283,6 +288,76 @@ actor WallpaperEngineCache {
             }
         }
         Logger.info("WPE cache purgeOlderThan(\(cutoff)) freed \(freed) bytes", category: .screenManager)
+        return freed
+    }
+
+    /// `.inflight`/`.replaced` are transient extraction sidecars
+    /// (`WallpaperEnginePackage.extractAll`); they pass `isSafeWorkshopID` but
+    /// are not finished per-workshop caches, so normal enumeration skips them —
+    /// reporting or reclaiming one could corrupt an in-flight extraction. The
+    /// launch GC additionally sweeps *stale* (crash-leftover) sidecars by age.
+    private func isExtractionSidecar(_ name: String) -> Bool {
+        name.hasSuffix(".inflight") || name.hasSuffix(".replaced")
+    }
+
+    /// Any sidecar older than this is a crash leftover, never an active
+    /// extraction (a streamed extract finishes in seconds-to-minutes), so it is
+    /// safe for the launch GC to reclaim.
+    private static let staleSidecarMaxAge: TimeInterval = 3600
+
+    /// Launch-time orphan GC: hard-deletes every per-workshop cache directory
+    /// whose id is **not** in `keepIDs` (the reachable set: applied configs,
+    /// bookmarks, recent imports, and their dependencies). Also reclaims stale
+    /// extraction sidecars (crash leftovers older than `staleSidecarMaxAge`)
+    /// while sparing young ones that may be live. Returns freed bytes. An
+    /// unreferenced scene is also unreachable from the UI, so dropping it loses
+    /// nothing actionable; referenced ids are never touched.
+    @discardableResult
+    func collectOrphans(keepIDs: Set<String>) -> UInt64 {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return 0
+        }
+
+        let sidecarCutoff = Date().addingTimeInterval(-Self.staleSidecarMaxAge)
+        var freed: UInt64 = 0
+        for child in children {
+            let id = child.lastPathComponent
+
+            if isExtractionSidecar(id) {
+                // Reclaim only sidecars old enough to be a guaranteed leftover;
+                // a young one may belong to an extraction in progress right now.
+                guard let mtime = (try? child.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                      mtime < sidecarCutoff else { continue }
+                let bytes = directoryByteCount(at: child)
+                do {
+                    try fileManager.removeItem(at: child)
+                    freed += bytes
+                } catch {
+                    Logger.warning("WPE cache orphan GC: failed to remove stale sidecar \(id): \(error.localizedDescription)", category: .screenManager)
+                }
+                continue
+            }
+
+            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
+            guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if keepIDs.contains(id) { continue }
+
+            let bytes = directoryByteCount(at: child)
+            do {
+                try fileManager.removeItem(at: child)
+                freed += bytes
+            } catch {
+                Logger.warning("WPE cache orphan GC: failed to remove \(id): \(error.localizedDescription)", category: .screenManager)
+            }
+        }
+        if freed > 0 {
+            Logger.info("WPE cache orphan GC reclaimed \(freed) bytes from unreferenced scenes / stale sidecars", category: .screenManager)
+        }
         return freed
     }
 

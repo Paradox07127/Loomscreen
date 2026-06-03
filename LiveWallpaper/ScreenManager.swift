@@ -1762,10 +1762,27 @@ final class ScreenManager {
                 return descriptor.propertyOverrides
             }
             let cacheRoot = supportRoot.appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
-            return WallpaperEngineProjectPropertySchema.effectiveSceneValues(
-                descriptor: descriptor,
-                cacheRootURL: cacheRoot
-            )
+            if FileManager.default.fileExists(atPath: cacheRoot.path) {
+                return WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                    descriptor: descriptor,
+                    cacheRootURL: cacheRoot
+                )
+            }
+            // Cache purged but the import source may still be resolvable — read
+            // `project.json` in place so property diffing matches the render
+            // path's lazy fallback. Falls back to bare overrides otherwise.
+            guard let origin,
+                  case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                    origin.sourceFolderBookmark, target: .transient
+                  ) else {
+                return descriptor.propertyOverrides
+            }
+            return SecurityScopedBookmarkResolver.withScopedAccess(resolved.url) { _ in
+                WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                    descriptor: descriptor,
+                    cacheRootURL: resolved.url
+                )
+            }
         case .sourceDirectory, .packageSource:
             guard let origin,
                   case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(

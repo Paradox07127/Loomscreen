@@ -147,7 +147,11 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Scene source unavailable for in-place read: \(descriptor.workshopID)", category: .screenManager)
             return nil
         }
-        if descriptor.assetStorage == .cache {
+        // A legacy `.cache` scene needs its extracted directory only when we
+        // actually fell back to it (`provider == nil`). When the cache was
+        // purged but the import source was still resolvable, `sceneAssets`
+        // returns an in-place provider instead, so the missing directory is fine.
+        if descriptor.assetStorage == .cache, assets.provider == nil {
             guard fileManager.fileExists(atPath: cacheURL.path) else {
                 Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
                 return nil
@@ -215,6 +219,19 @@ final class AmbientWallpaperSessionBuilder {
     ) -> (provider: (any WPESceneAssetProvider)?, projectRoot: URL)? {
         switch descriptor.assetStorage {
         case .cache:
+            // The known-good extracted copy wins whenever it is present — it was
+            // validated against a fingerprint at import and can't have drifted.
+            // Only when it is gone (purged / reclaimed) do we read in place from
+            // the still-resolvable import source, so clearing the cache no longer
+            // kills a legacy scene. The stale cache descriptor is left as-is;
+            // launch orphan GC / manual cleanup reclaim the directory later.
+            if fileManager.fileExists(atPath: cacheURL.path) {
+                return (nil, cacheURL)
+            }
+            if let upgraded = cacheFallbackSourceProvider(origin: origin, fileManager: fileManager) {
+                Logger.info("WPE scene cache absent; reading in place from source for \(descriptor.workshopID)", category: .screenManager)
+                return upgraded
+            }
             return (nil, cacheURL)
         case .sourceDirectory:
             guard let source = resolveSourceFolder(origin: origin) else { return nil }
@@ -250,6 +267,33 @@ final class AmbientWallpaperSessionBuilder {
             return nil
         }
         return (resolved.url, resolved.url.startAccessingSecurityScopedResource())
+    }
+
+    /// Lazy migration backstop for a legacy `.cache` descriptor whose extracted
+    /// directory is gone: builds an in-place provider from the still-resolvable
+    /// import source — `.packageSource` when a `scene.pkg` sits at the source
+    /// root, otherwise a directory provider. Returns `nil` when the source can't
+    /// be opened, leaving the caller to report the missing cache. The returned
+    /// provider owns the source's security scope for its lifetime.
+    private func cacheFallbackSourceProvider(
+        origin: WPEOrigin?,
+        fileManager: FileManager
+    ) -> (provider: (any WPESceneAssetProvider)?, projectRoot: URL)? {
+        guard let source = resolveSourceFolder(origin: origin) else { return nil }
+        let packageURL = source.url.appendingPathComponent("scene.pkg", isDirectory: false)
+        if fileManager.fileExists(atPath: packageURL.path),
+           let pkg = try? WPEPackageSceneAssetProvider(packageURL: packageURL) {
+            let provider = WPESecurityScopedSceneAssetProvider(
+                wrapped: pkg, scopedURL: source.url, didStartAccessing: source.didStart
+            )
+            return (provider, source.url)
+        }
+        let provider = WPESecurityScopedSceneAssetProvider(
+            wrapped: WPEDirectorySceneAssetProvider(rootURL: source.url),
+            scopedURL: source.url,
+            didStartAccessing: source.didStart
+        )
+        return (provider, source.url)
     }
     #endif
 

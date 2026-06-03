@@ -1,42 +1,11 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Why a consumer wants a file URL for an asset that the provider may only
-/// hold inside a packed container. Lets a package-backed provider decide how
-/// (and whether) to materialize the bytes on disk.
-enum WPESceneAssetURLPurpose: Equatable, Sendable {
-    /// AVFoundation video — needs a stable on-disk URL it can stream from.
-    case avFoundationVideo
-    /// Audio playback through AVAudioPlayer / AVAudioFile.
-    case audioPlayback
-    /// ImageIO / Core Text consumers that read from a URL.
-    case fileConsumer
-}
-
 enum WPESceneAssetProviderError: Error, Equatable, Sendable {
     case invalidRelativePath(String)
     case fileMissing(String)
     case unreadable(String)
     case stagingUnavailable(String)
-}
-
-/// A file URL handed to a consumer that needs one. For a directory-backed
-/// provider it is the project file itself (no copy, no release work). For a
-/// package-backed provider it is a staged temporary file whose lifetime is
-/// reference-counted by the stager; the consumer must `release()` once done.
-struct WPEStagedAssetURL: Sendable {
-    let url: URL
-    private let releaseHandler: (@Sendable () -> Void)?
-
-    init(url: URL, releaseHandler: (@Sendable () -> Void)? = nil) {
-        self.url = url
-        self.releaseHandler = releaseHandler
-    }
-
-    /// Idempotent: a directory-backed URL has no handler and releasing is a no-op.
-    func release() {
-        releaseHandler?()
-    }
 }
 
 /// Single boundary through which the scene runtime reads project assets. Two
@@ -49,9 +18,11 @@ protocol WPESceneAssetProvider: Sendable {
     /// `.mappedIfSafe` so the RSS profile matches the historical extracted-cache
     /// path; package backends read the entry's slice.
     func data(atRelativePath relativePath: String) throws -> Data
-    /// Returns a file URL for the asset, materializing it on disk only when the
-    /// backend cannot expose the project file directly.
-    func stagedURL(atRelativePath relativePath: String, purpose: WPESceneAssetURLPurpose) throws -> WPEStagedAssetURL
+    /// A file URL for a consumer that needs one. A directory backend returns the
+    /// project file itself; a package backend stages the entry into the
+    /// provider's session-lifetime temp dir (cleaned on deinit — no per-URL
+    /// release).
+    func stagedURL(atRelativePath relativePath: String) throws -> URL
     /// True when the asset exists and is a readable regular file/entry.
     func exists(atRelativePath relativePath: String) -> Bool
     /// All relative asset paths the provider can serve (sorted). Diagnostic /
@@ -84,8 +55,8 @@ final class WPESecurityScopedSceneAssetProvider: WPESceneAssetProvider, @uncheck
         try wrapped.data(atRelativePath: relativePath)
     }
 
-    func stagedURL(atRelativePath relativePath: String, purpose: WPESceneAssetURLPurpose) throws -> WPEStagedAssetURL {
-        try wrapped.stagedURL(atRelativePath: relativePath, purpose: purpose)
+    func stagedURL(atRelativePath relativePath: String) throws -> URL {
+        try wrapped.stagedURL(atRelativePath: relativePath)
     }
 
     func exists(atRelativePath relativePath: String) -> Bool {
