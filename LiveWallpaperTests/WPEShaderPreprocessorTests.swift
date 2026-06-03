@@ -108,6 +108,31 @@ struct WPEShaderPreprocessorTests {
         #expect(result.source.contains("// [BEGIN INCLUDE common.h]"))
     }
 
+    @Test("CRLF source keeps the body after an #include (newline normalization)")
+    func crlfIncludeKeepsBody() throws {
+        // Regression: WPE ships shaders (and most Windows workshop content) with
+        // CRLF endings. Swift treats "\r\n" as one grapheme, so a Character-based
+        // split saw the whole file as a single line — when that line started with
+        // `#include`, the entire body (incl. `void main`) was swallowed and
+        // dropped, and the shader failed to compile for every combo.
+        let processor = WPEShaderPreprocessor { path, _ in
+            path == "common.h" ? "#define COMMON_OK 1\r\nfloat helper() { return 1.0; }" : nil
+        }
+        let source = "#include \"common.h\"\r\nuniform vec4 g_Color4;\r\nvoid main() { gl_FragColor = g_Color4; }\r\n"
+
+        let result = try processor.processStage(
+            stage: .fragment,
+            shaderName: "font",
+            source: source,
+            comboValues: [:]
+        )
+
+        #expect(result.source.contains("void main"))
+        #expect(result.source.contains("g_Color4"))
+        #expect(result.source.contains("helper"))           // included body survived too
+        #expect(!result.source.contains("\r"))              // endings normalized to LF
+    }
+
     @Test("Throws when include cannot be resolved")
     func includeMissingThrows() {
         let processor = WPEShaderPreprocessor { _, _ in nil }

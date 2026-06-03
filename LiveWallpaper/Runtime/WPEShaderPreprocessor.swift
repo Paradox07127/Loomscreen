@@ -90,7 +90,13 @@ struct WPEShaderPreprocessor {
         var bindings: [Int: String] = [:]
         var includedAlready = Set<String>()
         let resolved = try resolveIncludes(
-            source: source,
+            // Normalize CRLF/CR → LF first. Swift treats "\r\n" as one grapheme,
+            // so the line-based passes below (`split(separator: "\n")`) would see
+            // a CRLF file as a SINGLE line — collapsing the whole shader onto its
+            // first line. When that line is `#include "…"` the entire body is
+            // swallowed as part of the include and silently dropped. WPE shaders
+            // (and most Windows-authored workshop shaders) ship CRLF.
+            source: Self.normalizeNewlines(source),
             requestedBy: shaderName,
             visited: &includedAlready
         )
@@ -107,6 +113,15 @@ struct WPEShaderPreprocessor {
             combos: combos,
             bindings: bindings
         )
+    }
+
+    /// Collapse CRLF and lone-CR line endings to LF so every downstream
+    /// line-based pass splits consistently regardless of the shader's authoring
+    /// platform.
+    static func normalizeNewlines(_ source: String) -> String {
+        source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     // MARK: - Includes
@@ -135,7 +150,9 @@ struct WPEShaderPreprocessor {
                     )
                 }
                 let inner = try resolveIncludes(
-                    source: payload,
+                    // Included files carry their own line endings (often CRLF) —
+                    // normalize before recursing so they split into real lines.
+                    source: Self.normalizeNewlines(payload),
                     requestedBy: path,
                     visited: &visited
                 )

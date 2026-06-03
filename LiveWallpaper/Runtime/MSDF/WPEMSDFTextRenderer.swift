@@ -125,10 +125,16 @@ final class WPEMSDFTextRenderer {
         let processor = WPEShaderPreprocessor { [resolver] path, _ in
             Self.readInclude(path: path, resolver: resolver)
         }
+        // Prepend the WPE builtin macro prelude (CAST2/ddx/ddy/saturate/…). The
+        // generic pipeline builder injects this for every other shader; the MSDF
+        // text path builds its request directly, so without it the shipped
+        // font.frag fails to compile (its file-scope ScreenPxRange uses CAST2 +
+        // ddx/ddy) for every combo and text silently reverts to CoreText.
+        let preludedFragment = WPEShaderBuiltinMacros.glslPrelude + "\n" + fontFragmentSource
         return try processor.process(
             shaderName: "font",
             vertexSource: Self.vertexStub,
-            fragmentSource: fontFragmentSource,
+            fragmentSource: preludedFragment,
             comboValues: comboValues,
             materialTextureBindings: [:]
         )
