@@ -135,6 +135,8 @@ struct WorkshopDoctorView: View {
                         catch { setupError = error.localizedDescription }
                     }
                 )
+                Divider()
+                downloadsRow
                 if let setupError {
                     Label(setupError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
@@ -145,6 +147,42 @@ struct WorkshopDoctorView: View {
                 }
             }
         }
+    }
+
+    /// Reveals the real on-disk location where SteamCMD saves Workshop items —
+    /// the sandbox-redirected container Steam tree, which is otherwise buried in
+    /// `~/Library/Containers/…` and hard to reach by hand.
+    private var downloadsRow: some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
+                Text("Downloads")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Where SteamCMD saves Workshop items inside this app's container.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Show in Finder") { revealDownloadsFolder() }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Opens the SteamCMD download folder in Finder, falling back to its deepest
+    /// existing ancestor when nothing has been downloaded yet (the
+    /// `content/431960` folder only appears after the first download).
+    private func revealDownloadsFolder() {
+        let fileManager = FileManager.default
+        guard let contentRoot = WPEDownloadArchiveReclaimer.containerSteamContentRoot(fileManager: fileManager) else {
+            return
+        }
+        var target = contentRoot
+        while !fileManager.fileExists(atPath: target.path) {
+            let parent = target.deletingLastPathComponent()
+            if parent.path == target.path { return }
+            target = parent
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 
     private var diagnosticsSection: some View {

@@ -253,7 +253,7 @@ struct WallpaperEngineImportServiceTests {
         #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }
 
-    @Test("Unpacked scene folder with valid scene.json + image asset returns ready cache-backed scene content")
+    @Test("Unpacked scene folder with valid scene.json + image asset imports in place (.sourceDirectory)")
     func unpackedSceneFolderWithAssetReturnsReady() async throws {
         let pngBytes = try makeFixturePNG(width: 4, height: 4)
         let sceneJSON = """
@@ -291,17 +291,16 @@ struct WallpaperEngineImportServiceTests {
             Issue.record("Expected .scene content, got \(content)")
             return
         }
-        let cachedScene = fixture.cacheURL
-            .appendingPathComponent(fixture.workshopID, isDirectory: true)
-            .appendingPathComponent("scene.json")
-
         #expect(descriptor.workshopID == fixture.workshopID)
         #expect(descriptor.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
         #expect(descriptor.entryFile == "scene.json")
         #expect(descriptor.capabilityTier == .imageOnly)
+        #expect(descriptor.assetStorage == .sourceDirectory)
         #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
         #expect(origin.resourceLocation == .cache)
-        #expect(FileManager.default.fileExists(atPath: cachedScene.path))
+        // Zero-cache: the folder is read in place, so nothing is mirrored into wpe-cache.
+        let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }
 
     @Test("Scene with image layers AND unsupported objects is classified degraded")

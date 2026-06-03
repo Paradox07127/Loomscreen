@@ -138,15 +138,6 @@ struct WorkshopSettingsView: View {
 
             Section {
                 LabeledContent {
-                    Button("Show in Finder") { revealLibraryFolder() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Open the folder where imported Workshop projects are stored")
-                } label: {
-                    Label("Workshop library folder", systemImage: "folder")
-                }
-
-                LabeledContent {
                     Button("Manage") { showingCacheManagement = true }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -157,7 +148,7 @@ struct WorkshopSettingsView: View {
             } header: {
                 Text("Cache")
             } footer: {
-                Text("Imported projects live in the library folder. The browse cache holds QueryFiles JSON responses (5-minute TTL, 100 MB hard cap).")
+                Text("The browse cache holds QueryFiles JSON responses (5-minute TTL, 100 MB hard cap). Scene assets are read in place from their source — they're no longer copied into a cache.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -292,10 +283,5 @@ struct WorkshopSettingsView: View {
         }
     }
 
-    private func revealLibraryFolder() {
-        let url = WallpaperEngineCache.defaultRootURL
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(url)
-    }
 }
 #endif
