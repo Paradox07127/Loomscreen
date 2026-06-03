@@ -304,6 +304,17 @@ final class WallpaperEngineImportService {
             ))
         }
 
+        // Default: read the unpacked folder scene in place from the source — no
+        // mirror copy in wpe-cache. Falls back to mirroring only if in-place
+        // reading fails (e.g. the entry can't be read/parsed).
+        if let directoryResult = await finishSceneSourceDirectoryImport(
+            project: project,
+            folderURL: folderURL,
+            sourceBookmark: sourceBookmark
+        ) {
+            return directoryResult
+        }
+
         let cacheResult = await ensureMirrored(project: project, folderURL: folderURL)
         guard case .success(let cacheURL) = cacheResult else {
             if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
@@ -437,6 +448,68 @@ final class WallpaperEngineImportService {
             entryFile: project.entryFile,
             capabilityTier: tier,
             assetStorage: .packageSource(fileName: pkgURL.lastPathComponent),
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
+        )
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
+        )
+
+        if tier == .unsupported {
+            return .unsupported(origin: origin)
+        }
+        return .ready(.scene(descriptor), origin: origin)
+    }
+
+    /// Imports an unpacked folder scene to read in place from its source folder
+    /// (no mirror copy). Returns `nil` when the entry can't be read/parsed, so
+    /// the caller falls back to mirroring into the cache.
+    private func finishSceneSourceDirectoryImport(
+        project: WallpaperEngineProject,
+        folderURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult? {
+        let provider = WPEDirectorySceneAssetProvider(rootURL: folderURL)
+        guard let sceneData = try? provider.data(atRelativePath: project.entryFile) else {
+            return nil
+        }
+        let document: WPESceneDocument
+        do {
+            document = try WPESceneDocumentParser.parse(data: sceneData)
+        } catch {
+            return nil
+        }
+
+        // Zero-cache: assets and project.json are read in place from the folder.
+        // Remove any stale prior mirror/extraction for this id.
+        try? await cache.purge(workshopID: project.workshopID)
+
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            origin: nil
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            primaryProvider: provider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: project,
+            scenePackageEntries: provider.entryNames
+        )
+        let descriptor = SceneDescriptor(
+            workshopID: project.workshopID,
+            cacheRelativePath: cacheRelativePath(for: project),
+            entryFile: project.entryFile,
+            capabilityTier: tier,
+            assetStorage: .sourceDirectory,
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             preflightTier: preflight.tier,
             preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
