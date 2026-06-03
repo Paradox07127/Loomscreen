@@ -322,6 +322,22 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return entries.first { $0.name.lowercased() == target }
     }
 
+    /// Normalizes a requested relative path into the same canonical form used
+    /// for stored entry names (drops `.`/empty components; rejects a leading
+    /// `/` or any `..` traversal component), so a package lookup matches what
+    /// `parseIndex` stored. Returns `nil` for an unsafe or empty path. Mirrors
+    /// `canonicalEntryName` but never throws — lookups treat invalid as a miss.
+    static func canonicalLookupName(_ name: String) -> String? {
+        guard !name.hasPrefix("/") else { return nil }
+        var canonical: [String] = []
+        for component in name.split(separator: "/", omittingEmptySubsequences: false) {
+            if component.isEmpty || component == "." { continue }
+            guard component != ".." else { return nil }
+            canonical.append(String(component))
+        }
+        return canonical.isEmpty ? nil : canonical.joined(separator: "/")
+    }
+
     private func dataRange(for entry: Entry, dataCount: Int) throws -> Range<Data.Index> {
         let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
         let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)

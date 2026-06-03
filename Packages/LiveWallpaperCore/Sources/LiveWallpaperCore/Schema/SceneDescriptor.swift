@@ -14,6 +14,11 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
     /// Path beneath `Application Support/LiveWallpaper/` — must satisfy
     /// `WPEPathSafety.isSafeCacheRelativePath`.
     public let cacheRelativePath: String
+    /// Where the runtime reads this scene's assets from. `.cache` (the default
+    /// and the only value historical descriptors persist) is the legacy
+    /// extracted `wpe-cache/<id>` directory; `.packageSource`/`.sourceDirectory`
+    /// read in place from the import source so no second on-disk copy exists.
+    public let assetStorage: SceneAssetStorage
     /// Entry filename inside the cache root, e.g. `scene.json`.
     public let entryFile: String
     /// Best-effort runtime capability assessment from the import flow.
@@ -39,6 +44,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         cacheRelativePath: String,
         entryFile: String,
         capabilityTier: SceneCapabilityTier,
+        assetStorage: SceneAssetStorage = .cache,
         dependencyWorkshopIDs: [String] = [],
         preflightTier: WPEScenePreflightTier? = nil,
         preflightFeatureFlags: [WPESceneFeatureFlag] = [],
@@ -48,6 +54,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         self.cacheRelativePath = cacheRelativePath
         self.entryFile = entryFile
         self.capabilityTier = capabilityTier
+        self.assetStorage = assetStorage
         self.dependencyWorkshopIDs = dependencyWorkshopIDs
         self.preflightTier = preflightTier
         self.preflightFeatureFlags = preflightFeatureFlags
@@ -71,6 +78,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
             cacheRelativePath: cacheRelativePath,
             entryFile: entryFile,
             capabilityTier: capabilityTier,
+            assetStorage: assetStorage,
             dependencyWorkshopIDs: dependencyWorkshopIDs,
             preflightTier: preflightTier,
             preflightFeatureFlags: preflightFeatureFlags,
@@ -85,6 +93,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
             cacheRelativePath: cacheRelativePath,
             entryFile: entryFile,
             capabilityTier: capabilityTier,
+            assetStorage: assetStorage,
             dependencyWorkshopIDs: dependencyWorkshopIDs,
             preflightTier: preflightTier,
             preflightFeatureFlags: preflightFeatureFlags,
@@ -97,6 +106,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         case cacheRelativePath
         case entryFile
         case capabilityTier
+        case assetStorage
         case dependencyWorkshopIDs
         case preflightTier
         case preflightFeatureFlags
@@ -109,6 +119,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         cacheRelativePath = try c.decode(String.self, forKey: .cacheRelativePath)
         entryFile = try c.decode(String.self, forKey: .entryFile)
         capabilityTier = (try? c.decode(SceneCapabilityTier.self, forKey: .capabilityTier)) ?? .unsupported
+        assetStorage = (try? c.decodeIfPresent(SceneAssetStorage.self, forKey: .assetStorage)) ?? .cache
         dependencyWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
         preflightTier = try? c.decodeIfPresent(WPEScenePreflightTier.self, forKey: .preflightTier)
         let rawFlags = (try? c.decodeIfPresent([String].self, forKey: .preflightFeatureFlags)) ?? []
@@ -125,6 +136,9 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         try c.encode(cacheRelativePath, forKey: .cacheRelativePath)
         try c.encode(entryFile, forKey: .entryFile)
         try c.encode(capabilityTier, forKey: .capabilityTier)
+        if assetStorage != .cache {
+            try c.encode(assetStorage, forKey: .assetStorage)
+        }
         try c.encode(dependencyWorkshopIDs, forKey: .dependencyWorkshopIDs)
         try c.encodeIfPresent(preflightTier, forKey: .preflightTier)
         try c.encode(preflightFeatureFlags.map(\.rawValue), forKey: .preflightFeatureFlags)
@@ -156,4 +170,16 @@ public enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
             return String(localized: "Unsupported", defaultValue: "Unsupported", comment: "Wallpaper Engine scene capability tier.")
         }
     }
+}
+
+/// Where a scene's runtime assets are read from. Persisted inside
+/// `SceneDescriptor`; absent in historical blobs, which decode as `.cache`.
+public enum SceneAssetStorage: Codable, Equatable, Sendable {
+    /// Legacy: assets extracted into `wpe-cache/<id>` (a second on-disk copy).
+    case cache
+    /// Read in place from the import source folder (folder imports).
+    case sourceDirectory
+    /// Read in place from a packed `scene.pkg` in the import source. `fileName`
+    /// is the archive's name within the source root (typically `scene.pkg`).
+    case packageSource(fileName: String)
 }

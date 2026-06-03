@@ -40,6 +40,44 @@ struct WPEMultiRootResourceResolver: Sendable {
         self.tracer = tracer
     }
 
+    /// Package-backed primary root. Built-ins, engine assets, and dependency
+    /// mounts stay directory-backed (they are real on-disk roots).
+    init(
+        primaryProvider: any WPESceneAssetProvider,
+        dependencyMounts: [WPEAssetMount],
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil,
+        builtinRootURL: URL? = WPEBuiltinFrameworkAssets.rootURL
+    ) {
+        self.primary = SceneResourceResolver(provider: primaryProvider)
+        self.builtinResolver = builtinRootURL.map { SceneResourceResolver(cacheRootURL: $0) }
+        self.engineAssetsResolver = engineAssetsRootURL.map {
+            SceneResourceResolver(
+                cacheRootURL: $0.appendingPathComponent("assets", isDirectory: true)
+            )
+        }
+        var mounts: [String: SceneResourceResolver] = [:]
+        for mount in dependencyMounts {
+            mounts[mount.workshopID] = SceneResourceResolver(cacheRootURL: mount.rootURL)
+        }
+        self.dependencyMounts = mounts
+        self.tracer = tracer
+    }
+
+    /// Reads raw bytes for a concrete asset path, following the same
+    /// primary → built-in → engine-assets (or dependency mount) cascade as the
+    /// image/URL resolvers.
+    func data(relativePath: String) throws -> Data {
+        if let dependency = dependencyReference(relativePath) {
+            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+                try resolver.data(relativePath: path)
+            }
+        }
+        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
+            try resolver.data(relativePath: path)
+        }
+    }
+
     /// Append a single resolution event under an alternate key (e.g. the
     /// original bare request path) when the multi-candidate cascade
     /// wants to surface a canonical miss rather than the last probed

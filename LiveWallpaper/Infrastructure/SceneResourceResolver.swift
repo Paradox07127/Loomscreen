@@ -4,9 +4,10 @@ import Foundation
 import ImageIO
 
 /// Resource resolver for `.scene` content. Reads PNG/JPG via ImageIO and
-/// `.tex` via the Phase 2.1 `WPETexDecoder`. Path safety mirrors the WPE
-/// folder scheme handler — every relative path is standardized + symlink-
-/// resolved and rejected if it escapes the cache root.
+/// `.tex` via the Phase 2.1 `WPETexDecoder`. All filesystem access goes through
+/// a `WPESceneAssetProvider`: a directory-backed provider (extracted cache /
+/// folder import) preserves the historical path-safety + `.mappedIfSafe`
+/// behavior; a package-backed provider reads entries in place from `scene.pkg`.
 ///
 /// Phase 2.1: `.tex` no longer auto-fails. The decoder routes by container
 /// version + format enum; unsupported BC formats, RGBA1010102, unknown
@@ -28,59 +29,49 @@ struct SceneResourceResolver: Sendable {
         case materialUnresolved(reason: String)
     }
 
-    let cacheRootURL: URL
+    /// The extracted-cache root when directory-backed; `nil` for a
+    /// package-backed resolver. Retained for diagnostics — all reads go through
+    /// `provider`, never this URL.
+    let cacheRootURL: URL?
+    private let provider: any WPESceneAssetProvider
     private let decoder: WPETexDecoder
 
     init(cacheRootURL: URL, decoder: WPETexDecoder = WPETexDecoder()) {
-        self.cacheRootURL = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let normalized = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        self.cacheRootURL = normalized
+        self.provider = WPEDirectorySceneAssetProvider(rootURL: normalized)
         self.decoder = decoder
     }
 
-    /// Single point where the resolver touches the filesystem. Pulled out as
-    /// a computed property so the struct stays `Sendable` (FileManager is
-    /// not Sendable, and storing one as a property is a hard error in
-    /// strict-concurrency mode).
-    private var fileManager: FileManager { .default }
+    init(provider: any WPESceneAssetProvider, cacheRootURL: URL? = nil, decoder: WPETexDecoder = WPETexDecoder()) {
+        self.cacheRootURL = cacheRootURL
+        self.provider = provider
+        self.decoder = decoder
+    }
 
     /// P3 hook: when scene-debug artifacts are active, parse the `.tex`
     /// header once more (very cheap — TEXI + TEXB headers only) and
     /// write the raw TEXI image dims + TEXB v4 fields into the session
     /// folder. No-op when artifacts are off, so production scene loads
     /// don't pay the cost.
-    private func dumpRawTexMetadataIfActive(payload: Data, target: URL) {
+    private func dumpRawTexMetadataIfActive(payload: Data, targetName: String) {
         guard WPESceneDebugArtifacts.shared.activeSessionFolder != nil else { return }
         guard case .success(let metadata) = decoder.extractRawMetadata(data: payload) else { return }
         WPESceneDebugArtifacts.shared.dumpRawTexMetadata(
-            name: target.lastPathComponent,
+            name: (targetName as NSString).lastPathComponent,
             info: metadata.info,
             bitmap: metadata.bitmap
         )
     }
 
-    /// Returns a CGImage decoded from the cache.
+    /// Returns a CGImage decoded from the resolved asset.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
-        let target = try resolveURL(for: resolvedPath)
 
-        guard fileManager.fileExists(atPath: target.path) else {
-            throw ResolveError.fileMissing
-        }
-
-        let lowered = target.pathExtension.lowercased()
-        if lowered == "tex" {
-            // mmap: large `.tex` containers in the corpus run 200+ MB and
-            // the decoder copies out only the slices it needs; letting
-            // the OS page-in saves the RSS spike of fully reading the
-            // file. PNG/JPEG continue through CGImageSourceCreateWithURL
-            // below — ImageIO already handles its own paging.
-            let payload: Data
-            do {
-                payload = try Data(contentsOf: target, options: [.mappedIfSafe])
-            } catch {
-                throw ResolveError.fileMissing
-            }
-            dumpRawTexMetadataIfActive(payload: payload, target: target)
+        if (resolvedPath as NSString).pathExtension.lowercased() == "tex" {
+            let payload = try providerData(resolvedPath)
+            dumpRawTexMetadataIfActive(payload: payload, targetName: resolvedPath)
             switch decoder.decode(data: payload) {
             case .success(let image):
                 return image
@@ -89,7 +80,8 @@ struct SceneResourceResolver: Sendable {
             }
         }
 
-        guard let source = CGImageSourceCreateWithURL(target as CFURL, nil),
+        let payload = try providerData(resolvedPath)
+        guard let source = CGImageSourceCreateWithData(payload as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ResolveError.decodeFailed
         }
@@ -100,22 +92,12 @@ struct SceneResourceResolver: Sendable {
     func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
-        let target = try resolveURL(for: resolvedPath)
-
-        guard fileManager.fileExists(atPath: target.path) else {
-            throw ResolveError.fileMissing
-        }
-        guard target.pathExtension.lowercased() == "tex" else {
+        guard (resolvedPath as NSString).pathExtension.lowercased() == "tex" else {
             throw ResolveError.unsupportedTexture
         }
 
-        let payload: Data
-        do {
-            payload = try Data(contentsOf: target, options: [.mappedIfSafe])
-        } catch {
-            throw ResolveError.fileMissing
-        }
-        dumpRawTexMetadataIfActive(payload: payload, target: target)
+        let payload = try providerData(resolvedPath)
+        dumpRawTexMetadataIfActive(payload: payload, targetName: resolvedPath)
         switch decoder.extractTexturePayload(data: payload) {
         case .success(let texture):
             return texture
@@ -125,28 +107,18 @@ struct SceneResourceResolver: Sendable {
     }
 
     /// Returns a streaming payload (compressed bytes + TEXS schedule)
-    /// for `WPETexLazyAnimatedTextureSource`. The file is mmap'd so the
-    /// 60-image multi-frame `.tex` files (>700 MB on disk) never fully
-    /// materialize in resident memory.
+    /// for `WPETexLazyAnimatedTextureSource`. Directory-backed reads map the
+    /// file via `.mappedIfSafe`, so the 60-image multi-frame `.tex` files
+    /// (>700 MB on disk) never fully materialize in resident memory.
     func resolveStreamingTexturePayload(relativePath: String) throws -> WPETexStreamingPayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
-        let target = try resolveURL(for: resolvedPath)
-
-        guard fileManager.fileExists(atPath: target.path) else {
-            throw ResolveError.fileMissing
-        }
-        guard target.pathExtension.lowercased() == "tex" else {
+        guard (resolvedPath as NSString).pathExtension.lowercased() == "tex" else {
             throw ResolveError.unsupportedTexture
         }
 
-        let payload: Data
-        do {
-            payload = try Data(contentsOf: target, options: [.mappedIfSafe])
-        } catch {
-            throw ResolveError.fileMissing
-        }
-        dumpRawTexMetadataIfActive(payload: payload, target: target)
+        let payload = try providerData(resolvedPath)
+        dumpRawTexMetadataIfActive(payload: payload, targetName: resolvedPath)
         switch decoder.extractStreamingPayload(data: payload) {
         case .success(let streaming):
             return streaming
@@ -165,8 +137,7 @@ struct SceneResourceResolver: Sendable {
             throw ResolveError.materialUnresolved(reason: "Reference depth exceeded for \(relativePath)")
         }
 
-        let url = try resolveURL(for: relativePath)
-        guard fileManager.fileExists(atPath: url.path) else {
+        guard provider.exists(atRelativePath: relativePath) else {
             if relativePath.contains("models/util/") {
                 throw ResolveError.materialUnresolved(reason: "Built-in WPE layer \(relativePath) is not available on macOS")
             }
@@ -175,7 +146,7 @@ struct SceneResourceResolver: Sendable {
 
         let payload: Data
         do {
-            payload = try Data(contentsOf: url)
+            payload = try provider.data(atRelativePath: relativePath)
         } catch {
             throw ResolveError.fileMissing
         }
@@ -219,24 +190,15 @@ struct SceneResourceResolver: Sendable {
     /// Decode-backed probe used by `WallpaperEngineImportService` during capability tier classification.
     func probeImage(relativePath: String) -> Result<WPETexInfo, ResolveError> {
         guard !relativePath.isEmpty else { return .failure(.fileMissing) }
-        let target: URL
-        do {
-            target = try resolveURL(for: relativePath)
-        } catch let error as ResolveError {
-            return .failure(error)
-        } catch {
+        guard provider.exists(atRelativePath: relativePath) else {
             return .failure(.fileMissing)
         }
-        guard fileManager.fileExists(atPath: target.path) else {
-            return .failure(.fileMissing)
-        }
-        let lowered = target.pathExtension.lowercased()
-        guard lowered == "tex" else {
+        guard (relativePath as NSString).pathExtension.lowercased() == "tex" else {
             return .failure(.unsupportedTexture)
         }
         let data: Data
         do {
-            data = try Data(contentsOf: target, options: [.mappedIfSafe])
+            data = try provider.data(atRelativePath: relativePath)
         } catch {
             return .failure(.fileMissing)
         }
@@ -279,38 +241,43 @@ struct SceneResourceResolver: Sendable {
             }
         }
 
-        do {
-            _ = try resolveExistingFileURL(relativePath: resolvedPath)
-            return .success(())
-        } catch let error as ResolveError {
-            return .failure(error)
-        } catch {
-            return .failure(.fileMissing)
-        }
+        return provider.exists(atRelativePath: resolvedPath) ? .success(()) : .failure(.fileMissing)
     }
 
     /// File existence probe used by tests + the import service to decide whether a scene's declared image layers are actually shipped.
     func exists(relativePath: String) -> Bool {
-        (try? resolveExistingFileURL(relativePath: relativePath)) != nil
+        provider.exists(atRelativePath: relativePath)
     }
 
-    /// Validates `relativePath`, joins it onto the cache root, and confirms the result is a regular file inside the cache.
+    /// Returns the raw bytes for a concrete asset path (scene.json, material /
+    /// model / particle JSON, shader source). Throws `.fileMissing` on a miss
+    /// so `WPEMultiRootResourceResolver`'s fallback cascade can continue.
+    func data(relativePath: String) throws -> Data {
+        try providerData(relativePath)
+    }
+
+    /// Validates `relativePath` and returns a file URL for a consumer that
+    /// needs one (fonts, audio, video). Directory-backed returns the project
+    /// file itself; package-backed materializes a staged temporary.
     func resolveExistingFileURL(relativePath: String) throws -> URL {
-        let url = try resolveURL(for: relativePath)
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue else {
+        guard provider.exists(atRelativePath: relativePath) else {
             throw ResolveError.fileMissing
         }
-        return url
+        do {
+            return try provider.stagedURL(atRelativePath: relativePath, purpose: .fileConsumer).url
+        } catch {
+            throw ResolveError.fileMissing
+        }
     }
 
-    /// Standardize the candidate URL and verify it falls under cache root.
-    private func resolveURL(for relativePath: String) throws -> URL {
-        guard let resolved = WPEPathSafety.strictResourceURL(root: cacheRootURL, relativePath: relativePath) else {
+    private func providerData(_ relativePath: String) throws -> Data {
+        do {
+            return try provider.data(atRelativePath: relativePath)
+        } catch WPESceneAssetProviderError.invalidRelativePath {
             throw ResolveError.pathEscape
+        } catch {
+            throw ResolveError.fileMissing
         }
-        return resolved
     }
 }
 #endif
