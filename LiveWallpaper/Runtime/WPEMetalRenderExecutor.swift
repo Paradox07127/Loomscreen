@@ -331,6 +331,20 @@ final class WPEMetalRenderExecutor {
     ) throws {
         let alive = systems.filter { $0.liveInstanceCount > 0 }
         guard !alive.isEmpty else { return }
+
+        // Resolve per-system pipeline states (throwing) BEFORE opening the encoder,
+        // so a failure can't dealloc an encoder without endEncoding (Metal asserts
+        // "Command encoder released without endEncoding").
+        let draws: [(system: WPEParticleSystem, texture: MTLTexture, state: MTLRenderPipelineState)] =
+            try alive.compactMap { system in
+                // Systems whose texture failed to load were filtered at scene-load;
+                // skip defensively so a stale texture-slot binding can't leak in.
+                guard let texture = texturesByMaterial[ObjectIdentifier(system)] else { return nil }
+                let state = try particlePipelineState(colorPixelFormat: output.pixelFormat, blendMode: system.blendMode)
+                return (system, texture, state)
+            }
+        guard !draws.isEmpty else { return }
+
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -350,19 +364,10 @@ final class WPEMetalRenderExecutor {
             )
         )
 
-        for system in alive {
-            // A system whose texture failed to load was already filtered
-            // out at scene-load time (see loadParticleSystems). Skip here
-            // defensively so a stale Metal texture-slot binding from a
-            // prior system can never leak into the current draw.
-            guard let texture = texturesByMaterial[ObjectIdentifier(system)] else {
-                continue
-            }
-            let pipelineState = try particlePipelineState(
-                colorPixelFormat: output.pixelFormat,
-                blendMode: system.blendMode
-            )
-            encoder.setRenderPipelineState(pipelineState)
+        for draw in draws {
+            let system = draw.system
+            let texture = draw.texture
+            encoder.setRenderPipelineState(draw.state)
             // Translate the whole system by its camera-parallax depth (pixels),
             // carried in `padding.xy` and added to each particle's screen
             // position in the vertex shader.
@@ -407,6 +412,10 @@ final class WPEMetalRenderExecutor {
         output: MTLTexture
     ) throws {
         guard !overlays.isEmpty else { return }
+        // Resolve the pipeline (can throw) BEFORE opening the encoder, so a
+        // failure never leaks an encoder without endEncoding (Metal asserts
+        // "Command encoder released without endEncoding").
+        let state = try textOverlayPipelineState(colorPixelFormat: output.pixelFormat)
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -417,7 +426,6 @@ final class WPEMetalRenderExecutor {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
-        let state = try textOverlayPipelineState(colorPixelFormat: output.pixelFormat)
         encoder.setRenderPipelineState(state)
 
         for overlay in overlays {
@@ -459,6 +467,22 @@ final class WPEMetalRenderExecutor {
         output: MTLTexture
     ) throws {
         guard !payloads.isEmpty else { return }
+
+        // Resolve everything that can THROW (white texture, font.frag compile,
+        // pipeline state) BEFORE opening the render encoder. A failure here (e.g.
+        // a font.frag combo that won't translate) then throws with no encoder
+        // open, so the scene renderer can catch it and fall back to CoreText.
+        // Doing these `try`s after makeRenderCommandEncoder would dealloc the
+        // encoder without endEncoding → Metal asserts
+        // ("Command encoder released without endEncoding") and crashes.
+        let whiteTexture = try msdfWhiteTexture()
+        let prepared: [(state: MTLRenderPipelineState, result: WPEShaderCompileResult, payload: WPEMSDFTextDrawPayload)] =
+            try payloads.map { payload in
+                let result = try compileMSDFFontShader(payload.shaderRequest)
+                let state = try msdfTextPipelineState(for: result, colorPixelFormat: output.pixelFormat)
+                return (state: state, result: result, payload: payload)
+            }
+
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -474,20 +498,18 @@ final class WPEMetalRenderExecutor {
             Float(max(sceneSize.width, 1)),
             Float(max(sceneSize.height, 1))
         )
-        let whiteTexture = try msdfWhiteTexture()
-        for payload in payloads {
-            let result = try compileMSDFFontShader(payload.shaderRequest)
-            let state = try msdfTextPipelineState(for: result, colorPixelFormat: output.pixelFormat)
-            encoder.setRenderPipelineState(state)
+        // From here on there are NO throwing calls until endEncoding().
+        for item in prepared {
+            encoder.setRenderPipelineState(item.state)
             encoder.setVertexBytes(&sceneSizeValue, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
 
-            for page in payload.pages {
+            for page in item.payload.pages {
                 encoder.setVertexBuffer(page.vertexBuffer, offset: 0, index: 0)
                 encoder.setFragmentTexture(page.texture, index: 0)
                 encoder.setFragmentTexture(whiteTexture, index: 1)
                 var slots = packTranslatedUniforms(
-                    values: payload.uniforms,
-                    layout: result.uniformLayout,
+                    values: item.payload.uniforms,
+                    layout: item.result.uniformLayout,
                     texturesBySlot: [0: page.texture, 1: whiteTexture],
                     destinationTexture: output
                 )
@@ -735,14 +757,15 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
-        }
-        encoder.setRenderPipelineState(try renderPipeline(
+        let copyState = try renderPipeline(
             fragmentName: "wpe_copy_fragment",
             blendMode: "disabled",
             colorPixelFormat: drawable.texture.pixelFormat
-        ))
+        )
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        encoder.setRenderPipelineState(copyState)
         encoder.setFragmentTexture(source, index: 0)
         var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
