@@ -28,9 +28,16 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public let imagePath: String
     public let materialPath: String?
     public let puppetPath: String?
+    /// Object this layer attaches to (the parent puppet for body-split rigs). `nil` for roots.
+    public let parentObjectID: String?
+    /// Named MDAT anchor on the parent puppet this layer follows. `nil` when unattached.
+    public let attachment: String?
     /// Scene `animationlayers` for this object, selecting which puppet MDLA animation(s) play.
     public let animationLayers: [WPESceneAnimationLayer]
     public let geometry: WPERenderLayerGeometry
+    /// Pre-inheritance geometry retained so an attached child can re-derive its placement from the
+    /// parent puppet's animated anchor bone. `nil` for layers that need no attachment-following.
+    public let localGeometry: WPERenderLayerGeometry?
     public let compositeA: String
     public let compositeB: String
     public let localFBOs: [WPERenderFBO]
@@ -44,8 +51,11 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         imagePath: String,
         materialPath: String?,
         puppetPath: String? = nil,
+        parentObjectID: String? = nil,
+        attachment: String? = nil,
         animationLayers: [WPESceneAnimationLayer] = [],
         geometry: WPERenderLayerGeometry,
+        localGeometry: WPERenderLayerGeometry? = nil,
         compositeA: String,
         compositeB: String,
         localFBOs: [WPERenderFBO],
@@ -58,8 +68,11 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         self.imagePath = imagePath
         self.materialPath = materialPath
         self.puppetPath = puppetPath
+        self.parentObjectID = parentObjectID
+        self.attachment = attachment
         self.animationLayers = animationLayers
         self.geometry = geometry
+        self.localGeometry = localGeometry
         self.compositeA = compositeA
         self.compositeB = compositeB
         self.localFBOs = localFBOs

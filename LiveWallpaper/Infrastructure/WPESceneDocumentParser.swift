@@ -725,6 +725,9 @@ enum WPESceneDocumentParser {
         let origin = transform.origin
         let scale = transform.scale
         let angles = transform.angles
+        let local = localTransform(in: dict)
+        let parentObjectID = parentID(in: dict)
+        let attachment = nonEmptyString(dict["attachment"]) ?? nonEmptyString(dict["anchor"])
         let visible = parseBool(dict["visible"]) ?? true
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
@@ -764,9 +767,14 @@ enum WPESceneDocumentParser {
             name: name,
             imageRelativePath: imagePath,
             materialRelativePath: materialRelativePath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
             origin: origin,
             scale: scale,
             angles: angles,
+            localOrigin: local.origin,
+            localScale: local.scale,
+            localAngles: local.angles,
             visible: visible,
             alpha: alphaValue.value,
             alphaAnimation: alphaValue.animation,
@@ -780,6 +788,12 @@ enum WPESceneDocumentParser {
             animationLayers: animationLayers,
             parallaxDepth: parallaxDepth
         )
+    }
+
+    private static func nonEmptyString(_ raw: Any?) -> String? {
+        guard let string = raw as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func parseDependencyIDs(_ raw: Any?) -> [String] {

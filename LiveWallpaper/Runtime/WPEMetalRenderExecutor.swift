@@ -91,6 +91,25 @@ final class WPEMetalRenderExecutor {
         let colorPixelFormat: UInt
     }
 
+    /// Per-puppet skinning decision for the current frame. `enabled` is false (and `palette` empty)
+    /// whenever the validation gate rejects skinning, so the pass renders the static assembled mesh.
+    private struct PuppetSkinningState {
+        let enabled: Bool
+        let palette: [simd_float4x4]
+        let attachmentsByName: [String: WPEPuppetAttachment]
+        /// Parent puppet's MDLS bind matrices (model space) keyed by bone index, for anchor following.
+        let boneBindByIndex: [Int: simd_float4x4]
+        let reason: String
+    }
+
+    /// Per-frame attachment/skinning context, built once before the layer loop so a parent puppet's
+    /// animated bone palette is available before its attached children render.
+    private struct PuppetAttachmentFrameContext {
+        let layersByObjectID: [String: WPEPreparedRenderLayer]
+        let skinningByObjectID: [String: PuppetSkinningState]
+        let sceneSize: CGSize
+    }
+
     private struct PreviousFrameHistory {
         let sceneSize: CGSize
         let sceneTexture: MTLTexture?
@@ -197,8 +216,18 @@ final class WPEMetalRenderExecutor {
         frameState.cameraParallax = runtimeUniforms.cameraParallax
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
+        let attachmentContext = makeAttachmentFrameContext(
+            for: preparedPipeline,
+            runtimeUniforms: runtimeUniforms,
+            sceneSize: size
+        )
 
         for layer in preparedPipeline.layers {
+            // Attached children (face/hair on a body-split rig) follow the parent puppet's animated
+            // anchor bone; `graphLayer` carries the followed transform, falling back to the static
+            // layer when there is no resolved attachment. Skinning is validated/cached once per frame.
+            let graphLayer = layerApplyingAttachmentFollow(layer.graphLayer, context: attachmentContext)
+            let skinningState = attachmentContext.skinningByObjectID[layer.graphLayer.objectID]
             if layer.passes.isEmpty {
                 // Hidden plain-image layer: nothing composites elsewhere, so
                 // simply skip the scene blit. `didEncode` stays satisfied so an
@@ -210,7 +239,7 @@ final class WPEMetalRenderExecutor {
                 try encodeCopy(
                     reference: .image(layer.graphLayer.imagePath),
                     target: .scene,
-                    layer: layer.graphLayer,
+                    layer: graphLayer,
                     runtimeUniforms: runtimeUniforms,
                     textures: textures,
                     commandBuffer: commandBuffer,
@@ -223,7 +252,7 @@ final class WPEMetalRenderExecutor {
                 continue
             }
             if bypassEffects, let firstSource = Self.bypassSourceReference(for: layer) {
-                guard layer.graphLayer.visible else {
+                guard graphLayer.visible else {
                     didEncode = true
                     continue
                 }
@@ -240,7 +269,7 @@ final class WPEMetalRenderExecutor {
                     try encodeCopy(
                         reference: firstSource,
                         target: .scene,
-                        layer: layer.graphLayer,
+                        layer: graphLayer,
                         runtimeUniforms: runtimeUniforms,
                         textures: textures,
                         commandBuffer: commandBuffer,
@@ -260,7 +289,7 @@ final class WPEMetalRenderExecutor {
                 // (dependents may sample them), but skip the final scene draw so
                 // the layer is invisible. Toggling `visible` true re-includes it
                 // without a pipeline rebuild.
-                if !layer.graphLayer.visible {
+                if !graphLayer.visible {
                     switch pass.pass.target {
                     case .scene:
                         didEncode = true
@@ -271,8 +300,9 @@ final class WPEMetalRenderExecutor {
                 }
                 try encode(
                     pass: pass,
-                    layer: layer.graphLayer,
+                    layer: graphLayer,
                     puppetModel: layer.puppetModel,
+                    skinningState: skinningState,
                     runtimeUniforms: runtimeUniforms,
                     textures: textures,
                     commandBuffer: commandBuffer,
@@ -850,6 +880,7 @@ final class WPEMetalRenderExecutor {
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         puppetModel: WPEPuppetModel?,
+        skinningState: PuppetSkinningState?,
         runtimeUniforms: WPEMetalRuntimeUniforms,
         textures: [String: MTLTexture],
         commandBuffer: MTLCommandBuffer,
@@ -938,6 +969,7 @@ final class WPEMetalRenderExecutor {
             pass: pass,
             layer: layer,
             puppetModel: puppetModel,
+            skinningState: skinningState,
             runtimeUniforms: runtimeUniforms,
             destination: destination,
             textures: textures,
@@ -988,10 +1020,324 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// Validates skinning for every puppet and caches each parent's animated palette once, so an
+    /// attached child can read its parent's anchor-bone transform before the child itself renders.
+    private func makeAttachmentFrameContext(
+        for pipeline: WPEPreparedRenderPipeline,
+        runtimeUniforms: WPEMetalRuntimeUniforms,
+        sceneSize: CGSize
+    ) -> PuppetAttachmentFrameContext {
+        let layersByID = Dictionary(
+            pipeline.layers.map { ($0.graphLayer.objectID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var attachedChildNamesByParent: [String: Set<String>] = [:]
+        for layer in pipeline.layers {
+            guard let parentID = layer.graphLayer.parentObjectID,
+                  let attachment = layer.graphLayer.attachment else { continue }
+            attachedChildNamesByParent[parentID, default: []].insert(attachment)
+        }
+        var skinningByObjectID: [String: PuppetSkinningState] = [:]
+        for layer in pipeline.layers {
+            guard let model = layer.puppetModel else { continue }
+            skinningByObjectID[layer.graphLayer.objectID] = validatedSkinningState(
+                for: layer.graphLayer,
+                model: model,
+                attachedChildNames: attachedChildNamesByParent[layer.graphLayer.objectID] ?? [],
+                runtimeUniforms: runtimeUniforms
+            )
+        }
+        return PuppetAttachmentFrameContext(
+            layersByObjectID: layersByID,
+            skinningByObjectID: skinningByObjectID,
+            sceneSize: sceneSize
+        )
+    }
+
+    /// The default-on skinning gate: only enable GPU skinning when the puppet's hierarchy, skin
+    /// indices, palette bounds, and attached children are all supported. Otherwise the puppet renders
+    /// the static assembled MDLV mesh (the pre-skinning known-good baseline).
+    private func validatedSkinningState(
+        for layer: WPERenderLayer,
+        model: WPEPuppetModel,
+        attachedChildNames: Set<String>,
+        runtimeUniforms: WPEMetalRuntimeUniforms
+    ) -> PuppetSkinningState {
+        let attachmentsByName = Dictionary(
+            model.attachments.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let boneBindByIndex = Dictionary(
+            model.bones.compactMap { bone -> (Int, simd_float4x4)? in
+                WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix).map { (bone.index, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        func disabled(_ reason: String) -> PuppetSkinningState {
+            PuppetSkinningState(
+                enabled: false,
+                palette: [],
+                attachmentsByName: attachmentsByName,
+                boneBindByIndex: boneBindByIndex,
+                reason: reason
+            )
+        }
+
+        guard UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? true else {
+            return disabled("user-disabled")
+        }
+        let animationLayers = puppetAnimationLayers(for: layer, model: model)
+        guard !animationLayers.isEmpty else { return disabled("no-animation") }
+        // If a child attaches to an anchor we cannot resolve, refuse to skin this parent so the body
+        // never moves out from under a face/hair layer we are unable to follow.
+        guard attachedChildNames.allSatisfy({ attachmentsByName[$0] != nil }) else {
+            return disabled("unresolved-attachment")
+        }
+        guard WPEPuppetAnimationEvaluator.hasUsableHierarchy(layers: animationLayers, bones: model.bones) else {
+            return disabled("missing-hierarchy")
+        }
+        let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(
+            layers: animationLayers,
+            bones: model.bones,
+            at: runtimeUniforms.time
+        )
+        guard evaluation.parentChannelMapSucceeded, !evaluation.palette.isEmpty else {
+            return disabled("palette-unresolved")
+        }
+        guard Self.skinBlendIndicesAreInRange(in: model.meshes, paletteCount: evaluation.palette.count) else {
+            return disabled("skin-index-out-of-range")
+        }
+        guard sampledPalettesAreFiniteAndBounded(layers: animationLayers, bones: model.bones, meshes: model.meshes) else {
+            return disabled("palette-unbounded")
+        }
+        return PuppetSkinningState(
+            enabled: true,
+            palette: evaluation.palette,
+            attachmentsByName: attachmentsByName,
+            boneBindByIndex: boneBindByIndex,
+            reason: evaluation.transformSpace?.rawValue ?? "bind"
+        )
+    }
+
+    /// Samples the palette across the clip and rejects skinning if any frame is non-finite or moves a
+    /// skinned vertex further than a puppet-size-relative bound — the catch for an otherwise "finite"
+    /// but exploding palette that frame-0==identity alone would not detect.
+    private func sampledPalettesAreFiniteAndBounded(
+        layers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone],
+        meshes: [WPEPuppetMesh]
+    ) -> Bool {
+        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return false }
+        let fps = Double(base.animation.fps)
+        guard fps.isFinite, fps > 0 else { return false }
+        let last = max(base.animation.frameCount, 1)
+        let frames = Array(Set([0, 1, last / 4, last / 2, (last * 3) / 4, last])).sorted()
+        let extent = Self.modelExtent(meshes: meshes)
+        let maxAllowedDelta = max(Float(96), extent * 0.12)
+        for frame in frames {
+            let time = Double(frame) / fps / max(base.rate, 0.0001)
+            let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(layers: layers, bones: bones, at: time)
+            guard evaluation.parentChannelMapSucceeded,
+                  !evaluation.palette.isEmpty,
+                  evaluation.palette.allSatisfy(WPEPuppetAnimationEvaluator.matrixIsFinite) else {
+                return false
+            }
+            guard Self.maxSkinnedVertexDelta(meshes: meshes, palette: evaluation.palette) <= maxAllowedDelta else {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Every skin-blend index with positive, finite weight must address a real palette entry. The
+    /// shader clamps negatives to bone 0, so a negative index with weight is a malformed mesh we must
+    /// reject here rather than skin against the wrong (or out-of-range) bone.
+    private static func skinBlendIndicesAreInRange(in meshes: [WPEPuppetMesh], paletteCount: Int) -> Bool {
+        guard paletteCount > 0 else { return false }
+        for mesh in meshes {
+            for vertex in mesh.vertices {
+                let weights = vertex.skinBlendWeights
+                let indices = vertex.skinBlendIndices
+                func valid(_ index: Int32, _ weight: Float) -> Bool {
+                    guard weight.isFinite else { return false }
+                    guard weight > 0 else { return true }
+                    return index >= 0 && Int(index) < paletteCount
+                }
+                guard valid(indices.x, weights.x), valid(indices.y, weights.y),
+                      valid(indices.z, weights.z), valid(indices.w, weights.w) else { return false }
+            }
+        }
+        return true
+    }
+
+    private static func modelExtent(meshes: [WPEPuppetMesh]) -> Float {
+        var minPoint = SIMD2<Float>(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
+        var maxPoint = SIMD2<Float>(-.greatestFiniteMagnitude, -.greatestFiniteMagnitude)
+        for mesh in meshes {
+            for vertex in mesh.vertices {
+                let p = SIMD2<Float>(vertex.position.x, vertex.position.y)
+                minPoint = min(minPoint, p)
+                maxPoint = max(maxPoint, p)
+            }
+        }
+        guard minPoint.x.isFinite, maxPoint.x.isFinite else { return 1 }
+        return max(maxPoint.x - minPoint.x, maxPoint.y - minPoint.y, 1)
+    }
+
+    private static func maxSkinnedVertexDelta(meshes: [WPEPuppetMesh], palette: [simd_float4x4]) -> Float {
+        var maxDelta: Float = 0
+        for mesh in meshes {
+            for vertex in mesh.vertices {
+                let weights = max(vertex.skinBlendWeights, SIMD4<Float>(repeating: 0))
+                let weightSum = weights.x + weights.y + weights.z + weights.w
+                guard weightSum > 0.00001 else { continue }
+                let source = SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 1)
+                let indices = vertex.skinBlendIndices
+                var skinned = SIMD4<Float>(repeating: 0)
+                func add(_ index: Int32, _ weight: Float) {
+                    guard weight > 0 else { return }
+                    if index >= 0, Int(index) < palette.count {
+                        skinned += weight * (palette[Int(index)] * source)
+                    } else {
+                        skinned += weight * source
+                    }
+                }
+                add(indices.x, weights.x)
+                add(indices.y, weights.y)
+                add(indices.z, weights.z)
+                add(indices.w, weights.w)
+                skinned /= weightSum
+                let dx = skinned.x - source.x
+                let dy = skinned.y - source.y
+                maxDelta = max(maxDelta, (dx * dx + dy * dy).squareRoot())
+            }
+        }
+        return maxDelta
+    }
+
+    /// Re-derives an attached child's transform from its parent puppet's animated anchor bone. The
+    /// child's static (parent-baked) origin already places it correctly at the bind pose, so we add
+    /// only the anchor's per-frame scene-space motion; at the bind pose the delta is exactly zero.
+    ///
+    /// ON-DEVICE VALIDATION POINT: the MDAT bind matrix is treated as a bone-LOCAL anchor offset, so
+    /// the model-space anchor is `boneBind · MDAT`. The model→scene mapping (puppetModelPointToScene)
+    /// is the convention most worth verifying on-device; both anchor points share it, so any constant
+    /// offset cancels and only the parent's scale/rotation shapes the followed motion.
+    private func layerApplyingAttachmentFollow(
+        _ layer: WPERenderLayer,
+        context: PuppetAttachmentFrameContext
+    ) -> WPERenderLayer {
+        guard let parentID = layer.parentObjectID,
+              let attachmentName = layer.attachment,
+              let parent = context.layersByObjectID[parentID]?.graphLayer,
+              let parentState = context.skinningByObjectID[parentID],
+              parentState.enabled,
+              let attachment = parentState.attachmentsByName[attachmentName],
+              attachment.boneIndex >= 0,
+              attachment.boneIndex < parentState.palette.count else {
+            return layer
+        }
+        let boneBind = parentState.boneBindByIndex[attachment.boneIndex] ?? matrix_identity_float4x4
+        let anchorBindModel = boneBind * attachment.matrix
+        let anchorCurrentModel = parentState.palette[attachment.boneIndex] * anchorBindModel
+        let bindPoint = SIMD2<Float>(anchorBindModel.columns.3.x, anchorBindModel.columns.3.y)
+        let currentPoint = SIMD2<Float>(anchorCurrentModel.columns.3.x, anchorCurrentModel.columns.3.y)
+        let bindScene = puppetModelPointToScene(bindPoint, layer: parent, sceneSize: context.sceneSize)
+        let currentScene = puppetModelPointToScene(currentPoint, layer: parent, sceneSize: context.sceneSize)
+        let delta = SIMD2<Float>(currentScene.x - bindScene.x, currentScene.y - bindScene.y)
+        guard delta.x.isFinite, delta.y.isFinite else { return layer }
+        return replacingGeometryOrigin(of: layer, bySceneOffset: delta, sceneSize: context.sceneSize)
+    }
+
+    /// A WPE origin component in `0...1` is a normalized fraction of the scene; outside that range it
+    /// is already in pixels. Resolve to pixels so an attachment delta (always pixels) can be added.
+    private static func scenePixelOrigin(from origin: SIMD3<Double>, sceneSize: CGSize) -> SIMD2<Double> {
+        let sceneWidth = max(Double(sceneSize.width), 1)
+        let sceneHeight = max(Double(sceneSize.height), 1)
+        let x = (origin.x >= 0 && origin.x <= 1) ? origin.x * sceneWidth : origin.x
+        let y = (origin.y >= 0 && origin.y <= 1) ? origin.y * sceneHeight : origin.y
+        return SIMD2<Double>(x, y)
+    }
+
+    private func puppetModelPointToScene(
+        _ point: SIMD2<Float>,
+        layer: WPERenderLayer,
+        sceneSize: CGSize
+    ) -> SIMD2<Float> {
+        let geometry = layer.geometry
+        let sceneWidth = Float(max(sceneSize.width, 1))
+        let sceneHeight = Float(max(sceneSize.height, 1))
+        let scaleX = max(abs(Float(geometry.scale.x)), 0.0001)
+        let scaleY = max(abs(Float(geometry.scale.y)), 0.0001)
+        let width = max(Float(geometry.size?.width ?? 1) * scaleX, 0.0001)
+        let height = max(Float(geometry.size?.height ?? 1) * scaleY, 0.0001)
+        let originX = Float(geometry.origin.x)
+        let originY = Float(geometry.origin.y)
+        let originXPixels = (originX >= 0 && originX <= 1) ? originX * sceneWidth : originX
+        let originYPixels = (originY >= 0 && originY <= 1) ? originY * sceneHeight : originY
+        let anchor = SIMD2<Float>(originXPixels - sceneWidth * 0.5, originYPixels - sceneHeight * 0.5)
+        let center = anchor + Self.alignmentCenterOffset(alignment: geometry.alignment, width: width, height: height)
+        let local = SIMD2<Float>(
+            (point.x - Float(geometry.puppetMeshCenter.x)) * scaleX,
+            (point.y - Float(geometry.puppetMeshCenter.y)) * scaleY
+        )
+        let angle = Float(geometry.angles.z)
+        let c = cos(angle)
+        let s = sin(angle)
+        return SIMD2<Float>(
+            center.x + c * local.x - s * local.y,
+            center.y + s * local.x + c * local.y
+        )
+    }
+
+    private func replacingGeometryOrigin(
+        of layer: WPERenderLayer,
+        bySceneOffset delta: SIMD2<Float>,
+        sceneSize: CGSize
+    ) -> WPERenderLayer {
+        let geometry = layer.geometry
+        let originPixels = Self.scenePixelOrigin(from: geometry.origin, sceneSize: sceneSize)
+        let adjustedGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(
+                originPixels.x + Double(delta.x),
+                originPixels.y + Double(delta.y),
+                geometry.origin.z
+            ),
+            scale: geometry.scale,
+            angles: geometry.angles,
+            alignment: geometry.alignment,
+            size: geometry.size,
+            puppetMeshCenter: geometry.puppetMeshCenter,
+            alpha: geometry.alpha,
+            alphaAnimation: geometry.alphaAnimation,
+            color: geometry.color,
+            brightness: geometry.brightness
+        )
+        return WPERenderLayer(
+            objectID: layer.objectID,
+            objectName: layer.objectName,
+            visible: layer.visible,
+            imagePath: layer.imagePath,
+            materialPath: layer.materialPath,
+            puppetPath: layer.puppetPath,
+            parentObjectID: layer.parentObjectID,
+            attachment: layer.attachment,
+            animationLayers: layer.animationLayers,
+            geometry: adjustedGeometry,
+            localGeometry: layer.localGeometry,
+            compositeA: layer.compositeA,
+            compositeB: layer.compositeB,
+            localFBOs: layer.localFBOs,
+            passes: layer.passes,
+            parallaxDepth: layer.parallaxDepth
+        )
+    }
+
     private func encodePuppetMaterialPassIfNeeded(
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         puppetModel: WPEPuppetModel?,
+        skinningState: PuppetSkinningState?,
         runtimeUniforms: WPEMetalRuntimeUniforms,
         destination: (id: WPEMetalTargetID, texture: MTLTexture),
         textures: [String: MTLTexture],
@@ -1055,25 +1401,17 @@ final class WPEMetalRenderExecutor {
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
-        // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind),
-        // reusing the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
-        //
-        // ON BY DEFAULT: hierarchy-composed MDLA skinning is the puppet's natural idle sway and is
-        // confirmed correct on-device (frame-0 palette == identity, finite-guarded, bounded). The
-        // earlier "torso perturbed" artifact was a since-fixed bug — MDLA channels are parent-LOCAL,
-        // but the palette had composed them as world transforms. No UI toggle anymore; a hidden
-        // override remains only as an escape hatch for a pathological puppet (no rebuild needed):
-        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool NO`.
-        let skinningAllowed = UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? true
-        let animationLayers = skinningAllowed ? puppetAnimationLayers(for: layer, model: model) : []
-        let resolvedPalette = animationLayers.isEmpty
-            ? []
-            : WPEPuppetAnimationEvaluator.palette(layers: animationLayers, bones: model.bones, at: runtimeUniforms.time)
+        // Skinning is validated and cached once per frame in `makeAttachmentFrameContext`, reusing the
+        // same scene clock that drives WPESceneAnimatedValue / shader g_Time. When the gate rejects
+        // skinning (partial hierarchy, out-of-range skin indices, an unbounded palette, or an attached
+        // child we cannot follow) this pass renders the static assembled MDLV mesh. A hidden override
+        // forces it off without a rebuild: `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool NO`.
+        let resolvedPalette = skinningState?.enabled == true ? (skinningState?.palette ?? []) : []
         let bonePalette = resolvedPalette.isEmpty
             ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
             : resolvedPalette
-        // Enable GPU skinning whenever animation layers resolved. At the bind pose the palette is
-        // identity, so the weighted blend reproduces the assembled rest mesh (no-regression guard).
+        // At the bind pose the palette is identity, so the weighted blend reproduces the assembled
+        // rest mesh (no-regression guard); enable GPU skinning only when a validated palette resolved.
         let skinningEnabled: Float = resolvedPalette.isEmpty ? 0 : 1
 
         var meshUniforms = WPEPuppetMeshUniforms(

@@ -429,9 +429,18 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let name: String
     public let imageRelativePath: String
     public let materialRelativePath: String?
+    /// Scene object this layer attaches to (the parent puppet for body-split rigs). `nil` for roots.
+    public let parentObjectID: String?
+    /// Named MDAT anchor on the parent puppet this layer follows (e.g. 头部/脖颈/胸部). `nil` when unattached.
+    public let attachment: String?
     public let origin: SIMD3<Double>
     public let scale: SIMD3<Double>
     public let angles: SIMD3<Double>
+    /// The object's own (pre-inheritance) transform. `origin`/`scale`/`angles` are parent-baked;
+    /// these retain the local values so attachment-following can re-derive the child placement.
+    public let localOrigin: SIMD3<Double>
+    public let localScale: SIMD3<Double>
+    public let localAngles: SIMD3<Double>
     public let visible: Bool
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
@@ -450,9 +459,14 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         name: String,
         imageRelativePath: String,
         materialRelativePath: String?,
+        parentObjectID: String? = nil,
+        attachment: String? = nil,
         origin: SIMD3<Double>,
         scale: SIMD3<Double>,
         angles: SIMD3<Double>,
+        localOrigin: SIMD3<Double>? = nil,
+        localScale: SIMD3<Double>? = nil,
+        localAngles: SIMD3<Double>? = nil,
         visible: Bool,
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
@@ -470,9 +484,14 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.name = name
         self.imageRelativePath = imageRelativePath
         self.materialRelativePath = materialRelativePath
+        self.parentObjectID = parentObjectID
+        self.attachment = attachment
         self.origin = origin
         self.scale = scale
         self.angles = angles
+        self.localOrigin = localOrigin ?? origin
+        self.localScale = localScale ?? scale
+        self.localAngles = localAngles ?? angles
         self.visible = visible
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation

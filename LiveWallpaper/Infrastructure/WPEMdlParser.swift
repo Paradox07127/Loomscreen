@@ -7,17 +7,21 @@ struct WPEPuppetModel: Equatable, Sendable {
     let meshes: [WPEPuppetMesh]
     let bones: [WPEPuppetBone]
     let animations: [WPEPuppetAnimation]
+    /// MDAT anchors mapping a named scene attachment (e.g. 头部/脖颈/胸部) to a bone + bind transform.
+    let attachments: [WPEPuppetAttachment]
 
     init(
         version: Int,
         meshes: [WPEPuppetMesh],
         bones: [WPEPuppetBone] = [],
-        animations: [WPEPuppetAnimation] = []
+        animations: [WPEPuppetAnimation] = [],
+        attachments: [WPEPuppetAttachment] = []
     ) {
         self.version = version
         self.meshes = meshes
         self.bones = bones
         self.animations = animations
+        self.attachments = attachments
     }
 }
 
@@ -54,6 +58,18 @@ struct WPEPuppetBone: Equatable, Sendable {
     let parentIndex: Int?
     /// Raw MDLS metadata retained for future runtime animation. Parser must not bake it into MDLV vertices.
     let rawMatrix: [Float]
+}
+
+struct WPEPuppetAttachment: Equatable, Sendable {
+    let name: String
+    let boneIndex: Int
+    /// MDAT0001 bind transform in the parent puppet's model space, stored as 16 little-endian
+    /// f32 in column-major simd/Metal order.
+    let bindMatrix: [Float]
+
+    var matrix: simd_float4x4 {
+        WPEMdlParser.matrix(fromColumnMajorFloats: bindMatrix) ?? matrix_identity_float4x4
+    }
 }
 
 struct WPEPuppetMeshPart: Equatable, Sendable {
@@ -101,12 +117,35 @@ struct WPEPuppetAnimationLayer: Equatable, Sendable {
     let blend: Float
 }
 
+/// Result of evaluating a puppet's animation layers: the skinning `palette` plus the diagnostics
+/// the render gate needs to decide whether skinning is safe to enable for this puppet.
+struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
+    enum TransformSpace: String, Equatable, Sendable {
+        case worldAbsolute
+        case parentLocal
+    }
+
+    let palette: [simd_float4x4]
+    let paletteCount: Int
+    let transformSpace: TransformSpace?
+    let parentChannelMapSucceeded: Bool
+
+    static let empty = WPEPuppetPaletteEvaluation(
+        palette: [],
+        paletteCount: 0,
+        transformSpace: nil,
+        parentChannelMapSucceeded: false
+    )
+}
+
 /// Evaluates puppet animation layers into a per-bone skinning palette indexed by skin-blend (bone)
-/// index. MDLA channels store parent-LOCAL transforms, so world matrices are composed down the
-/// skeleton hierarchy and `palette[boneIndex] = worldCurrent · worldBind⁻¹`. The first non-additive
-/// layer is the base pose; additive layers add their per-bone delta-from-bind on top in TRS space
-/// (translation/euler added, scale multiplied), weighted by `blend`. Frame 0 of every layer is the
-/// bind pose, so the palette is identity there (the regression guard against P0's static draw).
+/// index. The MDLS raw matrices are used as the inverse-bind ground truth, and each animation's
+/// channel space is auto-detected: MDLA0006 files (e.g. Kal'tsit's body/hair) store WORLD-absolute
+/// frame-0 transforms, while older/corpus variants may be parent-local and are composed down the
+/// hierarchy. `palette[boneIndex] = worldCurrent · worldBind⁻¹`. The first non-additive layer is the
+/// base pose; additive layers add their per-bone delta-from-bind on top in TRS space (translation/
+/// euler added, scale multiplied), weighted by `blend`. Frame 0 of every layer is the bind pose, so
+/// the palette is identity there (the regression guard against P0's static draw).
 enum WPEPuppetAnimationEvaluator {
     /// Single-animation convenience: one non-additive layer at full rate/blend.
     static func palette(
@@ -126,12 +165,29 @@ enum WPEPuppetAnimationEvaluator {
         bones: [WPEPuppetBone],
         at time: Double
     ) -> [simd_float4x4] {
+        evaluate(layers: layers, bones: bones, at: time).palette
+    }
+
+    static func paletteEvaluation(
+        layers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone],
+        at time: Double
+    ) -> WPEPuppetPaletteEvaluation {
+        evaluate(layers: layers, bones: bones, at: time)
+    }
+
+    private static func evaluate(
+        layers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone],
+        at time: Double
+    ) -> WPEPuppetPaletteEvaluation {
         guard let baseIndex = layers.indices.first(where: { !layers[$0].additive }) ?? layers.indices.first else {
-            return []
+            return .empty
         }
         let base = layers[baseIndex]
         let baseChannels = base.animation.channels
-        guard !baseChannels.isEmpty else { return [] }
+        guard !baseChannels.isEmpty else { return .empty }
+        let requiredPaletteCount = paletteCount(for: baseChannels)
 
         let baseFrame = sampledFrameIndex(for: base.animation, at: time * base.rate)
         // Exclude the base layer by index (not by predicate): an all-additive stack must not
@@ -154,7 +210,12 @@ enum WPEPuppetAnimationEvaluator {
 
         // Every layer at its bind frame → identity palette (exact, no FP drift through the inverse).
         if baseFrame == 0, additiveLayers.allSatisfy({ $0.frame == 0 }) {
-            return identityPalette(count: paletteCount(for: baseChannels))
+            return WPEPuppetPaletteEvaluation(
+                palette: identityPalette(count: requiredPaletteCount),
+                paletteCount: requiredPaletteCount,
+                transformSpace: nil,
+                parentChannelMapSucceeded: parentChannelMap(channels: baseChannels, bones: bones) != nil
+            )
         }
 
         // Combined parent-LOCAL transform for a base channel: the base pose, plus each additive
@@ -184,10 +245,36 @@ enum WPEPuppetAnimationEvaluator {
             return matrix(translation: translation, euler: euler, scale: scale)
         }
 
-        if let parentChannel = parentChannelMap(channels: baseChannels, bones: bones) {
-            return hierarchyPalette(channels: baseChannels, parentChannel: parentChannel, localMatrix: localMatrix)
+        guard let parentChannel = parentChannelMap(channels: baseChannels, bones: bones) else {
+            // No usable skeleton hierarchy. A genuinely bone-less model (flat single-root rig or a
+            // unit test) is correctly skinned by the independent path — each channel is its own root.
+            // But a puppet that DOES ship bones whose hierarchy we could not reconstruct must fail
+            // closed rather than mis-compose a partial skeleton (the old "torso perturbed" scatter);
+            // the render gate additionally refuses to skin when `parentChannelMapSucceeded` is false.
+            let palette = bones.isEmpty
+                ? independentPalette(channels: baseChannels, localMatrix: localMatrix)
+                : []
+            return WPEPuppetPaletteEvaluation(
+                palette: palette,
+                paletteCount: requiredPaletteCount,
+                transformSpace: nil,
+                parentChannelMapSucceeded: false
+            )
         }
-        return independentPalette(channels: baseChannels, localMatrix: localMatrix)
+        let space = transformSpace(channels: baseChannels, bones: bones, localMatrix: localMatrix)
+        let palette = hierarchyPalette(
+            channels: baseChannels,
+            bones: bones,
+            parentChannel: parentChannel,
+            transformSpace: space,
+            localMatrix: localMatrix
+        )
+        return WPEPuppetPaletteEvaluation(
+            palette: palette,
+            paletteCount: requiredPaletteCount,
+            transformSpace: space,
+            parentChannelMapSucceeded: true
+        )
     }
 
     private static func additiveScaleRatio(
@@ -208,12 +295,12 @@ enum WPEPuppetAnimationEvaluator {
 
     /// Palette length must cover every skin-blend index the shader can sample
     /// (`bonePalette[skinBlendIndex]`), which is `maxBoneIndex + 1`, not merely the channel count.
-    private static func paletteCount(for channels: [WPEPuppetAnimChannel]) -> Int {
+    static func paletteCount(for channels: [WPEPuppetAnimChannel]) -> Int {
         let maxBoneIndex = channels.map(\.boneIndex).max() ?? -1
         return max(channels.count, maxBoneIndex + 1, 1)
     }
 
-    private static func matrixIsFinite(_ matrix: simd_float4x4) -> Bool {
+    static func matrixIsFinite(_ matrix: simd_float4x4) -> Bool {
         for column in [matrix.columns.0, matrix.columns.1, matrix.columns.2, matrix.columns.3]
         where !(column.x.isFinite && column.y.isFinite && column.z.isFinite && column.w.isFinite) {
             return false
@@ -275,12 +362,84 @@ enum WPEPuppetAnimationEvaluator {
         return parentChannel
     }
 
+    static func hasUsableHierarchy(layers: [WPEPuppetAnimationLayer], bones: [WPEPuppetBone]) -> Bool {
+        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return false }
+        return parentChannelMap(channels: base.animation.channels, bones: bones) != nil
+    }
+
+    /// Detects whether MDLA channels store world-absolute transforms (MDLA0006, e.g. Kal'tsit) or
+    /// parent-local transforms, by comparing each child channel's frame-0 transform against the MDLS
+    /// raw bind matrix both directly (world) and after composing the parent (local).
+    private static func transformSpace(
+        channels: [WPEPuppetAnimChannel],
+        bones: [WPEPuppetBone],
+        localMatrix: (Int, Bool) -> simd_float4x4
+    ) -> WPEPuppetPaletteEvaluation.TransformSpace {
+        guard let parentChannel = parentChannelMap(channels: channels, bones: bones) else {
+            return .parentLocal
+        }
+        let rawByBone = rawMatricesByBone(bones)
+        var worldError: Float = 0
+        var localError: Float = 0
+        var sampleCount: Float = 0
+        for (position, channel) in channels.enumerated() where parentChannel[position] != nil {
+            guard let raw = rawByBone[channel.boneIndex] else { continue }
+            let frame0 = localMatrix(position, true)
+            worldError += translationDistance(frame0, raw)
+            if let parent = parentChannel[position],
+               let parentRaw = rawByBone[channels[parent].boneIndex] {
+                localError += translationDistance(parentRaw * frame0, raw)
+            } else {
+                localError += translationDistance(frame0, raw)
+            }
+            sampleCount += 1
+        }
+        guard sampleCount > 0 else { return .parentLocal }
+        // Kal'tsit MDLA0006 child frame-0 translations match the MDLS world raw matrices exactly;
+        // composing them as parent-local would double-apply ancestor motion. Stay conservative so
+        // older genuinely-parent-local files keep composing.
+        return worldError <= min(localError * 0.25, sampleCount * 0.5)
+            ? .worldAbsolute
+            : .parentLocal
+    }
+
+    private static func rawMatricesByBone(_ bones: [WPEPuppetBone]) -> [Int: simd_float4x4] {
+        Dictionary(uniqueKeysWithValues: bones.compactMap { bone -> (Int, simd_float4x4)? in
+            guard let raw = WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix) else { return nil }
+            return (bone.index, raw)
+        })
+    }
+
+    private static func translationDistance(_ lhs: simd_float4x4, _ rhs: simd_float4x4) -> Float {
+        simd_length(SIMD3<Float>(
+            lhs.columns.3.x - rhs.columns.3.x,
+            lhs.columns.3.y - rhs.columns.3.y,
+            lhs.columns.3.z - rhs.columns.3.z
+        ))
+    }
+
     private static func hierarchyPalette(
         channels: [WPEPuppetAnimChannel],
+        bones: [WPEPuppetBone],
         parentChannel: [Int?],
+        transformSpace: WPEPuppetPaletteEvaluation.TransformSpace,
         localMatrix: (Int, Bool) -> simd_float4x4
     ) -> [simd_float4x4] {
+        let rawByBone = rawMatricesByBone(bones)
+
         func worldMatrices(bind: Bool) -> [simd_float4x4] {
+            // Bind world comes from the MDLS raw matrices (the authored inverse-bind ground truth),
+            // falling back to the channel's own frame-0 transform when a bone lacks a raw matrix.
+            if bind {
+                return channels.enumerated().map { position, channel in
+                    rawByBone[channel.boneIndex] ?? localMatrix(position, true)
+                }
+            }
+            // World-absolute channels are already in world space; using them directly avoids the
+            // double-counting that parent composition would otherwise introduce.
+            if transformSpace == .worldAbsolute {
+                return channels.indices.map { localMatrix($0, false) }
+            }
             var cache = [simd_float4x4?](repeating: nil, count: channels.count)
             var visiting = [Bool](repeating: false, count: channels.count)
             func world(_ index: Int) -> simd_float4x4 {
@@ -451,6 +610,19 @@ enum WPEMdlParser {
             metadataReader = reader
         }
 
+        let attachments: [WPEPuppetAttachment]
+        do {
+            var attachmentReader = metadataReader
+            attachments = try parseAttachmentsIfPresent(reader: &attachmentReader)
+            metadataReader = attachmentReader
+        } catch {
+            Logger.warning(
+                "WPE puppet MDL attachment parse failed; rendering without MDAT anchors: \(error)",
+                category: .wpeRender
+            )
+            attachments = []
+        }
+
         let animations: [WPEPuppetAnimation]
         do {
             animations = try parseAnimationsIfPresent(reader: &metadataReader)
@@ -466,7 +638,8 @@ enum WPEMdlParser {
             version: version,
             meshes: meshes,
             bones: bones,
-            animations: animations
+            animations: animations,
+            attachments: attachments
         )
     }
 
@@ -697,6 +870,66 @@ enum WPEMdlParser {
         return bones
     }
 
+    static func matrix(fromColumnMajorFloats values: [Float]) -> simd_float4x4? {
+        guard values.count >= 16 else { return nil }
+        return simd_float4x4(
+            SIMD4<Float>(values[0], values[1], values[2], values[3]),
+            SIMD4<Float>(values[4], values[5], values[6], values[7]),
+            SIMD4<Float>(values[8], values[9], values[10], values[11]),
+            SIMD4<Float>(values[12], values[13], values[14], values[15])
+        )
+    }
+
+    /// MDAT0001 attachment anchors (between MDLS and MDLA). Layout validated against the on-disk
+    /// corpus (Kal'tsit 主体: 头部→5/脖颈→3/胸部→1; 长发3: 头发附件→0):
+    ///
+    /// - Section: tag(8) + flag u8 + sectionEnd u32 + anchorCount **u16**.
+    /// - Per anchor: boneIndex **u16**, name cstring (UTF-8), 16 little-endian f32 column-major
+    ///   bind matrix (bone-local anchor offset).
+    private static func parseAttachmentsIfPresent(reader: inout WPEMdlBinaryReader) throws -> [WPEPuppetAttachment] {
+        guard let attachmentOffset = reader.findTag("MDAT", from: reader.currentOffset) else {
+            return []
+        }
+        // MDAT precedes MDLA in the section order; if the next MDAT lies past MDLA it is a false
+        // positive inside the animation payload, so there is no real attachment section to read.
+        if let animationOffset = reader.findTag("MDLA", from: reader.currentOffset),
+           animationOffset < attachmentOffset {
+            return []
+        }
+        try reader.seek(to: attachmentOffset)
+        let tag = try reader.readFixedString(byteCount: 8)
+        guard tag == "MDAT0001" else { return [] }
+        _ = try reader.readUInt8()
+        let declaredSectionEnd = Int(try reader.readUInt32())
+        let anchorCount = try reader.readUInt16()
+        let sectionEnd = declaredSectionEnd > reader.currentOffset
+            ? min(declaredSectionEnd, reader.dataCount)
+            : reader.dataCount
+
+        var attachments: [WPEPuppetAttachment] = []
+        attachments.reserveCapacity(Int(anchorCount))
+        for _ in 0..<anchorCount {
+            // Keep every read inside the declared section; a false-positive `MDAT` tag would otherwise
+            // read garbage anchors from neighbouring data. On overrun, bail to the no-attachment path.
+            guard reader.currentOffset + 2 <= sectionEnd else {
+                throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
+            }
+            let boneIndex = Int(try reader.readUInt16())
+            let name = try reader.readCString()
+            guard reader.currentOffset + 16 * MemoryLayout<Float>.size <= sectionEnd else {
+                throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
+            }
+            var matrix: [Float] = []
+            matrix.reserveCapacity(16)
+            for _ in 0..<16 { matrix.append(try reader.readFloat()) }
+            attachments.append(WPEPuppetAttachment(name: name, boneIndex: boneIndex, bindMatrix: matrix))
+        }
+        if sectionEnd <= reader.dataCount {
+            try reader.seek(to: sectionEnd)
+        }
+        return attachments
+    }
+
     /// One keyframe = 9 little-endian f32: [Tx,Ty,Tz, Rx,Ry,Rz, Sx,Sy,Sz].
     private static let animationKeyByteCount = 9 * MemoryLayout<Float>.size
 
@@ -859,6 +1092,7 @@ enum WPEMdlParserError: Error, Equatable, Sendable {
     case invalidIndexBuffer(UInt32)
     case invalidSkeletonMatrix(UInt32)
     case invalidSkeletonTrailingMarker(offset: Int, value: UInt8)
+    case invalidAttachmentHeader(offset: Int)
     case invalidAnimationHeader(offset: Int)
     case invalidAnimationChannelByteCount(animationID: Int, byteCount: UInt32, expected: UInt32)
     case invalidAnimationChannelDelimiter(
