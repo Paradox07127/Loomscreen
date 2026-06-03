@@ -8,20 +8,23 @@ import Foundation
 ///
 /// Holds one `FileHandle` for the provider's lifetime; `NSLock` serializes the
 /// seek/read pair so concurrent asset loads can't interleave the file offset.
+/// The few consumers that require a file URL (AVFoundation video/audio, some
+/// ImageIO/Core Text paths) get an entry staged into a per-provider temporary
+/// directory whose lifetime equals the scene session — cleaned up on deinit, so
+/// staged files never outlive the wallpaper that needed them.
 final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Sendable {
     private let packageURL: URL
     private let package: WallpaperEnginePackage
     private let handle: FileHandle
     private let lock = NSLock()
-    private let stager: WPEPackageEntryDiskStager
-    /// Stable identity for staged-file content addressing. Two providers over
-    /// the same package path share staged temporaries.
-    private let stagingNamespace: String
+    /// Per-provider staging directory (lazily created); removed on deinit.
+    private let stagingRoot: URL
+    private var stagedPaths: [String: URL] = [:]
 
-    init(packageURL: URL, stager: WPEPackageEntryDiskStager = .shared) throws {
+    init(packageURL: URL) throws {
         self.packageURL = packageURL
-        self.stager = stager
-        self.stagingNamespace = packageURL.standardizedFileURL.path
+        self.stagingRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("LiveWallpaper-WPEPkgStage-\(UUID().uuidString)", isDirectory: true)
         let handle = try FileHandle(forReadingFrom: packageURL)
         do {
             self.package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
@@ -34,6 +37,7 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
 
     deinit {
         try? handle.close()
+        try? FileManager.default.removeItem(at: stagingRoot)
     }
 
     func data(atRelativePath relativePath: String) throws -> Data {
@@ -49,16 +53,30 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
 
     func stagedURL(atRelativePath relativePath: String, purpose: WPESceneAssetURLPurpose) throws -> WPEStagedAssetURL {
         let entry = try packageEntry(for: relativePath)
-        let key = "\(stagingNamespace)#\(entry.name)@\(entry.dataOffset):\(entry.dataSize)"
-        return try stager.stagedURL(forKey: key, suggestedName: entry.name) { [weak self] in
-            guard let self else { throw WPESceneAssetProviderError.unreadable(relativePath) }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            do {
-                return try self.package.readEntry(entry, from: self.handle)
-            } catch {
-                throw WPESceneAssetProviderError.unreadable(relativePath)
-            }
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = stagedPaths[entry.name],
+           FileManager.default.fileExists(atPath: existing.path) {
+            return WPEStagedAssetURL(url: existing)
+        }
+        let data: Data
+        do {
+            data = try package.readEntry(entry, from: handle)
+        } catch {
+            throw WPESceneAssetProviderError.unreadable(relativePath)
+        }
+        do {
+            try FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+            let safeName = (entry.name as NSString).lastPathComponent
+            let target = stagingRoot.appendingPathComponent(
+                "\(stagedPaths.count)-\(safeName.isEmpty ? "asset" : safeName)",
+                isDirectory: false
+            )
+            try data.write(to: target, options: [.atomic])
+            stagedPaths[entry.name] = target
+            return WPEStagedAssetURL(url: target)
+        } catch {
+            throw WPESceneAssetProviderError.stagingUnavailable(relativePath)
         }
     }
 

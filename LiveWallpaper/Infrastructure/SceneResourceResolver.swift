@@ -260,11 +260,10 @@ struct SceneResourceResolver: Sendable {
     /// needs one (fonts, audio, video). Directory-backed returns the project
     /// file itself; package-backed materializes a staged temporary.
     func resolveExistingFileURL(relativePath: String) throws -> URL {
-        guard provider.exists(atRelativePath: relativePath) else {
-            throw ResolveError.fileMissing
-        }
         do {
             return try provider.stagedURL(atRelativePath: relativePath, purpose: .fileConsumer).url
+        } catch WPESceneAssetProviderError.invalidRelativePath {
+            throw ResolveError.pathEscape
         } catch {
             throw ResolveError.fileMissing
         }

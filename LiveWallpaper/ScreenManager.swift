@@ -1610,6 +1610,7 @@ final class ScreenManager {
             let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
+                origin: configuration.wpeOrigin,
                 frame: screen.frame,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineRoot

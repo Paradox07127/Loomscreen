@@ -101,6 +101,7 @@ final class AmbientWallpaperSessionBuilder {
     /// Builds a scene wallpaper session.
     func makeSceneSession(
         descriptor: SceneDescriptor,
+        origin: WPEOrigin? = nil,
         frame: CGRect,
         dependencyMounts: [WPEAssetMount] = [],
         engineAssetsRootURL: URL? = nil,
@@ -134,12 +135,32 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Scene descriptor cache escapes app support: \(descriptor.cacheRelativePath)", category: .screenManager)
             return nil
         }
-        guard fileManager.fileExists(atPath: cacheURL.path) else {
-            Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
-            return nil
+        // Package-/source-backed scenes read assets in place; only the legacy
+        // cache backing requires the extracted directory to exist. The cache
+        // root URL is still passed through for the small `project.json` the
+        // property schema reads (kept even for package-backed imports).
+        let assetProvider = sceneAssetProvider(descriptor: descriptor, origin: origin, fileManager: fileManager)
+        switch descriptor.assetStorage {
+        case .cache:
+            guard fileManager.fileExists(atPath: cacheURL.path) else {
+                Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
+                return nil
+            }
+        case .sourceDirectory, .packageSource:
+            guard assetProvider != nil else {
+                Logger.warning("Scene source unavailable for in-place read: \(descriptor.workshopID)", category: .screenManager)
+                return nil
+            }
         }
-        let entryProbe = SceneResourceResolver(cacheRootURL: cacheURL)
-        guard (try? entryProbe.resolveExistingFileURL(relativePath: descriptor.entryFile)) != nil else {
+
+        let entryAvailable: Bool
+        if let assetProvider {
+            entryAvailable = assetProvider.exists(atRelativePath: descriptor.entryFile)
+        } else {
+            entryAvailable = (try? SceneResourceResolver(cacheRootURL: cacheURL)
+                .resolveExistingFileURL(relativePath: descriptor.entryFile)) != nil
+        }
+        guard entryAvailable else {
             Logger.warning("Scene descriptor entry file failed safety check: \(descriptor.entryFile)", category: .screenManager)
             return nil
         }
@@ -156,6 +177,7 @@ final class AmbientWallpaperSessionBuilder {
             renderer = try WPEMetalSceneRenderer(
                 descriptor: descriptor,
                 cacheRootURL: cacheURL,
+                assetProvider: assetProvider,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineAssetsRootURL,
                 frame: rendererFrame,
@@ -173,6 +195,51 @@ final class AmbientWallpaperSessionBuilder {
         let session = SceneWallpaperSession(window: window, renderer: renderer)
         session.startLoadIfNeeded()
         return session
+    }
+
+    /// Builds the in-place asset provider for a scene. Returns `nil` for legacy
+    /// `.cache` scenes (the renderer then defaults to the cache directory) and
+    /// for source-/package-backed scenes whose source can't be opened (the
+    /// caller treats that as a failed build).
+    private func sceneAssetProvider(
+        descriptor: SceneDescriptor,
+        origin: WPEOrigin?,
+        fileManager: FileManager
+    ) -> (any WPESceneAssetProvider)? {
+        switch descriptor.assetStorage {
+        case .cache:
+            return nil
+        case .sourceDirectory:
+            guard let source = resolveSourceFolder(origin: origin) else { return nil }
+            let provider = WPEDirectorySceneAssetProvider(rootURL: source.url)
+            return WPESecurityScopedSceneAssetProvider(
+                wrapped: provider, scopedURL: source.url, didStartAccessing: source.didStart
+            )
+        case .packageSource(let fileName):
+            guard let source = resolveSourceFolder(origin: origin) else { return nil }
+            let packageURL = source.url.appendingPathComponent(fileName, isDirectory: false)
+            guard fileManager.fileExists(atPath: packageURL.path),
+                  let provider = try? WPEPackageSceneAssetProvider(packageURL: packageURL) else {
+                if source.didStart { source.url.stopAccessingSecurityScopedResource() }
+                Logger.warning("Scene package missing/unreadable: \(packageURL.lastPathComponent)", category: .screenManager)
+                return nil
+            }
+            return WPESecurityScopedSceneAssetProvider(
+                wrapped: provider, scopedURL: source.url, didStartAccessing: source.didStart
+            )
+        }
+    }
+
+    /// Resolves a scene's source folder from its origin bookmark and opens its
+    /// security scope. The caller owns the scope for the provider's lifetime.
+    private func resolveSourceFolder(origin: WPEOrigin?) -> (url: URL, didStart: Bool)? {
+        guard let origin,
+              case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                origin.sourceFolderBookmark, target: .transient
+              ) else {
+            return nil
+        }
+        return (resolved.url, resolved.url.startAccessingSecurityScopedResource())
     }
     #endif
 

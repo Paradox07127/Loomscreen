@@ -267,6 +267,19 @@ final class WallpaperEngineImportService {
 
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
+            // Default: read the packaged scene in place from scene.pkg — no
+            // extraction, so no second multi-GB copy in wpe-cache. Falls back to
+            // extracting into the cache only when the package can't be opened or
+            // parsed for in-place use.
+            if let packageResult = await finishScenePackageBackedImport(
+                project: project,
+                pkgURL: pkgURL,
+                sourceFolderURL: folderURL,
+                sourceBookmark: sourceBookmark
+            ) {
+                return packageResult
+            }
+
             let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
             guard case .success(let cacheURL) = cacheResult else {
                 if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
@@ -359,6 +372,72 @@ final class WallpaperEngineImportService {
             cacheRelativePath: cacheRelativePath(for: project),
             entryFile: project.entryFile,
             capabilityTier: tier,
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
+        )
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
+        )
+
+        if tier == .unsupported {
+            return .unsupported(origin: origin)
+        }
+        return .ready(.scene(descriptor), origin: origin)
+    }
+
+    /// Imports a packaged scene to read in place from `scene.pkg` (no
+    /// extraction). Returns `nil` when the package can't be opened/parsed for
+    /// in-place use, so the caller falls back to extracting into the cache.
+    private func finishScenePackageBackedImport(
+        project: WallpaperEngineProject,
+        pkgURL: URL,
+        sourceFolderURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult? {
+        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+              let sceneData = try? provider.data(atRelativePath: project.entryFile) else {
+            return nil
+        }
+        let document: WPESceneDocument
+        do {
+            document = try WPESceneDocumentParser.parse(data: sceneData)
+        } catch {
+            return nil
+        }
+
+        // Best-effort metadata-only cache (just project.json) so the property
+        // schema / inspector keep working; heavy assets stay in the package.
+        _ = try? await cache.ensureProjectManifestCache(
+            workshopID: project.workshopID,
+            sourceFolderURL: sourceFolderURL
+        )
+
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            origin: nil
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            primaryProvider: provider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: project,
+            scenePackageEntries: provider.entryNames
+        )
+        let descriptor = SceneDescriptor(
+            workshopID: project.workshopID,
+            cacheRelativePath: cacheRelativePath(for: project),
+            entryFile: project.entryFile,
+            capabilityTier: tier,
+            assetStorage: .packageSource(fileName: pkgURL.lastPathComponent),
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             preflightTier: preflight.tier,
             preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)

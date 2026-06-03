@@ -25,6 +25,26 @@ struct WPERenderPipelineBuilder: Sendable {
         )
     }
 
+    init(
+        primaryProvider: any WPESceneAssetProvider,
+        dependencyMounts: [WPEAssetMount] = [],
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil
+    ) {
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryProvider: primaryProvider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
+        )
+        self.shaderLoader = WPEShaderSourceLoader(
+            primaryProvider: primaryProvider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
+        )
+    }
+
     func build(graph: WPERenderGraph) throws -> WPEPreparedRenderPipeline {
         let layers = try graph.layers.map { layer in
             let passes = try layer.passes.map { pass in
@@ -42,8 +62,7 @@ struct WPERenderPipelineBuilder: Sendable {
     private func loadPuppetModel(for layer: WPERenderLayer) -> WPEPuppetModel? {
         guard let puppetPath = layer.puppetPath else { return nil }
         do {
-            let url = try resolver.resolveExistingFileURL(relativePath: puppetPath)
-            let data = try Data(contentsOf: url)
+            let data = try resolver.data(relativePath: puppetPath)
             let model = try WPEMdlParser.parse(data: data)
             // Only the modern pre-assembled puppet generations (MDLV0021/0023)
             // ship MDLV vertices already in assembled object space, which the
@@ -108,6 +127,20 @@ private struct WPEShaderSourceLoader: Sendable {
     ) {
         self.resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
+        )
+    }
+
+    init(
+        primaryProvider: any WPESceneAssetProvider,
+        dependencyMounts: [WPEAssetMount] = [],
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil
+    ) {
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryProvider: primaryProvider,
             dependencyMounts: dependencyMounts,
             engineAssetsRootURL: engineAssetsRootURL,
             tracer: tracer
@@ -372,15 +405,9 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func readShaderSource(path: String, shaderName: String, stage: String) throws -> String {
-        let url: URL
-        do {
-            url = try resolveExistingFileURL(relativePath: path)
-        } catch {
-            throw WPERenderPipelineError.shaderMissing(name: shaderName, stage: stage, path: path)
-        }
         let data: Data
         do {
-            data = try Data(contentsOf: url)
+            data = try resolver.data(relativePath: path)
         } catch {
             throw WPERenderPipelineError.shaderMissing(name: shaderName, stage: stage, path: path)
         }
@@ -606,9 +633,9 @@ private struct WPEShaderSourceLoader: Sendable {
         let localPath = localIncludePath(includePath, requestedBy: requestedBy)
         let rootPath = "shaders/\(includePath)"
         let resolvedPath: String
-        if (try? resolveExistingFileURL(relativePath: localPath)) != nil {
+        if resolver.exists(relativePath: localPath) {
             resolvedPath = localPath
-        } else if (try? resolveExistingFileURL(relativePath: rootPath)) != nil {
+        } else if resolver.exists(relativePath: rootPath) {
             resolvedPath = rootPath
         } else {
             throw WPERenderPipelineError.includeMissing(path: includePath, requestedBy: requestedBy)
@@ -623,8 +650,12 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func readRawUTF8(path: String) throws -> String {
-        let url = try resolveExistingFileURL(relativePath: path)
-        let data = try Data(contentsOf: url)
+        let data: Data
+        do {
+            data = try resolver.data(relativePath: path)
+        } catch {
+            throw WPERenderPipelineError.includeMissing(path: path, requestedBy: "")
+        }
         guard let source = String(data: data, encoding: .utf8) else {
             throw WPERenderPipelineError.invalidSourceEncoding(path: path)
         }
@@ -1284,13 +1315,5 @@ private struct WPEShaderSourceLoader: Sendable {
         }
     }
 
-    private func resolveExistingFileURL(relativePath: String) throws -> URL {
-        do {
-            return try resolver.resolveExistingFileURL(relativePath: relativePath)
-        } catch SceneResourceResolver.ResolveError.fileMissing,
-                SceneResourceResolver.ResolveError.pathEscape {
-            throw WPERenderPipelineError.includeMissing(path: relativePath, requestedBy: "")
-        }
-    }
 }
 #endif

@@ -24,15 +24,36 @@ struct WPESceneCapabilityClassifier: Sendable {
         dependencyMounts: [WPEAssetMount] = [],
         engineAssetsRootURL: URL? = nil
     ) -> SceneCapabilityTier {
+        classify(document: document, resolver: WPEMultiRootResourceResolver(
+            primaryRootURL: cacheURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL
+        ))
+    }
+
+    /// Package-/source-backed variant — classifies against an in-place provider
+    /// without extracting to a cache directory.
+    func capabilityTier(
+        for document: WPESceneDocument,
+        primaryProvider: any WPESceneAssetProvider,
+        dependencyMounts: [WPEAssetMount] = [],
+        engineAssetsRootURL: URL? = nil
+    ) -> SceneCapabilityTier {
+        classify(document: document, resolver: WPEMultiRootResourceResolver(
+            primaryProvider: primaryProvider,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL
+        ))
+    }
+
+    private func classify(
+        document: WPESceneDocument,
+        resolver: WPEMultiRootResourceResolver
+    ) -> SceneCapabilityTier {
         guard !document.imageObjects.isEmpty else {
             return .unsupported
         }
 
-        let resolver = WPEMultiRootResourceResolver(
-            primaryRootURL: cacheURL,
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRootURL
-        )
         var resolvable = 0
         var unresolvable = 0
         for object in document.imageObjects {
@@ -59,7 +80,7 @@ struct WPESceneCapabilityClassifier: Sendable {
         through resolver: WPEMultiRootResourceResolver
     ) -> Bool {
         guard !relativePath.isEmpty else { return false }
-        return (try? resolver.resolveExistingFileURL(relativePath: relativePath)) != nil
+        return resolver.exists(relativePath: relativePath)
     }
 }
 #endif

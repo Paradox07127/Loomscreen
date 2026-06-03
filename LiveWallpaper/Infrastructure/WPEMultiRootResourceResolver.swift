@@ -64,6 +64,18 @@ struct WPEMultiRootResourceResolver: Sendable {
         self.tracer = tracer
     }
 
+    /// Existence probe across the same cascade, without staging or reading
+    /// bytes — used by shader-include resolution to pick the right candidate.
+    func exists(relativePath: String) -> Bool {
+        if let dependency = dependencyReference(relativePath) {
+            return dependencyMounts[dependency.workshopID]?.exists(relativePath: dependency.childPath) ?? false
+        }
+        if primary.exists(relativePath: relativePath) { return true }
+        if let builtinResolver, builtinResolver.exists(relativePath: relativePath) { return true }
+        if let engineAssetsResolver, engineAssetsResolver.exists(relativePath: relativePath) { return true }
+        return false
+    }
+
     /// Reads raw bytes for a concrete asset path, following the same
     /// primary → built-in → engine-assets (or dependency mount) cascade as the
     /// image/URL resolvers.
