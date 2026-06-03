@@ -40,6 +40,13 @@ public struct GlobalSettings: Codable, Sendable {
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
     public var recentWPEImports: [WPEHistoryEntry] = []
+    /// Workshop IDs the user explicitly deleted. The auto-import scan
+    /// (`WorkshopFolderImportCoordinator.ingestExistingDownloads`) skips these so
+    /// a still-present SteamCMD download or library-folder copy doesn't silently
+    /// reappear after a delete. Cleared the moment the user re-adds the item
+    /// deliberately (paste / download / manual folder import) via
+    /// `SettingsManager.recordWPEImport(_:)`. Capped in `SettingsManager`.
+    public var deletedWorkshopIDs: [String] = []
     /// Per-app "pause the wallpaper while this app is in use" rules. Empty by
     /// default; evaluated event-driven off NSWorkspace activation/launch/quit
     /// notifications, so it adds no idle cost.
@@ -102,6 +109,7 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcutsEnabled: Bool = true,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
+        deletedWorkshopIDs: [String] = [],
         applicationPerformanceRules: [ApplicationPerformanceRule] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
         developerModeEnabled: Bool = false,
@@ -119,6 +127,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.globalShortcutsEnabled = globalShortcutsEnabled
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
+        self.deletedWorkshopIDs = deletedWorkshopIDs
         self.applicationPerformanceRules = applicationPerformanceRules
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.developerModeEnabled = developerModeEnabled
@@ -141,6 +150,7 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcutsEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .globalShortcutsEnabled)) ?? true
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
+        deletedWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .deletedWorkshopIDs)) ?? []
         applicationPerformanceRules = (try? c.decodeIfPresent([ApplicationPerformanceRule].self, forKey: .applicationPerformanceRules)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)

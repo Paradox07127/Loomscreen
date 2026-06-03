@@ -604,6 +604,11 @@ struct WorkshopInstalledView: View {
                     comment: "Workshop delete: history removed but cache files couldn't be trashed."
                 )
             }
+            // Also free the SteamCMD download that seeded this cache copy —
+            // otherwise its bytes linger on disk. Best-effort + recoverable
+            // (Trash); the delete tombstone recorded in `removeWorkshop` already
+            // prevents the auto-scan from resurrecting it on its own.
+            Task { await doctor.trashDownloadedItemFolders(workshopID: workshopID) }
         }
         reload()
     }

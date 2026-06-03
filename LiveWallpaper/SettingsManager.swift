@@ -175,8 +175,46 @@ final class SettingsManager {
             recent = Array(recent.prefix(Self.maxRecentWPEImports))
         }
         settings.recentWPEImports = recent
+        // A deliberate (re-)import overrides a prior delete: drop any tombstone so
+        // the item is no longer suppressed by the auto-import scan.
+        settings.deletedWorkshopIDs.removeAll { $0 == entry.origin.workshopID }
         saveGlobalSettings(settings)
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
+    /// Upper bound on the delete-tombstone list. Each tombstone is just a
+    /// workshop-ID string, but it lives in the single `global-settings.json`
+    /// blob, so cap its growth; the oldest fall off first.
+    static let maxDeletedWorkshopTombstones = 500
+
+    /// SKU-neutral equivalent of `WPEPathSafety.isSafeWorkshopID` (which is
+    /// Pro-only): rejects empty, `.`/`..`, and any separator so a persisted
+    /// tombstone can never carry an escape-capable component.
+    private static func isSafeWorkshopIDComponent(_ value: String) -> Bool {
+        !value.isEmpty
+            && value != "."
+            && value != ".."
+            && !value.contains("/")
+            && !value.contains("\\")
+            && !value.contains("..")
+    }
+
+    /// Records that the user deleted `workshopID`, so the auto-import scan won't
+    /// resurrect it from a still-present SteamCMD download or library-folder
+    /// copy. A later deliberate re-import clears it (see `recordWPEImport`).
+    func recordWPEDeleteTombstone(workshopID: String) {
+        // Tombstones are persisted scan policy, so keep the list clean: reject
+        // any id that isn't a safe path component (mirrors ProWPE's
+        // `WPEPathSafety.isSafeWorkshopID`, inlined here because that type is
+        // Pro-only while this method is compiled into both SKUs).
+        guard Self.isSafeWorkshopIDComponent(workshopID) else { return }
+        var settings = loadGlobalSettings()
+        guard !settings.deletedWorkshopIDs.contains(workshopID) else { return }
+        settings.deletedWorkshopIDs.insert(workshopID, at: 0)
+        if settings.deletedWorkshopIDs.count > Self.maxDeletedWorkshopTombstones {
+            settings.deletedWorkshopIDs = Array(settings.deletedWorkshopIDs.prefix(Self.maxDeletedWorkshopTombstones))
+        }
+        saveGlobalSettings(settings)
     }
 
     func removeWPEImport(workshopID: String) {

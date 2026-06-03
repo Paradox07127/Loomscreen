@@ -847,6 +847,74 @@ final class SteamCMDDoctorService {
         return visited
     }
 
+    /// Moves any app-managed SteamCMD download folder(s) for `workshopID` to the
+    /// Trash (recoverable). Scans the same two roots as
+    /// `enumerateDownloadedItemFolders` — the sandbox-redirected container Steam
+    /// dir and the bound workdir — so deleting an item also frees the download
+    /// that seeded its cache copy (otherwise the bytes linger and, absent a
+    /// delete tombstone, the auto-scan re-imports it). Returns the number of
+    /// folders trashed; a no-op for ids never downloaded here (e.g. external
+    /// folder imports).
+    @discardableResult
+    func trashDownloadedItemFolders(workshopID: String) async -> Int {
+        guard WPEPathSafety.isSafeWorkshopID(workshopID) else { return 0 }
+        var trashed = 0
+
+        if let appSupport = try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) {
+            // Anchor the resolved Steam root back under resolved Application
+            // Support so a symlinked `Steam` can't re-base the trash target.
+            let safeAppSupport = appSupport.standardizedFileURL.resolvingSymlinksInPath()
+            let steam = safeAppSupport
+                .appendingPathComponent("Steam", isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            if WPEPathSafety.contains(steam, in: safeAppSupport),
+               trashItemFolder(workshopID: workshopID, under: steam) {
+                trashed += 1
+            }
+        }
+
+        if let workdir = try? resolveWorkdirURL() {
+            let scope = workdir.startAccessingSecurityScopedResource()
+            defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
+            if trashItemFolder(workshopID: workshopID, under: workdir) { trashed += 1 }
+        }
+        return trashed
+    }
+
+    /// Trashes `<base>/steamapps/workshop/content/431960/<workshopID>` only when
+    /// it exists and resolves (symlinks included) to a directory still contained
+    /// in the content root — never a sibling, parent, or symlink-escaped target.
+    private func trashItemFolder(workshopID: String, under base: URL) -> Bool {
+        // Anchor the whole chain: the resolved content root must stay inside the
+        // resolved trusted base, so a symlinked `steamapps`/`workshop`/`content`/
+        // `431960` can't re-base the trash target outside it. The final
+        // item-in-contentRoot check below is necessary but not sufficient alone.
+        let safeBase = base.standardizedFileURL.resolvingSymlinksInPath()
+        let contentRoot = workshopContentRoot(under: safeBase).standardizedFileURL.resolvingSymlinksInPath()
+        guard WPEPathSafety.contains(contentRoot, in: safeBase) else { return false }
+        let item = contentRoot
+            .appendingPathComponent(workshopID, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard WPEPathSafety.contains(item, in: contentRoot) else { return false }
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: item.path(percentEncoded: false), isDirectory: &isDirectory),
+              isDirectory.boolValue else { return false }
+        do {
+            var resultingURL: NSURL?
+            try fileManager.trashItem(at: item, resultingItemURL: &resultingURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Extracts the quoted destination from SteamCMD's
     /// `Success. Downloaded item <id> to "<path>"` line. Pure (no filesystem),
     /// so it is unit-testable without a real download.

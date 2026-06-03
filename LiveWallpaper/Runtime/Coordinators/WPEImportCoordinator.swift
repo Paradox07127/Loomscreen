@@ -140,6 +140,10 @@ final class WPEImportCoordinator {
 
     func removeWorkshop(workshopID: String) {
         SettingsManager.shared.removeWPEImport(workshopID: workshopID)
+        // Tombstone the delete so the auto-import scan can't resurrect the item
+        // from a still-present SteamCMD download or library-folder copy. Applies
+        // to every delete path (Installed + Scene tab) since they all funnel here.
+        SettingsManager.shared.recordWPEDeleteTombstone(workshopID: workshopID)
 
         for var config in configurationStore.loadAll() where config.wpeOrigin?.workshopID == workshopID {
             config.wpeOrigin = nil

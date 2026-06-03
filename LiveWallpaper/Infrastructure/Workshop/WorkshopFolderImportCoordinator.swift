@@ -88,7 +88,11 @@ final class WorkshopFolderImportCoordinator {
         isIngesting = true
         defer { isIngesting = false }
 
-        var known = Set(SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID))
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        var known = Set(settings.recentWPEImports.map(\.origin.workshopID))
+        // Skip items the user explicitly deleted so a still-present download or
+        // library-folder copy doesn't silently reappear after a delete.
+        known.formUnion(settings.deletedWorkshopIDs)
         var added = 0
 
         // 1. App-managed SteamCMD download tree (container-local).
