@@ -16,6 +16,10 @@ struct WPECacheManagementView: View {
     @State private var isLoadingVideo: Bool = true
     @State private var showingVideoClearConfirmation: Bool = false
     @State private var lastVideoFreedBytes: UInt64?
+    /// Bytes of redundant SteamCMD source archives (`.pkg`) whose payload is
+    /// already unpacked into the cache — reclaimable without losing wallpapers.
+    @State private var reclaimableArchiveBytes: Int64 = 0
+    @State private var lastReclaimedBytes: UInt64?
 
     private let cache: WallpaperEngineCache
 
@@ -84,6 +88,8 @@ struct WPECacheManagementView: View {
                     }
                 }
             }
+
+            reclaimArchivesSection
 
             videoCacheSection
         }
@@ -161,6 +167,48 @@ struct WPECacheManagementView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Surfaces redundant SteamCMD download archives (`.pkg`) whose payload is
+    /// already unpacked into the cache. Reclaiming moves them to the Trash
+    /// (recoverable) without touching any wallpaper — the runtime renders from
+    /// the cache copy. Pro/direct-distribution only (Lite has no SteamCMD).
+    @ViewBuilder
+    private var reclaimArchivesSection: some View {
+        #if DIRECT_DISTRIBUTION
+        if reclaimableArchiveBytes > 0 {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(byteFormatter.string(fromByteCount: reclaimableArchiveBytes))
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    Text("Source download archives already unpacked into your cache.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button {
+                    Task { await reclaimArchives() }
+                } label: {
+                    Label("Reclaim download archives", systemImage: "internaldrive")
+                }
+                .controlSize(.regular)
+            } header: {
+                Text("Reclaimable Download Archives")
+            } footer: {
+                if let last = lastReclaimedBytes, last > 0 {
+                    Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE download-archive reclaim footer after freeing space. Placeholder is the freed byte total.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Moves the source .pkg of items you've already imported to the Trash (recoverable). Your wallpapers keep working — they render from the cache.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        #endif
     }
 
     // MARK: - Header / rows
@@ -241,8 +289,28 @@ struct WPECacheManagementView: View {
         let snapshot = await cache.stats()
         stats = snapshot
         isLoading = false
+        #if DIRECT_DISTRIBUTION
+        let cachedIDs = await cache.listCompletedWorkshopIDs()
+        reclaimableArchiveBytes = await Task.detached {
+            WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
+        }.value
+        #endif
         await refreshVideoStats()
     }
+
+    #if DIRECT_DISTRIBUTION
+    /// Trashes the redundant source `.pkg` of every already-cached item, then
+    /// refreshes so the reclaimable figure drops to zero.
+    private func reclaimArchives() async {
+        let cachedIDs = await cache.listCompletedWorkshopIDs()
+        let result = await Task.detached {
+            WPEDownloadArchiveReclaimer().reclaim(cachedIDs: cachedIDs)
+        }.value
+        lastReclaimedBytes = UInt64(max(0, result.bytes))
+        reclaimableArchiveBytes = 0
+        await refreshStats()
+    }
+    #endif
 
     private func refreshVideoStats() async {
         isLoadingVideo = true

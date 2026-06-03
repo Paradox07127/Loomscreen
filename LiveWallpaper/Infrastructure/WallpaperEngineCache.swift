@@ -156,6 +156,18 @@ actor WallpaperEngineCache {
 
     /// Workshop IDs whose extracted payload currently lives under the cache root.
     func listAvailableWorkshopIDs() -> Set<String> {
+        listWorkshopIDs(requireCompletedManifest: false)
+    }
+
+    /// Workshop IDs whose cache payload also has a readable completion manifest
+    /// (written only after a successful extract/mirror). Use this to gate
+    /// DESTRUCTIVE source-archive cleanup so a half-extracted cache never lets a
+    /// caller trash the only good copy.
+    func listCompletedWorkshopIDs() -> Set<String> {
+        listWorkshopIDs(requireCompletedManifest: true)
+    }
+
+    private func listWorkshopIDs(requireCompletedManifest: Bool) -> Set<String> {
         guard fileManager.fileExists(atPath: rootURL.path),
               let children = try? fileManager.contentsOfDirectory(
                 at: rootURL,
@@ -169,7 +181,7 @@ actor WallpaperEngineCache {
             let id = child.lastPathComponent
             guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            if cacheHasPayload(child) {
+            if cacheHasPayload(child), !requireCompletedManifest || readManifest(in: child) != nil {
                 ids.insert(id)
             }
         }
