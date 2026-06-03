@@ -1236,12 +1236,24 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_composite.h":
-            return """
+            // WPE's common_composite.h `#include "common_blending.h"` so
+            // ApplyComposite(COMPOSITE==1) can overlay via ApplyBlending(
+            // BLENDMODE, …). Our include expander does NOT recurse into
+            // builtin strings, so prepend the (guarded) blending header
+            // verbatim to guarantee ApplyBlending is in scope. g_CompositeColor
+            // / g_CompositeAlpha / g_CompositeOffset / COMPOSITEMONO are
+            // identity for default values and aren't yet collected as
+            // uniforms from headers — omitted until that wiring lands.
+            let blending = builtinInclude(named: "common_blending.h") ?? ""
+            return blending + "\n" + """
             #ifndef LIVEWALLPAPER_WPE_COMMON_COMPOSITE_H
             #define LIVEWALLPAPER_WPE_COMMON_COMPOSITE_H
             #define wpe_common_composite_included 1
             #ifndef COMPOSITE
             #define COMPOSITE 0
+            #endif
+            #ifndef BLENDMODE
+            #define BLENDMODE 0
             #endif
 
             vec2 ApplyCompositeOffset(vec2 coord, vec2 resolution) {
@@ -1250,7 +1262,10 @@ private struct WPEShaderSourceLoader: Sendable {
 
             vec4 ApplyComposite(vec4 baseColor, vec4 compositeColor) {
             #if COMPOSITE == 1
-                return mix(baseColor, compositeColor, compositeColor.a);
+                // Overlay the effect onto the base with the shader's blend
+                // mode (BLENDMODE==0 → ApplyBlending == mix == prior behavior).
+                vec3 composited = ApplyBlending(BLENDMODE, baseColor.rgb, compositeColor.rgb, compositeColor.a);
+                return vec4(composited, max(compositeColor.a, baseColor.a));
             #elif COMPOSITE == 2
                 return mix(compositeColor, baseColor, baseColor.a);
             #elif COMPOSITE == 3
