@@ -33,7 +33,7 @@ struct WPECacheManagementView: View {
                 summaryRow
             } header: {
                 HStack {
-                    Text("Imported Project Cache")
+                    Text("Imported Project Cache (Legacy)")
                     Spacer()
                     if let stats {
                         Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")
@@ -74,7 +74,7 @@ struct WPECacheManagementView: View {
                         .destructiveControlTint()
                         .controlSize(.regular)
 
-                        Button {
+                        Button(role: .destructive) {
                             confirmPurgeOlderThan(days: 30)
                         } label: {
                             Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
@@ -158,6 +158,7 @@ struct WPECacheManagementView: View {
                     Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(videoStats.totalBytes))) · \(videoStats.fileCount)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("Video cache totals \(byteFormatter.string(fromByteCount: Int64(videoStats.totalBytes))) across \(videoStats.fileCount) files"))
                 }
             }
         } footer: {
@@ -206,7 +207,7 @@ struct WPECacheManagementView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Moves the source .pkg of items you've already imported to the Trash (recoverable). Your wallpapers keep working — they render from the cache.")
+                    Text("Moves the source .pkg of legacy imports (already unpacked into the cache) to the Trash (recoverable). Wallpapers that read in place from their source are left untouched.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -296,7 +297,7 @@ struct WPECacheManagementView: View {
         isLoading = false
         #if DIRECT_DISTRIBUTION
         let cachedIDs = await cache.listCompletedWorkshopIDs()
-            .subtracting(packageBackedWorkshopIDs())
+            .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
         reclaimableArchiveBytes = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
         }.value
@@ -309,7 +310,7 @@ struct WPECacheManagementView: View {
     /// refreshes so the reclaimable figure drops to zero.
     private func reclaimArchives() async {
         let cachedIDs = await cache.listCompletedWorkshopIDs()
-            .subtracting(packageBackedWorkshopIDs())
+            .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
         let result = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaim(cachedIDs: cachedIDs)
         }.value
@@ -350,16 +351,19 @@ struct WPECacheManagementView: View {
 
     private func purgeOlderThan(days: Int) async {
         let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
-        let freed = await cache.purgeOlderThan(cutoff)
+        let freed = await cache.purgeOlderThan(cutoff, keepingIDs: WPESceneReachability.referencedWorkshopIDs())
         lastFreedBytes = freed
         await refreshStats()
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
-    /// Surface the unified Liquid Glass confirmation so users see exactly which entries (count + total size) are about to be removed before bulk purging.
+    /// Surface the unified Liquid Glass confirmation so users see exactly which entries (count + total size) are about to be removed before bulk purging. Reachable scenes (applied / bookmarked / recent) are excluded so "unused" means unused.
     private func confirmPurgeOlderThan(days: Int) {
         let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
-        let candidates = (stats?.entries ?? []).filter { ($0.lastUsed ?? .distantPast) <= cutoff }
+        let keepIDs = WPESceneReachability.referencedWorkshopIDs()
+        let candidates = (stats?.entries ?? []).filter {
+            !keepIDs.contains($0.workshopID) && ($0.lastUsed ?? .distantPast) <= cutoff
+        }
         let totalBytes = candidates.reduce(UInt64(0)) { $0 + $1.sizeBytes }
         let size = byteFormatter.string(fromByteCount: Int64(totalBytes))
         pendingDestructive = PendingDestructive(
@@ -397,31 +401,6 @@ struct WPECacheManagementView: View {
         (stats?.totalBytes ?? 0) > 1_073_741_824
     }
 
-    #if DIRECT_DISTRIBUTION
-    /// Workshop ids whose live descriptor reads in place from a packed source
-    /// `scene.pkg`. For these the source archive is a *runtime dependency*, not
-    /// redundant post-extraction dead weight, so it must never be offered for
-    /// reclaim — trashing it would break the wallpaper. (Normally these never
-    /// appear in the extracted-cache set at all; this guards the edge where a
-    /// legacy extracted copy still lingers after the same id was re-imported
-    /// in place.)
-    private func packageBackedWorkshopIDs() -> Set<String> {
-        var ids: Set<String> = []
-        for config in SettingsManager.shared.loadConfigurations() {
-            if let descriptor = config.activeWallpaper.sceneDescriptor,
-               case .packageSource = descriptor.assetStorage {
-                ids.insert(descriptor.workshopID)
-            }
-        }
-        for bookmark in BookmarkStore.shared.bookmarks {
-            if let descriptor = bookmark.content.sceneDescriptor,
-               case .packageSource = descriptor.assetStorage {
-                ids.insert(descriptor.workshopID)
-            }
-        }
-        return ids
-    }
-    #endif
 
     private func displayTitle(for workshopID: String) -> String {
         let history = SettingsManager.shared.loadGlobalSettings().recentWPEImports
@@ -435,18 +414,24 @@ struct WPECacheManagementView: View {
         return "\(size) · used \(relative)"
     }
 
-    private var byteFormatter: ByteCountFormatter {
+    // Backed by shared instances — these formatters are otherwise rebuilt on
+    // every access (per cache row, per refresh), which is a measurable allocation
+    // cost in a list that updates often.
+    private var byteFormatter: ByteCountFormatter { Self.sharedByteFormatter }
+    private var relativeFormatter: RelativeDateTimeFormatter { Self.sharedRelativeFormatter }
+
+    private static let sharedByteFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB, .useGB]
         f.countStyle = .file
         f.includesUnit = true
         return f
-    }
+    }()
 
-    private var relativeFormatter: RelativeDateTimeFormatter {
+    private static let sharedRelativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
         return f
-    }
+    }()
 }
 #endif

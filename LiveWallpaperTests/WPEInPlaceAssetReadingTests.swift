@@ -122,11 +122,10 @@ struct WPEInPlaceAssetReadingTests {
         try pkg.write(to: pkgURL)
 
         let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
-        let staged = try provider.stagedURL(atRelativePath: "audio/clip.mp3", purpose: .audioPlayback)
-        defer { staged.release() }
+        let stagedURL = try provider.stagedURL(atRelativePath: "audio/clip.mp3")
 
-        #expect(FileManager.default.fileExists(atPath: staged.url.path))
-        #expect(try Data(contentsOf: staged.url) == payload)
+        #expect(FileManager.default.fileExists(atPath: stagedURL.path))
+        #expect(try Data(contentsOf: stagedURL) == payload)
     }
 
     // MARK: - SceneDescriptor.assetStorage

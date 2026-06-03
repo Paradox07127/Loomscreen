@@ -148,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !runtimeOptions.isTesting, manager.featureCatalog.isEnabled(.wpeImport) {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                let keepIDs = Self.referencedWPEWorkshopIDs()
+                let keepIDs = WPESceneReachability.referencedWorkshopIDs()
                 let cache = WallpaperEngineCache()
                 await cache.collectOrphans(keepIDs: keepIDs)
                 var referenced = keepIDs
@@ -222,45 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
     }
-
-    #if !LITE_BUILD
-    /// Workshop IDs referenced by any saved screen configuration, saved
-    /// bookmark, or recent import — every scene the user still has set up,
-    /// starred, or could re-apply. Used as the keep-set for both the extracted-
-    /// package cache and the video-texture cache GC, so nothing reachable is
-    /// ever reclaimed. `@MainActor` because it reads `BookmarkStore.shared`.
-    @MainActor
-    private static func referencedWPEWorkshopIDs() -> Set<String> {
-        var ids: Set<String> = []
-        for config in SettingsManager.shared.loadConfigurations() {
-            if let descriptor = config.activeWallpaper.sceneDescriptor {
-                ids.insert(descriptor.workshopID)
-                ids.formUnion(descriptor.dependencyWorkshopIDs)
-            }
-            if let origin = config.wpeOrigin {
-                ids.insert(origin.workshopID)
-                ids.formUnion(origin.dependencyWorkshopIDs)
-            }
-        }
-        for entry in SettingsManager.shared.loadGlobalSettings().recentWPEImports {
-            ids.insert(entry.origin.workshopID)
-            ids.formUnion(entry.origin.dependencyWorkshopIDs)
-        }
-        // Saved bookmarks (favorites): never reclaim a scene the user starred,
-        // even when it isn't currently applied to any screen.
-        for bookmark in BookmarkStore.shared.bookmarks {
-            if let origin = bookmark.wpeOrigin {
-                ids.insert(origin.workshopID)
-                ids.formUnion(origin.dependencyWorkshopIDs)
-            }
-            if let descriptor = bookmark.content.sceneDescriptor {
-                ids.insert(descriptor.workshopID)
-                ids.formUnion(descriptor.dependencyWorkshopIDs)
-            }
-        }
-        return ids.filter { !$0.isEmpty }
-    }
-    #endif
 
     // MARK: - Dock Visibility
 

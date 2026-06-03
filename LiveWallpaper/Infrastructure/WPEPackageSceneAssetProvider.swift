@@ -23,7 +23,6 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
     private static let mmapThreshold: UInt64 = 64 * 1024 * 1024
     private static let copyChunkSize = 1 << 20
 
-    private let packageURL: URL
     private let package: WallpaperEnginePackage
     private let handle: FileHandle
     private let lock = NSLock()
@@ -32,7 +31,6 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
     private var stagedPaths: [String: URL] = [:]
 
     init(packageURL: URL) throws {
-        self.packageURL = packageURL
         self.stagingRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("LiveWallpaper-WPEPkgStage-\(UUID().uuidString)", isDirectory: true)
         let handle = try FileHandle(forReadingFrom: packageURL)
@@ -70,11 +68,11 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
         }
     }
 
-    func stagedURL(atRelativePath relativePath: String, purpose: WPESceneAssetURLPurpose) throws -> WPEStagedAssetURL {
+    func stagedURL(atRelativePath relativePath: String) throws -> URL {
         let entry = try packageEntry(for: relativePath)
         lock.lock()
         defer { lock.unlock() }
-        return WPEStagedAssetURL(url: try stageEntryLocked(entry, relativePath: relativePath))
+        return try stageEntryLocked(entry, relativePath: relativePath)
     }
 
     func exists(atRelativePath relativePath: String) -> Bool {

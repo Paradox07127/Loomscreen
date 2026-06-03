@@ -179,7 +179,7 @@ actor WallpaperEngineCache {
         var ids: Set<String> = []
         for child in children {
             let id = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(id), !isExtractionSidecar(id) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if cacheHasPayload(child), !requireCompletedManifest || readManifest(in: child) != nil {
                 ids.insert(id)
@@ -227,7 +227,7 @@ actor WallpaperEngineCache {
 
         for child in children {
             let workshopID = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID), !isExtractionSidecar(workshopID) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
 
             let bytes = directoryByteCount(at: child)
@@ -255,7 +255,7 @@ actor WallpaperEngineCache {
         var freed: UInt64 = 0
         for child in children {
             let workshopID = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID), !isExtractionSidecar(workshopID) else { continue }
             let bytes = directoryByteCount(at: child)
             do {
                 try fileManager.removeItem(at: child)
@@ -268,12 +268,17 @@ actor WallpaperEngineCache {
         return freed
     }
 
-    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or directory mtime) is older than `cutoff`.
+    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or
+    /// directory mtime) is older than `cutoff`. `keepingIDs` are never removed —
+    /// the caller passes the reachable set (applied / bookmarked / recent) so a
+    /// scene the user still uses is never treated as "unused" just because its
+    /// extraction is old.
     @discardableResult
-    func purgeOlderThan(_ cutoff: Date) -> UInt64 {
+    func purgeOlderThan(_ cutoff: Date, keepingIDs: Set<String> = []) -> UInt64 {
         let snapshot = stats()
         var freed: UInt64 = 0
         for entry in snapshot.entries {
+            guard !keepingIDs.contains(entry.workshopID) else { continue }
             guard let lastUsed = entry.lastUsed, lastUsed < cutoff else { continue }
             do {
                 try purge(workshopID: entry.workshopID)
@@ -286,20 +291,20 @@ actor WallpaperEngineCache {
         return freed
     }
 
+    /// `.inflight`/`.replaced` are transient extraction sidecars
+    /// (`WallpaperEnginePackage.extractAll`); they pass `isSafeWorkshopID` but
+    /// are not finished per-workshop caches, so every enumeration skips them —
+    /// reporting or reclaiming one could corrupt an in-flight extraction.
+    private func isExtractionSidecar(_ name: String) -> Bool {
+        name.hasSuffix(".inflight") || name.hasSuffix(".replaced")
+    }
+
     /// Launch-time orphan GC: hard-deletes every per-workshop cache directory
-    /// whose id is **not** in `keepIDs`. The keep-set is the union of every
-    /// workshop the user can still reach — applied screen configs, saved
-    /// bookmarks, recent imports, and all of their declared dependencies — so
-    /// only a genuinely abandoned scene (no config, no bookmark, off the recent
-    /// list) is reclaimed. Mirrors `WPEVideoTextureDiskCache`'s orphan sweep;
-    /// returns freed bytes.
-    ///
-    /// Unlike the video cache (whose source bytes always live inside each
-    /// scene's `.tex`), a legacy extracted scene whose source archive was
-    /// already reclaimed has no other copy — but if it is unreferenced it is
-    /// also unreachable from the UI, so dropping it loses nothing the user can
-    /// act on. Referenced ids are never touched, preserving every in-use unique
-    /// copy.
+    /// whose id is **not** in `keepIDs` (the reachable set: applied configs,
+    /// bookmarks, recent imports, and their dependencies). Mirrors the video
+    /// cache's orphan sweep; returns freed bytes. An unreferenced scene is also
+    /// unreachable from the UI, so dropping it loses nothing actionable;
+    /// referenced ids are never touched.
     @discardableResult
     func collectOrphans(keepIDs: Set<String>) -> UInt64 {
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -314,7 +319,7 @@ actor WallpaperEngineCache {
         var freed: UInt64 = 0
         for child in children {
             let id = child.lastPathComponent
-            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(id), !isExtractionSidecar(id) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if keepIDs.contains(id) { continue }
 

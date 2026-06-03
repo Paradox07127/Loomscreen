@@ -13,6 +13,22 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     let magic: String
     let entries: [Entry]
     let dataStart: UInt64
+    /// Lowercased entry-name → entry, built once at parse so case-insensitive
+    /// lookups are O(1) instead of an O(n) lowercased scan per read (matters for
+    /// large packages + multi-root fallback cascades). First match wins.
+    let nameIndex: [String: Entry]
+
+    init(magic: String, entries: [Entry], dataStart: UInt64) {
+        self.magic = magic
+        self.entries = entries
+        self.dataStart = dataStart
+        var index: [String: Entry] = [:]
+        index.reserveCapacity(entries.count)
+        for entry in entries where index[entry.name.lowercased()] == nil {
+            index[entry.name.lowercased()] = entry
+        }
+        self.nameIndex = index
+    }
 
     /// Max bytes for an entry name (a full relative path in UTF-8). The old cap
     /// of 255 wrongly rejected legitimate packages: a path with multi-byte CJK
@@ -316,10 +332,10 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return data
     }
 
-    /// Convenience: locate an entry by case-insensitive name match.
+    /// Convenience: locate an entry by case-insensitive name match (O(1) via the
+    /// prebuilt `nameIndex`).
     func entry(named name: String) -> Entry? {
-        let target = name.lowercased()
-        return entries.first { $0.name.lowercased() == target }
+        nameIndex[name.lowercased()]
     }
 
     /// Normalizes a requested relative path into the same canonical form used
