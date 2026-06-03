@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import simd
 
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
@@ -82,7 +83,75 @@ struct WPERenderGraphBuilder: Sendable {
                     preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
                 )
             }
-        return WPERenderGraph(layers: layers)
+        return WPERenderGraph(layers: applyAttachmentAnchorOffsets(to: layers))
+    }
+
+    /// Body-split rigs attach face/hair/clothing child layers to a parent puppet's named MDAT anchor
+    /// (头部/胸部/脖颈). Parse-time parent composition (`SceneObjectTransform.combining`) places those
+    /// children relative to the parent's ORIGIN, ignoring the anchor bone — so the children tear away
+    /// from the parent mesh. This second pass adds the missing static anchor-bind offset (in scene
+    /// space) to each attached child's origin. Layers without a resolvable attachment are untouched,
+    /// so non-attached layers and other scenes are unaffected. The executor's animated attachment
+    /// follow adds only the per-frame `currentAnchor - bindAnchor` delta on top of this static bind.
+    private func applyAttachmentAnchorOffsets(to layers: [WPERenderLayer]) -> [WPERenderLayer] {
+        guard layers.contains(where: { $0.attachment != nil && $0.parentObjectID != nil }) else {
+            return layers
+        }
+        let layersByID = Dictionary(layers.map { ($0.objectID, $0) }, uniquingKeysWith: { first, _ in first })
+        var modelCache: [String: WPEPuppetModel?] = [:]
+        func parentModel(forPuppetPath path: String) -> WPEPuppetModel? {
+            if let cached = modelCache[path] { return cached }
+            let model = (try? resolver.data(relativePath: path)).flatMap { try? WPEMdlParser.parse(data: $0) }
+            modelCache[path] = model
+            return model
+        }
+        return layers.map { layer in
+            guard let attachmentName = layer.attachment,
+                  let parentID = layer.parentObjectID,
+                  let parent = layersByID[parentID],
+                  let puppetPath = parent.puppetPath,
+                  let model = parentModel(forPuppetPath: puppetPath),
+                  let offset = Self.staticAttachmentOffset(
+                      attachmentName: attachmentName,
+                      parentGeometry: parent.geometry,
+                      parentModel: model
+                  ) else {
+                return layer
+            }
+            return layer.replacingGeometryOrigin(addingSceneOffset: offset)
+        }
+    }
+
+    /// Scene-space offset that moves an attached child from "relative to parent origin" to "relative
+    /// to the parent's anchor bone bind point". `anchorModel = rawMatrix[bone] · MDAT` is the anchor
+    /// in parent model space; it maps to scene by the parent's mesh-center, scale (model→scene), and
+    /// rotation. Returns nil (no offset) when the anchor/bone/matrix cannot be resolved.
+    private static func staticAttachmentOffset(
+        attachmentName: String,
+        parentGeometry: WPERenderLayerGeometry,
+        parentModel: WPEPuppetModel
+    ) -> SIMD3<Double>? {
+        guard let attachment = parentModel.attachments.first(where: { $0.name == attachmentName }),
+              let bone = parentModel.bones.first(where: { $0.index == attachment.boneIndex }),
+              let boneBind = WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix) else {
+            return nil
+        }
+        let anchorBind = boneBind * attachment.matrix
+        let anchorModel = SIMD2<Double>(Double(anchorBind.columns.3.x), Double(anchorBind.columns.3.y))
+        // Model y is down; scene origin y is up — hence the y sign flip. Subtract the parent's mesh
+        // center so the offset is expressed in the same composite frame the puppet vertex shader uses.
+        let local = SIMD2<Double>(
+            abs(parentGeometry.scale.x) * (anchorModel.x - parentGeometry.puppetMeshCenter.x),
+            -abs(parentGeometry.scale.y) * (anchorModel.y - parentGeometry.puppetMeshCenter.y)
+        )
+        let cosine = cos(parentGeometry.angles.z)
+        let sine = sin(parentGeometry.angles.z)
+        guard local.x.isFinite, local.y.isFinite else { return nil }
+        return SIMD3<Double>(
+            cosine * local.x - sine * local.y,
+            sine * local.x + cosine * local.y,
+            0
+        )
     }
 
     private static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
@@ -850,6 +919,42 @@ private struct WPEPuppetBounds {
 
         self.min = SIMD2<Double>(minX, minY)
         self.max = SIMD2<Double>(maxX, maxY)
+    }
+}
+
+private extension WPERenderLayer {
+    func replacingGeometryOrigin(addingSceneOffset offset: SIMD3<Double>) -> WPERenderLayer {
+        let g = geometry
+        let newGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(g.origin.x + offset.x, g.origin.y + offset.y, g.origin.z + offset.z),
+            scale: g.scale,
+            angles: g.angles,
+            alignment: g.alignment,
+            size: g.size,
+            puppetMeshCenter: g.puppetMeshCenter,
+            alpha: g.alpha,
+            alphaAnimation: g.alphaAnimation,
+            color: g.color,
+            brightness: g.brightness
+        )
+        return WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: newGeometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: parallaxDepth
+        )
     }
 }
 
