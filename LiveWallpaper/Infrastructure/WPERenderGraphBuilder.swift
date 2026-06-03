@@ -136,8 +136,24 @@ struct WPERenderGraphBuilder: Sendable {
               let boneBind = WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix) else {
             return nil
         }
+        // MDLS anchor bones live in a skeleton frame offset from the MDLV mesh frame by the root
+        // bone's translation. The mesh (and the children) use the MDLV frame, so a non-root anchor's Y
+        // must be rebased by the root bone Y to land on the visible body part. On-device (Kal'tsit
+        // MDLV0023) without this, 头部 children sit at the neck ~980px too low.
+        let rootBone = parentModel.bones.first(where: { $0.parentIndex == nil })
+        let rootYOffset: Double
+        if let rootBone,
+           rootBone.index != bone.index,
+           let rootBind = WPEMdlParser.matrix(fromColumnMajorFloats: rootBone.rawMatrix) {
+            rootYOffset = Double(rootBind.columns.3.y)
+        } else {
+            rootYOffset = 0
+        }
         let anchorBind = boneBind * attachment.matrix
-        let anchorModel = SIMD2<Double>(Double(anchorBind.columns.3.x), Double(anchorBind.columns.3.y))
+        let anchorModel = SIMD2<Double>(
+            Double(anchorBind.columns.3.x),
+            Double(anchorBind.columns.3.y) + rootYOffset
+        )
         // Model y is down; scene origin y is up — hence the y sign flip. Subtract the parent's mesh
         // center so the offset is expressed in the same composite frame the puppet vertex shader uses.
         let local = SIMD2<Double>(
