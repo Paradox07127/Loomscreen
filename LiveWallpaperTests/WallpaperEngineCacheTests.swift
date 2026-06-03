@@ -209,6 +209,39 @@ struct WallpaperEngineCacheTests {
         #expect(afterStats.totalBytes == 0)
     }
 
+    @Test("collectOrphans() drops unreferenced workshops and keeps referenced ones")
+    func collectOrphansDropsUnreferenced() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "orphans")
+        defer { env.cleanup() }
+
+        let keepURL = try await env.cache.ensureExtracted(workshopID: "keep", sourcePkgURL: env.pkgURL)
+        let dropURL = try await env.cache.ensureExtracted(workshopID: "drop", sourcePkgURL: env.pkgURL)
+        #expect(FileManager.default.fileExists(atPath: keepURL.path))
+        #expect(FileManager.default.fileExists(atPath: dropURL.path))
+
+        let freed = await env.cache.collectOrphans(keepIDs: ["keep"])
+
+        #expect(freed > 0)
+        #expect(FileManager.default.fileExists(atPath: keepURL.path), "referenced scene must survive")
+        #expect(!FileManager.default.fileExists(atPath: dropURL.path), "unreferenced scene must be reclaimed")
+        let remaining = await env.cache.stats().entries.map(\.workshopID)
+        #expect(remaining == ["keep"])
+    }
+
+    @Test("collectOrphans() keeps everything when all ids are referenced and frees nothing")
+    func collectOrphansNoOpWhenAllReferenced() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "all-kept")
+        defer { env.cleanup() }
+
+        _ = try await env.cache.ensureExtracted(workshopID: "one", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "two", sourcePkgURL: env.pkgURL)
+
+        let freed = await env.cache.collectOrphans(keepIDs: ["one", "two"])
+
+        #expect(freed == 0)
+        #expect(await env.cache.stats().entries.count == 2)
+    }
+
     @Test("purgeOlderThan() only drops entries whose lastUsed predates the cutoff")
     func purgeOlderThanScopesByLastUsed() async throws {
         let env = try TempCacheEnvironment.make(workshopID: "older")

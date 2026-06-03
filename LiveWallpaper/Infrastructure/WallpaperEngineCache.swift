@@ -286,6 +286,52 @@ actor WallpaperEngineCache {
         return freed
     }
 
+    /// Launch-time orphan GC: hard-deletes every per-workshop cache directory
+    /// whose id is **not** in `keepIDs`. The keep-set is the union of every
+    /// workshop the user can still reach — applied screen configs, saved
+    /// bookmarks, recent imports, and all of their declared dependencies — so
+    /// only a genuinely abandoned scene (no config, no bookmark, off the recent
+    /// list) is reclaimed. Mirrors `WPEVideoTextureDiskCache`'s orphan sweep;
+    /// returns freed bytes.
+    ///
+    /// Unlike the video cache (whose source bytes always live inside each
+    /// scene's `.tex`), a legacy extracted scene whose source archive was
+    /// already reclaimed has no other copy — but if it is unreferenced it is
+    /// also unreachable from the UI, so dropping it loses nothing the user can
+    /// act on. Referenced ids are never touched, preserving every in-use unique
+    /// copy.
+    @discardableResult
+    func collectOrphans(keepIDs: Set<String>) -> UInt64 {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return 0
+        }
+
+        var freed: UInt64 = 0
+        for child in children {
+            let id = child.lastPathComponent
+            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
+            guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if keepIDs.contains(id) { continue }
+
+            let bytes = directoryByteCount(at: child)
+            do {
+                try fileManager.removeItem(at: child)
+                freed += bytes
+            } catch {
+                Logger.warning("WPE cache orphan GC: failed to remove \(id): \(error.localizedDescription)", category: .screenManager)
+            }
+        }
+        if freed > 0 {
+            Logger.info("WPE cache orphan GC reclaimed \(freed) bytes from unreferenced scenes", category: .screenManager)
+        }
+        return freed
+    }
+
     private func directoryByteCount(at url: URL) -> UInt64 {
         guard let enumerator = fileManager.enumerator(
             at: url,

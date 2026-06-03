@@ -47,6 +47,11 @@ struct WPECacheManagementView: View {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Text("New scenes read their assets in place from the source, so this cache only holds older imports. Unreferenced leftovers are reclaimed automatically at startup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -291,6 +296,7 @@ struct WPECacheManagementView: View {
         isLoading = false
         #if DIRECT_DISTRIBUTION
         let cachedIDs = await cache.listCompletedWorkshopIDs()
+            .subtracting(packageBackedWorkshopIDs())
         reclaimableArchiveBytes = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
         }.value
@@ -303,6 +309,7 @@ struct WPECacheManagementView: View {
     /// refreshes so the reclaimable figure drops to zero.
     private func reclaimArchives() async {
         let cachedIDs = await cache.listCompletedWorkshopIDs()
+            .subtracting(packageBackedWorkshopIDs())
         let result = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaim(cachedIDs: cachedIDs)
         }.value
@@ -389,6 +396,32 @@ struct WPECacheManagementView: View {
     private var isOversized: Bool {
         (stats?.totalBytes ?? 0) > 1_073_741_824
     }
+
+    #if DIRECT_DISTRIBUTION
+    /// Workshop ids whose live descriptor reads in place from a packed source
+    /// `scene.pkg`. For these the source archive is a *runtime dependency*, not
+    /// redundant post-extraction dead weight, so it must never be offered for
+    /// reclaim — trashing it would break the wallpaper. (Normally these never
+    /// appear in the extracted-cache set at all; this guards the edge where a
+    /// legacy extracted copy still lingers after the same id was re-imported
+    /// in place.)
+    private func packageBackedWorkshopIDs() -> Set<String> {
+        var ids: Set<String> = []
+        for config in SettingsManager.shared.loadConfigurations() {
+            if let descriptor = config.activeWallpaper.sceneDescriptor,
+               case .packageSource = descriptor.assetStorage {
+                ids.insert(descriptor.workshopID)
+            }
+        }
+        for bookmark in BookmarkStore.shared.bookmarks {
+            if let descriptor = bookmark.content.sceneDescriptor,
+               case .packageSource = descriptor.assetStorage {
+                ids.insert(descriptor.workshopID)
+            }
+        }
+        return ids
+    }
+    #endif
 
     private func displayTitle(for workshopID: String) -> String {
         let history = SettingsManager.shared.loadGlobalSettings().recentWPEImports
