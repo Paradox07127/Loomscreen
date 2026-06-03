@@ -81,6 +81,30 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.tickString() == ":OK")
     }
 
+    @Test("addCombo defaults to its first option's value (date script combos)")
+    func comboDefaultsToFirstOption() throws {
+        // Reproduces the VHS date bug: the date script declares monthFormat/
+        // dayFormat via `addCombo` with NO top-level `value`. WPE defaults a combo
+        // to its first option's value, so `scriptProperties.monthFormat == 1` must
+        // be true; otherwise `months` stays undefined and `months[...]` throws,
+        // leaving the date stuck on its placeholder.
+        let script = """
+        export var scriptProperties = createScriptProperties()
+            .addCombo({ name: 'monthFormat', label: 'Month Format', options: [
+                { label: 'Numeric', value: '1' },
+                { label: 'Abbreviated', value: '2' }
+            ]})
+            .finish();
+        export function update(value) {
+            var months = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+            if (scriptProperties.monthFormat == 1) { return 'JAN=' + months[0]; }
+            return 'COMBO_UNDEFINED';
+        }
+        """
+        let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
+        #expect(instance.tickString() == "JAN=1")
+    }
+
     @Test("Clock-style script reads property defaults, not 'undefined'")
     func clockScriptPropertyDefaults() throws {
         // Reproduces the VHS clock bug: a missing `delimiter`/`use24hFormat`
