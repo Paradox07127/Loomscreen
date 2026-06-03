@@ -695,6 +695,11 @@ final class ScreenManager {
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
         let wasActive = (config.activeWallpaper.wallpaperType == type)
+        // Switching away from an active scene drops its origin metadata too, so a
+        // later reload can't re-resolve a deleted scene from a stale `wpeOrigin`.
+        if wasActive, type == .scene {
+            config.wpeOrigin = nil
+        }
 
         switch type {
         case .video:
@@ -1255,6 +1260,22 @@ final class ScreenManager {
     }
 
     func removeWPEImport(workshopID: String) {
+        // If a screen is currently rendering the scene being deleted, switch it
+        // away FIRST — otherwise its live renderer keeps reading the cache files
+        // that the delete is about to move to the Trash. `clearWallpaperOfType`
+        // tears down the scene session (synchronously, on every fallback path)
+        // and falls back to the screen's saved video/html (or blanks it),
+        // persisting the result. Match the active SceneDescriptor — what
+        // actually drives the renderer and names the cache dir — not the
+        // separate `wpeOrigin` metadata, which can be nil or stale.
+        let cacheRelativePath = "wpe-cache/\(workshopID)"
+        for screen in screens {
+            guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+                  case .scene(let descriptor) = config.activeWallpaper,
+                  descriptor.workshopID == workshopID || descriptor.cacheRelativePath == cacheRelativePath
+            else { continue }
+            clearWallpaperOfType(.scene, for: screen)
+        }
         wpeImportCoordinator.removeWorkshop(workshopID: workshopID)
     }
     #endif
