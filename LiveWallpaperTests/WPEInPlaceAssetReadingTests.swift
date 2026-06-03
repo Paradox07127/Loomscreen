@@ -128,6 +128,22 @@ struct WPEInPlaceAssetReadingTests {
         #expect(try Data(contentsOf: stagedURL) == payload)
     }
 
+    @Test("Package entry lookup is case-insensitive and first-match-wins on collision")
+    func packageEntryFirstMatchWins() throws {
+        let root = try makeTempDir()
+        let pkg = makePackageData([
+            (name: "Material.json", data: Data("first".utf8)),
+            (name: "material.json", data: Data("second".utf8)),
+        ])
+        let pkgURL = root.appendingPathComponent("scene.pkg")
+        try pkg.write(to: pkgURL)
+
+        let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
+        // The prebuilt lowercased index resolves any case to the first stored entry.
+        #expect(try provider.data(atRelativePath: "material.json") == Data("first".utf8))
+        #expect(try provider.data(atRelativePath: "MATERIAL.JSON") == Data("first".utf8))
+    }
+
     // MARK: - SceneDescriptor.assetStorage
 
     @Test("SceneDescriptor without assetStorage decodes as .cache")
