@@ -1052,36 +1052,146 @@ private struct WPEShaderSourceLoader: Sendable {
             #define wpe_common_blending_included 1
 
             // Named blend-mode constants WPE workshop shaders pass to
-            // ApplyBlending. Values match Photoshop ordering and our
-            // implementation's runtime switch below. Workshops invoke
-            // ApplyBlending(BlendLinearDodge, A, B, opacity) — without
-            // these the transpiler emits 'undeclared identifier
-            // BlendLinearDodge' for the corpus vhs / sine_wave_circle
+            // ApplyBlending. Integer values match Wallpaper Engine's
+            // authoritative common_blending.h `#if BLENDMODE == N` chain
+            // (NOT Photoshop ordering) — scene `combos.BLENDMODE` values are
+            // emitted against this enum, so the runtime switch below must
+            // agree with it. Workshops invoke ApplyBlending(BlendLinearDodge,
+            // A, B, opacity); without these the transpiler emits 'undeclared
+            // identifier BlendLinearDodge' for the corpus vhs / sine_wave_circle
             // shaders.
             #define BlendNormal 0
-            #define BlendDarken 2
-            #define BlendLighten 3
-            #define BlendMultiply 4
-            #define BlendScreen 5
-            #define BlendLinearDodge 6
-            #define BlendAdd 6
+            #define BlendDarken 1
+            #define BlendMultiply 2
+            #define BlendSubtract 4
+            #define BlendLighten 6
+            #define BlendScreen 7
+            #define BlendLinearDodge 9
+            #define BlendAdd 9
+            #define BlendDifference 18
             #define BlendWPELinearDodge 31
-            #define BlendSubtract 7
-            #define BlendDifference 8
 
-            // No `in` qualifier on parameters — it's GLSL-default (and thus
-            // optional) but the MSL backend rejects it as an unknown type
-            // name when the transpiler forwards this header verbatim.
+            // Per-channel blend helpers (mirror WPE common_blending.h macros).
+            float wpe_s_colorBurn(float b, float s)  { return (s == 0.0) ? 0.0 : max(1.0 - (1.0 - b) / s, 0.0); }
+            float wpe_s_colorDodge(float b, float s) { return (s == 1.0) ? 1.0 : min(b / (1.0 - s), 1.0); }
+            float wpe_s_overlay(float b, float s)    { return b < 0.5 ? (2.0 * b * s) : (1.0 - 2.0 * (1.0 - b) * (1.0 - s)); }
+            float wpe_s_softLight(float b, float s)  { return s < 0.5 ? (2.0 * b * s + b * b * (1.0 - 2.0 * s)) : (sqrt(b) * (2.0 * s - 1.0) + 2.0 * b * (1.0 - s)); }
+            float wpe_s_linearLight(float b, float s){ return s < 0.5 ? max(b + 2.0 * s - 1.0, 0.0) : (b + 2.0 * (s - 0.5)); }
+            float wpe_s_vividLight(float b, float s) { return s < 0.5 ? wpe_s_colorBurn(b, 2.0 * s) : wpe_s_colorDodge(b, 2.0 * (s - 0.5)); }
+            float wpe_s_pinLight(float b, float s)   { return s < 0.5 ? min(b, 2.0 * s) : max(b, 2.0 * (s - 0.5)); }
+            float wpe_s_hardMix(float b, float s)    { return wpe_s_vividLight(b, s) < 0.5 ? 0.0 : 1.0; }
+            float wpe_s_reflect(float b, float s)    { return (s == 1.0) ? 1.0 : min(b * b / (1.0 - s), 1.0); }
+
+            vec3 wpe_blend_colorBurn(vec3 b, vec3 s)  { return vec3(wpe_s_colorBurn(b.r, s.r), wpe_s_colorBurn(b.g, s.g), wpe_s_colorBurn(b.b, s.b)); }
+            vec3 wpe_blend_colorDodge(vec3 b, vec3 s) { return vec3(wpe_s_colorDodge(b.r, s.r), wpe_s_colorDodge(b.g, s.g), wpe_s_colorDodge(b.b, s.b)); }
+            vec3 wpe_blend_overlay(vec3 b, vec3 s)    { return vec3(wpe_s_overlay(b.r, s.r), wpe_s_overlay(b.g, s.g), wpe_s_overlay(b.b, s.b)); }
+            vec3 wpe_blend_softLight(vec3 b, vec3 s)  { return vec3(wpe_s_softLight(b.r, s.r), wpe_s_softLight(b.g, s.g), wpe_s_softLight(b.b, s.b)); }
+            vec3 wpe_blend_linearLight(vec3 b, vec3 s){ return vec3(wpe_s_linearLight(b.r, s.r), wpe_s_linearLight(b.g, s.g), wpe_s_linearLight(b.b, s.b)); }
+            vec3 wpe_blend_vividLight(vec3 b, vec3 s) { return vec3(wpe_s_vividLight(b.r, s.r), wpe_s_vividLight(b.g, s.g), wpe_s_vividLight(b.b, s.b)); }
+            vec3 wpe_blend_pinLight(vec3 b, vec3 s)   { return vec3(wpe_s_pinLight(b.r, s.r), wpe_s_pinLight(b.g, s.g), wpe_s_pinLight(b.b, s.b)); }
+            vec3 wpe_blend_hardMix(vec3 b, vec3 s)    { return vec3(wpe_s_hardMix(b.r, s.r), wpe_s_hardMix(b.g, s.g), wpe_s_hardMix(b.b, s.b)); }
+            vec3 wpe_blend_reflect(vec3 b, vec3 s)    { return vec3(wpe_s_reflect(b.r, s.r), wpe_s_reflect(b.g, s.g), wpe_s_reflect(b.b, s.b)); }
+
+            // HSL conversion for the Hue/Saturation/Color/Luminosity modes
+            // (verbatim from WPE common_blending.h; HDR clamp branch dropped).
+            vec3 wpe_RGBToHSL(vec3 color) {
+                vec3 hsl;
+                float fmin = min(min(color.r, color.g), color.b);
+                float fmax = max(max(color.r, color.g), color.b);
+                float delta = fmax - fmin;
+                hsl.z = (fmax + fmin) / 2.0;
+                if (delta == 0.0) {
+                    hsl.x = 0.0;
+                    hsl.y = 0.0;
+                } else {
+                    if (hsl.z < 0.5) { hsl.y = delta / (fmax + fmin); }
+                    else             { hsl.y = delta / (2.0 - fmax - fmin); }
+                    float deltaR = (((fmax - color.r) / 6.0) + (delta / 2.0)) / delta;
+                    float deltaG = (((fmax - color.g) / 6.0) + (delta / 2.0)) / delta;
+                    float deltaB = (((fmax - color.b) / 6.0) + (delta / 2.0)) / delta;
+                    if (color.r == fmax)      { hsl.x = deltaB - deltaG; }
+                    else if (color.g == fmax) { hsl.x = (1.0 / 3.0) + deltaR - deltaB; }
+                    else if (color.b == fmax) { hsl.x = (2.0 / 3.0) + deltaG - deltaR; }
+                    if (hsl.x < 0.0)      { hsl.x += 1.0; }
+                    else if (hsl.x > 1.0) { hsl.x -= 1.0; }
+                }
+                return hsl;
+            }
+
+            float wpe_HueToRGB(float f1, float f2, float hue) {
+                if (hue < 0.0)      { hue += 1.0; }
+                else if (hue > 1.0) { hue -= 1.0; }
+                float res;
+                if ((6.0 * hue) < 1.0)      { res = f1 + (f2 - f1) * 6.0 * hue; }
+                else if ((2.0 * hue) < 1.0) { res = f2; }
+                else if ((3.0 * hue) < 2.0) { res = f1 + (f2 - f1) * ((2.0 / 3.0) - hue) * 6.0; }
+                else                        { res = f1; }
+                return res;
+            }
+
+            vec3 wpe_HSLToRGB(vec3 hsl) {
+                vec3 rgb;
+                if (hsl.y == 0.0) {
+                    rgb = vec3(hsl.z);
+                } else {
+                    float f2;
+                    if (hsl.z < 0.5) { f2 = hsl.z * (1.0 + hsl.y); }
+                    else             { f2 = (hsl.z + hsl.y) - (hsl.y * hsl.z); }
+                    float f1 = 2.0 * hsl.z - f2;
+                    rgb.r = wpe_HueToRGB(f1, f2, hsl.x + (1.0 / 3.0));
+                    rgb.g = wpe_HueToRGB(f1, f2, hsl.x);
+                    rgb.b = wpe_HueToRGB(f1, f2, hsl.x - (1.0 / 3.0));
+                }
+                return rgb;
+            }
+
+            vec3 wpe_blend_hue(vec3 base, vec3 blend)        { vec3 h = wpe_RGBToHSL(base); return wpe_HSLToRGB(vec3(wpe_RGBToHSL(blend).r, h.g, h.b)); }
+            vec3 wpe_blend_saturation(vec3 base, vec3 blend) { vec3 h = wpe_RGBToHSL(base); return wpe_HSLToRGB(vec3(h.r, wpe_RGBToHSL(blend).g, h.b)); }
+            vec3 wpe_blend_color(vec3 base, vec3 blend)      { vec3 bh = wpe_RGBToHSL(blend); return wpe_HSLToRGB(vec3(bh.r, bh.g, wpe_RGBToHSL(base).b)); }
+            vec3 wpe_blend_luminosity(vec3 base, vec3 blend) { vec3 h = wpe_RGBToHSL(base); return wpe_HSLToRGB(vec3(h.r, h.g, wpe_RGBToHSL(blend).b)); }
+
+            // Runtime port of WPE common_blending.h ApplyBlending. WPE selects
+            // a single branch at compile time via `#if BLENDMODE == N`; we keep
+            // a runtime switch keyed on the same integers so one synthesized
+            // header serves every baked combo. No `in` qualifier on parameters
+            // — it's GLSL-default but the MSL backend rejects it as an unknown
+            // type name when the transpiler forwards this header verbatim.
             vec3 ApplyBlending(int blendMode, vec3 A, vec3 B, float opacity) {
-                vec3 result = B;
-                if (blendMode == 2)      { result = min(A, B); }                                     // Darken
-                else if (blendMode == 3) { result = max(A, B); }                                     // Lighten
-                else if (blendMode == 4) { result = A * B; }                                          // Multiply
-                else if (blendMode == 5) { result = vec3(1.0) - (vec3(1.0) - A) * (vec3(1.0) - B); } // Screen
-                else if (blendMode == 6) { result = A + B; }                                          // LinearDodge / Add
-                else if (blendMode == 31) { result = A + B; }                                         // WPE imageblending LinearDodge / Add
-                else if (blendMode == 7) { result = max(vec3(0.0), A - B); }                         // Subtract
-                else if (blendMode == 8) { result = vec3(1.0) - abs(vec3(1.0) - B - A); }            // Difference
+                // Modes that ignore opacity in WPE.
+                if (blendMode == 5)  { return min(A, B); }              // Darker Color
+                if (blendMode == 10) { return max(A, B); }              // Lighter Color
+                if (blendMode == 31) { return A + B * opacity; }        // imageblending additive (premultiplied)
+
+                vec3 result;
+                if      (blendMode == 1)  { result = min(A, B); }                                       // Darken
+                else if (blendMode == 2)  { result = A * B; }                                           // Multiply
+                else if (blendMode == 3)  { result = wpe_blend_colorBurn(A, B); }                       // Color Burn
+                else if (blendMode == 4 || blendMode == 20) { result = max(A + B - vec3(1.0), vec3(0.0)); } // Subtract
+                else if (blendMode == 6)  { result = max(A, B); }                                       // Lighten
+                else if (blendMode == 7)  { result = vec3(1.0) - (vec3(1.0) - A) * (vec3(1.0) - B); }   // Screen
+                else if (blendMode == 8)  { result = wpe_blend_colorDodge(A, B); }                      // Color Dodge
+                else if (blendMode == 9)  { result = min(A + B, vec3(1.0)); }                           // Add (Linear Dodge)
+                else if (blendMode == 11) { result = wpe_blend_overlay(A, B); }                         // Overlay
+                else if (blendMode == 12) { result = wpe_blend_softLight(A, B); }                       // Soft Light
+                else if (blendMode == 13) { result = wpe_blend_overlay(B, A); }                         // Hard Light
+                else if (blendMode == 14) { result = wpe_blend_vividLight(A, B); }                      // Vivid Light
+                else if (blendMode == 15) { result = wpe_blend_linearLight(A, B); }                     // Linear Light
+                else if (blendMode == 16) { result = wpe_blend_pinLight(A, B); }                        // Pin Light
+                else if (blendMode == 17) { result = wpe_blend_hardMix(A, B); }                         // Hard Mix
+                else if (blendMode == 18) { result = abs(A - B); }                                      // Difference
+                else if (blendMode == 19) { result = A + B - 2.0 * A * B; }                             // Exclusion
+                else if (blendMode == 21) { result = wpe_blend_reflect(A, B); }                         // Reflect
+                else if (blendMode == 22) { result = wpe_blend_reflect(B, A); }                         // Glow
+                else if (blendMode == 23) { result = min(A, B) - max(A, B) + vec3(1.0); }               // Phoenix
+                else if (blendMode == 24) { result = (A + B) * 0.5; }                                   // Average
+                else if (blendMode == 25) { result = vec3(1.0) - abs(vec3(1.0) - A - B); }              // Negation
+                else if (blendMode == 26) { result = wpe_blend_hue(A, B); }                             // Hue
+                else if (blendMode == 27) { result = wpe_blend_saturation(A, B); }                      // Saturation
+                else if (blendMode == 28) { result = wpe_blend_color(A, B); }                           // Color
+                else if (blendMode == 29) { result = wpe_blend_luminosity(A, B); }                      // Luminosity
+                else if (blendMode == 30) { result = vec3(max(A.x, max(A.y, A.z))) * B; }               // Tint
+                else if (blendMode == 32) { result = A + A * B; }                                       // imageblending mode 32
+                else                      { result = B; }                                               // Normal (0 / default)
                 return mix(A, result, opacity);
             }
 
