@@ -233,6 +233,10 @@ struct DeveloperToolsView: View {
               help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
         .init(key: "WPEAudioDebugLog", title: "Audio debug log",
               help: "Verbose audio-reactive DSP logging."),
+        .init(key: "WPEPuppetLogSkinningReason", title: "Log puppet skinning gate",
+              help: "Log why each puppet's GPU skinning is enabled or gated off (blink/body-sway depend on it). Filter logs for 🦴 [puppet-skin]. Logged once per change."),
+        .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp",
+              help: "Run the puppet base + effect chain in atlas/local UV space and warp the skinned mesh at composite, so effect masks align with the puppet. Reload the scene to apply."),
     ]
 
     private static let diagnosticStringKeys: [String] = [
