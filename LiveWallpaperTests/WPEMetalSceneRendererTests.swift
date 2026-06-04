@@ -272,7 +272,14 @@ struct WPEMetalSceneRendererTests {
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.png"))
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.tex"))
 
-        #expect(renderer.textureCandidates(for: "logo.png") == ["logo.png"])
+        // A raw-image ref also probes its converted `.tex` form and the
+        // `materials/` root — WPE stores `foo.png` source images as
+        // `materials/foo.png.tex` (see WPEMetalSceneRenderer.textureCandidates).
+        #expect(
+            renderer.textureCandidates(for: "logo.png")
+                == ["logo.png", "logo.png.tex", "materials/logo.png", "materials/logo.png.tex"]
+        )
+        // `.tex` is taken at face value — no fallback chain.
         #expect(renderer.textureCandidates(for: "atlas.tex") == ["atlas.tex"])
 
         let bare = renderer.textureCandidates(for: "halo")
