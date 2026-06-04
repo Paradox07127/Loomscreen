@@ -26,6 +26,9 @@ from typing import Any, BinaryIO, Iterable
 
 SCHEMA_VERSION = "wpe.trace.v1"
 DEFAULT_WPE_VERSION = "2.8.26"
+D3D11_MAP_WRITE_DISCARD = 4
+D3D11_MAP_WRITE_NO_OVERWRITE = 5
+D3D_SVF_USED = 0x2
 
 RESOURCE_BIND_TYPES = {
     0: "CBUFFER",
@@ -552,6 +555,14 @@ class TraceState:
     samplers: dict[str, dict[int, str]] = field(default_factory=lambda: {"vertex": {}, "fragment": {}})
 
 
+@dataclass
+class PendingMap:
+    resource_id: str
+    subresource: int
+    map_type: int
+    map_type_label: str | None
+
+
 class CaptureParser:
     def __init__(self, capture_dir: Path, out_dir: Path, scene_id: str, project_json: str, wpe_version: str) -> None:
         self.capture_dir = capture_dir
@@ -565,6 +576,8 @@ class CaptureParser:
         self.textures: dict[str, dict[str, Any]] = {}
         self.buffers: dict[str, dict[str, Any]] = {}
         self.buffer_data: dict[str, bytes] = {}
+        self.buffer_backing: dict[str, bytearray] = {}
+        self.pending_maps: dict[tuple[str, int], PendingMap] = {}
         self.rtv_to_texture: dict[str, str] = {}
         self.srv_to_texture: dict[str, str] = {}
         self.dsv_to_texture: dict[str, str] = {}
@@ -634,11 +647,14 @@ class CaptureParser:
         key = self.buffer_key(rid)
         desc = self.buffers.get(rid, {})
         data = self.buffer_data.get(rid, b"")
-        self.resources["buffers"].setdefault(key, {
+        byte_length = desc.get("byteLength") or len(data) or None
+        entry = self.resources["buffers"].setdefault(key, {
             "label": desc.get("label") or f"Buffer {rid}",
-            "byteLength": desc.get("byteLength") or len(data) or None,
-            "sha256": sha256_bytes(data) if data else None,
+            "byteLength": byte_length,
+            "sha256": None,
         })
+        entry["byteLength"] = byte_length
+        entry["sha256"] = sha256_bytes(data) if data else None
         return key
 
     def shader_id_for_resource(self, rid: str | None) -> str | None:
@@ -707,9 +723,11 @@ class CaptureParser:
             self.handle_set_shader_resources(chunk, "vertex" if "::VS" in name else "fragment")
         elif name in ("ID3D11DeviceContext::VSSetSamplers", "ID3D11DeviceContext::PSSetSamplers"):
             self.handle_set_samplers(chunk, "vertex" if "::VS" in name else "fragment")
+        elif name == "ID3D11DeviceContext::Map":
+            self.handle_map(chunk)
         elif name == "ID3D11DeviceContext::Unmap":
             self.handle_unmap(chunk)
-        elif name == "ID3D11DeviceContext::UpdateSubresource":
+        elif name in ("ID3D11DeviceContext::UpdateSubresource", "ID3D11DeviceContext::UpdateSubresource1"):
             self.handle_update_subresource(chunk)
         elif name == "ID3D11DeviceContext::DrawIndexed":
             self.emit_draw(chunk, indexed=True)
@@ -756,9 +774,62 @@ class CaptureParser:
             "bindFlags": bind_flags,
         }
         blob_index, _ = buffer_ref(chunk, "InitialData")
+        self.ensure_buffer_backing(rid, byte_width)
         data = self.blobs.read_blob(blob_index)
         if data:
-            self.buffer_data[rid] = data
+            self.write_buffer_data(rid, data, offset=0, discard=True)
+        else:
+            self.publish_buffer_data(rid)
+
+    def buffer_byte_width(self, rid: str) -> int:
+        desc = self.buffers.get(rid, {})
+        width = desc.get("byteLength")
+        if isinstance(width, int) and width > 0:
+            return width
+        return max(len(self.buffer_backing.get(rid, b"")), len(self.buffer_data.get(rid, b"")))
+
+    def ensure_buffer_backing(self, rid: str, min_size: int = 0) -> bytearray:
+        size = max(min_size, self.buffer_byte_width(rid))
+        backing = self.buffer_backing.get(rid)
+        if backing is None:
+            old = self.buffer_data.get(rid, b"")
+            size = max(size, len(old))
+            backing = bytearray(size)
+            backing[:min(len(old), size)] = old[:size]
+            self.buffer_backing[rid] = backing
+        elif len(backing) < size:
+            backing.extend(b"\x00" * (size - len(backing)))
+        return backing
+
+    def publish_buffer_data(self, rid: str) -> None:
+        backing = self.buffer_backing.get(rid)
+        if backing is not None:
+            self.buffer_data[rid] = bytes(backing)
+
+    def write_buffer_data(self, rid: str, data: bytes, offset: int = 0, discard: bool = False) -> None:
+        if not rid:
+            return
+        offset = max(offset, 0)
+        byte_width = self.buffer_byte_width(rid)
+        needed = max(byte_width, offset + len(data))
+        if discard:
+            self.buffer_backing[rid] = bytearray(needed)
+        backing = self.ensure_buffer_backing(rid, needed)
+        backing[offset:offset + len(data)] = data
+        self.publish_buffer_data(rid)
+
+    def handle_map(self, chunk: ET.Element) -> None:
+        rid = rid_child(chunk, "pResource")
+        if rid is None:
+            return
+        subresource = int_child(chunk, "Subresource")
+        map_type = int_child(chunk, "MapType")
+        self.pending_maps[(rid, subresource)] = PendingMap(
+            resource_id=rid,
+            subresource=subresource,
+            map_type=map_type,
+            map_type_label=enum_value(direct(chunk, "MapType")),
+        )
 
     def handle_create_shader(self, chunk: ET.Element, stage: str) -> None:
         rid = rid_child(chunk, "pShader")
@@ -855,19 +926,51 @@ class CaptureParser:
 
     def handle_unmap(self, chunk: ET.Element) -> None:
         rid = rid_child(chunk, "pResource")
-        blob_index, _ = buffer_ref(chunk, "MapWrittenData")
+        if rid is None:
+            return
+        subresource = int_child(chunk, "Subresource")
+        pending = self.pending_maps.pop((rid, subresource), None)
+        map_type = int_child(chunk, "MapType", pending.map_type if pending is not None else 0)
+        start = int_child(chunk, "Byte offset to start of written data")
+        end = int_child(chunk, "Byte offset to end of written data")
+        blob_index, byte_length = buffer_ref(chunk, "MapWrittenData")
         data = self.blobs.read_blob(blob_index)
-        if rid and data:
-            self.buffer_data[rid] = data
-            self.record_buffer_resource(rid)
+        if not data:
+            return
+        expected = max(end - start, 0)
+        if expected and len(data) > expected:
+            data = data[:expected]
+        elif byte_length is not None and byte_length > 0 and len(data) > byte_length:
+            data = data[:byte_length]
+        discard = map_type == D3D11_MAP_WRITE_DISCARD
+        self.write_buffer_data(rid, data, offset=start, discard=discard)
+        self.record_buffer_resource(rid)
 
     def handle_update_subresource(self, chunk: ET.Element) -> None:
         rid = rid_child(chunk, "pDstResource")
-        blob_index, _ = buffer_ref(chunk, "pSrcData")
+        if rid is None:
+            return
+        offset, limit = self.update_subresource_range(chunk)
+        blob_index, byte_length = buffer_ref(chunk, "pSrcData")
         data = self.blobs.read_blob(blob_index)
-        if rid and data:
-            self.buffer_data[rid] = data
-            self.record_buffer_resource(rid)
+        if not data:
+            return
+        if limit is not None and limit >= offset:
+            data = data[:limit - offset]
+        elif byte_length is not None and byte_length > 0 and len(data) > byte_length:
+            data = data[:byte_length]
+        self.write_buffer_data(rid, data, offset=offset, discard=False)
+        self.record_buffer_resource(rid)
+
+    def update_subresource_range(self, chunk: ET.Element) -> tuple[int, int | None]:
+        box = direct(chunk, "pDstBox") or direct(chunk, "DstBox")
+        if box is None:
+            return 0, None
+        left = int_child(box, "left", int_child(box, "Left"))
+        right = int_child(box, "right", int_child(box, "Right", -1))
+        if right < left:
+            right = None
+        return max(left, 0), right
 
     def emit_draw(self, chunk: ET.Element, indexed: bool) -> None:
         ordinal = len(self.passes)
@@ -1013,7 +1116,12 @@ class CaptureParser:
                 slot = cbuffer.get("bindPoint")
                 bound_rid = self.state.constant_buffers[stage].get(slot)
                 data = self.buffer_data.get(bound_rid or "", b"")
-                variables = [decode_variable_value(v, data) for v in cbuffer.get("variables", [])]
+                cb_vars = cbuffer.get("variables", [])
+                # Defensive fallback: if a compiler emitted ALL-zero variable flags
+                # (no D3D_SVF_USED on any), the used-gate would silently drop every
+                # value — decode them all instead of returning an empty cbuffer.
+                force_used = bool(cb_vars) and all((v.get("flags") or 0) == 0 for v in cb_vars)
+                variables = [decode_variable_value(v, data, force_used=force_used) for v in cb_vars]
                 out.append({
                     "name": cbuffer.get("name"),
                     "stage": stage,
@@ -1142,24 +1250,33 @@ def binding_md(binding: dict[str, Any]) -> dict[str, Any]:
 
 def variable_schema(var: dict[str, Any]) -> dict[str, Any]:
     typ = var.get("type", {})
+    flags = int(var.get("flags") or 0)
     return {
         "name": var.get("name", ""),
         "type": f"{typ.get('class')}<{typ.get('type')}>",
         "startOffset": var.get("startOffset"),
         "size": var.get("size"),
+        "flags": flags,
+        "usedByShader": bool(flags & D3D_SVF_USED),
         "rows": typ.get("rows"),
         "cols": typ.get("cols"),
         "elements": typ.get("elements"),
     }
 
 
-def decode_variable_value(var: dict[str, Any], data: bytes) -> dict[str, Any]:
+def decode_variable_value(var: dict[str, Any], data: bytes, force_used: bool = False) -> dict[str, Any]:
     out = variable_schema(var)
     start = int(var.get("startOffset") or 0)
     size = int(var.get("size") or 0)
     raw = data[start:start + size] if start < len(data) else b""
     typ = var.get("type", {})
     rows = int(typ.get("rows") or 0)
+    if not out["usedByShader"] and not force_used:
+        out["valueStatus"] = "unused-reflection-slot"
+        if raw:
+            out["rawBytesSha256"] = sha256_bytes(raw)
+        return out
+
     cols = int(typ.get("cols") or 0)
     elements = int(typ.get("elements") or 1)
     values = decode_scalar_values(raw, typ.get("type"))
