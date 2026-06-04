@@ -109,6 +109,33 @@ struct WPETexDecoderTests {
         #expect(image.height == 4)
     }
 
+    // Single-frame static `.tex` (util/black, util/clouds_256, mask textures
+    // on saber 3526278753) carry one image and no TEXS schedule. They decode
+    // through the eager static path at full resolution; the lazy *streaming*
+    // path declines them with `unsupportedAnimation` by design (lazy = animated
+    // only). That benign decline must not be mistaken for a decode failure —
+    // see `WPEResolutionDiagnosticsTests` for the resolution-summary contract.
+    @Test("Single-frame static .tex decodes eagerly at full size and declines the streaming path")
+    func singleFrameStaticDecodesEagerlyAndDeclinesStreaming() throws {
+        let buffer = makeRGBA8888TestImage(width: 256, height: 256)
+
+        let eager = try WPETexDecoder().extractTexturePayload(data: buffer).get()
+        #expect(eager.info.format == .rgba8888)
+        #expect(eager.hasAnimationFrames == false)
+        #expect(eager.animationTrack == nil)
+        #expect(eager.videoPayload == nil)
+        let mip = try #require(eager.largestMipmap)
+        #expect(mip.width == 256)
+        #expect(mip.height == 256)
+        #expect(mip.bytes.count == 256 * 256 * 4)
+
+        let streaming = WPETexDecoder().extractStreamingPayload(data: buffer)
+        guard case .failure(.unsupportedAnimation) = streaming else {
+            Issue.record("Expected single-frame static to decline streaming with unsupportedAnimation, got \(streaming)")
+            return
+        }
+    }
+
     @Test("Decode accepts RePKG TEXB0003 PNG-backed texture")
     func decodeRePKGTEXB0003PNGBackedTexture() throws {
         let buffer = makeRePKGPNGBackedImage()

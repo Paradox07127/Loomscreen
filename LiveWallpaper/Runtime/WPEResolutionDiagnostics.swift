@@ -65,8 +65,20 @@ struct WPEResolutionDiagnosticsSnapshot: Equatable, Sendable {
         return counts
     }
 
+    /// References that never resolved through *any* attempt.
+    ///
+    /// A ref can produce more than one event per scene load: the renderer
+    /// speculatively probes the lazy-streaming path
+    /// (`resolveStreamingPayloadIfHeavy`) before the eager static path.
+    /// Single-frame static `.tex` decline the streaming probe with
+    /// `unsupportedAnimation` *by design* (lazy = animation-only), then
+    /// resolve through the eager path. Counting the speculative decline as a
+    /// miss reported those textures as both resolved *and* missing — the
+    /// spurious "missing=9" on saber 3526278753. De-dupe by ref so a texture
+    /// that resolved anywhere is never also reported missing.
     var missedRefs: [WPEResolutionEvent] {
-        events.filter { $0.finalOutcome != .resolved }
+        let resolvedRefs = Set(events.lazy.filter { $0.finalOutcome == .resolved }.map(\.ref))
+        return events.filter { $0.finalOutcome != .resolved && !resolvedRefs.contains($0.ref) }
     }
 }
 
