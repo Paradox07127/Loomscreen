@@ -14,7 +14,11 @@ import Metal
 /// One `mac/trace.json` is written per scene load: passes accumulate during the
 /// first rendered frame, then `finishFrame` serialises once and latches so the
 /// live render loop never re-accumulates.
-final class WPECanonicalTraceRecorder {
+///
+/// `@unchecked Sendable`: all mutable state (scene/frameComplete/passes/resources)
+/// is guarded by `lock`, so the shared singleton is safe to touch from the render
+/// thread and the end-of-frame flush. Mirrors `WPESceneDebugArtifacts`.
+final class WPECanonicalTraceRecorder: @unchecked Sendable {
     static let shared = WPECanonicalTraceRecorder()
 
     struct TextureBindingInput {
