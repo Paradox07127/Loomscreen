@@ -107,6 +107,21 @@ final class WPEMetalRenderExecutor {
         #endif
     }
 
+    /// Diagnostic: log each puppet's GPU-skinning gate result (enabled, or the
+    /// disable reason — `unresolved-attachment` / `missing-hierarchy` /
+    /// `palette-unresolved` / `skin-index-out-of-range` / `palette-unbounded` /
+    /// `no-animation` / `user-disabled`). A gated-off puppet falls back to the
+    /// static rest pose (no blink/sway), so this surfaces *why* a puppet doesn't
+    /// animate. Logged once per object per change (not per frame). DEBUG-only.
+    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetLogSkinningReason -bool YES`.
+    static var logPuppetSkinningReason: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "WPEPuppetLogSkinningReason")
+        #else
+        return false
+        #endif
+    }
+
     /// Rollback gate for sub-region compose-layer output (the audio-visualizer
     /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
     /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
@@ -1152,12 +1167,43 @@ final class WPEMetalRenderExecutor {
                 runtimeUniforms: runtimeUniforms
             )
         }
+        #if DEBUG
+        if Self.logPuppetSkinningReason {
+            logResolvedPuppetSkinning(pipeline: pipeline, skinningByObjectID: skinningByObjectID)
+        }
+        #endif
         return PuppetAttachmentFrameContext(
             layersByObjectID: layersByID,
             skinningByObjectID: skinningByObjectID,
             sceneSize: sceneSize
         )
     }
+
+    #if DEBUG
+    /// Per-objectID dedup so the skinning-gate reason logs once per change, not per frame.
+    private var lastLoggedPuppetSkinningReason: [String: String] = [:]
+
+    /// Logs why each puppet's GPU skinning is enabled or gated off (see `logPuppetSkinningReason`).
+    private func logResolvedPuppetSkinning(
+        pipeline: WPEPreparedRenderPipeline,
+        skinningByObjectID: [String: PuppetSkinningState]
+    ) {
+        for layer in pipeline.layers where layer.puppetModel != nil {
+            let objectID = layer.graphLayer.objectID
+            let state = skinningByObjectID[objectID]
+            let enabled = state?.enabled ?? false
+            let reason = state?.reason ?? "no-state"
+            let summary = "\(enabled ? "ENABLED" : "DISABLED")/\(reason)"
+            guard lastLoggedPuppetSkinningReason[objectID] != summary else { continue }
+            lastLoggedPuppetSkinningReason[objectID] = summary
+            Logger.info(
+                "🦴 [puppet-skin] obj=\(objectID) name=\(layer.graphLayer.objectName) "
+                    + "skinning=\(enabled ? "ENABLED" : "DISABLED") reason=\(reason)",
+                category: .wpeRender
+            )
+        }
+    }
+    #endif
 
     /// The default-on skinning gate: only enable GPU skinning when the puppet's hierarchy, skin
     /// indices, palette bounds, and attached children are all supported. Otherwise the puppet renders
