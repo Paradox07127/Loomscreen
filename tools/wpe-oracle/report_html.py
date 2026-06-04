@@ -425,6 +425,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       background-color: rgba(245, 158, 11, 0.02);
     }
 
+    .val-volatile td {
+      color: #fcd34d !important;
+    }
+
     .transpose-badge {
       background: var(--color-amber-bg);
       color: var(--color-amber);
@@ -522,6 +526,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     const summary = data.summary || {};
     const wpeTrace = data.wpeTrace || [];
     const macTrace = data.macTrace || [];
+    const wpeTextures = data.wpeTextures || {};
+    const macTextures = data.macTextures || {};
 
     // Map of passes by ordinal for fast O(1) lookup
     const wpePassByOrdinal = {};
@@ -536,7 +542,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       macPassByOrdinal[ord] = p;
     });
 
-    const volatileRegex = /g_Time|g_Frame|g_DeltaTime|time|frame/i;
+    const volatileRegex = /(?:^|[.])(g_)?(time|daytime|frame|framecount|deltatime|random)/i;
 
     window.onload = function() {
       document.getElementById('generation-time').textContent = new Date().toLocaleString();
@@ -1080,33 +1086,51 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let macInfo = '<span class="text-muted">N/A</span>';
         let status = '';
         let rowClass = '';
-        
+
+        // Per-pass texture bindings carry only a resource id; dims/format live in
+        // resources.textures. WPE bindings omit dims entirely, so join by id.
+        let wpeWidth = w && w.width, wpeHeight = w && w.height, wpeFormat = w && w.format;
+        if (w && w.resource && wpeTextures[w.resource]) {
+          const res = wpeTextures[w.resource];
+          if (wpeWidth === undefined || wpeWidth === null) wpeWidth = res.width;
+          if (wpeHeight === undefined || wpeHeight === null) wpeHeight = res.height;
+          if (wpeFormat === undefined || wpeFormat === null) wpeFormat = res.format;
+        }
+        let macWidth = m && m.width, macHeight = m && m.height, macFormat = m && m.format;
+        if (m && m.resource && macTextures[m.resource]) {
+          const res = macTextures[m.resource];
+          if (macWidth === undefined || macWidth === null) macWidth = res.width;
+          if (macHeight === undefined || macHeight === null) macHeight = res.height;
+          if (macFormat === undefined || macFormat === null) macFormat = res.format;
+        }
+
         if (w && m) {
-          const wpeDims = w.width !== undefined ? `${w.width}x${w.height}` : 'unknown';
-          const macDims = m.width !== undefined ? `${m.width}x${m.height}` : 'unknown';
-          const dimsMatch = w.width === m.width && w.height === m.height;
-          const formatMatch = w.format === m.format;
-          
+          const wpeDims = (wpeWidth !== undefined && wpeWidth !== null) ? `${wpeWidth}x${wpeHeight}` : 'unknown';
+          const macDims = (macWidth !== undefined && macWidth !== null) ? `${macWidth}x${macHeight}` : 'unknown';
+          const dimsMatch = wpeWidth === macWidth && wpeHeight === macHeight;
+          // Format strings are not directly comparable across APIs (WPE uses DXGI
+          // names, Metal uses MTLPixelFormat ints), so gate the row status on dims
+          // only and show formats as informational rather than a false mismatch.
           const dimsClass = dimsMatch ? '' : 'val-mismatch';
-          const formatClass = formatMatch ? '' : 'val-mismatch';
-          
+          const formatClass = '';
+
           wpeInfo = `
             <div class="monospace" style="font-size:11px; line-height:1.4;">
               Dim: <span class="${dimsClass}">${wpeDims}</span><br>
-              Fmt: <span class="${formatClass}">${w.format || 'unknown'}</span><br>
+              Fmt: <span class="${formatClass}">${wpeFormat || 'unknown'}</span><br>
               Res: <span class="text-muted" style="font-size:10px;">${w.resource || 'none'}</span>
             </div>
           `;
           macInfo = `
             <div class="monospace" style="font-size:11px; line-height:1.4;">
               Dim: <span class="${dimsClass}">${macDims}</span><br>
-              Fmt: <span class="${formatClass}">${m.format || 'unknown'}</span><br>
+              Fmt: <span class="${formatClass}">${macFormat || 'unknown'}</span><br>
               Res: <span class="text-muted" style="font-size:10px;">${m.resource || 'none'}</span>
               ${m.fallback ? '<br><span class="badge badge-amber" style="font-size:9px; padding:1px 3px; border:none; margin-top:2px;">Fallback</span>' : ''}
             </div>
           `;
-          
-          if (!dimsMatch || !formatMatch) {
+
+          if (!dimsMatch) {
             status = '<span class="badge badge-red">Mismatch</span>';
             rowClass = 'val-mismatch';
           } else {
@@ -1115,8 +1139,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         } else if (w) {
           wpeInfo = `
             <div class="monospace" style="font-size:11px; line-height:1.4;">
-              Dim: ${w.width !== undefined ? w.width + 'x' + w.height : 'unknown'}<br>
-              Fmt: ${w.format || 'unknown'}<br>
+              Dim: ${(wpeWidth !== undefined && wpeWidth !== null) ? wpeWidth + 'x' + wpeHeight : 'unknown'}<br>
+              Fmt: ${wpeFormat || 'unknown'}<br>
               Res: ${w.resource || 'none'}
             </div>
           `;
@@ -1124,8 +1148,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         } else if (m) {
           macInfo = `
             <div class="monospace" style="font-size:11px; line-height:1.4;">
-              Dim: ${m.width !== undefined ? m.width + 'x' + m.height : 'unknown'}<br>
-              Fmt: ${m.format || 'unknown'}<br>
+              Dim: ${(macWidth !== undefined && macWidth !== null) ? macWidth + 'x' + macHeight : 'unknown'}<br>
+              Fmt: ${macFormat || 'unknown'}<br>
               Res: ${m.resource || 'none'}
             </div>
           `;
@@ -1310,7 +1334,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
               } else if (maxDelta > 1e-4) {
                 if (isVolatile) {
                   cellClass = 'val-volatile';
-                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile</span>';
+                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile/ignored</span>';
                 } else {
                   cellClass = 'val-mismatch';
                 }
@@ -1328,7 +1352,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
               if (delta > 1e-4) {
                 if (isVolatile) {
                   cellClass = 'val-volatile';
-                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile</span>';
+                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile/ignored</span>';
                 } else {
                   cellClass = 'val-mismatch';
                 }
@@ -1341,7 +1365,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
               if (!match) {
                 if (isVolatile) {
                   cellClass = 'val-volatile';
-                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile</span>';
+                  badge = '<span class="badge badge-amber" style="font-size:9px; padding:1px 3px; margin-left:6px; border:none;">Volatile/ignored</span>';
                 } else {
                   cellClass = 'val-mismatch';
                 }
@@ -1516,17 +1540,19 @@ def main():
             sys.stderr.write(f"Warning: Failed to load Mac trace '{args.mac}': {e}\n")
 
     # The JS renders directly from raw trace passes (reads pass.constantBuffers /
-    # pass.textures), so embed the passes lists as-is. The diff JSON already did
-    # the uniform-by-name reconciliation; the report just displays both sides.
-    if isinstance(wpe_trace, dict) and "passes" in wpe_trace:
-        wpe_trace = wpe_trace["passes"]
-    if isinstance(mac_trace, dict) and "passes" in mac_trace:
-        mac_trace = mac_trace["passes"]
+    # pass.textures) and joins resources.textures by id for the WPE/Mac texture
+    # dims (per-pass bindings carry only the resource id, not inline dims).
+    wpe_passes = wpe_trace.get("passes", []) if isinstance(wpe_trace, dict) else (wpe_trace or [])
+    wpe_textures = wpe_trace.get("resources", {}).get("textures", {}) if isinstance(wpe_trace, dict) else {}
+    mac_passes = mac_trace.get("passes", []) if isinstance(mac_trace, dict) else (mac_trace or [])
+    mac_textures = mac_trace.get("resources", {}).get("textures", {}) if isinstance(mac_trace, dict) else {}
 
     report_data = {
         "summary": summary,
-        "wpeTrace": wpe_trace,
-        "macTrace": mac_trace,
+        "wpeTrace": wpe_passes,
+        "macTrace": mac_passes,
+        "wpeTextures": wpe_textures,
+        "macTextures": mac_textures,
     }
     
     # Build & Inject
