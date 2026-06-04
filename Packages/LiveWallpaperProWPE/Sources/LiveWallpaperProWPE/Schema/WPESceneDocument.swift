@@ -368,15 +368,22 @@ public struct WPESceneGeneral: Equatable, Sendable {
     public let clearColor: SIMD3<Double>
     public let orthogonalProjection: WPESceneOrthogonalProjection
     public let cameraParallax: WPESceneCameraParallaxSettings
+    /// WPE `general.supportsaudioprocessing`: the scene declares audio-reactive
+    /// content (a shader/effect samples `g_AudioSpectrum*`). Used by the renderer
+    /// to keep the view on the continuous-frame path so the visualizer animates
+    /// with audio instead of freezing on the static/on-demand path.
+    public let supportsAudioProcessing: Bool
 
     public init(
         clearColor: SIMD3<Double>,
         orthogonalProjection: WPESceneOrthogonalProjection,
-        cameraParallax: WPESceneCameraParallaxSettings = .disabled
+        cameraParallax: WPESceneCameraParallaxSettings = .disabled,
+        supportsAudioProcessing: Bool = false
     ) {
         self.clearColor = clearColor
         self.orthogonalProjection = orthogonalProjection
         self.cameraParallax = cameraParallax
+        self.supportsAudioProcessing = supportsAudioProcessing
     }
 
     public static let defaultGeneral = WPESceneGeneral(

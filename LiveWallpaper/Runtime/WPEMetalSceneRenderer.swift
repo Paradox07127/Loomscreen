@@ -146,6 +146,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// when there are no dynamic textures or particles — otherwise the scene
     /// renders one frame and freezes. Computed once per load.
     private var hasAnimatedShaderPasses = false
+    /// WPE `general.supportsaudioprocessing`. An audio-reactive scene must stay
+    /// on the continuous-frame path so `g_AudioSpectrum*` re-samples every frame
+    /// — `pipelineHasAnimatedPasses` only catches audio shaders under
+    /// `effects/`/`workshop/`, so a custom-path audio shader would otherwise
+    /// freeze on the static/on-demand path.
+    private var sceneSupportsAudioProcessing = false
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
     /// Property-key → render-target bindings for the loaded scene, used by the
     /// incremental settings-apply path. Empty until `load()` completes.
@@ -453,6 +459,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             sceneCamera: document.camera
         )
         cameraParallaxSettings = document.general.cameraParallax
+        sceneSupportsAudioProcessing = document.general.supportsAudioProcessing
         cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
@@ -1547,6 +1554,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// run again).
     private var needsContinuousFrames: Bool {
         hasAnimatedShaderPasses
+            || sceneSupportsAudioProcessing
             || !dynamicTextureSources.isEmpty
             || !particleSystems.isEmpty
             || pointerDrivenContent
@@ -1613,6 +1621,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         soundRuntime?.stop()
         soundRuntime = nil
         cameraParallaxSettings = .disabled
+        sceneSupportsAudioProcessing = false
         cameraParallaxSmoother.reset()
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
