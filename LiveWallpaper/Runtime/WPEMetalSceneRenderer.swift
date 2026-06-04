@@ -631,7 +631,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             texture = decoded
         } else {
             Logger.info(
-                "[WPEMetalCaptureScene] texture dump: unsupported pixel format \(rawTexture.pixelFormat.rawValue) for \(basename)",
+                "[gpu-dump] texture dump: unsupported pixel format \(rawTexture.pixelFormat.rawValue) for \(basename)",
                 category: .wpeRender
             )
             return
@@ -647,7 +647,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         )
 
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else {
-            Logger.info("[WPEMetalCaptureScene] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
+            Logger.info("[gpu-dump] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
             return
         }
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
@@ -665,7 +665,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             shouldInterpolate: false,
             intent: .defaultIntent
         ) else {
-            Logger.info("[WPEMetalCaptureScene] texture dump: CGImage failed for \(basename)", category: .wpeRender)
+            Logger.info("[gpu-dump] texture dump: CGImage failed for \(basename)", category: .wpeRender)
             return
         }
 
@@ -687,14 +687,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let tiff = nsImage.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiff),
                   let png = bitmap.representation(using: .png, properties: [:]) else {
-                Logger.info("[WPEMetalCaptureScene] texture dump: PNG encode failed for \(basename)", category: .wpeRender)
+                Logger.info("[gpu-dump] texture dump: PNG encode failed for \(basename)", category: .wpeRender)
                 return
             }
             try png.write(to: url)
-            Logger.notice("[WPEMetalCaptureScene] texture dump → \(url.path)", category: .wpeRender)
+            Logger.notice("[gpu-dump] texture dump → \(url.path)", category: .wpeRender)
         } catch {
             Logger.info(
-                "[WPEMetalCaptureScene] texture dump failed for \(basename): \(error.localizedDescription)",
+                "[gpu-dump] texture dump failed for \(basename): \(error.localizedDescription)",
                 category: .wpeRender
             )
         }
