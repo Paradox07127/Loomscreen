@@ -523,15 +523,32 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         _ = id
     }
 
+    #if DEBUG
+    /// Whether the current scene is in the GPU-capture set. `WPEMetalCaptureScene`
+    /// holds a string array (the Developer Tools "GPU capture" list); a single
+    /// `defaults write ... WPEMetalCaptureScene <id>` string — optionally comma/
+    /// space separated — is still honored for back-compat with the CLI workflow.
+    private func gpuCaptureRequestedForCurrentScene() -> Bool {
+        let d = UserDefaults.standard
+        let raw: [String]
+        if let arr = d.stringArray(forKey: "WPEMetalCaptureScene") {
+            raw = arr
+        } else if let s = d.string(forKey: "WPEMetalCaptureScene") {
+            raw = s.split(whereSeparator: { ",; ".contains($0) }).map(String.init)
+        } else {
+            raw = []
+        }
+        let wanted = Set(raw.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        return wanted.contains(descriptor.workshopID)
+    }
+    #endif
+
     /// Iterate every entry in `loadedTextures` and dump each to a PNG so we
     /// can verify whether the source-image upload actually carried bytes to
     /// the GPU. Same gate as the GPU trace + outputTexture dump.
     private func dumpLoadedTexturesIfRequested() {
         #if DEBUG
-        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
-            return
-        }
+        guard gpuCaptureRequestedForCurrentScene() else { return }
         for (path, texture) in loadedTextures {
             let safeName = path
                 .replacingOccurrences(of: "/", with: "_")
@@ -670,10 +687,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `WPEMetalCaptureScene` UserDefault as the GPU trace capture.
     private func dumpOutputTextureIfRequested(_ texture: MTLTexture) {
         #if DEBUG
-        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
-            return
-        }
+        guard gpuCaptureRequestedForCurrentScene() else { return }
         let device = texture.device
         guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
             Logger.info(
@@ -796,10 +810,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     ///   defaults delete Taijia.LiveWallpaper WPEMetalCaptureScene
     private func beginGPUCaptureIfRequested() -> GPUCaptureHandle? {
         #if DEBUG
-        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
-            return nil
-        }
+        guard gpuCaptureRequestedForCurrentScene() else { return nil }
         let manager = MTLCaptureManager.shared()
         guard manager.supportsDestination(.gpuTraceDocument) else {
             Logger.info(

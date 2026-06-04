@@ -14,8 +14,11 @@ struct DeveloperToolsView: View {
     // Corpus Test machinery is DEBUG-only: the `WPECorpusPlaybackHarness` /
     // `WPECorpusPlaybackReport` types it drives are themselves `#if DEBUG`, so
     // none of this can compile (or run) in Release. Release Developer Tools
-    // shows only the Diagnostics tab.
+    // shows only the Diagnostics tab. The GPU-capture list is DEBUG-only too —
+    // the renderer reads `WPEMetalCaptureScene` only under `#if DEBUG`.
     #if DEBUG
+    @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: "WPEMetalCaptureScene") ?? []
+    @State private var newCaptureID: String = ""
     @State private var isRunning = false
     @State private var progressLabel: String = ""
     @State private var progressFraction: Double = 0
@@ -246,8 +249,6 @@ struct DeveloperToolsView: View {
     /// capture / verbose-log paths that work in Release too).
     private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = {
         var flags: [DiagnosticBoolFlag] = [
-            .init(key: "WPEMetalCaptureScene", title: "Capture scene textures",
-                  help: "Dump decoded scene/composite textures (incl. BC/DXT) under scene-debug."),
             .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
                   help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
             .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
@@ -275,6 +276,7 @@ struct DeveloperToolsView: View {
         WPEWaterWavesDebugMode.defaultsKey,
         "WPEDumpScenePasses",
         "WPEDumpScenePassesAtTime",
+        "WPEMetalCaptureScene",
     ]
 
     private var diagnosticsFlagsSection: some View {
@@ -301,6 +303,11 @@ struct DeveloperToolsView: View {
                         }
                     }
                 }
+
+                #if DEBUG
+                Divider()
+                gpuCaptureList
+                #endif
 
                 Text(verbatim: "Flags persist in UserDefaults until toggled off. \"Reset all\" clears every flag here (including scene-dump targets) so a forgotten toggle never affects normal playback.")
                     .font(.caption)
@@ -329,10 +336,72 @@ struct DeveloperToolsView: View {
             UserDefaults.standard.removeObject(forKey: key)
         }
         UserDefaults.standard.removeObject(forKey: WPEWaterWavesTrace.defaultsKey)
+        #if DEBUG
+        captureIDs = []
+        #endif
         flagRefresh += 1
     }
 
     #if DEBUG
+    private func addCaptureID() {
+        let id = newCaptureID.trimmingCharacters(in: .whitespaces)
+        guard !id.isEmpty, !captureIDs.contains(id) else { return }
+        captureIDs.append(id)
+        UserDefaults.standard.set(captureIDs, forKey: "WPEMetalCaptureScene")
+        newCaptureID = ""
+    }
+
+    private func removeCaptureID(_ id: String) {
+        captureIDs.removeAll { $0 == id }
+        if captureIDs.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "WPEMetalCaptureScene")
+        } else {
+            UserDefaults.standard.set(captureIDs, forKey: "WPEMetalCaptureScene")
+        }
+    }
+
+    private var gpuCaptureList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: "GPU capture scene IDs")
+                .font(.callout.weight(.medium))
+            Text(verbatim: "Scenes whose workshopID is listed get a Metal .gputrace (→ /tmp) plus output/texture PNG dumps (→ App Support/LiveWallpaper/gpu-traces/) on next load. Reload the wallpaper after editing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if captureIDs.isEmpty {
+                Text(verbatim: "No scenes selected.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(captureIDs, id: \.self) { id in
+                    HStack(spacing: 8) {
+                        Text(verbatim: id).monospaced()
+                        Spacer()
+                        Button(role: .destructive) {
+                            removeCaptureID(id)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(Text(verbatim: "Stop capturing this scene"))
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                TextField("Workshop ID", text: $newCaptureID)
+                    .textFieldStyle(.roundedBorder)
+                    .disableAutocorrection(true)
+                    .frame(maxWidth: 200)
+                    .onSubmit { addCaptureID() }
+                Button {
+                    addCaptureID()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .disabled(newCaptureID.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
     private func errorBanner(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
             .foregroundStyle(.orange)
