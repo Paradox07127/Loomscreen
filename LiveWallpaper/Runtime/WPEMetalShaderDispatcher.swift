@@ -736,6 +736,28 @@ struct WPEMetalShaderDispatcher {
         depthPixelFormat: MTLPixelFormat
     ) throws {
         let result = try executor.compileCustomShader(for: pass)
+        // Dev-only: dump every transpiled layer's MSL + uniform/sampler interface
+        // so it can be cross-checked against the Windows RenderDoc oracle
+        // (tools/wpe-oracle shader-interface.md). No-op unless scene-debug is on.
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            WPESceneDebugArtifacts.shared.recordNoteOnce(
+                name: "msl-\(pass.pass.id)-\(pass.pass.shader).metal",
+                contents: result.mslSource
+            )
+            var iface = "shader=\(pass.pass.shader) pass=\(pass.pass.id)\n"
+            iface += "vertexFunction=\(result.vertexFunctionName)\n"
+            iface += "fragmentFunction=\(result.fragmentFunctionName)\n"
+            iface += "samplerNames=\(result.samplerNames)\n"
+            iface += "uniformLayout (name | glslType | slot | slotCount | arrayLength | material):\n"
+            for slot in result.uniformLayout {
+                iface += "  \(slot.name) | \(slot.glslType) | \(slot.slot) | \(slot.slotCount)"
+                    + " | \(slot.arrayLength.map(String.init) ?? "-") | \(slot.materialName ?? "-")\n"
+            }
+            WPESceneDebugArtifacts.shared.recordNoteOnce(
+                name: "iface-\(pass.pass.id)-\(pass.pass.shader).txt",
+                contents: iface
+            )
+        }
         let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         let isWaveLikePass = Self.isWaveLikePass(pass)
         let isWaterWavesPass = Self.isWaterWavesPass(pass)
