@@ -1291,7 +1291,13 @@ final class WPEMetalRenderExecutor {
         let last = max(base.animation.frameCount, 1)
         let frames = Array(Set([0, 1, last / 4, last / 2, (last * 3) / 4, last])).sorted()
         let extent = Self.modelExtent(meshes: meshes)
-        let maxAllowedDelta = max(Float(96), extent * 0.12)
+        // This bound only needs to catch a grossly exploding palette: structural failures
+        // (non-finite, out-of-range skin indices, unresolved attachments, broken hierarchy) are
+        // caught by the other gate conditions. The previous 0.12×extent was far too tight — it
+        // rejected legit flowing-hair / gesture motion (e.g. Plana's finite 0.37×-extent swing),
+        // leaving the whole puppet static (no blink/sway). A legit pose keeps every skinned vertex
+        // within ~1.5 model extents of rest; beyond that the palette is exploding.
+        let maxAllowedDelta = max(Float(256), extent * 1.5)
         for frame in frames {
             let time = Double(frame) / fps / max(base.rate, 0.0001)
             let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(layers: layers, bones: bones, at: time)
