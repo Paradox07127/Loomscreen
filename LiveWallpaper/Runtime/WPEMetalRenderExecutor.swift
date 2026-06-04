@@ -247,9 +247,6 @@ final class WPEMetalRenderExecutor {
     /// through its dozen call sites. Safe because the render loop encodes one
     /// frame at a time.
     private var currentSceneSize: CGSize = .zero
-    /// Diagnostic dedupe for the compose-subregion box (one log per object per
-    /// executor lifetime). Temporary — remove once the audio-box path is proven.
-    private var loggedSubregionDiag: Set<String> = []
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -1993,19 +1990,11 @@ final class WPEMetalRenderExecutor {
         // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
             guard Self.subregionComposeOutputEnabled else { return false }
-            let decision = WPEMetalSceneCaptureUtilityModels.outputGeometry(
+            return WPEMetalSceneCaptureUtilityModels.outputGeometry(
                 path: layer.imagePath,
                 geometry: layer.geometry,
                 sceneSize: currentSceneSize
-            )
-            let key = "decide:\(layer.objectID)"
-            if loggedSubregionDiag.insert(key).inserted {
-                Logger.warning(
-                    "🟦[ComposeSubregion] decide objID=\(layer.objectID) shader=\(pass.pass.shader) target=\(String(describing: pass.pass.target)) decision=\(decision) sceneSize=\(Int(currentSceneSize.width))x\(Int(currentSceneSize.height)) origin=\(layer.geometry.origin.x),\(layer.geometry.origin.y) size=\(String(describing: layer.geometry.size)) scale=\(layer.geometry.scale.x)",
-                    category: .wpeRender
-                )
-            }
-            return decision == .subregion
+            ) == .subregion
         }
         return true
     }
@@ -2057,13 +2046,6 @@ final class WPEMetalRenderExecutor {
             width: width,
             height: height
         ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
-        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath),
-           loggedSubregionDiag.insert("quad:\(layer.objectID)").inserted {
-            Logger.warning(
-                "🟩[ComposeSubregion] quad objID=\(layer.objectID) center=(\(Int(center.x)),\(Int(center.y))) size=(\(Int(width)),\(Int(height))) sceneSize=(\(Int(sceneWidth)),\(Int(sceneHeight))) centerNDC=(\(String(format: "%.2f", center.x / max(sceneWidth * 0.5, 1))),\(String(format: "%.2f", center.y / max(sceneHeight * 0.5, 1)))) srcTex=\(sourceTexture.width)x\(sourceTexture.height)",
-                category: .wpeRender
-            )
-        }
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(
