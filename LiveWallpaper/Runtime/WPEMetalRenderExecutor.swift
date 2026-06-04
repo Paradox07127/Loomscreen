@@ -53,6 +53,20 @@ final class WPEMetalRenderExecutor {
         #endif
     }
 
+    /// Prototype flag: defer the puppet mesh warp from the base material pass to
+    /// the final scene composite, so the base image + entire effect chain run in
+    /// puppet atlas/local UV space (effect masks align with the mesh). Default-off
+    /// and DEBUG-only so Release builds stay byte-identical while the core puppet
+    /// pipeline is validated. Enable: `defaults write Taijia.LiveWallpaper
+    /// WPEPuppetDeferMeshWarp -bool YES`.
+    static var deferPuppetMeshWarp: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "WPEPuppetDeferMeshWarp")
+        #else
+        return false
+        #endif
+    }
+
     /// Mirrors the slot-0 precedence used by
     /// `WPEMetalSceneRenderer.requiredTextureReferences(for:)`: prefer the
     /// per-pass binding override, then the pass's `textures[0]`, then the
@@ -994,7 +1008,7 @@ final class WPEMetalRenderExecutor {
             depthWrite: pass.pass.depthWrite
         ))
 
-        let drewPuppetMesh = try encodePuppetMaterialPassIfNeeded(
+        let drewPuppetMaterial = try encodePuppetMaterialPassIfNeeded(
             pass: pass,
             layer: layer,
             puppetModel: puppetModel,
@@ -1006,7 +1020,23 @@ final class WPEMetalRenderExecutor {
             encoder: encoder,
             depthPixelFormat: needsDepth ? .depth32Float : .invalid
         )
-        if !drewPuppetMesh {
+        let drewPuppetSceneComposite: Bool
+        if drewPuppetMaterial {
+            drewPuppetSceneComposite = false
+        } else {
+            drewPuppetSceneComposite = try encodePuppetSceneCompositePassIfNeeded(
+                pass: pass,
+                layer: layer,
+                puppetModel: puppetModel,
+                skinningState: skinningState,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: needsDepth ? .depth32Float : .invalid
+            )
+        }
+        if !drewPuppetMaterial && !drewPuppetSceneComposite {
             let dispatcher = WPEMetalShaderDispatcher(executor: self)
             try dispatcher.dispatch(
                 pass: pass,
@@ -1379,6 +1409,15 @@ final class WPEMetalRenderExecutor {
               let model = puppetModel else {
             return false
         }
+        if Self.deferPuppetMeshWarp {
+            // Intentional fallthrough: the dispatcher's genericimage2/4 path resolves
+            // texture0 with the SAME atlas precedence used below
+            // (`textureBindings[0] ?? textures[0] ?? source`). Because this pass targets
+            // `.layerComposite`, `usesObjectQuadGeometry` is false, so it renders the
+            // atlas at local UV 1:1 via `wpe_fullscreen_vertex` (no mesh warp). The warp
+            // is applied later by `encodePuppetSceneCompositePassIfNeeded`.
+            return false
+        }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard !meshes.isEmpty else { return false }
 
@@ -1430,25 +1469,15 @@ final class WPEMetalRenderExecutor {
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
-        // Skinning is validated and cached once per frame in `makeAttachmentFrameContext`, reusing the
-        // same scene clock that drives WPESceneAnimatedValue / shader g_Time. When the gate rejects
-        // skinning (partial hierarchy, out-of-range skin indices, an unbounded palette, or an attached
-        // child we cannot follow) this pass renders the static assembled MDLV mesh. A hidden override
-        // forces it off without a rebuild: `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool NO`.
-        let resolvedPalette = skinningState?.enabled == true ? (skinningState?.palette ?? []) : []
-        let bonePalette = resolvedPalette.isEmpty
-            ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
-            : resolvedPalette
-        // At the bind pose the palette is identity, so the weighted blend reproduces the assembled
-        // rest mesh (no-regression guard); enable GPU skinning only when a validated palette resolved.
-        let skinningEnabled: Float = resolvedPalette.isEmpty ? 0 : 1
-
+        // Skinning is resolved via `puppetBonePalette` (validated/cached once per frame in
+        // `makeAttachmentFrameContext`); the identity-palette fallback reproduces the assembled rest mesh.
+        let paletteState = puppetBonePalette(for: skinningState)
         var meshUniforms = WPEPuppetMeshUniforms(
             localSizeAndMode: SIMD4<Float>(
                 Float(max(destination.texture.width, 1)),
                 Float(max(destination.texture.height, 1)),
-                Float(bonePalette.count),
-                skinningEnabled
+                Float(paletteState.bonePalette.count),
+                paletteState.skinningEnabled
             ),
             meshCenterAndPadding: SIMD4<Float>(
                 Float(layer.geometry.puppetMeshCenter.x),
@@ -1458,6 +1487,135 @@ final class WPEMetalRenderExecutor {
             )
         )
 
+        try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
+        encoder.setVertexBytes(
+            &meshUniforms,
+            length: MemoryLayout<WPEPuppetMeshUniforms>.stride,
+            index: 1
+        )
+
+        try drawPuppetMeshes(meshes, encoder: encoder)
+        return true
+    }
+
+    /// Deferred-warp final composite (gated by `deferPuppetMeshWarp`): the base + effect chain ran in
+    /// puppet atlas/local UV space; here the skinned mesh warps that result into the scene, replacing
+    /// the rectangular `copy`-to-`.scene` pass. Placement is copied 1:1 from `objectQuadUniforms` so a
+    /// bind-pose, no-effect puppet stays byte-identical to the current path.
+    private func encodePuppetSceneCompositePassIfNeeded(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        puppetModel: WPEPuppetModel?,
+        skinningState: PuppetSkinningState?,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat
+    ) throws -> Bool {
+        guard Self.deferPuppetMeshWarp,
+              case .scene = pass.pass.target,
+              let model = puppetModel else {
+            return false
+        }
+        let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
+        guard !meshes.isEmpty else { return false }
+        guard WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "copy" else {
+            return false
+        }
+
+        let sourceReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let sourceTexture = try WPEMetalShaderInputs.resolve(
+            reference: sourceReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let quadUniforms = objectQuadUniforms(
+            for: layer,
+            sceneSize: frameState.sceneSize,
+            cameraParallax: frameState.cameraParallax,
+            sourceTexture: sourceTexture
+        )
+        let localSize = puppetCompositeLocalSize(for: layer, sourceTexture: sourceTexture)
+        let paletteState = puppetBonePalette(for: skinningState)
+
+        // Placement copied from the current final object-quad path:
+        //   centerAndSize        -> objectCenterAndSize
+        //   sceneSizeAndRotation -> sceneSizeAndRotation
+        //   uvSignAndPadding.xy  -> meshCenterAndScaleSign.zw
+        // The vertex uses objectCenterAndSize.zw / localSize to produce the same screen-space scale
+        // `wpe_object_quad_vertex` applied to the layer FBO.
+        var compositeUniforms = WPEPuppetSceneCompositeUniforms(
+            localSizeAndMode: SIMD4<Float>(
+                localSize.x,
+                localSize.y,
+                Float(paletteState.bonePalette.count),
+                paletteState.skinningEnabled
+            ),
+            meshCenterAndScaleSign: SIMD4<Float>(
+                Float(layer.geometry.puppetMeshCenter.x),
+                Float(layer.geometry.puppetMeshCenter.y),
+                quadUniforms.uvSignAndPadding.x,
+                quadUniforms.uvSignAndPadding.y
+            ),
+            objectCenterAndSize: quadUniforms.centerAndSize,
+            sceneSizeAndRotation: quadUniforms.sceneSizeAndRotation
+        )
+
+        encoder.setRenderPipelineState(try renderPipeline(
+            vertexName: "wpe_puppet_scene_composite_vertex",
+            fragmentName: "wpe_copy_fragment",
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+        encoder.setFragmentTexture(sourceTexture, index: 0)
+        // Premultiplied alpha (commit 968cf50) stays intact: the source layer/effect FBO is already
+        // premultiplied, `wpe_copy_fragment` returns it unchanged, and `pass.pass.blending` is the
+        // graph's existing `premultiplied*` final scene blend.
+        var copyUniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
+        encoder.setFragmentBytes(&copyUniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
+        try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
+        encoder.setVertexBytes(
+            &compositeUniforms,
+            length: MemoryLayout<WPEPuppetSceneCompositeUniforms>.stride,
+            index: 1
+        )
+        try drawPuppetMeshes(meshes, encoder: encoder)
+        return true
+    }
+
+    private func puppetBonePalette(
+        for skinningState: PuppetSkinningState?
+    ) -> (bonePalette: [simd_float4x4], skinningEnabled: Float) {
+        // When the skinning gate rejects (partial hierarchy, out-of-range indices, unbounded palette,
+        // unfollowable attached child) the identity palette reproduces the assembled MDLV rest mesh
+        // (no-regression guard). Hidden override: `defaults write Taijia.LiveWallpaper
+        // WPEPuppetEnableSkinning -bool NO`.
+        let resolvedPalette = skinningState?.enabled == true ? (skinningState?.palette ?? []) : []
+        let bonePalette = resolvedPalette.isEmpty
+            ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
+            : resolvedPalette
+        let skinningEnabled: Float = resolvedPalette.isEmpty ? 0 : 1
+        return (bonePalette, skinningEnabled)
+    }
+
+    private func puppetCompositeLocalSize(
+        for layer: WPERenderLayer,
+        sourceTexture: MTLTexture
+    ) -> SIMD2<Float> {
+        // Match `objectQuadUniforms`: use authored/resolved geometry size for placement, falling back
+        // to the source-texture dimensions only when size is absent.
+        let width = Float(layer.geometry.size?.width ?? CGFloat(sourceTexture.width))
+        let height = Float(layer.geometry.size?.height ?? CGFloat(sourceTexture.height))
+        return SIMD2<Float>(max(width, 1), max(height, 1))
+    }
+
+    private func bindPuppetBonePalette(
+        _ bonePalette: [simd_float4x4],
+        encoder: MTLRenderCommandEncoder
+    ) throws {
         let bonePaletteBuffer = bonePalette.withUnsafeBytes { rawBuffer in
             device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
         }
@@ -1465,12 +1623,12 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         encoder.setVertexBuffer(bonePaletteBuffer, offset: 0, index: 2)
-        encoder.setVertexBytes(
-            &meshUniforms,
-            length: MemoryLayout<WPEPuppetMeshUniforms>.stride,
-            index: 1
-        )
+    }
 
+    private func drawPuppetMeshes(
+        _ meshes: [WPEPuppetMesh],
+        encoder: MTLRenderCommandEncoder
+    ) throws {
         for mesh in meshes {
             let vertices = mesh.vertices.map { vertex in
                 WPEMetalPuppetVertex(
@@ -1529,7 +1687,6 @@ final class WPEMetalRenderExecutor {
                 }
             }
         }
-        return true
     }
 
     /// Breaks the `_rt_*` scene-alias hazard.

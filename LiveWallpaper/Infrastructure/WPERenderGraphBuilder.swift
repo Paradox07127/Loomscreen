@@ -123,42 +123,28 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     /// Scene-space offset that moves an attached child from "relative to parent origin" to "relative
-    /// to the parent's anchor bone bind point". `anchorModel = rawMatrix[bone] · MDAT` is the anchor
-    /// in parent model space; it maps to scene by the parent's mesh-center, scale (model→scene), and
-    /// rotation. Returns nil (no offset) when the anchor/bone/matrix cannot be resolved.
+    /// to the parent's anchor bone" — using the bone's skinned mesh-frame position (its skin-weighted
+    /// vertex centroid), mapped to scene by the parent's mesh-center, scale, and rotation. Returns nil
+    /// (no offset) when the anchor or bone cannot be resolved.
     private static func staticAttachmentOffset(
         attachmentName: String,
         parentGeometry: WPERenderLayerGeometry,
         parentModel: WPEPuppetModel
     ) -> SIMD3<Double>? {
         guard let attachment = parentModel.attachments.first(where: { $0.name == attachmentName }),
-              let bone = parentModel.bones.first(where: { $0.index == attachment.boneIndex }),
-              let boneBind = WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix) else {
+              let joint = skinnedJoint(of: attachment.boneIndex, in: parentModel.meshes) else {
             return nil
         }
-        // MDLS anchor bones live in a skeleton frame offset from the MDLV mesh frame by the root
-        // bone's translation. The mesh (and the children) use the MDLV frame, so a non-root anchor's Y
-        // must be rebased by the root bone Y to land on the visible body part. On-device (Kal'tsit
-        // MDLV0023) without this, 头部 children sit at the neck ~980px too low.
-        let rootBone = parentModel.bones.first(where: { $0.parentIndex == nil })
-        let rootYOffset: Double
-        if let rootBone,
-           rootBone.index != bone.index,
-           let rootBind = WPEMdlParser.matrix(fromColumnMajorFloats: rootBone.rawMatrix) {
-            rootYOffset = Double(rootBind.columns.3.y)
-        } else {
-            rootYOffset = 0
-        }
-        let anchorBind = boneBind * attachment.matrix
-        let anchorModel = SIMD2<Double>(
-            Double(anchorBind.columns.3.x),
-            Double(anchorBind.columns.3.y) + rootYOffset
-        )
-        // Model y is down; scene origin y is up — hence the y sign flip. Subtract the parent's mesh
-        // center so the offset is expressed in the same composite frame the puppet vertex shader uses.
+        // `joint` is the weighted centroid of the mesh vertices skinned to the anchor bone — i.e. the
+        // bone's real position in the MDLV mesh frame (model y is UP). The MDLS bone rawMatrix values
+        // are PARENT-LOCAL skin transforms (not mesh-frame joints), and the MDLS0004 tail carries no
+        // usable joint table (its matrices match no extraction of the skin centroids), so the skin
+        // centroid is the data-grounded anchor — verified on-device against head/chest placement.
+        // The puppet mesh draws model→scene with no Y flip, so map the joint with a +Y sign; subtract
+        // the parent mesh center so the offset is in the same composite frame the vertex shader uses.
         let local = SIMD2<Double>(
-            abs(parentGeometry.scale.x) * (anchorModel.x - parentGeometry.puppetMeshCenter.x),
-            -abs(parentGeometry.scale.y) * (anchorModel.y - parentGeometry.puppetMeshCenter.y)
+            abs(parentGeometry.scale.x) * (joint.x - parentGeometry.puppetMeshCenter.x),
+            abs(parentGeometry.scale.y) * (joint.y - parentGeometry.puppetMeshCenter.y)
         )
         let cosine = cos(parentGeometry.angles.z)
         let sine = sin(parentGeometry.angles.z)
@@ -168,6 +154,32 @@ struct WPERenderGraphBuilder: Sendable {
             sine * local.x + cosine * local.y,
             0
         )
+    }
+
+    /// Weighted centroid of the mesh vertices skinned to `boneIndex` — a robust mesh-frame proxy for
+    /// the bone's position. Returns nil when the bone influences no vertices.
+    private static func skinnedJoint(of boneIndex: Int, in meshes: [WPEPuppetMesh]) -> SIMD2<Double>? {
+        var sumX = 0.0
+        var sumY = 0.0
+        var sumW = 0.0
+        for mesh in meshes {
+            for vertex in mesh.vertices {
+                let indices = vertex.skinBlendIndices
+                let weights = vertex.skinBlendWeights
+                func accumulate(_ index: Int32, _ weight: Float) {
+                    guard Int(index) == boneIndex, weight > 0, weight.isFinite else { return }
+                    sumX += Double(weight) * Double(vertex.position.x)
+                    sumY += Double(weight) * Double(vertex.position.y)
+                    sumW += Double(weight)
+                }
+                accumulate(indices.x, weights.x)
+                accumulate(indices.y, weights.y)
+                accumulate(indices.z, weights.z)
+                accumulate(indices.w, weights.w)
+            }
+        }
+        guard sumW > 0 else { return nil }
+        return SIMD2<Double>(sumX / sumW, sumY / sumW)
     }
 
     private static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
