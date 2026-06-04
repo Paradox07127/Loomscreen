@@ -586,14 +586,25 @@ enum WPESceneDocumentParser {
 
     private static func parseParticleInstanceOverride(_ raw: Any?) -> WPESceneParticleInstanceOverride? {
         guard let dict = raw as? [String: Any] else { return nil }
+        // WPE stores an override either as a bare value (`"lifetime": 0.66`)
+        // or, when bound to a user-editable property, as a wrapper
+        // `{ "user": "<prop>", "value": X }`. Unwrap `.value` first or the
+        // user-bound overrides get silently dropped — that dropped debris
+        // `rate` (→ over-dense) and wildfire `alpha` (→ over-bright) in
+        // scene 3460973721.
+        func unwrap(_ key: String) -> Any? {
+            let v = dict[key]
+            if let inner = (v as? [String: Any])?["value"] { return inner }
+            return v
+        }
         let value = WPESceneParticleInstanceOverride(
-            count: parseDouble(dict["count"]),
-            rate: parseDouble(dict["rate"]),
-            lifetime: parseDouble(dict["lifetime"]),
-            size: parseDouble(dict["size"]),
-            speed: parseDouble(dict["speed"]),
-            alpha: parseDouble(dict["alpha"]),
-            color: parseNormalizedParticleColor(dict["colorn"]) ?? parseVector3(dict["color"])
+            count: parseDouble(unwrap("count")),
+            rate: parseDouble(unwrap("rate")),
+            lifetime: parseDouble(unwrap("lifetime")),
+            size: parseDouble(unwrap("size")),
+            speed: parseDouble(unwrap("speed")),
+            alpha: parseDouble(unwrap("alpha")),
+            color: parseNormalizedParticleColor(unwrap("colorn")) ?? parseVector3(unwrap("color"))
         )
         return value.count == nil
             && value.rate == nil
