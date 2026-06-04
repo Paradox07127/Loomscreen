@@ -256,6 +256,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             workshopID: descriptor.workshopID,
             descriptor: descriptorSummary
         )
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.beginScene(
+            workshopID: descriptor.workshopID,
+            projectJsonPath: projectManifestRootURL?.appendingPathComponent(descriptor.entryFile).path,
+            descriptor: descriptorSummary
+        )
+        #endif
         WPESceneDebugArtifacts.shared.appendLog(
             "load() began for \(descriptorSummary)",
             level: .info
@@ -500,20 +507,32 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         capture?.stop()
 
         if let outputTexture {
+            // Capture per-pass scene-target RT hashes BEFORE finishFrame latches
+            // and serializes the trace — otherwise recordPassOutputs runs after the
+            // trace is already written and the per-pass output hashes are dropped.
+            #if DEBUG
+            dumpScenePassesIfRequested()
+            #endif
             // The snapshot + visual-stats read-backs exist only to feed the
             // scene-debug artifacts (first-frame PNG + stats). The inspector
             // now shows the project's preview GIF, so skip the synchronous GPU
             // read-back entirely unless artifacts are actually being captured.
             if WPESceneDebugArtifacts.shared.isEnabled {
                 cachedSnapshot = snapshotter.snapshot(from: outputTexture)
-                if let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture) {
+                let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture)
+                if let stats {
                     WPESceneDebugArtifacts.shared.recordFirstFrameStats(stats)
                 }
+                #if !LITE_BUILD && DEBUG
+                WPECanonicalTraceRecorder.shared.finishFrame(
+                    outputTexture: outputTexture,
+                    runtimeUniforms: lastRuntimeUniforms,
+                    firstFrameStats: stats,
+                    resolutionDiagnostics: resolutionTracer.snapshot()
+                )
+                #endif
             }
             dumpOutputTextureIfRequested(outputTexture)
-            #if DEBUG
-            dumpScenePassesIfRequested()
-            #endif
         }
         hasPresentedFrame = true
         didLoad = true
@@ -573,6 +592,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes\(suffix.isEmpty ? " (t0)" : " \(suffix)") for \(descriptor.workshopID)",
             category: .wpeRender
         )
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.recordPassOutputs(dumps)
+        #endif
         for (index, entry) in dumps.enumerated() {
             let safeLabel = entry.label
                 .replacingOccurrences(of: "/", with: "_")

@@ -736,6 +736,28 @@ struct WPEMetalShaderDispatcher {
         depthPixelFormat: MTLPixelFormat
     ) throws {
         let result = try executor.compileCustomShader(for: pass)
+        // Dev-only: dump every transpiled layer's MSL + uniform/sampler interface
+        // so it can be cross-checked against the Windows RenderDoc oracle
+        // (tools/wpe-oracle shader-interface.md). No-op unless scene-debug is on.
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            WPESceneDebugArtifacts.shared.recordNoteOnce(
+                name: "msl-\(pass.pass.id)-\(pass.pass.shader).metal",
+                contents: result.mslSource
+            )
+            var iface = "shader=\(pass.pass.shader) pass=\(pass.pass.id)\n"
+            iface += "vertexFunction=\(result.vertexFunctionName)\n"
+            iface += "fragmentFunction=\(result.fragmentFunctionName)\n"
+            iface += "samplerNames=\(result.samplerNames)\n"
+            iface += "uniformLayout (name | glslType | slot | slotCount | arrayLength | material):\n"
+            for slot in result.uniformLayout {
+                iface += "  \(slot.name) | \(slot.glslType) | \(slot.slot) | \(slot.slotCount)"
+                    + " | \(slot.arrayLength.map(String.init) ?? "-") | \(slot.materialName ?? "-")\n"
+            }
+            WPESceneDebugArtifacts.shared.recordNoteOnce(
+                name: "iface-\(pass.pass.id)-\(pass.pass.shader).txt",
+                contents: iface
+            )
+        }
         let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         let isWaveLikePass = Self.isWaveLikePass(pass)
         let isWaterWavesPass = Self.isWaterWavesPass(pass)
@@ -757,6 +779,9 @@ struct WPEMetalShaderDispatcher {
 
         var primary: MTLTexture? = nil
         var resolvedTexturesBySlot: [Int: MTLTexture] = [:]
+        #if !LITE_BUILD && DEBUG
+        var canonicalTextureBindings: [WPECanonicalTraceRecorder.TextureBindingInput] = []
+        #endif
         for slot in 0..<WPEShaderTranspiler.customTextureSlotCount {
             // `textureBindings` is the pipeline-builder's *normalized* binding
             // table: it already rewrites an effect-bind `previous` to the pass's
@@ -809,6 +834,15 @@ struct WPEMetalShaderDispatcher {
             if let texture {
                 resolvedTexturesBySlot[slot] = texture
             }
+            #if !LITE_BUILD && DEBUG
+            canonicalTextureBindings.append(WPECanonicalTraceRecorder.TextureBindingInput(
+                slot: slot,
+                name: result.samplerNames.indices.contains(slot) ? result.samplerNames[slot] : nil,
+                reference: resolvedReference,
+                texture: texture,
+                fallbackToPrimary: fallbackToPrimary
+            ))
+            #endif
         }
 
         var packedUniformSlots: [SIMD4<Float>] = []
@@ -820,6 +854,16 @@ struct WPEMetalShaderDispatcher {
                 destinationTexture: usesObjectQuad ? (primary ?? destination.texture) : destination.texture
             )
         }
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.recordCustomPass(
+            pass: pass,
+            destination: destination,
+            result: result,
+            textureBindings: canonicalTextureBindings,
+            packedUniformSlots: packedUniformSlots,
+            usesObjectQuad: usesObjectQuad
+        )
+        #endif
 
         // Phase A: log the GPU-bound uniforms for waterwaves passes so the live values
         // (g_Time/g_Speed/g_Scale/g_Direction/g_Strength/g_Texture1Resolution) can be
