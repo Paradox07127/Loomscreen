@@ -341,6 +341,63 @@ struct WPESceneDocumentParserTests {
         #expect(abs(layer.scale.y - 0.5) < 0.0001)
     }
 
+    @Test("Uniform scalar scale (a lone number) resolves to all axes, not the 1.0 default")
+    func uniformScalarScaleResolvesToAllAxes() throws {
+        // The real on-device shape (scene 3460973721): once WPE/the app resolves the
+        // "Scale Size" slider, the object's scale is written as a SINGLE scalar (0.5),
+        // not a vector. parseVector3 returns nil for a scalar → scale silently fell
+        // back to 1.0 and doubled the box. parseScale must coerce it to (0.5,0.5,0.5).
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                ["id": 30, "name": "Group", "origin": "0 0 0"],
+                [
+                    "id": 31,
+                    "name": "Audio",
+                    "image": "models/util/composelayer.json",
+                    "parent": 30,
+                    "origin": "0 0 0",
+                    "scale": 0.5
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+        #expect(abs(layer.scale.x - 0.5) < 0.0001)
+        #expect(abs(layer.scale.y - 0.5) < 0.0001)
+        #expect(abs(layer.scale.z - 0.5) < 0.0001)
+    }
+
+    @Test("Property-bound visibility {user,value:false} hides the layer (style-combo selection)")
+    func propertyBoundVisibilityHidesLayer() throws {
+        // Scene 3461168300: a "style" combo (newproperty14) shows the diagonal OR the
+        // bottom audio bar. The hidden one carries visible={user:{...}, value:false}.
+        // parseBool must read `value` (false) instead of defaulting to true.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 269, "name": "斜", "image": "models/util/solidlayer.json",
+                    "origin": "100 100 0",
+                    "visible": ["user": ["condition": "1", "name": "newproperty14"], "value": true]
+                ],
+                [
+                    "id": 488, "name": "底", "image": "models/util/solidlayer.json",
+                    "origin": "100 100 0",
+                    "visible": ["user": ["condition": "2", "name": "newproperty14"], "value": false]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
+        #expect(byID["269"]?.visible == true)   // 斜 shown
+        #expect(byID["488"]?.visible == false)  // 底 hidden by the style selection
+    }
+
     @Test("Child image object adds parent-local Y in scene-up coordinates")
     func childImageOriginYAddsInSceneUpCoordinates() throws {
         let payload: [String: Any] = [
