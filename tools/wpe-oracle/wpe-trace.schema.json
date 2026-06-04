@@ -1,0 +1,923 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loomscreen.local/schemas/wpe.trace.v1.json",
+  "title": "WPE Runtime Oracle Trace",
+  "description": "Canonical trace contract shared by Windows Wallpaper Engine D3D11 captures and macOS Metal captures.",
+  "type": "object",
+  "required": [
+    "schema",
+    "producer",
+    "scene",
+    "capture",
+    "resources",
+    "passes",
+    "final"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wpe.trace.v1"
+    },
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "scene": {
+      "$ref": "#/$defs/scene"
+    },
+    "capture": {
+      "$ref": "#/$defs/capture"
+    },
+    "resources": {
+      "$ref": "#/$defs/resources"
+    },
+    "passes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pass"
+      }
+    },
+    "final": {
+      "$ref": "#/$defs/finalOutput"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^([A-Fa-f0-9]{64})?$"
+    },
+    "resourceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vec2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "vec4": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number"
+      }
+    },
+    "matrix4x4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {
+        "type": "number"
+      }
+    },
+    "producer": {
+      "type": "object",
+      "required": [
+        "side",
+        "tool",
+        "wpeVersion"
+      ],
+      "properties": {
+        "side": {
+          "enum": [
+            "windows-wpe",
+            "mac-metal"
+          ]
+        },
+        "tool": {
+          "type": "string"
+        },
+        "toolVersion": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "wpeVersion": {
+          "type": "string"
+        },
+        "appBuild": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scene": {
+      "type": "object",
+      "required": [
+        "workshopId",
+        "projectJson",
+        "projectJsonSha256"
+      ],
+      "properties": {
+        "workshopId": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "projectJson": {
+          "type": "string"
+        },
+        "projectJsonSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "scenePkgSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "entryFile": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "assetRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "frameOrdinal",
+        "resolution",
+        "wallpaperWindow",
+        "determinism"
+      ],
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "mode": {
+          "enum": [
+            "shader-first",
+            "state",
+            "full"
+          ]
+        },
+        "frameOrdinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warmupMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolution": {
+          "type": "object",
+          "required": [
+            "width",
+            "height"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "wallpaperWindow": {
+          "type": "object",
+          "required": [
+            "class",
+            "hwnd"
+          ],
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "hwnd": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "pid": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "determinism": {
+          "type": "object",
+          "required": [
+            "time",
+            "daytime",
+            "pointer",
+            "audioMode"
+          ],
+          "properties": {
+            "time": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "daytime": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "pointer": {
+              "$ref": "#/$defs/vec2"
+            },
+            "audioMode": {
+              "enum": [
+                "muted",
+                "captured",
+                "zeroed",
+                "unknown"
+              ]
+            },
+            "mouseParallax": {
+              "enum": [
+                "disabled",
+                "centered",
+                "unknown"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "resources": {
+      "type": "object",
+      "required": [
+        "textures",
+        "renderTargets",
+        "buffers",
+        "shaders"
+      ],
+      "properties": {
+        "textures": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/textureResource"
+          }
+        },
+        "renderTargets": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/renderTargetResource"
+          }
+        },
+        "buffers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/bufferResource"
+          }
+        },
+        "shaders": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/shaderResource"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "textureResource": {
+      "type": "object",
+      "required": [
+        "label",
+        "width",
+        "height",
+        "format"
+      ],
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sourcePath": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "format": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "mips": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "png": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "renderTargetResource": {
+      "type": "object",
+      "required": [
+        "label",
+        "width",
+        "height",
+        "format",
+        "lineage"
+      ],
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "format": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "lineage": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "bufferResource": {
+      "type": "object",
+      "required": [
+        "label",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "byteLength": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": true
+    },
+    "shaderResource": {
+      "type": "object",
+      "required": [
+        "stage",
+        "sourceLanguage",
+        "entryPoint",
+        "disassembly",
+        "reflection"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "vertex",
+            "fragment"
+          ]
+        },
+        "sourceLanguage": {
+          "enum": [
+            "HLSL",
+            "DXBC",
+            "MSL"
+          ]
+        },
+        "entryPoint": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sourcePath": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "disassembly": {
+          "type": "object",
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "additionalProperties": true
+        },
+        "reflection": {
+          "$ref": "#/$defs/shaderReflection"
+        }
+      },
+      "additionalProperties": true
+    },
+    "shaderReflection": {
+      "type": "object",
+      "properties": {
+        "samplers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reflectionBinding"
+          }
+        },
+        "textures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reflectionBinding"
+          }
+        },
+        "constantBlocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reflectionBinding"
+          }
+        },
+        "uniforms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variable"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "reflectionBinding": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "slot": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "pass": {
+      "type": "object",
+      "required": [
+        "ordinal",
+        "draw",
+        "targets",
+        "textures",
+        "shaders",
+        "constantBuffers",
+        "state",
+        "output"
+      ],
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eventId": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "layerId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "passId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "shaderName": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "draw": {
+          "type": "object",
+          "required": [
+            "topology",
+            "vertexCount",
+            "indexCount",
+            "instanceCount",
+            "viewport"
+          ],
+          "properties": {
+            "topology": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "vertexCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "indexCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "instanceCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "viewport": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "scissor": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "targets": {
+          "type": "object",
+          "required": [
+            "color",
+            "depth"
+          ],
+          "properties": {
+            "color": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "slot",
+                  "resource",
+                  "load",
+                  "store"
+                ],
+                "properties": {
+                  "slot": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "resource": {
+                    "$ref": "#/$defs/resourceId"
+                  },
+                  "load": {
+                    "$ref": "#/$defs/nullableString"
+                  },
+                  "store": {
+                    "$ref": "#/$defs/nullableString"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "depth": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "resource": {
+                  "$ref": "#/$defs/resourceId"
+                },
+                "load": {
+                  "$ref": "#/$defs/nullableString"
+                },
+                "store": {
+                  "$ref": "#/$defs/nullableString"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "textures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "slot",
+              "resource"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "vertex",
+                  "fragment"
+                ]
+              },
+              "slot": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "name": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "resource": {
+                "$ref": "#/$defs/resourceId"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "shaders": {
+          "type": "object",
+          "required": [
+            "vs",
+            "fs"
+          ],
+          "properties": {
+            "vs": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "fs": {
+              "$ref": "#/$defs/nullableString"
+            }
+          },
+          "additionalProperties": true
+        },
+        "constantBuffers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constantBuffer"
+          }
+        },
+        "state": {
+          "$ref": "#/$defs/pipelineState"
+        },
+        "output": {
+          "$ref": "#/$defs/passOutput"
+        }
+      },
+      "additionalProperties": true
+    },
+    "constantBuffer": {
+      "type": "object",
+      "required": [
+        "name",
+        "stage",
+        "slot",
+        "variables"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "stage": {
+          "enum": [
+            "vertex",
+            "fragment"
+          ]
+        },
+        "slot": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "resource": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "rawBytesSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variable"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "variable": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "value": {
+          "type": [
+            "number",
+            "integer",
+            "string",
+            "boolean",
+            "array",
+            "object",
+            "null"
+          ]
+        },
+        "matrix4x4": {
+          "$ref": "#/$defs/matrix4x4"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variable"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "pipelineState": {
+      "type": "object",
+      "required": [
+        "blend",
+        "depth",
+        "raster",
+        "samplers"
+      ],
+      "properties": {
+        "blend": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "depth": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "raster": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "samplers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "slot"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "vertex",
+                  "fragment"
+                ]
+              },
+              "slot": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "filter": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "addressU": {
+                "$ref": "#/$defs/nullableString"
+              },
+              "addressV": {
+                "$ref": "#/$defs/nullableString"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "passOutput": {
+      "type": "object",
+      "required": [
+        "png",
+        "sha256",
+        "visualStats"
+      ],
+      "properties": {
+        "resource": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "png": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "visualStats": {
+          "$ref": "#/$defs/visualStats"
+        }
+      },
+      "additionalProperties": true
+    },
+    "finalOutput": {
+      "type": "object",
+      "required": [
+        "png",
+        "sha256"
+      ],
+      "properties": {
+        "resource": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "png": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": true
+    },
+    "visualStats": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "coverage": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "meanRGBA": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "note": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
