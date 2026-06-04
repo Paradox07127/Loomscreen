@@ -214,7 +214,7 @@ final class WallpaperVideoPlayer {
                             category: .videoPlayer
                         )
                     } catch {
-                        Logger.warning(
+                        Logger.info(
                             "In-memory load failed (\(error.localizedDescription)) — falling back to streaming",
                             category: .videoPlayer
                         )

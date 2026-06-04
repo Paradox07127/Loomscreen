@@ -83,7 +83,7 @@ final class SystemAudioCaptureManager {
         guard serviceBox == nil else { return }
         guard #available(macOS 14.2, *) else {
             state = .unsupported
-            Logger.warning("[AudioCapture] manager: system audio capture needs macOS 14.2+", category: .audioCapture)
+            Logger.info("[AudioCapture] manager: system audio capture needs macOS 14.2+", category: .audioCapture)
             return
         }
         let service = SystemAudioCaptureService(broker: Self.broker)

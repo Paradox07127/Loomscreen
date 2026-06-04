@@ -372,7 +372,7 @@ final class WPEMetalRenderExecutor {
                         frameState: &frameState
                     )
                 } catch {
-                    Logger.warning(
+                    Logger.info(
                         "[WPE.bypass] skipped layer \(layer.graphLayer.objectID): source \(firstSource) not blittable (\(error))",
                         category: .wpeRender
                     )
@@ -855,7 +855,7 @@ final class WPEMetalRenderExecutor {
     func present(texture source: MTLTexture, in view: MTKView) throws -> Bool {
         guard let drawable = view.currentDrawable else {
             #if DEBUG
-            Logger.warning(
+            Logger.info(
                 "[present] view.currentDrawable=nil — source=\(source.width)x\(source.height) view.bounds=\(view.bounds) drawableSize=\(view.drawableSize)",
                 category: .wpeRender
             )
@@ -2341,7 +2341,7 @@ final class WPEMetalRenderExecutor {
 
         if !loggedWaterWavesDispatch {
             loggedWaterWavesDispatch = true
-            Logger.warning(
+            Logger.info(
                 "WPE waterwaves dispatch ran (builtin effect_waterwaves): debugMode=\(debugMode) hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
                 category: .wpeRender
             )

@@ -221,7 +221,7 @@ final class WPECorpusPlaybackHarness {
         for (offset, project) in projects.enumerated() {
             if isCancelled() || Task.isCancelled {
                 let report = makeReport(total: projects.count, entries: entries)
-                Logger.warning("WPE corpus playback cancelled with \(entries.count)/\(projects.count) entries", category: .screenManager)
+                Logger.info("WPE corpus playback cancelled with \(entries.count)/\(projects.count) entries", category: .screenManager)
                 progress(.cancelled(report))
                 return
             }

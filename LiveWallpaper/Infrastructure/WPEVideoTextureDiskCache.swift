@@ -221,7 +221,7 @@ actor WPEVideoTextureDiskCache {
             Logger.info("WPE video cache LRU evicted \(freed) bytes (cap \(maxBytes))", category: .wpeRender)
         }
         if total > maxBytes {
-            Logger.warning("WPE video cache still over cap (\(total) > \(maxBytes)) — remaining files are in use", category: .wpeRender)
+            Logger.notice("WPE video cache still over cap (\(total) > \(maxBytes)) — remaining files are in use", category: .wpeRender)
         }
     }
 
