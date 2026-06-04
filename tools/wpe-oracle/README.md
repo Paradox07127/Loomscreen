@@ -3,7 +3,8 @@
 This is the minimal first slice only:
 
 - shared `wpe.trace.v1` contract
-- Windows RenderDoc shader-first capture/export
+- Windows RenderDoc capture + headless `renderdoccmd convert`
+- Mac-side stdlib parser (`parse_capture.py`) for `frame.zip.xml` + blobs
 - no Mac Swift exporter
 - no diff engine
 - no HTML report
@@ -15,30 +16,32 @@ The stop-loss is intentional: first validate that RenderDoc can see Wallpaper En
 - Windows interactive logon session. Do not run capture from SSH.
 - Wallpaper Engine 2.8.26 (default path `D:\Steam\steamapps\common\wallpaper_engine\`, or set `wpeRoot` in the job).
 - Workshop scenes at `D:\Steam\steamapps\workshop\content\431960\<id>\` (or set `workshopRoot` / `projectJson` in the job).
-- RenderDoc for Windows (v1.31+ recommended) installed.
-- Python available through RenderDoc's Python environment (`renderdoccmd python`) or a Python environment where `renderdoc` is importable.
+- RenderDoc for Windows (validated on v1.44) installed.
+- Python 3 on the Mac for `parse_capture.py` (stdlib only).
 
 No scheduled task is used. No `-ExecutionPolicy Bypass` is used. `run_once.cmd` is a plain command script the user launches manually.
 
 ## Files
 
 - `wpe-trace.schema.json`: JSON Schema draft 2020-12 for `wpe.trace.v1`.
-- `extract_renderdoc_trace.py`: RenderDoc replay exporter for `.rdc` files.
-- `run_once.cmd`: user-launched one-shot capture entry.
+- `run_once.cmd`: user-launched Windows capture entry → `renderdoccmd convert` → `frame.zip.xml` + `frame.zip`.
+- `parse_capture.py`: Mac stdlib parser; turns the convert output into `trace.json` + `shader-interface.md`.
+- `extract_renderdoc_trace.py`: retained ONLY as a qrenderdoc GUI Python-shell alternative. RenderDoc 1.44 has no standalone `renderdoc` module and no `renderdoccmd python`, so it cannot run headless.
 - `job.example.json`: seed job for scene `3526278753`.
 
 Artifacts are written under:
 
 ```text
 tools\wpe-oracle\captures\<jobId>\windows\
-  frame.rdc
-  trace.json
-  rt\*.png
-  shaders\*.dxbc.txt
+  frame.rdc            (Windows; the raw capture)
+  frame.zip.xml        (Windows; renderdoccmd convert structure)
+  frame.zip            (Windows; convert blob payloads)
+  trace.json           (Mac; parse_capture.py → wpe.trace.v1)
+  shader-interface.md  (Mac; per-shader RDEF + signatures)
 tools\wpe-oracle\captures\<jobId>\done.json
 ```
 
-`captures/` can contain WPE assets, shader disassembly, and large `.rdc` files. Keep it gitignored and local.
+`captures/` holds WPE assets, shader bytecode, and large `.rdc`/`.zip` files. Keep it gitignored and local.
 
 ## Operator Flow
 
@@ -70,9 +73,20 @@ wallpaper64.exe -control openWallpaper -file <project.json>
 ```
 
 - warms up
-- tries RenderDoc capture
-- exports `windows\trace.json`, `rt\*.png`, and `shaders\*.dxbc.txt`
+- tries RenderDoc capture (auto launch-under / inject)
+- runs `renderdoccmd convert -f <frame.rdc> -o windows\frame.zip.xml -c zip.xml`
 - writes `done.json`
+
+> **Reality check (validated on RenderDoc 1.44 + WPE 2.8.26):** WPE is a single-instance, windowless wallpaper, so CLI auto-capture rarely triggers. The reliable capture is the RenderDoc **GUI → "Launch Application"** tab: kill the running `wallpaper64.exe` first, then Launch `wallpaper64.exe` (working dir = the WPE folder, "Capture Child Processes" on) so RenderDoc owns the sole instance, then "Capture Frame(s) Immediately" and **Save Capture As** `frame.rdc`. `renderdoccmd convert` and `parse_capture.py` then run headlessly over SSH.
+
+5. Copy the capture dir to the Mac and parse it (headless, stdlib only):
+
+```bash
+python3 tools/wpe-oracle/parse_capture.py \
+  --capture-dir tools/wpe-oracle/captures/<jobId>/windows --scene-id <id>
+```
+
+This emits `windows/trace.json` (wpe.trace.v1) + `windows/shader-interface.md`.
 
 ## Mac to Windows Bridge
 
@@ -100,15 +114,15 @@ The key signal is in `done.json`:
 - `status=succeeded`, `hookMethod=launch-under`: RenderDoc saw WPE when launched under RenderDoc.
 - `status=succeeded`, `hookMethod=inject`: RenderDoc saw an already-running `wallpaper64.exe`.
 - `status=needs-ui`: CLI automation did not capture WPE. Use RenderDoc UI injection next.
-- `status=failed`: capture or extraction failed; inspect the console stdout/stderr and the `error` field in `done.json`. (Per-texture save failures additionally drop a `*.error.txt` beside the affected PNG.)
+- `status=failed`: convert failed; inspect the console stdout/stderr and the `error` field in `done.json`.
 
 The minimum useful success is:
 
-- `windows\trace.json` exists
-- `passes[]` is non-empty
-- `resources.shaders` contains DXBC disassembly paths
-- `constantBuffers[]` contains runtime values such as `g_Time` when reflection exposes them
-- `rt\*.png` contains at least one render target dump
+- Windows: `windows\frame.zip.xml` exists and `done.json.status` is `succeeded`.
+- Mac (after `parse_capture.py`): `windows/trace.json` exists and validates against `wpe.trace.v1`.
+- Mac: `passes[]` is non-empty.
+- Mac: `resources.shaders` carries DXBC shader records + RDEF reflection (`shader-interface.md`).
+- Mac: `constantBuffers[]` carries decoded runtime values (matrices like `g_ModelViewProjectionMatrix`) where RDEF layout + buffer contents allow.
 
 ## Fallback Ladder
 
@@ -143,6 +157,7 @@ If RenderDoc cannot hook WorkerW/WPE at all, validate the path with Nsight Graph
 
 ## Notes
 
-- Missing HLSL source is expected. DXBC disassembly and reflection are the baseline.
+- Missing HLSL source is expected — WPE ships only DXBC. RDEF reflection (cbuffer layouts, resource/sampler bindings) + ISGN/OSGN signatures are the baseline, parsed by `parse_capture.py`.
+- The convert path has no GPU replay readback, so per-RT PNGs are intentionally absent; `output.png` is `null` in `trace.json`. (Replayed images need the qrenderdoc GUI.)
 - This first slice intentionally does not classify divergences.
-- Do not commit `.rdc`, PNGs, shader dumps, or captured WPE/workshop assets.
+- Do not commit `.rdc`, `.zip`, `frame.zip.xml`, shader blobs, or captured WPE/workshop assets.

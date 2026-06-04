@@ -46,7 +46,7 @@ set "RDC_TEMPLATE=%OUT_DIR%\frame"
 set "RDC_SAVE_AS=%OUT_DIR%\frame.rdc"
 set "RDC_FILE="
 set "DONE_JSON=%ROOT%captures\%JOB_ID%\done.json"
-set "EXTRACTOR=%ROOT%extract_renderdoc_trace.py"
+set "CONVERT_XML=%OUT_DIR%\frame.zip.xml"
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%" >nul 2>&1
 if not exist "%OUT_DIR%\rt" mkdir "%OUT_DIR%\rt" >nul 2>&1
@@ -159,53 +159,31 @@ exit /b 3
 
 :extract
 call :find_newest_rdc
-echo [wpe-oracle] extracting RenderDoc trace from %RDC_FILE%
+echo [wpe-oracle] converting RenderDoc capture to structured zip.xml from %RDC_FILE%
 if not exist "%RDC_FILE%" (
   set "ERROR_TEXT=missing capture under %OUT_DIR% (no frame*.rdc)"
   goto fail
 )
 
-"%RENDERDOCCMD%" python "%EXTRACTOR%" ^
-  --rdc "%RDC_FILE%" ^
-  --out "%OUT_DIR%" ^
-  --job "%JOB_FILE%" ^
-  --job-id "%JOB_ID%" ^
-  --scene-id "%SCENE_ID%" ^
-  --project-json "%PROJECT_JSON%" ^
-  --mode "%MODE%" ^
-  --warmup-ms "%WARMUP_MS%" ^
-  --frame-ordinal "%FRAME_ORDINAL%" ^
-  --wpe-version "%WPE_VERSION%"
-
+rem RenderDoc 1.x has no `renderdoccmd python` and no standalone renderdoc module;
+rem convert is headless/SSH-safe. The Mac parses frame.zip.xml via parse_capture.py.
+if exist "%CONVERT_XML%" del "%CONVERT_XML%" >nul 2>&1
+"%RENDERDOCCMD%" convert -f "%RDC_FILE%" -o "%CONVERT_XML%" -c zip.xml
 if errorlevel 1 (
-  echo [wpe-oracle] renderdoccmd python failed; trying python from PATH for environments with renderdoc module installed.
-  python "%EXTRACTOR%" ^
-    --rdc "%RDC_FILE%" ^
-    --out "%OUT_DIR%" ^
-    --job "%JOB_FILE%" ^
-    --job-id "%JOB_ID%" ^
-    --scene-id "%SCENE_ID%" ^
-    --project-json "%PROJECT_JSON%" ^
-    --mode "%MODE%" ^
-    --warmup-ms "%WARMUP_MS%" ^
-    --frame-ordinal "%FRAME_ORDINAL%" ^
-    --wpe-version "%WPE_VERSION%"
-)
-
-if errorlevel 1 (
-  set "ERROR_TEXT=extract_renderdoc_trace.py failed (see console stdout/stderr)"
+  set "ERROR_TEXT=renderdoccmd convert failed (see console stdout/stderr)"
   goto fail
 )
 
-if not exist "%OUT_DIR%\trace.json" (
-  set "ERROR_TEXT=extractor completed without trace.json"
+if not exist "%CONVERT_XML%" (
+  set "ERROR_TEXT=renderdoccmd convert completed without frame.zip.xml"
   goto fail
 )
 
 set "STATUS=succeeded"
 call :write_done
 echo [wpe-oracle] hook=%HOOK_METHOD% status=succeeded
-echo [wpe-oracle] trace=%OUT_DIR%\trace.json
+echo [wpe-oracle] structured capture=%CONVERT_XML%
+echo [wpe-oracle] next: copy this capture dir to Mac, run: python3 parse_capture.py --capture-dir "%OUT_DIR%"
 exit /b 0
 
 :fail
@@ -346,7 +324,7 @@ goto wait_loop
 :write_done
 for %%D in ("%DONE_JSON%") do if not exist "%%~dpD" mkdir "%%~dpD" >nul 2>&1
 powershell -NoProfile -Command ^
-  "$done=[ordered]@{status=$env:STATUS; jobId=$env:JOB_ID; sceneId=$env:SCENE_ID; hookMethod=$env:HOOK_METHOD; error=$env:ERROR_TEXT; rdc=$env:RDC_FILE; trace=(Join-Path $env:OUT_DIR 'trace.json'); completedUtc=(Get-Date).ToUniversalTime().ToString('o')};" ^
+  "$done=[ordered]@{status=$env:STATUS; jobId=$env:JOB_ID; sceneId=$env:SCENE_ID; hookMethod=$env:HOOK_METHOD; error=$env:ERROR_TEXT; rdc=$env:RDC_FILE; convertedXml=$env:CONVERT_XML; completedUtc=(Get-Date).ToUniversalTime().ToString('o')};" ^
   "$done | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 $env:DONE_JSON"
 echo [wpe-oracle] done=%DONE_JSON% status=%STATUS% hook=%HOOK_METHOD%
 exit /b 0
