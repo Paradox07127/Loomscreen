@@ -57,11 +57,23 @@ public struct GlobalSettings: Codable, Sendable {
     /// independently checks its own file against this budget.
     public var videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes
 
+    /// Default for `developerModeEnabled`: ON in DEBUG builds so the Developer
+    /// Tools surface is reachable during development without a manual opt-in,
+    /// OFF in Release so ordinary users never see it. An explicit, persisted
+    /// user choice still wins over this default (see the decoder below).
+    public static var defaultDeveloperModeEnabled: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// Pro-only runtime opt-in that surfaces the Developer Tools sidebar
     /// entry and enables `WKWebView.isInspectable` on every HTML wallpaper.
-    /// Persisted so the choice survives relaunch; default `false` keeps the
-    /// diagnostic surface invisible to ordinary users.
-    public var developerModeEnabled: Bool = false
+    /// Persisted so the choice survives relaunch; defaults on in DEBUG and off
+    /// in Release via `defaultDeveloperModeEnabled`.
+    public var developerModeEnabled: Bool = GlobalSettings.defaultDeveloperModeEnabled
 
     /// Pro-only master switch for audio-reactive wallpapers. When true, the app
     /// captures system audio output (Core Audio process tap) so audio-reactive
@@ -110,7 +122,7 @@ public struct GlobalSettings: Codable, Sendable {
         deletedWorkshopIDs: [String] = [],
         applicationPerformanceRules: [ApplicationPerformanceRule] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
-        developerModeEnabled: Bool = false,
+        developerModeEnabled: Bool = GlobalSettings.defaultDeveloperModeEnabled,
         audioResponseEnabled: Bool = false
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
@@ -150,7 +162,7 @@ public struct GlobalSettings: Codable, Sendable {
         applicationPerformanceRules = (try? c.decodeIfPresent([ApplicationPerformanceRule].self, forKey: .applicationPerformanceRules)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
-        developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? false
+        developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? GlobalSettings.defaultDeveloperModeEnabled
         audioResponseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .audioResponseEnabled)) ?? false
     }
 }
