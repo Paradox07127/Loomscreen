@@ -1,15 +1,17 @@
-# WPE Runtime Oracle: Windows Shader-First Capture Kit
+# WPE Runtime Oracle: Windows ↔ Mac divergence kit
 
-This is the minimal first slice only:
+Cross-device pipeline that aligns Wallpaper Engine's real D3D11 frame (Windows
+ground truth) against our Metal renderer and pinpoints where they diverge:
 
-- shared `wpe.trace.v1` contract
-- Windows RenderDoc capture + headless `renderdoccmd convert`
-- Mac-side stdlib parser (`parse_capture.py`) for `frame.zip.xml` + blobs
-- no Mac Swift exporter
-- no diff engine
-- no HTML report
+- shared `wpe.trace.v1` contract (both producers)
+- **Windows producer**: RenderDoc capture + headless `renderdoccmd convert` + Mac-side stdlib parser (`parse_capture.py`) → `windows/trace.json`
+- **Mac producer** (Phase A): `WPECanonicalTraceRecorder.swift` emits `mac/trace.json` from the live Metal scene-debug path
+- **Diff engine** (Phase B): `diff_traces.py` DP-aligns the two pass lists, normalizes uniforms by name, and buckets the first real divergence → `diff/divergence-summary.json` (`wpe.diff.v1`)
+- not yet: corpus orchestration (Phase C), extra fidelity tools (Phase D), HTML report / in-app panel (Phase E)
 
-The stop-loss is intentional: first validate that RenderDoc can see Wallpaper Engine's WorkerW desktop-wallpaper D3D11 path.
+Scope is structure / uniform / topology / texture-binding / RT-lineage diffing.
+Per-pass perceptual (SSIM/ΔE) diff is deferred (the convert path has no WPE RT
+readback); Mac per-pass RT hashes are best-effort placeholders for it.
 
 ## Requirements
 
@@ -27,6 +29,7 @@ No scheduled task is used. No `-ExecutionPolicy Bypass` is used. `run_once.cmd` 
 - `run_once.cmd`: user-launched Windows capture entry → `renderdoccmd convert` → `frame.zip.xml` + `frame.zip`.
 - `parse_capture.py`: Mac stdlib parser; turns the convert output into `trace.json` + `shader-interface.md`.
 - `extract_renderdoc_trace.py`: retained ONLY as a qrenderdoc GUI Python-shell alternative. RenderDoc 1.44 has no standalone `renderdoc` module and no `renderdoccmd python`, so it cannot run headless.
+- `diff_traces.py`: Mac stdlib diff engine; aligns `windows/trace.json` ↔ `mac/trace.json` and writes `diff/divergence-summary.json` (`wpe.diff.v1`). The Mac trace is produced on-device by `WPECanonicalTraceRecorder` (DEBUG builds) into the scene-debug session folder.
 - `job.example.json`: seed job for scene `3526278753`.
 
 Artifacts are written under:
@@ -87,6 +90,35 @@ python3 tools/wpe-oracle/parse_capture.py \
 ```
 
 This emits `windows/trace.json` (wpe.trace.v1) + `windows/shader-interface.md`.
+
+## Divergence Diff (Phase B)
+
+The Mac producer runs on-device: a DEBUG build with scene-debug artifacts
+enabled (`defaults write Taijia.LiveWallpaper WPESceneDebugArtifactsEnabled -bool YES`,
+then relaunch) writes `trace.json` into each scene-debug session folder
+(`~/Library/Containers/Taijia.LiveWallpaper/Data/Library/Application Support/LiveWallpaper/scene-debug/<stamp>-<id>/`).
+Copy it next to the Windows trace as `mac/trace.json`, then diff:
+
+```bash
+python3 tools/wpe-oracle/diff_traces.py \
+  --windows tools/wpe-oracle/captures/<jobId>/windows/trace.json \
+  --mac     tools/wpe-oracle/captures/<jobId>/mac/trace.json \
+  --out     tools/wpe-oracle/captures/<jobId>/diff/divergence-summary.json
+```
+
+`divergence-summary.json` (`wpe.diff.v1`) carries: `status`, `primaryBucket`
+(transpiler / FBO / asset / puppet+particle), `firstDivergence` (with a
+`pinpoint` naming the exact pass / uniform / texture and a `responsibleSite`
+code path), the full pass `alignment` (deletions = passes only WPE drew, e.g.
+particle `POINTLIST`), per-pass `passes[].status` (matched / diverged /
+unverified-cascade / skipped_on_mac), and `bucketHistogram`. Uniform-packing
+differences (WPE `g_bufStatic`/`g_bufDynamic` split vs our flat slot array) are
+reconciled by name and reported in `normalizationNotes`, not as divergence.
+
+> Coverage note: the recorder traces custom-shader passes (the effect chain).
+> The base-image `genericimage4` draw goes through a non-custom path and is not
+> yet captured, so the diff reports it as a `missing-wpe-pass` (transpiler
+> bucket) rather than a real rendering divergence.
 
 ## Mac to Windows Bridge
 
@@ -159,5 +191,5 @@ If RenderDoc cannot hook WorkerW/WPE at all, validate the path with Nsight Graph
 
 - Missing HLSL source is expected — WPE ships only DXBC. RDEF reflection (cbuffer layouts, resource/sampler bindings) + ISGN/OSGN signatures are the baseline, parsed by `parse_capture.py`.
 - The convert path has no GPU replay readback, so per-RT PNGs are intentionally absent; `output.png` is `null` in `trace.json`. (Replayed images need the qrenderdoc GUI.)
-- This first slice intentionally does not classify divergences.
-- Do not commit `.rdc`, `.zip`, `frame.zip.xml`, shader blobs, or captured WPE/workshop assets.
+- Divergence classification lives in `diff_traces.py` (Phase B); see "Divergence Diff" above.
+- Do not commit `.rdc`, `.zip`, `frame.zip.xml`, shader blobs, captured WPE/workshop assets, or `mac/`+`diff/` outputs.

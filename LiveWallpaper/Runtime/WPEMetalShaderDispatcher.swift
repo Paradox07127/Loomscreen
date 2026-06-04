@@ -779,6 +779,9 @@ struct WPEMetalShaderDispatcher {
 
         var primary: MTLTexture? = nil
         var resolvedTexturesBySlot: [Int: MTLTexture] = [:]
+        #if !LITE_BUILD && DEBUG
+        var canonicalTextureBindings: [WPECanonicalTraceRecorder.TextureBindingInput] = []
+        #endif
         for slot in 0..<WPEShaderTranspiler.customTextureSlotCount {
             // `textureBindings` is the pipeline-builder's *normalized* binding
             // table: it already rewrites an effect-bind `previous` to the pass's
@@ -831,6 +834,15 @@ struct WPEMetalShaderDispatcher {
             if let texture {
                 resolvedTexturesBySlot[slot] = texture
             }
+            #if !LITE_BUILD && DEBUG
+            canonicalTextureBindings.append(WPECanonicalTraceRecorder.TextureBindingInput(
+                slot: slot,
+                name: result.samplerNames.indices.contains(slot) ? result.samplerNames[slot] : nil,
+                reference: resolvedReference,
+                texture: texture,
+                fallbackToPrimary: fallbackToPrimary
+            ))
+            #endif
         }
 
         var packedUniformSlots: [SIMD4<Float>] = []
@@ -842,6 +854,16 @@ struct WPEMetalShaderDispatcher {
                 destinationTexture: usesObjectQuad ? (primary ?? destination.texture) : destination.texture
             )
         }
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.recordCustomPass(
+            pass: pass,
+            destination: destination,
+            result: result,
+            textureBindings: canonicalTextureBindings,
+            packedUniformSlots: packedUniformSlots,
+            usesObjectQuad: usesObjectQuad
+        )
+        #endif
 
         // Phase A: log the GPU-bound uniforms for waterwaves passes so the live values
         // (g_Time/g_Speed/g_Scale/g_Direction/g_Strength/g_Texture1Resolution) can be
