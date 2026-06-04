@@ -117,6 +117,13 @@ struct WPEPuppetMeshUniforms {
     float4 meshCenterAndPadding; // x,y raw MDLV mesh center; z,w reserved
 };
 
+struct WPEPuppetSceneCompositeUniforms {
+    float4 localSizeAndMode;       // x,y atlas/local layer size; z=bone palette count; w=skinning enabled
+    float4 meshCenterAndScaleSign; // x,y raw MDLV mesh center; z,w = WPEObjectQuadUniforms.uvSignAndPadding.xy
+    float4 objectCenterAndSize;    // exact WPEObjectQuadUniforms.centerAndSize
+    float4 sceneSizeAndRotation;   // exact WPEObjectQuadUniforms.sceneSizeAndRotation
+};
+
 static inline float4 wpe_skin_puppet_position(
     WPEPuppetVertex v,
     constant float4x4* bonePalette,
@@ -161,6 +168,53 @@ vertex WPEVertexOut wpe_puppet_mesh_vertex(
 
     WPEVertexOut out;
     out.position = float4((position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
+    out.uv = v.uv.xy;
+    return out;
+}
+
+// Deferred-warp final composite: the base pass + effect chain ran in atlas/local
+// UV space (masks aligned), so the mesh geometry warp happens here, once. This
+// reproduces the old `base mesh-warp into FBO -> wpe_object_quad_vertex -> scene`
+// placement exactly: a vertex's local quad coordinate is (meshPos - meshCenter) /
+// localSize (matching the old base NDC = .../halfSize), then the object-quad
+// placement (size/rotation/center, /halfScene) is applied. Negative WPE scale
+// mirrors the MESH geometry (scaleSign) rather than the UV, which is equivalent
+// because the old final quad mirrored an already-rasterized puppet FBO.
+vertex WPEVertexOut wpe_puppet_scene_composite_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEPuppetVertex* vertices [[buffer(0)]],
+    constant WPEPuppetSceneCompositeUniforms& u [[buffer(1)]],
+    constant float4x4* bonePalette [[buffer(2)]]
+) {
+    WPEPuppetVertex v = vertices[vertexID];
+    uint paletteCount = uint(max(u.localSizeAndMode.z, 0.0));
+    float4 position = (u.localSizeAndMode.w > 0.5 && paletteCount > 0)
+        ? wpe_skin_puppet_position(v, bonePalette, paletteCount)
+        : v.position;
+
+    float2 localSize = max(u.localSizeAndMode.xy, float2(1.0));
+    float2 scaleMagnitude = u.objectCenterAndSize.zw / localSize;
+    float2 scaleSign = float2(
+        u.meshCenterAndScaleSign.z < 0.0 ? -1.0 : 1.0,
+        u.meshCenterAndScaleSign.w < 0.0 ? -1.0 : 1.0
+    );
+    float2 localPixels = (position.xy - u.meshCenterAndScaleSign.xy) * scaleMagnitude * scaleSign;
+
+    float rot = u.sceneSizeAndRotation.z;
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 rotated = float2(
+        c * localPixels.x - s * localPixels.y,
+        s * localPixels.x + c * localPixels.y
+    );
+    float2 halfScene = max(u.sceneSizeAndRotation.xy * 0.5, float2(0.5));
+
+    WPEVertexOut out;
+    out.position = float4(
+        u.objectCenterAndSize.xy / halfScene + rotated / halfScene,
+        0.0,
+        1.0
+    );
     out.uv = v.uv.xy;
     return out;
 }

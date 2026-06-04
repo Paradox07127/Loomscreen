@@ -292,6 +292,25 @@ struct WPEPuppetMeshUniforms {
     var meshCenterAndPadding: SIMD4<Float>
 }
 
+/// Layout MUST match `WPEPuppetSceneCompositeUniforms` in `WPEMetalBuiltins.metal`.
+/// Placement fields are copied 1:1 from `WPEObjectQuadUniforms` so the deferred-warp
+/// composite reproduces the current final object-quad placement exactly:
+/// - `objectCenterAndSize`  ← `WPEObjectQuadUniforms.centerAndSize`
+/// - `sceneSizeAndRotation` ← `WPEObjectQuadUniforms.sceneSizeAndRotation`
+/// - `meshCenterAndScaleSign.zw` ← `WPEObjectQuadUniforms.uvSignAndPadding.xy`
+/// The vertex applies that sign to mesh-local positions (mirroring geometry) instead
+/// of UVs, equivalent to the old path that mirrored an already-rasterized puppet FBO.
+struct WPEPuppetSceneCompositeUniforms {
+    /// x/y = atlas/local layer size, z = bone palette count, w = skinning enabled (1/0).
+    var localSizeAndMode: SIMD4<Float>
+    /// x/y = raw MDLV mesh center, z/w = negative-scale mirror sign from object-quad uniforms.
+    var meshCenterAndScaleSign: SIMD4<Float>
+    /// Exact copy of `WPEObjectQuadUniforms.centerAndSize`.
+    var objectCenterAndSize: SIMD4<Float>
+    /// Exact copy of `WPEObjectQuadUniforms.sceneSizeAndRotation`.
+    var sceneSizeAndRotation: SIMD4<Float>
+}
+
 struct WPEGenericParticleUniforms {
     var color: SIMD4<Float>
     /// x = alpha, y = brightness, z/w = padding (reserved for spectrum
