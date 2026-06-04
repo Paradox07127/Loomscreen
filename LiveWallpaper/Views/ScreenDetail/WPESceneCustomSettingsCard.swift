@@ -113,6 +113,7 @@ struct WPESceneCustomSettingsCard: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .slider:
             WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
@@ -162,6 +163,7 @@ struct WPESceneCustomSettingsCard: View {
                 ColorPicker("", selection: colorBinding(for: property), supportsOpacity: false)
                     .labelsHidden()
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .textinput:
             WPEProjectSettingRow(icon: "text.cursor", iconColor: .teal, title: property.displayText) {
@@ -169,6 +171,7 @@ struct WPESceneCustomSettingsCard: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 132)
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .file, .directory:
             WPEProjectSettingRow(

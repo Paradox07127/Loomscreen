@@ -116,6 +116,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .slider:
             WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
@@ -173,6 +174,7 @@ struct WPEProjectCustomSettingsCard: View {
                 ColorPicker("", selection: colorBinding(for: property), supportsOpacity: false)
                     .labelsHidden()
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .textinput:
             WPEProjectSettingRow(icon: "text.cursor", iconColor: .teal, title: property.displayText) {
@@ -180,6 +182,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 132)
                     .controlSize(.small)
+                    .accessibilityLabel(property.displayText)
             }
         case .file, .directory:
             // WPE web projects expect to load arbitrary local paths
