@@ -247,9 +247,6 @@ final class WPEMetalRenderExecutor {
     /// through its dozen call sites. Safe because the render loop encodes one
     /// frame at a time.
     private var currentSceneSize: CGSize = .zero
-    /// Diagnostic dedupe for the compose-subregion box (one log per object per
-    /// executor lifetime). Temporary — remove once the audio-box path is proven.
-    private var loggedSubregionDiag: Set<String> = []
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -1261,8 +1258,8 @@ final class WPEMetalRenderExecutor {
         guard Self.skinBlendIndicesAreInRange(in: model.meshes, paletteCount: evaluation.palette.count) else {
             return disabled("skin-index-out-of-range")
         }
-        guard sampledPalettesAreFiniteAndBounded(layers: animationLayers, bones: model.bones, meshes: model.meshes) else {
-            return disabled("palette-unbounded")
+        if let detail = paletteBoundFailureDetail(layers: animationLayers, bones: model.bones, meshes: model.meshes) {
+            return disabled("palette-unbounded[\(detail)]")
         }
         return PuppetSkinningState(
             enabled: true,
@@ -1276,31 +1273,45 @@ final class WPEMetalRenderExecutor {
     /// Samples the palette across the clip and rejects skinning if any frame is non-finite or moves a
     /// skinned vertex further than a puppet-size-relative bound — the catch for an otherwise "finite"
     /// but exploding palette that frame-0==identity alone would not detect.
-    private func sampledPalettesAreFiniteAndBounded(
+    /// Returns nil when every sampled frame's palette is finite and bounded; otherwise a short
+    /// failure detail (frame / transform space / vertex-delta vs. allowed) that rides on the
+    /// `palette-unbounded` reason so the skinning-gate log shows WHY a puppet was rejected — a near-miss
+    /// delta means the threshold is too tight, a huge delta means the palette evaluation is exploding.
+    private func paletteBoundFailureDetail(
         layers: [WPEPuppetAnimationLayer],
         bones: [WPEPuppetBone],
         meshes: [WPEPuppetMesh]
-    ) -> Bool {
-        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return false }
+    ) -> String? {
+        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return "no-base-layer" }
         let fps = Double(base.animation.fps)
-        guard fps.isFinite, fps > 0 else { return false }
+        guard fps.isFinite, fps > 0 else { return "bad-fps" }
         let last = max(base.animation.frameCount, 1)
         let frames = Array(Set([0, 1, last / 4, last / 2, (last * 3) / 4, last])).sorted()
         let extent = Self.modelExtent(meshes: meshes)
-        let maxAllowedDelta = max(Float(96), extent * 0.12)
+        // This bound only needs to catch a grossly exploding palette: structural failures
+        // (non-finite, out-of-range skin indices, unresolved attachments, broken hierarchy) are
+        // caught by the other gate conditions. The previous 0.12×extent was far too tight — it
+        // rejected legit flowing-hair / gesture motion (e.g. Plana's finite 0.37×-extent swing),
+        // leaving the whole puppet static (no blink/sway). A legit pose keeps every skinned vertex
+        // within ~1.5 model extents of rest; beyond that the palette is exploding.
+        let maxAllowedDelta = max(Float(256), extent * 1.5)
         for frame in frames {
             let time = Double(frame) / fps / max(base.rate, 0.0001)
             let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(layers: layers, bones: bones, at: time)
             guard evaluation.parentChannelMapSucceeded,
                   !evaluation.palette.isEmpty,
                   evaluation.palette.allSatisfy(WPEPuppetAnimationEvaluator.matrixIsFinite) else {
-                return false
+                let finite = evaluation.palette.allSatisfy(WPEPuppetAnimationEvaluator.matrixIsFinite)
+                return "frame=\(frame) parentMap=\(evaluation.parentChannelMapSucceeded) "
+                    + "empty=\(evaluation.palette.isEmpty) finite=\(finite)"
             }
-            guard Self.maxSkinnedVertexDelta(meshes: meshes, palette: evaluation.palette) <= maxAllowedDelta else {
-                return false
+            let delta = Self.maxSkinnedVertexDelta(meshes: meshes, palette: evaluation.palette)
+            guard delta <= maxAllowedDelta else {
+                return "frame=\(frame) space=\(evaluation.transformSpace?.rawValue ?? "nil") "
+                    + "Δ=\(Int(delta))>\(Int(maxAllowedDelta)) extent=\(Int(extent))"
             }
         }
-        return true
+        return nil
     }
 
     /// Every skin-blend index with positive, finite weight must address a real palette entry. The
@@ -1979,19 +1990,11 @@ final class WPEMetalRenderExecutor {
         // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
             guard Self.subregionComposeOutputEnabled else { return false }
-            let decision = WPEMetalSceneCaptureUtilityModels.outputGeometry(
+            return WPEMetalSceneCaptureUtilityModels.outputGeometry(
                 path: layer.imagePath,
                 geometry: layer.geometry,
                 sceneSize: currentSceneSize
-            )
-            let key = "decide:\(layer.objectID)"
-            if loggedSubregionDiag.insert(key).inserted {
-                Logger.info(
-                    "🟦[ComposeSubregion] decide objID=\(layer.objectID) shader=\(pass.pass.shader) target=\(String(describing: pass.pass.target)) decision=\(decision) sceneSize=\(Int(currentSceneSize.width))x\(Int(currentSceneSize.height)) origin=\(layer.geometry.origin.x),\(layer.geometry.origin.y) size=\(String(describing: layer.geometry.size)) scale=\(layer.geometry.scale.x)",
-                    category: .wpeRender
-                )
-            }
-            return decision == .subregion
+            ) == .subregion
         }
         return true
     }
@@ -2043,13 +2046,6 @@ final class WPEMetalRenderExecutor {
             width: width,
             height: height
         ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
-        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath),
-           loggedSubregionDiag.insert("quad:\(layer.objectID)").inserted {
-            Logger.info(
-                "🟩[ComposeSubregion] quad objID=\(layer.objectID) center=(\(Int(center.x)),\(Int(center.y))) size=(\(Int(width)),\(Int(height))) sceneSize=(\(Int(sceneWidth)),\(Int(sceneHeight))) centerNDC=(\(String(format: "%.2f", center.x / max(sceneWidth * 0.5, 1))),\(String(format: "%.2f", center.y / max(sceneHeight * 0.5, 1)))) srcTex=\(sourceTexture.width)x\(sourceTexture.height)",
-                category: .wpeRender
-            )
-        }
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(

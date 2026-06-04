@@ -297,12 +297,36 @@ enum WPESceneDocumentParser {
         return nil
     }
 
+    /// WPE binds a transform component to a user property as
+    /// `{"user": "newpropertyN", "value": "0.5 0.5 0.5"}`; the resolved value is
+    /// in `value`. Unwrap it in the APP target (not just the package's vector3,
+    /// which a stale incremental build may not recompile) so a property-bound
+    /// scale/origin resolves instead of defaulting.
+    private static func resolveBoundTransformValue(_ raw: Any?) -> Any? {
+        if let dict = raw as? [String: Any], let value = dict["value"] {
+            return value
+        }
+        return raw
+    }
+
     private static func localTransform(in dict: [String: Any]) -> SceneObjectTransform {
         SceneObjectTransform(
-            origin: parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0),
-            scale: parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1),
-            angles: parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+            origin: parseVector3(resolveBoundTransformValue(dict["origin"])) ?? SIMD3<Double>(0, 0, 0),
+            scale: parseScale(dict["scale"]),
+            angles: parseVector3(resolveBoundTransformValue(dict["angles"])) ?? SIMD3<Double>(0, 0, 0)
         )
+    }
+
+    /// WPE may store scale as a vector ("0.5 0.5 0.5"), a {user,value} property
+    /// binding, OR a single uniform scalar (0.5 → applied to all axes — this is
+    /// what a resolved "Scale Size" slider writes). `parseVector3` returns nil for
+    /// a lone scalar, which silently defaulted scale to 1.0 and doubled the layer
+    /// (scene 3460973721's audio-bar composelayer). Coerce the scalar to uniform.
+    private static func parseScale(_ raw: Any?) -> SIMD3<Double> {
+        let resolved = resolveBoundTransformValue(raw)
+        if let vector = parseVector3(resolved) { return vector }
+        if let scalar = parseDouble(resolved) { return SIMD3<Double>(scalar, scalar, scalar) }
+        return SIMD3<Double>(1, 1, 1)
     }
 
     private static func parseSoundObject(
@@ -930,7 +954,15 @@ enum WPESceneDocumentParser {
     }
 
     private static func parseBool(_ raw: Any?) -> Bool? {
-        WPEValueParser.bool(raw)
+        // WPE binds layer/effect visibility (and other toggles) to a user property as
+        // {"user": {...}, "value": <bool>}; the resolved value is in `value`. Unwrap
+        // it so a property-bound `visible:false` actually hides the layer instead of
+        // defaulting to true — e.g. scene 3461168300's "音频条底" is hidden by the
+        // "音频条/audio strip" style combo (newproperty14=斜), leaving only the diagonal.
+        if let dict = raw as? [String: Any], let value = dict["value"] {
+            return parseBool(value)
+        }
+        return WPEValueParser.bool(raw)
     }
 }
 
