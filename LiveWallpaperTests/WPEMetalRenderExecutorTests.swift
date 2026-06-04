@@ -576,14 +576,20 @@ struct WPEMetalRenderExecutorTests {
             geometry: geo(size: nil), sceneSize: scene) == .fullscreen)
     }
 
-    @Test("Subregion composelayer object quad uses WPE center-origin coordinates (no half-scene anchor)")
-    func subregionComposeObjectQuadUsesCenterOrigin() throws {
+    @Test("Subregion composelayer object quad uses the normal placed-layer anchor")
+    func subregionComposeObjectQuadUsesNormalAnchor() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let source = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 255, count: 4))
+        // Render-time origin is already in the renderer's TOP-LEFT pixel convention
+        // (parser/builder resolved it — confirmed on-device: scene 3460973721 logs
+        // origin (1089.35, 1861.99), not the raw scene.json center-origin). The box
+        // must use the same `origin - sceneSize/2` anchor as a normal placed layer;
+        // an earlier center-origin special-case shoved it off-screen and blanked the
+        // audio bars.
         let geometry = WPERenderLayerGeometry(
-            origin: SIMD3<Double>(-772.6, 494.6, 0),
-            scale: SIMD3<Double>(0.5, 0.5, 0.5),
+            origin: SIMD3<Double>(1089.35, 1861.99, 0),
+            scale: SIMD3<Double>(1, 1, 1),
             angles: SIMD3<Double>(0, 0, 0),
             alignment: .center,
             size: CGSize(width: 2560, height: 1440),
@@ -607,17 +613,16 @@ struct WPEMetalRenderExecutorTests {
             sceneSize: CGSize(width: 3840, height: 2160),
             sourceTexture: source
         )
-        // Center = authored center-origin pixels directly (NOT origin - sceneSize/2,
-        // which would give (-2692.6, -585.4) → off-screen). Size = footprint × scale.
-        #expect(abs(quad.centerAndSize.x - (-772.6)) < 0.01)
-        #expect(abs(quad.centerAndSize.y - 494.6) < 0.01)
-        #expect(abs(quad.centerAndSize.z - 1280) < 0.01)
-        #expect(abs(quad.centerAndSize.w - 720) < 0.01)
-        // Derived clip-space center stays on-screen (|NDC| < 1), upper-left.
+        // Normal anchor: center = origin - sceneSize/2; size = footprint × scale.
+        #expect(abs(quad.centerAndSize.x - (1089.35 - 1920)) < 0.01) // -830.65
+        #expect(abs(quad.centerAndSize.y - (1861.99 - 1080)) < 0.01) // 781.99
+        #expect(abs(quad.centerAndSize.z - 2560) < 0.01)
+        #expect(abs(quad.centerAndSize.w - 1440) < 0.01)
+        // Center stays on-screen (the off-screen bug produced centerNDC.y = 1.72).
         let ndcX = quad.centerAndSize.x / (3840 / 2)
         let ndcY = quad.centerAndSize.y / (2160 / 2)
-        #expect(ndcX > -1 && ndcX < 0)
-        #expect(ndcY > 0 && ndcY < 1)
+        #expect(ndcX > -1 && ndcX < 0) // -0.43, left of center
+        #expect(ndcY > 0 && ndcY < 1)  // +0.72, upper, on-screen
     }
 
     @Test("Copies sampled input texture to offscreen output")

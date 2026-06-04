@@ -247,6 +247,9 @@ final class WPEMetalRenderExecutor {
     /// through its dozen call sites. Safe because the render loop encodes one
     /// frame at a time.
     private var currentSceneSize: CGSize = .zero
+    /// Diagnostic dedupe for the compose-subregion box (one log per object per
+    /// executor lifetime). Temporary — remove once the audio-box path is proven.
+    private var loggedSubregionDiag: Set<String> = []
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -1976,11 +1979,19 @@ final class WPEMetalRenderExecutor {
         // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
             guard Self.subregionComposeOutputEnabled else { return false }
-            return WPEMetalSceneCaptureUtilityModels.outputGeometry(
+            let decision = WPEMetalSceneCaptureUtilityModels.outputGeometry(
                 path: layer.imagePath,
                 geometry: layer.geometry,
                 sceneSize: currentSceneSize
-            ) == .subregion
+            )
+            let key = "decide:\(layer.objectID)"
+            if loggedSubregionDiag.insert(key).inserted {
+                Logger.warning(
+                    "🟦[ComposeSubregion] decide objID=\(layer.objectID) shader=\(pass.pass.shader) target=\(String(describing: pass.pass.target)) decision=\(decision) sceneSize=\(Int(currentSceneSize.width))x\(Int(currentSceneSize.height)) origin=\(layer.geometry.origin.x),\(layer.geometry.origin.y) size=\(String(describing: layer.geometry.size)) scale=\(layer.geometry.scale.x)",
+                    category: .wpeRender
+                )
+            }
+            return decision == .subregion
         }
         return true
     }
@@ -2006,31 +2017,13 @@ final class WPEMetalRenderExecutor {
                 uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
             )
         }
-        // Scene-capture utility (passthrough) compose layers confined to a
-        // sub-rect use WPE's native object coordinates directly — origin is the
-        // box CENTER in scene-centered pixels (0,0 = scene center, +Y up), which
-        // is exactly what `wpe_object_quad_vertex` expects in `centerAndSize.xy`.
-        // The normal-object `originX - sceneWidth*0.5` anchor below assumes a
-        // different convention and would double-shift a center-origin utility
-        // layer off-screen (origin (-772,494) → NDC (-1.40,-0.54) instead of the
-        // correct (-0.40,+0.46)). Only reached for `.subregion` layers (see
-        // `usesObjectQuadGeometry` / `WPEMetalSceneCaptureUtilityModels`).
-        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
-            let utilWidth = max(Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
-                * max(abs(Float(geometry.scale.x)), 0.0001), 0.0001)
-            let utilHeight = max(Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
-                * max(abs(Float(geometry.scale.y)), 0.0001), 0.0001)
-            let originX = Float(geometry.origin.x)
-            let originY = Float(geometry.origin.y)
-            let centerX = (originX >= 0 && originX <= 1) ? originX * sceneWidth : originX
-            let centerY = (originY >= 0 && originY <= 1) ? originY * sceneHeight : originY
-            let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
-            return WPEObjectQuadUniforms(
-                centerAndSize: SIMD4<Float>(centerX + parallax.x, centerY + parallax.y, utilWidth, utilHeight),
-                sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
-                uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
-            )
-        }
+        // Scene-capture utility subregion layers use the SAME object-quad geometry
+        // as the normal placed-layer path below. At render time `geometry.origin`
+        // is already in the renderer's top-left pixel convention (resolved by the
+        // parser/builder), so the `originX - sceneWidth*0.5` anchor places the box
+        // correctly. An earlier center-origin special-case here pushed the box
+        // off-screen (runtime origin (1089,1862) → NDC (0.57,1.72)) and blanked
+        // the bars; the raw scene.json center-origin value never reaches here.
         let baseWidth = Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
         let baseHeight = Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
         let scaleX = Float(geometry.scale.x)
@@ -2050,6 +2043,13 @@ final class WPEMetalRenderExecutor {
             width: width,
             height: height
         ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
+        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath),
+           loggedSubregionDiag.insert("quad:\(layer.objectID)").inserted {
+            Logger.warning(
+                "🟩[ComposeSubregion] quad objID=\(layer.objectID) center=(\(Int(center.x)),\(Int(center.y))) size=(\(Int(width)),\(Int(height))) sceneSize=(\(Int(sceneWidth)),\(Int(sceneHeight))) centerNDC=(\(String(format: "%.2f", center.x / max(sceneWidth * 0.5, 1))),\(String(format: "%.2f", center.y / max(sceneHeight * 0.5, 1)))) srcTex=\(sourceTexture.width)x\(sourceTexture.height)",
+                category: .wpeRender
+            )
+        }
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(

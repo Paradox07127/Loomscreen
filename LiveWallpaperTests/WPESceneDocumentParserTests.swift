@@ -313,6 +313,34 @@ struct WPESceneDocumentParserTests {
         #expect(abs(layer.angles.z - 1.8707963267948966) < 0.0001)
     }
 
+    @Test("Property-bound {user,value} scale resolves (not default 1.0) through parent composition")
+    func propertyBoundScaleResolvesThroughParentComposition() throws {
+        // Mirrors scene 3460973721's audio-bar layer: a child composelayer whose
+        // scale is bound to a user property as {"user":…,"value":"0.5 0.5 0.5"}.
+        // Before the WPEValueParser.vector3 `value`-unwrap, this parsed as the 1.0
+        // default, doubling the rendered box. The parent group has no own scale.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                ["id": 20, "name": "Group", "origin": "0 0 0"],
+                [
+                    "id": 21,
+                    "name": "Audio",
+                    "image": "models/util/composelayer.json",
+                    "parent": 20,
+                    "origin": "0 0 0",
+                    "scale": ["user": "newproperty11", "value": "0.5 0.5 0.5"]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+        #expect(abs(layer.scale.x - 0.5) < 0.0001)
+        #expect(abs(layer.scale.y - 0.5) < 0.0001)
+    }
+
     @Test("Child image object adds parent-local Y in scene-up coordinates")
     func childImageOriginYAddsInSceneUpCoordinates() throws {
         let payload: [String: Any] = [

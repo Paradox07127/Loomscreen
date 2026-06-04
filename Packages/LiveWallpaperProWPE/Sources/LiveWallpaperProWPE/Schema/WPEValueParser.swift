@@ -129,6 +129,14 @@ public enum WPEValueParser {
     }
 
     public static func vector3(_ raw: Any?, boolAsNumber: Bool = false) -> SIMD3<Double>? {
+        // WPE binds a transform component (scale/origin/angles) to a user property
+        // as {"user": "newpropertyN", "value": "0.5 0.5 0.5"}; the resolved value
+        // lives in `value`. Unwrap it (matching `shaderConstant`) so a property-bound
+        // transform resolves instead of silently falling back to the default — e.g.
+        // an audio-bar composelayer scale of 0.5 was parsing as 1.0, doubling the box.
+        if let dict = raw as? [String: Any], let value = dict["value"] {
+            return vector3(value, boolAsNumber: boolAsNumber)
+        }
         if let values = numberVector(raw, boolAsNumber: boolAsNumber) {
             let z = values.count >= 3 ? values[2] : 0
             return SIMD3<Double>(values[0], values[1], z)
