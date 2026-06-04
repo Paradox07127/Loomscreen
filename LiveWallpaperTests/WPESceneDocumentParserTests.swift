@@ -398,6 +398,120 @@ struct WPESceneDocumentParserTests {
         #expect(byID["488"]?.visible == false)  // 底 hidden by the style selection
     }
 
+    /// Builds scene 3461168300's two-layer style selector: `newproperty14`
+    /// picks the diagonal (condition "1") or the bottom bar (condition "2").
+    private func styleSelectorSceneData() throws -> Data {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 269, "name": "斜", "image": "models/util/solidlayer.json",
+                    "origin": "100 100 0",
+                    "visible": ["user": ["condition": "1", "name": "newproperty14"], "value": true]
+                ],
+                [
+                    "id": 488, "name": "底", "image": "models/util/solidlayer.json",
+                    "origin": "100 100 0",
+                    "visible": ["user": ["condition": "2", "name": "newproperty14"], "value": false]
+                ]
+            ]
+        ]
+        return try JSONSerialization.data(withJSONObject: payload, options: [])
+    }
+
+    @Test("Style selector resolves the live selection (numeric, string, mismatch)")
+    func styleSelectorResolvesLiveSelection() throws {
+        let data = try styleSelectorSceneData()
+
+        // newproperty14 = 2 → only the bottom bar (condition "2") shows.
+        let pickBottom = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(2)])
+        let bottomByID = Dictionary(uniqueKeysWithValues: pickBottom.imageObjects.map { ($0.id, $0) })
+        #expect(bottomByID["269"]?.visible == false)
+        #expect(bottomByID["488"]?.visible == true)
+
+        // String "2" must match the same way as the numeric value.
+        let pickBottomString = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .string("2")])
+        let bottomStringByID = Dictionary(uniqueKeysWithValues: pickBottomString.imageObjects.map { ($0.id, $0) })
+        #expect(bottomStringByID["488"]?.visible == true)
+
+        // newproperty14 = 1 → only the diagonal (condition "1") shows.
+        let pickDiagonal = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(1)])
+        let diagonalByID = Dictionary(uniqueKeysWithValues: pickDiagonal.imageObjects.map { ($0.id, $0) })
+        #expect(diagonalByID["269"]?.visible == true)
+        #expect(diagonalByID["488"]?.visible == false)
+    }
+
+    @Test("Style selector 'off' value hides every conditional layer")
+    func styleSelectorOffHidesAll() throws {
+        let data = try styleSelectorSceneData()
+        // newproperty14 = 3 (off) matches neither condition → both hidden.
+        let off = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(3)])
+        let byID = Dictionary(uniqueKeysWithValues: off.imageObjects.map { ($0.id, $0) })
+        #expect(byID["269"]?.visible == false)
+        #expect(byID["488"]?.visible == false)
+    }
+
+    @Test("Condition-form visibility records an incremental binding carrying the condition")
+    func styleSelectorBindingIsIncrementalWithCondition() throws {
+        let data = try styleSelectorSceneData()
+        let document = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(1)])
+
+        let bindings = try #require(document.propertyBindings["newproperty14"])
+        #expect(bindings.count == 2)
+        for binding in bindings {
+            #expect(binding.kind == .visible)
+            #expect(binding.action == .incremental)
+            #expect(binding.condition != nil)
+        }
+        #expect(bindings.contains { $0.target == .imageObject(id: "269") && $0.condition == "1" })
+        #expect(bindings.contains { $0.target == .imageObject(id: "488") && $0.condition == "2" })
+    }
+
+    @Test("Switching a style selector is an incremental patch, not a reload")
+    func styleSelectorPatchIsIncremental() throws {
+        let data = try styleSelectorSceneData()
+        let document = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(1)])
+
+        let patch = WPEScenePropertyPatch(
+            bindingsByProperty: document.propertyBindings,
+            oldValues: ["newproperty14": .number(1)],
+            newValues: ["newproperty14": .number(2)]
+        )
+        #expect(!patch.requiresReload)
+        #expect(patch.incrementalBindings.count == 2)
+    }
+
+    @Test("Nested user property without a condition behaves like a simple binding")
+    func nestedUserWithoutConditionActsAsSimpleBinding() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": 7, "name": "Toggle", "image": "models/util/solidlayer.json",
+                "visible": ["user": ["name": "toggle"], "value": true]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        // No condition → the property drives the bool directly: toggle=false hides it.
+        let hidden = try WPESceneDocumentParser.parse(data: data, userValues: ["toggle": .bool(false)])
+        #expect(hidden.imageObjects.first?.visible == false)
+        #expect(hidden.propertyBindings["toggle"]?.first?.target == .imageObject(id: "7"))
+    }
+
+    @Test("sceneConditionMatches maps live combo values to a condition literal")
+    func sceneConditionMatchesCoversTypes() {
+        // The shared helper used by both the parser (full-reload path) and the
+        // renderer's resolvedVisible (incremental path). This is the core
+        // live-value → visibility mapping for the style selector.
+        typealias Schema = WallpaperEngineProjectPropertySchema
+        #expect(Schema.sceneConditionMatches(value: .number(2), condition: "2"))
+        #expect(Schema.sceneConditionMatches(value: .string("2"), condition: "2"))
+        #expect(!Schema.sceneConditionMatches(value: .number(1), condition: "2"))
+        #expect(!Schema.sceneConditionMatches(value: .number(2), condition: "1"))
+        #expect(!Schema.sceneConditionMatches(value: nil, condition: "2"))
+    }
+
     @Test("Child image object adds parent-local Y in scene-up coordinates")
     func childImageOriginYAddsInSceneUpCoordinates() throws {
         let payload: [String: Any] = [

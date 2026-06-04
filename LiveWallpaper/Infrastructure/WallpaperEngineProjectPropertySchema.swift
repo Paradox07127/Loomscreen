@@ -259,6 +259,21 @@ private struct Localization: Equatable {
     }
 }
 
+extension WallpaperEngineProjectPropertySchema {
+    /// Evaluates a WPE scene condition-form binding literal (the
+    /// `visible.user.condition` value, e.g. `"2"`) against the live value of
+    /// the bound property. Reuses the same loose number/string matching as
+    /// project-property visibility conditions so `.number(2)`, `.string("2")`
+    /// and a condition literal `"2"` all compare equal. Used by the scene
+    /// parser (full-reload path) and the renderer (incremental patch path).
+    static func sceneConditionMatches(
+        value: WallpaperEngineProjectPropertyValue?,
+        condition: String
+    ) -> Bool {
+        ConditionEvaluator.matchesLiteral(value: value, condition: condition)
+    }
+}
+
 private enum ConditionEvaluator {
     static func isVisible(
         condition: String?,
@@ -269,6 +284,16 @@ private enum ConditionEvaluator {
             .components(separatedBy: "||")
             .map { evaluateAndGroup($0, values: values) }
             .contains(true)
+    }
+
+    /// Loose equality between a property value and a single condition literal,
+    /// reusing `parseLiteral` (bool/number/string coercion) and `matches`
+    /// (number tolerance + cross-type `stringValue` fallback).
+    static func matchesLiteral(
+        value: WallpaperEngineProjectPropertyValue?,
+        condition: String
+    ) -> Bool {
+        value.matches(parseLiteral(condition))
     }
 
     private static func evaluateAndGroup(

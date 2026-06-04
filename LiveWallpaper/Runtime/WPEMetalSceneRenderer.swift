@@ -1485,13 +1485,28 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         var nextLayerVisibility = liveLayerVisibility
         var nextTextVisibility = liveTextVisibility
 
+        // Resolves a visibility binding's live boolean. Condition-form (style
+        // selector) bindings evaluate `newValue matches condition`; simple
+        // bindings read the boolean directly. Returns nil (→ safe full reload)
+        // when the changed value can't drive this target.
+        func resolvedVisible(for binding: WPEScenePropertyBinding) -> Bool? {
+            if let condition = binding.condition {
+                guard let value = patch.newValues[binding.propertyKey] else { return nil }
+                return WallpaperEngineProjectPropertySchema.sceneConditionMatches(
+                    value: value,
+                    condition: condition
+                )
+            }
+            return patch.newValues[binding.propertyKey]?.boolValue
+        }
+
         for binding in patch.incrementalBindings {
             switch (binding.target, binding.kind) {
             case (.imageObject(let id), .visible):
-                guard let value = patch.newValues[binding.propertyKey]?.boolValue else { return false }
+                guard let value = resolvedVisible(for: binding) else { return false }
                 nextLayerVisibility[id] = value
             case (.textObject(let id), .visible):
-                guard let value = patch.newValues[binding.propertyKey]?.boolValue else { return false }
+                guard let value = resolvedVisible(for: binding) else { return false }
                 nextTextVisibility[id] = value
             default:
                 // An incremental binding we don't yet know how to apply: bail to

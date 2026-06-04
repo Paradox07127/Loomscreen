@@ -163,12 +163,17 @@ enum WPESceneDocumentParser {
             kind: WPEScenePropertyBindingKind,
             action: WPEScenePropertyBindingAction
         ) {
-            for key in userPropertyKeys(in: raw).sorted() {
-                result[key, default: []].append(WPEScenePropertyBinding(
-                    propertyKey: key,
+            let specs = userPropertyBindingSpecs(in: raw).sorted { lhs, rhs in
+                if lhs.key != rhs.key { return lhs.key < rhs.key }
+                return (lhs.condition ?? "") < (rhs.condition ?? "")
+            }
+            for spec in specs {
+                result[spec.key, default: []].append(WPEScenePropertyBinding(
+                    propertyKey: spec.key,
                     target: target,
                     kind: kind,
-                    action: action
+                    action: action,
+                    condition: spec.condition
                 ))
             }
         }
@@ -231,25 +236,65 @@ enum WPESceneDocumentParser {
         return fallback
     }
 
-    /// Recursively collects every `{"user":K, "value":...}` key reachable from
-    /// `raw` (a field value may be a scalar, a `{user}` envelope, or an array of
-    /// them — e.g. color components).
-    private static func userPropertyKeys(in raw: Any?) -> Set<String> {
+    /// Describes one user-property dependency discovered in a raw scene field:
+    /// the property key plus, for condition-form (style-selector) bindings, the
+    /// expected literal the property must match for the field's `value` to take
+    /// effect (nil for the simple form).
+    private struct UserPropertyBindingSpec: Hashable {
+        let key: String
+        let condition: String?
+    }
+
+    /// Recursively collects every user-property envelope reachable from `raw`
+    /// (a field value may be a scalar, a `{user}` envelope, or an array of them
+    /// — e.g. color components). Handles both the simple form
+    /// `{"user":K,"value":...}` and the condition form
+    /// `{"user":{"name":K,"condition":"2"},"value":...}` (style selectors).
+    private static func userPropertyBindingSpecs(in raw: Any?) -> Set<UserPropertyBindingSpec> {
         guard let raw else { return [] }
         if let array = raw as? [Any] {
-            return array.reduce(into: Set<String>()) { keys, value in
-                keys.formUnion(userPropertyKeys(in: value))
+            return array.reduce(into: Set<UserPropertyBindingSpec>()) { specs, value in
+                specs.formUnion(userPropertyBindingSpecs(in: value))
             }
         }
         guard let dict = raw as? [String: Any] else { return [] }
-        var keys = Set<String>()
-        if let key = dict["user"] as? String, dict.keys.contains("value") {
-            keys.insert(key)
+        var specs = Set<UserPropertyBindingSpec>()
+        if dict.keys.contains("value") {
+            if let key = dict["user"] as? String {
+                specs.insert(UserPropertyBindingSpec(key: key, condition: nil))
+            } else if let user = dict["user"] as? [String: Any],
+                      let name = user["name"] as? String, !name.isEmpty {
+                specs.insert(UserPropertyBindingSpec(
+                    key: name,
+                    condition: conditionString(from: user["condition"])
+                ))
+            }
         }
         for value in dict.values {
-            keys.formUnion(userPropertyKeys(in: value))
+            specs.formUnion(userPropertyBindingSpecs(in: value))
         }
-        return keys
+        return specs
+    }
+
+    /// Normalises a condition literal (`String`/number/`Bool`) to its string
+    /// form. Integral numbers render without a trailing `.0` so a combo option
+    /// value of `2` matches a condition `"2"`. JSON booleans (which bridge to
+    /// `NSNumber`) are kept distinct from numerics.
+    private static func conditionString(from raw: Any?) -> String? {
+        if let value = raw as? String {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return number.boolValue ? "true" : "false"
+            }
+            // `NSNumber.stringValue` renders integers without a trailing `.0`
+            // and never traps — unlike `Int(double)`, which would crash on a
+            // finite but out-of-`Int`-range literal from external scene JSON.
+            return number.stringValue
+        }
+        return nil
     }
 
     private static func resolvedObjectTransforms(_ rawObjects: [[String: Any]]) -> [String: SceneObjectTransform] {
@@ -493,6 +538,38 @@ enum WPESceneDocumentParser {
                 return fallback
             }
             return jsonValue(for: override)
+        }
+
+        // Condition form (WPE style selector):
+        // `{"user":{"name":K,"condition":"2"},"value":false}`. The field is
+        // visible only while `userValues[K]` matches the condition literal.
+        if let user = dict["user"] as? [String: Any],
+           let name = user["name"] as? String, !name.isEmpty,
+           dict.keys.contains("value") {
+            let fallback = resolveUserPropertyEnvelopes(
+                in: dict["value"] ?? NSNull(),
+                userValues: userValues
+            )
+            guard let override = userValues[name] else {
+                return fallback
+            }
+            guard let condition = conditionString(from: user["condition"]) else {
+                // Nested user with a name but no condition → the property drives
+                // the value directly, like the simple form.
+                return jsonValue(for: override)
+            }
+            // Gate to a Bool only when the baked fallback is a genuine JSON
+            // boolean (a `visible` field). `strictBool` rejects numeric
+            // NSNumbers, so a condition-form envelope wrapping a scalar field
+            // (alpha/brightness/scale) — or a vector/color — is returned
+            // untouched instead of being coerced into a Bool.
+            guard WPEValueParser.strictBool(fallback) != nil else {
+                return fallback
+            }
+            return WallpaperEngineProjectPropertySchema.sceneConditionMatches(
+                value: override,
+                condition: condition
+            )
         }
 
         var resolved: [String: Any] = [:]

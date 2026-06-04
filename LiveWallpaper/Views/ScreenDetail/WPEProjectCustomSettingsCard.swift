@@ -165,6 +165,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .fixedSize()
+                    .accessibilityLabel(property.displayText)
                 }
             }
         case .color:

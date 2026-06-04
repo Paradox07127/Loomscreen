@@ -43,22 +43,31 @@ public struct WPESceneDocument: Equatable, Sendable {
 /// One link between a user-defined project property and a concrete render
 /// target. `action` decides whether changing the property can be patched in
 /// place (`.incremental`) or requires a full pipeline reload (`.reload`).
+///
+/// `condition` carries the expected literal for *condition-form* bindings —
+/// `{"user":{"name":K,"condition":"2"},"value":...}` (WPE style selectors).
+/// When non-nil the target is visible only while `userValues[propertyKey]`
+/// matches `condition`; when nil the property drives the target directly
+/// (simple `{"user":K,"value":...}` form).
 public struct WPEScenePropertyBinding: Equatable, Sendable {
     public let propertyKey: String
     public let target: WPEScenePropertyBindingTarget
     public let kind: WPEScenePropertyBindingKind
     public let action: WPEScenePropertyBindingAction
+    public let condition: String?
 
     public init(
         propertyKey: String,
         target: WPEScenePropertyBindingTarget,
         kind: WPEScenePropertyBindingKind,
-        action: WPEScenePropertyBindingAction
+        action: WPEScenePropertyBindingAction,
+        condition: String? = nil
     ) {
         self.propertyKey = propertyKey
         self.target = target
         self.kind = kind
         self.action = action
+        self.condition = condition
     }
 }
 
