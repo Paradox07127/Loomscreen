@@ -17,17 +17,57 @@ enum WPEMetalSceneCaptureUtilityModels {
     /// (e.g. scene 3479521040's DoF layer was a `fullscreenlayer`). Tolerates a
     /// leading `../<dependencyID>/` resolver prefix.
     static func isSceneCaptureUtilityModelPath(_ path: String) -> Bool {
-        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
-        let stripped: String
-        if normalized.hasPrefix("../") {
-            let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
-            stripped = parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
-        } else {
-            stripped = normalized
-        }
+        let stripped = strippedUtilityPath(path)
         return stripped == "models/util/composelayer.json"
             || stripped == "models/util/projectlayer.json"
             || stripped == "models/util/fullscreenlayer.json"
+    }
+
+    /// Output geometry for a scene-capture utility (passthrough) layer's FINAL
+    /// scene composite. The capture / `previous` sampling always stays
+    /// full-frame 1:1 (the 98f79b5 lesson); only the output composite of a
+    /// plain `composelayer.json` that hosts a *spatial* effect authored into a
+    /// real sub-rect (e.g. an audio-bar visualizer box) is confined to that box.
+    enum OutputGeometry { case fullscreen, subregion }
+
+    /// `fullscreenlayer.json` (DoF/post-process) and `projectlayer.json`
+    /// (projection/autosize) always cover the frame. A `composelayer.json`
+    /// stays fullscreen too unless its authored footprint is a safe sub-scene
+    /// rectangle: axis-aligned, positive-scale, finite, and clearly smaller
+    /// than the scene. Rotated / mirrored / oversized / full-coverage compose
+    /// layers stay fullscreen — this preserves 98f79b5's decision for scene
+    /// 3479521040's 5000×2300 rotated passthrough layer.
+    static func outputGeometry(
+        path: String,
+        geometry: WPERenderLayerGeometry,
+        sceneSize: CGSize
+    ) -> OutputGeometry {
+        guard strippedUtilityPath(path) == "models/util/composelayer.json" else { return .fullscreen }
+        guard let size = geometry.size else { return .fullscreen }
+        let sceneW = max(Float(sceneSize.width), 1)
+        let sceneH = max(Float(sceneSize.height), 1)
+        let width = Float(size.width) * max(abs(Float(geometry.scale.x)), 0.0001)
+        let height = Float(size.height) * max(abs(Float(geometry.scale.y)), 0.0001)
+        guard width.isFinite, height.isFinite, width > 1, height > 1 else { return .fullscreen }
+        let rotationEpsilon = 0.001
+        if abs(geometry.angles.x) > rotationEpsilon
+            || abs(geometry.angles.y) > rotationEpsilon
+            || abs(geometry.angles.z) > rotationEpsilon {
+            return .fullscreen
+        }
+        if geometry.scale.x < 0 || geometry.scale.y < 0 { return .fullscreen }
+        let fullCoverage: Float = 0.95
+        if width >= sceneW * fullCoverage && height >= sceneH * fullCoverage { return .fullscreen }
+        return .subregion
+    }
+
+    private static func strippedUtilityPath(_ path: String) -> String {
+        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        if normalized.hasPrefix("../") {
+            let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            return parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
+        }
+        return normalized
     }
 }
 
@@ -65,6 +105,16 @@ final class WPEMetalRenderExecutor {
         #else
         return false
         #endif
+    }
+
+    /// Rollback gate for sub-region compose-layer output (the audio-visualizer
+    /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
+    /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
+    /// utility layer to the legacy unconditional-fullscreen output.
+    static var subregionComposeOutputEnabled: Bool {
+        UserDefaults.standard.object(forKey: "WPEMetalSubregionComposeOutput") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "WPEMetalSubregionComposeOutput")
     }
 
     /// Mirrors the slot-0 precedence used by
@@ -176,6 +226,12 @@ final class WPEMetalRenderExecutor {
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
     /// (confirms the builtin effect_waterwaves path actually runs + the debug flag value reaching it).
     private var loggedWaterWavesDispatch = false
+    /// Scene size (ortho-projection pixels) for the frame currently encoding.
+    /// Stashed at frame start so `usesObjectQuadGeometry` can judge a
+    /// scene-capture utility layer's footprint without threading `sceneSize`
+    /// through its dozen call sites. Safe because the render loop encodes one
+    /// frame at a time.
+    private var currentSceneSize: CGSize = .zero
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -238,6 +294,7 @@ final class WPEMetalRenderExecutor {
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
         frameState.cameraParallax = runtimeUniforms.cameraParallax
+        currentSceneSize = size
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
         let attachmentContext = makeAttachmentFrameContext(
@@ -674,18 +731,7 @@ final class WPEMetalRenderExecutor {
                 matching: Self.translatedUniformNameCandidates(for: u)
             ) ?? u.defaultValue
             if let length = u.arrayLength {
-                let flat = Self.vectorValue(value, count: length * 4)
-                for i in 0..<length {
-                    let slotIndex = u.slot + i
-                    guard slotIndex < slots.count else { break }
-                    let base = i * 4
-                    slots[slotIndex] = SIMD4<Float>(
-                        flat.indices.contains(base) ? flat[base] : 0,
-                        flat.indices.contains(base + 1) ? flat[base + 1] : 0,
-                        flat.indices.contains(base + 2) ? flat[base + 2] : 0,
-                        flat.indices.contains(base + 3) ? flat[base + 3] : 0
-                    )
-                }
+                Self.packArrayUniform(value, glslType: u.glslType, length: length, slot: u.slot, into: &slots)
                 continue
             }
             switch u.glslType {
@@ -1876,10 +1922,19 @@ final class WPEMetalRenderExecutor {
             return layer.parallaxDepth != 0 && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
         // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
-        // render fullscreen and copy the captured frame 1:1, never as a
-        // shrunken object quad.
+        // capture + copy the full frame 1:1. Their FINAL scene composite stays
+        // fullscreen too, EXCEPT a plain `composelayer.json` authored into a
+        // safe sub-rect (an audio-bar visualizer box), whose output is confined
+        // to that box via the object quad. Capture/effect passes target the
+        // layer composite (not `.scene`), so they were already excluded by the
+        // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
-            return false
+            guard Self.subregionComposeOutputEnabled else { return false }
+            return WPEMetalSceneCaptureUtilityModels.outputGeometry(
+                path: layer.imagePath,
+                geometry: layer.geometry,
+                sceneSize: currentSceneSize
+            ) == .subregion
         }
         return true
     }
@@ -1901,6 +1956,31 @@ final class WPEMetalRenderExecutor {
             let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
             return WPEObjectQuadUniforms(
                 centerAndSize: SIMD4<Float>(parallax.x, parallax.y, sceneWidth, sceneHeight),
+                sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
+                uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
+            )
+        }
+        // Scene-capture utility (passthrough) compose layers confined to a
+        // sub-rect use WPE's native object coordinates directly — origin is the
+        // box CENTER in scene-centered pixels (0,0 = scene center, +Y up), which
+        // is exactly what `wpe_object_quad_vertex` expects in `centerAndSize.xy`.
+        // The normal-object `originX - sceneWidth*0.5` anchor below assumes a
+        // different convention and would double-shift a center-origin utility
+        // layer off-screen (origin (-772,494) → NDC (-1.40,-0.54) instead of the
+        // correct (-0.40,+0.46)). Only reached for `.subregion` layers (see
+        // `usesObjectQuadGeometry` / `WPEMetalSceneCaptureUtilityModels`).
+        if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
+            let utilWidth = max(Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
+                * max(abs(Float(geometry.scale.x)), 0.0001), 0.0001)
+            let utilHeight = max(Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
+                * max(abs(Float(geometry.scale.y)), 0.0001), 0.0001)
+            let originX = Float(geometry.origin.x)
+            let originY = Float(geometry.origin.y)
+            let centerX = (originX >= 0 && originX <= 1) ? originX * sceneWidth : originX
+            let centerY = (originY >= 0 && originY <= 1) ? originY * sceneHeight : originY
+            let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
+            return WPEObjectQuadUniforms(
+                centerAndSize: SIMD4<Float>(centerX + parallax.x, centerY + parallax.y, utilWidth, utilHeight),
                 sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
                 uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
             )
@@ -2458,39 +2538,7 @@ final class WPEMetalRenderExecutor {
                 destinationTexture: destinationTexture
             ) ?? Self.translatedUniformValue(for: u, in: pass)
             if let length = u.arrayLength {
-                let raw = Self.vectorValue(value, count: length)
-                for i in 0..<length {
-                    let v = raw.indices.contains(i) ? raw[i] : 0
-                    let slotIndex = u.slot + i
-                    guard slotIndex < slots.count else { break }
-                    switch u.glslType {
-                    case "vec2":
-                        let stride = 2
-                        slots[slotIndex] = SIMD4<Float>(
-                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
-                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
-                            0, 0
-                        )
-                    case "vec3":
-                        let stride = 3
-                        slots[slotIndex] = SIMD4<Float>(
-                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
-                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
-                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
-                            0
-                        )
-                    case "vec4":
-                        let stride = 4
-                        slots[slotIndex] = SIMD4<Float>(
-                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
-                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
-                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
-                            raw.indices.contains(i * stride + 3) ? raw[i * stride + 3] : 0
-                        )
-                    default:
-                        slots[slotIndex].x = v
-                    }
-                }
+                Self.packArrayUniform(value, glslType: u.glslType, length: length, slot: u.slot, into: &slots)
                 continue
             }
             switch u.glslType {
@@ -2605,6 +2653,43 @@ final class WPEMetalRenderExecutor {
         case .animated(let v): return Float(v.scalar(at: 0) ?? Double(fallback))
         case .string(let s): return Float(s) ?? fallback
         case nil:            return fallback
+        }
+    }
+
+    /// Packs a GLSL array uniform (`elemType name[length]`) into `length`
+    /// consecutive `float4` slots — one array element per slot, the element's
+    /// components in `.x`/`.xy`/`.xyz`/`.xyzw`. This mirrors the transpiler's
+    /// per-element read `u.vals[slot + i].<swizzle>` (see
+    /// `WPEShaderTranspiler.renderMSL`). Both pack overloads route here so the
+    /// scalar/vec packing can never drift apart again — the previous divergence
+    /// (`values:` overload packed every array as `vec4[N]`; the per-pass
+    /// overload under-read `vec2/3/4[N]` with `count: length`) silently
+    /// corrupted scalar `float[N]` uniforms such as `g_AudioSpectrum*[N]`.
+    private static func packArrayUniform(
+        _ value: WPESceneShaderConstantValue?,
+        glslType: String,
+        length: Int,
+        slot: Int,
+        into slots: inout [SIMD4<Float>]
+    ) {
+        let components: Int
+        switch glslType {
+        case "vec2": components = 2
+        case "vec3": components = 3
+        case "vec4": components = 4
+        default: components = 1 // float / int / bool — scalar element, read via `.x`
+        }
+        let flat = vectorValue(value, count: length * components)
+        for i in 0..<length {
+            let slotIndex = slot + i
+            guard slotIndex < slots.count else { break }
+            let base = i * components
+            slots[slotIndex] = SIMD4<Float>(
+                base < flat.count ? flat[base] : 0,
+                components > 1 && base + 1 < flat.count ? flat[base + 1] : 0,
+                components > 2 && base + 2 < flat.count ? flat[base + 2] : 0,
+                components > 3 && base + 3 < flat.count ? flat[base + 3] : 0
+            )
         }
     }
 
