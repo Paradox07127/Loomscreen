@@ -375,7 +375,7 @@ final class WPEMetalRenderExecutor {
                         frameState: &frameState
                     )
                 } catch {
-                    Logger.warning(
+                    Logger.info(
                         "[WPE.bypass] skipped layer \(layer.graphLayer.objectID): source \(firstSource) not blittable (\(error))",
                         category: .wpeRender
                     )
@@ -858,7 +858,7 @@ final class WPEMetalRenderExecutor {
     func present(texture source: MTLTexture, in view: MTKView) throws -> Bool {
         guard let drawable = view.currentDrawable else {
             #if DEBUG
-            Logger.warning(
+            Logger.info(
                 "[present] view.currentDrawable=nil — source=\(source.width)x\(source.height) view.bounds=\(view.bounds) drawableSize=\(view.drawableSize)",
                 category: .wpeRender
             )
@@ -1986,7 +1986,7 @@ final class WPEMetalRenderExecutor {
             )
             let key = "decide:\(layer.objectID)"
             if loggedSubregionDiag.insert(key).inserted {
-                Logger.warning(
+                Logger.info(
                     "🟦[ComposeSubregion] decide objID=\(layer.objectID) shader=\(pass.pass.shader) target=\(String(describing: pass.pass.target)) decision=\(decision) sceneSize=\(Int(currentSceneSize.width))x\(Int(currentSceneSize.height)) origin=\(layer.geometry.origin.x),\(layer.geometry.origin.y) size=\(String(describing: layer.geometry.size)) scale=\(layer.geometry.scale.x)",
                     category: .wpeRender
                 )
@@ -2045,7 +2045,7 @@ final class WPEMetalRenderExecutor {
         ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath),
            loggedSubregionDiag.insert("quad:\(layer.objectID)").inserted {
-            Logger.warning(
+            Logger.info(
                 "🟩[ComposeSubregion] quad objID=\(layer.objectID) center=(\(Int(center.x)),\(Int(center.y))) size=(\(Int(width)),\(Int(height))) sceneSize=(\(Int(sceneWidth)),\(Int(sceneHeight))) centerNDC=(\(String(format: "%.2f", center.x / max(sceneWidth * 0.5, 1))),\(String(format: "%.2f", center.y / max(sceneHeight * 0.5, 1)))) srcTex=\(sourceTexture.width)x\(sourceTexture.height)",
                 category: .wpeRender
             )
@@ -2345,7 +2345,7 @@ final class WPEMetalRenderExecutor {
 
         if !loggedWaterWavesDispatch {
             loggedWaterWavesDispatch = true
-            Logger.warning(
+            Logger.info(
                 "WPE waterwaves dispatch ran (builtin effect_waterwaves): debugMode=\(debugMode) hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
                 category: .wpeRender
             )

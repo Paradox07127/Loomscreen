@@ -197,7 +197,7 @@ public final class SystemMonitor {
         if isLow != isMemoryLow {
             isMemoryLow = isLow
             if isLow {
-                Logger.warning("System memory usage is high: \(Int(systemMemoryUsage * 100))%", category: .memory)
+                Logger.notice("System memory usage is high: \(Int(systemMemoryUsage * 100))%", category: .memory)
                 NotificationCenter.default.post(
                     name: .systemMemoryWarning,
                     object: nil,

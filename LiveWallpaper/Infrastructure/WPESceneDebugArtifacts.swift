@@ -57,6 +57,12 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private let bindingDiagnosticsLock = NSLock()
     private var bindingDiagnostics: [String] = []
     private let maxBindingDiagnostics = 512
+
+    /// Caps on the scene-debug directory so DEBUG builds (where dumps default on)
+    /// don't accumulate unbounded PNG/MSL artifacts. The oldest session folders
+    /// are pruned first when either bound is exceeded; the newest is always kept.
+    private let maxSessionFolders = 40
+    private let maxTotalBytes: UInt64 = 512 * 1024 * 1024  // 512 MiB
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withYear, .withMonth, .withDay, .withTime]
@@ -102,6 +108,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     func beginSession(workshopID: String, descriptor: String) -> URL? {
         guard isEnabled else { return nil }
         guard let root = Self.rootURL else { return nil }
+        pruneOldSessions(under: root)
 
         let stamp = compactTimestamp(from: Date())
         let folder = root.appendingPathComponent("\(stamp)-\(workshopID)", isDirectory: true)
@@ -141,6 +148,57 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
             category: .wpeRender
         )
         return folder
+    }
+
+    /// Prune oldest session folders so the scene-debug root stays under both the
+    /// folder-count and total-byte caps. Runs async on the write queue so it
+    /// never blocks scene load. Best-effort — failures are ignored, and the
+    /// single newest session is always retained.
+    private func pruneOldSessions(under root: URL) {
+        let maxFolders = maxSessionFolders
+        let maxBytes = maxTotalBytes
+        writeQueue.async {
+            let fm = FileManager.default
+            let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
+            guard let children = try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            ) else { return }
+
+            // Newest first, so we keep the most recent sessions and trim the tail.
+            let folders = children
+                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                .map { url -> (url: URL, date: Date, size: UInt64) in
+                    let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return (url, date, Self.directorySize(of: url, fm: fm))
+                }
+                .sorted { $0.date > $1.date }
+
+            var runningBytes: UInt64 = 0
+            for (index, folder) in folders.enumerated() {
+                runningBytes += folder.size
+                let overCount = index + 1 > maxFolders
+                let overBytes = index > 0 && runningBytes > maxBytes
+                if overCount || overBytes {
+                    try? fm.removeItem(at: folder.url)
+                }
+            }
+        }
+    }
+
+    private static func directorySize(of url: URL, fm: FileManager) -> UInt64 {
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        var total: UInt64 = 0
+        for case let fileURL as URL in enumerator {
+            let size = (try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0
+            total += UInt64(size)
+        }
+        return total
     }
 
     /// Drop the current session reference. Files stay on disk.

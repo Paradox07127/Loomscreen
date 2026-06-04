@@ -1172,7 +1172,7 @@ final class ScreenManager {
     
     // MARK: - Memory Management
     private func handleLowMemory() {
-        Logger.warning("Low memory condition detected, optimizing resource usage", category: .memory)
+        Logger.notice("Low memory condition detected, optimizing resource usage", category: .memory)
 
         for screen in screens {
             guard let playback = screen.playbackController, playback.isPlaying else { continue }

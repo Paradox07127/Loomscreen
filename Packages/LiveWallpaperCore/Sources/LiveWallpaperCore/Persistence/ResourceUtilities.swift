@@ -33,7 +33,7 @@ public final class ResourceUtilities {
         if let data = tryBookmark(url, options: primaryOptions, keys: snapshotKeys) {
             return data
         }
-        Logger.warning(
+        Logger.info(
             "Bookmark step 1 (security-scope + resource keys) failed; retrying without resource keys",
             category: .fileAccess
         )

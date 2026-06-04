@@ -9,6 +9,13 @@ import AppKit
 /// `WPECorpusPlaybackHarness` run, surfaces per-scene outcomes in a table,
 /// and lets the maintainer export the resulting JSON report for triage.
 struct DeveloperToolsView: View {
+    @State private var flagRefresh = 0
+
+    // Corpus Test machinery is DEBUG-only: the `WPECorpusPlaybackHarness` /
+    // `WPECorpusPlaybackReport` types it drives are themselves `#if DEBUG`, so
+    // none of this can compile (or run) in Release. Release Developer Tools
+    // shows only the Diagnostics tab.
+    #if DEBUG
     @State private var isRunning = false
     @State private var progressLabel: String = ""
     @State private var progressFraction: Double = 0
@@ -20,10 +27,7 @@ struct DeveloperToolsView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var singleSceneWorkshopID: String = ""
     @State private var singleSceneStatus: String = ""
-    @State private var flagRefresh = 0
-    @State private var waterWavesDebug = WPEWaterWavesDebugMode.current
     @State private var selectedTab: DevToolsTab = .corpusTest
-    @State private var activeWaterWavesPath = WPESceneDebugArtifacts.shared.waterWavesPath
 
     private enum DevToolsTab: String, CaseIterable, Identifiable {
         case corpusTest
@@ -36,6 +40,7 @@ struct DeveloperToolsView: View {
             }
         }
     }
+    #endif
 
     var body: some View {
         DetailPageScaffold(
@@ -43,10 +48,12 @@ struct DeveloperToolsView: View {
             header: { header },
             content: { content }
         )
+        #if DEBUG
         .onDisappear {
             runTask?.cancel()
             cancelRequested = true
         }
+        #endif
     }
 
     private var header: some View {
@@ -60,6 +67,7 @@ struct DeveloperToolsView: View {
 
     @ViewBuilder
     private var metadata: some View {
+        #if DEBUG
         if selectedTab == .diagnostics {
             Text("Diagnostic flags — persist until toggled off or reset.", comment: "Developer Tools header subtitle on the diagnostics tab.")
                 .foregroundStyle(.secondary)
@@ -78,10 +86,15 @@ struct DeveloperToolsView: View {
             Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
                 .foregroundStyle(.secondary)
         }
+        #else
+        Text("Diagnostic flags — persist until toggled off or reset.", comment: "Developer Tools header subtitle on the diagnostics tab.")
+            .foregroundStyle(.secondary)
+        #endif
     }
 
     @ViewBuilder
     private var actions: some View {
+        #if DEBUG
         if selectedTab == .corpusTest {
             HStack(spacing: 8) {
                 if isRunning {
@@ -108,11 +121,13 @@ struct DeveloperToolsView: View {
                 }
             }
         }
+        #endif
     }
 
     @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
+            #if DEBUG
             Picker(selection: $selectedTab) {
                 ForEach(DevToolsTab.allCases) { tab in
                     Text(verbatim: tab.title).tag(tab)
@@ -129,10 +144,14 @@ struct DeveloperToolsView: View {
             case .diagnostics:
                 diagnosticsFlagsSection
             }
+            #else
+            diagnosticsFlagsSection
+            #endif
         }
         .padding(16)
     }
 
+    #if DEBUG
     @ViewBuilder
     private var corpusTestContent: some View {
         configurationSection
@@ -212,6 +231,7 @@ struct DeveloperToolsView: View {
             .padding(.vertical, 4)
         }
     }
+    #endif
 
     // MARK: - Diagnostic flags
 
@@ -222,22 +242,34 @@ struct DeveloperToolsView: View {
         var id: String { key }
     }
 
-    private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = [
-        .init(key: "WPEMetalCaptureScene", title: "Capture scene textures",
-              help: "Dump decoded scene/composite textures (incl. BC/DXT) under scene-debug."),
-        .init(key: "WPEMetalBypassEffects", title: "Bypass effect passes",
-              help: "Draw only base image layers, skipping effects (note: breaks solid-color layers)."),
-        .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
-              help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
-        .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
-              help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
-        .init(key: "WPEAudioDebugLog", title: "Audio debug log",
-              help: "Verbose audio-reactive DSP logging."),
-        .init(key: "WPEPuppetLogSkinningReason", title: "Log puppet skinning gate",
-              help: "Log why each puppet's GPU skinning is enabled or gated off (blink/body-sway depend on it). Filter logs for 🦴 [puppet-skin]. Logged once per change."),
-        .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp",
-              help: "Run the puppet base + effect chain in atlas/local UV space and warp the skinned mesh at composite, so effect masks align with the puppet. Reload the scene to apply."),
-    ]
+    /// Diagnostics whose backing behavior is compiled into every build (dump /
+    /// capture / verbose-log paths that work in Release too).
+    private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = {
+        var flags: [DiagnosticBoolFlag] = [
+            .init(key: "WPEMetalCaptureScene", title: "Capture scene textures",
+                  help: "Dump decoded scene/composite textures (incl. BC/DXT) under scene-debug."),
+            .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
+                  help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
+            .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
+                  help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
+            .init(key: "WPEAudioDebugLog", title: "Audio debug log",
+                  help: "Verbose audio-reactive DSP logging."),
+        ]
+        // These three read `#if DEBUG`-only gates in WPEMetalRenderExecutor, so
+        // their toggles do nothing in Release. Only surface them where the
+        // backing behavior actually exists.
+        #if DEBUG
+        flags += [
+            .init(key: "WPEPuppetLogSkinningReason", title: "Log puppet skinning gate",
+                  help: "Log why each puppet's GPU skinning is enabled or gated off (blink/body-sway depend on it). Filter logs for 🦴 [puppet-skin]. Logged once per change."),
+            .init(key: "WPEMetalBypassEffects", title: "Bypass effect passes",
+                  help: "Draw only base image layers, skipping effects (note: breaks solid-color layers)."),
+            .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp",
+                  help: "Run the puppet base + effect chain in atlas/local UV space and warp the skinned mesh at composite, so effect masks align with the puppet. Reload the scene to apply."),
+        ]
+        #endif
+        return flags
+    }()
 
     private static let diagnosticStringKeys: [String] = [
         WPEWaterWavesDebugMode.defaultsKey,
@@ -259,48 +291,6 @@ struct DeveloperToolsView: View {
             }
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Picker(selection: Binding(
-                        get: { waterWavesDebug },
-                        set: { setWaterWavesDebug($0) }
-                    )) {
-                        ForEach(WPEWaterWavesDebugMode.allCases) { mode in
-                            Text(verbatim: mode.title).tag(mode)
-                        }
-                    } label: {
-                        Text(verbatim: "Waterwaves debug")
-                    }
-                    Text(verbatim: "Visualize where the waterwaves effect triggers: Mask / Overlay show the masked region on the character, Displacement shows the wave field. Applies on the next rendered frame.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 4) {
-                        Text(verbatim: "Active waterwaves path:")
-                            .font(.caption)
-                        Text(verbatim: activeWaterWavesPath)
-                            .font(.caption.bold())
-                            .foregroundStyle(waterWavesPathColor)
-                    }
-                    .accessibilityElement(children: .combine)
-
-                    if waterWavesDebug != .off && activeWaterWavesPath == "Inactive" {
-                        Text(verbatim: "⚠️ Waterwaves debug is on but no waterwaves effect is rendering in the current scene.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Toggle(isOn: boolBinding("WPEWaterWavesTrace")) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: "Waterwaves uniform trace")
-                        Text(verbatim: "Log packed waterwaves uniforms per pass + dump the translated MSL to scene-debug. Needs scene debug artifacts on.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
                 ForEach(Self.diagnosticBoolFlags) { flag in
                     Toggle(isOn: boolBinding(flag.key)) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -318,12 +308,6 @@ struct DeveloperToolsView: View {
             }
             .padding(.vertical, 4)
             .id(flagRefresh)
-            .task {
-                while !Task.isCancelled {
-                    activeWaterWavesPath = WPESceneDebugArtifacts.shared.waterWavesPath
-                    try? await Task.sleep(nanoseconds: 700_000_000)
-                }
-            }
         }
     }
 
@@ -337,23 +321,6 @@ struct DeveloperToolsView: View {
         )
     }
 
-    private func setWaterWavesDebug(_ mode: WPEWaterWavesDebugMode) {
-        waterWavesDebug = mode
-        if mode == .off {
-            UserDefaults.standard.removeObject(forKey: WPEWaterWavesDebugMode.defaultsKey)
-        } else {
-            UserDefaults.standard.set(mode.storageValue, forKey: WPEWaterWavesDebugMode.defaultsKey)
-        }
-    }
-
-    private var waterWavesPathColor: Color {
-        switch activeWaterWavesPath {
-        case "Builtin": return .green
-        case "Transpiled": return .orange
-        default: return .secondary
-        }
-    }
-
     private func resetDiagnosticFlags() {
         for flag in Self.diagnosticBoolFlags {
             UserDefaults.standard.removeObject(forKey: flag.key)
@@ -362,10 +329,10 @@ struct DeveloperToolsView: View {
             UserDefaults.standard.removeObject(forKey: key)
         }
         UserDefaults.standard.removeObject(forKey: WPEWaterWavesTrace.defaultsKey)
-        waterWavesDebug = .off
         flagRefresh += 1
     }
 
+    #if DEBUG
     private func errorBanner(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
             .foregroundStyle(.orange)
@@ -645,5 +612,6 @@ struct DeveloperToolsView: View {
         }
         return lines.isEmpty ? entry.title : lines.joined(separator: "\n")
     }
+    #endif
 }
 #endif

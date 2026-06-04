@@ -345,7 +345,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             if case .dependency = entry.key { return partial + entry.value }
             return partial
         }
-        Logger.warning(
+        Logger.notice(
             "Scene \(workshopID) resolution summary — events:\(snapshot.events.count) resolved:\(snapshot.resolvedCount) scene:\(counts[.scene, default: 0]) builtin:\(counts[.builtin, default: 0]) engineAssets:\(counts[.engineAssets, default: 0]) dependency:\(dependencyCount)",
             category: .screenManager
         )
@@ -355,7 +355,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 .map { "\($0.ref) → \($0.finalOutcome.debugLabel)" }
                 .joined(separator: " | ")
             let suffix = missed.count > 40 ? " | +\(missed.count - 40) more" : ""
-            Logger.warning(
+            Logger.notice(
                 "Scene \(workshopID) misses (top 40 of \(missed.count)): \(summary)\(suffix)",
                 category: .screenManager
             )
@@ -591,7 +591,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             // BC/DXT/RG88/R8 etc. — decode by sampling into rgba8 so we can view it.
             texture = decoded
         } else {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] texture dump: unsupported pixel format \(rawTexture.pixelFormat.rawValue) for \(basename)",
                 category: .wpeRender
             )
@@ -608,7 +608,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         )
 
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else {
-            Logger.warning("[WPEMetalCaptureScene] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
             return
         }
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
@@ -626,7 +626,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             shouldInterpolate: false,
             intent: .defaultIntent
         ) else {
-            Logger.warning("[WPEMetalCaptureScene] texture dump: CGImage failed for \(basename)", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] texture dump: CGImage failed for \(basename)", category: .wpeRender)
             return
         }
 
@@ -648,13 +648,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let tiff = nsImage.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiff),
                   let png = bitmap.representation(using: .png, properties: [:]) else {
-                Logger.warning("[WPEMetalCaptureScene] texture dump: PNG encode failed for \(basename)", category: .wpeRender)
+                Logger.info("[WPEMetalCaptureScene] texture dump: PNG encode failed for \(basename)", category: .wpeRender)
                 return
             }
             try png.write(to: url)
             Logger.notice("[WPEMetalCaptureScene] texture dump → \(url.path)", category: .wpeRender)
         } catch {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] texture dump failed for \(basename): \(error.localizedDescription)",
                 category: .wpeRender
             )
@@ -676,7 +676,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         let device = texture.device
         guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] outputTexture dump: unsupported pixel format \(texture.pixelFormat.rawValue)",
                 category: .wpeRender
             )
@@ -686,13 +686,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let bytesPerRow = texture.width * bytesPerPixel
         let totalBytes = bytesPerRow * texture.height
         guard let buffer = device.makeBuffer(length: totalBytes, options: .storageModeShared) else {
-            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: makeBuffer failed", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] outputTexture dump: makeBuffer failed", category: .wpeRender)
             return
         }
         guard let queue = device.makeCommandQueue(),
               let cb = queue.makeCommandBuffer(),
               let blit = cb.makeBlitCommandEncoder() else {
-            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: cannot create blit encoder", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] outputTexture dump: cannot create blit encoder", category: .wpeRender)
             return
         }
         blit.copy(
@@ -710,7 +710,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         cb.commit()
         cb.waitUntilCompleted()
         guard cb.status == .completed else {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] outputTexture dump: blit failed (status=\(cb.status.rawValue))",
                 category: .wpeRender
             )
@@ -719,7 +719,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         let provider = CGDataProvider(dataInfo: nil, data: buffer.contents(), size: totalBytes) { _, _, _ in }
         guard let provider else {
-            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: CGDataProvider failed", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] outputTexture dump: CGDataProvider failed", category: .wpeRender)
             return
         }
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
@@ -737,7 +737,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             shouldInterpolate: false,
             intent: .defaultIntent
         ) else {
-            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: CGImage failed", category: .wpeRender)
+            Logger.info("[WPEMetalCaptureScene] outputTexture dump: CGImage failed", category: .wpeRender)
             return
         }
         let nsImage = NSImage(cgImage: cg, size: CGSize(width: texture.width, height: texture.height))
@@ -759,7 +759,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let tiff = nsImage.tiffRepresentation,
                   let bitmap = NSBitmapImageRep(data: tiff),
                   let png = bitmap.representation(using: .png, properties: [:]) else {
-                Logger.warning("[WPEMetalCaptureScene] outputTexture dump: PNG encode failed", category: .wpeRender)
+                Logger.info("[WPEMetalCaptureScene] outputTexture dump: PNG encode failed", category: .wpeRender)
                 return
             }
             try png.write(to: url)
@@ -775,7 +775,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 category: .wpeRender
             )
         } catch {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] outputTexture dump failed: \(error.localizedDescription)",
                 category: .wpeRender
             )
@@ -802,7 +802,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         let manager = MTLCaptureManager.shared()
         guard manager.supportsDestination(.gpuTraceDocument) else {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] device does not support gpuTraceDocument capture; ensure MetalCaptureEnabled is YES in Info.plist and Xcode is attached.",
                 category: .wpeRender
             )
@@ -815,7 +815,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         do {
             traceURL = try Self.makeCaptureURL(workshopID: descriptor.workshopID)
         } catch {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] could not create capture directory: \(error.localizedDescription)",
                 category: .wpeRender
             )
@@ -834,7 +834,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             )
             return GPUCaptureHandle(manager: manager, outputURL: traceURL)
         } catch {
-            Logger.warning(
+            Logger.info(
                 "[WPEMetalCaptureScene] capture start failed: \(error.localizedDescription)",
                 category: .wpeRender
             )

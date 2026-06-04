@@ -561,7 +561,7 @@ final class SettingsManager {
         if url.exists {
             return url
         }
-        Logger.warning("Last used directory no longer exists: \(path)", category: .fileAccess)
+        Logger.info("Last used directory no longer exists: \(path)", category: .fileAccess)
         return nil
     }
 
