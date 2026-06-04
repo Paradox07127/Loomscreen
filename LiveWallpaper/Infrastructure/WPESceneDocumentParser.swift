@@ -691,10 +691,12 @@ enum WPESceneDocumentParser {
             delay: parseDouble(dict["cameraparallaxdelay"]) ?? parallaxDefaults.delay,
             mouseInfluence: parseDouble(dict["cameraparallaxmouseinfluence"]) ?? parallaxDefaults.mouseInfluence
         )
+        let supportsAudioProcessing = parseBool(dict["supportsaudioprocessing"]) ?? false
         return WPESceneGeneral(
             clearColor: clearColor,
             orthogonalProjection: projection,
-            cameraParallax: cameraParallax
+            cameraParallax: cameraParallax,
+            supportsAudioProcessing: supportsAudioProcessing
         )
     }
 

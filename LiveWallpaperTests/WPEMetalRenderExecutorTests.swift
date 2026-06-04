@@ -453,6 +453,173 @@ struct WPEMetalRenderExecutorTests {
         #expect(slots[0] == SIMD4<Float>(8, 4, 7, 3))
     }
 
+    @Test("Scalar float[N] audio array packs one bin per slot in .x (both pack overloads)")
+    func audioSpectrumArrayPacksOneBinPerSlot() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        // Distinct, recognizable per-bin values so a 4-per-slot mispack (the old
+        // `values:` overload bug) or a stride under-read would be obvious.
+        let bins = (0..<64).map { Double($0) + 1 }
+        let layout = [
+            WPEUniformSlot(name: "g_AudioSpectrum64Left", glslType: "float", slot: 0, slotCount: 64, arrayLength: 64)
+        ]
+
+        // `values:` overload (MSDF text path) — previously packed every array as vec4[N].
+        let slotsValues = executor.packTranslatedUniforms(
+            values: ["g_AudioSpectrum64Left": .vector(bins)],
+            layout: layout
+        )
+        for i in 0..<64 {
+            #expect(slotsValues[i].x == Float(bins[i]))
+            #expect(slotsValues[i].y == 0 && slotsValues[i].z == 0 && slotsValues[i].w == 0)
+        }
+
+        // Per-pass overload (live scene path) must agree bin-for-bin.
+        let pass = WPEPreparedRenderPass(
+            pass: WPERenderPass(
+                id: "audio.0",
+                phase: .effect(file: "effects/workshop/audio/effect.json"),
+                shader: "workshop/audio/bars",
+                source: .image("materials/base.png"),
+                target: .scene,
+                textures: [:],
+                binds: [:],
+                constants: [:],
+                combos: [:],
+                blending: "normal",
+                cullMode: "nocull",
+                depthTest: "disabled",
+                depthWrite: "disabled"
+            ),
+            shader: nil,
+            textureBindings: [:],
+            comboValues: [:],
+            uniformValues: ["g_AudioSpectrum64Left": .vector(bins)]
+        )
+        let slotsPass = executor.packTranslatedUniforms(for: pass, layout: layout)
+        for i in 0..<64 {
+            #expect(slotsPass[i].x == Float(bins[i]))
+        }
+    }
+
+    @Test("vec2[N] array packs two components per slot (.xy), tightly strided")
+    func vec2ArrayPacksTwoComponentsPerSlot() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        // 4 elements × 2 components = 8 flat values.
+        let flat = (0..<8).map { Double($0) + 1 } // 1,2 | 3,4 | 5,6 | 7,8
+        let layout = [
+            WPEUniformSlot(name: "u_Points", glslType: "vec2", slot: 0, slotCount: 4, arrayLength: 4)
+        ]
+        let slots = executor.packTranslatedUniforms(
+            values: ["u_Points": .vector(flat)],
+            layout: layout
+        )
+        for i in 0..<4 {
+            #expect(slots[i].x == Float(flat[i * 2]))
+            #expect(slots[i].y == Float(flat[i * 2 + 1]))
+            #expect(slots[i].z == 0 && slots[i].w == 0)
+        }
+    }
+
+    @Test("Scene-capture utility output geometry: only a small axis-aligned composelayer is subregion")
+    func sceneCaptureUtilityOutputGeometryClassifier() throws {
+        let scene = CGSize(width: 3840, height: 2160)
+        func geo(
+            size: CGSize?,
+            scale: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double> = SIMD3<Double>(0, 0, 0)
+        ) -> WPERenderLayerGeometry {
+            WPERenderLayerGeometry(
+                origin: SIMD3<Double>(-772.6, 494.6, 0),
+                scale: scale,
+                angles: angles,
+                alignment: .center,
+                size: size,
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            )
+        }
+        typealias Models = WPEMetalSceneCaptureUtilityModels
+
+        // The audio-bar box (scene 3460973721): 2560×1440 × 0.5 = 1280×720, axis-aligned.
+        #expect(Models.outputGeometry(
+            path: "models/util/composelayer.json",
+            geometry: geo(size: CGSize(width: 2560, height: 1440), scale: SIMD3<Double>(0.5, 0.5, 0.5)),
+            sceneSize: scene
+        ) == .subregion)
+        // ../<dependencyID>/ resolver prefix is tolerated.
+        #expect(Models.outputGeometry(
+            path: "../3021673417/models/util/composelayer.json",
+            geometry: geo(size: CGSize(width: 2560, height: 1440), scale: SIMD3<Double>(0.5, 0.5, 0.5)),
+            sceneSize: scene
+        ) == .subregion)
+
+        // fullscreenlayer (DoF) and projectlayer (projection) always fullscreen.
+        #expect(Models.outputGeometry(path: "models/util/fullscreenlayer.json",
+            geometry: geo(size: CGSize(width: 1280, height: 720)), sceneSize: scene) == .fullscreen)
+        #expect(Models.outputGeometry(path: "models/util/projectlayer.json",
+            geometry: geo(size: CGSize(width: 1280, height: 720)), sceneSize: scene) == .fullscreen)
+
+        // Scene 3479521040 regression guards: rotated and oversized compose stay fullscreen.
+        #expect(Models.outputGeometry(path: "models/util/composelayer.json",
+            geometry: geo(size: CGSize(width: 1280, height: 720), angles: SIMD3<Double>(0, 0, 0.4)),
+            sceneSize: scene) == .fullscreen)
+        #expect(Models.outputGeometry(path: "models/util/composelayer.json",
+            geometry: geo(size: CGSize(width: 5000, height: 2300)), sceneSize: scene) == .fullscreen)
+        // Mirrored (negative scale) and missing size also stay fullscreen.
+        #expect(Models.outputGeometry(path: "models/util/composelayer.json",
+            geometry: geo(size: CGSize(width: 1280, height: 720), scale: SIMD3<Double>(-1, 1, 1)),
+            sceneSize: scene) == .fullscreen)
+        #expect(Models.outputGeometry(path: "models/util/composelayer.json",
+            geometry: geo(size: nil), sceneSize: scene) == .fullscreen)
+    }
+
+    @Test("Subregion composelayer object quad uses WPE center-origin coordinates (no half-scene anchor)")
+    func subregionComposeObjectQuadUsesCenterOrigin() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let source = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 255, count: 4))
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(-772.6, 494.6, 0),
+            scale: SIMD3<Double>(0.5, 0.5, 0.5),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 2560, height: 1440),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let layer = WPERenderLayer(
+            objectID: "audio",
+            objectName: "音频响应",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: geometry,
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: []
+        )
+        let quad = executor.objectQuadUniforms(
+            for: layer,
+            sceneSize: CGSize(width: 3840, height: 2160),
+            sourceTexture: source
+        )
+        // Center = authored center-origin pixels directly (NOT origin - sceneSize/2,
+        // which would give (-2692.6, -585.4) → off-screen). Size = footprint × scale.
+        #expect(abs(quad.centerAndSize.x - (-772.6)) < 0.01)
+        #expect(abs(quad.centerAndSize.y - 494.6) < 0.01)
+        #expect(abs(quad.centerAndSize.z - 1280) < 0.01)
+        #expect(abs(quad.centerAndSize.w - 720) < 0.01)
+        // Derived clip-space center stays on-screen (|NDC| < 1), upper-left.
+        let ndcX = quad.centerAndSize.x / (3840 / 2)
+        let ndcY = quad.centerAndSize.y / (2160 / 2)
+        #expect(ndcX > -1 && ndcX < 0)
+        #expect(ndcY > 0 && ndcY < 1)
+    }
+
     @Test("Copies sampled input texture to offscreen output")
     func copiesInputTexture() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
