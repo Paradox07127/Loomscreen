@@ -124,3 +124,7 @@ docs/
 
 .vm-bridge/
 cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
