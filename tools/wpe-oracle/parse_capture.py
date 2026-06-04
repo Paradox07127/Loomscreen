@@ -113,6 +113,8 @@ COMPONENT_TYPES = {
     3: "float32",
 }
 
+SIGNATURE_CHUNKS = {"ISGN", "OSGN", "ISG1", "OSG1", "ISG5", "OSG5", "PCSG"}
+
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -481,8 +483,19 @@ def parse_dxbc(data: bytes) -> dict[str, Any]:
             "rdef": {"constantBuffers": [], "resourceBindings": [], "creator": ""},
             "signatures": {},
         }
-    version, total_size, chunk_count = struct.unpack_from("<III", data, 20)
-    chunk_offsets = struct.unpack_from("<" + "I" * chunk_count, data, 32)
+    try:
+        version, total_size, chunk_count = struct.unpack_from("<III", data, 20)
+        if 32 + 4 * chunk_count > len(data):
+            raise struct.error("DXBC chunk table exceeds blob length")
+        chunk_offsets = struct.unpack_from("<" + "I" * chunk_count, data, 32)
+    except struct.error:
+        return {
+            "valid": False,
+            "sha256": sha256_bytes(data),
+            "chunks": [],
+            "rdef": {"constantBuffers": [], "resourceBindings": [], "creator": ""},
+            "signatures": {},
+        }
     chunks: list[dict[str, Any]] = []
     signatures: dict[str, list[dict[str, Any]]] = {}
     rdef = {"constantBuffers": [], "resourceBindings": [], "creator": ""}
@@ -496,7 +509,7 @@ def parse_dxbc(data: bytes) -> dict[str, Any]:
         chunks.append({"fourcc": fourcc, "offset": offset, "size": size})
         if fourcc == "RDEF":
             rdef = parse_rdef(payload)
-        elif fourcc in ("ISGN", "OSGN", "ISG1", "OSG1", "PCSG"):
+        elif fourcc in SIGNATURE_CHUNKS:
             signatures[fourcc] = parse_signature(payload, fourcc)
         elif fourcc in ("SHEX", "SHDR"):
             shex_payload = payload
@@ -767,8 +780,8 @@ class CaptureParser:
             "textures": [binding_md(b) for b in bindings if b.get("type") == "TEXTURE"],
             "constantBlocks": [binding_md(b) for b in bindings if b.get("type") == "CBUFFER"],
             "uniforms": [variable_schema(v) for cb in cbuffers for v in cb.get("variables", [])],
-            "inputSignature": dxbc.get("signatures", {}).get("ISGN") or dxbc.get("signatures", {}).get("ISG1") or [],
-            "outputSignature": dxbc.get("signatures", {}).get("OSGN") or dxbc.get("signatures", {}).get("OSG1") or [],
+            "inputSignature": first_signature(dxbc, ("ISGN", "ISG1", "ISG5")),
+            "outputSignature": first_signature(dxbc, ("OSGN", "OSG1", "OSG5")),
             "dxbcChunks": dxbc.get("chunks", []),
             "creator": rdef.get("creator", ""),
         }
@@ -1097,7 +1110,7 @@ class CaptureParser:
                         f"{typ.get('class','')} | {typ.get('type','')} | {typ.get('rows','')} | {typ.get('cols','')} | {typ.get('elements','')} |"
                     )
                 lines.append("")
-            for label, keys in (("Input Signature", ("ISGN", "ISG1")), ("Output Signature", ("OSGN", "OSG1"))):
+            for label, keys in (("Input Signature", ("ISGN", "ISG1", "ISG5")), ("Output Signature", ("OSGN", "OSG1", "OSG5")), ("Patch Constant Signature", ("PCSG",))):
                 params = []
                 for key in keys:
                     params = sigs.get(key) or []
@@ -1148,20 +1161,62 @@ def decode_variable_value(var: dict[str, Any], data: bytes) -> dict[str, Any]:
     typ = var.get("type", {})
     rows = int(typ.get("rows") or 0)
     cols = int(typ.get("cols") or 0)
-    values: list[float | int] = []
-    if raw and typ.get("type") in ("float", "double"):
-        count = len(raw) // 4
-        if count:
-            values = list(struct.unpack_from("<" + "f" * count, raw, 0))
-    elif raw:
-        values = list(raw)
+    elements = int(typ.get("elements") or 1)
+    values = decode_scalar_values(raw, typ.get("type"))
     if values:
         out["value"] = values[0] if len(values) == 1 else values
         if rows == 4 and cols == 4 and len(values) >= 16:
-            out["matrix4x4"] = [float(v) for v in values[:16]]
+            # WPE/HLSL constant-buffer matrices are column-major; expose the raw
+            # 16 floats plus a row-major view for comparison against our
+            # column-major Metal matrices.
+            major = "row" if typ.get("class") == "matrix_rows" else "column"
+            out["matrixMajor"] = major
+            mats, row_major = [], []
+            for i in range(max(1, elements)):
+                chunk = values[i * 16:(i + 1) * 16]
+                if len(chunk) < 16:
+                    break
+                m = [float(v) for v in chunk]
+                mats.append(m)
+                row_major.append(m if major == "row" else transpose_square4(m))
+            if mats:
+                out["matrix4x4"] = mats[0]
+                out["matrix4x4RowMajor"] = row_major[0]
+            if len(mats) > 1:
+                out["matrix4x4Array"] = mats
+                out["matrix4x4RowMajorArray"] = row_major
     if raw:
         out["rawBytesSha256"] = sha256_bytes(raw)
     return out
+
+
+def decode_scalar_values(raw: bytes, value_type: str | None) -> list[float | int | bool]:
+    if not raw:
+        return []
+    if value_type == "double":
+        count = len(raw) // 8
+        return list(struct.unpack_from("<" + "d" * count, raw, 0)) if count else []
+    fmt = {"float": "f", "int": "i", "uint": "I", "bool": "I"}.get(value_type)
+    if fmt is None:
+        return list(raw)
+    count = len(raw) // 4
+    if not count:
+        return []
+    values = list(struct.unpack_from("<" + fmt * count, raw, 0))
+    return [bool(v) for v in values] if value_type == "bool" else values
+
+
+def transpose_square4(values: list[float | int | bool]) -> list[float]:
+    return [float(values[c * 4 + r]) for r in range(4) for c in range(4)]
+
+
+def first_signature(dxbc: dict[str, Any], keys: Iterable[str]) -> list[dict[str, Any]]:
+    signatures = dxbc.get("signatures", {})
+    for key in keys:
+        params = signatures.get(key)
+        if params:
+            return params
+    return []
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
