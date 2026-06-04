@@ -19,6 +19,28 @@ public enum WPEParticleBlendMode: String, Sendable, CaseIterable, Equatable {
     }
 }
 
+/// How a particle walks its sprite-sheet atlas over its lifetime.
+///
+/// - `.sequence`: play the atlas frames in order, `sequencemultiplier`
+///   full cycles across the particle's life (the default WPE playback).
+/// - `.randomFrame`: each particle locks onto ONE random frame at spawn
+///   and never animates — WPE's `"animationmode": "randomframe"`, used by
+///   shatter/debris/ember presets so every shard is a *different static*
+///   piece of the atlas rather than the whole atlas flip-booking.
+///
+/// A particle JSON that omits `animationmode` defaults to `.sequence`.
+public enum WPEParticleAnimationMode: String, Sendable, Equatable, CaseIterable {
+    case sequence
+    case randomFrame
+
+    public init(wpeString raw: String?) {
+        switch raw?.lowercased() {
+        case "randomframe": self = .randomFrame
+        default: self = .sequence
+        }
+    }
+}
+
 /// A WPE particle "control point" — a named anchor an emitter or operator can
 /// reference. `id 0` is the emitter's spawn origin by convention. `flags & 1`
 /// means the point tracks the mouse pointer (WPE's "Lock to pointer"); the
@@ -110,6 +132,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// runtime can pick a sub-frame index every tick. `1` is the
     /// WPE default; `0` freezes on frame 0.
     public let sequenceMultiplier: Double
+    /// `animationmode` from the particle JSON — whether the sprite sheet
+    /// animates over the lifetime (`.sequence`) or each particle freezes
+    /// on a random frame (`.randomFrame`).
+    public let animationMode: WPEParticleAnimationMode
     /// Parsed control points (mouse anchors). `id 0` is the emitter origin.
     public let controlPoints: [WPEParticleControlPoint]
     /// `controlpointattract` operators (cursor follow/avoid forces).
@@ -169,6 +195,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         turbulencePhaseMin: Double = 0,
         turbulencePhaseMax: Double = 0,
         sequenceMultiplier: Double = 1,
+        animationMode: WPEParticleAnimationMode = .sequence,
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = []
     ) {
@@ -214,6 +241,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
         self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
         self.sequenceMultiplier = max(0, sequenceMultiplier)
+        self.animationMode = animationMode
         self.controlPoints = controlPoints
         self.attractors = attractors
     }
@@ -273,6 +301,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             turbulencePhaseMin: turbulencePhaseMin,
             turbulencePhaseMax: turbulencePhaseMax,
             sequenceMultiplier: sequenceMultiplier,
+            animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors
         )
@@ -328,6 +357,7 @@ public enum WPEParticleDefinitionParser {
             ?? 0
         let startDelay = WPEValueParser.double(json["starttime"]) ?? 0
         let sequenceMultiplier = WPEValueParser.double(json["sequencemultiplier"]) ?? 1
+        let animationMode = WPEParticleAnimationMode(wpeString: json["animationmode"] as? String)
 
         var rate: Double = 0
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
@@ -541,6 +571,7 @@ public enum WPEParticleDefinitionParser {
             turbulencePhaseMin: turbulencePhaseMin,
             turbulencePhaseMax: turbulencePhaseMax,
             sequenceMultiplier: sequenceMultiplier,
+            animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors
         )

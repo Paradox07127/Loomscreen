@@ -198,6 +198,10 @@ final class WPEParticleSystem {
         /// operator pumps a deterministic noise field every frame.
         var turbulenceSpeed: Float
         var turbulencePhase: Float
+        /// Sprite-sheet frame this particle locks onto when the system is
+        /// in `.randomFrame` mode (chosen once at spawn). Ignored by
+        /// `.sequence` particles, which animate off `age/lifetime`.
+        var staticFrame: Float
     }
 
     init?(
@@ -224,7 +228,8 @@ final class WPEParticleSystem {
             lifetime: 0,
             age: .greatestFiniteMagnitude,
             turbulenceSpeed: 0,
-            turbulencePhase: 0
+            turbulencePhase: 0,
+            staticFrame: 0
         ), count: cap)
         guard let buffer = device.makeBuffer(
             length: cap * MemoryLayout<WPEParticleInstance>.stride,
@@ -352,29 +357,26 @@ final class WPEParticleSystem {
     func tick(now: Double) {
         advance(now: now)
         let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
-        // Sprite-sheet animation is **lifetime-relative**: a particle
-        // sees `sequenceMultiplier` full atlas cycles over the course
-        // of its life, regardless of `duration`. Almamu's wall-clock
-        // reading (90 fps for leaves7) produces visible flicker even
-        // with cross-fade; the lifetime-relative reading gives the
-        // smooth ~10 fps "leaves slowly rotating as they fall" pace
-        // workshop authors clearly tuned for. `frameCount = 1`
-        // collapses to a static sprite.
-        let frameCount: Float
-        let cyclesPerLifetime: Float
-        if let sheet = spriteSheet, sheet.frameCount > 1 {
-            frameCount = Float(sheet.frameCount)
-            // `sequenceMultiplier × 2` empirically lands between Almamu's
-            // wall-clock rate (visibly fast/flickery at default settings)
-            // and a pure lifetime-relative single-multiplier reading
-            // (too slow on leaves2). For leaves7 (sequenceMultiplier 3,
-            // lifetime ~9s, 30 frames): 6 cycles ≈ 20 fps — the natural
-            // "leaves slowly rotating as they fall" pace.
-            cyclesPerLifetime = max(0.0001, Float(definition.sequenceMultiplier) * 2)
-        } else {
-            frameCount = 1
-            cyclesPerLifetime = 0
-        }
+        // Sprite-sheet frame selection splits on `animationmode`:
+        //
+        //   • `.sequence` — animate the atlas **lifetime-relative**: a
+        //     particle sees `sequenceMultiplier` full cycles over its
+        //     life (wildfire: multiplier 1, 32 frames over ~2.5s ≈ 13 fps).
+        //     We deliberately ignore the `.tex-json` wall-clock `duration`
+        //     (Almamu's ~90 fps reading on leaves7 flickers); the lifetime
+        //     reading matches the pace workshop authors tune for. There is
+        //     NO ×2 fudge — that was a single-scene hack that doubled every
+        //     `sequence` particle's speed (see WPE wildfire too-fast bug).
+        //
+        //   • `.randomFrame` — each particle froze on one atlas cell at
+        //     spawn (`spawn(into:)`), so it never animates; we emit that
+        //     fixed `staticFrame` (debris shards, embers — a *different
+        //     static* piece per particle, the WPE shatter look).
+        //
+        // `frameCount = 1` (no sheet) collapses to a static sprite either way.
+        let frameCount: Float = Float(max(1, spriteSheet?.frameCount ?? 1))
+        let animatesSequence = definition.animationMode == .sequence && frameCount > 1
+        let cyclesPerLifetime = max(0.0001, Float(definition.sequenceMultiplier))
         let visualScaleSigns = sceneTransform.visualScaleSigns()
         var written = 0
         for index in 0..<capacity {
@@ -384,11 +386,14 @@ final class WPEParticleSystem {
             let alpha = particle.alphaBase * envelope
             let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
             let frameIndex: Float
-            if cyclesPerLifetime > 0 {
+            if animatesSequence {
                 let raw = lifetimeFraction * cyclesPerLifetime * frameCount
                 frameIndex = raw.truncatingRemainder(dividingBy: frameCount)
             } else {
-                frameIndex = 0
+                // `.randomFrame` (or single-frame sprite): the spawn-time
+                // locked cell, floored so the shader's cross-fade picks it
+                // cleanly with blend 0.
+                frameIndex = particle.staticFrame
             }
             pointer[written] = WPEParticleInstance(
                 positionAndSize: SIMD4<Float>(
@@ -561,6 +566,16 @@ final class WPEParticleSystem {
         let angularVec = uniformVector(definition.angularVelocityMin, definition.angularVelocityMax)
         let turbulenceSpeed = Float(uniform(definition.turbulenceSpeedMin, definition.turbulenceSpeedMax))
         let turbulencePhase = Float(uniform(definition.turbulencePhaseMin, definition.turbulencePhaseMax))
+        // `.randomFrame`: lock onto one atlas cell for life so each shard
+        // is a different *static* piece of the sheet (WPE shatter look).
+        // `.sequence` / single-frame sprites leave this at 0 — `tick`
+        // computes their animated frame from age instead.
+        let staticFrame: Float
+        if definition.animationMode == .randomFrame, let sheet = spriteSheet, sheet.frameCount > 1 {
+            staticFrame = Float(Int.random(in: 0..<sheet.frameCount, using: &rng))
+        } else {
+            staticFrame = 0
+        }
         particles[slot] = Particle(
             position: position,
             velocity: velocity,
@@ -576,7 +591,8 @@ final class WPEParticleSystem {
             lifetime: max(0.0001, lifetime),
             age: 0,
             turbulenceSpeed: turbulenceSpeed,
-            turbulencePhase: turbulencePhase
+            turbulencePhase: turbulencePhase,
+            staticFrame: staticFrame
         )
     }
 
