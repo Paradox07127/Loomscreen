@@ -73,8 +73,17 @@ struct WPEParticleSceneTransform {
     }
 
     /// Same rotation + scale chain, no translation — for velocity,
-    /// gravity, or other free vectors that already had their Y flipped
-    /// at spawn time.
+    /// gravity, and other free vectors. NO Y-flip is applied (nor needed):
+    /// WPE author space is Y-up and our render frame is Y-up, so authored
+    /// velocities are used as-is.
+    ///
+    /// Oracle-tested (saber 3526278753): flipping velocity Y makes the
+    /// leaves RISE (sim vy goes +78 instead of -74), whereas WPE's decoded
+    /// particle velocity (TEXCOORD1) and ours are both NEGATIVE = falling.
+    /// So the older "velocity already had its Y flipped at spawn" note was
+    /// wrong; the correct convention is no-flip, confirmed against ground
+    /// truth. See `turbulenceNoise` for the one remaining Y discrepancy
+    /// (which is a turbulence-model gap, not an axis-convention bug).
     func applyModelDirection(_ v: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(v.x * objectScale.x, v.y * objectScale.y, v.z * objectScale.z)
         let cosA = cos(-objectAngleZ)
@@ -620,6 +629,21 @@ final class WPEParticleSystem {
     /// in a full Perlin/simplex implementation. Each output component
     /// is bounded to roughly [-0.5, 0.5] so multiplying by `speed`
     /// caps the per-frame velocity contribution cleanly.
+    ///
+    /// KNOWN LIMITATION (oracle-measured, saber 3526278753 leaves):
+    /// this field is ISOTROPIC and zero-mean, so it cannot reproduce
+    /// WPE's `turbulentvelocityrandom` initializer, which empirically
+    /// drifts particles DOWNWARD. Decoding WPE's particle vertex buffer
+    /// (TEXCOORD1 = velocity) vs an offline replay of this sim: the X
+    /// velocity matches (~-130), but WPE's vy is ~1.85× ours — |vy/vx|
+    /// 1.83 (WPE) vs 0.84 (ours), equivalent to a steady ~30 px/s² down
+    /// acceleration. This is NOT gravity (the preset's `movement` operator
+    /// sets gravity="0 0 0", confirmed in scene.pkg) and NOT a Y-axis flip
+    /// (flipping makes leaves rise — see `applyModelDirection`); it is this
+    /// turbulence model being too simple. Closing it needs a downward-
+    /// biased / anisotropic noise (or an empirical settle force) tuned to
+    /// |vy/vx| → 1.83, then cross-scene validation before enabling globally
+    /// so it can't over-accelerate other particle presets.
     private func turbulenceNoise(x: Float, y: Float, t: Float) -> SIMD2<Float> {
         let nx = sin(x * 0.10 + t * 0.5) + cos(y * 0.13 + t * 0.7)
         let ny = sin(x * 0.17 + t * 0.3) + cos(y * 0.09 + t * 0.4)
