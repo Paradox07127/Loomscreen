@@ -703,6 +703,60 @@
         },
         "output": {
           "$ref": "#/$defs/passOutput"
+        },
+        "puppet": {
+          "$ref": "#/$defs/puppetPass"
+        }
+      },
+      "additionalProperties": true
+    },
+    "puppetPass": {
+      "type": "object",
+      "required": [
+        "stage",
+        "modelPath",
+        "skinningEnabled",
+        "paletteCount",
+        "paletteSha256",
+        "meshCenter",
+        "localSize",
+        "objectCenterAndSize"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "material-mesh",
+            "scene-composite-mesh"
+          ]
+        },
+        "modelPath": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "skinningEnabled": {
+          "type": "boolean"
+        },
+        "paletteCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paletteSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "meshCenter": {
+          "$ref": "#/$defs/vec2"
+        },
+        "localSize": {
+          "$ref": "#/$defs/vec2"
+        },
+        "objectCenterAndSize": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/vec4"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": true

@@ -6,6 +6,19 @@ import simd
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
+    /// Opt-in (default OFF) crop-frame placement fix for autosize/cropoffset puppet
+    /// rigs whose MDLV vertices live in the uncropped source frame (e.g. 3719111841's
+    /// face group). When OFF, placement is byte-identical to the legacy path.
+    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetStaticPlacementFix -bool YES`.
+    private static var puppetStaticPlacementFixEnabled: Bool {
+        let key = "WPEPuppetStaticPlacementFix"
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
+           suite.object(forKey: key) != nil {
+            return suite.bool(forKey: key)
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
     init(
         cacheRootURL: URL,
         dependencyMounts: [WPEAssetMount] = [],
@@ -318,7 +331,11 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let puppetPlacement = model.puppetPlacement(for: object, sceneSize: sceneSize)
+        let puppetPlacement = model.puppetPlacement(
+            for: object,
+            sceneSize: sceneSize,
+            staticPlacementFixEnabled: Self.puppetStaticPlacementFixEnabled
+        )
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -499,7 +516,9 @@ struct WPERenderGraphBuilder: Sendable {
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
             puppetPath: puppetPath,
-            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:))
+            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:)),
+            autosize: parseBool(dict["autosize"]) ?? false,
+            cropOffset: parseVector2(dict["cropoffset"])
         )
     }
 
@@ -738,6 +757,24 @@ struct WPERenderGraphBuilder: Sendable {
         WPEValueParser.bool(raw)
     }
 
+    /// Parses a 2-component vector from a model-JSON value: a `"x y"` / `"x,y"`
+    /// string, a `[x, y]` array, or a `{ "value": ... }` envelope wrapping either.
+    private func parseVector2(_ raw: Any?) -> SIMD2<Double>? {
+        let resolved = (raw as? [String: Any])?["value"] ?? raw
+        if let string = resolved as? String {
+            let parts = string
+                .split(whereSeparator: { " \t\n,".contains($0) })
+                .compactMap { Double($0) }
+            guard parts.count >= 2 else { return nil }
+            return SIMD2<Double>(parts[0], parts[1])
+        }
+        if let array = resolved as? [Any], array.count >= 2,
+           let x = parseDouble(array[0]), let y = parseDouble(array[1]) {
+            return SIMD2<Double>(x, y)
+        }
+        return nil
+    }
+
     private func parseInt(_ raw: Any?) -> Int? {
         WPEValueParser.int(raw, boolAsNumber: true)
     }
@@ -795,15 +832,21 @@ private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
     let puppetBounds: WPEPuppetBounds?
+    let autosize: Bool
+    let cropOffset: SIMD2<Double>?
 
     init(
         materialPath: String?,
         puppetPath: String?,
-        puppetBounds: WPEPuppetBounds? = nil
+        puppetBounds: WPEPuppetBounds? = nil,
+        autosize: Bool = false,
+        cropOffset: SIMD2<Double>? = nil
     ) {
         self.materialPath = materialPath
         self.puppetPath = puppetPath
         self.puppetBounds = puppetBounds
+        self.autosize = autosize
+        self.cropOffset = cropOffset
     }
 
     /// Re-place a puppet whose raw MDLV mesh bbox is cropped by the declared
@@ -812,7 +855,11 @@ private struct WPEModelDescriptor {
     /// recomputes the origin so the mesh-bbox center keeps its old on-screen
     /// position. Returns nil (no-op) for non-puppets and puppets that already
     /// fit — protecting every working puppet/image layer.
-    func puppetPlacement(for object: WPESceneImageObject, sceneSize: CGSize) -> WPEPuppetPlacement? {
+    func puppetPlacement(
+        for object: WPESceneImageObject,
+        sceneSize: CGSize,
+        staticPlacementFixEnabled: Bool = false
+    ) -> WPEPuppetPlacement? {
         guard puppetPath != nil,
               let puppetBounds,
               let objectSize = object.size else {
@@ -822,6 +869,16 @@ private struct WPEModelDescriptor {
         let objectWidth = Double(objectSize.width)
         let objectHeight = Double(objectSize.height)
         guard objectWidth > 0, objectHeight > 0 else { return nil }
+
+        if staticPlacementFixEnabled,
+           let cropPlacement = cropOffsetPlacement(
+               for: object,
+               objectSize: objectSize,
+               objectWidth: objectWidth,
+               objectHeight: objectHeight
+           ) {
+            return cropPlacement
+        }
 
         let localMinX = objectWidth * 0.5 + puppetBounds.min.x
         let localMaxX = objectWidth * 0.5 + puppetBounds.max.x
@@ -881,6 +938,39 @@ private struct WPEModelDescriptor {
         )
     }
 
+    /// Crop-frame placement for an autosize/cropoffset puppet: keeps the authored
+    /// object-sized composite and shifts the mesh center by the crop offset, mapping
+    /// uncropped-source-frame MDLV vertices back into the object frame (no resize, so
+    /// no per-part stretch). Self-guards: only adopted when it lands more mesh inside
+    /// the object rectangle than the legacy centered mesh, leaving already-object-local
+    /// puppets untouched. Returns nil when not applicable.
+    private func cropOffsetPlacement(
+        for object: WPESceneImageObject,
+        objectSize: CGSize,
+        objectWidth: Double,
+        objectHeight: Double
+    ) -> WPEPuppetPlacement? {
+        guard autosize, let cropOffset, let puppetBounds else { return nil }
+
+        let cropMeshCenter = SIMD2<Double>(-cropOffset.x, cropOffset.y - objectHeight)
+
+        let defaultOverlap = WPEPuppetLocalBox(
+            bounds: puppetBounds, meshCenter: .zero,
+            objectWidth: objectWidth, objectHeight: objectHeight
+        ).overlapArea(objectWidth: objectWidth, objectHeight: objectHeight)
+        let cropOverlap = WPEPuppetLocalBox(
+            bounds: puppetBounds, meshCenter: cropMeshCenter,
+            objectWidth: objectWidth, objectHeight: objectHeight
+        ).overlapArea(objectWidth: objectWidth, objectHeight: objectHeight)
+        guard cropOverlap > defaultOverlap + 1 else { return nil }
+
+        return WPEPuppetPlacement(
+            origin: object.origin,
+            size: objectSize,
+            meshCenter: cropMeshCenter
+        )
+    }
+
     private func finiteMagnitude(_ value: Double, fallback: Double) -> Double {
         let magnitude = abs(value)
         return magnitude.isFinite && magnitude > 0 ? magnitude : fallback
@@ -918,6 +1008,29 @@ private struct WPEPuppetPlacement {
     let origin: SIMD3<Double>
     let size: CGSize
     let meshCenter: SIMD2<Double>
+}
+
+/// The puppet mesh bbox projected into the authored object pixel frame for a given
+/// mesh center — used by `cropOffsetPlacement` to compare how much of the mesh lands
+/// inside the object rectangle under the legacy vs crop-offset interpretation.
+private struct WPEPuppetLocalBox {
+    let minX: Double
+    let minY: Double
+    let maxX: Double
+    let maxY: Double
+
+    init(bounds: WPEPuppetBounds, meshCenter: SIMD2<Double>, objectWidth: Double, objectHeight: Double) {
+        minX = objectWidth * 0.5 + bounds.min.x - meshCenter.x
+        maxX = objectWidth * 0.5 + bounds.max.x - meshCenter.x
+        minY = objectHeight * 0.5 - bounds.max.y + meshCenter.y
+        maxY = objectHeight * 0.5 - bounds.min.y + meshCenter.y
+    }
+
+    func overlapArea(objectWidth: Double, objectHeight: Double) -> Double {
+        let width = max(min(maxX, objectWidth) - max(minX, 0), 0)
+        let height = max(min(maxY, objectHeight) - max(minY, 0), 0)
+        return width * height
+    }
 }
 
 private struct WPEPuppetBounds {

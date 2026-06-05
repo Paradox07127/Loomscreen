@@ -2,6 +2,7 @@
 import CryptoKit
 import Foundation
 import Metal
+import simd
 
 /// DEBUG-only accumulator that mirrors the Windows RenderDoc oracle into the
 /// shared `wpe.trace.v1` schema from the Mac Metal path.
@@ -27,6 +28,12 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         let reference: WPETextureReference?
         let texture: MTLTexture?
         let fallbackToPrimary: Bool
+    }
+
+    struct PuppetUniformInput {
+        let name: String
+        let type: String
+        let value: SIMD4<Float>
     }
 
     private let lock = NSLock()
@@ -163,6 +170,188 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
             "constantBuffers": [constantBuffer],
             "state": state,
             "output": output
+        ]
+        passes.append(passRecord)
+    }
+
+    /// Record one built-in puppet mesh draw as a pass so Mac traces can be aligned
+    /// against Windows RenderDoc captures bone-by-bone. These draws bypass the custom
+    /// shader recorder and are otherwise invisible to the canonical pass stream.
+    func recordPuppetPass(
+        pass: WPEPreparedRenderPass,
+        stage: String,
+        layer: WPERenderLayer,
+        modelPath: String?,
+        meshes: [WPEPuppetMesh],
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textureBindings: [TextureBindingInput],
+        vertexShaderName: String,
+        fragmentShaderName: String,
+        fragmentUniforms: [PuppetUniformInput],
+        vertexUniforms: [PuppetUniformInput],
+        bonePalette: [simd_float4x4],
+        skinningEnabled: Bool,
+        localSize: SIMD2<Float>,
+        meshCenter: SIMD2<Float>,
+        objectCenterAndSize: SIMD4<Float>?
+    ) {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard scene != nil, !frameComplete else { return }
+
+        let ordinal = passes.count
+        let target = destination.id
+        let targetTexture = destination.texture
+        let targetResource = renderTargetResourceID(target)
+        let vertexShaderID = shaderID(stage: "vs", stableInput: vertexShaderName)
+        let fragmentShaderID = shaderID(stage: "fs", stableInput: fragmentShaderName)
+        let fragmentUniformBytes = packedUniformBytes(fragmentUniforms.map(\.value))
+        let vertexUniformBytes = packedUniformBytes(vertexUniforms.map(\.value))
+        let paletteBytes = puppetPaletteBytes(bonePalette)
+        let paletteHash = bonePalette.isEmpty ? nil : sha256Hex(paletteBytes)
+        let fragmentBufferResource = "buf-mac-puppet-fragment-\(ordinal)"
+        let vertexBufferResource = "buf-mac-puppet-vertex-\(ordinal)"
+        let paletteBufferResource = "buf-mac-puppet-palette-\(ordinal)"
+
+        resources.renderTargets[targetResource] = renderTargetResource(target: target, texture: targetTexture, ordinal: ordinal)
+        resources.buffers[fragmentBufferResource] = [
+            "label": "Mac puppet fragment uniforms pass \(ordinal)",
+            "byteLength": fragmentUniformBytes.count,
+            "sha256": sha256Hex(fragmentUniformBytes)
+        ]
+        resources.buffers[vertexBufferResource] = [
+            "label": "Mac puppet vertex uniforms pass \(ordinal)",
+            "byteLength": vertexUniformBytes.count,
+            "sha256": sha256Hex(vertexUniformBytes)
+        ]
+        resources.buffers[paletteBufferResource] = [
+            "label": "Mac puppet bone palette pass \(ordinal)",
+            "byteLength": paletteBytes.count,
+            "sha256": jsonOrNull(paletteHash)
+        ]
+        resources.shaders[vertexShaderID] = shaderResource(
+            stage: "vertex",
+            entryPoint: vertexShaderName,
+            source: vertexShaderName,
+            path: nil,
+            layout: [],
+            samplers: []
+        )
+        resources.shaders[fragmentShaderID] = shaderResource(
+            stage: "fragment",
+            entryPoint: fragmentShaderName,
+            source: fragmentShaderName,
+            path: nil,
+            layout: [],
+            samplers: textureBindings.compactMap(\.name)
+        )
+
+        var textures: [[String: Any]] = []
+        for binding in textureBindings.sorted(by: { $0.slot < $1.slot }) {
+            let texID = textureResourceID(texture: binding.texture, fallbackKey: "puppet-\(ordinal)-\(binding.slot)")
+            resources.textures[texID] = textureResource(
+                id: texID, name: binding.name, reference: binding.reference, texture: binding.texture
+            )
+            textures.append([
+                "stage": "fragment",
+                "slot": binding.slot,
+                "name": jsonOrNull(binding.name),
+                "resource": texID,
+                "reference": jsonOrNull(Self.describe(reference: binding.reference)),
+                "fallback": binding.fallbackToPrimary,
+                "width": jsonOrNull(binding.texture?.width),
+                "height": jsonOrNull(binding.texture?.height),
+                "format": jsonOrNull(binding.texture.map { pixelFormatName($0.pixelFormat) })
+            ])
+        }
+
+        let draw: [String: Any] = [
+            "topology": "indexed-triangle-list",
+            "vertexCount": puppetVertexCount(meshes),
+            "indexCount": puppetIndexCount(meshes),
+            "instanceCount": 1,
+            "viewport": [0, 0, Double(targetTexture.width), Double(targetTexture.height), 0, 1] as [Double],
+            "scissor": [Double]()
+        ]
+        let colorTargets: [[String: Any]] = [[
+            "slot": 0,
+            "resource": targetResource,
+            "load": NSNull(),
+            "store": "store",
+            "target": describe(target: target)
+        ]]
+        let constantBuffers: [[String: Any]] = [
+            [
+                "name": "puppet_fragment_uniforms",
+                "stage": "fragment",
+                "slot": 0,
+                "resource": fragmentBufferResource,
+                "rawBytesSha256": sha256Hex(fragmentUniformBytes),
+                "variables": puppetUniformVariables(fragmentUniforms)
+            ],
+            [
+                "name": "puppet_vertex_uniforms",
+                "stage": "vertex",
+                "slot": 1,
+                "resource": vertexBufferResource,
+                "rawBytesSha256": sha256Hex(vertexUniformBytes),
+                "variables": puppetUniformVariables(vertexUniforms)
+            ],
+            [
+                "name": "puppet_bone_palette",
+                "stage": "vertex",
+                "slot": 2,
+                "resource": paletteBufferResource,
+                "rawBytesSha256": jsonOrNull(paletteHash),
+                "variables": [[
+                    "name": "bonePalette",
+                    "type": "mat4[]",
+                    "arrayLength": bonePalette.count,
+                    "rawBytesSha256": jsonOrNull(paletteHash)
+                ]]
+            ]
+        ]
+        let state: [String: Any] = [
+            "blend": ["mode": "\(pass.pass.blending)"] as [String: Any],
+            "depth": NSNull(),
+            "raster": NSNull(),
+            "samplers": textureBindings.sorted(by: { $0.slot < $1.slot }).map {
+                ["stage": "fragment", "slot": $0.slot, "name": jsonOrNull($0.name)] as [String: Any]
+            }
+        ]
+        let output: [String: Any] = [
+            "resource": targetResource,
+            "png": NSNull(),
+            "sha256": NSNull(),
+            "visualStats": ["note": "Puppet built-in mesh pass; output hash filled from scenePassDumps when captured."]
+        ]
+        let puppet: [String: Any] = [
+            "stage": stage,
+            "modelPath": jsonOrNull(modelPath),
+            "skinningEnabled": skinningEnabled,
+            "paletteCount": bonePalette.count,
+            "paletteSha256": jsonOrNull(paletteHash),
+            "meshCenter": [Double(meshCenter.x), Double(meshCenter.y)],
+            "localSize": [Double(localSize.x), Double(localSize.y)],
+            "objectCenterAndSize": jsonOrNull(objectCenterAndSize.map {
+                [Double($0.x), Double($0.y), Double($0.z), Double($0.w)]
+            })
+        ]
+        let passRecord: [String: Any] = [
+            "ordinal": ordinal,
+            "eventId": NSNull(),
+            "layerId": layer.objectID,
+            "passId": pass.pass.id,
+            "shaderName": pass.pass.shader,
+            "draw": draw,
+            "targets": ["color": colorTargets, "depth": NSNull()] as [String: Any],
+            "textures": textures,
+            "shaders": ["vs": vertexShaderID, "fs": fragmentShaderID],
+            "constantBuffers": constantBuffers,
+            "state": state,
+            "output": output,
+            "puppet": puppet
         ]
         passes.append(passRecord)
     }
@@ -483,6 +672,36 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         }
     }
 
+    private func puppetUniformVariables(_ inputs: [PuppetUniformInput]) -> [[String: Any]] {
+        inputs.enumerated().map { index, input in
+            let values = [Double(input.value.x), Double(input.value.y), Double(input.value.z), Double(input.value.w)]
+            return [
+                "name": input.name,
+                "type": input.type,
+                "slot": index,
+                "slotCount": 1,
+                "rawSlotFloats": values,
+                "value": values
+            ]
+        }
+    }
+
+    private func puppetVertexCount(_ meshes: [WPEPuppetMesh]) -> Int {
+        meshes.reduce(0) { $0 + $1.vertices.count }
+    }
+
+    private func puppetIndexCount(_ meshes: [WPEPuppetMesh]) -> Int {
+        meshes.reduce(0) { total, mesh in
+            guard !mesh.parts.isEmpty else { return total + mesh.indices.count }
+            let partCount = mesh.parts.reduce(0) { partial, part in
+                let start = max(part.start, 0)
+                let count = min(part.count, max(mesh.indices.count - start, 0))
+                return partial + max(count, 0)
+            }
+            return total + partCount
+        }
+    }
+
     private func textureResource(id: String, name: String?, reference: WPETextureReference?, texture: MTLTexture?) -> [String: Any] {
         [
             "label": name ?? Self.describe(reference: reference) ?? id,
@@ -577,6 +796,12 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
                 withUnsafeBytes(of: value) { data.append(contentsOf: $0) }
             }
         }
+        return data
+    }
+
+    private func puppetPaletteBytes(_ palette: [simd_float4x4]) -> Data {
+        var data = Data(capacity: palette.count * MemoryLayout<simd_float4x4>.stride)
+        palette.withUnsafeBytes { data.append(contentsOf: $0) }
         return data
     }
 

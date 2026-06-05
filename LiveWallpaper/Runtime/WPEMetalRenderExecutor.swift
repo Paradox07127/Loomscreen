@@ -1576,6 +1576,12 @@ final class WPEMetalRenderExecutor {
         encoder.setFragmentTexture(primary, index: 0)
 
         let hasMask: Bool
+        #if !LITE_BUILD && DEBUG
+        let maskBindingReference: WPETextureReference?
+        let maskBindingTexture: MTLTexture?
+        let maskBindingName: String?
+        let maskFallbackToPrimary: Bool
+        #endif
         if normalizedShader == "genericimage4" {
             let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1]
             if let maskRef {
@@ -1587,12 +1593,33 @@ final class WPEMetalRenderExecutor {
                 )
                 encoder.setFragmentTexture(mask, index: 1)
                 hasMask = true
+                #if !LITE_BUILD && DEBUG
+                maskBindingReference = maskRef
+                maskBindingTexture = mask
+                maskBindingName = "g_Texture1"
+                maskFallbackToPrimary = false
+                #endif
             } else {
                 encoder.setFragmentTexture(primary, index: 1)
                 hasMask = false
+                #if !LITE_BUILD && DEBUG
+                maskBindingReference = nil
+                maskBindingTexture = primary
+                // hasMask == false: texture1 is bound only to satisfy the Metal
+                // signature; the fragment never samples it, so leave it unnamed so
+                // the oracle diff does not flag it as an asset divergence.
+                maskBindingName = nil
+                maskFallbackToPrimary = true
+                #endif
             }
         } else {
             hasMask = false
+            #if !LITE_BUILD && DEBUG
+            maskBindingReference = nil
+            maskBindingTexture = nil
+            maskBindingName = nil
+            maskFallbackToPrimary = false
+            #endif
         }
 
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
@@ -1622,6 +1649,59 @@ final class WPEMetalRenderExecutor {
             length: MemoryLayout<WPEPuppetMeshUniforms>.stride,
             index: 1
         )
+
+        #if !LITE_BUILD && DEBUG
+        var canonicalTextureBindings = [
+            WPECanonicalTraceRecorder.TextureBindingInput(
+                slot: 0,
+                name: "g_Texture0",
+                reference: primaryRef,
+                texture: primary,
+                fallbackToPrimary: false
+            )
+        ]
+        if let maskBindingTexture {
+            canonicalTextureBindings.append(WPECanonicalTraceRecorder.TextureBindingInput(
+                slot: 1,
+                name: maskBindingName,
+                reference: maskBindingReference,
+                texture: maskBindingTexture,
+                fallbackToPrimary: maskFallbackToPrimary
+            ))
+        }
+        WPECanonicalTraceRecorder.shared.recordPuppetPass(
+            pass: pass,
+            stage: "material-mesh",
+            layer: layer,
+            modelPath: layer.puppetPath,
+            meshes: meshes,
+            destination: destination,
+            textureBindings: canonicalTextureBindings,
+            vertexShaderName: "wpe_puppet_mesh_vertex",
+            fragmentShaderName: fragmentName,
+            fragmentUniforms: [
+                WPECanonicalTraceRecorder.PuppetUniformInput(name: "color", type: "vec4", value: uniforms.color),
+                WPECanonicalTraceRecorder.PuppetUniformInput(name: "alphaMaskUV", type: "vec4", value: uniforms.alphaMaskUV)
+            ],
+            vertexUniforms: [
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "localSizeAndMode",
+                    type: "vec4",
+                    value: meshUniforms.localSizeAndMode
+                ),
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "meshCenterAndPadding",
+                    type: "vec4",
+                    value: meshUniforms.meshCenterAndPadding
+                )
+            ],
+            bonePalette: paletteState.bonePalette,
+            skinningEnabled: paletteState.skinningEnabled != 0,
+            localSize: SIMD2<Float>(meshUniforms.localSizeAndMode.x, meshUniforms.localSizeAndMode.y),
+            meshCenter: SIMD2<Float>(meshUniforms.meshCenterAndPadding.x, meshUniforms.meshCenterAndPadding.y),
+            objectCenterAndSize: nil
+        )
+        #endif
 
         try drawPuppetMeshes(meshes, encoder: encoder)
         return true
@@ -1711,6 +1791,69 @@ final class WPEMetalRenderExecutor {
             length: MemoryLayout<WPEPuppetSceneCompositeUniforms>.stride,
             index: 1
         )
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.recordPuppetPass(
+            pass: pass,
+            stage: "scene-composite-mesh",
+            layer: layer,
+            modelPath: layer.puppetPath,
+            meshes: meshes,
+            destination: destination,
+            textureBindings: [
+                WPECanonicalTraceRecorder.TextureBindingInput(
+                    slot: 0,
+                    name: "g_Texture0",
+                    reference: sourceReference,
+                    texture: sourceTexture,
+                    fallbackToPrimary: false
+                )
+            ],
+            vertexShaderName: "wpe_puppet_scene_composite_vertex",
+            fragmentShaderName: "wpe_copy_fragment",
+            fragmentUniforms: [
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "uvOffsetAndPadding",
+                    type: "vec4",
+                    value: SIMD4<Float>(
+                        copyUniforms.uvOffset.x,
+                        copyUniforms.uvOffset.y,
+                        copyUniforms.padding.x,
+                        copyUniforms.padding.y
+                    )
+                )
+            ],
+            vertexUniforms: [
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "localSizeAndMode",
+                    type: "vec4",
+                    value: compositeUniforms.localSizeAndMode
+                ),
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "meshCenterAndScaleSign",
+                    type: "vec4",
+                    value: compositeUniforms.meshCenterAndScaleSign
+                ),
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "objectCenterAndSize",
+                    type: "vec4",
+                    value: compositeUniforms.objectCenterAndSize
+                ),
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "sceneSizeAndRotation",
+                    type: "vec4",
+                    value: compositeUniforms.sceneSizeAndRotation
+                )
+            ],
+            bonePalette: paletteState.bonePalette,
+            skinningEnabled: paletteState.skinningEnabled != 0,
+            localSize: localSize,
+            meshCenter: SIMD2<Float>(
+                compositeUniforms.meshCenterAndScaleSign.x,
+                compositeUniforms.meshCenterAndScaleSign.y
+            ),
+            objectCenterAndSize: compositeUniforms.objectCenterAndSize
+        )
+        #endif
         try drawPuppetMeshes(meshes, encoder: encoder)
         return true
     }

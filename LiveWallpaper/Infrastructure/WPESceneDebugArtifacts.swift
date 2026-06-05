@@ -58,6 +58,19 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private var bindingDiagnostics: [String] = []
     private let maxBindingDiagnostics = 512
 
+    #if DEBUG
+    private let testingEnabledOverrideLock = NSLock()
+    private var testingEnabledOverride: Bool?
+
+    /// Test-only: force `isEnabled` on/off independent of UserDefaults, so trace/diagnostics
+    /// tests don't depend on the developer's `WPESceneDebugArtifactsEnabled` setting. Pass nil to clear.
+    func setEnabledForTesting(_ enabled: Bool?) {
+        testingEnabledOverrideLock.lock()
+        testingEnabledOverride = enabled
+        testingEnabledOverrideLock.unlock()
+    }
+    #endif
+
     /// Caps on the scene-debug directory so DEBUG builds (where dumps default on)
     /// don't accumulate unbounded PNG/MSL artifacts. The oldest session folders
     /// are pruned first when either bound is exceeded; the newest is always kept.
@@ -73,6 +86,10 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     /// explicitly when it wants per-scene dumps.
     var isEnabled: Bool {
         #if DEBUG
+        testingEnabledOverrideLock.lock()
+        let testingOverride = testingEnabledOverride
+        testingEnabledOverrideLock.unlock()
+        if let testingOverride { return testingOverride }
         return UserDefaults.standard.object(forKey: Self.defaultsKey) as? Bool ?? true
         #else
         return UserDefaults.standard.bool(forKey: Self.defaultsKey)
