@@ -479,19 +479,8 @@ final class WPEParticleSystem {
                     y: pos.y * turbulenceScale,
                     t: t
                 )
-                let turbSpeed = particles[index].turbulenceSpeed
-                step.x += noise.x * turbSpeed * turbulenceMask.x
-                // WPE's `turbulentvelocityrandom` is NOT zero-mean: it drifts
-                // particles along their vertical travel (our sin/cos noise IS
-                // zero-mean, so leaves fell ~1.85× too slow and covered ~half
-                // the area). Add an explicit settle bias ∝ turbulenceSpeed,
-                // oracle-calibrated to 0.76 (see `turbulenceSettleBias`). The
-                // sign follows the particle's own vy so falling emitters
-                // (leaves/snow) settle DOWN while rising ones (embers/smoke)
-                // are sped along their rise, never reversed.
-                let settleSign: Float = particles[index].velocity.y < 0 ? 1 : -1
-                step.y += (noise.y - settleSign * Self.turbulenceSettleBias)
-                    * turbSpeed * turbulenceMask.y
+                step.x += noise.x * particles[index].turbulenceSpeed * turbulenceMask.x
+                step.y += noise.y * particles[index].turbulenceSpeed * turbulenceMask.y
             }
             particles[index].position += step * dt
             // Angular motion with force + drag.
@@ -635,14 +624,6 @@ final class WPEParticleSystem {
         )
     }
 
-    /// Oracle-calibrated downward settle bias for `turbulentvelocityrandom`
-    /// (saber 3526278753). WPE's turbulent velocity is non-zero-mean and
-    /// drifts leaves DOWN ~0.76×turbulenceSpeed; applying it in `tick`
-    /// (sign-aware) closes |vy/vx| 0.84→1.83 and the matching fall-coverage
-    /// gap (pos.y span 1120→~1987). Retune against
-    /// tools/wpe-oracle/particle_velocity_model.py (target |vy/vx|→1.83).
-    private static let turbulenceSettleBias: Float = 0.76
-
     /// Cheap deterministic 2D noise field built from sine products —
     /// sufficient for "leaves drift on the breeze" feel without pulling
     /// in a full Perlin/simplex implementation. Each output component
@@ -659,12 +640,10 @@ final class WPEParticleSystem {
     /// acceleration. This is NOT gravity (the preset's `movement` operator
     /// sets gravity="0 0 0", confirmed in scene.pkg) and NOT a Y-axis flip
     /// (flipping makes leaves rise — see `applyModelDirection`); it is this
-    /// turbulence model being too simple. ADDRESSED by the sign-aware
-    /// `turbulenceSettleBias` drift in `tick` (calibrated to |vy/vx|→1.83);
-    /// this field itself stays isotropic/zero-mean and just supplies the
-    /// wobble. The bias is gated on `velocity.y` sign so it only speeds a
-    /// particle along its own vertical travel — re-validate cross-scene if
-    /// the coefficient is retuned (esp. rising emitters: embers/smoke/dust).
+    /// turbulence model being too simple. Closing it needs a downward-
+    /// biased / anisotropic noise (or an empirical settle force) tuned to
+    /// |vy/vx| → 1.83, then cross-scene validation before enabling globally
+    /// so it can't over-accelerate other particle presets.
     private func turbulenceNoise(x: Float, y: Float, t: Float) -> SIMD2<Float> {
         let nx = sin(x * 0.10 + t * 0.5) + cos(y * 0.13 + t * 0.7)
         let ny = sin(x * 0.17 + t * 0.3) + cos(y * 0.09 + t * 0.4)
