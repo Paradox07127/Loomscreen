@@ -1430,6 +1430,24 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         system.prewarm(simulatedSeconds: prewarmSeconds)
         particleSystems.append(system)
         particleTextures[ObjectIdentifier(system)] = resolved
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            // Dump the parsed motion-driving params so an emitter-placement /
+            // fall-speed divergence vs WPE can be traced to either our PARSING
+            // (these values wrong) or our SIMULATION (values right, motion wrong).
+            let idx = particleSystems.count - 1
+            let d = definition
+            var s = "particle[\(idx)] name=\(object.name)\n"
+            s += "material=\(d.materialRelativePath ?? "-") blend=\(blendMode.rawValue) animationMode=\(d.animationMode)\n"
+            s += "maxCount=\(d.maxCount) rate=\(d.rate) startDelay=\(d.startDelay)\n"
+            s += "lifetime=[\(d.lifetimeMin),\(d.lifetimeMax)] size=[\(d.sizeMin),\(d.sizeMax)]\n"
+            s += "originOffset=\(d.originOffset) dispersal=[\(d.dispersalMin),\(d.dispersalMax)] directionMask=\(d.directionMask)\n"
+            s += "velocityMin=\(d.velocityMin) velocityMax=\(d.velocityMax)\n"
+            s += "gravity=\(d.gravity) drag=\(d.drag)\n"
+            s += "rotation=[\(d.rotationMin),\(d.rotationMax)] angularVel=[\(d.angularVelocityMin),\(d.angularVelocityMax)] angularForceZ=\(d.angularForceZ)\n"
+            s += "turbulence: speed=[\(d.turbulenceSpeedMin),\(d.turbulenceSpeedMax)] scale=\(d.turbulenceScale) mask=\(d.turbulenceMask)\n"
+            s += "sceneTransform: renderOrigin=\(sceneTransform.renderOrigin) objectScale=\(sceneTransform.objectScale) objectAngleZ=\(sceneTransform.objectAngleZ)\n"
+            WPESceneDebugArtifacts.shared.recordNote(name: "particle-def-\(idx).txt", contents: s)
+        }
         let textureLabel = resolved.label ?? "<unlabeled>"
         let sheetDescription: String
         if let sheet = spriteSheet {

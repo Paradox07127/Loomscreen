@@ -29,6 +29,8 @@ DEFAULT_WPE_VERSION = "2.8.26"
 D3D11_MAP_WRITE_DISCARD = 4
 D3D11_MAP_WRITE_NO_OVERWRITE = 5
 D3D_SVF_USED = 0x2
+D3D11_APPEND_ALIGNED_ELEMENT = 0xFFFFFFFF
+MAX_DECODED_VERTICES = 256
 
 RESOURCE_BIND_TYPES = {
     0: "CBUFFER",
@@ -117,6 +119,16 @@ COMPONENT_TYPES = {
 }
 
 SIGNATURE_CHUNKS = {"ISGN", "OSGN", "ISG1", "OSG1", "ISG5", "OSG5", "PCSG"}
+
+DXGI_FORMAT_BYTE_SIZES = {
+    "DXGI_FORMAT_R32G32B32A32_FLOAT": 16,
+    "DXGI_FORMAT_R32G32B32_FLOAT": 12,
+    "DXGI_FORMAT_R32G32_FLOAT": 8,
+    "DXGI_FORMAT_R32_FLOAT": 4,
+    "DXGI_FORMAT_R8G8B8A8_UNORM": 4,
+    "DXGI_FORMAT_R16G16B16A16_FLOAT": 8,
+    "DXGI_FORMAT_R16G16_FLOAT": 4,
+}
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -222,6 +234,19 @@ def array_resource_ids(elem: ET.Element, name: str) -> list[str | None]:
     for child in list(arr):
         value = text(child)
         out.append(None if value in ("", "0") else value)
+    return out
+
+
+def array_uints(elem: ET.Element, name: str) -> list[int]:
+    arr = direct(elem, name, "array")
+    if arr is None:
+        return []
+    out: list[int] = []
+    for child in list(arr):
+        try:
+            out.append(int(text(child), 0))
+        except ValueError:
+            out.append(0)
     return out
 
 
@@ -545,6 +570,8 @@ class TraceState:
     topology: str | None = None
     input_layout: str | None = None
     vertex_buffers: dict[int, str] = field(default_factory=dict)
+    vertex_strides: dict[int, int] = field(default_factory=dict)
+    vertex_offsets: dict[int, int] = field(default_factory=dict)
     index_buffer: str | None = None
     render_targets: list[str | None] = field(default_factory=list)
     depth_target: str | None = None
@@ -584,6 +611,7 @@ class CaptureParser:
         self.samplers: dict[str, dict[str, Any]] = {}
         self.blend_states: dict[str, dict[str, Any]] = {}
         self.shaders_by_resource: dict[str, ShaderRecord] = {}
+        self.input_layouts: dict[str, list[dict[str, Any]]] = {}
         self.shader_interfaces: dict[str, ShaderRecord] = {}
 
         self.resources: dict[str, dict[str, Any]] = {
@@ -698,6 +726,8 @@ class CaptureParser:
             self.handle_create_shader(chunk, "vertex")
         elif name == "ID3D11Device::CreatePixelShader":
             self.handle_create_shader(chunk, "fragment")
+        elif name == "ID3D11Device::CreateInputLayout":
+            self.handle_create_input_layout(chunk)
         elif name == "ID3D11DeviceContext::VSSetShader":
             self.state.vertex_shader = rid_child(chunk, "pVertexShader") or rid_child(chunk, "pShader")
         elif name == "ID3D11DeviceContext::PSSetShader":
@@ -831,6 +861,40 @@ class CaptureParser:
             map_type_label=enum_value(direct(chunk, "MapType")),
         )
 
+    def handle_create_input_layout(self, chunk: ET.Element) -> None:
+        rid = rid_child(chunk, "pInputLayout")
+        if rid is None:
+            return
+        arr = direct(chunk, "pInputElementDescs", "array")
+        if arr is None:
+            self.input_layouts[rid] = []
+            return
+        slot_offsets: dict[int, int] = {}
+        elements: list[dict[str, Any]] = []
+        for elem in list(arr):
+            if elem.tag != "struct":
+                continue
+            semantic = text(find_named(elem, "SemanticName"))
+            fmt = enum_value(find_named(elem, "Format"))
+            slot = int_child(elem, "InputSlot")
+            raw_offset = int_child(elem, "AlignedByteOffset", D3D11_APPEND_ALIGNED_ELEMENT)
+            byte_offset = slot_offsets.get(slot, 0) if raw_offset == D3D11_APPEND_ALIGNED_ELEMENT else raw_offset
+            byte_size = dxgi_format_byte_size(fmt)
+            entry = {
+                "semanticName": semantic,
+                "semanticIndex": int_child(elem, "SemanticIndex"),
+                "format": fmt,
+                "inputSlot": slot,
+                "alignedByteOffset": byte_offset,
+                "inputSlotClass": enum_value(find_named(elem, "InputSlotClass")),
+                "instanceDataStepRate": int_child(elem, "InstanceDataStepRate"),
+            }
+            if byte_size is not None:
+                entry["byteSize"] = byte_size
+                slot_offsets[slot] = max(slot_offsets.get(slot, 0), byte_offset + byte_size)
+            elements.append(entry)
+        self.input_layouts[rid] = elements
+
     def handle_create_shader(self, chunk: ET.Element, stage: str) -> None:
         rid = rid_child(chunk, "pShader")
         blob_index, _ = buffer_ref(chunk, "pShaderBytecode")
@@ -873,11 +937,18 @@ class CaptureParser:
     def handle_set_vertex_buffers(self, chunk: ET.Element) -> None:
         start = int_child(chunk, "StartSlot")
         buffers = array_resource_ids(chunk, "ppVertexBuffers")
+        strides = array_uints(chunk, "pStrides")
+        offsets = array_uints(chunk, "pOffsets")
         for i, rid in enumerate(buffers):
+            slot = start + i
             if rid is None:
-                self.state.vertex_buffers.pop(start + i, None)
+                self.state.vertex_buffers.pop(slot, None)
+                self.state.vertex_strides.pop(slot, None)
+                self.state.vertex_offsets.pop(slot, None)
             else:
-                self.state.vertex_buffers[start + i] = rid
+                self.state.vertex_buffers[slot] = rid
+                self.state.vertex_strides[slot] = strides[i] if i < len(strides) else 0
+                self.state.vertex_offsets[slot] = offsets[i] if i < len(offsets) else 0
 
     def handle_set_viewports(self, chunk: ET.Element) -> None:
         arr = direct(chunk, "pViewports", "array")
@@ -999,13 +1070,14 @@ class CaptureParser:
                 }
 
         output_resource = color_targets[0]["resource"] if color_targets else None
+        draw = self.draw_record(chunk, indexed)
         pass_record = {
             "ordinal": ordinal,
             "eventId": event_id,
             "layerId": None,
             "passId": None,
             "shaderName": None,
-            "draw": self.draw_record(chunk, indexed),
+            "draw": draw,
             "targets": {
                 "color": color_targets,
                 "depth": depth,
@@ -1032,7 +1104,64 @@ class CaptureParser:
                 "visualStats": {"note": "RenderDoc convert path has no replay readback; PNG intentionally unavailable."},
             },
         }
+        vertices, truncated = self.decode_draw_vertices(draw)
+        if vertices:
+            pass_record["vertices"] = vertices
+            if truncated:
+                pass_record["verticesTruncated"] = True
+                pass_record["verticesDecodedCount"] = len(vertices)
         self.passes.append(pass_record)
+
+    def decode_draw_vertices(self, draw: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+        topology = str(draw.get("topology") or "").upper()
+        if "POINTLIST" not in topology or draw.get("indexed"):
+            return [], False
+        try:
+            vertex_count = int(draw.get("vertexCount") or 0)
+            start_vertex = int(draw.get("start") or 0)
+        except (TypeError, ValueError):
+            return [], False
+        if vertex_count <= 0:
+            return [], False
+        layout = self.input_layouts.get(self.state.input_layout or "")
+        if not layout:
+            return [], False
+
+        decode_count = min(vertex_count, MAX_DECODED_VERTICES)
+        slot_fallback_strides = self.layout_slot_strides(layout)
+        vertices: list[dict[str, Any]] = []
+        for local_index in range(decode_count):
+            vertex_index = start_vertex + local_index
+            entry: dict[str, Any] = {"vertexIndex": vertex_index}
+            for element in layout:
+                slot = int(element.get("inputSlot") or 0)
+                rid = self.state.vertex_buffers.get(slot)
+                if not rid:
+                    continue
+                data = self.buffer_data.get(rid, b"")
+                if not data:
+                    continue
+                stride = self.state.vertex_strides.get(slot) or slot_fallback_strides.get(slot) or 0
+                if stride <= 0:
+                    continue
+                base = self.state.vertex_offsets.get(slot, 0) + vertex_index * stride + int(element.get("alignedByteOffset") or 0)
+                value = decode_dxgi_value(element.get("format"), data, base)
+                if value is None:
+                    continue
+                entry[semantic_key(element)] = value
+            if len(entry) > 1:
+                vertices.append(entry)
+        return vertices, vertex_count > decode_count
+
+    def layout_slot_strides(self, layout: list[dict[str, Any]]) -> dict[int, int]:
+        out: dict[int, int] = {}
+        for element in layout:
+            slot = int(element.get("inputSlot") or 0)
+            offset = int(element.get("alignedByteOffset") or 0)
+            byte_size = element.get("byteSize")
+            if isinstance(byte_size, int) and byte_size > 0:
+                out[slot] = max(out.get(slot, 0), offset + byte_size)
+        return out
 
     def draw_record(self, chunk: ET.Element, indexed: bool) -> dict[str, Any]:
         if indexed:
@@ -1325,6 +1454,40 @@ def decode_scalar_values(raw: bytes, value_type: str | None) -> list[float | int
 
 def transpose_square4(values: list[float | int | bool]) -> list[float]:
     return [float(values[c * 4 + r]) for r in range(4) for c in range(4)]
+
+
+def semantic_key(element: dict[str, Any]) -> str:
+    semantic = str(element.get("semanticName") or "ATTRIBUTE")
+    index = int(element.get("semanticIndex") or 0)
+    return semantic if index == 0 else f"{semantic}{index}"
+
+
+def dxgi_format_byte_size(format_name: str | None) -> int | None:
+    return DXGI_FORMAT_BYTE_SIZES.get(format_name or "")
+
+
+def decode_dxgi_value(format_name: str | None, data: bytes, offset: int) -> Any:
+    size = dxgi_format_byte_size(format_name)
+    if size is None or offset < 0 or offset + size > len(data):
+        return None
+    try:
+        if format_name == "DXGI_FORMAT_R32G32B32A32_FLOAT":
+            return list(struct.unpack_from("<4f", data, offset))
+        if format_name == "DXGI_FORMAT_R32G32B32_FLOAT":
+            return list(struct.unpack_from("<3f", data, offset))
+        if format_name == "DXGI_FORMAT_R32G32_FLOAT":
+            return list(struct.unpack_from("<2f", data, offset))
+        if format_name == "DXGI_FORMAT_R32_FLOAT":
+            return struct.unpack_from("<f", data, offset)[0]
+        if format_name == "DXGI_FORMAT_R8G8B8A8_UNORM":
+            return [component / 255.0 for component in struct.unpack_from("<4B", data, offset)]
+        if format_name == "DXGI_FORMAT_R16G16B16A16_FLOAT":
+            return list(struct.unpack_from("<4e", data, offset))
+        if format_name == "DXGI_FORMAT_R16G16_FLOAT":
+            return list(struct.unpack_from("<2e", data, offset))
+    except struct.error:
+        return None
+    return None
 
 
 def first_signature(dxbc: dict[str, Any], keys: Iterable[str]) -> list[dict[str, Any]]:
