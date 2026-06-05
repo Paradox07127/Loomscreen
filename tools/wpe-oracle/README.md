@@ -156,36 +156,54 @@ The minimum useful success is:
 - Mac: `resources.shaders` carries DXBC shader records + RDEF reflection (`shader-interface.md`).
 - Mac: `constantBuffers[]` carries decoded runtime values (matrices like `g_ModelViewProjectionMatrix`) where RDEF layout + buffer contents allow.
 
-## Fallback Ladder
+## Capture Ladder (most reliable first)
 
-1. **Launch-under-RenderDoc**
+WPE is a single-instance, windowless wallpaper, so **CLI auto-capture and
+process injection do not work reliably**. The validated method
+(RenderDoc 1.44 + WPE 2.8.26) is the RenderDoc GUI **Launch Application** tab.
 
-Use when WPE is not already running or the job sets `"captureMethod": "launch-under"`.
+### 1. RenderDoc GUI → Launch Application — USE THIS
 
-2. **Inject**
-
-Use when WPE is already running. The script tries `renderdoccmd inject` against the newest `wallpaper64.exe` PID.
-
-3. **RenderDoc UI**
-
-If CLI capture fails:
-
-- open RenderDoc in the interactive session
-- **File > Inject into Process**, search `wallpaper64.exe`, click **Inject**
-- once the wallpaper is visible, click **Capture Frame(s) Immediately** in the
-  connection panel (the windowless wallpaper has no focus, so the F12 hotkey
-  usually will not fire — use the UI button)
-- select the capture, **File > Save Capture As**, save it as
-  `captures\<jobId>\windows\frame.rdc`
-- rerun:
+- In the interactive desktop session (RDP/console, NOT SSH), open RenderDoc.
+- **Kill any running `wallpaper64.exe` first** — WPE is single-instance, so
+  RenderDoc must own the sole instance, otherwise the new launch just hands off
+  to the existing process and RenderDoc never hooks it.
+- **Launch Application** tab:
+  - *Executable Path* = `<wpeRoot>\wallpaper64.exe`
+  - *Working Directory* = `<wpeRoot>` (e.g. `D:\Steam\steamapps\common\wallpaper_engine`)
+  - enable **Capture Child Processes**
+  - **Launch**
+- RenderDoc relaunches WPE hooked; the in-app overlay shows
+  `Capturing D3D11 … F12, PrtScrn to capture`. Reapply the scene if needed:
+  `wallpaper64.exe -control openWallpaper -file <project.json>`.
+- **Capture a frame**: press **PrtScn** (or **F12**) while the overlay is up,
+  or click **Capture Frame(s) Immediately** in the connection/target-control
+  panel. Confirm the overlay's "N Captures saved" increments.
+- **File > Save Capture As** → `captures\<jobId>\windows\frame.rdc`.
+- Convert + parse run headlessly (these CAN be driven over SSH):
 
 ```cmd
 run_once.cmd jobs\<jobId>.json extract-only
 ```
 
-4. **Nsight Graphics**
+> **There is no "Inject into Process" menu item in RenderDoc 1.44.** Process
+> injection is hidden by default (Settings > General > *"Enable process
+> injection in capture window"*, restart required) AND even when enabled it
+> almost never hooks WPE — the hook must be in place *before* the D3D device is
+> created, which has already happened for a running wallpaper. Do not rely on
+> injection; use Launch Application above. (Earlier revisions of this doc told
+> you to "File > Inject into Process" — that was wrong.)
 
-If RenderDoc cannot hook WorkerW/WPE at all, validate the path with Nsight Graphics on the NVIDIA RTX PRO 6000 machine before building any Mac-side trace or diff code.
+### 2. CLI launch-under / inject (`renderdoccmd`)
+
+`run_once.cmd` attempts `renderdoccmd capture`/`inject` automatically, but it
+rarely triggers for the windowless wallpaper. A `needs-ui` status in
+`done.json` is the **normal** signal — fall back to method 1.
+
+### 3. Nsight Graphics
+
+If RenderDoc cannot hook WPE at all, validate the path with Nsight Graphics on
+the NVIDIA RTX PRO 6000 machine before building any Mac-side trace/diff code.
 
 ## Notes
 
