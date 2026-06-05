@@ -1234,7 +1234,13 @@ final class WPEMetalRenderExecutor {
             )
         }
 
-        guard UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? true else {
+        // Bone skinning is opt-in (default OFF). Enabling it by default (9c44bab) together with the
+        // relaxed displacement gate (e204842: 0.12→1.5·extent) regressed previously-static face/blink
+        // puppets: their additive eye animation now passed the gate and got bone-skinned into
+        // deformation (scenes 3461168300 / 3554161528). Skin only when the user explicitly opts in via
+        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`, until per-scene
+        // skinning correctness is validated.
+        guard UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? false else {
             return disabled("user-disabled")
         }
         let animationLayers = puppetAnimationLayers(for: layer, model: model)
@@ -1697,8 +1703,8 @@ final class WPEMetalRenderExecutor {
     ) -> (bonePalette: [simd_float4x4], skinningEnabled: Float) {
         // When the skinning gate rejects (partial hierarchy, out-of-range indices, unbounded palette,
         // unfollowable attached child) the identity palette reproduces the assembled MDLV rest mesh
-        // (no-regression guard). Hidden override: `defaults write Taijia.LiveWallpaper
-        // WPEPuppetEnableSkinning -bool NO`.
+        // (no-regression guard). Skinning is opt-in (default off); enable with `defaults write
+        // Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
         let resolvedPalette = skinningState?.enabled == true ? (skinningState?.palette ?? []) : []
         let bonePalette = resolvedPalette.isEmpty
             ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
