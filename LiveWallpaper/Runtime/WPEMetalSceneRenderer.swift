@@ -1422,11 +1422,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             spriteSheet: spriteSheet
         ) else { return }
         system.parallaxDepth = object.parallaxDepth
-        // Spread `startDelay + 2s` worth of spawn/integration across
-        // the first frame so the user doesn't see a one-particle-
-        // per-frame cold start — matches WPE's behaviour where the
-        // scene loads with a populated emitter.
-        let prewarmSeconds = max(0, definition.startDelay) + 2.0
+        // Prewarm long enough that the first-spawned particles have lived a full
+        // lifetime, so the emitter starts at its STEADY-STATE age/position spread
+        // (matches WPE, which loads with a populated emitter). `+2s` only aged
+        // particles to ~2s, leaving them clustered near the origin instead of
+        // spread across their fall path. Cap to bound load-time prewarm cost.
+        let prewarmSeconds = max(0, definition.startDelay)
+            + min(max(definition.lifetimeMax, 2.0), 15.0)
         system.prewarm(simulatedSeconds: prewarmSeconds)
         particleSystems.append(system)
         particleTextures[ObjectIdentifier(system)] = resolved
