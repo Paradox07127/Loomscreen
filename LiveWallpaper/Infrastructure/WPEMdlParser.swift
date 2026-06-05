@@ -121,7 +121,6 @@ struct WPEPuppetAnimationLayer: Equatable, Sendable {
 /// the render gate needs to decide whether skinning is safe to enable for this puppet.
 struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
     enum TransformSpace: String, Equatable, Sendable {
-        case worldAbsolute
         case parentLocal
     }
 
@@ -261,12 +260,13 @@ enum WPEPuppetAnimationEvaluator {
                 parentChannelMapSucceeded: false
             )
         }
-        let space = transformSpace(channels: baseChannels, bones: bones, localMatrix: localMatrix)
+        // MDLS raw + MDLA channels are always parent-local (oracle-confirmed); the previous
+        // translation-only world/local auto-detect was refuted and removed.
+        let space: WPEPuppetPaletteEvaluation.TransformSpace = .parentLocal
         let palette = hierarchyPalette(
             channels: baseChannels,
             bones: bones,
             parentChannel: parentChannel,
-            transformSpace: space,
             localMatrix: localMatrix
         )
         return WPEPuppetPaletteEvaluation(
@@ -367,42 +367,6 @@ enum WPEPuppetAnimationEvaluator {
         return parentChannelMap(channels: base.animation.channels, bones: bones) != nil
     }
 
-    /// Detects whether MDLA channels store world-absolute transforms (MDLA0006, e.g. Kal'tsit) or
-    /// parent-local transforms, by comparing each child channel's frame-0 transform against the MDLS
-    /// raw bind matrix both directly (world) and after composing the parent (local).
-    private static func transformSpace(
-        channels: [WPEPuppetAnimChannel],
-        bones: [WPEPuppetBone],
-        localMatrix: (Int, Bool) -> simd_float4x4
-    ) -> WPEPuppetPaletteEvaluation.TransformSpace {
-        guard let parentChannel = parentChannelMap(channels: channels, bones: bones) else {
-            return .parentLocal
-        }
-        let rawByBone = rawMatricesByBone(bones)
-        var worldError: Float = 0
-        var localError: Float = 0
-        var sampleCount: Float = 0
-        for (position, channel) in channels.enumerated() where parentChannel[position] != nil {
-            guard let raw = rawByBone[channel.boneIndex] else { continue }
-            let frame0 = localMatrix(position, true)
-            worldError += translationDistance(frame0, raw)
-            if let parent = parentChannel[position],
-               let parentRaw = rawByBone[channels[parent].boneIndex] {
-                localError += translationDistance(parentRaw * frame0, raw)
-            } else {
-                localError += translationDistance(frame0, raw)
-            }
-            sampleCount += 1
-        }
-        guard sampleCount > 0 else { return .parentLocal }
-        // Kal'tsit MDLA0006 child frame-0 translations match the MDLS world raw matrices exactly;
-        // composing them as parent-local would double-apply ancestor motion. Stay conservative so
-        // older genuinely-parent-local files keep composing.
-        return worldError <= min(localError * 0.25, sampleCount * 0.5)
-            ? .worldAbsolute
-            : .parentLocal
-    }
-
     private static func rawMatricesByBone(_ bones: [WPEPuppetBone]) -> [Int: simd_float4x4] {
         Dictionary(uniqueKeysWithValues: bones.compactMap { bone -> (Int, simd_float4x4)? in
             guard let raw = WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix) else { return nil }
@@ -410,43 +374,36 @@ enum WPEPuppetAnimationEvaluator {
         })
     }
 
-    private static func translationDistance(_ lhs: simd_float4x4, _ rhs: simd_float4x4) -> Float {
-        simd_length(SIMD3<Float>(
-            lhs.columns.3.x - rhs.columns.3.x,
-            lhs.columns.3.y - rhs.columns.3.y,
-            lhs.columns.3.z - rhs.columns.3.z
-        ))
-    }
-
     private static func hierarchyPalette(
         channels: [WPEPuppetAnimChannel],
         bones: [WPEPuppetBone],
         parentChannel: [Int?],
-        transformSpace: WPEPuppetPaletteEvaluation.TransformSpace,
         localMatrix: (Int, Bool) -> simd_float4x4
     ) -> [simd_float4x4] {
         let rawByBone = rawMatricesByBone(bones)
 
         func worldMatrices(bind: Bool) -> [simd_float4x4] {
-            // Bind world comes from the MDLS raw matrices (the authored inverse-bind ground truth),
-            // falling back to the channel's own frame-0 transform when a bone lacks a raw matrix.
-            if bind {
-                return channels.enumerated().map { position, channel in
-                    rawByBone[channel.boneIndex] ?? localMatrix(position, true)
-                }
-            }
-            // World-absolute channels are already in world space; using them directly avoids the
-            // double-counting that parent composition would otherwise introduce.
-            if transformSpace == .worldAbsolute {
-                return channels.indices.map { localMatrix($0, false) }
-            }
+            // Both the MDLS raw matrices (bind pose) and the MDLA channel keyframes (current pose) are
+            // stored PARENT-LOCAL, so a bone's WORLD transform is recovered by composing it onto its
+            // parent's world transform. Bind and current are composed identically: the palette
+            // (`current · bind⁻¹`) is then exactly identity in the rest pose, and a parent bone's motion
+            // flows into every descendant. Without this, a high bone's breathing/sway/blink never
+            // reaches the bones it drives and the puppet skins nearly static.
+            //
+            // Oracle-validated against Wallpaper Engine `g_Bones` (RenderDoc, WPE 2.8.26): scenes
+            // 3461168300 (Plana, 53 bones) and 3554161528 (32 bones) match WPE to <0.1 / <6 total
+            // Frobenius across all bones, vs ~70–190 with the previous code, which used the raw matrices
+            // as world bind directly (uncomposed) and a translation-only `worldAbsolute` auto-detect
+            // that always misfired here because each bone's frame-0 local equals its raw local.
             var cache = [simd_float4x4?](repeating: nil, count: channels.count)
             var visiting = [Bool](repeating: false, count: channels.count)
             func world(_ index: Int) -> simd_float4x4 {
                 if let cached = cache[index] { return cached }
                 if visiting[index] { return matrix_identity_float4x4 }
                 visiting[index] = true
-                let local = localMatrix(index, bind)
+                let local = bind
+                    ? (rawByBone[channels[index].boneIndex] ?? localMatrix(index, true))
+                    : localMatrix(index, false)
                 let composed: simd_float4x4
                 if let parent = parentChannel[index] {
                     composed = world(parent) * local

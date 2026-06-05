@@ -87,6 +87,50 @@ struct WPEPuppetAnimationEvaluatorTests {
         #expect(abs(skinned.y - 1.0) < 1e-5)
         #expect(abs(skinned.x) < 1e-5)
     }
+
+    @Test("A parent bone's rotation propagates through the hierarchy into a child bone's palette")
+    func parentRotationPropagatesToChild() {
+        // Two-bone parent-local rig: root at the origin, child offset (100,0,0). MDLS raw matrices
+        // are PARENT-LOCAL (the convention this skinning path composes), and each channel's frame 0
+        // equals its raw local bind. Regression guard for scenes 3461168300 / 3554161528: the old
+        // code left descendants ≈ identity (worldAbsolute / uncomposed raw bind) so a parent's
+        // breathing/sway/blink never reached the bones it drives — the puppet skinned nearly static.
+        func columnMajor(translation: SIMD3<Float>) -> [Float] {
+            [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, translation.x, translation.y, translation.z, 1]
+        }
+        let bones = [
+            WPEPuppetBone(index: 0, parentIndex: nil, rawMatrix: columnMajor(translation: .zero)),
+            WPEPuppetBone(index: 1, parentIndex: 0, rawMatrix: columnMajor(translation: SIMD3(100, 0, 0)))
+        ]
+        // Root rotates 90° about Z at frame 1; the child has NO local motion — its world motion must
+        // come entirely from inheriting the parent.
+        let anim = WPEPuppetAnimation(
+            id: 1, name: "sway", mode: "loop", fps: 30, frameCount: 2,
+            channels: [
+                WPEPuppetAnimChannel(boneIndex: 0, keyframes: [
+                    WPEPuppetAnimKey(frame: 0, translation: .zero, euler: .zero, scale: SIMD3(1, 1, 1)),
+                    WPEPuppetAnimKey(frame: 1, translation: .zero, euler: SIMD3(0, 0, .pi / 2), scale: SIMD3(1, 1, 1))
+                ]),
+                WPEPuppetAnimChannel(boneIndex: 1, keyframes: [
+                    WPEPuppetAnimKey(frame: 0, translation: SIMD3(100, 0, 0), euler: .zero, scale: SIMD3(1, 1, 1)),
+                    WPEPuppetAnimKey(frame: 1, translation: SIMD3(100, 0, 0), euler: .zero, scale: SIMD3(1, 1, 1))
+                ])
+            ]
+        )
+        let layers = [WPEPuppetAnimationLayer(animation: anim, rate: 1, additive: false, blend: 1)]
+
+        // Frame 0: bind pose → identity palette for both bones (no-regression guard).
+        let bind = WPEPuppetAnimationEvaluator.palette(layers: layers, bones: bones, at: 0)
+        #expect(bind.count == 2)
+        #expect(bind.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
+
+        // Frame 1: the child's bind-world anchor (100,0,0) must skin to the root-rotated (0,100,0).
+        // Pre-fix this stayed at (100,0,0) because the child palette was ≈ identity.
+        let posed = WPEPuppetAnimationEvaluator.palette(layers: layers, bones: bones, at: 1.0 / 30.0)
+        let childAnchor = posed[1] * SIMD4<Float>(100, 0, 0, 1)
+        #expect(abs(childAnchor.x) < 1e-3)
+        #expect(abs(childAnchor.y - 100) < 1e-3)
+    }
 }
 
 @Suite("WPE MDL parser")
