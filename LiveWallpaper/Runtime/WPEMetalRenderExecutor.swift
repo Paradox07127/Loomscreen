@@ -490,7 +490,7 @@ final class WPEMetalRenderExecutor {
             )
         )
 
-        for draw in draws {
+        for (idx, draw) in draws.enumerated() {
             let system = draw.system
             let texture = draw.texture
             encoder.setRenderPipelineState(draw.state)
@@ -516,6 +516,18 @@ final class WPEMetalRenderExecutor {
                 vertexCount: 4,
                 instanceCount: system.liveInstanceCount
             )
+            #if !LITE_BUILD && DEBUG
+            WPECanonicalTraceRecorder.shared.recordParticlePass(
+                index: idx,
+                particleCount: system.liveInstanceCount,
+                sprite: texture,
+                blendMode: system.blendMode.rawValue,
+                target: output,
+                spriteSheet: system.spriteSheet.map {
+                    (cols: $0.cols, rows: $0.rows, frames: $0.frameCount, alphaMask: $0.isAlphaMask)
+                }
+            )
+            #endif
         }
         encoder.endEncoding()
         commandBuffer.commit()

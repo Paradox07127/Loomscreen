@@ -204,6 +204,79 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         }
     }
 
+    /// Record one particle-system draw as a pass so the divergence engine can
+    /// align it against WPE's POINTLIST particle passes. Particles render via a
+    /// separate path (`drawParticles`) from the effect chain, so without this hook
+    /// they show up only as "missing" WPE passes even though we render them.
+    func recordParticlePass(
+        index: Int,
+        particleCount: Int,
+        sprite: MTLTexture?,
+        blendMode: String,
+        target: MTLTexture,
+        spriteSheet: (cols: Int, rows: Int, frames: Int, alphaMask: Bool)?
+    ) {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard scene != nil, !frameComplete else { return }
+
+        let ordinal = passes.count
+        let targetResource = "rt-scene"
+        resources.renderTargets[targetResource] = [
+            "label": "scene", "width": target.width, "height": target.height,
+            "format": pixelFormatName(target.pixelFormat), "lineage": [String]()
+        ]
+        let spriteID = textureResourceID(texture: sprite, fallbackKey: "particle-\(index)")
+        resources.textures[spriteID] = textureResource(id: spriteID, name: "g_Texture0", reference: nil, texture: sprite)
+
+        let textures: [[String: Any]] = [[
+            "stage": "fragment", "slot": 0, "name": "g_Texture0", "resource": spriteID,
+            "reference": NSNull(), "fallback": false,
+            "width": jsonOrNull(sprite?.width), "height": jsonOrNull(sprite?.height),
+            "format": jsonOrNull(sprite.map { pixelFormatName($0.pixelFormat) })
+        ]]
+        let draw: [String: Any] = [
+            "topology": "particle", "vertexCount": particleCount, "indexCount": NSNull(),
+            "instanceCount": particleCount,
+            "viewport": [0, 0, Double(target.width), Double(target.height), 0, 1] as [Double],
+            "scissor": [Double]()
+        ]
+        let colorTargets: [[String: Any]] = [[
+            "slot": 0, "resource": targetResource, "load": "load", "store": "store"
+        ]]
+        var variables: [[String: Any]] = []
+        if let sheet = spriteSheet {
+            variables = [[
+                "name": "g_SpriteSheet", "type": "vec4",
+                "value": [Double(sheet.cols), Double(sheet.rows), Double(sheet.frames), sheet.alphaMask ? 1.0 : 0.0]
+            ]]
+        }
+        let constantBuffer: [String: Any] = [
+            "name": "particle", "stage": "fragment", "slot": 0, "variables": variables
+        ]
+        let state: [String: Any] = [
+            "blend": ["mode": blendMode] as [String: Any], "depth": NSNull(), "raster": NSNull(),
+            "samplers": [["stage": "fragment", "slot": 0, "name": "g_Texture0"]] as [[String: Any]]
+        ]
+        let output: [String: Any] = [
+            "resource": targetResource, "png": NSNull(), "sha256": NSNull(),
+            "visualStats": ["note": "particle pass (instanced quads, \(particleCount) alive)"]
+        ]
+        let passRecord: [String: Any] = [
+            "ordinal": ordinal, "eventId": NSNull(), "layerId": NSNull(),
+            "passId": "particle.\(index)", "shaderName": "particle/\(blendMode)",
+            "draw": draw,
+            "targets": ["color": colorTargets, "depth": NSNull()] as [String: Any],
+            "textures": textures,
+            "shaders": ["vs": "shader-vs-particle", "fs": "shader-fs-particle"],
+            "constantBuffers": [constantBuffer],
+            "state": state,
+            "output": output
+        ]
+        passes.append(passRecord)
+    }
+
     func finishFrame(
         outputTexture: MTLTexture,
         runtimeUniforms: WPEMetalRuntimeUniforms?,

@@ -33,7 +33,7 @@ VOLATILE_UNIFORMS = {
 }
 # DP costs.
 DELETE_QUAD = 2.0          # deleting a WPE quad pass is expensive (real gap)
-DELETE_POINTLIST = 0.35    # deleting a WPE particle pass is cheap (expected gap)
+DELETE_PARTICLE = 0.35    # deleting a WPE particle pass is cheap (expected gap)
 INSERT = 2.0               # inserting an unmatched Mac pass
 
 
@@ -77,8 +77,8 @@ class NormalizedPass:
     raw: dict[str, Any]
 
     @property
-    def is_pointlist(self) -> bool:
-        return self.topology == "pointlist"
+    def is_particle(self) -> bool:
+        return self.topology == "particle"
 
 
 # --------------------------------------------------------------------------- #
@@ -145,8 +145,8 @@ def canonical_topology(draw: dict[str, Any]) -> str:
     they fall out of the alignment into the puppet+particle bucket.
     """
     topology = str(draw.get("topology") or "").lower()
-    if "pointlist" in topology:
-        return "pointlist"
+    if "pointlist" in topology or "particle" in topology:
+        return "particle"
     if "linelist" in topology or "linestrip" in topology:
         return "line"
     if any(token in topology for token in ("quad", "triangle")):
@@ -286,7 +286,7 @@ def align_passes(wpe: list[NormalizedPass], mac: list[NormalizedPass]) -> list[d
             i, j = i - 1, j - 1
         elif op == "delete":
             entry = {"wpe": wi, "mac": None, "status": "deleted", "cost": round(delete_cost(wpe[wi]), 4)}
-            if wpe[wi].is_pointlist:
+            if wpe[wi].is_particle:
                 entry["bucket"] = "puppet+particle"
             alignment.append(entry)
             i -= 1
@@ -298,13 +298,13 @@ def align_passes(wpe: list[NormalizedPass], mac: list[NormalizedPass]) -> list[d
 
 
 def delete_cost(pass_: NormalizedPass) -> float:
-    return DELETE_POINTLIST if pass_.is_pointlist else DELETE_QUAD
+    return DELETE_PARTICLE if pass_.is_particle else DELETE_QUAD
 
 
 def substitute_cost(wpe: NormalizedPass, mac: NormalizedPass) -> float:
     cost = 0.0
     if wpe.topology != mac.topology:
-        cost += 3.0 if (wpe.is_pointlist or mac.is_pointlist) else 1.0
+        cost += 3.0 if (wpe.is_particle or mac.is_particle) else 1.0
     cost += 1.0 - jaccard(set(wpe.uniforms), set(mac.uniforms))
     cost += 0.75 * (1.0 - jaccard(set(texture_names(wpe)), set(texture_names(mac))))
     cost += 0.75 * (1.0 - jaccard(set(wpe.shader_sig.get("samplers", [])), set(mac.shader_sig.get("samplers", []))))
@@ -412,7 +412,7 @@ def compare_alignment(
 
 def compare_pair(wpe: NormalizedPass, mac: NormalizedPass) -> Optional[dict[str, Any]]:
     if wpe.topology != mac.topology:
-        bucket = "puppet+particle" if "pointlist" in (wpe.topology, mac.topology) else "transpiler"
+        bucket = "puppet+particle" if "particle" in (wpe.topology, mac.topology) else "transpiler"
         return divergence(wpe, mac, bucket, "topology", "draw.topology", wpe.topology, mac.topology, "mismatch")
 
     shader_delta = compare_shader_interface(wpe, mac)
@@ -573,7 +573,7 @@ def normalize_texture_name(name: str) -> str:
 
 
 def deleted_wpe_pass(pass_: NormalizedPass) -> dict[str, Any]:
-    is_particle = pass_.is_pointlist
+    is_particle = pass_.is_particle
     return {
         "macPassIndex": None,
         "wpePassOrdinal": pass_.ordinal,
@@ -585,9 +585,9 @@ def deleted_wpe_pass(pass_: NormalizedPass) -> dict[str, Any]:
             "name": pass_.topology,
             "wpe": {"ordinal": pass_.ordinal, "topology": pass_.topology, "draw": pass_.draw},
             "metal": None,
-            "varianceType": "missing-pointlist-particle-pass" if is_particle else "missing-wpe-pass",
+            "varianceType": "missing-particle-pass" if is_particle else "missing-wpe-pass",
         },
-        "responsibleSite": "LiveWallpaper/Runtime/WPEMetalShaderDispatcher.swift (fragment-only: no particle/pointlist path)"
+        "responsibleSite": "LiveWallpaper/Runtime/WPEParticleSystem.swift (WPE emits a particle pass we did not render)"
         if is_particle else "LiveWallpaper/Runtime/WPEMetalRenderExecutor.swift",
     }
 
