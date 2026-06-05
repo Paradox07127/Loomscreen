@@ -117,6 +117,14 @@ struct WPEPuppetMeshUniforms {
     float4 meshCenterAndPadding; // x,y raw MDLV mesh center; z,w reserved
 };
 
+// Puppet clip-composite path (WPE genericimage4 CLIPPINGUVS): carries the
+// screen-space UV used to sample the clip-mask render target alongside the atlas UV.
+struct WPEPuppetClipVertexOut {
+    float4 position [[position]];
+    float2 uv;
+    float2 screenUV;
+};
+
 struct WPEPuppetSceneCompositeUniforms {
     float4 localSizeAndMode;       // x,y atlas/local layer size; z=bone palette count; w=skinning enabled
     float4 meshCenterAndScaleSign; // x,y raw MDLV mesh center; z,w = WPEObjectQuadUniforms.uvSignAndPadding.xy
@@ -169,6 +177,30 @@ vertex WPEVertexOut wpe_puppet_mesh_vertex(
     WPEVertexOut out;
     out.position = float4((position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
     out.uv = v.uv.xy;
+    return out;
+}
+
+// Same skinned placement as wpe_puppet_mesh_vertex, but also emits the screen-space
+// UV (WPE CLIPPINGUVS) so the clip-target/compose fragments can sample the clip-mask RT.
+vertex WPEPuppetClipVertexOut wpe_puppet_mesh_clip_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEPuppetVertex* vertices [[buffer(0)]],
+    constant WPEPuppetMeshUniforms& u [[buffer(1)]],
+    constant float4x4* bonePalette [[buffer(2)]]
+) {
+    WPEPuppetVertex v = vertices[vertexID];
+    uint paletteCount = uint(max(u.localSizeAndMode.z, 0.0));
+    float4 position = (u.localSizeAndMode.w > 0.5 && paletteCount > 0)
+        ? wpe_skin_puppet_position(v, bonePalette, paletteCount)
+        : v.position;
+    float2 halfSize = max(u.localSizeAndMode.xy * 0.5, float2(0.5));
+    float4 clipPosition = float4((position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
+
+    WPEPuppetClipVertexOut out;
+    out.position = clipPosition;
+    out.uv = v.uv.xy;
+    // CLIPPINGUVS maps clip-space position to UV; Metal textures are top-left so flip Y.
+    out.screenUV = float2(clipPosition.x * 0.5 + 0.5, 0.5 - clipPosition.y * 0.5);
     return out;
 }
 
@@ -459,6 +491,56 @@ fragment half4 wpe_genericimage4_fragment(
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
     // Premultiplied-alpha render target — see wpe_genericimage2_fragment.
+    return half4(float4(rgb * alpha, alpha));
+}
+
+// Port of WPE clippingmaskimage4.frag: renders the clip SHAPE part into the clip-mask
+// render target. `.r` carries the mask coverage (consumed by CLIPPINGTARGET below),
+// `.a` carries the shape alpha. alphaMaskUV.w maps WPE's g_RenderVar0.x (invert toggle).
+fragment half4 wpe_puppet_clippingmaskimage4_fragment(
+    WPEPuppetClipVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
+    constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float albedoAlpha = float(texture0.sample(linearSampler, in.uv).a);
+    float mask = float(texture1.sample(linearSampler, in.uv).r);
+    float alpha = mix(pow(albedoAlpha, 4.0), albedoAlpha, mask);
+    float red = mask * alpha;
+    red = mix(red, 1.0 - red, saturate(uniforms.alphaMaskUV.w));
+    return half4(float4(red, 0.0, 0.0, alpha));
+}
+
+// Port of WPE genericimage4.frag clipping combos. alphaMaskUV.w selects the mode:
+// 1=CLIPPINGTARGET (alpha *= clipMask.r), 2=CLIPPINGCOMPOSE (mix rgb), 3=both.
+// The clip mask is sampled in screen space (CLIPPINGUVS), matching the mask RT.
+fragment half4 wpe_genericimage4_puppet_clip_fragment(
+    WPEPuppetClipVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
+    texture2d<half, access::sample> texture8 [[texture(8)]],
+    constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float maskAlpha = 1.0;
+    if (uniforms.alphaMaskUV.z > 0.5) {
+        maskAlpha = float(texture1.sample(linearSampler, in.uv).a);
+    }
+    float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
+    float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
+
+    float4 clipping = float4(texture8.sample(linearSampler, saturate(in.screenUV)));
+    float mode = uniforms.alphaMaskUV.w;
+    if (mode > 0.5 && mode < 1.5) {
+        alpha *= clipping.r;
+    } else if (mode > 1.5 && mode < 2.5) {
+        rgb = mix(rgb, clipping.rgb, clipping.a);
+    } else if (mode > 2.5) {
+        alpha *= clipping.r;
+        rgb = mix(rgb, clipping.rgb, clipping.a);
+    }
     return half4(float4(rgb * alpha, alpha));
 }
 

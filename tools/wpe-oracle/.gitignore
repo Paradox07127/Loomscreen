@@ -7,3 +7,4 @@ jobs/
 *.dxbc.txt
 __pycache__/
 *.pyc
+reference-shaders/
