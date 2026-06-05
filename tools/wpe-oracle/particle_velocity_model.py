@@ -61,9 +61,13 @@ def _spawn(rng):
                 age=0.0, life=rng.uniform(*LIFE))
 
 
-def run(gravity=0.0, vyscale=1.0, flip=False, turb_accum=False, secs=14.0, seed=42):
+def run(gravity=0.0, vyscale=1.0, flip=False, turb_accum=False, down_bias=0.0,
+        secs=14.0, seed=42):
     """Returns (mean_vx, mean_vy, mean_|vy/vx|) of instantaneous velocity at
-    steady state. `gravity` is a downward accel (px/s^2) added to vy."""
+    steady state. `gravity` is a downward accel (px/s^2) added to vy.
+    `down_bias` mirrors WPEParticleSystem.turbulenceSettleBias: a non-zero-mean
+    downward drift of `down_bias * turbulenceSpeed` (the SHIPPED fix; 0.76
+    hits |vy/vx|->1.83)."""
     rng = random.Random(seed)
     parts, acc = [], 0.0
     samples = []
@@ -78,8 +82,9 @@ def run(gravity=0.0, vyscale=1.0, flip=False, turb_accum=False, secs=14.0, seed=
             vy = p['vy'] * vyscale * (-1 if flip else 1)
             nx, ny = _noise(p['px'] * TURB_SCALE, p['py'] * TURB_SCALE,
                             t + 3.0 + p['ph'])
+            settle = down_bias if p['vy'] < 0 else -down_bias  # sign-aware
             stepx = vx + nx * p['ts'] * MASK[0]
-            stepy = vy + ny * p['ts'] * MASK[1] - gravity * p['age']
+            stepy = vy + (ny - settle) * p['ts'] * MASK[1] - gravity * p['age']
             if turb_accum:
                 p['vx'] += nx * p['ts'] * MASK[0] * DT
                 p['vy'] += ny * p['ts'] * MASK[1] * DT
@@ -110,6 +115,7 @@ if __name__ == "__main__":
         ("H_grav g=30", dict(gravity=30.0)),
         ("H_vyscale x1.85", dict(vyscale=1.85)),
         ("H_turbAccum", dict(turb_accum=True)),
+        ("FIX down_bias=0.76 (shipped)", dict(down_bias=0.76)),
     ]
     for name, kw in cases:
         vx, vy, ratio = run(**kw)
