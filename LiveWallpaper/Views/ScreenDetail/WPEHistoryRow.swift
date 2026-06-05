@@ -2,101 +2,67 @@
 import SwiftUI
 import AppKit
 
-/// Single recent-import card in the managed library grid. Adaptive width
-/// (160-240pt) × height (240-320pt) per `wpeProjectCardChrome`, glass-effect
-/// background, hover lift, context menu for Finder/remove.
-///
-/// Two interaction modes:
-/// - **Scene tab** (per-screen): whole card is a tap target that applies to the
-///   surrounding screen — pass `onTap`, leave `allowsInlineApply` off.
-/// - **Installed library** (multi-screen): an explicit per-card Apply control
-///   targets the open displays — pass `allowsInlineApply: true` + `screens`.
+/// Shared Wallpaper Engine gallery card used by both the Scene tab and the
+/// Installed library grid.
 struct WPEHistoryRow: View {
     let entry: WPEHistoryEntry
     let isActive: Bool
     var allowsInlineApply: Bool = false
-    /// Browse-consistent gallery presentation — square tile, controlBackground +
-    /// `galleryTileChrome`, uppercase type pill — so the Installed library matches
-    /// the redesigned online Browse cards. Default keeps the Scene-tab glass card.
-    var galleryStyle: Bool = false
-    /// True when this row's detail inspector is open (gallery style only) —
-    /// draws the accent selection ring via `galleryTileChrome`.
     var isSelected: Bool = false
     var screens: [Screen] = []
     var onApply: (Screen) -> Void = { _ in }
     var onApplyToAll: () -> Void = {}
     var onTap: () -> Void = {}
     let onRemove: () -> Void
-    /// Installed-library bookmark toggle. When `onBookmark` is non-nil a
-    /// context-menu item + indicator appear; the Scene-tab call site leaves it
-    /// nil so its appearance/behavior is unchanged.
     var isBookmarked: Bool = false
     var onBookmark: (() -> Void)? = nil
-    /// "Update available" badge — set when the installed item's Workshop
-    /// `timeUpdated` is newer than its import (Installed library only).
     var hasUpdate: Bool = false
-    /// Re-download the newer Workshop version. Non-nil only in the Installed
-    /// library when an update is available and SteamCMD is ready; adds a
-    /// context-menu item. The Scene tab leaves it nil.
     var onUpdate: (() -> Void)? = nil
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        chromedCard
-        .onHover { isHovering = $0 }
-        .accessibilityElement(children: allowsInlineApply ? .contain : .ignore)
-        .accessibilityLabel(accessibilityCardLabel)
-        .accessibilityHint(applyAccessibilityHint)
-        .contextMenu {
-            if allowsInlineApply {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { onApply(screen) }
+        cardContainer
+            .galleryTileChrome(
+                isHovering: isHovering,
+                isSelected: isSelected,
+                reduceMotion: reduceMotion,
+                useGlass: true
+            )
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .onHover { isHovering = $0 }
+            .accessibilityElement(children: allowsInlineApply ? .contain : .ignore)
+            .accessibilityLabel(accessibilityCardLabel)
+            .accessibilityHint(applyAccessibilityHint)
+            .contextMenu {
+                if allowsInlineApply {
+                    ForEach(screens, id: \.id) { screen in
+                        Button("Apply to \(screen.name)") { onApply(screen) }
+                    }
+                    if screens.count > 1 {
+                        Button("Apply to All Displays", action: onApplyToAll)
+                    }
+                    if !screens.isEmpty { Divider() }
                 }
-                if screens.count > 1 {
-                    Button("Apply to All Displays", action: onApplyToAll)
+                if hasUpdate, let onUpdate {
+                    Button(action: onUpdate) {
+                        Label("Update from Steam", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Divider()
                 }
-                if !screens.isEmpty { Divider() }
-            }
-            if hasUpdate, let onUpdate {
-                Button(action: onUpdate) {
-                    Label("Update from Steam", systemImage: "arrow.triangle.2.circlepath")
+                if let onBookmark {
+                    Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", action: onBookmark)
+                    Divider()
                 }
-                Divider()
+                Button("Show in Finder") { showInFinder() }
+                Button("Remove", role: .destructive, action: onRemove)
             }
-            if let onBookmark {
-                Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", action: onBookmark)
-                Divider()
-            }
-            Button("Show in Finder") { showInFinder() }
-            Button("Remove", role: .destructive, action: onRemove)
-        }
     }
 
-    /// The whole card is a tap target that applies the wallpaper — in the
-    /// Installed library (`allowsInlineApply`) this replaces the separate Apply
-    /// button, so a click (or a drag) sets the wallpaper. The bookmark toggle in
-    /// the footer is a nested button and keeps working on its own hit area.
     private var cardContainer: some View {
         Button(action: onTap) { card }
             .buttonStyle(.plain)
-    }
-
-    /// Browse-style gallery chrome (solid control surface + `galleryTileChrome`)
-    /// vs the legacy Scene-tab glass card. ScreenDetail leaves `galleryStyle`
-    /// off, so its rendering is unchanged.
-    @ViewBuilder
-    private var chromedCard: some View {
-        if galleryStyle {
-            cardContainer
-                .background(Color(nsColor: .controlBackgroundColor))
-                .galleryTileChrome(isHovering: isHovering, isSelected: isSelected, reduceMotion: reduceMotion)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
-        } else {
-            cardContainer
-                .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
-        }
     }
 
     private var card: some View {
@@ -106,48 +72,36 @@ struct WPEHistoryRow: View {
                 securityScopedBookmarkData: entry.origin.sourceFolderBookmark,
                 playbackMode: .hoverToPlay
             )
-                .overlay(alignment: .topTrailing) {
-                    if let badge = compatibilityBadge {
-                        Text(badge.titleKey)
-                            .font(.system(size: 9, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .foregroundStyle(.white)
-                            .thumbnailBadgeGlass(tint: badge.tint, opacity: 0.85)
-                            .padding(DesignTokens.Spacing.sm)
-                            .accessibilityLabel(badge.accessibility)
-                    }
+            .overlay(alignment: .topTrailing) {
+                if let badge = compatibilityBadge {
+                    Text(badge.titleKey)
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(.white)
+                        .thumbnailBadgeGlass(tint: badge.tint, opacity: 0.85)
+                        .padding(DesignTokens.Spacing.sm)
+                        .accessibilityLabel(badge.accessibility)
                 }
-                .overlay(alignment: .topLeading) {
-                    if hasUpdate {
-                        updateBadge
-                    }
-                }
-
-            // Gallery style keeps the thumbnail flush (like the Browse card);
-            // the legacy card separates it from the footer with a divider.
-            if !galleryStyle {
-                Divider()
+            }
+            .overlay(alignment: .topLeading) {
+                if hasUpdate { updateBadge }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if isActive { activeBadge }
             }
 
-            VStack(alignment: .leading, spacing: galleryStyle ? DesignTokens.Spacing.xs : DesignTokens.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 Text(verbatim: entry.origin.title)
                     .font(.system(size: 13, weight: .semibold))
-                    // Gallery (Installed) reserves two lines so cards are equal
-                    // height; the Scene tab keeps its original single-/two-line
-                    // sizing (reservesSpace off) so its layout is unchanged.
-                    .lineLimit(2, reservesSpace: galleryStyle)
+                    .lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 6) {
-                    typeIndicator
+                    TypeBadge(entry.origin.localizedDisplayTypeName)
 
                     Spacer(minLength: 4)
 
-                    // Visible, state-showing toggle (matches WorkshopGalleryView's
-                    // yellow bookmark idiom) — far more discoverable than a
-                    // context-menu-only action. Shown only when bookmarking is
-                    // wired (Installed library); the Scene tab passes no onBookmark.
                     if let onBookmark {
                         Button(action: onBookmark) {
                             Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
@@ -158,48 +112,10 @@ struct WPEHistoryRow: View {
                         .help(isBookmarked ? Text("Remove Bookmark") : Text("Add Bookmark"))
                         .accessibilityLabel(Text(isBookmarked ? "Remove Bookmark" : "Add Bookmark"))
                     }
-
-                    if isActive {
-                        HStack(spacing: 3) {
-                            Circle().fill(Color.green).frame(width: 4, height: 4)
-                            Text("In use")
-                        }
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.15), in: Capsule())
-                    }
                 }
             }
             .padding(DesignTokens.Spacing.md)
-            .frame(
-                maxWidth: galleryStyle ? .infinity : nil,
-                maxHeight: galleryStyle ? nil : .infinity,
-                alignment: .top
-            )
-        }
-    }
-
-    /// Type as an uppercase pill (Browse idiom) in gallery style, or the legacy
-    /// colored dot + name otherwise.
-    @ViewBuilder
-    private var typeIndicator: some View {
-        if galleryStyle {
-            Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.5)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
-        } else {
-            Circle()
-                .fill(typeColor)
-                .frame(width: 6, height: 6)
-            Text(verbatim: entry.origin.localizedDisplayTypeName)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
@@ -215,23 +131,40 @@ struct WPEHistoryRow: View {
         .padding(.vertical, 3)
         .thumbnailBadgeGlass(tint: .orange, opacity: 0.9)
         .padding(DesignTokens.Spacing.sm)
-        .accessibilityLabel(Text("Update available"))
+        .accessibilityHidden(true)
     }
 
-    /// In the inline-apply (Installed) layout the badge is a separately focusable
-    /// child, so the card label stays just the title. In the tap-to-apply (Scene
-    /// tab) layout children are `.ignore`d, so the compatibility badge ("Won't
-    /// run" / "Needs deps") would be silent to VoiceOver — fold it into the label.
+    private var activeBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .bold))
+            Text("In use")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .thumbnailBadgeGlass(tint: Color(red: 0.08, green: 0.35, blue: 0.15), opacity: 0.85)
+        .padding(DesignTokens.Spacing.sm)
+        .accessibilityHidden(true)
+    }
+
     private var accessibilityCardLabel: Text {
         var label = Text(
             "Imported project: \(entry.origin.title)",
             comment: "A11y label for an imported project history row card. The placeholder is the project title."
         )
+        if isActive {
+            label = label + Text(verbatim: " — ") + Text("Currently in use", comment: "A11y: this wallpaper is the active one.")
+        }
         if hasUpdate {
             label = label + Text(verbatim: " — ") + Text("Update available", comment: "A11y: the installed item has a newer version on Steam.")
         }
-        if !allowsInlineApply, let badge = compatibilityBadge {
-            label = label + Text(verbatim: " — ") + badge.accessibility
+        if !allowsInlineApply {
+            label = label + Text(verbatim: " — ") + Text(verbatim: entry.origin.localizedDisplayTypeName)
+            if let badge = compatibilityBadge {
+                label = label + Text(verbatim: " — ") + badge.accessibility
+            }
         }
         return label
     }
@@ -266,24 +199,11 @@ struct WPEHistoryRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([folder])
     }
 
-    private var typeColor: Color {
-        switch entry.origin.originalType {
-        case .video: return .blue
-        case .web: return .green
-        case .scene: return .orange
-        case .application: return .red
-        case .unknown: return .gray
-        }
-    }
-
-    /// Phase 2.1 thumbnail badge for honest expectation-setting BEFORE the
-    /// user taps Apply. Three tiers — clean (no badge), Experimental
-    /// (likely degraded), and Won't Run (Windows plugin / unknown).
-    /// We deliberately keep this conservative: PNG/JPG video and web
-    /// imports get no badge; scene + application + unknown carry one.
+    /// Actionable pre-apply compatibility badge. Plain scenes carry none — only
+    /// hard blockers ("Won't run") and missing dependencies ("Needs deps").
     private var compatibilityBadge: (titleKey: LocalizedStringKey, tint: Color, accessibility: Text)? {
         switch entry.origin.originalType {
-        case .video, .web:
+        case .video, .web, .unknown:
             return nil
         case .application:
             return ("Won't run", .orange, Text("Wallpaper requires a Windows executable; cannot run on macOS"))
@@ -294,9 +214,7 @@ struct WPEHistoryRow: View {
             if !entry.origin.missingDependencyIDs.isEmpty {
                 return ("Needs deps", .yellow, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
             }
-            return ("Experimental", .yellow, Text("Scene wallpapers are rendered with the Phase 2.1 image-only engine"))
-        case .unknown:
-            return ("Untested", .gray, Text("Project type is unknown"))
+            return nil
         }
     }
 }

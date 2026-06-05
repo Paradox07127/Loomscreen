@@ -216,7 +216,6 @@ struct WorkshopInstalledView: View {
                             entry: entry,
                             isActive: isActive(entry),
                             allowsInlineApply: true,
-                            galleryStyle: true,
                             isSelected: selectedEntry?.id == entry.id,
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
@@ -1138,13 +1137,7 @@ private struct WPEInstalledInspectorContent: View {
     }()
 
     private var typePill: some View {
-        Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+        TypeBadge(entry.origin.localizedDisplayTypeName)
     }
 
     @ViewBuilder

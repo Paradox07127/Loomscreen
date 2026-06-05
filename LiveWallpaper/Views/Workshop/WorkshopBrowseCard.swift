@@ -50,10 +50,9 @@ struct WorkshopBrowseCard: View {
                     .padding(DesignTokens.Spacing.md)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor))
         }
         .buttonStyle(.plain)
-        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
+        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion, useGlass: true)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { isHovered = $0 }
         .help(item.title)
@@ -183,7 +182,7 @@ struct WorkshopBrowseCard: View {
 
             HStack(spacing: 6) {
                 if let type = contentType {
-                    typePill(type)
+                    TypeBadge(type.displayName, systemImage: Self.typeSymbol(for: type))
                 }
                 Spacer(minLength: 0)
                 if !metaTrailing.isEmpty {
@@ -196,22 +195,6 @@ struct WorkshopBrowseCard: View {
 
             statusBadge
         }
-    }
-
-    private func typePill(_ type: WorkshopContentTypeFilter) -> some View {
-        HStack(spacing: 3) {
-            if let symbol = Self.typeSymbol(for: type) {
-                Image(systemName: symbol)
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            Text(verbatim: type.displayName.uppercased(with: .current))
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.5)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
     }
 
     /// Leading type glyph, matching the app's existing drag-preview iconography
