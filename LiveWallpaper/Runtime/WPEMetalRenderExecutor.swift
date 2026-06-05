@@ -527,6 +527,11 @@ final class WPEMetalRenderExecutor {
                     (cols: $0.cols, rows: $0.rows, frames: $0.frameCount, alphaMask: $0.isAlphaMask)
                 }
             )
+            if WPESceneDebugArtifacts.shared.isEnabled {
+                WPESceneDebugArtifacts.shared.recordNoteOnce(
+                    name: "particle-state-\(idx).txt",
+                    contents: system.particleStateDumpText())
+            }
             #endif
         }
         encoder.endEncoding()

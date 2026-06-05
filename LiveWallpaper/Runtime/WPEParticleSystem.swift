@@ -490,6 +490,25 @@ final class WPEParticleSystem {
         }
     }
 
+    #if !LITE_BUILD && DEBUG
+    /// Dev-only: per-alive-particle state for oracle comparison against WPE's
+    /// decoded particle vertex buffer (POSITION + TEXCOORD1.xyz=velocity +
+    /// TEXCOORD.xyz/.w=rotation/size, confirmed from genericparticle.vert).
+    func particleStateDumpText() -> String {
+        var lines: [String] = [
+            "alive=\(liveInstanceCount) speedScale-applied velocity is base; WPE TEXCOORD1=velocity",
+            "(pos.xyz | vel.xy(base) | size | rotZ | turbSpeed | age/life)",
+        ]
+        for p in particles where p.age != .greatestFiniteMagnitude {
+            lines.append(String(
+                format: "  pos=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f) size=%.1f rotZ=%.2f turb=%.1f age=%.2f/%.2f",
+                p.position.x, p.position.y, p.position.z, p.velocity.x, p.velocity.y,
+                p.size, p.rotationZ, p.turbulenceSpeed, p.age, p.lifetime))
+        }
+        return lines.joined(separator: "\n")
+    }
+    #endif
+
     /// alphafade.fadeintime / fadeouttime are **lifetime fractions** in
     /// the WPE schema — `fadeintime=0.1` means "fade-in completes at
     /// 10% of lifetime"; `fadeouttime=0.9` means "fade-out begins at
