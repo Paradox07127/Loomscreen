@@ -6,12 +6,13 @@ import simd
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
-    /// Opt-in (default OFF) crop-frame placement fix for autosize/cropoffset puppet
-    /// rigs whose MDLV vertices live in the uncropped source frame (e.g. 3719111841's
-    /// face group). When OFF, placement is byte-identical to the legacy path.
-    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetStaticPlacementFix -bool YES`.
-    private static var puppetStaticPlacementFixEnabled: Bool {
-        let key = "WPEPuppetStaticPlacementFix"
+    /// Opt-in (default OFF) fix for body-split attachment placement: anchor attached children to the
+    /// MDAT bind point on the bone's hierarchy-composed bind-world transform instead of the bone's
+    /// skin-weighted vertex centroid. The centroid sat above the true joint, pushing 头部/胸部/脖颈
+    /// children up and left relative to the body. When OFF, the legacy centroid path is unchanged.
+    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool YES`.
+    private static var useAttachmentBindAnchor: Bool {
+        let key = "WPEPuppetAttachmentBindAnchor"
         if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
            suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
@@ -144,20 +145,29 @@ struct WPERenderGraphBuilder: Sendable {
         parentGeometry: WPERenderLayerGeometry,
         parentModel: WPEPuppetModel
     ) -> SIMD3<Double>? {
-        guard let attachment = parentModel.attachments.first(where: { $0.name == attachmentName }),
-              let joint = skinnedJoint(of: attachment.boneIndex, in: parentModel.meshes) else {
+        guard let attachment = parentModel.attachments.first(where: { $0.name == attachmentName }) else {
             return nil
         }
-        // `joint` is the weighted centroid of the mesh vertices skinned to the anchor bone — i.e. the
-        // bone's real position in the MDLV mesh frame (model y is UP). The MDLS bone rawMatrix values
-        // are PARENT-LOCAL skin transforms (not mesh-frame joints), and the MDLS0004 tail carries no
-        // usable joint table (its matrices match no extraction of the skin centroids), so the skin
-        // centroid is the data-grounded anchor — verified on-device against head/chest placement.
-        // The puppet mesh draws model→scene with no Y flip, so map the joint with a +Y sign; subtract
+        // Anchor point in the parent's MDLV mesh frame (model y is UP). The data-grounded anchor is the
+        // bone's hierarchy-composed bind-world transform with the MDAT bind matrix applied —
+        // `translation(bindWorld[bone] · attachment.matrix)`. The legacy skin-weighted vertex centroid
+        // is a mesh-region statistic that sits ABOVE the true joint for a head bone, so it shifted every
+        // 头部/胸部/脖颈 child up and left relative to the body (Windows-trace residual ~−90px x / ~−210px y).
+        // Gated while validating; the centroid stays as the fallback when bind data is unavailable.
+        let anchorPoint: SIMD2<Double>
+        if useAttachmentBindAnchor,
+           let bindAnchor = bindAnchorPoint(for: attachment, bones: parentModel.bones) {
+            anchorPoint = bindAnchor
+        } else if let joint = skinnedJoint(of: attachment.boneIndex, in: parentModel.meshes) {
+            anchorPoint = joint
+        } else {
+            return nil
+        }
+        // The puppet mesh draws model→scene with no Y flip, so map the anchor with a +Y sign; subtract
         // the parent mesh center so the offset is in the same composite frame the vertex shader uses.
         let local = SIMD2<Double>(
-            abs(parentGeometry.scale.x) * (joint.x - parentGeometry.puppetMeshCenter.x),
-            abs(parentGeometry.scale.y) * (joint.y - parentGeometry.puppetMeshCenter.y)
+            abs(parentGeometry.scale.x) * (anchorPoint.x - parentGeometry.puppetMeshCenter.x),
+            abs(parentGeometry.scale.y) * (anchorPoint.y - parentGeometry.puppetMeshCenter.y)
         )
         let cosine = cos(parentGeometry.angles.z)
         let sine = sin(parentGeometry.angles.z)
@@ -193,6 +203,78 @@ struct WPERenderGraphBuilder: Sendable {
         }
         guard sumW > 0 else { return nil }
         return SIMD2<Double>(sumX / sumW, sumY / sumW)
+    }
+
+    /// The attachment's anchor point in the parent MDLV mesh frame: the translation of
+    /// `bindWorld[boneIndex] · attachment.matrix`, where `bindWorld` composes the bone's parent chain.
+    /// This is the WPE attachment pivot (not the skin-region centroid). Returns nil if the bone or its
+    /// bind transform is missing/non-finite.
+    private static func bindAnchorPoint(
+        for attachment: WPEPuppetAttachment,
+        bones: [WPEPuppetBone]
+    ) -> SIMD2<Double>? {
+        guard let boneWorld = bindWorldMatrices(bones: bones)[attachment.boneIndex] else { return nil }
+        let anchor = boneWorld * attachment.matrix
+        let p = anchor.columns.3
+        guard p.x.isFinite, p.y.isFinite else { return nil }
+        return SIMD2<Double>(Double(p.x), Double(p.y))
+    }
+
+    /// Composes each MDLS bone's parent-local `rawMatrix` down the hierarchy (`world(parent)·local`)
+    /// into a model-space bind-world matrix, keyed by bone index. Roots use their local matrix directly.
+    /// A missing/unparseable matrix, a missing parent, or a cycle leaves that bone UNRESOLVED (absent
+    /// from the result) so `bindAnchorPoint` returns nil and the caller falls back to the legacy
+    /// centroid anchor instead of adopting a finite-but-wrong identity-derived anchor.
+    ///
+    /// NOTE on the composition (do not naively "simplify" to raw): `WPEMdlParser.worldMatrices(bind:)`
+    /// uses `rawMatrix` DIRECTLY as the skinning-palette bind-world. For the head attachment anchor,
+    /// however, the raw head-bone translation is implausible (≈(221,323)) and did NOT match Windows
+    /// ground truth, while the hierarchy-composed value (≈(686,800)) · MDAT did — and is on-device
+    /// confirmed for 3719111841. So the attachment path empirically needs composition. This tension
+    /// with the palette bind path is unresolved across the corpus → keep this opt-in (default OFF) and
+    /// validate on a non-root-anchor rig before widening. FOLLOW-UP: the executor's animated follow
+    /// (`layerApplyingAttachmentFollow`) still measures its bind reference from the RAW matrix, so when
+    /// skinning is re-enabled it must switch to this composed bind-world to stay consistent with the
+    /// static placement here.
+    private static func bindWorldMatrices(bones: [WPEPuppetBone]) -> [Int: simd_float4x4] {
+        let localByIndex = Dictionary(
+            bones.compactMap { bone -> (Int, simd_float4x4)? in
+                WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix).map { (bone.index, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let parentByIndex = Dictionary(
+            bones.map { ($0.index, $0.parentIndex) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var cache: [Int: simd_float4x4] = [:]
+        var visiting: Set<Int> = []
+        var invalid: Set<Int> = []
+        func world(_ index: Int) -> simd_float4x4? {
+            if let cached = cache[index] { return cached }
+            guard !invalid.contains(index),
+                  !visiting.contains(index),
+                  let local = localByIndex[index] else {
+                invalid.insert(index)
+                return nil
+            }
+            visiting.insert(index)
+            defer { visiting.remove(index) }
+            let resolved: simd_float4x4
+            if let parent = parentByIndex[index] ?? nil, parent != index {
+                guard let parentWorld = world(parent) else {
+                    invalid.insert(index)
+                    return nil
+                }
+                resolved = parentWorld * local
+            } else {
+                resolved = local
+            }
+            cache[index] = resolved
+            return resolved
+        }
+        for bone in bones { _ = world(bone.index) }
+        return cache
     }
 
     private static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
@@ -331,11 +413,7 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let puppetPlacement = model.puppetPlacement(
-            for: object,
-            sceneSize: sceneSize,
-            staticPlacementFixEnabled: Self.puppetStaticPlacementFixEnabled
-        )
+        let puppetPlacement = model.puppetPlacement(for: object, sceneSize: sceneSize)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -516,9 +594,7 @@ struct WPERenderGraphBuilder: Sendable {
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
             puppetPath: puppetPath,
-            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:)),
-            autosize: parseBool(dict["autosize"]) ?? false,
-            cropOffset: parseVector2(dict["cropoffset"])
+            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:))
         )
     }
 
@@ -757,24 +833,6 @@ struct WPERenderGraphBuilder: Sendable {
         WPEValueParser.bool(raw)
     }
 
-    /// Parses a 2-component vector from a model-JSON value: a `"x y"` / `"x,y"`
-    /// string, a `[x, y]` array, or a `{ "value": ... }` envelope wrapping either.
-    private func parseVector2(_ raw: Any?) -> SIMD2<Double>? {
-        let resolved = (raw as? [String: Any])?["value"] ?? raw
-        if let string = resolved as? String {
-            let parts = string
-                .split(whereSeparator: { " \t\n,".contains($0) })
-                .compactMap { Double($0) }
-            guard parts.count >= 2 else { return nil }
-            return SIMD2<Double>(parts[0], parts[1])
-        }
-        if let array = resolved as? [Any], array.count >= 2,
-           let x = parseDouble(array[0]), let y = parseDouble(array[1]) {
-            return SIMD2<Double>(x, y)
-        }
-        return nil
-    }
-
     private func parseInt(_ raw: Any?) -> Int? {
         WPEValueParser.int(raw, boolAsNumber: true)
     }
@@ -832,21 +890,15 @@ private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
     let puppetBounds: WPEPuppetBounds?
-    let autosize: Bool
-    let cropOffset: SIMD2<Double>?
 
     init(
         materialPath: String?,
         puppetPath: String?,
-        puppetBounds: WPEPuppetBounds? = nil,
-        autosize: Bool = false,
-        cropOffset: SIMD2<Double>? = nil
+        puppetBounds: WPEPuppetBounds? = nil
     ) {
         self.materialPath = materialPath
         self.puppetPath = puppetPath
         self.puppetBounds = puppetBounds
-        self.autosize = autosize
-        self.cropOffset = cropOffset
     }
 
     /// Re-place a puppet whose raw MDLV mesh bbox is cropped by the declared
@@ -855,11 +907,7 @@ private struct WPEModelDescriptor {
     /// recomputes the origin so the mesh-bbox center keeps its old on-screen
     /// position. Returns nil (no-op) for non-puppets and puppets that already
     /// fit — protecting every working puppet/image layer.
-    func puppetPlacement(
-        for object: WPESceneImageObject,
-        sceneSize: CGSize,
-        staticPlacementFixEnabled: Bool = false
-    ) -> WPEPuppetPlacement? {
+    func puppetPlacement(for object: WPESceneImageObject, sceneSize: CGSize) -> WPEPuppetPlacement? {
         guard puppetPath != nil,
               let puppetBounds,
               let objectSize = object.size else {
@@ -869,16 +917,6 @@ private struct WPEModelDescriptor {
         let objectWidth = Double(objectSize.width)
         let objectHeight = Double(objectSize.height)
         guard objectWidth > 0, objectHeight > 0 else { return nil }
-
-        if staticPlacementFixEnabled,
-           let cropPlacement = cropOffsetPlacement(
-               for: object,
-               objectSize: objectSize,
-               objectWidth: objectWidth,
-               objectHeight: objectHeight
-           ) {
-            return cropPlacement
-        }
 
         let localMinX = objectWidth * 0.5 + puppetBounds.min.x
         let localMaxX = objectWidth * 0.5 + puppetBounds.max.x
@@ -938,39 +976,6 @@ private struct WPEModelDescriptor {
         )
     }
 
-    /// Crop-frame placement for an autosize/cropoffset puppet: keeps the authored
-    /// object-sized composite and shifts the mesh center by the crop offset, mapping
-    /// uncropped-source-frame MDLV vertices back into the object frame (no resize, so
-    /// no per-part stretch). Self-guards: only adopted when it lands more mesh inside
-    /// the object rectangle than the legacy centered mesh, leaving already-object-local
-    /// puppets untouched. Returns nil when not applicable.
-    private func cropOffsetPlacement(
-        for object: WPESceneImageObject,
-        objectSize: CGSize,
-        objectWidth: Double,
-        objectHeight: Double
-    ) -> WPEPuppetPlacement? {
-        guard autosize, let cropOffset, let puppetBounds else { return nil }
-
-        let cropMeshCenter = SIMD2<Double>(-cropOffset.x, cropOffset.y - objectHeight)
-
-        let defaultOverlap = WPEPuppetLocalBox(
-            bounds: puppetBounds, meshCenter: .zero,
-            objectWidth: objectWidth, objectHeight: objectHeight
-        ).overlapArea(objectWidth: objectWidth, objectHeight: objectHeight)
-        let cropOverlap = WPEPuppetLocalBox(
-            bounds: puppetBounds, meshCenter: cropMeshCenter,
-            objectWidth: objectWidth, objectHeight: objectHeight
-        ).overlapArea(objectWidth: objectWidth, objectHeight: objectHeight)
-        guard cropOverlap > defaultOverlap + 1 else { return nil }
-
-        return WPEPuppetPlacement(
-            origin: object.origin,
-            size: objectSize,
-            meshCenter: cropMeshCenter
-        )
-    }
-
     private func finiteMagnitude(_ value: Double, fallback: Double) -> Double {
         let magnitude = abs(value)
         return magnitude.isFinite && magnitude > 0 ? magnitude : fallback
@@ -1008,29 +1013,6 @@ private struct WPEPuppetPlacement {
     let origin: SIMD3<Double>
     let size: CGSize
     let meshCenter: SIMD2<Double>
-}
-
-/// The puppet mesh bbox projected into the authored object pixel frame for a given
-/// mesh center — used by `cropOffsetPlacement` to compare how much of the mesh lands
-/// inside the object rectangle under the legacy vs crop-offset interpretation.
-private struct WPEPuppetLocalBox {
-    let minX: Double
-    let minY: Double
-    let maxX: Double
-    let maxY: Double
-
-    init(bounds: WPEPuppetBounds, meshCenter: SIMD2<Double>, objectWidth: Double, objectHeight: Double) {
-        minX = objectWidth * 0.5 + bounds.min.x - meshCenter.x
-        maxX = objectWidth * 0.5 + bounds.max.x - meshCenter.x
-        minY = objectHeight * 0.5 - bounds.max.y + meshCenter.y
-        maxY = objectHeight * 0.5 - bounds.min.y + meshCenter.y
-    }
-
-    func overlapArea(objectWidth: Double, objectHeight: Double) -> Double {
-        let width = max(min(maxX, objectWidth) - max(minX, 0), 0)
-        let height = max(min(maxY, objectHeight) - max(minY, 0), 0)
-        return width * height
-    }
 }
 
 private struct WPEPuppetBounds {
