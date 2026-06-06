@@ -124,7 +124,7 @@ struct WorkshopBrowseFilterRibbon: View {
                         .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 2)
                         .background(Color.accentColor, in: Capsule())
                 }
                 Image(systemName: isFilterPanelExpanded ? "chevron.up" : "chevron.down")

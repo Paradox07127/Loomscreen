@@ -39,7 +39,7 @@ struct VideoInformationOverlay: View {
                         Text(verbatim: badge.displayLabel)
                             .font(DesignTokens.Typography.badge)
                             .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
+                            .padding(.vertical, 2)
                             .background(Color.white.opacity(0.18), in: Capsule())
                     }
                 }

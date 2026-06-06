@@ -387,7 +387,7 @@ struct WorkshopInstalledView: View {
                         .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 2)
                         .background(Color.accentColor, in: Capsule())
                 }
                 Image(systemName: showFilters ? "chevron.up" : "chevron.down")
