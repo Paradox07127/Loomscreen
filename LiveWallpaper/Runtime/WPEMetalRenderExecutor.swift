@@ -1809,6 +1809,10 @@ final class WPEMetalRenderExecutor {
               let model = puppetModel else {
             return false
         }
+        // A clip-composite puppet already warped (and clipped) its mesh at material time, so its layer
+        // composite is in final screen space — re-warping here would double-apply the deformation. Let it
+        // fall through to the plain rectangular copy-to-scene instead.
+        guard !puppetUsesClipComposite(layer: layer, model: model) else { return false }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard !meshes.isEmpty else { return false }
         guard WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "copy" else {
@@ -2077,6 +2081,16 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    /// True when this puppet renders via the clip composite (clip flag on, has a clip mask, and the
+    /// first→second part convention is geometrically confirmed). Such a puppet warps + clips at material
+    /// time, so the deferred-warp scene composite must NOT re-warp it.
+    private func puppetUsesClipComposite(layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
+        guard Self.puppetClipCompositeEnabled, model.clipMaskName != nil else { return false }
+        let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
+        guard meshes.count == 1, let mesh = meshes.first else { return false }
+        return !resolvePuppetClipPairs(for: layer, model: model, mesh: mesh).isEmpty
+    }
+
     /// Cached geometry-driven clip-role detection (see `Self.detectClipPairs`). Keyed by puppet path.
     private func resolvePuppetClipPairs(
         for layer: WPERenderLayer,
@@ -2271,23 +2285,13 @@ final class WPEMetalRenderExecutor {
         commandBuffer: MTLCommandBuffer,
         frameState: inout WPEMetalFrameState
     ) throws -> Bool {
-        // `WPEPuppetClipComposite` and `WPEPuppetDeferMeshWarp` are mutually exclusive puppet render
-        // modes: the clip composite must draw the warped mesh per-part at material time, while the
-        // deferred warp pushes the warp to the final scene composite. Warn once when both are set so the
-        // conflict is never silent (the clip path no-ops below and the eye renders without occlusion).
-        if Self.deferPuppetMeshWarp,
-           (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil,
-           let dpath = layer.puppetPath, loggedClipActivation.insert("conflict:" + dpath).inserted {
-            Logger.warning(
-                "[WPE clip] \(dpath): WPEPuppetClipComposite is ON but WPEPuppetDeferMeshWarp is also ON — "
-                    + "these are mutually exclusive; clip composite is skipped. Disable deferred warp: "
-                    + "`defaults write Taijia.LiveWallpaper WPEPuppetDeferMeshWarp -bool NO`.",
-                category: .wpeRender
-            )
-        }
+        // The clip composite draws the warped mesh per-part at material time, so it runs even when
+        // WPEPuppetDeferMeshWarp is globally on: a clip puppet bypasses the deferral locally (the
+        // deferred scene-composite re-warp is suppressed for it in encodePuppetSceneCompositePassIfNeeded),
+        // so deferred warp can stay on for non-clip puppets (e.g. 3461168300's head effect) without
+        // breaking clip eyes (e.g. 3719111841).
         guard case .material = pass.pass.phase,
               case .layerComposite = pass.pass.target,
-              !Self.deferPuppetMeshWarp,
               let model = puppetModel else {
             return false
         }
