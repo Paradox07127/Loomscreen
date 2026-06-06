@@ -28,6 +28,15 @@ public enum DesignTokens {
             public static let caution = Color(nsColor: .systemYellow)
             public static let danger = Color(nsColor: .systemRed)
         }
+
+        /// Muted ring-gauge palette (CPU/GPU/RAM/power dashboards). Intentionally
+        /// lower-saturation than `Status.*` so always-busy usage rings read as
+        /// calm indicators rather than constant alarms.
+        public enum Gauge {
+            public static let low = Color(red: 0.42, green: 0.67, blue: 0.51)
+            public static let medium = Color(red: 0.86, green: 0.66, blue: 0.33)
+            public static let high = Color(red: 0.84, green: 0.45, blue: 0.42)
+        }
     }
 
     /// Semantic type scale. Prefer Dynamic Type styles so text auto-scales with

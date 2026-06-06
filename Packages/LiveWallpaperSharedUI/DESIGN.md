@@ -47,6 +47,7 @@ System `NSColor`-backed → automatic light/dark + Increase Contrast.
 | `Status.warning` | `.systemOrange` | "won't run" blockers |
 | `Status.caution` | `.systemYellow` | "needs deps" / pending |
 | `Status.danger` | `.systemRed` | errors, destructive |
+| `Gauge.low/medium/high` | muted green/amber/red | ring-gauge dashboards (calmer than Status) |
 
 ## Spacing & corners (existing)
 
