@@ -839,6 +839,36 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[2].binds[0] == .fbo("blur_start_2"))
     }
 
+    @Test("Alpha-0 layer composites to scene only when it carries a visible effect")
+    func alphaZeroCompositesWhenItHasAVisibleEffect() {
+        func object(alpha: Double, effectVisible: Bool?) -> WPESceneImageObject {
+            let effects = effectVisible.map {
+                [WPESceneImageEffect(
+                    id: "e", name: "audioline",
+                    fileRelativePath: "effects/workshop/3578699527/audioline/effect.json",
+                    visible: $0, passOverrides: []
+                )]
+            } ?? []
+            return WPESceneImageObject(
+                id: "1", name: "音频线",
+                imageRelativePath: "models/util/solidlayer_depthtest.json",
+                materialRelativePath: nil,
+                origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0), visible: true, alpha: alpha,
+                color: SIMD3<Double>(1, 1, 1), brightness: 1, blendMode: .normal,
+                alignment: .center, size: nil, effects: effects,
+                animationLayers: [], parallaxDepth: SIMD2<Double>(0, 0)
+            )
+        }
+        // The 3719111841 audio-line case: alpha 0 + a visible effect → must composite.
+        #expect(WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: true), liveVisibilityIDs: []))
+        // Alpha 0 with no effect (or an invisible one) contributes nothing → dropped.
+        #expect(!WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: nil), liveVisibilityIDs: []))
+        #expect(!WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: false), liveVisibilityIDs: []))
+        // Opaque layers are unaffected.
+        #expect(WPERenderGraphBuilder.compositesToScene(object(alpha: 1, effectVisible: nil), liveVisibilityIDs: []))
+    }
+
     private func plainImageObject(id: String) -> WPESceneImageObject {
         WPESceneImageObject(
             id: id,

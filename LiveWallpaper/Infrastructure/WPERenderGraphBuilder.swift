@@ -334,8 +334,16 @@ struct WPERenderGraphBuilder: Sendable {
         return cache
     }
 
-    private static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
-        guard object.alpha > 0.001 || object.alphaAnimation != nil else { return false }
+    static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
+        // A fully-transparent base layer with no alpha animation contributes
+        // nothing on its own — EXCEPT when it carries a visible effect, which
+        // draws its own content with its own alpha (e.g. 3719111841's audio
+        // spectrum line: an alpha-0 solidlayer whose `audioline` effect renders
+        // the visible curve). Dropping such layers hid the entire effect.
+        let hasVisibleEffect = object.effects.contains { $0.visible }
+        guard object.alpha > 0.001 || object.alphaAnimation != nil || hasVisibleEffect else {
+            return false
+        }
         return object.visible || liveVisibilityIDs.contains(object.id)
     }
 
