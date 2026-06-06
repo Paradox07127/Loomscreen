@@ -111,7 +111,7 @@ struct WorkshopBrowsePane: View {
                     inspectorPlaceholder
                 }
             }
-            .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
+            .inspectorColumnWidth(min: 280, ideal: 320, max: 380)
         }
     }
 
