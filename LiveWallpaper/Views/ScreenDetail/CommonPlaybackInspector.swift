@@ -151,7 +151,7 @@ struct CommonPlaybackInspector: View {
                     .accessibilityValue(audioAccessibilityValue(isMuted: isMuted, percent: percent))
 
                 audioLevelLabel(isMuted: isMuted, percent: percent)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
                     .monospacedDigit()

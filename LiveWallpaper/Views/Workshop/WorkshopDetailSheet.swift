@@ -197,7 +197,7 @@ struct WorkshopInspectorContent: View {
                     }
                 }
                 Text(verbatim: stars.formatted(.number.precision(.fractionLength(1))))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .ignore)
@@ -464,7 +464,7 @@ struct WorkshopInspectorContent: View {
                 Text(verbatim: Self.byteFormatter.string(fromByteCount: Int64(clamping: size)))
             }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(DesignTokens.Typography.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -473,7 +473,7 @@ struct WorkshopInspectorContent: View {
     private var statusBadge: some View {
         if item.isBanned {
             Label("Unavailable — removed or hidden on Steam", systemImage: "xmark.octagon.fill")
-                .font(.system(size: 11, weight: .semibold))
+                .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -496,7 +496,7 @@ struct WorkshopInspectorContent: View {
         if let onSelectTag {
             Button { onSelectTag(tag) } label: {
                 Text(tag)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(DesignTokens.Typography.badge)
                     .foregroundStyle(Color.accentColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -506,7 +506,7 @@ struct WorkshopInspectorContent: View {
             .help(Text("Browse items tagged \(tag)"))
         } else {
             Text(tag)
-                .font(.system(size: 10, weight: .medium))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -580,7 +580,7 @@ struct WorkshopApplyTargetPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Apply to")
-                .font(.system(size: 11, weight: .semibold))
+                .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
@@ -652,7 +652,7 @@ struct CollapsibleDescription: View {
 
             if isExpandable {
                 Text(isExpanded ? "Show less" : "Show more")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(Color.accentColor)
             }
         }

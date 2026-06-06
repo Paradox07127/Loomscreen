@@ -78,9 +78,9 @@ struct AnimatedGIFThumbnail: View {
                 Image(systemName: "eye.slash.fill")
                     .font(.system(size: 22, weight: .semibold))
                 Text("Mature", comment: "Spoiler cover over an adult-rated Workshop thumbnail.")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(DesignTokens.Typography.captionEmphasized)
                 Text("Click to reveal", comment: "Hint on the spoiler cover over an adult-rated Workshop thumbnail.")
-                    .font(.system(size: 9.5, weight: .medium))
+                    .font(DesignTokens.Typography.badge)
                     .opacity(0.85)
             }
             .foregroundStyle(.white)
@@ -119,7 +119,7 @@ struct AnimatedGIFThumbnail: View {
             Image(systemName: "play.fill")
                 .font(.system(size: 8, weight: .bold))
             Text("Playing", comment: "Badge on a Workshop thumbnail while its animated preview is playing.")
-                .font(.system(size: 10, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 7)

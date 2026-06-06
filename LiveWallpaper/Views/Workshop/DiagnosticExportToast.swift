@@ -28,7 +28,7 @@ struct DiagnosticExportToast: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Diagnostic copied")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(DesignTokens.Typography.bodyEmphasized)
                         Text("Paste into a GitHub issue — secrets are already redacted.")
                             .font(.caption)
                             .foregroundStyle(.secondary)

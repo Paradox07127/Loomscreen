@@ -127,7 +127,7 @@ struct WPESceneCustomSettingsCard: View {
                     .controlSize(.small)
 
                     Text(verbatim: formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(DesignTokens.Typography.metric)
                         .foregroundStyle(.secondary)
                         .frame(width: 44, alignment: .trailing)
                         .monospacedDigit()
@@ -139,7 +139,7 @@ struct WPESceneCustomSettingsCard: View {
             WPEProjectSettingRow(icon: "list.bullet.rectangle", iconColor: .purple, title: property.displayText) {
                 if property.options.isEmpty {
                     Text(verbatim: currentValue.stringValue)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("", selection: valueBinding(for: property)) {

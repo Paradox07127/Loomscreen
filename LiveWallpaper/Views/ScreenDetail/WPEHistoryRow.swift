@@ -75,7 +75,7 @@ struct WPEHistoryRow: View {
             .overlay(alignment: .topTrailing) {
                 if let badge = compatibilityBadge {
                     Text(badge.titleKey)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(DesignTokens.Typography.badge)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .foregroundStyle(.white)
@@ -93,7 +93,7 @@ struct WPEHistoryRow: View {
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 Text(verbatim: entry.origin.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                     .lineLimit(2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -124,7 +124,7 @@ struct WPEHistoryRow: View {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 8, weight: .bold))
             Text("Update")
-                .font(.system(size: 9, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -139,7 +139,7 @@ struct WPEHistoryRow: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 9, weight: .bold))
             Text("In use")
-                .font(.system(size: 9, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)

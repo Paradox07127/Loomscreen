@@ -129,7 +129,7 @@ struct AerialThumbnailCard: View {
             HStack(spacing: 4) {
                 ForEach(badges, id: \.self) { badge in
                     Text(verbatim: badge.displayLabel)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)

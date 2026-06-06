@@ -109,7 +109,7 @@ struct MenuBarContent: View {
         VStack(spacing: 0) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
             } else {
@@ -216,7 +216,7 @@ struct MenuBarContent: View {
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
         HStack(spacing: 4) {
             Text(verbatim: label)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -243,7 +243,7 @@ struct MenuBarContent: View {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 13, weight: .semibold))
                     Text("Manage")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
@@ -589,7 +589,7 @@ private struct InlineLabelSwitchStyle: ToggleStyle {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
-                .font(.system(size: 10, weight: .bold))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.white.opacity(configuration.isOn ? 0.95 : 0.70))
 
                 Circle()
@@ -634,11 +634,11 @@ private struct MenuBarDisplayRow: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: title)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(DesignTokens.Typography.bodyEmphasized)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Text(subtitle)
-                                .font(.system(size: 11))
+                                .font(DesignTokens.Typography.caption)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -738,7 +738,7 @@ private struct VolumeControlRow: View {
                 .accessibilityValue(Text("\(volumePercent(liveValue)) percent"))
 
             Text(verbatim: "\(volumePercent(liveValue))%")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(DesignTokens.Typography.metric)
                 .foregroundStyle(.secondary)
                 .frame(width: 38, alignment: .trailing)
                 .monospacedDigit()

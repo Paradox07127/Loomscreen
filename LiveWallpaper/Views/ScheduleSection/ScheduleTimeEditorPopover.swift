@@ -42,7 +42,7 @@ struct ScheduleTimeEditorPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Edit Time Range")
-                .font(.system(size: 13, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
 
             VStack(spacing: 8) {
                 pickerRow(
@@ -63,12 +63,12 @@ struct ScheduleTimeEditorPopover: View {
 
             if let banner = conflictBanner {
                 Label(banner, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             } else if isZeroLength {
                 Label("Start and end times must differ.", systemImage: "exclamationmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.orange)
             }
 
@@ -108,7 +108,7 @@ struct ScheduleTimeEditorPopover: View {
     ) -> some View {
         HStack {
             label
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .leading)
             Spacer()

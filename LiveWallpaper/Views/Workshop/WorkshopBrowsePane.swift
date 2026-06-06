@@ -216,7 +216,7 @@ struct WorkshopBrowsePane: View {
                 HStack(spacing: 4) {
                     if viewModel.isPaging { ProgressView().controlSize(.small) }
                     Text("Page")
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
                     TextField("", text: $pageJumpText)
                         .frame(width: 46)
@@ -227,8 +227,7 @@ struct WorkshopBrowsePane: View {
                         .onSubmit { jumpToTypedPage() }
                     if let total = viewModel.totalPages {
                         Text("of \(total)")
-                            .font(.system(size: 12))
-                            .monospacedDigit()
+                            .font(DesignTokens.Typography.metric)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -279,7 +278,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
             Text("Set your Steam Web API key to browse online.")
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
             Text(verbatim: WorkshopAPIKeyOwnershipInfo.passwordReassurance)
                 .font(.caption)
@@ -303,7 +302,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
             Text("Select a wallpaper to see details.")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -317,7 +316,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
             Text(emptyMessage)
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if hasActiveFilters {
@@ -336,7 +335,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 30))
                 .foregroundStyle(.tertiary)
             Text("Every item on this page is already in your library.")
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Show downloaded items") { hidesDownloadedPref = false }
@@ -353,7 +352,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 36))
                 .foregroundStyle(.orange)
             Text(message(for: error))
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .multilineTextAlignment(.center)
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Button("Retry") { Task { await viewModel.reload() } }
@@ -415,7 +414,7 @@ struct WorkshopBrowsePane: View {
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
                 label
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }

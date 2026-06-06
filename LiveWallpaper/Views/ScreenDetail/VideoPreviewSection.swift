@@ -74,7 +74,7 @@ struct VideoPreviewSection: View {
 
             HStack {
                 Text(FormatUtils.formatDuration(previewController.currentPosition))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.white)
 
                 Spacer()
@@ -87,7 +87,7 @@ struct VideoPreviewSection: View {
                 Spacer()
 
                 Text(FormatUtils.formatDuration(previewController.duration))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.white)
             }
             .padding(.horizontal, 28)

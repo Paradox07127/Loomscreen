@@ -37,7 +37,7 @@ struct VideoInformationOverlay: View {
                 HStack(spacing: 4) {
                     ForEach(formatBadges, id: \.self) { badge in
                         Text(verbatim: badge.displayLabel)
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .font(DesignTokens.Typography.badge)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Color.white.opacity(0.18), in: Capsule())
@@ -63,7 +63,7 @@ struct VideoInformationOverlay: View {
                 }
             }
         }
-        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .font(DesignTokens.Typography.metric)
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

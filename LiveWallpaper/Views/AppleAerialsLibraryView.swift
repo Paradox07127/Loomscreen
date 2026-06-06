@@ -193,7 +193,7 @@ struct AppleAerialsLibraryView: View {
                             ProgressView()
                                 .controlSize(.small)
                             Text("Scanning library…")
-                                .font(.system(size: 12))
+                                .font(DesignTokens.Typography.body)
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 4)

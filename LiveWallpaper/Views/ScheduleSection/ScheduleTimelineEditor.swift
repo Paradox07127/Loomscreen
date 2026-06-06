@@ -119,7 +119,7 @@ struct ScheduleTimelineEditor: View {
                 let alignment: HorizontalAlignment =
                     (hour == 0) ? .leading : (hour == 24 ? .trailing : .center)
                 Text(verbatim: ScheduleTimeFormatter.hourLabel(hour))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(DesignTokens.Typography.badge)
                     .foregroundStyle(.secondary)
                     .frame(
                         width: 50,

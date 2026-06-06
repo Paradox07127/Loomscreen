@@ -281,7 +281,7 @@ struct ScreenDetailInspectorPanel: View {
                     .accessibilityLabel(Text("Particle density"))
                     .accessibilityValue(String(format: "%.1f×", draft.particleDensity))
                 Text(String(format: "%.1f", draft.particleDensity))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 28, alignment: .trailing)
             }
@@ -324,7 +324,7 @@ struct ScreenDetailInspectorPanel: View {
             Spacer()
             Button(action: onResetDisplaySettings) {
                 Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(DesignTokens.Typography.body)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
             }

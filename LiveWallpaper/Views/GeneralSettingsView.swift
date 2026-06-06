@@ -720,7 +720,7 @@ struct GeneralSettingsView: View {
 
             VStack(spacing: 4) {
                 Text(verbatim: BundleIdentity.productDisplayName)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(DesignTokens.Typography.hero)
                     .textSelection(.enabled)
 
                 HStack(spacing: 6) {

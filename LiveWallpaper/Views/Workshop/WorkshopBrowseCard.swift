@@ -126,7 +126,7 @@ struct WorkshopBrowseCard: View {
 
     private func resolutionPill(_ label: String) -> some View {
         Text(verbatim: label)
-            .font(.system(size: 9, weight: .bold))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -139,7 +139,7 @@ struct WorkshopBrowseCard: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 9, weight: .bold))
             Text("In Library")
-                .font(.system(size: 9, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -153,7 +153,7 @@ struct WorkshopBrowseCard: View {
             Image(systemName: "star.fill")
                 .font(.system(size: 9, weight: .bold))
             Text(verbatim: rating.formatted(.number.precision(.fractionLength(1))))
-                .font(.system(size: 10, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -172,7 +172,7 @@ struct WorkshopBrowseCard: View {
     private var textInfo: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 // Always reserve two lines so 1- and 2-line titles produce
                 // equal-height cards (no ragged grid). Long titles truncate;
                 // the card's `.help(item.title)` shows the full text on hover.
@@ -187,7 +187,7 @@ struct WorkshopBrowseCard: View {
                 Spacer(minLength: 0)
                 if !metaTrailing.isEmpty {
                     Text(verbatim: metaTrailing)
-                        .font(.system(size: 10.5))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -217,7 +217,7 @@ struct WorkshopBrowseCard: View {
                     .foregroundStyle(status.tint)
                     .imageScale(.small)
                 Text(verbatim: status.text)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(DesignTokens.Typography.captionEmphasized)
                     .foregroundStyle(status.tint)
             }
             .padding(.horizontal, 6)

@@ -20,7 +20,7 @@ struct WorkshopOnboardingSheet: View {
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
                 Text("Paste any Workshop URL and Loomscreen pulls the official preview, title, and creator. Downloading needs your own Steam account and SteamCMD — those are an opt-in setup step.")
-                    .font(.system(size: 13))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -69,7 +69,7 @@ struct WorkshopOnboardingSheet: View {
                     .foregroundStyle(Color.accentColor)
             }
             Text(verbatim: text)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

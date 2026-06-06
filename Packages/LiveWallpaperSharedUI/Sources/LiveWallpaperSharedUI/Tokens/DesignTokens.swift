@@ -57,8 +57,9 @@ public enum DesignTokens {
         /// Empty-state and onboarding display titles.
         public static let hero = Font.largeTitle
 
-        /// Numeric readouts (CPU/GPU/RAM gauges, fps) — tabular digits stop jitter.
-        public static let metric = Font.body.monospacedDigit()
+        /// Inline numeric readouts (slider values, %, fps, gauges) — caption-sized
+        /// with tabular digits so dense columns stay compact and don't jitter.
+        public static let metric = Font.caption.monospacedDigit()
 
         /// Monospaced code/path/command/ID text (not numeric metrics).
         public static let code = Font.system(.body, design: .monospaced)

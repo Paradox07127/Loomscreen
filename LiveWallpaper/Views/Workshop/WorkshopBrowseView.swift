@@ -39,7 +39,7 @@ struct WorkshopBrowseView: View {
         HStack(spacing: DesignTokens.Spacing.md) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Steam Workshop · Browse")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(DesignTokens.Typography.sectionTitle)
                 Text("Online metadata from Valve. Requires your own Steam Web API key.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

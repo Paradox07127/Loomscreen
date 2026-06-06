@@ -41,7 +41,7 @@ struct WorkshopDownloadToastHost: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: event.headline)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                 Text(verbatim: event.title)
                     .font(.caption)
                     .foregroundStyle(.secondary)

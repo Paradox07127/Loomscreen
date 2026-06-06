@@ -27,7 +27,7 @@ struct WorkshopSettingsView: View {
                 LabeledContent("Status") {
                     Label("Ready", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(Color.green)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                 }
             } header: {
                 Text("Steam Workshop")
@@ -41,13 +41,13 @@ struct WorkshopSettingsView: View {
             Section("Privacy") {
                 Label("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.", systemImage: "lock.shield")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                 Label("Workshop metadata is fetched directly from Valve over HTTPS. We never proxy through a Loomscreen server.", systemImage: "network")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                 Label("Workshop wallpapers run inside an isolated, ephemeral WKWebView with a strict Content-Security-Policy.", systemImage: "shield.lefthalf.filled")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
             }
 
             Section("Onboarding") {
@@ -206,7 +206,7 @@ struct WorkshopSettingsView: View {
             if engineAssets.isAuthorized {
                 Label(engineAssets.engineRootDisplayName ?? String(localized: "Linked", comment: "Engine-assets status when authorized but no display name."), systemImage: "checkmark.seal.fill")
                     .foregroundStyle(Color.green)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Button("Change") { Task { _ = await engineAssets.requestAccess() } }
@@ -249,11 +249,11 @@ struct WorkshopSettingsView: View {
         if workshopServices.hasWebAPIKey {
             Label("Set", systemImage: "checkmark.seal.fill")
                 .foregroundStyle(Color.green)
-                .font(.system(size: 12, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
         } else {
             Label("Not set", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.orange)
-                .font(.system(size: 12, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
         }
     }
 
@@ -278,7 +278,7 @@ struct WorkshopSettingsView: View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
         }
     }

@@ -44,7 +44,7 @@ struct WorkshopDoctorView: View {
     private var navigationBar: some View {
         HStack {
             Text("SteamCMD Doctor")
-                .font(.system(size: 14, weight: .semibold))
+                .font(DesignTokens.Typography.sectionTitle)
             Spacer()
             Button("Done") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -58,7 +58,7 @@ struct WorkshopDoctorView: View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text("Diagnostics")
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(DesignTokens.Typography.sectionTitle)
                 Text(lastRunText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -76,7 +76,7 @@ struct WorkshopDoctorView: View {
                 }
                 if greenCount + yellowCount + redCount == 0 {
                     Text("Not yet run")
-                        .font(.system(size: 11))
+                        .font(DesignTokens.Typography.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -156,7 +156,7 @@ struct WorkshopDoctorView: View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 Text("Downloads")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                 Text("Where SteamCMD saves Workshop items inside this app's container.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -332,7 +332,7 @@ private struct Card<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
             Text(title)
-                .font(.system(size: 12, weight: .bold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.6)
@@ -361,7 +361,7 @@ private struct BinaryPickerRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
             Label("Binary", systemImage: "terminal.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 .frame(width: 96, alignment: .leading)
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
@@ -376,10 +376,10 @@ private struct BinaryPickerRow: View {
                 } else {
                     Text("Not selected")
                         .italic()
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.tertiary)
                     Text("Auto-detect finds a Homebrew or tarball install; otherwise pick SteamCMD's executable or its `steamcmd.sh` wrapper.")
-                        .font(.system(size: 11))
+                        .font(DesignTokens.Typography.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -469,16 +469,16 @@ private struct WorkdirRadioRow: View {
             // app-managed folder); the two choices live under "Change location".
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Label("Working directory", systemImage: "folder")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
                 Spacer(minLength: 0)
                 Text(summaryText)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
             }
 
             if let currentPath, !selectionIsShared {
                 Text(currentPath)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.code)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -506,7 +506,7 @@ private struct WorkdirRadioRow: View {
                 .padding(.top, DesignTokens.Spacing.xs)
             } label: {
                 Text("Change location")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -528,7 +528,7 @@ private struct WorkdirRadioRow: View {
 
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                         .foregroundStyle(.primary)
                     Text(detail)
                         .font(.system(size: 11, design: isPath ? .monospaced : .default))
@@ -576,17 +576,17 @@ private struct UsernameRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
             Label("Username", systemImage: "person")
-                .font(.system(size: 12, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 .frame(width: 96, alignment: .leading)
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 TextField("Steam account name", text: $draft)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 280, alignment: .leading)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .onSubmit { commit() }
                 Text("A–Z, 0–9, underscore only. We never store your password.")
-                    .font(.system(size: 11))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -624,11 +624,11 @@ private struct ProbeRow: View {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: DesignTokens.Spacing.sm) {
                     Text(report.id.displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                     Spacer()
                     if let value = inlineValue {
                         Text(value)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(DesignTokens.Typography.code)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -637,7 +637,7 @@ private struct ProbeRow: View {
 
                 if let description = descriptionText {
                     Text(description)
-                        .font(.system(size: 11))
+                        .font(DesignTokens.Typography.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -795,7 +795,7 @@ private struct ProbeRow: View {
     private var rerunButton: some View {
         Button(action: { Task { await service.runProbe(report.id) } }) {
             Label("Re-run", systemImage: "arrow.clockwise")
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .labelStyle(.iconOnly)
         }
         .buttonStyle(.borderless)
@@ -825,7 +825,7 @@ private struct BadgeChip: View {
 
     var body: some View {
         Label(text, systemImage: systemImage)
-            .font(.system(size: 10, weight: .semibold))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)

@@ -102,11 +102,11 @@ struct EmptyStateGuideView: View {
                 .accessibilityHidden(true)
 
             Text("Choose a wallpaper type")
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .font(DesignTokens.Typography.pageTitle)
                 .accessibilityAddTraits(.isHeader)
 
             Text("Pick a type for this display. You can switch later.")
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 540)
@@ -120,7 +120,7 @@ struct EmptyStateGuideView: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
             Text("Or drag a video, HTML file, or folder here.")
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(.top, 2)
@@ -159,9 +159,9 @@ private struct GuideCard: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(DesignTokens.Typography.sectionTitle)
                     Text(subtitle)
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -170,7 +170,7 @@ private struct GuideCard: View {
                 Spacer(minLength: 2)
 
                 Label(actionTitle, systemImage: actionSystemImage)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(DesignTokens.Typography.body)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(

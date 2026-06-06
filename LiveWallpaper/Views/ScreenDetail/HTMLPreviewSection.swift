@@ -126,7 +126,7 @@ struct HTMLPreviewSection: View {
                     .font(.system(size: 36, weight: .light))
                     .foregroundStyle(.tertiary)
                 Text(title)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
             }
         }
@@ -308,7 +308,7 @@ struct HTMLInformationOverlay: View {
                 tag("CLICKS")
             }
         }
-        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .font(DesignTokens.Typography.code)
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -320,7 +320,7 @@ struct HTMLInformationOverlay: View {
 
     private func tag(_ text: String, background: Color = Color.white.opacity(0.18)) -> some View {
         Text(verbatim: text)
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(DesignTokens.Typography.badge)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(background, in: Capsule())

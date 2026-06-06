@@ -219,7 +219,7 @@ struct PlaylistSection: View {
         VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: autoRotateBinding) {
                 Text("Auto-rotate")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(DesignTokens.Typography.body)
             }
             .toggleStyle(.switch)
 
@@ -234,7 +234,7 @@ struct PlaylistSection: View {
                         .labelsHidden()
                         .accessibilityLabel(Text("Adjust rotation interval"))
                     Text("min")
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
                 }
             }

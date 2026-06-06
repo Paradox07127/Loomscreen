@@ -18,7 +18,7 @@ struct OnboardingDisplayPillRow: View {
             if screens.count > 1 {
                 HStack(spacing: 10) {
                     Text("Apply to:", comment: "Label preceding the onboarding display-selector pill rail.")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(DesignTokens.Typography.captionEmphasized)
                         .foregroundStyle(.secondary)
 
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -48,7 +48,7 @@ struct OnboardingDisplayPillRow: View {
                         .font(.system(size: 10, weight: .bold))
                 }
                 Text(verbatim: screen.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignTokens.Typography.caption)
                     .lineLimit(1)
             }
             .padding(.horizontal, 12)

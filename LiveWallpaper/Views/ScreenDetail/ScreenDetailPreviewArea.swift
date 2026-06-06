@@ -192,7 +192,7 @@ struct ScreenDetailPreviewArea: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text(speedDisplayLabel)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(DesignTokens.Typography.metric)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, alignment: .trailing)
         }
@@ -247,7 +247,7 @@ struct ScreenDetailPreviewArea: View {
                     .font(.system(size: 32, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
                     Text("Drop to use as wallpaper")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(DesignTokens.Typography.sectionTitle)
                         .foregroundStyle(.primary)
                     Text(dragHintSubtitle)
                         .font(.caption)

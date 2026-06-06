@@ -186,7 +186,7 @@ struct ScheduleSection: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.red)
             Text(verbatim: message)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -456,7 +456,7 @@ private struct DisableScheduleButton: View {
     var body: some View {
         Button(role: .destructive, action: action) {
             Text("Disable Schedule")
-                .font(.system(size: 12, weight: .medium))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(Color.red)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)

@@ -128,7 +128,7 @@ struct ScheduleSlotRow: View {
                 timePopoverShown = true
             } label: {
                 Text(verbatim: ScheduleTimeFormatter.rangeLabel(startHour: slot.startHour, endHour: slot.endHour))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .padding(.horizontal, 6)
@@ -163,13 +163,13 @@ struct ScheduleSlotRow: View {
     private var subtitleRow: some View {
         if let name = videoName {
             Text(verbatim: name)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         } else {
             Text("No video assigned")
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }

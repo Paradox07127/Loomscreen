@@ -26,7 +26,7 @@ styles auto-scale with accessibility; `badge` is the only fixed size.
 | `sectionTitle` | `.title3.semibold` | 15 | group & inspector headers | 14, 15, 16 |
 | `pageTitle` | `.title2` | 17 | page / nav / sheet titles | 17, 18, 20, 22 |
 | `hero` | `.largeTitle` | 26 | empty-state / onboarding | 24–56 |
-| `metric` | `.body.monospacedDigit()` | 13 | CPU/GPU/RAM gauges, fps (numeric) | numeric readouts |
+| `metric` | `.caption.monospacedDigit()` | 11 | inline numeric readouts: slider %, fps, gauges | numeric readouts |
 | `code` | `.body.monospaced` | 13 | paths, commands, IDs, technical text | monospaced text |
 
 ## Color — `DesignTokens.Colors`

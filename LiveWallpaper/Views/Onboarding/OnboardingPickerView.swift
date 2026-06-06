@@ -75,11 +75,11 @@ struct OnboardingPickerView: View {
     private var header: some View {
         VStack(spacing: 4) {
             Text(headerTitle)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(DesignTokens.Typography.pageTitle)
                 .accessibilityAddTraits(.isHeader)
 
             Text(headerSubtitle)
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
         }
         .multilineTextAlignment(.center)
@@ -153,7 +153,7 @@ struct OnboardingPickerView: View {
                     }
                 } label: {
                     Text("Pick Different Source", comment: "Secondary onboarding action that returns to the gallery.")
-                        .font(.system(size: 13))
+                        .font(DesignTokens.Typography.body)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -170,9 +170,9 @@ struct OnboardingPickerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(draft.headlineKey)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(DesignTokens.Typography.sectionTitle)
                 Text(verbatim: draft.detail)
-                    .font(.system(size: 11))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -190,7 +190,7 @@ struct OnboardingPickerView: View {
         if case .gallery = stage {
             Button(action: skip) {
                 Text("Skip for Now", comment: "Secondary onboarding action that defers wallpaper setup.")
-                    .font(.system(size: 13))
+                    .font(DesignTokens.Typography.body)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -349,9 +349,9 @@ private struct ActionRowCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(DesignTokens.Typography.sectionTitle)
                     Text(subtitle)
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)

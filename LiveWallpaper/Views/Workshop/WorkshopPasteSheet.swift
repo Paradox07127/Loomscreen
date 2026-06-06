@@ -45,7 +45,7 @@ struct WorkshopPasteSheet: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add from Steam Workshop")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(DesignTokens.Typography.sectionTitle)
                 Text("Paste Workshop URLs or item IDs — newline, comma, or space-separated.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -96,14 +96,14 @@ struct WorkshopPasteSheet: View {
                     set: { model.updateRawInput($0) }
                 ))
                 .focused($textFieldIsFocused)
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .scrollContentBackground(.hidden)
 
                 if model.rawInput.isEmpty {
                     Text("https://steamcommunity.com/sharedfiles/filedetails/?id=…\n3725117707\nsteam://url/CommunityFilePage/…")
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
@@ -124,7 +124,7 @@ struct WorkshopPasteSheet: View {
                     model.ingestFromRawInput()
                 } label: {
                     Label("Add to queue", systemImage: "plus.circle.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(model.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -151,7 +151,7 @@ struct WorkshopPasteSheet: View {
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
             Text("Paste a Workshop URL to get started.")
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
             Text("Loomscreen reads only the public metadata for each item. Your Steam credentials never enter LiveWallpaper.")
                 .font(.caption)

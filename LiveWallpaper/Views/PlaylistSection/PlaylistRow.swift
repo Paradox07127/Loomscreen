@@ -84,7 +84,7 @@ struct PlaylistRow: View {
                     .help(Text(verbatim: entry.name))
 
                 Text(verbatim: subtitleText)
-                    .font(.system(size: 11, weight: .regular))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)

@@ -15,11 +15,11 @@ struct OnboardingStepWelcome: View {
 
             VStack(spacing: 10) {
                 Text("Welcome to LiveWallpaper")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(DesignTokens.Typography.hero)
                     .accessibilityAddTraits(.isHeader)
 
                 Text("Bring your desktop to life with dynamic wallpapers — video, web pages, shaders, and more — across every display.")
-                    .font(.system(size: 14))
+                    .font(DesignTokens.Typography.sectionTitle)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)

@@ -34,7 +34,7 @@ struct SteamWebAPIKeyEntrySheet: View {
             disclosurePanel
             Toggle(isOn: $hasReadTOU) {
                 Text("I have read the Steam Web API Terms of Use.")
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
             }
             .toggleStyle(.checkbox)
             keyField
@@ -87,13 +87,13 @@ struct SteamWebAPIKeyEntrySheet: View {
     private var disclosurePanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text("Loomscreen uses Valve's Steam Web API to fetch Workshop metadata.")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
             Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .tint(Color.accentColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -163,7 +163,7 @@ struct SteamWebAPIKeyEntrySheet: View {
 
     private var dataFlowFooter: some View {
         Text("Stored on your Mac (Keychain, no iCloud sync) and sent directly to Valve's Steam Web API over HTTPS. Loomscreen never proxies your key.")
-            .font(.system(size: 10))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
