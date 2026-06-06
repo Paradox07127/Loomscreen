@@ -74,34 +74,44 @@ struct WPECameraParallaxTests {
         #expect(frame.pixelOffset(depth: SIMD2<Double>(0, 0), sceneSize: CGSize(width: 2560, height: 1440)) == SIMD2<Float>(0, 0))
     }
 
-    @Test("pixelOffset sign: X negated, Y kept; magnitude scales with depth")
+    @Test("pixelOffset sign: X negated, Y kept; magnitude scales with depth × gain")
     func pixelOffsetSign() {
+        // Default gain 0.5: uv = 0.2 * 1.0 * 0.5 = 0.1 → (-0.1*1000, 0.1*1000).
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.2, 0.2))
         let off = frame.pixelOffset(depth: SIMD2<Double>(1, 1), sceneSize: CGSize(width: 1000, height: 1000))
-        // uv = clamp(0.2 * 1.0 * 0.1, ±0.05) = 0.02 → (-0.02*1000, 0.02*1000)
-        #expect(abs(off.x - (-20)) < 1e-3)
-        #expect(abs(off.y - 20) < 1e-3)
+        #expect(abs(off.x - (-100)) < 1e-3)
+        #expect(abs(off.y - 100) < 1e-3)
     }
 
-    @Test("pixelOffset clamps to ±0.05 UV regardless of depth/offset")
+    @Test("pixelOffset clamps to ±maxShiftFraction regardless of depth/offset")
     func pixelOffsetClamp() {
+        // raw uv = 0.5 * 10 * 0.5 = 2.5 → clamps to 0.2 → (-200, ...).
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.5, -0.5))
         let off = frame.pixelOffset(depth: SIMD2<Double>(10, 10), sceneSize: CGSize(width: 1000, height: 1000))
-        // raw uv = 0.5 * 10 * 0.1 = 0.5 → clamps to 0.05 → (-50, ...)
-        #expect(abs(off.x - (-50)) < 1e-3)
-        #expect(abs(off.y - (-50)) < 1e-3)
+        #expect(abs(off.x - (-200)) < 1e-3)
+        #expect(abs(off.y - (-200)) < 1e-3)
+    }
+
+    @Test("gain scales the shift; a custom gain overrides the default")
+    func pixelOffsetGain() {
+        let scene = CGSize(width: 1000, height: 1000)
+        let base = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.1, 0.1))         // gain 0.5
+        let strong = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.1, 0.1), gain: 1.0)
+        let b = base.pixelOffset(depth: SIMD2<Double>(1, 1), sceneSize: scene)
+        let s = strong.pixelOffset(depth: SIMD2<Double>(1, 1), sceneSize: scene)
+        #expect(abs(s.x - 2 * b.x) < 1e-3) // double gain → double shift
     }
 
     @Test("pixelOffset honors per-axis depth: '1 0' horizontal-only, '0 1' vertical-only")
     func pixelOffsetPerAxis() {
-        let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.3, 0.3))
+        let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.3, 0.3)) // gain 0.5
         let scene = CGSize(width: 1000, height: 1000)
         let horizontalOnly = frame.pixelOffset(depth: SIMD2<Double>(1, 0), sceneSize: scene)
-        #expect(abs(horizontalOnly.x - (-30)) < 1e-3) // x moves
-        #expect(horizontalOnly.y == 0)                // y pinned
+        #expect(abs(horizontalOnly.x - (-150)) < 1e-3) // x moves (0.3*1*0.5*1000)
+        #expect(horizontalOnly.y == 0)                 // y pinned
         let verticalOnly = frame.pixelOffset(depth: SIMD2<Double>(0, 1), sceneSize: scene)
-        #expect(verticalOnly.x == 0)                  // x pinned
-        #expect(abs(verticalOnly.y - 30) < 1e-3)      // y moves — would be 0 under the old .x collapse
+        #expect(verticalOnly.x == 0)                   // x pinned
+        #expect(abs(verticalOnly.y - 150) < 1e-3)      // y moves — would be 0 under the old .x collapse
     }
 
     // MARK: - Smoother

@@ -13,15 +13,30 @@ import QuartzCore
 /// per-layer scene-pixel translation scaled by that layer's `parallaxDepth`.
 struct WPECameraParallaxFrame: Equatable, Sendable {
     var smoothed: SIMD2<Float>
+    /// Magnitude multiplier for the per-layer shift (`smoothed × depth × gain`,
+    /// as a fraction of the scene). Carried on the frame so every consumer
+    /// (image layers, particles, text) uses one value. Tunable live via
+    /// `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`.
+    var gain: Double = WPECameraParallaxFrame.defaultGain
+
+    /// Default parallax gain. The previous value baked into `pixelOffset` (0.1,
+    /// with a ±0.05 clamp) was an unvalidated carry-over from the old UV-shift
+    /// path — and was never actually exercised, because object `parallaxDepth`
+    /// parsed to 0 until per-axis vector parsing landed. The result was far
+    /// weaker than Wallpaper Engine. Raised here to better match WPE; fine-tune
+    /// per machine with `WPEParallaxGain`.
+    static let defaultGain: Double = 0.5
+    /// Safety ceiling so an extreme depth can't fling a layer off-screen — a
+    /// fraction of the scene per axis. Generous enough not to clip real scenes.
+    static let maxShiftFraction: Float = 0.2
 
     static let neutral = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0))
 
-    /// Scene-pixel translation for a layer at per-axis `depth`. Mirrors the
-    /// historical UV-parallax magnitude (`× depth × 0.1`, clamped ±0.05) but
-    /// expressed as a geometry shift, with each axis scaled by its own depth so
-    /// WPE's per-axis limiting works ("1 0" → horizontal only, "0 1" → vertical
-    /// only). X is negated and Y kept so the layer moves with the cursor in the
-    /// renderer's top-left scene space.
+    /// Scene-pixel translation for a layer at per-axis `depth`: each axis is
+    /// scaled by its own depth so WPE's per-axis limiting works ("1 0" →
+    /// horizontal only, "0 1" → vertical only), times `gain`, clamped to
+    /// `maxShiftFraction`. X is negated and Y kept so the layer moves with the
+    /// cursor in the renderer's top-left scene space.
     func pixelOffset(depth: SIMD2<Double>, sceneSize: CGSize) -> SIMD2<Float> {
         let dx = Float(depth.x)
         let dy = Float(depth.y)
@@ -31,8 +46,10 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
               dx != 0 || dy != 0, smoothed != SIMD2<Float>(0, 0) else {
             return SIMD2<Float>(0, 0)
         }
-        let ux = min(max(smoothed.x * dx * 0.1, -0.05), 0.05)
-        let uy = min(max(smoothed.y * dy * 0.1, -0.05), 0.05)
+        let g = Float(gain)
+        let m = Self.maxShiftFraction
+        let ux = min(max(smoothed.x * dx * g, -m), m)
+        let uy = min(max(smoothed.y * dy * g, -m), m)
         return SIMD2<Float>(-ux * max(width, 1), uy * max(height, 1))
     }
 }
@@ -58,14 +75,15 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
     mutating func frame(
         settings: WPESceneCameraParallaxSettings,
         pointerPosition: SIMD2<Double>,
-        time: Double
+        time: Double,
+        gain: Double = WPECameraParallaxFrame.defaultGain
     ) -> WPECameraParallaxFrame {
         let amount = max(settings.amount, 0)
         let influence = max(settings.mouseInfluence, 0)
         guard settings.enabled, amount > 0, influence > 0 else {
             smoothed = SIMD2<Float>(0, 0)
             lastTime = time
-            return .neutral
+            return WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0), gain: gain)
         }
         let effectiveGlobal = Float((amount / 0.5) * (influence / 0.5))
         let pointer = pointerPosition.clampedToUnitSquare
@@ -81,14 +99,14 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
         // frame-rate independent.
         guard let rawDt, rawDt <= 0.5 else {
             smoothed = target
-            return WPECameraParallaxFrame(smoothed: smoothed)
+            return WPECameraParallaxFrame(smoothed: smoothed, gain: gain)
         }
         let dt = min(rawDt, 1.0 / 10.0)
         let alpha: Float = settings.delay <= 0
             ? 1
             : Float(1 - exp(-dt / max(settings.delay, 1.0 / 240.0)))
         smoothed += (target - smoothed) * alpha
-        return WPECameraParallaxFrame(smoothed: smoothed)
+        return WPECameraParallaxFrame(smoothed: smoothed, gain: gain)
     }
 }
 

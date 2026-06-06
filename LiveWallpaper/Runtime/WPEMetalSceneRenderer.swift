@@ -118,6 +118,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// the scene disables parallax.
     private var cameraParallaxSettings: WPESceneCameraParallaxSettings = .disabled
     private var cameraParallaxSmoother = WPECameraParallaxSmoother()
+    /// Per-machine magnitude multiplier for camera parallax. Defaults to
+    /// `WPECameraParallaxFrame.defaultGain`; override live to match Wallpaper
+    /// Engine with `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`.
+    private let cameraParallaxGain = WPEMetalSceneRenderer.resolvedParallaxGain()
     private var currentProfile: WallpaperPerformanceProfile = .quality
     /// When false, the per-frame pointer is pinned to the screen center so the
     /// scene stops reacting to the cursor (camera parallax freezes, pointer
@@ -819,6 +823,21 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         #endif
     }
 
+    /// Camera-parallax magnitude multiplier. Reads `WPEParallaxGain` from the
+    /// app's `Taijia.LiveWallpaper` suite first, then the process `.standard`
+    /// domain (which IS that suite in the renderer process), falling back to the
+    /// built-in default. Clamped to a sane positive range so a stray value can't
+    /// fling layers off-screen. Tune to match Wallpaper Engine with:
+    ///   defaults write Taijia.LiveWallpaper WPEParallaxGain 0.8
+    private static func resolvedParallaxGain() -> Double {
+        for defaults in [UserDefaults(suiteName: "Taijia.LiveWallpaper"), .standard] {
+            guard let defaults, defaults.object(forKey: "WPEParallaxGain") != nil else { continue }
+            let value = defaults.double(forKey: "WPEParallaxGain")
+            if value > 0 { return min(value, 20) }
+        }
+        return WPECameraParallaxFrame.defaultGain
+    }
+
     /// DEBUG-only `MTLCaptureManager` wrap around `renderCurrentFrame()`. When
     /// `UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")` matches
     /// the active scene's workshopID, the render's `MTLCommandBuffer` is
@@ -1028,7 +1047,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let parallaxFrame = cameraParallaxSmoother.frame(
             settings: cameraParallaxSettings,
             pointerPosition: pointer,
-            time: uniforms.time
+            time: uniforms.time,
+            gain: cameraParallaxGain
         )
         // Audio-reactive uniforms follow the shared system-audio capture (the
         // loopback of whatever is playing), not the scene's own sounds — those
