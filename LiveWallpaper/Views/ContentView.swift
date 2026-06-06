@@ -392,21 +392,27 @@ struct Sidebar: View {
                 SidebarSectionHeader(title: "Library")
             }
 
+        }
+        .listStyle(.sidebar)
+        // Pin Usage to the bottom of the sidebar (like the mockup's
+        // `margin-top:auto`) instead of letting it flow as the last section —
+        // the gauges stay anchored at the floor with the nav list scrolling above.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if featureCatalog.isEnabled(.systemMonitor) {
-                Section {
+                VStack(spacing: 0) {
+                    Divider()
                     SystemMonitorView(
                         activeDisplayCount: activeWallpaperDisplayCount,
                         totalDisplayCount: screenManager.screens.count
                     )
-                        .padding(.vertical, 2)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
-                        .listRowBackground(Color.clear)
-                } header: {
-                    SidebarSectionHeader(title: "Usage")
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
                 }
+                // Transparent — the sidebar's own material shows through; no
+                // extra layer over the gauges.
             }
         }
-        .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(
             min: SettingsWindowMetrics.sidebarColumnWidth,
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
