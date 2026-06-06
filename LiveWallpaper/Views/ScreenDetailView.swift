@@ -182,10 +182,8 @@ struct ScreenDetailView: View {
 
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
-    /// Remembered open/closed preference for the trailing inspector. Reconciled
-    /// with `showsInspector` so the panel only appears for configurable
-    /// wallpapers, but the user's toolbar toggle is honored within that.
-    @AppStorage("ScreenDetail.InspectorOpen") private var userWantsInspectorOpen = true
+    @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
+    @State private var liveInspectorWidth: Double?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -197,12 +195,7 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            // Xcode-style inspector: a real AppKit split (InspectorSplit) hosts
-            // the editor (preview) and the inspector as siblings inside this
-            // detail column. Opening it resizes only the editor — the window
-            // never grows and the toolbar region is untouched (no `>>`), unlike
-            // SwiftUI's window-level `.inspector()`.
-            InspectorSplit(isPresented: inspectorPresentedBinding) {
+            HStack(spacing: 0) {
                 ScreenDetailPreviewArea(
                     screen: screen,
                     draft: $draft,
@@ -221,25 +214,29 @@ struct ScreenDetailView: View {
                     onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
                     onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
                 )
-                .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
-            } inspector: {
-                inspectorPanel
+
+                if showsInspector {
+                    inspectorPanel
+                        .overlay(alignment: .leading) {
+                            InspectorResizeHandle(
+                                width: inspectorPanelWidth,
+                                minWidth: DesignTokens.Inspector.minWidth,
+                                maxWidth: DesignTokens.Inspector.maxWidth,
+                                onPreviewWidthChange: previewInspectorWidth,
+                                onCommitWidth: commitInspectorWidth
+                            )
+                            .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
+                        }
+                        .layoutPriority(0)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
+            .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    userWantsInspectorOpen.toggle()
-                } label: {
-                    Label("Toggle Inspector", systemImage: "sidebar.right")
-                }
-                .disabled(!showsInspector)
-                .help(Text("Show or hide the wallpaper properties inspector"))
             }
         }
         .confirmDestructive($pendingDestructive)
@@ -302,31 +299,29 @@ struct ScreenDetailView: View {
         #endif
     }
 
+    @ViewBuilder
     private var inspectorPanel: some View {
-        ScreenDetailInspectorPanel(
-            screen: screen,
-            draft: $draft,
-            screenManager: screenManager,
-            featureCatalog: featureCatalog,
-            reduceMotion: reduceMotion,
-            isEnvironmentExpanded: $isEnvironmentExpanded,
-            isColorExpanded: $isColorExpanded,
-            onParticleEffectChange: { screenManager.updateParticleEffect($0, for: screen) },
-            onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
-            onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
-            onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
-            onResetDisplaySettings: requestResetDisplaySettings
-        )
+        if showsInspector {
+            ScreenDetailInspectorPanel(
+                screen: screen,
+                draft: $draft,
+                screenManager: screenManager,
+                featureCatalog: featureCatalog,
+                reduceMotion: reduceMotion,
+                inspectorPanelWidth: inspectorPanelWidth,
+                isEnvironmentExpanded: $isEnvironmentExpanded,
+                isColorExpanded: $isColorExpanded,
+                onParticleEffectChange: { screenManager.updateParticleEffect($0, for: screen) },
+                onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
+                onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
+                onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
+                onResetDisplaySettings: requestResetDisplaySettings
+            )
+        }
     }
 
-    /// Available only for configurable wallpapers (`showsInspector`), but within
-    /// that the user's toolbar toggle (`userWantsInspectorOpen`) drives show/hide
-    /// — a real two-way binding so the native inspector can actually collapse.
-    private var inspectorPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { showsInspector && userWantsInspectorOpen },
-            set: { userWantsInspectorOpen = $0 }
-        )
+    private var inspectorPanelWidth: CGFloat {
+        clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
     }
 
     private var dropFailurePresented: Binding<Bool> {
@@ -366,6 +361,29 @@ struct ScreenDetailView: View {
         ) {
             screenManager.resetDisplaySettings(for: screen)
         }
+    }
+
+    private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, DesignTokens.Inspector.minWidth), DesignTokens.Inspector.maxWidth)
+    }
+
+    private func previewInspectorWidth(_ width: CGFloat) {
+        withoutResizeAnimation {
+            liveInspectorWidth = Double(clampedInspectorWidth(width))
+        }
+    }
+
+    private func commitInspectorWidth(_ width: CGFloat) {
+        withoutResizeAnimation {
+            inspectorWidth = Double(clampedInspectorWidth(width))
+            liveInspectorWidth = nil
+        }
+    }
+
+    private func withoutResizeAnimation(_ update: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
     }
 
     // MARK: - Drag and Drop

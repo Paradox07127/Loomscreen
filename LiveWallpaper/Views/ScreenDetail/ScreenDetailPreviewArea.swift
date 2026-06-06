@@ -52,11 +52,8 @@ struct ScreenDetailPreviewArea: View {
                 #endif
             }
         }
-        // The AppKit inspector split (InspectorSplitViewController) enforces the
-        // editor floor via NSSplitViewItem.minimumThickness. Keeping this SwiftUI
-        // root free of a hard minWidth prevents the hosting controller from
-        // exporting a larger fitting width that could grow the window.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
+        .layoutPriority(1)
         .overlay {
             dragHintOverlay
                 .animation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2)), value: isDraggingOver)

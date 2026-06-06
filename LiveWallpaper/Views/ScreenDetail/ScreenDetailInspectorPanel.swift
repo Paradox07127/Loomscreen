@@ -9,6 +9,7 @@ struct ScreenDetailInspectorPanel: View {
     let screenManager: ScreenManager
     let featureCatalog: FeatureCatalog
     let reduceMotion: Bool
+    let inspectorPanelWidth: CGFloat
     @Binding var isEnvironmentExpanded: Bool
     @Binding var isColorExpanded: Bool
     let onParticleEffectChange: (ParticleEffect) -> Void
@@ -103,16 +104,13 @@ struct ScreenDetailInspectorPanel: View {
                     }
                     #endif
                 }
-                .padding(.horizontal, DesignTokens.Inspector.horizontalPadding)
-                .padding(.top, 2)
-                .padding(.bottom, 14)
+                .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
+                .padding(.vertical, 14)
             }
         }
-        // The AppKit NSSplitViewItem(inspectorWithViewController:) supplies the
-        // native inspector material/chrome. Keep the SwiftUI scroll content
-        // clear so that surface remains visible behind the cards (GroupBox /
-        // AdaptiveGlass still provide their own legible surfaces).
-        .scrollContentBackground(.hidden)
+        .frame(width: inspectorPanelWidth)
+        .fixedSize(horizontal: true, vertical: false)
+        .background(Color(NSColor.windowBackgroundColor))
         .clipped()
         .accessibilityLabel(Text("Wallpaper Properties"))
         #if !LITE_BUILD
