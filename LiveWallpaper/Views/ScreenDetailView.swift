@@ -186,8 +186,6 @@ struct ScreenDetailView: View {
     /// with `showsInspector` so the panel only appears for configurable
     /// wallpapers, but the user's toolbar toggle is honored within that.
     @AppStorage("ScreenDetail.InspectorOpen") private var userWantsInspectorOpen = true
-    @State private var hostingWindow: NSWindow?
-    @State private var inspectorMaxWidthRestore: DispatchWorkItem?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -220,17 +218,20 @@ struct ScreenDetailView: View {
             .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
-        .background(WindowAccessor { if hostingWindow !== $0 { hostingWindow = $0 } })
         .inspector(isPresented: inspectorPresentedBinding) {
             inspectorPanel
+                // ideal == min so SwiftUI only ever asks for this exact width and
+                // never sends a "grab a wider ideal" signal that grows the window.
+                // It fits inside the current window by yielding preview width
+                // instead. The window floor (1160) ≥ sidebar(210) + preview
+                // min(480) + this width, so the inspector is shown at its full
+                // width — never compressed or pushed off-screen — and the sidebar
+                // is untouched.
                 .inspectorColumnWidth(
-                    min: DesignTokens.Inspector.minWidth,
+                    min: DesignTokens.Inspector.idealWidth,
                     ideal: DesignTokens.Inspector.idealWidth,
                     max: DesignTokens.Inspector.maxWidth
                 )
-        }
-        .onChange(of: showsInspector && userWantsInspectorOpen) { _, isOpen in
-            preventInspectorWindowGrowth(whenOpening: isOpen)
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -331,26 +332,6 @@ struct ScreenDetailView: View {
             get: { showsInspector && userWantsInspectorOpen },
             set: { userWantsInspectorOpen = $0 }
         )
-    }
-
-    /// SwiftUI's `.inspector` tends to widen the host `NSWindow` by the column's
-    /// ideal width on open. Pin the window's MAX width to its current width
-    /// *synchronously* (before the open layout pass) so SwiftUI compresses the
-    /// preview to make room instead of growing the window. The previous approach
-    /// — an async `setFrame` correction after the fact — snapped the window back
-    /// mid-slide and caused a visible hitch. The cap is lifted once the open
-    /// transition settles so manual resizing still works. `contentMinSize`
-    /// (shared by other panes) is never touched.
-    private func preventInspectorWindowGrowth(whenOpening isOpening: Bool) {
-        guard isOpening, let window = hostingWindow else { return }
-        inspectorMaxWidthRestore?.cancel()
-        window.maxSize = NSSize(width: window.frame.width, height: window.maxSize.height)
-        let restore = DispatchWorkItem { [weak window] in
-            guard let window else { return }
-            window.maxSize = NSSize(width: .greatestFiniteMagnitude, height: window.maxSize.height)
-        }
-        inspectorMaxWidthRestore = restore
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: restore)
     }
 
     private var dropFailurePresented: Binding<Bool> {
@@ -672,22 +653,6 @@ struct ScreenDetailView: View {
 
     private func triggerSceneGuideAction() {
         draft.selectedWallpaperType = .scene
-    }
-}
-
-/// Bridges the hosting `NSWindow` out to SwiftUI so the inspector logic can keep
-/// the window from auto-growing. Reports the window once the view is attached.
-private struct WindowAccessor: NSViewRepresentable {
-    let onResolve: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { onResolve(view.window) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { onResolve(nsView.window) }
     }
 }
 
