@@ -655,7 +655,8 @@ struct WPERenderGraphBuilder: Sendable {
               pass.textures[8] == nil else {
             return pass
         }
-        let clipTargetName = "_rt_puppetClip_\(context.object.id)"
+        // Shared name so the executor's defer routing matches this exact injected RT (no format drift).
+        let clipTargetName = WPEMetalRenderExecutor.puppetClipRTName(objectID: context.object.id)
         if !context.localFBOs.contains(where: { $0.name == clipTargetName }) {
             // Half-res clip mask RT, matching WPE (1920×1080 for a 3840×2160 capture).
             context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 2, format: "rgba8888"))

@@ -269,6 +269,10 @@ final class WPEMetalRenderExecutor {
     func releaseTransientResources() {
         targetPool.releaseAll()
         previousFrameHistory = nil
+        // Clip-role detection + activation diagnostics are keyed by objectID, which a reload can reuse
+        // for a different puppet/material/animation, so drop them when the graph is rebuilt.
+        puppetClipPairsCache.removeAll()
+        loggedClipActivation.removeAll()
     }
 
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
@@ -2129,18 +2133,26 @@ final class WPEMetalRenderExecutor {
     /// part pair — so the defer/clip routing can never disagree about whether the clip pass will run.
     private func puppetUsesClipComposite(layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
         guard Self.puppetClipCompositeEnabled, model.clipMaskName != nil else { return false }
+        // Match the EXACT builder-injected clip RT (`WPERenderGraphBuilder` skips injection when slot 8
+        // is already authored), not just any non-nil slot 8 — otherwise a pre-existing authored slot 8
+        // would falsely suppress the deferred warp for a clip pass that won't actually run.
+        let injectedClipRT = WPETextureReference.fbo(Self.puppetClipRTName(objectID: layer.objectID))
         let hasInjectedClipPass = layer.passes.contains { pass in
             guard case .material = pass.phase,
                   WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "genericimage4" else {
                 return false
             }
-            return pass.textures[8] != nil
+            return pass.textures[8] == injectedClipRT
         }
         guard hasInjectedClipPass else { return false }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard meshes.count == 1, let mesh = meshes.first else { return false }
         return !resolvePuppetClipPairs(for: layer, model: model, mesh: mesh).isEmpty
     }
+
+    /// Canonical intermediate clip-mask RT name. MUST match `WPERenderGraphBuilder`'s injection
+    /// (`_rt_puppetClip_<objectID>`) so defer routing and clip planning agree on the same pass.
+    static func puppetClipRTName(objectID: String) -> String { "_rt_puppetClip_\(objectID)" }
 
     /// Cached clip-role detection. Keyed by `objectID` (not puppet path): detection depends on this
     /// object's animation layers, so two objects reusing the same puppet asset with different anims must
