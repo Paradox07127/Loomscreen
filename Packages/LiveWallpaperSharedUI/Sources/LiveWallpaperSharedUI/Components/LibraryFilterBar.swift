@@ -63,7 +63,7 @@ public struct LibraryFilterBar<Filters: View>: View {
 
             TextField(searchPrompt, text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .accessibilityLabel(Text(searchPrompt))
 
             if !searchText.isEmpty {
@@ -93,7 +93,7 @@ public struct LibraryFilterBar<Filters: View>: View {
 
     private func resultCounter(_ visible: Int, _ total: Int) -> some View {
         Text(verbatim: visible == total ? "\(total)" : "\(visible)/\(total)")
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .font(DesignTokens.Typography.metric)
             .foregroundStyle(.secondary)
             .help(visible == total
                   ? Text("\(total) items")

@@ -11,7 +11,7 @@ public struct DevPill: View {
 
     public var body: some View {
         Text(verbatim: "DEV")
-            .font(.system(size: 9, weight: .bold))
+            .font(DesignTokens.Typography.badge)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: true)
             .tracking(0.4)

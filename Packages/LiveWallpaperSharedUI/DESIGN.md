@@ -55,7 +55,7 @@ System `NSColor`-backed → automatic light/dark + Increase Contrast.
 
 ## Hard rules
 
-1. **No inline fonts.** Never `.font(.system(size:))` / `.font(.custom())` in a view — use `DesignTokens.Typography`.
+1. **No inline fonts** for text. Never `.font(.system(size:))` / `.font(.custom())` on `Text`/`Label` — use `DesignTokens.Typography`. (SF Symbol glyph sizing is exempt: a standalone `Image(systemName:)` may use `.font(.system(size:))` for precise sizing, or adopt a Typography token when it sits inline with text so the two scale together.)
 2. **No literal colors** for semantic elements. No `.orange` / `.yellow` / `.white` / `Color(red:…)` — use `DesignTokens.Colors`.
 3. **Tabular digits** for live-updating numbers — use `Typography.metric` (or `.monospacedDigit()`) so columns don't jitter.
 4. **Adaptive surfaces.** Use `AdaptiveGlass` / `GalleryTileChrome`, never hardcoded `.ultraThinMaterial`; it honors Reduce Transparency.
