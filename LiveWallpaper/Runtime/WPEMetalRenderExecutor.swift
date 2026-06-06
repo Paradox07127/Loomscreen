@@ -1249,6 +1249,44 @@ final class WPEMetalRenderExecutor {
     }
     #endif
 
+    /// Composes each bone's WORLD bind matrix by walking the MDLS hierarchy (`world(parent) · rawLocal`),
+    /// matching the palette's bind basis and the static attachment anchor (WPERenderGraphBuilder).
+    /// Bones with a cycle / missing parent / unparseable matrix fall back to identity.
+    private static func composedBindWorldByBoneIndex(_ bones: [WPEPuppetBone]) -> [Int: simd_float4x4] {
+        let rawByIndex = Dictionary(
+            bones.compactMap { bone -> (Int, simd_float4x4)? in
+                WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix).map { (bone.index, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let parentByIndex = Dictionary(
+            bones.map { ($0.index, $0.parentIndex) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var cache: [Int: simd_float4x4] = [:]
+        var visiting: Set<Int> = []
+        func world(_ index: Int) -> simd_float4x4 {
+            if let cached = cache[index] { return cached }
+            guard let local = rawByIndex[index] else { return matrix_identity_float4x4 }
+            guard !visiting.contains(index) else { return local }
+            visiting.insert(index)
+            let composed: simd_float4x4
+            if let parent = parentByIndex[index] ?? nil {
+                composed = world(parent) * local
+            } else {
+                composed = local
+            }
+            visiting.remove(index)
+            cache[index] = composed
+            return composed
+        }
+        var result: [Int: simd_float4x4] = [:]
+        for bone in bones where rawByIndex[bone.index] != nil {
+            result[bone.index] = world(bone.index)
+        }
+        return result
+    }
+
     /// The default-on skinning gate: only enable GPU skinning when the puppet's hierarchy, skin
     /// indices, palette bounds, and attached children are all supported. Otherwise the puppet renders
     /// the static assembled MDLV mesh (the pre-skinning known-good baseline).
@@ -1262,12 +1300,11 @@ final class WPEMetalRenderExecutor {
             model.attachments.map { ($0.name, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let boneBindByIndex = Dictionary(
-            model.bones.compactMap { bone -> (Int, simd_float4x4)? in
-                WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix).map { (bone.index, $0) }
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
+        // Composed (parent-local hierarchy) bind world per bone — MUST match the palette's bind basis
+        // (WPEPuppetAnimationEvaluator composes raw MDLS down the hierarchy). Using the raw matrices
+        // here desyncs the attachment-follow anchor from `palette[bone] · bind⁻¹`, so a followed face/
+        // hair layer drifts/stretches relative to the skinned head. See the palette fix (69ed52b).
+        let boneBindByIndex = Self.composedBindWorldByBoneIndex(model.bones)
         func disabled(_ reason: String) -> PuppetSkinningState {
             PuppetSkinningState(
                 enabled: false,
