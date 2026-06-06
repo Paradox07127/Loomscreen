@@ -187,6 +187,7 @@ struct ScreenDetailView: View {
     /// wallpapers, but the user's toolbar toggle is honored within that.
     @AppStorage("ScreenDetail.InspectorOpen") private var userWantsInspectorOpen = true
     @State private var hostingWindow: NSWindow?
+    @State private var inspectorMaxWidthRestore: DispatchWorkItem?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -219,7 +220,7 @@ struct ScreenDetailView: View {
             .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
-        .background(WindowAccessor { hostingWindow = $0 })
+        .background(WindowAccessor { if hostingWindow !== $0 { hostingWindow = $0 } })
         .inspector(isPresented: inspectorPresentedBinding) {
             inspectorPanel
                 .inspectorColumnWidth(
@@ -333,21 +334,23 @@ struct ScreenDetailView: View {
     }
 
     /// SwiftUI's `.inspector` tends to widen the host `NSWindow` by the column's
-    /// ideal width on open and never shrinks it back. Since the window is always
-    /// wide enough to fit the preview (≥480) plus the inspector by yielding
-    /// preview space, clamp the frame back to its pre-open width so opening the
-    /// inspector pushes the preview instead of growing the window — and closing
-    /// reclaims the space automatically. We never touch the shared
-    /// `contentMinSize` (other panes rely on it).
+    /// ideal width on open. Pin the window's MAX width to its current width
+    /// *synchronously* (before the open layout pass) so SwiftUI compresses the
+    /// preview to make room instead of growing the window. The previous approach
+    /// — an async `setFrame` correction after the fact — snapped the window back
+    /// mid-slide and caused a visible hitch. The cap is lifted once the open
+    /// transition settles so manual resizing still works. `contentMinSize`
+    /// (shared by other panes) is never touched.
     private func preventInspectorWindowGrowth(whenOpening isOpening: Bool) {
         guard isOpening, let window = hostingWindow else { return }
-        let targetWidth = window.frame.width
-        DispatchQueue.main.async {
-            guard window.frame.width > targetWidth else { return }
-            var frame = window.frame
-            frame.size.width = targetWidth
-            window.setFrame(frame, display: true, animate: false)
+        inspectorMaxWidthRestore?.cancel()
+        window.maxSize = NSSize(width: window.frame.width, height: window.maxSize.height)
+        let restore = DispatchWorkItem { [weak window] in
+            guard let window else { return }
+            window.maxSize = NSSize(width: .greatestFiniteMagnitude, height: window.maxSize.height)
         }
+        inspectorMaxWidthRestore = restore
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: restore)
     }
 
     private var dropFailurePresented: Binding<Bool> {
