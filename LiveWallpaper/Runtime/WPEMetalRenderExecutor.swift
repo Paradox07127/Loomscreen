@@ -2272,6 +2272,20 @@ final class WPEMetalRenderExecutor {
         commandBuffer: MTLCommandBuffer,
         frameState: inout WPEMetalFrameState
     ) throws -> Bool {
+        // `WPEPuppetClipComposite` and `WPEPuppetDeferMeshWarp` are mutually exclusive puppet render
+        // modes: the clip composite must draw the warped mesh per-part at material time, while the
+        // deferred warp pushes the warp to the final scene composite. Warn once when both are set so the
+        // conflict is never silent (the clip path no-ops below and the eye renders without occlusion).
+        if Self.deferPuppetMeshWarp,
+           (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil,
+           let dpath = layer.puppetPath, loggedClipActivation.insert("conflict:" + dpath).inserted {
+            Logger.warning(
+                "[WPE clip] \(dpath): WPEPuppetClipComposite is ON but WPEPuppetDeferMeshWarp is also ON — "
+                    + "these are mutually exclusive; clip composite is skipped. Disable deferred warp: "
+                    + "`defaults write Taijia.LiveWallpaper WPEPuppetDeferMeshWarp -bool NO`.",
+                category: .wpeRender
+            )
+        }
         guard case .material = pass.pass.phase,
               case .layerComposite = pass.pass.target,
               !Self.deferPuppetMeshWarp,
