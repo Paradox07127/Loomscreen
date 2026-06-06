@@ -112,24 +112,53 @@ struct WPEPuppetClipRoleTests {
         #expect(pairs.isEmpty)
     }
 
-    @Test("Two eyes each get their own source→target clip pair")
-    func detectsTwoEyes() {
-        // Left eye: white (bone 0) + pupil (bone 1). Right eye: white (bone 2) + pupil (bone 3).
-        let vertices = quad(bone: 0, minX: -20, maxX: -2, minY: -5, maxY: 5)
-            + quad(bone: 1, minX: -14, maxX: -8, minY: -3, maxY: 3)
-            + quad(bone: 2, minX: 2, maxX: 20, minY: -5, maxY: 5)
-            + quad(bone: 3, minX: 8, maxX: 14, minY: -3, maxY: 3)
+    @Test("No clip when the first part doesn't close (convention guard rejects)")
+    func firstPartMustClose() {
+        // First part stays open while the second squishes — the opposite of the eye-white/pupil shape,
+        // so the convention guard must NOT emit a (parts[0]→parts[1]) clip.
+        let vertices = quad(bone: 0, minX: -10, maxX: 10, minY: -5, maxY: 5)
+            + quad(bone: 1, minX: -3, maxX: 3, minY: -3, maxY: 3)
         let indices = quadIndices(base: 0) + quadIndices(base: 4)
-            + quadIndices(base: 8) + quadIndices(base: 12)
         let mesh = WPEPuppetMesh(
-            materialPath: "eyes",
+            materialPath: "eye",
+            vertices: vertices,
+            indices: indices,
+            parts: [
+                WPEPuppetMeshPart(id: 1, start: 0, count: 6),
+                WPEPuppetMeshPart(id: 2, start: 6, count: 6)
+            ],
+            clipMaskName: "masks/clipping_mask_test"
+        )
+        let frameCount = 12
+        let animation = WPEPuppetAnimation(
+            id: 1, name: "blink", mode: "loop", fps: 30, frameCount: frameCount,
+            channels: [
+                channel(bone: 0, closedScaleY: 1, frameCount: frameCount),    // first part stays open
+                channel(bone: 1, closedScaleY: 0.18, frameCount: frameCount)  // second part squishes
+            ]
+        )
+        let bones = (0..<2).map { WPEPuppetBone(index: $0, parentIndex: nil, rawMatrix: identityColumnMajor()) }
+        let layers = [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)]
+
+        let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
+        #expect(pairs.isEmpty)
+    }
+
+    @Test("Only the first→second part pair is emitted; later parts are ignored")
+    func emitsSinglePairIgnoringLaterParts() {
+        // Three parts that all match target criteria spatially; only parts[0]→parts[1] must be returned.
+        let vertices = quad(bone: 0, minX: -10, maxX: 10, minY: -5, maxY: 5)
+            + quad(bone: 1, minX: -3, maxX: 3, minY: -3, maxY: 3)
+            + quad(bone: 2, minX: -2, maxX: 2, minY: -2, maxY: 2)
+        let indices = quadIndices(base: 0) + quadIndices(base: 4) + quadIndices(base: 8)
+        let mesh = WPEPuppetMesh(
+            materialPath: "eye",
             vertices: vertices,
             indices: indices,
             parts: [
                 WPEPuppetMeshPart(id: 1, start: 0, count: 6),
                 WPEPuppetMeshPart(id: 2, start: 6, count: 6),
-                WPEPuppetMeshPart(id: 3, start: 12, count: 6),
-                WPEPuppetMeshPart(id: 4, start: 18, count: 6)
+                WPEPuppetMeshPart(id: 5, start: 12, count: 6)
             ],
             clipMaskName: "masks/clipping_mask_test"
         )
@@ -139,17 +168,15 @@ struct WPEPuppetClipRoleTests {
             channels: [
                 channel(bone: 0, closedScaleY: 0.18, frameCount: frameCount),
                 channel(bone: 1, closedScaleY: 1, frameCount: frameCount),
-                channel(bone: 2, closedScaleY: 0.18, frameCount: frameCount),
-                channel(bone: 3, closedScaleY: 1, frameCount: frameCount)
+                channel(bone: 2, closedScaleY: 1, frameCount: frameCount)
             ]
         )
-        let bones = (0..<4).map { WPEPuppetBone(index: $0, parentIndex: nil, rawMatrix: identityColumnMajor()) }
+        let bones = (0..<3).map { WPEPuppetBone(index: $0, parentIndex: nil, rawMatrix: identityColumnMajor()) }
         let layers = [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)]
 
         let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
-        let mapping = Dictionary(uniqueKeysWithValues: pairs.map { ($0.target, $0.source) })
-        #expect(pairs.count == 2)
-        #expect(mapping[2] == 1)
-        #expect(mapping[4] == 3)
+        #expect(pairs.count == 1)
+        #expect(pairs.first?.source == 1)
+        #expect(pairs.first?.target == 2)
     }
 }

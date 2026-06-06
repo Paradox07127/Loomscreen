@@ -2157,9 +2157,12 @@ final class WPEMetalRenderExecutor {
         return boxes
     }
 
-    /// Detects clip source→target pairs from animated geometry. A target part stays near full height
-    /// across the blink while an enclosing source part squishes shut; the target is then clipped to the
-    /// source silhouette. Returns [] when no part squishes under an enclosing part (no clip needed).
+    /// Resolves the clip source→target pair for a clip-mask puppet. WPE's puppet clip is a fixed
+    /// two-part convention (oracle-confirmed on 3719111841 via RenderDoc; the MDLV clip section and the
+    /// material carry only the mask name, no per-part roles): the FIRST mesh part is the clip silhouette
+    /// that squishes shut, the SECOND part is clipped to it and stays full. Animated geometry is used only
+    /// to VALIDATE that shape (shape closes, target stays open inside it) so an unfamiliar rig degrades to
+    /// a flat draw instead of being mis-clipped. Returns [] when the convention doesn't hold.
     private static func detectClipPairs(
         mesh: WPEPuppetMesh,
         animationLayers: [WPEPuppetAnimationLayer],
@@ -2194,55 +2197,51 @@ final class WPEMetalRenderExecutor {
             }
         }
 
-        // A part "squishes" when it collapses well below bind on EITHER axis (anime eyes usually close
-        // vertically, but the silhouette test stays axis-agnostic); a clip target stays near full on
-        // both axes across the whole clip.
-        let sourceMaxRatio: Float = 0.8
-        let targetMinRatio: Float = 0.85
+        // Min-axis squish ratio over the clip: a part "squishes" when it collapses on EITHER axis
+        // (anime eyes usually close vertically, but the test stays axis-agnostic).
         func ratio(_ id: UInt32) -> Float {
             guard let bind = bindByID[id], bind.width > 1e-4, bind.height > 1e-4 else { return 1 }
             let widthRatio = (minWidthByID[id] ?? bind.width) / bind.width
             let heightRatio = (minHeightByID[id] ?? bind.height) / bind.height
             return min(widthRatio, heightRatio)
         }
-        let sources = bindByID.values.filter { ratio($0.id) < sourceMaxRatio }
-        let targets = bindByID.values.filter { ratio($0.id) > targetMinRatio }
         let ratioSummary = bindByID.keys.sorted()
             .map { "id\($0)=\(String(format: "%.2f", ratio($0)))" }
             .joined(separator: " ")
-        guard !sources.isEmpty, !targets.isEmpty else {
+
+        // WPE convention: parts[0] = clip silhouette, parts[1] = clipped target. Validate with geometry.
+        let ordered = mesh.parts.filter { $0.count > 0 }
+        guard ordered.count >= 2,
+              let shape = bindByID[ordered[0].id],
+              let target = bindByID[ordered[1].id] else {
+            Logger.info("[WPE clip] detect: NO PAIR (fewer than 2 measurable parts) minAxisRatios[\(ratioSummary)]",
+                        category: .wpeRender)
+            return []
+        }
+        let shapeRatio = ratio(shape.id)
+        let targetRatio = ratio(target.id)
+        let targetInsideShape = target.centerX >= shape.minX && target.centerX <= shape.maxX
+            && target.centerY >= shape.minY && target.centerY <= shape.maxY
+        guard shapeRatio < 0.85,              // the silhouette part actually closes
+              targetRatio > 0.8,              // the clipped part stays open (would show through)
+              targetRatio > shapeRatio + 0.1, // and is clearly fuller than the silhouette
+              targetInsideShape else {        // and sits inside the silhouette
             Logger.info(
-                "[WPE clip] detect: NO PAIR (sources=\(sources.count) targets=\(targets.count)) "
-                    + "minAxisRatios[\(ratioSummary)] — squish must dip <\(sourceMaxRatio) and a clip "
-                    + "target stay >\(targetMinRatio); if all ~1.0 the mesh isn't deforming (skinning off?)",
+                "[WPE clip] detect: NO PAIR (shape id\(shape.id)=\(String(format: "%.2f", shapeRatio)) "
+                    + "target id\(target.id)=\(String(format: "%.2f", targetRatio)) inside=\(targetInsideShape)) "
+                    + "minAxisRatios[\(ratioSummary)] — first part must close, second must stay open inside it; "
+                    + "if all ~1.0 the mesh isn't deforming (skinning off?)",
                 category: .wpeRender
             )
             return []
         }
-
-        func encloses(_ outer: PuppetClipPartBox, _ inner: PuppetClipPartBox) -> Bool {
-            let centerInside = inner.centerX >= outer.minX && inner.centerX <= outer.maxX
-                && inner.centerY >= outer.minY && inner.centerY <= outer.maxY
-            return centerInside && outer.area >= inner.area * 0.8
-        }
-
-        var pairs: [PuppetClipPair] = []
-        for target in targets {
-            // Tightest enclosing squishing part is the clip silhouette (e.g. the eye-white wrapping
-            // the pupil), never the part itself.
-            let source = sources
-                .filter { $0.id != target.id && encloses($0, target) }
-                .min(by: { $0.area < $1.area })
-            if let source {
-                pairs.append(PuppetClipPair(source: source.id, target: target.id))
-            }
-        }
         Logger.info(
-            "[WPE clip] detect: pairs=[\(pairs.map { "\($0.source)→\($0.target)" }.joined(separator: ","))] "
+            "[WPE clip] detect: pair=\(shape.id)→\(target.id) "
+                + "(shape=\(String(format: "%.2f", shapeRatio)) target=\(String(format: "%.2f", targetRatio))) "
                 + "minAxisRatios[\(ratioSummary)]",
             category: .wpeRender
         )
-        return pairs
+        return [PuppetClipPair(source: shape.id, target: target.id)]
     }
 
     #if DEBUG
