@@ -1967,7 +1967,8 @@ final class WPEMetalRenderExecutor {
     }
 
     private func hasPuppetClipCompositeBinding(_ pass: WPEPreparedRenderPass) -> Bool {
-        (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
+        Self.puppetClipCompositeEnabled
+            && (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
     }
 
     /// Mirrors the WPE eye draw structure (parts id1/id2/id3..N) once the builder has injected
@@ -1990,6 +1991,15 @@ final class WPEMetalRenderExecutor {
         }
         let parts = mesh.parts
         let normalParts = parts.dropFirst(2)
+        // Only the captured Kelsey eye (id1=eye-white 426, id2=pupil 312, rest=1179) has a proven
+        // clip-shape/clip-target role mapping. Until other clip puppets are oracle-validated, no-op on
+        // any other part layout so we never mis-render an unknown clip rig.
+        let normalIndexCount = normalParts.reduce(0) { $0 + $1.count }
+        guard parts[0].id == 1, parts[0].count == 426,
+              parts[1].id == 2, parts[1].count == 312,
+              normalIndexCount == 1179 else {
+            return nil
+        }
         return PuppetClipCompositePlan(
             sourcePartID: parts[0].id,
             targetPartID: parts[1].id,

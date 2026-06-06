@@ -551,7 +551,7 @@ struct WPERenderGraphBuilder: Sendable {
         for materialPass in passes {
             let target = explicitTarget ?? .layerComposite(name: context.nextComposite)
             var merged = materialPass.merging(override: override)
-            merged = materialPassWithPuppetClipCompositeIfNeeded(merged, context: &context)
+            merged = materialPassWithPuppetClipCompositeIfNeeded(merged, phase: phase, context: &context)
             let passID = "\(context.object.id).\(context.passes.count)"
             context.passes.append(WPERenderPass(
                 id: passID,
@@ -642,9 +642,13 @@ struct WPERenderGraphBuilder: Sendable {
     /// is not genericimage4.
     private func materialPassWithPuppetClipCompositeIfNeeded(
         _ pass: WPEMaterialPass,
+        phase: WPERenderPassPhase,
         context: inout LayerBuildContext
     ) -> WPEMaterialPass {
-        guard Self.puppetClipCompositeEnabled,
+        // Only the base material phase drives the clip composite; effect-chain genericimage4 passes
+        // must not receive the clip bindings (the executor clip path only handles `.material`).
+        guard case .material = phase,
+              Self.puppetClipCompositeEnabled,
               context.model.puppetPath != nil,
               let clipMaskName = context.model.puppetClipMaskName,
               WPEBuiltinShaderName.normalized(pass.shader) == "genericimage4",
@@ -653,9 +657,12 @@ struct WPERenderGraphBuilder: Sendable {
         }
         let clipTargetName = "_rt_puppetClip_\(context.object.id)"
         if !context.localFBOs.contains(where: { $0.name == clipTargetName }) {
-            context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 1, format: "rgba8888"))
+            // Half-res clip mask RT, matching WPE (1920×1080 for a 3840×2160 capture).
+            context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 2, format: "rgba8888"))
         }
         var textures = pass.textures
+        // The clip-mask name (e.g. `masks/clipping_mask_39cb32c5`) uses the SAME bare-name convention
+        // as a material texture ("眼睛组合"); textureReference + the resolver add `materials/` + `.tex`.
         textures[1] = textures[1] ?? textureReference(clipMaskName, ownerPath: context.object.imageRelativePath)
         textures[8] = .fbo(clipTargetName)
         return pass.replacingTextures(textures)
