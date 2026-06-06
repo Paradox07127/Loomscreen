@@ -182,6 +182,11 @@ struct ScreenDetailView: View {
 
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
+    /// Remembered open/closed preference for the trailing inspector. Reconciled
+    /// with `showsInspector` so the panel only appears for configurable
+    /// wallpapers, but the user's toolbar toggle is honored within that.
+    @AppStorage("ScreenDetail.InspectorOpen") private var userWantsInspectorOpen = true
+    @State private var hostingWindow: NSWindow?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -214,6 +219,7 @@ struct ScreenDetailView: View {
             .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
+        .background(WindowAccessor { hostingWindow = $0 })
         .inspector(isPresented: inspectorPresentedBinding) {
             inspectorPanel
                 .inspectorColumnWidth(
@@ -222,9 +228,21 @@ struct ScreenDetailView: View {
                     max: DesignTokens.Inspector.maxWidth
                 )
         }
+        .onChange(of: showsInspector && userWantsInspectorOpen) { _, isOpen in
+            preventInspectorWindowGrowth(whenOpening: isOpen)
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    userWantsInspectorOpen.toggle()
+                } label: {
+                    Label("Toggle Inspector", systemImage: "sidebar.right")
+                }
+                .disabled(!showsInspector)
+                .help(Text("Show or hide the wallpaper properties inspector"))
             }
         }
         .confirmDestructive($pendingDestructive)
@@ -304,11 +322,32 @@ struct ScreenDetailView: View {
         )
     }
 
-    /// Native `.inspector` is binding-driven; the panel's visibility is fully
-    /// derived from `showsInspector`, so the setter is a no-op (the user can't
-    /// manually collapse a panel that only exists for configurable wallpapers).
+    /// Available only for configurable wallpapers (`showsInspector`), but within
+    /// that the user's toolbar toggle (`userWantsInspectorOpen`) drives show/hide
+    /// — a real two-way binding so the native inspector can actually collapse.
     private var inspectorPresentedBinding: Binding<Bool> {
-        Binding(get: { showsInspector }, set: { _ in })
+        Binding(
+            get: { showsInspector && userWantsInspectorOpen },
+            set: { userWantsInspectorOpen = $0 }
+        )
+    }
+
+    /// SwiftUI's `.inspector` tends to widen the host `NSWindow` by the column's
+    /// ideal width on open and never shrinks it back. Since the window is always
+    /// wide enough to fit the preview (≥480) plus the inspector by yielding
+    /// preview space, clamp the frame back to its pre-open width so opening the
+    /// inspector pushes the preview instead of growing the window — and closing
+    /// reclaims the space automatically. We never touch the shared
+    /// `contentMinSize` (other panes rely on it).
+    private func preventInspectorWindowGrowth(whenOpening isOpening: Bool) {
+        guard isOpening, let window = hostingWindow else { return }
+        let targetWidth = window.frame.width
+        DispatchQueue.main.async {
+            guard window.frame.width > targetWidth else { return }
+            var frame = window.frame
+            frame.size.width = targetWidth
+            window.setFrame(frame, display: true, animate: false)
+        }
     }
 
     private var dropFailurePresented: Binding<Bool> {
@@ -630,6 +669,22 @@ struct ScreenDetailView: View {
 
     private func triggerSceneGuideAction() {
         draft.selectedWallpaperType = .scene
+    }
+}
+
+/// Bridges the hosting `NSWindow` out to SwiftUI so the inspector logic can keep
+/// the window from auto-growing. Reports the window once the view is attached.
+private struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { onResolve(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { onResolve(nsView.window) }
     }
 }
 

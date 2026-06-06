@@ -104,7 +104,8 @@ struct ScreenDetailInspectorPanel: View {
                     #endif
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding)
-                .padding(.vertical, 14)
+                .padding(.top, 2)
+                .padding(.bottom, 14)
             }
         }
         // Let the native inspector's system material show through instead of
