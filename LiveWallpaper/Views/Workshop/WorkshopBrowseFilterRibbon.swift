@@ -276,7 +276,7 @@ struct WorkshopBrowseFilterRibbon: View {
             .disabled(controlsDisabled)
             .help(Text("Search"))
 
-            TextField("Search Workshop", text: Binding(
+            TextField("Search the Workshop", text: Binding(
                 get: { viewModel.searchInput },
                 set: { viewModel.searchInput = $0 }
             ))

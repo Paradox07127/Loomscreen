@@ -98,7 +98,7 @@ struct ScreenDetailHeader: View {
                             .controlSize(.regular)
                             .help(Text("Apply Project — choose a Wallpaper Engine project folder for this display"))
                             .accessibilityLabel(Text("Apply project"))
-                            .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
+                            .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
                         }
 
                         Button(role: .destructive, action: onClearWallpaper) {
