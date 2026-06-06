@@ -151,31 +151,13 @@ enum WPEMetalShaderInputs {
         return defaultValue
     }
 
-    static func copyUniforms(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> WPECopyUniforms {
-        // Parallax is applied as a geometry translation in `objectQuadUniforms`
-        // (scene-targeted passes only), gated by the scene's camera-parallax
-        // settings. The legacy raw-pointer UV shift here is intentionally
-        // removed so it can't double-shift non-identity copy passes or move
-        // layers when camera parallax is disabled.
+    /// The full-frame copy never shifts its sample UVs: camera parallax is a
+    /// geometry translation applied in `objectQuadUniforms` (scene-targeted
+    /// passes only), so the copy fragment samples 1:1. (The old raw-pointer UV
+    /// shift was removed — it double-shifted non-identity copies and moved layers
+    /// even when parallax was off.)
+    static func copyUniforms() -> WPECopyUniforms {
         WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
-    }
-
-    static func parallaxUVOffset(
-        pointerPosition: SIMD2<Double>,
-        parallaxDepth: Double
-    ) -> SIMD2<Float> {
-        guard parallaxDepth != 0 else {
-            return SIMD2<Float>(0, 0)
-        }
-        let delta = SIMD2<Double>(
-            pointerPosition.x - 0.5,
-            pointerPosition.y - 0.5
-        )
-        let offset = delta * parallaxDepth * 0.1
-        return SIMD2<Float>(
-            Float(min(max(offset.x, -0.05), 0.05)),
-            Float(min(max(offset.y, -0.05), 0.05))
-        )
     }
 
     /// Standard sRGB EOTF used by Metal's `_srgb` pixel formats.

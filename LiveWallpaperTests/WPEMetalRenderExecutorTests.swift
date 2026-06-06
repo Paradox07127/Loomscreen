@@ -2121,19 +2121,11 @@ private extension WPEMetalRenderExecutorTests {
         #expect(try readPixel(output0, x: 2, y: 2) == readPixel(output1, x: 2, y: 2))
     }
 
-    @Test("Generic image parallax offset is bounded by pointer delta and layer depth")
-    func genericImageParallaxOffsetIsBounded() throws {
-        let offset = WPEMetalShaderInputs.parallaxUVOffset(
-            pointerPosition: SIMD2<Double>(1.5, 0.5),
-            parallaxDepth: 0.1
-        )
-
-        #expect(abs(offset.x - 0.01) < 0.0001)
-        #expect(abs(offset.y) < 0.0001)
-    }
-
-    @Test("Generic image copy path shifts samples when parallax depth is non-zero")
-    func genericImageCopyPathShiftsSamplesWithParallax() throws {
+    @Test("Generic image copy path is pointer-independent (legacy UV parallax removed)")
+    func genericImageCopyPathIgnoresPointer() throws {
+        // Camera parallax is a geometry translation gated by the scene's parallax
+        // settings (neutral here), so moving the pointer must NOT shift the copy
+        // fragment's samples — guards against re-introducing the old UV shift.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 

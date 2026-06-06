@@ -103,7 +103,7 @@ struct WPEMetalShaderDispatcher {
             )
             encoder.setFragmentTexture(texture, index: 0)
             if fragmentName == "wpe_copy_fragment" {
-                var uniforms = WPEMetalShaderInputs.copyUniforms(for: pass, layer: layer)
+                var uniforms = WPEMetalShaderInputs.copyUniforms()
                 encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
             }
             if usesObjectQuad {
