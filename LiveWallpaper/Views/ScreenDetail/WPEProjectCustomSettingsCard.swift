@@ -44,7 +44,7 @@ struct WPEProjectCustomSettingsCard: View {
             Button(action: { resetOverrides(for: schema) }) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             .buttonStyle(.borderless)
             .help(Text("Reset project custom settings"))
@@ -130,7 +130,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .controlSize(.small)
 
                     Text(verbatim: formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(DesignTokens.Typography.metric)
                         .foregroundStyle(.secondary)
                         .frame(width: 44, alignment: .trailing)
                         .monospacedDigit()
@@ -145,7 +145,7 @@ struct WPEProjectCustomSettingsCard: View {
                     // nothing the user can switch between — mark as
                     // unavailable instead of rendering an empty Picker.
                     Text(verbatim: currentValue.stringValue)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("", selection: valueBinding(for: property)) {

@@ -50,10 +50,9 @@ struct WorkshopBrowseCard: View {
                     .padding(DesignTokens.Spacing.md)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor))
         }
         .buttonStyle(.plain)
-        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
+        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion, useGlass: true)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { isHovered = $0 }
         .help(item.title)
@@ -127,7 +126,7 @@ struct WorkshopBrowseCard: View {
 
     private func resolutionPill(_ label: String) -> some View {
         Text(verbatim: label)
-            .font(.system(size: 9, weight: .bold))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -140,7 +139,7 @@ struct WorkshopBrowseCard: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 9, weight: .bold))
             Text("In Library")
-                .font(.system(size: 9, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -154,7 +153,7 @@ struct WorkshopBrowseCard: View {
             Image(systemName: "star.fill")
                 .font(.system(size: 9, weight: .bold))
             Text(verbatim: rating.formatted(.number.precision(.fractionLength(1))))
-                .font(.system(size: 10, weight: .bold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -173,7 +172,7 @@ struct WorkshopBrowseCard: View {
     private var textInfo: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 // Always reserve two lines so 1- and 2-line titles produce
                 // equal-height cards (no ragged grid). Long titles truncate;
                 // the card's `.help(item.title)` shows the full text on hover.
@@ -183,12 +182,12 @@ struct WorkshopBrowseCard: View {
 
             HStack(spacing: 6) {
                 if let type = contentType {
-                    typePill(type)
+                    TypeBadge(type.displayName, systemImage: Self.typeSymbol(for: type))
                 }
                 Spacer(minLength: 0)
                 if !metaTrailing.isEmpty {
                     Text(verbatim: metaTrailing)
-                        .font(.system(size: 10.5))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -196,22 +195,6 @@ struct WorkshopBrowseCard: View {
 
             statusBadge
         }
-    }
-
-    private func typePill(_ type: WorkshopContentTypeFilter) -> some View {
-        HStack(spacing: 3) {
-            if let symbol = Self.typeSymbol(for: type) {
-                Image(systemName: symbol)
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            Text(verbatim: type.displayName.uppercased(with: .current))
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.5)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
     }
 
     /// Leading type glyph, matching the app's existing drag-preview iconography
@@ -234,7 +217,7 @@ struct WorkshopBrowseCard: View {
                     .foregroundStyle(status.tint)
                     .imageScale(.small)
                 Text(verbatim: status.text)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(DesignTokens.Typography.captionEmphasized)
                     .foregroundStyle(status.tint)
             }
             .padding(.horizontal, 6)
@@ -359,17 +342,17 @@ struct WorkshopBrowseCard: View {
     /// Single source for the restricted/banned badge — reused by VoiceOver.
     private var statusInfo: (text: String, tint: Color, symbol: String)? {
         if item.isBanned {
-            return (String(localized: "Unavailable", comment: "Workshop item removed or hidden on Steam."), .red, "xmark.octagon.fill")
+            return (String(localized: "Unavailable", comment: "Workshop item removed or hidden on Steam."), DesignTokens.Colors.Status.danger, "xmark.octagon.fill")
         }
         switch item.visibility {
         case .friendsOnly:
-            return (String(localized: "Friends-only", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Friends-only", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         case .private:
-            return (String(localized: "Private", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Private", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         case .public, .unknown:
             return nil
         @unknown default:
-            return (String(localized: "Restricted", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Restricted", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         }
     }
 

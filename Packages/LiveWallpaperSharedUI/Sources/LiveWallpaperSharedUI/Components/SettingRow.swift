@@ -12,9 +12,9 @@ import SwiftUI
 public struct SettingRow<Content: View>: View {
     let icon: String
     let iconColor: Color
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey?
-    let info: LocalizedStringKey?
+    let title: Text
+    let subtitle: Text?
+    let info: Text?
     let content: Content
 
     public init(
@@ -27,9 +27,30 @@ public struct SettingRow<Content: View>: View {
     ) {
         self.icon = icon
         self.iconColor = iconColor
-        self.title = title
-        self.subtitle = subtitle
-        self.info = info
+        self.title = Text(title)
+        self.subtitle = subtitle.map { Text($0) }
+        self.info = info.map { Text($0) }
+        self.content = content()
+    }
+
+    /// Verbatim variant for already-resolved runtime/author strings (e.g. a
+    /// Wallpaper Engine property display name) that must NOT be re-looked-up in
+    /// the localization catalog. Distinct `verbatim*` labels avoid overload
+    /// ambiguity with the `LocalizedStringKey` initializer at string-literal
+    /// call sites.
+    public init(
+        icon: String,
+        iconColor: Color = .accentColor,
+        verbatimTitle: String,
+        verbatimSubtitle: String? = nil,
+        info: LocalizedStringKey? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = Text(verbatim: verbatimTitle)
+        self.subtitle = verbatimSubtitle.map { Text(verbatim: $0) }
+        self.info = info.map { Text($0) }
         self.content = content()
     }
 
@@ -47,7 +68,7 @@ public struct SettingRow<Content: View>: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(title)
+                    title
                         .font(.body.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -56,7 +77,7 @@ public struct SettingRow<Content: View>: View {
                     }
                 }
                 if let subtitle = subtitle {
-                    Text(subtitle)
+                    subtitle
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -78,10 +99,18 @@ public struct SettingRow<Content: View>: View {
 /// so inspector rows that don't use `SettingRow` (e.g. compact slider grids)
 /// can adopt the same pattern.
 public struct InfoTooltipButton: View {
-    let text: LocalizedStringKey
+    let text: Text
     @State private var isPresentingPopover = false
 
     public init(text: LocalizedStringKey) {
+        self.text = Text(text)
+    }
+
+    public init(verbatim text: String) {
+        self.text = Text(verbatim: text)
+    }
+
+    fileprivate init(text: Text) {
         self.text = text
     }
 
@@ -94,11 +123,11 @@ public struct InfoTooltipButton: View {
                 .foregroundStyle(.tertiary)
         }
         .buttonStyle(.plain)
-        .help(Text(text))
+        .help(text)
         .accessibilityLabel(Text("More information"))
-        .accessibilityHint(Text(text))
+        .accessibilityHint(text)
         .popover(isPresented: $isPresentingPopover, arrowEdge: .top) {
-            Text(text)
+            text
                 .font(.callout)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)

@@ -122,7 +122,7 @@ struct WorkshopInstalledView: View {
                         installedInspectorPlaceholder
                     }
                 }
-                .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 380)
             }
     }
 
@@ -132,7 +132,7 @@ struct WorkshopInstalledView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
             Text("Select a wallpaper to see details.")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -204,7 +204,7 @@ struct WorkshopInstalledView: View {
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 20)
                         .padding(.top, DesignTokens.Spacing.sm)
@@ -216,7 +216,6 @@ struct WorkshopInstalledView: View {
                             entry: entry,
                             isActive: isActive(entry),
                             allowsInlineApply: true,
-                            galleryStyle: true,
                             isSelected: selectedEntry?.id == entry.id,
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
@@ -260,7 +259,7 @@ struct WorkshopInstalledView: View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             ProgressView().controlSize(.small)
             Text("Importing from folder…")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
@@ -274,7 +273,7 @@ struct WorkshopInstalledView: View {
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
             Text("No wallpapers installed yet.")
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
             Text("Download from Browse Online, paste a Workshop URL, or import an existing library folder.")
                 .font(.caption)
@@ -385,17 +384,17 @@ struct WorkshopInstalledView: View {
                 Text("Filters")
                 if activeFilterCount > 0 {
                     Text(verbatim: "\(activeFilterCount)")
-                        .font(.system(size: 9.5, weight: .bold))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 2)
                         .background(Color.accentColor, in: Capsule())
                 }
                 Image(systemName: showFilters ? "chevron.up" : "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.secondary)
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(DesignTokens.Typography.caption)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -456,7 +455,7 @@ struct WorkshopInstalledView: View {
     ) -> some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Text(title)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .frame(width: 74, alignment: .leading)
@@ -668,7 +667,7 @@ struct WorkshopInstalledView: View {
     private var screenDropBar: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
             Text("Drop onto a display to apply")
-                .font(.system(size: 12, weight: .medium))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: DesignTokens.Spacing.lg) {
@@ -712,7 +711,7 @@ struct WorkshopInstalledView: View {
                         .foregroundStyle(Color.accentColor)
                 }
             Text(verbatim: screen.name)
-                .font(.system(size: 11, weight: .medium))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(maxWidth: 150)
@@ -729,21 +728,11 @@ struct WorkshopInstalledView: View {
     /// Small icon shown under the cursor while dragging — deliberately NOT the
     /// preview image, so it doesn't obscure which display you're hovering.
     private func dragPreview(_ entry: WPEHistoryEntry) -> some View {
-        Image(systemName: dragIconName(for: entry.origin.originalType))
+        Image(systemName: entry.origin.originalType.symbolName)
             .font(.system(size: 22, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 54, height: 54)
             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func dragIconName(for type: WPEType) -> String {
-        switch type {
-        case .video: return "play.rectangle.fill"
-        case .web: return "globe"
-        case .scene: return "cube.transparent.fill"
-        case .application: return "app.dashed"
-        case .unknown: return "questionmark.square.dashed"
-        }
     }
 
     private func handleScreenDrop(_ providers: [NSItemProvider], to screen: Screen) -> Bool {
@@ -1087,7 +1076,7 @@ private struct WPEInstalledInspectorContent: View {
                     Image(systemName: "calendar")
                 }
             }
-            .font(.system(size: 11))
+            .font(DesignTokens.Typography.caption)
             .foregroundStyle(.secondary)
             .labelStyle(.titleAndIcon)
 
@@ -1138,21 +1127,15 @@ private struct WPEInstalledInspectorContent: View {
     }()
 
     private var typePill: some View {
-        Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+        TypeBadge(entry.origin.localizedDisplayTypeName, systemImage: entry.origin.originalType.symbolName)
     }
 
     @ViewBuilder
     private var updateSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Label("Update available on Steam", systemImage: "arrow.triangle.2.circlepath")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.orange)
+                .font(DesignTokens.Typography.captionEmphasized)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
 
             switch updatePhase {
             case .downloading, .importing:
@@ -1172,7 +1155,7 @@ private struct WPEInstalledInspectorContent: View {
                 if case .failed(let message) = updatePhase {
                     Text(verbatim: message)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !canUpdate {
                     Text("Updates use SteamCMD (Settings → Workshop → SteamCMD Doctor).")
@@ -1215,8 +1198,8 @@ private struct WPEInstalledInspectorContent: View {
     private var unsupportedWarning: some View {
         if entry.origin.originalType == .application || entry.origin.originalType == .unknown {
             Label("This is a Windows-only wallpaper and can't run on macOS.", systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.orange)
+                .font(DesignTokens.Typography.caption)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1224,8 +1207,8 @@ private struct WPEInstalledInspectorContent: View {
     private var inUseRow: some View {
         let names = screens.filter { activeScreenIDs.contains($0.id) }.map(\.name).joined(separator: ", ")
         return Label("In use on \(names)", systemImage: "checkmark.circle.fill")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.green)
+            .font(DesignTokens.Typography.caption)
+            .foregroundStyle(DesignTokens.Colors.Status.active)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -1236,7 +1219,7 @@ private struct WPEInstalledInspectorContent: View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             applyControl
             plainIconButton("Show in Finder", systemImage: "folder", tint: AnyShapeStyle(.secondary), size: 15, action: onShowInFinder)
-            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(.red), size: 15, action: onDelete)
+            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(DesignTokens.Colors.Status.danger), size: 15, action: onDelete)
         }
     }
 
@@ -1318,7 +1301,7 @@ private struct WPEInstalledInspectorContent: View {
         if let onSelectTag {
             Button { onSelectTag(tag) } label: {
                 Text(verbatim: tag)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(DesignTokens.Typography.badge)
                     .foregroundStyle(Color.accentColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -1328,7 +1311,7 @@ private struct WPEInstalledInspectorContent: View {
             .help(Text("Browse items tagged \(tag)"))
         } else {
             Text(verbatim: tag)
-                .font(.system(size: 10, weight: .medium))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -1339,7 +1322,7 @@ private struct WPEInstalledInspectorContent: View {
     private func contentRatingPill(_ rating: String) -> some View {
         let tint = contentRatingTint(rating)
         return Text(verbatim: rating.uppercased(with: .current))
-            .font(.system(size: 9, weight: .bold))
+            .font(DesignTokens.Typography.badge)
             .tracking(0.5)
             .foregroundStyle(tint)
             .padding(.horizontal, 6)

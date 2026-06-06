@@ -44,7 +44,7 @@ struct WeatherStatusBadge: View {
                 if let error = weatherService.lastError {
                     Text(verbatim: PIISanitizer.scrub(error))
                         .font(.caption2)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .lineLimit(1)
                         .help(Text(
                             "Weather fetch error (paths and tokens scrubbed)",
@@ -121,10 +121,10 @@ struct WeatherStatusBadge: View {
     private var statusColor: Color {
         switch weatherService.locationStatus {
         case .available: return .cyan
-        case .fetching: return .orange
-        case .denied: return .red
-        case .notDetermined: return .orange
-        case .error: return .red
+        case .fetching: return DesignTokens.Colors.Status.warning
+        case .denied: return DesignTokens.Colors.Status.danger
+        case .notDetermined: return DesignTokens.Colors.Status.warning
+        case .error: return DesignTokens.Colors.Status.danger
         case .authorized: return .secondary
         }
     }

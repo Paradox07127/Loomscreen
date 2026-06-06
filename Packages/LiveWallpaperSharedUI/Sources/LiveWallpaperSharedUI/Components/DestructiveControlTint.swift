@@ -5,9 +5,9 @@ public struct DestructiveControlTint: ViewModifier {
 
     public func body(content: Content) -> some View {
         content
-            .foregroundStyle(Color.red)
-            .tint(Color.red)
-            .adaptiveGlassSurface(.roundedRectangle(8), tint: .red, interactive: true)
+            .foregroundStyle(DesignTokens.Colors.Status.danger)
+            .tint(DesignTokens.Colors.Status.danger)
+            .adaptiveGlassSurface(.roundedRectangle(8), tint: DesignTokens.Colors.Status.danger, interactive: true)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

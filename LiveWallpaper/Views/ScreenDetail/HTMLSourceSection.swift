@@ -68,7 +68,7 @@ struct HTMLSourceSection: View {
                     }
                 } label: {
                     Text(segment.labelKey)
-                        .font(.system(size: 12, weight: selectedSegment == segment ? .semibold : .regular))
+                        .font(selectedSegment == segment ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 3)
                         .background(
@@ -170,7 +170,7 @@ struct HTMLSourceSection: View {
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
             text
-                .font(.system(size: 12, design: .monospaced))
+                .font(DesignTokens.Typography.code)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -206,7 +206,7 @@ struct HTMLSourceSection: View {
         chip(
             symbol: "exclamationmark.shield",
             text: "HTTP",
-            color: .orange,
+            color: DesignTokens.Colors.Status.warning,
             help: "Insecure HTTP — content cannot be verified."
         )
     }
@@ -221,14 +221,14 @@ struct HTMLSourceSection: View {
             chip(
                 symbol: "checkmark.shield.fill",
                 text: "Trusted",
-                color: .green,
+                color: DesignTokens.Colors.Status.active,
                 help: "JavaScript allowed for this origin."
             )
         case .untrustedRemote:
             chip(
                 symbol: "exclamationmark.shield",
                 text: "Untrusted",
-                color: .orange,
+                color: DesignTokens.Colors.Status.warning,
                 help: "Scripts disabled. Manage in Content Security panel."
             )
         }
@@ -270,7 +270,7 @@ struct HTMLSourceSection: View {
             Image(systemName: symbol)
                 .font(.system(size: 9, weight: .semibold))
             label
-                .font(.system(size: 10, weight: .semibold))
+                .font(DesignTokens.Typography.badge)
         }
         .foregroundStyle(color)
         .padding(.horizontal, 7)
@@ -502,7 +502,7 @@ struct HTMLOptionsInspector: View {
                 .font(.headline)
 
             TextEditor(text: $draftCustomCSS)
-                .font(.system(size: 11, design: .monospaced))
+                .font(DesignTokens.Typography.code)
                 .frame(width: 380, height: 200)
                 .scrollContentBackground(.hidden)
                 .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
@@ -606,7 +606,7 @@ struct HTMLTransformInspector: View {
             Button(action: resetTransform) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             .buttonStyle(.borderless)
             .help(Text("Reset scale, translate, and rotation"))
@@ -636,7 +636,7 @@ struct HTMLTransformInspector: View {
                 .accessibilityLabel(Text("Scale"))
 
                 Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 42, alignment: .trailing)
                     .monospacedDigit()
@@ -696,7 +696,7 @@ struct HTMLTransformInspector: View {
     ) -> some View {
         HStack(spacing: 6) {
             Text(verbatim: axisLabel)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
 
             Slider(
@@ -713,7 +713,7 @@ struct HTMLTransformInspector: View {
                 format: .number.precision(.fractionLength(0))
             )
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced))
+            .font(DesignTokens.Typography.metric)
             .foregroundStyle(.primary)
             .multilineTextAlignment(.trailing)
             .monospacedDigit()
@@ -747,7 +747,7 @@ struct HTMLTransformInspector: View {
                 .accessibilityLabel(Text("Rotation"))
 
                 Text(verbatim: String(format: "%.0f°", config.transformRotationDegrees))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 36, alignment: .trailing)
                     .monospacedDigit()

@@ -95,7 +95,7 @@ struct WPEPreviewView: View {
     private var retryBadge: some View {
         HStack(spacing: 4) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
             Image(systemName: "arrow.clockwise")
         }
         .font(.system(size: 10, weight: .semibold))

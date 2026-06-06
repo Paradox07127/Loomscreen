@@ -34,7 +34,7 @@ struct SteamWebAPIKeyEntrySheet: View {
             disclosurePanel
             Toggle(isOn: $hasReadTOU) {
                 Text("I have read the Steam Web API Terms of Use.")
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
             }
             .toggleStyle(.checkbox)
             keyField
@@ -42,7 +42,7 @@ struct SteamWebAPIKeyEntrySheet: View {
             if let savingError {
                 Text(savingError)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             HStack {
                 Spacer()
@@ -87,13 +87,13 @@ struct SteamWebAPIKeyEntrySheet: View {
     private var disclosurePanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text("Loomscreen uses Valve's Steam Web API to fetch Workshop metadata.")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
             Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .tint(Color.accentColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -148,22 +148,22 @@ struct SteamWebAPIKeyEntrySheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .wrongShape:
-            label(text: "Key must be 32 hexadecimal characters.", tint: .red, system: "xmark.circle.fill")
+            label(text: "Key must be 32 hexadecimal characters.", tint: DesignTokens.Colors.Status.danger, system: "xmark.circle.fill")
         case .validating:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Checking with Steam…").font(.caption).foregroundStyle(.secondary)
             }
         case .valid:
-            label(text: "Key validated.", tint: .green, system: "checkmark.circle.fill")
+            label(text: "Key validated.", tint: DesignTokens.Colors.Status.active, system: "checkmark.circle.fill")
         case .error(let message):
-            label(text: message, tint: .red, system: "exclamationmark.triangle.fill")
+            label(text: message, tint: DesignTokens.Colors.Status.danger, system: "exclamationmark.triangle.fill")
         }
     }
 
     private var dataFlowFooter: some View {
         Text("Stored on your Mac (Keychain, no iCloud sync) and sent directly to Valve's Steam Web API over HTTPS. Loomscreen never proxies your key.")
-            .font(.system(size: 10))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)

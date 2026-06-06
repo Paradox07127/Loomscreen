@@ -281,7 +281,7 @@ struct ScreenDetailInspectorPanel: View {
                     .accessibilityLabel(Text("Particle density"))
                     .accessibilityValue(String(format: "%.1f×", draft.particleDensity))
                 Text(String(format: "%.1f", draft.particleDensity))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 28, alignment: .trailing)
             }
@@ -324,14 +324,14 @@ struct ScreenDetailInspectorPanel: View {
             Spacer()
             Button(action: onResetDisplaySettings) {
                 Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(DesignTokens.Typography.body)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.red)
-            .tint(Color.red)
-            .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
+            .foregroundStyle(DesignTokens.Colors.Status.danger)
+            .tint(DesignTokens.Colors.Status.danger)
+            .adaptiveGlassSurface(.capsule, tint: DesignTokens.Colors.Status.danger, interactive: true)
             .contentShape(Capsule())
             .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
             Spacer()
@@ -421,7 +421,7 @@ struct ScreenDetailInspectorPanel: View {
                     onWallpaperModeChange(mode)
                 } label: {
                     Text(mode.labelKey)
-                        .font(.system(size: 12, weight: draft.selectedWallpaperMode == mode ? .semibold : .regular))
+                        .font(draft.selectedWallpaperMode == mode ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(

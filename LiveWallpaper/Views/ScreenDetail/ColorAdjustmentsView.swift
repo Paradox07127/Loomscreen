@@ -27,7 +27,7 @@ struct ColorAdjustmentsView: View {
 
                 HStack {
                     Text("Auto warm tint by time of day")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer()
@@ -47,7 +47,7 @@ struct ColorAdjustmentsView: View {
                         Label("Reset Color & Filters", systemImage: "arrow.counterclockwise")
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
+                    .tint(DesignTokens.Colors.Status.danger)
                     .controlSize(.small)
                     .help(Text("Reset blur, brightness, saturation, warmth, vignette, and auto-tint to defaults"))
                     Spacer()
@@ -60,7 +60,7 @@ struct ColorAdjustmentsView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Color Management")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(DesignTokens.Typography.body)
                 Spacer()
                 Picker("", selection: Binding(
                     get: { videoColorSpace },
@@ -79,7 +79,7 @@ struct ColorAdjustmentsView: View {
                 .accessibilityLabel(Text("Color management"))
             }
             Text(LocalizedStringKey(videoColorSpace.descriptionKey))
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -111,7 +111,7 @@ struct ColorAdjustmentsView: View {
     ) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 13))
+                .font(DesignTokens.Typography.body)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(width: 90, alignment: .leading)
@@ -122,7 +122,7 @@ struct ColorAdjustmentsView: View {
                 .accessibilityValue(Text(verbatim: String(format: format, value.wrappedValue)))
 
             Text(verbatim: String(format: format, value.wrappedValue))
-            .font(.system(size: 12, design: .monospaced))
+            .font(DesignTokens.Typography.metric)
             .foregroundStyle(.secondary)
             .frame(width: 44, alignment: .trailing)
         }

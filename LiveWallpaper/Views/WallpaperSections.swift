@@ -39,7 +39,7 @@ struct ShaderWallpaperSection: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 14) {
                 Label("Shader Wallpaper", systemImage: "wand.and.stars")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignTokens.Typography.bodyEmphasized)
 
                 builtinSection
                 customSection

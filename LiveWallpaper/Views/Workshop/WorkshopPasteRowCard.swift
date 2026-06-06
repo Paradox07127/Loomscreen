@@ -66,7 +66,7 @@ struct WorkshopPasteRowCard: View {
             } else if row.state == .invalidInput {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.title3)
-                    .foregroundStyle(Color.yellow)
+                    .foregroundStyle(DesignTokens.Colors.Status.caution)
             } else {
                 Image(systemName: "cube.transparent")
                     .font(.title3)
@@ -81,7 +81,7 @@ struct WorkshopPasteRowCard: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text(verbatim: titleText)
-                .font(.system(size: 14, weight: .semibold))
+                .font(DesignTokens.Typography.sectionTitle)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             statusBadge
@@ -92,13 +92,13 @@ struct WorkshopPasteRowCard: View {
     private var statusBadge: some View {
         switch row.state {
         case .ready:
-            BadgeChip(text: "Ready", tint: .green, systemImage: "checkmark.seal.fill")
+            BadgeChip(text: "Ready", tint: DesignTokens.Colors.Status.active, systemImage: "checkmark.seal.fill")
         case .fetchingMetadata:
             BadgeChip(text: "Fetching", tint: .blue, systemImage: "hourglass")
         case .invalidInput:
-            BadgeChip(text: "Invalid", tint: .yellow, systemImage: "exclamationmark.triangle.fill")
+            BadgeChip(text: "Invalid", tint: DesignTokens.Colors.Status.caution, systemImage: "exclamationmark.triangle.fill")
         case .failed:
-            BadgeChip(text: errorBadgeLabel, tint: .red, systemImage: "xmark.octagon.fill")
+            BadgeChip(text: errorBadgeLabel, tint: DesignTokens.Colors.Status.danger, systemImage: "xmark.octagon.fill")
         }
     }
 
@@ -108,7 +108,7 @@ struct WorkshopPasteRowCard: View {
             if row.steamURL != nil {
                 Button(action: onOpenInSteam) {
                     Label("Open in Steam", systemImage: "arrow.up.forward.app")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                 }
                 .buttonStyle(.borderless)
             }
@@ -116,7 +116,7 @@ struct WorkshopPasteRowCard: View {
             if row.state == .failed, !isInvalidInputState {
                 Button(action: onRetry) {
                     Label("Retry", systemImage: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                 }
                 .buttonStyle(.borderless)
             }
@@ -126,7 +126,7 @@ struct WorkshopPasteRowCard: View {
             if row.state == .failed || row.state == .invalidInput {
                 Button(action: onCopyDiagnostic) {
                     Label("Copy diagnostic", systemImage: "doc.on.clipboard")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -199,7 +199,7 @@ private struct BadgeChip: View {
 
     var body: some View {
         Label(text, systemImage: systemImage)
-            .font(.system(size: 10, weight: .semibold))
+            .font(DesignTokens.Typography.badge)
             .foregroundStyle(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -231,7 +231,7 @@ private struct SteamWorkshopMetadataView: View {
         VStack(alignment: .leading, spacing: 6) {
             if !metadata.shortDescription.isEmpty {
                 Text(verbatim: metadata.shortDescription)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -259,7 +259,7 @@ private struct WorkshopRowErrorStrip: View {
                 .foregroundStyle(tint)
                 .imageScale(.small)
             Text(verbatim: copy)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -272,14 +272,14 @@ private struct WorkshopRowErrorStrip: View {
     private var tint: Color {
         switch error {
         case .itemBanned, .itemNotFound, .responseParseFailure, .schemaMismatch:
-            return .red
+            return DesignTokens.Colors.Status.danger
         case .rateLimited:
             // Transient — orange (per plan & mockup) signals "auto-retrying"
             // distinctly from yellow ("user action recommended").
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .invalidInput, .itemPrivate, .timeout, .networkUnreachable,
              .unauthorized, .http:
-            return .yellow
+            return DesignTokens.Colors.Status.caution
         case .cancelled, .unknown:
             return .secondary
         }

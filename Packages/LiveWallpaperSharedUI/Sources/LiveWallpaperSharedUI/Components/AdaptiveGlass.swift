@@ -123,7 +123,11 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            // Honor Reduce Transparency on every OS — fallbackMaterial renders an
+            // opaque window-background fill rather than native Liquid Glass.
+            fallbackMaterial(content)
+        } else if #available(macOS 26.0, *) {
             nativeGlass(content)
         } else {
             fallbackMaterial(content)

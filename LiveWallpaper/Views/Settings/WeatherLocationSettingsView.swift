@@ -28,9 +28,9 @@ struct ManualLocationPicker: View {
             if let current = currentSelection {
                 HStack(spacing: 6) {
                     Image(systemName: "mappin.and.ellipse")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(DesignTokens.Colors.Status.active)
                     Text(verbatim: current.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
@@ -63,10 +63,10 @@ struct ManualLocationPicker: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(verbatim: result.title)
-                                        .font(.system(size: 12, weight: .medium))
+                                        .font(DesignTokens.Typography.body)
                                     if !result.subtitle.isEmpty {
                                         Text(verbatim: result.subtitle)
-                                            .font(.system(size: 10))
+                                            .font(DesignTokens.Typography.badge)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -95,7 +95,7 @@ struct ManualLocationPicker: View {
             if let error = resolutionError {
                 Text(verbatim: error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
         }
     }

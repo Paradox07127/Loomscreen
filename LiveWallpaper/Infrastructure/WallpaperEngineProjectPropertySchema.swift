@@ -199,6 +199,33 @@ extension WallpaperEngineProjectPropertySchema {
     }
 }
 
+private enum KnownWallpaperEngineKeys {
+    private static let displayNames: [String: String] = [
+        "bgmvolume": "BGM Volume",
+        "mouseactions": "Mouse Actions",
+        "schemecolor": "Scheme Color",
+        "ui_browse_properties_alignment": "Alignment",
+        "ui_browse_properties_background_image": "Background Image",
+        "ui_browse_properties_blur": "Blur",
+        "ui_browse_properties_brightness": "Brightness",
+        "ui_browse_properties_color": "Color",
+        "ui_browse_properties_contrast": "Contrast",
+        "ui_browse_properties_opacity": "Opacity",
+        "ui_browse_properties_playback_rate": "Playback Rate",
+        "ui_browse_properties_rotation": "Rotation",
+        "ui_browse_properties_scale": "Scale",
+        "ui_browse_properties_scheme_color": "Scheme Color",
+        "ui_browse_properties_schemecolor": "Scheme Color",
+        "ui_browse_properties_size": "Size",
+        "ui_browse_properties_speed": "Speed",
+        "ui_browse_properties_volume": "Volume"
+    ]
+
+    static func displayText(for raw: String) -> String? {
+        displayNames[raw.lowercased()]
+    }
+}
+
 private struct Localization: Equatable {
     private let selected: [String: String]
     private let fallback: [String: String]
@@ -211,10 +238,13 @@ private struct Localization: Equatable {
 
     func displayText(for raw: String) -> String {
         let cleaned = Self.clean(raw)
+        // A localization hit is the author's chosen string — return it verbatim.
+        // Only resolve (known-key map / identifier prettify) on a miss, which is
+        // where raw WPE keys like `ui_browse_properties_scheme_color` would leak.
         if let localized = selected[cleaned] ?? fallback[cleaned] {
             return Self.clean(localized)
         }
-        return cleaned
+        return Self.resolveDisplayText(cleaned)
     }
 
     private static func selectMap(
@@ -243,6 +273,59 @@ private struct Localization: Equatable {
             candidates.append("en-us")
         }
         return Array(NSOrderedSet(array: candidates)) as? [String] ?? candidates
+    }
+
+    /// Last-resort display resolution for a label that the project did not
+    /// localize: a curated known-key map, then `ui_browse_properties_*` /
+    /// snake_case / camelCase prettification. Genuine author text (anything with
+    /// whitespace or no identifier shape) passes through untouched.
+    private static func resolveDisplayText(_ cleaned: String) -> String {
+        if let known = KnownWallpaperEngineKeys.displayText(for: cleaned) {
+            return known
+        }
+        if let suffix = browsePropertySuffix(for: cleaned) {
+            return prettifyIdentifier(suffix)
+        }
+        if isIdentifierLike(cleaned) {
+            return prettifyIdentifier(cleaned)
+        }
+        return cleaned
+    }
+
+    private static func browsePropertySuffix(for text: String) -> String? {
+        let prefix = "ui_browse_properties_"
+        let lowered = text.lowercased()
+        guard lowered.hasPrefix(prefix), text.count > prefix.count else { return nil }
+        return String(text.dropFirst(prefix.count))
+    }
+
+    /// Conservative: only snake_case identifiers are prettified. WPE keys use
+    /// underscores; camelCase, hyphenated ranges ("4K-8K"), and short tokens
+    /// ("4K") are left untouched so genuine author labels are never mangled.
+    private static func isIdentifierLike(_ text: String) -> Bool {
+        guard !text.isEmpty,
+              text.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            return false
+        }
+        return text.contains("_")
+    }
+
+    private static func prettifyIdentifier(_ raw: String) -> String {
+        let spaced = raw
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return spaced.split(separator: " ").map(titleCasedIdentifierWord).joined(separator: " ")
+    }
+
+    private static func titleCasedIdentifierWord(_ word: Substring) -> String {
+        let lower = word.lowercased()
+        if ["bgm", "css", "fps", "hdr", "html", "rgb", "rgba", "ui", "url", "wpe"].contains(lower) {
+            return lower.uppercased()
+        }
+        guard let first = lower.first else { return "" }
+        return String(first).uppercased() + lower.dropFirst()
     }
 
     private static func clean(_ raw: String) -> String {

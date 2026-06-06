@@ -151,7 +151,7 @@ struct CommonPlaybackInspector: View {
                     .accessibilityValue(audioAccessibilityValue(isMuted: isMuted, percent: percent))
 
                 audioLevelLabel(isMuted: isMuted, percent: percent)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
                     .monospacedDigit()
@@ -310,7 +310,7 @@ struct CommonPlaybackInspector: View {
             HStack(spacing: 6) {
                 if lockScreenExtracted {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(DesignTokens.Colors.Status.active)
                         .transition(.scale.combined(with: .opacity))
                         .accessibilityHidden(true)
                 }
@@ -586,7 +586,7 @@ struct ContentSecurityInspector: View {
         // we want to show. The xcstrings extractor will simply skip it.
         SettingRow(
             icon: isTrusted ? "checkmark.shield.fill" : "exclamationmark.shield",
-            iconColor: isTrusted ? .green : .orange,
+            iconColor: isTrusted ? DesignTokens.Colors.Status.active : DesignTokens.Colors.Status.warning,
             title: "Origin Access",
             subtitle: LocalizedStringKey(origin.displayName),
             info: trustRowInfo(for: origin, isTrusted: isTrusted)

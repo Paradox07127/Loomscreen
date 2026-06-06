@@ -20,7 +20,7 @@ struct RowNumberHandle: View {
                     .transition(.opacity)
             } else {
                 Text("\(index)")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
                     .transition(.opacity)

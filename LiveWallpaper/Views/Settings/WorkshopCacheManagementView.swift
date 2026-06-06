@@ -27,7 +27,7 @@ struct WorkshopCacheManagementView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: cacheSizeBytes))
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .font(DesignTokens.Typography.pageTitle)
                         Text("On-disk Workshop browse cache")
                             .font(.caption)
                             .foregroundStyle(.secondary)

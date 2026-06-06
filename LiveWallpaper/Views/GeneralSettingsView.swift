@@ -501,7 +501,7 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
             }
 
-            SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85% of a display, even if none is full-screen") {
+            SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85 percent of a display, even if none is full-screen") {
                 Toggle("", isOn: $pauseOnWindowOcclusion)
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -720,7 +720,7 @@ struct GeneralSettingsView: View {
 
             VStack(spacing: 4) {
                 Text(verbatim: BundleIdentity.productDisplayName)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(DesignTokens.Typography.hero)
                     .textSelection(.enabled)
 
                 HStack(spacing: 6) {
@@ -889,7 +889,7 @@ struct GeneralSettingsView: View {
                 Label("Reset Defaults", systemImage: "arrow.counterclockwise")
             }
             .buttonStyle(.bordered)
-            .tint(.red)
+            .tint(DesignTokens.Colors.Status.danger)
             .controlSize(.regular)
             .accessibilityLabel(Text("Reset all settings to default"))
             .accessibilityHint(Text("Erases all configurations and restores factory defaults"))

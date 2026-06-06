@@ -46,7 +46,7 @@ struct BookmarksPopover: View {
         VStack(alignment: .leading, spacing: 8) {
             header(systemImage: "bookmark", title: Text("Bookmark"))
             Text("Configure a wallpaper first to bookmark it.")
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -63,11 +63,11 @@ struct BookmarksPopover: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Name")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(DesignTokens.Typography.badge)
                     .foregroundStyle(.secondary)
                 TextField(defaultLabel(for: content), text: $nameDraft)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .onSubmit { commit(content: content, existing: existing) }
             }
 
@@ -83,7 +83,7 @@ struct BookmarksPopover: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tint)
             title
-                .font(.system(size: 13, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
             Spacer()
         }
     }

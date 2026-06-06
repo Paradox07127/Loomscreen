@@ -71,13 +71,13 @@ struct UpdateBannerView: View {
             ProgressView().controlSize(.small)
         case .upToDate:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(DesignTokens.Colors.Status.active)
         case .available:
             Image(systemName: "arrow.down.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
         }
     }
 

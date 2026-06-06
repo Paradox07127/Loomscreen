@@ -31,7 +31,7 @@ struct TerminalCommandPanel: View {
             HStack(spacing: DesignTokens.Spacing.xs) {
                 Button(action: copyToClipboard) {
                     Label("Copy", systemImage: "doc.on.clipboard")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(DesignTokens.Typography.caption)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -39,7 +39,7 @@ struct TerminalCommandPanel: View {
 
                 Button(action: openTerminal) {
                     Label("Terminal", systemImage: "terminal")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(DesignTokens.Typography.caption)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

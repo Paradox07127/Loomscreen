@@ -1,0 +1,65 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>① Token 色板</title>
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/app.css"></head>
+<body>
+<div class="note"><h1>① Design Tokens 色板</h1><p>对应 DesignTokens.swift 的合并规格（Typography / Opacity / SemanticColor / Radius / Elevation / 徽章）。</p></div>
+<div class="palette">
+  <h2>Typography</h2>
+  <div class="typerow"><span>heroTitle 28/300</span><div style="font:var(--t-hero)">Live Wallpaper</div></div>
+  <div class="typerow"><span>pageTitle 18/600</span><div style="font:var(--t-page)">MPG321CX OLED</div></div>
+  <div class="typerow"><span>sectionTitle 12/700</span><div style="font:var(--t-section)">PERFORMANCE & BATTERY</div></div>
+  <div class="typerow"><span>cardTitle 13/600</span><div style="font:var(--t-card-title)">Blue Archive — Plana [4K]</div></div>
+  <div class="typerow"><span>cardMeta 10.5/400</span><div style="font:var(--t-card-meta);color:var(--text-2)">337.2 MB · SCENE</div></div>
+  <div class="typerow"><span>rowTitle 13/400</span><div style="font:var(--t-row-title)">Pause on battery</div></div>
+  <div class="typerow"><span>rowSubtitle 11/400</span><div style="font:var(--t-row-sub);color:var(--text-2)">Switch to a static frame when unplugged</div></div>
+  <div class="typerow"><span>badge 9/700</span><div style="font:var(--t-badge);letter-spacing:.05em">4K · SCENE · IN LIBRARY</div></div>
+  <div class="typerow"><span>mono 11</span><div style="font:var(--t-mono)">3479521040 · capability: ok</div></div>
+
+  <h2>Semantic Colors</h2>
+  <div class="swatches">
+    <div class="swatch"><i style="background:var(--accent)"></i><b>accent</b><span>#5B5BD6</span></div>
+    <div class="swatch"><i style="background:var(--accent-soft)"></i><b>accent-soft</b><span>12%</span></div>
+    <div class="swatch"><i style="background:var(--badge-success)"></i><b>inLibrary</b><span>AA on art</span></div>
+    <div class="swatch"><i style="background:var(--badge-accent)"></i><b>update</b><span>amber</span></div>
+    <div class="swatch"><i style="background:var(--badge-warning)"></i><b>warning</b><span>mature</span></div>
+    <div class="swatch"><i style="background:var(--badge-danger)"></i><b>danger</b><span>won't run</span></div>
+    <div class="swatch"><i style="background:var(--text)"></i><b>text</b><span>label</span></div>
+    <div class="swatch"><i style="background:var(--text-2)"></i><b>text-2</b><span>secondary</span></div>
+  </div>
+
+  <h2>Gauges（降饱和）</h2>
+  <div class="swatches">
+    <div class="swatch"><i style="background:var(--gauge-low)"></i><b>low</b></div>
+    <div class="swatch"><i style="background:var(--gauge-med)"></i><b>medium</b></div>
+    <div class="swatch"><i style="background:var(--gauge-high)"></i><b>high</b></div>
+  </div>
+
+  <h2>Corner Radius</h2>
+  <div class="swatches">
+    <div class="swatch"><i style="border-radius:var(--r-badge);background:#e7e7ea"></i><b>badge 6</b></div>
+    <div class="swatch"><i style="border-radius:var(--r-control);background:#e7e7ea"></i><b>control 10</b></div>
+    <div class="swatch"><i style="border-radius:var(--r-tile);background:#e7e7ea"></i><b>tile 14</b></div>
+    <div class="swatch"><i style="border-radius:var(--r-chrome);background:#e7e7ea"></i><b>chrome 18</b></div>
+  </div>
+
+  <h2>Elevation</h2>
+  <div class="swatches">
+    <div class="swatch"><i style="box-shadow:var(--e-rest);background:#fff"></i><b>rest</b></div>
+    <div class="swatch"><i style="box-shadow:var(--e-hover);background:#fff"></i><b>hover</b></div>
+    <div class="swatch"><i style="box-shadow:var(--e-chrome);background:#fff"></i><b>chrome</b></div>
+  </div>
+
+  <h2>徽章体系（退役全局 Experimental）</h2>
+  <div class="badgewrap">
+    <span class="badge success">✓ In Library</span>
+    <span class="badge accent">↑ Update</span>
+    <span class="badge warning">Mature</span>
+    <span class="badge warning">Needs Files</span>
+    <span class="badge danger">Won't Run</span>
+    <span class="badge">4K</span>
+    <span class="badge"><span class="star" data-ic="star" data-s="9"></span>4.9</span>
+    <span class="type-badge">scene</span>
+  </div>
+</div>
+<script src="css/app.js"></script>
+</body></html>

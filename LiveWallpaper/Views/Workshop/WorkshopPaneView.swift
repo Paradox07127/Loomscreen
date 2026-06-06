@@ -127,7 +127,7 @@ struct WorkshopPaneView: View {
             if selectedTab == .browseOnline, services.hasWebAPIKey {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(DesignTokens.Colors.Status.active)
                     .accessibilityHidden(true)
             }
             Text(verbatim: headerStat)

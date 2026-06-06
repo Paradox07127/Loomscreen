@@ -61,7 +61,7 @@ struct WPEFallbackCard: View {
 
             VStack(spacing: 8) {
                 Text(verbatim: origin.title)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(DesignTokens.Typography.pageTitle)
                     .multilineTextAlignment(.center)
                 Text("Workshop ID \(origin.workshopID) · \(origin.localizedDisplayTypeName) type", comment: "Wallpaper Engine metadata line. Placeholders are Workshop ID and project type.")
                     .font(.subheadline)
@@ -290,17 +290,17 @@ extension FallbackReason {
     var severityTint: Color {
         switch self {
         case .requiresWindowsPlugin:
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .unsupportedType,
              .sceneShaderUnsupported,
              .texContainerUnsupported,
              .texUnsupportedFormat:
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .missingDependency,
              .sceneParseFailed,
              .sceneResourceMissing,
              .texDecodeFailed:
-            return .yellow
+            return DesignTokens.Colors.Status.caution
         }
     }
 

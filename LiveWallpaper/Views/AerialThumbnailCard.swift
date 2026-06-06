@@ -129,7 +129,7 @@ struct AerialThumbnailCard: View {
             HStack(spacing: 4) {
                 ForEach(badges, id: \.self) { badge in
                     Text(verbatim: badge.displayLabel)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -155,14 +155,14 @@ struct AerialThumbnailCard: View {
     private var textBlock: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(verbatim: asset.displayName)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             if let category = asset.category, !category.isEmpty {
                 Text(verbatim: category)
-                    .font(.system(size: 10.5))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)

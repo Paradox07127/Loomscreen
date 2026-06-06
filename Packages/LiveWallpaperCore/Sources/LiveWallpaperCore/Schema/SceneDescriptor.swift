@@ -165,7 +165,7 @@ public enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
         case .imageOnly:
             return String(localized: "Image-only", defaultValue: "Image-only", comment: "Wallpaper Engine scene capability tier.")
         case .degraded:
-            return String(localized: "Degraded", defaultValue: "Degraded", comment: "Wallpaper Engine scene capability tier.")
+            return String(localized: "Limited Compatibility", defaultValue: "Limited Compatibility", comment: "Wallpaper Engine scene capability tier.")
         case .unsupported:
             return String(localized: "Unsupported", defaultValue: "Unsupported", comment: "Wallpaper Engine scene capability tier.")
         }

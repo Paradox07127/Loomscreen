@@ -120,7 +120,7 @@ struct ScheduleSlotRow: View {
     private var titleRow: some View {
         HStack(spacing: 8) {
             Text(verbatim: slot.localizedLabel)
-                .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+                .font(isActive ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
@@ -128,7 +128,7 @@ struct ScheduleSlotRow: View {
                 timePopoverShown = true
             } label: {
                 Text(verbatim: ScheduleTimeFormatter.rangeLabel(startHour: slot.startHour, endHour: slot.endHour))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .padding(.horizontal, 6)
@@ -163,13 +163,13 @@ struct ScheduleSlotRow: View {
     private var subtitleRow: some View {
         if let name = videoName {
             Text(verbatim: name)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         } else {
             Text("No video assigned")
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
@@ -235,14 +235,14 @@ struct ScheduleSlotRow: View {
     }
 
     private var backgroundFill: Color {
-        if isHighlightedConflict { return Color.red.opacity(0.10) }
+        if isHighlightedConflict { return DesignTokens.Colors.Status.danger.opacity(0.10) }
         if isActive { return accent.opacity(0.10) }
         if isHovering { return Color.primary.opacity(0.04) }
         return Color.primary.opacity(0.025)
     }
 
     private var borderColor: Color {
-        if isHighlightedConflict { return Color.red.opacity(0.75) }
+        if isHighlightedConflict { return DesignTokens.Colors.Status.danger.opacity(0.75) }
         if isActive { return accent.opacity(0.30) }
         return Color.primary.opacity(0.06)
     }

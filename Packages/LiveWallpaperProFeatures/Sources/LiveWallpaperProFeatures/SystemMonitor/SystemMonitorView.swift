@@ -107,17 +107,17 @@ public struct SystemMonitorView: View {
     }
 
     private func colorForPercent(_ pct: Double) -> Color {
-        if pct >= 80 { return .red }
-        if pct >= 50 { return .orange }
-        return .green
+        if pct >= 80 { return DesignTokens.Colors.Gauge.high }
+        if pct >= 50 { return DesignTokens.Colors.Gauge.medium }
+        return DesignTokens.Colors.Gauge.low
     }
 
     private var thermalColor: Color {
         switch monitor.thermalState {
-        case .nominal:  return .green
-        case .fair:     return .yellow
-        case .serious:  return .orange
-        case .critical: return .red
+        case .nominal:  return DesignTokens.Colors.Gauge.low
+        case .fair:     return DesignTokens.Colors.Gauge.medium
+        case .serious:  return DesignTokens.Colors.Gauge.high
+        case .critical: return DesignTokens.Colors.Gauge.high
         @unknown default: return .gray
         }
     }
@@ -167,12 +167,12 @@ struct MiniGaugeCard: View {
         ZStack {
             Circle()
                 .trim(from: 0.0, to: 0.75)
-                .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(Color.gray.opacity(0.12), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(135))
 
             Circle()
                 .trim(from: 0.0, to: CGFloat(displayedPercent) / 100 * 0.75)
-                .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(color, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(135))
                 .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.5, dampingFraction: 0.8)), value: displayedPercent)
 
@@ -211,19 +211,19 @@ struct PowerStatusCard: View {
         ZStack {
             Circle()
                 .trim(from: 0.0, to: 0.75)
-                .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .stroke(Color.gray.opacity(0.12), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(135))
 
             switch powerSource {
             case .battery(let level):
                 Circle()
                     .trim(from: 0.0, to: CGFloat(level) * 0.75)
-                    .stroke(statusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(statusColor, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                     .rotationEffect(.degrees(135))
             case .external:
                 Circle()
                     .trim(from: 0.0, to: 0.75)
-                    .stroke(statusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(statusColor, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                     .rotationEffect(.degrees(135))
             }
 
@@ -264,11 +264,11 @@ struct PowerStatusCard: View {
     private var statusColor: Color {
         switch powerSource {
         case .battery(let level):
-            if level <= 0.2 { return .red }
-            if level <= 0.5 { return .orange }
-            return .green
+            if level <= 0.2 { return DesignTokens.Colors.Gauge.high }
+            if level <= 0.5 { return DesignTokens.Colors.Gauge.medium }
+            return DesignTokens.Colors.Gauge.low
         case .external:
-            return .green
+            return DesignTokens.Colors.Gauge.low
         }
     }
 }

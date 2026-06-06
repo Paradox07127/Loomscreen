@@ -2,6 +2,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftUI
 import Testing
 import UniformTypeIdentifiers
 @testable import LiveWallpaper
@@ -136,6 +137,56 @@ struct GIFPlaybackCoordinatorTests {
     }
 }
 
+@Suite("ThumbnailPlaybackGate")
+struct ThumbnailPlaybackGateTests {
+
+    @Test("Grid gate requires visibility, hover, motion, and unblurred content")
+    func gridGateRequiresAllInputs() {
+        var gate = ThumbnailPlaybackGate(
+            isVisible: true,
+            isHovered: true,
+            reduceMotion: false,
+            isBlurred: false,
+            trigger: .hover
+        )
+        #expect(gate.allowsPlayback)
+
+        gate.isVisible = false
+        #expect(!gate.allowsPlayback)
+
+        gate.isVisible = true
+        gate.isHovered = false
+        #expect(!gate.allowsPlayback)
+
+        gate.isHovered = true
+        gate.reduceMotion = true
+        #expect(!gate.allowsPlayback)
+
+        gate.reduceMotion = false
+        gate.isBlurred = true
+        #expect(!gate.allowsPlayback)
+    }
+
+    @Test("Detail gate auto-plays when visible, without hover")
+    func detailGateAutoPlays() {
+        var gate = ThumbnailPlaybackGate(
+            isVisible: true,
+            isHovered: false,
+            reduceMotion: false,
+            isBlurred: false,
+            trigger: .auto
+        )
+        #expect(gate.allowsPlayback)
+
+        gate.isVisible = false
+        #expect(!gate.allowsPlayback)
+
+        gate.isVisible = true
+        gate.isBlurred = true
+        #expect(!gate.allowsPlayback)
+    }
+}
+
 @Suite("GIFAnimationController playback gating", .serialized)
 @MainActor
 struct GIFAnimationControllerTests {
@@ -168,12 +219,12 @@ struct GIFAnimationControllerTests {
         #expect(controller.isAnimating == false)
     }
 
-    @Test("Stopping within the 80 ms debounce window starts no playback")
+    @Test("Stopping within the 250 ms debounce window starts no playback")
     func debounceCancellation() async {
         let controller = GIFAnimationController()
         controller.setAsset(GIFTestFixtures.animatedAsset(frameCount: 3))
         controller.play(debounced: true)
-        controller.stop()                          // exits before the 80 ms fires
+        controller.stop()                          // exits before the 250 ms fires
         try? await Task.sleep(nanoseconds: 150_000_000)
         #expect(controller.isAnimating == false)
     }

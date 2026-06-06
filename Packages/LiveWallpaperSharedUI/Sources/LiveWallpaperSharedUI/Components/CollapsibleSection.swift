@@ -37,7 +37,7 @@ public struct CollapsibleSection<Content: View, TrailingAccessory: View>: View {
                 } label: {
                     HStack(spacing: 8) {
                         Label(title, systemImage: systemImage)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(DesignTokens.Typography.sectionTitle)
                             .foregroundStyle(.primary)
                         Spacer(minLength: 0)
                     }

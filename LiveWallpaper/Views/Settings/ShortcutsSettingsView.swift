@@ -34,7 +34,7 @@ struct ShortcutsSettingsView: View {
                 if let rejectionMessage {
                     Text(verbatim: rejectionMessage)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .accessibilityLabel(Text("Shortcut rejected: \(rejectionMessage)"))
                 }
             } header: {
@@ -195,9 +195,9 @@ private struct ShortcutRow: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: action.displayName)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(DesignTokens.Typography.body)
                     Text(verbatim: action.displayDescription)
-                        .font(.system(size: 11))
+                        .font(DesignTokens.Typography.caption)
                         .foregroundStyle(.secondary)
                 }
 
@@ -251,7 +251,7 @@ private struct ShortcutCaptureField: View {
                         .italic()
                 } else if let binding {
                     Text(verbatim: binding.displayString)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                 } else {
                     Text("None")
                         .foregroundStyle(.tertiary)

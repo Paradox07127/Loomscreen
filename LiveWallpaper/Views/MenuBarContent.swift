@@ -109,7 +109,7 @@ struct MenuBarContent: View {
         VStack(spacing: 0) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
             } else {
@@ -194,10 +194,10 @@ struct MenuBarContent: View {
 
     private func thermalColor(for state: ProcessInfo.ThermalState) -> Color {
         switch state {
-        case .nominal:  return .green
-        case .fair:     return .yellow
-        case .serious:  return .orange
-        case .critical: return .red
+        case .nominal:  return DesignTokens.Colors.Status.active
+        case .fair:     return DesignTokens.Colors.Status.caution
+        case .serious:  return DesignTokens.Colors.Status.warning
+        case .critical: return DesignTokens.Colors.Status.danger
         @unknown default: return .gray
         }
     }
@@ -208,15 +208,15 @@ struct MenuBarContent: View {
     /// iStat Menus) so the user can read load at a glance without parsing
     /// the number.
     private func usageColor(for percent: Double) -> Color {
-        if percent >= 80 { return .red }
-        if percent >= 50 { return .orange }
-        return .green
+        if percent >= 80 { return DesignTokens.Colors.Status.danger }
+        if percent >= 50 { return DesignTokens.Colors.Status.warning }
+        return DesignTokens.Colors.Status.active
     }
 
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
         HStack(spacing: 4) {
             Text(verbatim: label)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -243,7 +243,7 @@ struct MenuBarContent: View {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 13, weight: .semibold))
                     Text("Manage")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
@@ -486,10 +486,10 @@ private enum DisplayVisualState: Equatable {
 
     var tint: Color {
         switch self {
-        case .active:   return .green
-        case .paused:   return .orange
+        case .active:   return DesignTokens.Colors.Status.active
+        case .paused:   return DesignTokens.Colors.Status.warning
         case .off:      return .secondary
-        case .error:    return .red
+        case .error:    return DesignTokens.Colors.Status.danger
         case .inactive: return .secondary
         }
     }
@@ -589,7 +589,7 @@ private struct InlineLabelSwitchStyle: ToggleStyle {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
-                .font(.system(size: 10, weight: .bold))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.white.opacity(configuration.isOn ? 0.95 : 0.70))
 
                 Circle()
@@ -634,11 +634,11 @@ private struct MenuBarDisplayRow: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: title)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(DesignTokens.Typography.bodyEmphasized)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Text(subtitle)
-                                .font(.system(size: 11))
+                                .font(DesignTokens.Typography.caption)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -738,7 +738,7 @@ private struct VolumeControlRow: View {
                 .accessibilityValue(Text("\(volumePercent(liveValue)) percent"))
 
             Text(verbatim: "\(volumePercent(liveValue))%")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(DesignTokens.Typography.metric)
                 .foregroundStyle(.secondary)
                 .frame(width: 38, alignment: .trailing)
                 .monospacedDigit()
@@ -816,7 +816,7 @@ private struct MenuBarFooterUtility: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(role == .destructiveGlyph ? Color.red : Color.primary)
+                .foregroundStyle(role == .destructiveGlyph ? DesignTokens.Colors.Status.danger : Color.primary)
                 .frame(width: 38, height: 38)
                 .contentShape(Circle())
         }

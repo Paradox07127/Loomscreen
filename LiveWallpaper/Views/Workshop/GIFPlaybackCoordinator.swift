@@ -2,6 +2,34 @@
 import AppKit
 import Foundation
 
+/// Composable predicate deciding whether an animated thumbnail may decode.
+/// Grid previews play on hover; detail surfaces auto-play. Background pausing is
+/// owned by the coordinator's app-resign observer — this app hosts SwiftUI in
+/// AppKit windows, so SwiftUI `scenePhase` is unreliable here and is NOT gated on.
+struct ThumbnailPlaybackGate: Equatable {
+    enum Trigger: Equatable { case hover, auto }
+
+    /// Hover debounce so a fast sweep across a grid doesn't thrash the decoder.
+    static let hoverPreviewDelayNanoseconds: UInt64 = 250_000_000
+
+    var isVisible: Bool
+    var isHovered: Bool
+    var reduceMotion: Bool
+    var isBlurred: Bool
+    var trigger: Trigger
+
+    var allowsPlayback: Bool {
+        isVisible && triggerAllowsPlayback && !reduceMotion && !isBlurred
+    }
+
+    private var triggerAllowsPlayback: Bool {
+        switch trigger {
+        case .hover: return isHovered
+        case .auto: return true
+        }
+    }
+}
+
 /// Bounds the number of GIF/APNG previews animating at once. Clients register
 /// when they begin playback and the coordinator evicts the least-recently-used
 /// client past a hard cap, calling its `freeze` closure so it falls back to its
@@ -9,9 +37,10 @@ import Foundation
 /// approached (the mouse hovers one card at a time); it remains a defensive
 /// limit for `.autoPlay` callers and pathological grids.
 ///
-/// Also freezes every client when the app resigns active, and — per the plan —
-/// does NOT auto-resume on reactivation (playback restarts only on a fresh
-/// hover) so backgrounded windows stay quiet.
+/// Also freezes every client when the app resigns active. Resumption is
+/// gate-driven (`ThumbnailPlaybackGate`): on reactivation a tile replays only
+/// if its gate is satisfied again (visible + still hovered / focused), so
+/// backgrounded windows stay quiet until the app is frontmost.
 @MainActor
 final class GIFPlaybackCoordinator {
     static let shared = GIFPlaybackCoordinator()
@@ -53,6 +82,10 @@ final class GIFPlaybackCoordinator {
     func endPlayback(id: UUID) {
         lruOrder.removeAll { $0 == id }
         freezers.removeValue(forKey: id)
+    }
+
+    func allowsPlayback(_ gate: ThumbnailPlaybackGate) -> Bool {
+        gate.allowsPlayback
     }
 
     /// Marks `id` as most-recently-used so steady playback isn't evicted.

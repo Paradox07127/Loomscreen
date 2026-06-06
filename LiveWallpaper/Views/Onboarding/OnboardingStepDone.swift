@@ -22,11 +22,11 @@ struct OnboardingStepDone: View {
 
             VStack(spacing: 10) {
                 Text("You're All Set")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(DesignTokens.Typography.hero)
                     .accessibilityAddTraits(.isHeader)
 
                 Text("Open the LiveWallpaper menu bar icon at any time to control playback, switch wallpapers, or change settings.")
-                    .font(.system(size: 13))
+                    .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 36)
@@ -54,7 +54,7 @@ struct OnboardingStepDone: View {
     private var nextStepsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Next steps", comment: "Header label for the onboarding completion tip list.")
-                .font(.system(size: 11, weight: .semibold))
+                .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
 
@@ -66,7 +66,7 @@ struct OnboardingStepDone: View {
                         .frame(width: 16, alignment: .center)
                         .accessibilityHidden(true)
                     Text(tip.text)
-                        .font(.system(size: 12))
+                        .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

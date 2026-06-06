@@ -94,7 +94,7 @@ struct WPECacheManagementView: View {
                     if isOversized {
                         Label("Cache is using more than 1 GB. Consider clearing unused projects.", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(DesignTokens.Colors.Status.warning)
                     }
                 }
             }
@@ -140,7 +140,7 @@ struct WPECacheManagementView: View {
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(byteFormatter.string(fromByteCount: Int64(videoStats?.totalBytes ?? 0)))
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .font(DesignTokens.Typography.pageTitle)
                     Text("Across \(videoStats?.fileCount ?? 0) extracted video file\((videoStats?.fileCount ?? 0) == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -191,7 +191,7 @@ struct WPECacheManagementView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(byteFormatter.string(fromByteCount: reclaimableArchiveBytes))
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .font(DesignTokens.Typography.pageTitle)
                     Text("Source download archives already unpacked into your cache.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -238,12 +238,12 @@ struct WPECacheManagementView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(byteFormatter.string(fromByteCount: Int64(stats.totalBytes)))
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .font(DesignTokens.Typography.pageTitle)
                     Spacer()
                     if isOversized {
                         Label("Over 1 GB", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(DesignTokens.Colors.Status.warning)
                     }
                 }
                 Text("Across \(stats.entries.count) project\(stats.entries.count == 1 ? "" : "s")")
@@ -266,7 +266,7 @@ struct WPECacheManagementView: View {
                 // list to expand to the longest title's width and wraps,
                 // breaking the dense table feel.
                 Text(verbatim: title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(DesignTokens.Typography.body)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(Text(verbatim: title))

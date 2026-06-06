@@ -121,17 +121,17 @@ struct WorkshopBrowseFilterRibbon: View {
                 Text("Filters")
                 if activeFilterCount > 0 {
                     Text(verbatim: "\(activeFilterCount)")
-                        .font(.system(size: 9.5, weight: .bold))
+                        .font(DesignTokens.Typography.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.vertical, 2)
                         .background(Color.accentColor, in: Capsule())
                 }
                 Image(systemName: isFilterPanelExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.secondary)
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(DesignTokens.Typography.caption)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -241,7 +241,7 @@ struct WorkshopBrowseFilterRibbon: View {
         // chips wrap onto several lines (Genre / Resolution).
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Text(title)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(DesignTokens.Typography.badge)
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .frame(width: 74, alignment: .leading)
@@ -276,12 +276,12 @@ struct WorkshopBrowseFilterRibbon: View {
             .disabled(controlsDisabled)
             .help(Text("Search"))
 
-            TextField("Search Workshop", text: Binding(
+            TextField("Search the Workshop", text: Binding(
                 get: { viewModel.searchInput },
                 set: { viewModel.searchInput = $0 }
             ))
             .textFieldStyle(.plain)
-            .font(.system(size: 12))
+            .font(DesignTokens.Typography.body)
             .focused($isSearchFocused)
             .disabled(controlsDisabled)
             .onSubmit { Task { await viewModel.submitSearch() } }
@@ -434,7 +434,7 @@ struct WorkshopFilterChip: View {
             }
         } label: {
             title
-                .font(.system(size: 11, weight: .medium))
+                .font(DesignTokens.Typography.caption)
                 .lineLimit(1)
                 .strikethrough(!isSelected, color: .secondary)
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)

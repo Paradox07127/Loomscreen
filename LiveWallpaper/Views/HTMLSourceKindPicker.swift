@@ -18,7 +18,7 @@ struct HTMLSourceKindPicker: View {
                     }
                 } label: {
                     Text(kind.labelKey)
-                        .font(.system(size: 12, weight: selection == kind ? .semibold : .regular))
+                        .font(selection == kind ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(

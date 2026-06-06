@@ -18,7 +18,7 @@ public struct FilterChip: View {
     public var body: some View {
         Button(action: action) {
             title
-                .font(.system(size: 11, weight: .medium))
+                .font(DesignTokens.Typography.caption)
                 .lineLimit(1)
                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 .padding(.horizontal, 10)

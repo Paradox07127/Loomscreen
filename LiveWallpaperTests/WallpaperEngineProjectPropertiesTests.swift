@@ -35,6 +35,25 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(resolution.defaultValue == .string("8k"))
     }
 
+    @Test("Resolves raw WPE keys and identifiers to readable labels; keeps author text")
+    func resolvesDisplayKeysAndIdentifiers() throws {
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(displayNameResolutionManifest.utf8),
+            preferredLanguages: ["en-US"]
+        )
+        let labels = Dictionary(uniqueKeysWithValues: schema.properties.map { ($0.key, $0.displayText) })
+        // Known WPE key + `ui_browse_properties_*` prefix + snake_case all resolve.
+        #expect(labels["pknown"] == "Scheme Color")
+        #expect(labels["psnake"] == "Particle Density")
+        #expect(labels["pbrowse"] == "Bloom Strength")
+        // Conservative: camelCase and author plain text pass through verbatim.
+        #expect(labels["pcamel"] == "modelResolution")
+        #expect(labels["pauthor"] == "Artist Label: Keep as Written")
+        // The raw key must never survive to the UI.
+        #expect(schema.properties.allSatisfy { !$0.displayText.hasPrefix("ui_browse_properties_") })
+        #expect(schema.properties.allSatisfy { !$0.displayText.contains("_") })
+    }
+
     @Test("Evaluates common Wallpaper Engine display conditions against current values")
     func evaluatesDisplayConditions() throws {
         let schema = try WallpaperEngineProjectPropertySchema.parse(
@@ -232,6 +251,24 @@ struct WallpaperEngineProjectPropertiesTests {
               "backgroundimage": { "type": "file", "text": "Background Image", "value": "", "condition": "backgroundsource.value == 2 || backgroundsource.value == 3", "order": 101 },
               "slotcount": { "type": "slider", "text": "Slot Count", "value": 2, "min": 1, "max": 5, "order": 102 },
               "dockslot": { "type": "bool", "text": "Dock Slot", "value": true, "condition": "[2, 3, 4].includes(slotcount.value)", "order": 103 }
+            }
+          }
+        }
+        """
+    }
+
+    private var displayNameResolutionManifest: String {
+        """
+        {
+          "file": "index.html",
+          "type": "Web",
+          "general": {
+            "properties": {
+              "pknown":  { "type": "slider", "text": "ui_browse_properties_scheme_color", "value": 1, "min": 0, "max": 1, "order": 0 },
+              "psnake":  { "type": "slider", "text": "particle_density", "value": 1, "min": 0, "max": 1, "order": 1 },
+              "pbrowse": { "type": "slider", "text": "ui_browse_properties_bloom_strength", "value": 1, "min": 0, "max": 1, "order": 2 },
+              "pcamel":  { "type": "combo", "text": "modelResolution", "value": "4k", "order": 3, "options": [ { "label": "4K", "value": "4k" } ] },
+              "pauthor": { "type": "textinput", "text": "Artist Label: Keep as Written", "value": "", "order": 4 }
             }
           }
         }

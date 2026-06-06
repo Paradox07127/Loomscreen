@@ -356,7 +356,7 @@ private struct BookmarkTile: View {
             VStack(alignment: .leading, spacing: 1) {
                 Button(action: onStartRename) {
                     Text(verbatim: bookmark.label)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -365,7 +365,7 @@ private struct BookmarkTile: View {
                 .buttonStyle(.plain)
                 .help(Text("Rename"))
                 bookmark.subtitleText
-                    .font(.system(size: 10.5))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -377,7 +377,7 @@ private struct BookmarkTile: View {
         HStack(spacing: 4) {
             TextField("Name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
+                .font(DesignTokens.Typography.body)
                 .onSubmit(onCommitRename)
                 .onExitCommand(perform: onCancelRename)
             Button(action: onCommitRename) {

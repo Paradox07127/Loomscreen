@@ -1,41 +1,46 @@
 import SwiftUI
 
-/// Visual chrome shared by 16:9 gallery tiles (Bookmarks, Aerials, future
-/// libraries). Captures the macOS-native resting profile — static hairline
-/// stroke, always-on soft shadow that smoothly elevates on hover, and a
-/// gentle 1.02× lift — so each call site stops re-implementing the same
-/// modifier stack.
-///
-/// Apply to the thumbnail container *after* its own clipShape / overlays
-/// have settled; this modifier owns the outer clip + stroke + shadow +
-/// scale so the call site only contributes the artwork.
+/// Shared gallery-card chrome: optional Liquid-Glass backing, hairline stroke,
+/// resting/hover shadow, a 1.02× hover lift, and a selected accent ring. Pass
+/// `useGlass` for content cards; library tiles that supply their own backing
+/// leave it off.
 public struct GalleryTileChrome: ViewModifier {
     public let isHovering: Bool
-    /// When the tile is the one whose detail inspector is open — draws an accent
-    /// ring + soft accent glow so the grid↔inspector link is unmistakable.
     public let isSelected: Bool
     public let cornerRadius: CGFloat
     public let reduceMotion: Bool
+    public let useGlass: Bool
 
     public init(
         isHovering: Bool,
         isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
-        reduceMotion: Bool = false
+        reduceMotion: Bool = false,
+        useGlass: Bool = false
     ) {
         self.isHovering = isHovering
         self.isSelected = isSelected
         self.cornerRadius = cornerRadius
         self.reduceMotion = reduceMotion
+        self.useGlass = useGlass
     }
 
     public func body(content: Content) -> some View {
         content
+            .background {
+                if useGlass {
+                    Color.clear.adaptiveGlassSurface(.roundedRectangle(cornerRadius), interactive: true)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
+                // When glass is on it supplies its own hairline edge, so only the
+                // accent selection ring is drawn here to avoid a double stroke.
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
-                        isSelected ? Color.accentColor : Color.primary.opacity(DesignTokens.Card.strokeOpacity),
+                        isSelected
+                            ? Color.accentColor
+                            : Color.primary.opacity(useGlass ? 0 : DesignTokens.Card.strokeOpacity),
                         lineWidth: isSelected ? 2.5 : DesignTokens.Card.strokeWidth
                     )
             }
@@ -66,20 +71,19 @@ public struct GalleryTileChrome: ViewModifier {
 }
 
 extension View {
-    /// Apply the shared gallery-tile chrome (corner clip + static stroke +
-    /// resting/hover shadow + 1.02× lift). Pass `isSelected` to mark the tile
-    /// whose detail inspector is open (accent ring + glow).
     public func galleryTileChrome(
         isHovering: Bool,
         isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
-        reduceMotion: Bool = false
+        reduceMotion: Bool = false,
+        useGlass: Bool = false
     ) -> some View {
         modifier(GalleryTileChrome(
             isHovering: isHovering,
             isSelected: isSelected,
             cornerRadius: cornerRadius,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            useGlass: useGlass
         ))
     }
 }

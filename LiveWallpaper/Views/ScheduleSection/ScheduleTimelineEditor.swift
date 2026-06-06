@@ -119,7 +119,7 @@ struct ScheduleTimelineEditor: View {
                 let alignment: HorizontalAlignment =
                     (hour == 0) ? .leading : (hour == 24 ? .trailing : .center)
                 Text(verbatim: ScheduleTimeFormatter.hourLabel(hour))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(DesignTokens.Typography.badge)
                     .foregroundStyle(.secondary)
                     .frame(
                         width: 50,
@@ -201,7 +201,7 @@ struct ScheduleTimelineEditor: View {
     ) -> some View {
         let proposedConflict = isPreview && drag?.conflictsKnown == true && drag?.hasConflict == true
         let fill: Color = proposedConflict
-            ? Color.red.opacity(0.55)
+            ? DesignTokens.Colors.Status.danger.opacity(0.55)
             : (slot.videoBookmarkData == nil ? accent.opacity(0.45) : accent.opacity(0.70))
 
         ZStack(alignment: .topLeading) {

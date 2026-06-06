@@ -26,9 +26,9 @@ struct HTMLPickerSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Web / HTML Wallpaper")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(DesignTokens.Typography.sectionTitle)
                 Text("Use a website, a single .html file, or a full folder of assets.")
-                    .font(.system(size: 11))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -71,7 +71,7 @@ struct HTMLPickerSheet: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                     Text(pickedFileName.isEmpty ? "No file chosen" : pickedFileName)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
@@ -89,7 +89,7 @@ struct HTMLPickerSheet: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                     Text(pickedFolderName.isEmpty ? "No folder chosen" : pickedFolderName)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()

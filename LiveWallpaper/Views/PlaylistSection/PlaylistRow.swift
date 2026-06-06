@@ -77,14 +77,14 @@ struct PlaylistRow: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: entry.name)
-                    .font(.system(size: 13, weight: entry.isPlaying ? .semibold : .medium))
+                    .font(entry.isPlaying ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(Text(verbatim: entry.name))
 
                 Text(verbatim: subtitleText)
-                    .font(.system(size: 11, weight: .regular))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)

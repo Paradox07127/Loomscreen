@@ -26,8 +26,8 @@ struct WorkshopSettingsView: View {
             Section {
                 LabeledContent("Status") {
                     Label("Ready", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(Color.green)
-                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DesignTokens.Colors.Status.active)
+                        .font(DesignTokens.Typography.bodyEmphasized)
                 }
             } header: {
                 Text("Steam Workshop")
@@ -41,13 +41,13 @@ struct WorkshopSettingsView: View {
             Section("Privacy") {
                 Label("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.", systemImage: "lock.shield")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                 Label("Workshop metadata is fetched directly from Valve over HTTPS. We never proxy through a Loomscreen server.", systemImage: "network")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                 Label("Workshop wallpapers run inside an isolated, ephemeral WKWebView with a strict Content-Security-Policy.", systemImage: "shield.lefthalf.filled")
                     .labelStyle(.titleAndIcon)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
             }
 
             Section("Onboarding") {
@@ -163,7 +163,7 @@ struct WorkshopSettingsView: View {
                 if let error = engineAssets.lastError {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } header: {
@@ -205,8 +205,8 @@ struct WorkshopSettingsView: View {
         HStack(spacing: DesignTokens.Spacing.xs) {
             if engineAssets.isAuthorized {
                 Label(engineAssets.engineRootDisplayName ?? String(localized: "Linked", comment: "Engine-assets status when authorized but no display name."), systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(Color.green)
-                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DesignTokens.Colors.Status.active)
+                    .font(DesignTokens.Typography.bodyEmphasized)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Button("Change") { Task { _ = await engineAssets.requestAccess() } }
@@ -235,11 +235,11 @@ struct WorkshopSettingsView: View {
             ProgressView().controlSize(.small)
         case .done(let allGreen, let blockingFailures):
             if allGreen {
-                indicatorDot(.green, label: "All probes green")
+                indicatorDot(DesignTokens.Colors.Status.active, label: "All probes green")
             } else if blockingFailures == 0 {
-                indicatorDot(.orange, label: "Warnings")
+                indicatorDot(DesignTokens.Colors.Status.warning, label: "Warnings")
             } else {
-                indicatorDot(.red, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
+                indicatorDot(DesignTokens.Colors.Status.danger, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
             }
         }
     }
@@ -248,12 +248,12 @@ struct WorkshopSettingsView: View {
     private var keyStatusBadge: some View {
         if workshopServices.hasWebAPIKey {
             Label("Set", systemImage: "checkmark.seal.fill")
-                .foregroundStyle(Color.green)
-                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DesignTokens.Colors.Status.active)
+                .font(DesignTokens.Typography.bodyEmphasized)
         } else {
             Label("Not set", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.orange)
-                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
+                .font(DesignTokens.Typography.bodyEmphasized)
         }
     }
 
@@ -278,7 +278,7 @@ struct WorkshopSettingsView: View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 11))
+                .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
         }
     }

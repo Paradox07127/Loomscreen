@@ -98,7 +98,7 @@ struct ScreenDetailHeader: View {
                             .controlSize(.regular)
                             .help(Text("Apply Project — choose a Wallpaper Engine project folder for this display"))
                             .accessibilityLabel(Text("Apply project"))
-                            .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
+                            .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
                         }
 
                         Button(role: .destructive, action: onClearWallpaper) {
@@ -159,10 +159,10 @@ struct ScreenDetailHeader: View {
 
     private var sessionStatusColor: Color {
         switch wallpaperSessionSummary.activity {
-        case .active:   return .green
-        case .paused:   return .orange
+        case .active:   return DesignTokens.Colors.Status.active
+        case .paused:   return DesignTokens.Colors.Status.warning
         case .off:      return .secondary
-        case .error:    return .red
+        case .error:    return DesignTokens.Colors.Status.danger
         case .inactive: return .secondary
         }
     }
