@@ -1041,17 +1041,17 @@ enum WPESceneDocumentParser {
     /// not a scalar — e.g. "1.000 1.000". A plain `parseDouble` returns nil for
     /// that (Swift's `Double(_:)` rejects the embedded space), so every object's
     /// depth silently fell back to 0 and the camera-parallax pipeline received
-    /// all-zero depths → no layer ever shifted with the cursor. The editor always
-    /// writes x == y, so reduce to a single scalar (first component). A bare
-    /// number or a `{ "user", "value" }` wrapper is also accepted; absent → 0
-    /// (layer pinned, no parallax).
-    static func parseParallaxDepth(_ raw: Any?) -> Double {
+    /// all-zero depths → no layer ever shifted with the cursor. WPE supports
+    /// per-axis depth ("1 0" = horizontal-only, "0 1" = vertical-only), so keep
+    /// both axes rather than collapsing to one. A bare scalar maps to both axes;
+    /// a `{ "user", "value" }` wrapper is unwrapped; absent → `.zero` (pinned).
+    static func parseParallaxDepth(_ raw: Any?) -> SIMD2<Double> {
         if let dict = raw as? [String: Any], let value = dict["value"] {
             return parseParallaxDepth(value)
         }
-        if let scalar = parseDouble(raw) { return scalar }
-        if let vector = parseVector3(raw) { return vector.x }
-        return 0
+        if let vector = parseVector3(raw) { return SIMD2<Double>(vector.x, vector.y) }
+        if let scalar = parseDouble(raw) { return SIMD2<Double>(scalar, scalar) }
+        return SIMD2<Double>(0, 0)
     }
 
     private static func parseInt(_ raw: Any?) -> Int? {

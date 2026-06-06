@@ -661,7 +661,7 @@ struct WPERenderGraphBuilderTests {
             size: nil,
             effects: [],
             animationLayers: [],
-            parallaxDepth: 0.2
+            parallaxDepth: SIMD2<Double>(0.2, 0.2)
         )
         let document = WPESceneDocument(
             camera: .defaultCamera,
@@ -674,7 +674,7 @@ struct WPERenderGraphBuilderTests {
             cacheRootURL: FileManager.default.temporaryDirectory
         ).build(document: document)
 
-        #expect(graph.layers.first?.parallaxDepth == 0.2)
+        #expect(graph.layers.first?.parallaxDepth == SIMD2<Double>(0.2, 0.2))
     }
 
     @Test("Render graph preserves image object geometry on layer")
@@ -696,7 +696,7 @@ struct WPERenderGraphBuilderTests {
             size: CGSize(width: 320, height: 180),
             effects: [],
             animationLayers: [],
-            parallaxDepth: 0.2
+            parallaxDepth: SIMD2<Double>(0.2, 0.2)
         )
         let document = WPESceneDocument(
             camera: .defaultCamera,
@@ -752,7 +752,7 @@ struct WPERenderGraphBuilderTests {
             size: nil,
             effects: [],
             animationLayers: [],
-            parallaxDepth: 0
+            parallaxDepth: SIMD2<Double>(0, 0)
         )
         let document = WPESceneDocument(
             camera: .defaultCamera,
@@ -857,7 +857,7 @@ struct WPERenderGraphBuilderTests {
             size: nil,
             effects: [],
             animationLayers: [],
-            parallaxDepth: 0
+            parallaxDepth: SIMD2<Double>(0, 0)
         )
     }
 

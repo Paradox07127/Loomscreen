@@ -2071,7 +2071,7 @@ private extension WPEMetalRenderExecutorTests {
         let pass = solidPass()
         let pipeline = WPEPreparedRenderPipeline(layers: [
             WPEPreparedRenderLayer(
-                graphLayer: graphLayer(pass: pass, parallaxDepth: 0),
+                graphLayer: graphLayer(pass: pass, parallaxDepth: SIMD2<Double>(0, 0)),
                 passes: [
                     WPEPreparedRenderPass(
                         pass: pass,
@@ -2146,7 +2146,7 @@ private extension WPEMetalRenderExecutorTests {
         }
         let input = try makeRGBAInputTexture(device: device, width: 100, height: 1, bytes: bytes)
         let pass = copyPass()
-        let layer = graphLayer(pass: pass, parallaxDepth: 0.1)
+        let layer = graphLayer(pass: pass, parallaxDepth: SIMD2<Double>(0.1, 0.1))
         let pipeline = WPEPreparedRenderPipeline(layers: [
             WPEPreparedRenderLayer(
                 graphLayer: layer,
@@ -2232,7 +2232,7 @@ private func makeRGBAInputTexture(
 
 private func graphLayer(
     pass: WPERenderPass,
-    parallaxDepth: Double = 0,
+    parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0),
     geometry: WPERenderLayerGeometry = .identity
 ) -> WPERenderLayer {
     WPERenderLayer(

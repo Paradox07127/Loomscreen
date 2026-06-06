@@ -24,7 +24,7 @@ struct WPEMSDFTextPipelineTests {
             color: SIMD3<Double>(1, 0.5, 0.25), alpha: 0.8,
             origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
             visible: true, horizontalAlignment: "center", verticalAlignment: "middle",
-            maxWidth: nil, parallaxDepth: 0,
+            maxWidth: nil, parallaxDepth: SIMD2<Double>(0, 0),
             outlineSize: outlineSize, outlineColor: SIMD3<Double>(0, 1, 0),
             blurSize: blurSize, shadowSize: shadowSize, shadowColor: SIMD3<Double>(0, 0, 1),
             shadowOffset: shadowOffset, letterSpacing: 1

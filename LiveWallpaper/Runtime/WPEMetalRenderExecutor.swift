@@ -2803,7 +2803,7 @@ final class WPEMetalRenderExecutor {
             // Route them through the object quad (an identical full-scene quad)
             // only when there's an actual parallax shift to apply, leaving the
             // common no-parallax path byte-for-byte unchanged.
-            return layer.parallaxDepth != 0 && cameraParallax.smoothed != SIMD2<Float>(0, 0)
+            return layer.parallaxDepth != SIMD2<Double>(0, 0) && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
         // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
         // capture + copy the full frame 1:1. Their FINAL scene composite stays

@@ -161,9 +161,10 @@ final class WPEParticleSystem {
     /// frame static texture, the executor binds a full-UV pass-through
     /// sprite-sheet uniform (cols=rows=frames=1, mask=0).
     let spriteSheet: WPEParticleSpriteSheet?
-    /// Camera-parallax depth of the owning particle object; drives the
-    /// per-frame parallax translation applied to the whole system at draw time.
-    var parallaxDepth: Double = 0
+    /// Per-axis camera-parallax depth (WPE Vec2) of the owning particle object;
+    /// drives the per-frame parallax translation applied to the whole system at
+    /// draw time.
+    var parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
     /// Live cursor position in the centered render frame (Y-up), or `nil` when
     /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
     /// by the renderer each frame; drives pointer-locked control points

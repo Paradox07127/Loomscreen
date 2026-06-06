@@ -715,7 +715,7 @@ struct WPESceneDocumentParserTests {
         let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
         let object = try #require(document.imageObjects.first)
 
-        #expect(object.parallaxDepth == 0.125)
+        #expect(object.parallaxDepth == SIMD2<Double>(0.125, 0.125))
     }
 
     @Test("Particle object preserves instance overrides")

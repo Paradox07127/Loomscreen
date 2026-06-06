@@ -62,7 +62,7 @@ struct WPETextRendererTests {
             horizontalAlignment: "center",
             verticalAlignment: "middle",
             maxWidth: nil,
-            parallaxDepth: 0
+            parallaxDepth: SIMD2<Double>(0, 0)
         )
         let entry = try #require(renderer.rasterize(object))
         #expect(entry.size.width > 0)
@@ -94,7 +94,7 @@ struct WPETextRendererTests {
             horizontalAlignment: "center",
             verticalAlignment: "middle",
             maxWidth: nil,
-            parallaxDepth: 0
+            parallaxDepth: SIMD2<Double>(0, 0)
         )
         let first = try #require(renderer.rasterize(object))
         let second = try #require(renderer.rasterize(object))

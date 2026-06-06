@@ -16,21 +16,23 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
 
     static let neutral = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0))
 
-    /// Scene-pixel translation for a layer at `depth`. Mirrors the historical
-    /// UV-parallax magnitude (`× depth × 0.1`, clamped ±0.05) but expressed as a
-    /// geometry shift. X is negated and Y kept so the layer moves with the
-    /// cursor in the renderer's top-left scene space.
-    func pixelOffset(depth: Double, sceneSize: CGSize) -> SIMD2<Float> {
-        let d = Float(depth)
+    /// Scene-pixel translation for a layer at per-axis `depth`. Mirrors the
+    /// historical UV-parallax magnitude (`× depth × 0.1`, clamped ±0.05) but
+    /// expressed as a geometry shift, with each axis scaled by its own depth so
+    /// WPE's per-axis limiting works ("1 0" → horizontal only, "0 1" → vertical
+    /// only). X is negated and Y kept so the layer moves with the cursor in the
+    /// renderer's top-left scene space.
+    func pixelOffset(depth: SIMD2<Double>, sceneSize: CGSize) -> SIMD2<Float> {
+        let dx = Float(depth.x)
+        let dy = Float(depth.y)
         let width = Float(sceneSize.width)
         let height = Float(sceneSize.height)
-        guard d.isFinite, width.isFinite, height.isFinite,
-              d != 0, smoothed != SIMD2<Float>(0, 0) else {
+        guard dx.isFinite, dy.isFinite, width.isFinite, height.isFinite,
+              dx != 0 || dy != 0, smoothed != SIMD2<Float>(0, 0) else {
             return SIMD2<Float>(0, 0)
         }
-        let scaledDepth = d * 0.1
-        let ux = min(max(smoothed.x * scaledDepth, -0.05), 0.05)
-        let uy = min(max(smoothed.y * scaledDepth, -0.05), 0.05)
+        let ux = min(max(smoothed.x * dx * 0.1, -0.05), 0.05)
+        let uy = min(max(smoothed.y * dy * 0.1, -0.05), 0.05)
         return SIMD2<Float>(-ux * max(width, 1), uy * max(height, 1))
     }
 }

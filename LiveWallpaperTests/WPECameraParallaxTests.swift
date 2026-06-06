@@ -24,8 +24,8 @@ struct WPECameraParallaxTests {
     }
 
     /// Parses a scene whose single image object carries `parallaxDepth: raw` and
-    /// returns that object's parsed scalar depth.
-    private func parsedImageDepth(_ raw: Any) throws -> Double {
+    /// returns that object's parsed per-axis depth.
+    private func parsedImageDepth(_ raw: Any) throws -> SIMD2<Double> {
         let doc = try parse([
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 100, "height": 100, "auto": true]],
@@ -71,13 +71,13 @@ struct WPECameraParallaxTests {
     @Test("pixelOffset is zero for depth 0")
     func pixelOffsetDepthZero() {
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.5, 0.5))
-        #expect(frame.pixelOffset(depth: 0, sceneSize: CGSize(width: 2560, height: 1440)) == SIMD2<Float>(0, 0))
+        #expect(frame.pixelOffset(depth: SIMD2<Double>(0, 0), sceneSize: CGSize(width: 2560, height: 1440)) == SIMD2<Float>(0, 0))
     }
 
     @Test("pixelOffset sign: X negated, Y kept; magnitude scales with depth")
     func pixelOffsetSign() {
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.2, 0.2))
-        let off = frame.pixelOffset(depth: 1.0, sceneSize: CGSize(width: 1000, height: 1000))
+        let off = frame.pixelOffset(depth: SIMD2<Double>(1, 1), sceneSize: CGSize(width: 1000, height: 1000))
         // uv = clamp(0.2 * 1.0 * 0.1, ±0.05) = 0.02 → (-0.02*1000, 0.02*1000)
         #expect(abs(off.x - (-20)) < 1e-3)
         #expect(abs(off.y - 20) < 1e-3)
@@ -86,10 +86,22 @@ struct WPECameraParallaxTests {
     @Test("pixelOffset clamps to ±0.05 UV regardless of depth/offset")
     func pixelOffsetClamp() {
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.5, -0.5))
-        let off = frame.pixelOffset(depth: 10.0, sceneSize: CGSize(width: 1000, height: 1000))
+        let off = frame.pixelOffset(depth: SIMD2<Double>(10, 10), sceneSize: CGSize(width: 1000, height: 1000))
         // raw uv = 0.5 * 10 * 0.1 = 0.5 → clamps to 0.05 → (-50, ...)
         #expect(abs(off.x - (-50)) < 1e-3)
         #expect(abs(off.y - (-50)) < 1e-3)
+    }
+
+    @Test("pixelOffset honors per-axis depth: '1 0' horizontal-only, '0 1' vertical-only")
+    func pixelOffsetPerAxis() {
+        let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.3, 0.3))
+        let scene = CGSize(width: 1000, height: 1000)
+        let horizontalOnly = frame.pixelOffset(depth: SIMD2<Double>(1, 0), sceneSize: scene)
+        #expect(abs(horizontalOnly.x - (-30)) < 1e-3) // x moves
+        #expect(horizontalOnly.y == 0)                // y pinned
+        let verticalOnly = frame.pixelOffset(depth: SIMD2<Double>(0, 1), sceneSize: scene)
+        #expect(verticalOnly.x == 0)                  // x pinned
+        #expect(abs(verticalOnly.y - 30) < 1e-3)      // y moves — would be 0 under the old .x collapse
     }
 
     // MARK: - Smoother
@@ -143,63 +155,90 @@ struct WPECameraParallaxTests {
     func parsesVectorStringDepth() throws {
         // The native WPE format. A plain Double(_:) returns nil for this → the
         // old code silently fell back to 0 and nothing ever parallaxed.
-        #expect(try parsedImageDepth("1.000 1.000") == 1.0)
-        #expect(try parsedImageDepth("0.50000 0.50000") == 0.5)
-        #expect(try parsedImageDepth("0.00000 0.00000") == 0.0)
+        #expect(try parsedImageDepth("1.000 1.000") == SIMD2<Double>(1, 1))
+        #expect(try parsedImageDepth("0.50000 0.50000") == SIMD2<Double>(0.5, 0.5))
+        #expect(try parsedImageDepth("0.00000 0.00000") == SIMD2<Double>(0, 0))
+    }
+
+    @Test("parallaxDepth keeps per-axis values and accepts a dict-wrapped vector")
+    func parsesPerAxisAndWrappedDepth() throws {
+        // Per-axis limiting must survive parsing, not collapse to one component.
+        #expect(try parsedImageDepth("1 0") == SIMD2<Double>(1, 0))
+        #expect(try parsedImageDepth("0 1") == SIMD2<Double>(0, 1))
+        #expect(try parsedImageDepth("-0.5 0.25") == SIMD2<Double>(-0.5, 0.25))
+        // User-property-bound wrapper: { "user": ..., "value": "x y" }.
+        #expect(try parsedImageDepth(["user": "p0", "value": "0.5 0.5"]) == SIMD2<Double>(0.5, 0.5))
     }
 
     @Test("parallaxDepth still accepts a bare scalar and defaults to 0 when absent")
     func parsesScalarAndAbsentDepth() throws {
-        #expect(try parsedImageDepth(2.0) == 2.0)
-        #expect(try parsedImageDepth("3") == 3.0)
-        // Absent → 0 (layer pinned).
+        #expect(try parsedImageDepth(2.0) == SIMD2<Double>(2, 2))   // scalar → both axes
+        #expect(try parsedImageDepth("3") == SIMD2<Double>(3, 3))
+        // Absent → .zero (layer pinned).
         let doc = try parse(minimalScene(general: [
             "orthogonalprojection": ["width": 100, "height": 100, "auto": true]
         ]))
-        #expect(try #require(doc.imageObjects.first).parallaxDepth == 0)
+        #expect(try #require(doc.imageObjects.first).parallaxDepth == SIMD2<Double>(0, 0))
     }
 
     // MARK: - Depth inheritance (the "components fall apart / 散架" guard)
 
-    private func layer(_ id: String, depth: Double, parent: String? = nil) -> WPERenderLayer {
+    private func layer(
+        _ id: String,
+        depth: SIMD2<Double>,
+        parent: String? = nil,
+        attachment: String? = nil
+    ) -> WPERenderLayer {
         WPERenderLayer(
             objectID: id, objectName: id, imagePath: "models/util/solidlayer.json",
-            materialPath: nil, parentObjectID: parent,
+            materialPath: nil, parentObjectID: parent, attachment: attachment,
             geometry: .identity, compositeA: "_a", compositeB: "_b",
             localFBOs: [], passes: [], parallaxDepth: depth
         )
     }
 
-    @Test("Attachment children inherit the root ancestor's parallaxDepth")
+    @Test("Attachment children inherit the root ancestor's per-axis parallaxDepth")
     func childInheritsRootDepth() {
-        // body(depth 1) ← head(depth 0) ← eye(depth 0): the whole tree must shift
-        // as one rigid unit, so head/eye are pinned to the body's depth.
+        // body(depth 1,0.5) ← head(.zero, attached) ← eye(.zero, attached): the
+        // rig must shift as one unit, so head/eye are pinned to the body's depth.
         let pinned = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
-            layer("body", depth: 1.0),
-            layer("head", depth: 0.0, parent: "body"),
-            layer("eye", depth: 0.0, parent: "head"),
-            layer("bg", depth: 0.0)
+            layer("body", depth: SIMD2<Double>(1, 0.5)),
+            layer("head", depth: SIMD2<Double>(0, 0), parent: "body", attachment: "头部"),
+            layer("eye", depth: SIMD2<Double>(0, 0), parent: "head", attachment: "眼"),
+            layer("bg", depth: SIMD2<Double>(0, 0))
         ])
         let byID = Dictionary(uniqueKeysWithValues: pinned.map { ($0.objectID, $0.parallaxDepth) })
-        #expect(byID["body"] == 1.0)
-        #expect(byID["head"] == 1.0)
-        #expect(byID["eye"] == 1.0)
-        #expect(byID["bg"] == 0.0) // unparented root keeps its own depth
+        #expect(byID["body"] == SIMD2<Double>(1, 0.5))
+        #expect(byID["head"] == SIMD2<Double>(1, 0.5))
+        #expect(byID["eye"] == SIMD2<Double>(1, 0.5))
+        #expect(byID["bg"] == SIMD2<Double>(0, 0)) // unparented root keeps its own depth
     }
 
-    @Test("No parented layers → input returned unchanged")
-    func noParentsNoOp() {
-        let input = [layer("a", depth: 1.0), layer("b", depth: 0.5)]
+    @Test("Plain transform-parenting (no attachment) keeps its own depth")
+    func unattachedParentingNotPinned() {
+        // A child parented for transform grouping but NOT attached keeps WPE's
+        // intentional per-layer depth — only rigid attachment subtrees are pinned.
+        let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
+            layer("group", depth: SIMD2<Double>(1, 1)),
+            layer("child", depth: SIMD2<Double>(0.3, 0.3), parent: "group")
+        ])
+        let byID = Dictionary(uniqueKeysWithValues: out.map { ($0.objectID, $0.parallaxDepth) })
+        #expect(byID["child"] == SIMD2<Double>(0.3, 0.3))
+    }
+
+    @Test("No attachment subtrees → input returned unchanged")
+    func noAttachmentNoOp() {
+        let input = [layer("a", depth: SIMD2<Double>(1, 1)), layer("b", depth: SIMD2<Double>(0.5, 0.5))]
         let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents(input)
         #expect(out == input)
     }
 
     @Test("A parent missing from the graph stops the walk at the last resolvable node")
     func danglingParentStopsWalk() {
-        // 'child' points at 'ghost' which isn't a layer → child keeps its own depth.
+        // attached 'child' points at 'ghost' which isn't a layer → keeps own depth.
         let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
-            layer("child", depth: 0.7, parent: "ghost")
+            layer("child", depth: SIMD2<Double>(0.7, 0.7), parent: "ghost", attachment: "头部")
         ])
-        #expect(out.first?.parallaxDepth == 0.7)
+        #expect(out.first?.parallaxDepth == SIMD2<Double>(0.7, 0.7))
     }
 }

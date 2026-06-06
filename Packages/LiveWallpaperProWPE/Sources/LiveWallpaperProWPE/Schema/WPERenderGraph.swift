@@ -42,7 +42,10 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public let compositeB: String
     public let localFBOs: [WPERenderFBO]
     public let passes: [WPERenderPass]
-    public let parallaxDepth: Double
+    /// Per-axis camera-parallax depth (WPE Vec2). Each axis scales independently;
+    /// `.zero` pins the layer. Inherited from the root attachment ancestor by the
+    /// graph builder so a rigid puppet subtree shifts as one unit.
+    public let parallaxDepth: SIMD2<Double>
 
     public init(
         objectID: String,
@@ -60,7 +63,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         compositeB: String,
         localFBOs: [WPERenderFBO],
         passes: [WPERenderPass],
-        parallaxDepth: Double = 0
+        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
     ) {
         self.objectID = objectID
         self.objectName = objectName

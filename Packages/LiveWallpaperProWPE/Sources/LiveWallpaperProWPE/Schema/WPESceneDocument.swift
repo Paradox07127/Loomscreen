@@ -173,7 +173,10 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let horizontalAlignment: String
     public let verticalAlignment: String
     public let maxWidth: Double?
-    public let parallaxDepth: Double
+    /// Per-axis camera-parallax depth (WPE stores this as a Vec2 "x y"). Each
+    /// axis scales independently, so "1 0" parallaxes horizontally only and
+    /// "0 1" vertically only. `.zero` pins the layer (no parallax).
+    public let parallaxDepth: SIMD2<Double>
     /// WPE's authored text-box size in scene pixels (`size`). A WPE text object
     /// is an image layer whose texture is sized to this box; the text fills the
     /// box minus `padding`, then the layer is placed at `origin × scale`. When
@@ -207,7 +210,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         horizontalAlignment: String,
         verticalAlignment: String,
         maxWidth: Double?,
-        parallaxDepth: Double,
+        parallaxDepth: SIMD2<Double>,
         boxSize: SIMD2<Double>? = nil,
         padding: Double = 0,
         outlineSize: Double = 0,
@@ -294,10 +297,13 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
-    public let parallaxDepth: Double
+    /// Per-axis camera-parallax depth (WPE stores this as a Vec2 "x y"). Each
+    /// axis scales independently, so "1 0" parallaxes horizontally only and
+    /// "0 1" vertically only. `.zero` pins the layer (no parallax).
+    public let parallaxDepth: SIMD2<Double>
     public let instanceOverride: WPESceneParticleInstanceOverride?
 
-    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, parallaxDepth: Double, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
+    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, parallaxDepth: SIMD2<Double>, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
         self.id = id
         self.name = name
         self.particleRelativePath = particleRelativePath
@@ -468,7 +474,10 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let dependencies: [String]
     public let effects: [WPESceneImageEffect]
     public let animationLayers: [WPESceneAnimationLayer]
-    public let parallaxDepth: Double
+    /// Per-axis camera-parallax depth (WPE stores this as a Vec2 "x y"). Each
+    /// axis scales independently, so "1 0" parallaxes horizontally only and
+    /// "0 1" vertically only. `.zero` pins the layer (no parallax).
+    public let parallaxDepth: SIMD2<Double>
 
     public init(
         id: String,
@@ -494,7 +503,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         dependencies: [String] = [],
         effects: [WPESceneImageEffect],
         animationLayers: [WPESceneAnimationLayer],
-        parallaxDepth: Double = 0
+        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
     ) {
         self.id = id
         self.name = name

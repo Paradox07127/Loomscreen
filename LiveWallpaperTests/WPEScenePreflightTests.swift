@@ -158,7 +158,7 @@ struct WPEScenePreflightTests {
             size: nil,
             effects: effects,
             animationLayers: animationLayers,
-            parallaxDepth: 0
+            parallaxDepth: SIMD2<Double>(0, 0)
         )
     }
 }
