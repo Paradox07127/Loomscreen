@@ -163,7 +163,7 @@ struct ScreenDetailPreviewArea: View {
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 28, height: 18)
                 Text(mode.titleKey)
-                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .font(isSelected ? DesignTokens.Typography.captionEmphasized : DesignTokens.Typography.caption)
             }
             .foregroundStyle(isSelected ? Color.accentColor : .secondary)
             .padding(.horizontal, 6)

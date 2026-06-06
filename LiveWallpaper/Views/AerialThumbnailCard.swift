@@ -155,14 +155,14 @@ struct AerialThumbnailCard: View {
     private var textBlock: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(verbatim: asset.displayName)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(DesignTokens.Typography.bodyEmphasized)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             if let category = asset.category, !category.isEmpty {
                 Text(verbatim: category)
-                    .font(.system(size: 10.5))
+                    .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)

@@ -68,7 +68,7 @@ struct HTMLSourceSection: View {
                     }
                 } label: {
                     Text(segment.labelKey)
-                        .font(.system(size: 12, weight: selectedSegment == segment ? .semibold : .regular))
+                        .font(selectedSegment == segment ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 3)
                         .background(

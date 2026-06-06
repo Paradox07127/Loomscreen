@@ -67,7 +67,7 @@ struct BookmarksPopover: View {
                     .foregroundStyle(.secondary)
                 TextField(defaultLabel(for: content), text: $nameDraft)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(DesignTokens.Typography.body)
                     .onSubmit { commit(content: content, existing: existing) }
             }
 

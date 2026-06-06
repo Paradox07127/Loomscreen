@@ -421,7 +421,7 @@ struct ScreenDetailInspectorPanel: View {
                     onWallpaperModeChange(mode)
                 } label: {
                     Text(mode.labelKey)
-                        .font(.system(size: 12, weight: draft.selectedWallpaperMode == mode ? .semibold : .regular))
+                        .font(draft.selectedWallpaperMode == mode ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(

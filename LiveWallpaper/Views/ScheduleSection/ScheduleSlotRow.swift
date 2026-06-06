@@ -120,7 +120,7 @@ struct ScheduleSlotRow: View {
     private var titleRow: some View {
         HStack(spacing: 8) {
             Text(verbatim: slot.localizedLabel)
-                .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+                .font(isActive ? DesignTokens.Typography.bodyEmphasized : DesignTokens.Typography.body)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
