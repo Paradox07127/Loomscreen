@@ -42,7 +42,7 @@ struct SteamWebAPIKeyEntrySheet: View {
             if let savingError {
                 Text(savingError)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             HStack {
                 Spacer()
@@ -148,16 +148,16 @@ struct SteamWebAPIKeyEntrySheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .wrongShape:
-            label(text: "Key must be 32 hexadecimal characters.", tint: .red, system: "xmark.circle.fill")
+            label(text: "Key must be 32 hexadecimal characters.", tint: DesignTokens.Colors.Status.danger, system: "xmark.circle.fill")
         case .validating:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Checking with Steam…").font(.caption).foregroundStyle(.secondary)
             }
         case .valid:
-            label(text: "Key validated.", tint: .green, system: "checkmark.circle.fill")
+            label(text: "Key validated.", tint: DesignTokens.Colors.Status.active, system: "checkmark.circle.fill")
         case .error(let message):
-            label(text: message, tint: .red, system: "exclamationmark.triangle.fill")
+            label(text: message, tint: DesignTokens.Colors.Status.danger, system: "exclamationmark.triangle.fill")
         }
     }
 

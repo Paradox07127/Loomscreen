@@ -290,17 +290,17 @@ extension FallbackReason {
     var severityTint: Color {
         switch self {
         case .requiresWindowsPlugin:
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .unsupportedType,
              .sceneShaderUnsupported,
              .texContainerUnsupported,
              .texUnsupportedFormat:
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .missingDependency,
              .sceneParseFailed,
              .sceneResourceMissing,
              .texDecodeFailed:
-            return .yellow
+            return DesignTokens.Colors.Status.caution
         }
     }
 

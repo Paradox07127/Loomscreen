@@ -66,7 +66,7 @@ struct WorkshopPasteRowCard: View {
             } else if row.state == .invalidInput {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.title3)
-                    .foregroundStyle(Color.yellow)
+                    .foregroundStyle(DesignTokens.Colors.Status.caution)
             } else {
                 Image(systemName: "cube.transparent")
                     .font(.title3)
@@ -92,13 +92,13 @@ struct WorkshopPasteRowCard: View {
     private var statusBadge: some View {
         switch row.state {
         case .ready:
-            BadgeChip(text: "Ready", tint: .green, systemImage: "checkmark.seal.fill")
+            BadgeChip(text: "Ready", tint: DesignTokens.Colors.Status.active, systemImage: "checkmark.seal.fill")
         case .fetchingMetadata:
             BadgeChip(text: "Fetching", tint: .blue, systemImage: "hourglass")
         case .invalidInput:
-            BadgeChip(text: "Invalid", tint: .yellow, systemImage: "exclamationmark.triangle.fill")
+            BadgeChip(text: "Invalid", tint: DesignTokens.Colors.Status.caution, systemImage: "exclamationmark.triangle.fill")
         case .failed:
-            BadgeChip(text: errorBadgeLabel, tint: .red, systemImage: "xmark.octagon.fill")
+            BadgeChip(text: errorBadgeLabel, tint: DesignTokens.Colors.Status.danger, systemImage: "xmark.octagon.fill")
         }
     }
 
@@ -272,14 +272,14 @@ private struct WorkshopRowErrorStrip: View {
     private var tint: Color {
         switch error {
         case .itemBanned, .itemNotFound, .responseParseFailure, .schemaMismatch:
-            return .red
+            return DesignTokens.Colors.Status.danger
         case .rateLimited:
             // Transient — orange (per plan & mockup) signals "auto-retrying"
             // distinctly from yellow ("user action recommended").
-            return .orange
+            return DesignTokens.Colors.Status.warning
         case .invalidInput, .itemPrivate, .timeout, .networkUnreachable,
              .unauthorized, .http:
-            return .yellow
+            return DesignTokens.Colors.Status.caution
         case .cancelled, .unknown:
             return .secondary
         }

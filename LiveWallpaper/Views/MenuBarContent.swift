@@ -194,10 +194,10 @@ struct MenuBarContent: View {
 
     private func thermalColor(for state: ProcessInfo.ThermalState) -> Color {
         switch state {
-        case .nominal:  return .green
-        case .fair:     return .yellow
-        case .serious:  return .orange
-        case .critical: return .red
+        case .nominal:  return DesignTokens.Colors.Status.active
+        case .fair:     return DesignTokens.Colors.Status.caution
+        case .serious:  return DesignTokens.Colors.Status.warning
+        case .critical: return DesignTokens.Colors.Status.danger
         @unknown default: return .gray
         }
     }
@@ -208,9 +208,9 @@ struct MenuBarContent: View {
     /// iStat Menus) so the user can read load at a glance without parsing
     /// the number.
     private func usageColor(for percent: Double) -> Color {
-        if percent >= 80 { return .red }
-        if percent >= 50 { return .orange }
-        return .green
+        if percent >= 80 { return DesignTokens.Colors.Status.danger }
+        if percent >= 50 { return DesignTokens.Colors.Status.warning }
+        return DesignTokens.Colors.Status.active
     }
 
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
@@ -486,10 +486,10 @@ private enum DisplayVisualState: Equatable {
 
     var tint: Color {
         switch self {
-        case .active:   return .green
-        case .paused:   return .orange
+        case .active:   return DesignTokens.Colors.Status.active
+        case .paused:   return DesignTokens.Colors.Status.warning
         case .off:      return .secondary
-        case .error:    return .red
+        case .error:    return DesignTokens.Colors.Status.danger
         case .inactive: return .secondary
         }
     }
@@ -816,7 +816,7 @@ private struct MenuBarFooterUtility: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(role == .destructiveGlyph ? Color.red : Color.primary)
+                .foregroundStyle(role == .destructiveGlyph ? DesignTokens.Colors.Status.danger : Color.primary)
                 .frame(width: 38, height: 38)
                 .contentShape(Circle())
         }

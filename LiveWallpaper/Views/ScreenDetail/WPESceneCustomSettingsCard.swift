@@ -56,7 +56,7 @@ struct WPESceneCustomSettingsCard: View {
             Button(action: resetOverrides) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             .buttonStyle(.borderless)
             .help(Text("Reset project custom settings"))

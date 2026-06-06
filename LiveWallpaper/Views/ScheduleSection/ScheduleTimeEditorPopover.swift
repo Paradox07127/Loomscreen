@@ -64,12 +64,12 @@ struct ScheduleTimeEditorPopover: View {
             if let banner = conflictBanner {
                 Label(banner, systemImage: "exclamationmark.triangle.fill")
                     .font(DesignTokens.Typography.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
                     .fixedSize(horizontal: false, vertical: true)
             } else if isZeroLength {
                 Label("Start and end times must differ.", systemImage: "exclamationmark.circle.fill")
                     .font(DesignTokens.Typography.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(DesignTokens.Colors.Status.warning)
             }
 
             HStack(spacing: 8) {

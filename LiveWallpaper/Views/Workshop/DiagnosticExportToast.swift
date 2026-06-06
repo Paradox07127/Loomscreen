@@ -20,11 +20,11 @@ struct DiagnosticExportToast: View {
                 HStack(spacing: 10) {
                     ZStack {
                         Circle()
-                            .fill(Color.green.opacity(0.18))
+                            .fill(DesignTokens.Colors.Status.active.opacity(0.18))
                             .frame(width: 28, height: 28)
                         Image(systemName: "checkmark")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.green)
+                            .foregroundStyle(DesignTokens.Colors.Status.active)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Diagnostic copied")

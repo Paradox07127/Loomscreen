@@ -235,14 +235,14 @@ struct ScheduleSlotRow: View {
     }
 
     private var backgroundFill: Color {
-        if isHighlightedConflict { return Color.red.opacity(0.10) }
+        if isHighlightedConflict { return DesignTokens.Colors.Status.danger.opacity(0.10) }
         if isActive { return accent.opacity(0.10) }
         if isHovering { return Color.primary.opacity(0.04) }
         return Color.primary.opacity(0.025)
     }
 
     private var borderColor: Color {
-        if isHighlightedConflict { return Color.red.opacity(0.75) }
+        if isHighlightedConflict { return DesignTokens.Colors.Status.danger.opacity(0.75) }
         if isActive { return accent.opacity(0.30) }
         return Color.primary.opacity(0.06)
     }

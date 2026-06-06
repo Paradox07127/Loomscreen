@@ -243,8 +243,8 @@ struct WPESceneDetailView: View {
     /// everything else is a hard render failure.
     private func severityColor(for reason: FallbackReason) -> Color {
         switch reason {
-        case .missingDependency, .requiresWindowsPlugin: return .orange
-        default:                                         return .red
+        case .missingDependency, .requiresWindowsPlugin: return DesignTokens.Colors.Status.warning
+        default:                                         return DesignTokens.Colors.Status.danger
         }
     }
 
@@ -581,8 +581,8 @@ struct WPESceneDetailView: View {
     private var statusColor: Color {
         switch state {
         case .ready:   return .blue
-        case .loading: return .yellow
-        case .error:   return .red
+        case .loading: return DesignTokens.Colors.Status.caution
+        case .error:   return DesignTokens.Colors.Status.danger
         case .idle:    return .secondary
         }
     }
@@ -644,7 +644,7 @@ private struct DiagnosticLogSheet: View {
                     .animation(.snappy, value: didCopy)
             }
             .buttonStyle(.bordered)
-            .tint(didCopy ? .green : tint)
+            .tint(didCopy ? DesignTokens.Colors.Status.active : tint)
             Button("Done") { dismiss() }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)

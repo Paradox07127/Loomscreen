@@ -66,13 +66,13 @@ struct WorkshopDoctorView: View {
             Spacer()
             HStack(spacing: DesignTokens.Spacing.xs) {
                 if greenCount > 0 {
-                    BadgeChip(text: "\(greenCount) OK", tint: .green, systemImage: "checkmark.circle.fill")
+                    BadgeChip(text: "\(greenCount) OK", tint: DesignTokens.Colors.Status.active, systemImage: "checkmark.circle.fill")
                 }
                 if yellowCount > 0 {
-                    BadgeChip(text: "\(yellowCount) warning", tint: .orange, systemImage: "exclamationmark.triangle.fill")
+                    BadgeChip(text: "\(yellowCount) warning", tint: DesignTokens.Colors.Status.warning, systemImage: "exclamationmark.triangle.fill")
                 }
                 if redCount > 0 {
-                    BadgeChip(text: "\(redCount) error", tint: .red, systemImage: "xmark.circle.fill")
+                    BadgeChip(text: "\(redCount) error", tint: DesignTokens.Colors.Status.danger, systemImage: "xmark.circle.fill")
                 }
                 if greenCount + yellowCount + redCount == 0 {
                     Text("Not yet run")
@@ -139,7 +139,7 @@ struct WorkshopDoctorView: View {
                 downloadsRow
                 if let setupError {
                     Label(setupError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .font(.caption)
                         .padding(.top, DesignTokens.Spacing.xs)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -416,11 +416,11 @@ private struct BinaryPickerRow: View {
     @ViewBuilder private var statusBadge: some View {
         switch status {
         case .green(let detail):
-            BadgeChip(text: detail ?? "Verified", tint: .green, systemImage: "checkmark.seal.fill")
+            BadgeChip(text: detail ?? "Verified", tint: DesignTokens.Colors.Status.active, systemImage: "checkmark.seal.fill")
         case .yellow:
-            BadgeChip(text: "Unverified build", tint: .orange, systemImage: "exclamationmark.shield.fill")
+            BadgeChip(text: "Unverified build", tint: DesignTokens.Colors.Status.warning, systemImage: "exclamationmark.shield.fill")
         case .red:
-            BadgeChip(text: "Invalid binary", tint: .red, systemImage: "xmark.shield.fill")
+            BadgeChip(text: "Invalid binary", tint: DesignTokens.Colors.Status.danger, systemImage: "xmark.shield.fill")
         default:
             EmptyView()
         }
@@ -669,17 +669,17 @@ private struct ProbeRow: View {
         case .green:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(Color.green)
+                .foregroundStyle(DesignTokens.Colors.Status.active)
                 .accessibilityLabel("Passed")
         case .yellow:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .accessibilityLabel("Warning")
         case .red:
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(Color.red)
+                .foregroundStyle(DesignTokens.Colors.Status.danger)
                 .accessibilityLabel("Failed")
         case .running:
             ProgressView().controlSize(.small).accessibilityLabel("Running")

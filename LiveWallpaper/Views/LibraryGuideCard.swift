@@ -118,7 +118,7 @@ struct LibraryGuideCard: View {
             if let errorMessage, !errorMessage.isEmpty {
                 Text(verbatim: PIISanitizer.scrub(errorMessage))
                     .font(DesignTokens.Typography.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 380)

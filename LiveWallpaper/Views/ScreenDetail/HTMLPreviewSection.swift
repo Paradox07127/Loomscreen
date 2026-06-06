@@ -280,7 +280,7 @@ struct HTMLInformationOverlay: View {
     private func content(for source: HTMLSource) -> some View {
         HStack(spacing: 10) {
             if source.isInsecureURL {
-                tag("HTTP", background: Color.orange.opacity(0.55))
+                tag("HTTP", background: DesignTokens.Colors.Status.warning.opacity(0.55))
             }
 
             HStack(spacing: 4) {
@@ -295,10 +295,10 @@ struct HTMLInformationOverlay: View {
                 if config.allowJavaScript {
                     tag("JS")
                 } else {
-                    tag("NO JS", background: Color.red.opacity(0.55))
+                    tag("NO JS", background: DesignTokens.Colors.Status.danger.opacity(0.55))
                 }
             } else if !config.allowJavaScript {
-                tag("NO JS", background: Color.red.opacity(0.55))
+                tag("NO JS", background: DesignTokens.Colors.Status.danger.opacity(0.55))
             }
 
             if config.physicalPixelLayout {

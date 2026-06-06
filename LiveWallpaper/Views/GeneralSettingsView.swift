@@ -889,7 +889,7 @@ struct GeneralSettingsView: View {
                 Label("Reset Defaults", systemImage: "arrow.counterclockwise")
             }
             .buttonStyle(.bordered)
-            .tint(.red)
+            .tint(DesignTokens.Colors.Status.danger)
             .controlSize(.regular)
             .accessibilityLabel(Text("Reset all settings to default"))
             .accessibilityHint(Text("Erases all configurations and restores factory defaults"))

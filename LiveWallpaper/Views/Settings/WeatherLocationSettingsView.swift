@@ -28,7 +28,7 @@ struct ManualLocationPicker: View {
             if let current = currentSelection {
                 HStack(spacing: 6) {
                     Image(systemName: "mappin.and.ellipse")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(DesignTokens.Colors.Status.active)
                     Text(verbatim: current.name)
                         .font(DesignTokens.Typography.body)
                         .lineLimit(1)
@@ -95,7 +95,7 @@ struct ManualLocationPicker: View {
             if let error = resolutionError {
                 Text(verbatim: error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
         }
     }

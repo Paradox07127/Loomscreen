@@ -129,7 +129,7 @@ struct WPEHistoryRow: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .thumbnailBadgeGlass(tint: .orange, opacity: 0.9)
+        .thumbnailBadgeGlass(tint: DesignTokens.Colors.Status.warning, opacity: 0.9)
         .padding(DesignTokens.Spacing.sm)
         .accessibilityHidden(true)
     }
@@ -206,13 +206,13 @@ struct WPEHistoryRow: View {
         case .video, .web, .unknown:
             return nil
         case .application:
-            return ("Won't run", .orange, Text("Wallpaper requires a Windows executable; cannot run on macOS"))
+            return ("Won't run", DesignTokens.Colors.Status.warning, Text("Wallpaper requires a Windows executable; cannot run on macOS"))
         case .scene:
             if entry.origin.requiresWindowsPlugin {
-                return ("Won't run", .orange, Text("Wallpaper bundles a Windows DLL plugin; cannot run on macOS"))
+                return ("Won't run", DesignTokens.Colors.Status.warning, Text("Wallpaper bundles a Windows DLL plugin; cannot run on macOS"))
             }
             if !entry.origin.missingDependencyIDs.isEmpty {
-                return ("Needs deps", .yellow, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
+                return ("Needs deps", DesignTokens.Colors.Status.caution, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
             }
             return nil
         }

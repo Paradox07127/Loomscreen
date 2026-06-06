@@ -31,7 +31,7 @@ struct WorkshopDownloadToastHost: View {
     }
 
     private func toast(_ event: WorkshopToastEvent) -> some View {
-        let tint = event.isSuccess ? Color.green : Color.red
+        let tint = event.isSuccess ? DesignTokens.Colors.Status.active : DesignTokens.Colors.Status.danger
         return HStack(spacing: 10) {
             ZStack {
                 Circle().fill(tint.opacity(0.18)).frame(width: 28, height: 28)

@@ -201,7 +201,7 @@ struct OnboardingPickerView: View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .accessibilityHidden(true)
             Text(message)
                 .font(.caption)
@@ -209,7 +209,7 @@ struct OnboardingPickerView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .background(DesignTokens.Colors.Status.warning.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
         .transition(.opacity)
     }

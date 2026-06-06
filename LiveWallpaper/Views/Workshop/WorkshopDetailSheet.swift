@@ -399,7 +399,7 @@ struct WorkshopInspectorContent: View {
     @ViewBuilder
     private var downloadStatusNote: some View {
         if case .failed(let message) = downloadPhase {
-            actionNote(message, color: .red)
+            actionNote(message, color: DesignTokens.Colors.Status.danger)
         } else if !doctor.isDownloadReady, downloadPhase == .idle {
             actionNote(
                 String(localized: "Downloads use SteamCMD (Settings → Workshop → SteamCMD Doctor), separate from the Web API key.", comment: "Hint in the Workshop detail inspector when SteamCMD isn't configured."),
@@ -474,7 +474,7 @@ struct WorkshopInspectorContent: View {
         if item.isBanned {
             Label("Unavailable — removed or hidden on Steam", systemImage: "xmark.octagon.fill")
                 .font(DesignTokens.Typography.captionEmphasized)
-                .foregroundStyle(.red)
+                .foregroundStyle(DesignTokens.Colors.Status.danger)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

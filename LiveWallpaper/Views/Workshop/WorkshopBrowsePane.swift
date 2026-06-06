@@ -350,7 +350,7 @@ struct WorkshopBrowsePane: View {
         VStack(spacing: DesignTokens.Spacing.md) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 36))
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
             Text(message(for: error))
                 .font(DesignTokens.Typography.body)
                 .multilineTextAlignment(.center)
@@ -439,7 +439,7 @@ struct WorkshopBrowsePane: View {
             HStack(spacing: DesignTokens.Spacing.sm) {
                 HStack(spacing: DesignTokens.Spacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(DesignTokens.Colors.Status.warning)
                         .accessibilityHidden(true)
                     Text("Steam is rate-limiting — retry in \(Self.countdown(rateLimitRemaining))")
                         .font(.callout.weight(.medium))
@@ -456,8 +456,8 @@ struct WorkshopBrowsePane: View {
             .padding(.vertical, DesignTokens.Spacing.sm)
             // Native Liquid Glass (orange-tinted) over the grid; the orange
             // stroke still reads as a warning. Material fallback pre-26.
-            .adaptiveGlassSurface(.capsule, tint: .orange)
-            .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.5))
+            .adaptiveGlassSurface(.capsule, tint: DesignTokens.Colors.Status.warning)
+            .overlay(Capsule().strokeBorder(DesignTokens.Colors.Status.warning.opacity(0.35), lineWidth: 0.5))
             .padding(DesignTokens.Spacing.md)
             .transition(.move(edge: .top).combined(with: .opacity))
         }

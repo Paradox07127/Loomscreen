@@ -206,7 +206,7 @@ struct HTMLSourceSection: View {
         chip(
             symbol: "exclamationmark.shield",
             text: "HTTP",
-            color: .orange,
+            color: DesignTokens.Colors.Status.warning,
             help: "Insecure HTTP — content cannot be verified."
         )
     }
@@ -221,14 +221,14 @@ struct HTMLSourceSection: View {
             chip(
                 symbol: "checkmark.shield.fill",
                 text: "Trusted",
-                color: .green,
+                color: DesignTokens.Colors.Status.active,
                 help: "JavaScript allowed for this origin."
             )
         case .untrustedRemote:
             chip(
                 symbol: "exclamationmark.shield",
                 text: "Untrusted",
-                color: .orange,
+                color: DesignTokens.Colors.Status.warning,
                 help: "Scripts disabled. Manage in Content Security panel."
             )
         }
@@ -606,7 +606,7 @@ struct HTMLTransformInspector: View {
             Button(action: resetTransform) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             .buttonStyle(.borderless)
             .help(Text("Reset scale, translate, and rotation"))

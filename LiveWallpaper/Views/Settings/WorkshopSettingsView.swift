@@ -26,7 +26,7 @@ struct WorkshopSettingsView: View {
             Section {
                 LabeledContent("Status") {
                     Label("Ready", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(Color.green)
+                        .foregroundStyle(DesignTokens.Colors.Status.active)
                         .font(DesignTokens.Typography.bodyEmphasized)
                 }
             } header: {
@@ -163,7 +163,7 @@ struct WorkshopSettingsView: View {
                 if let error = engineAssets.lastError {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } header: {
@@ -205,7 +205,7 @@ struct WorkshopSettingsView: View {
         HStack(spacing: DesignTokens.Spacing.xs) {
             if engineAssets.isAuthorized {
                 Label(engineAssets.engineRootDisplayName ?? String(localized: "Linked", comment: "Engine-assets status when authorized but no display name."), systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(DesignTokens.Colors.Status.active)
                     .font(DesignTokens.Typography.bodyEmphasized)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -235,11 +235,11 @@ struct WorkshopSettingsView: View {
             ProgressView().controlSize(.small)
         case .done(let allGreen, let blockingFailures):
             if allGreen {
-                indicatorDot(.green, label: "All probes green")
+                indicatorDot(DesignTokens.Colors.Status.active, label: "All probes green")
             } else if blockingFailures == 0 {
-                indicatorDot(.orange, label: "Warnings")
+                indicatorDot(DesignTokens.Colors.Status.warning, label: "Warnings")
             } else {
-                indicatorDot(.red, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
+                indicatorDot(DesignTokens.Colors.Status.danger, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
             }
         }
     }
@@ -248,11 +248,11 @@ struct WorkshopSettingsView: View {
     private var keyStatusBadge: some View {
         if workshopServices.hasWebAPIKey {
             Label("Set", systemImage: "checkmark.seal.fill")
-                .foregroundStyle(Color.green)
+                .foregroundStyle(DesignTokens.Colors.Status.active)
                 .font(DesignTokens.Typography.bodyEmphasized)
         } else {
             Label("Not set", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .font(DesignTokens.Typography.bodyEmphasized)
         }
     }

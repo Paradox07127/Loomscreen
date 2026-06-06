@@ -490,10 +490,10 @@ struct ScreenRow: View {
     /// invisible, and `.primary` would lose the playing/paused distinction.
     private func dotColor(for summary: WallpaperSessionSummary) -> Color? {
         switch summary.activity {
-        case .active:   return .green
-        case .paused:   return .orange
+        case .active:   return DesignTokens.Colors.Status.active
+        case .paused:   return DesignTokens.Colors.Status.warning
         case .off:      return .secondary
-        case .error:    return .red
+        case .error:    return DesignTokens.Colors.Status.danger
         case .inactive: return nil
         }
     }

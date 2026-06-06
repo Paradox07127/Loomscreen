@@ -94,7 +94,7 @@ struct WPECacheManagementView: View {
                     if isOversized {
                         Label("Cache is using more than 1 GB. Consider clearing unused projects.", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(DesignTokens.Colors.Status.warning)
                     }
                 }
             }
@@ -243,7 +243,7 @@ struct WPECacheManagementView: View {
                     if isOversized {
                         Label("Over 1 GB", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(DesignTokens.Colors.Status.warning)
                     }
                 }
                 Text("Across \(stats.entries.count) project\(stats.entries.count == 1 ? "" : "s")")

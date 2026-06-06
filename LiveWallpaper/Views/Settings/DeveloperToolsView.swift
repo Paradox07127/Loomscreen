@@ -404,10 +404,10 @@ struct DeveloperToolsView: View {
 
     private func errorBanner(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.orange)
+            .foregroundStyle(DesignTokens.Colors.Status.warning)
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.1))
+            .background(DesignTokens.Colors.Status.warning.opacity(0.1))
             .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -448,7 +448,7 @@ struct DeveloperToolsView: View {
             TableColumn("Resolved / Missing") { entry in
                 Text(verbatim: "\(entry.resolution.resolved) / \(entry.resolution.missing)")
                     .monospacedDigit()
-                    .foregroundStyle(entry.resolution.missing > 0 ? .orange : .secondary)
+                    .foregroundStyle(entry.resolution.missing > 0 ? DesignTokens.Colors.Status.warning : .secondary)
             }
             .width(min: 90, ideal: 110)
 
@@ -661,9 +661,9 @@ struct DeveloperToolsView: View {
 
     private func resultColor(_ result: WPECorpusPlaybackReport.Entry.Outcome) -> Color {
         switch result {
-        case .pass: return .green
-        case .fail: return .red
-        case .timeout: return .orange
+        case .pass: return DesignTokens.Colors.Status.active
+        case .fail: return DesignTokens.Colors.Status.danger
+        case .timeout: return DesignTokens.Colors.Status.warning
         case .skipped: return .secondary
         }
     }

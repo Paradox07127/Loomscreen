@@ -184,7 +184,7 @@ struct ScheduleSection: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
-                .foregroundStyle(.red)
+                .foregroundStyle(DesignTokens.Colors.Status.danger)
             Text(verbatim: message)
                 .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.primary)
@@ -195,12 +195,12 @@ struct ScheduleSection: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: DesignTokens.Corner.sm)
-                .fill(Color.red.opacity(0.10))
+                .fill(DesignTokens.Colors.Status.danger.opacity(0.10))
         )
         .overlay(
             HStack(spacing: 0) {
                 Rectangle()
-                    .fill(Color.red.opacity(0.75))
+                    .fill(DesignTokens.Colors.Status.danger.opacity(0.75))
                     .frame(width: 2)
                 Spacer(minLength: 0)
             }
@@ -457,12 +457,12 @@ private struct DisableScheduleButton: View {
         Button(role: .destructive, action: action) {
             Text("Disable Schedule")
                 .font(DesignTokens.Typography.body)
-                .foregroundStyle(Color.red)
+                .foregroundStyle(DesignTokens.Colors.Status.danger)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(isHovering ? Color.red.opacity(0.10) : Color.clear)
+                        .fill(isHovering ? DesignTokens.Colors.Status.danger.opacity(0.10) : Color.clear)
                 )
                 .contentShape(Capsule())
         }

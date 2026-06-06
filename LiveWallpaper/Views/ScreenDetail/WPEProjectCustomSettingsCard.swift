@@ -44,7 +44,7 @@ struct WPEProjectCustomSettingsCard: View {
             Button(action: { resetOverrides(for: schema) }) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(DesignTokens.Colors.Status.danger)
             }
             .buttonStyle(.borderless)
             .help(Text("Reset project custom settings"))

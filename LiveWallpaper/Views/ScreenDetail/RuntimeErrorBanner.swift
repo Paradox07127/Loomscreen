@@ -73,8 +73,8 @@ struct RuntimeErrorBanner: View {
 
     private var severityTint: Color {
         switch error.severity {
-        case .error:   return .red
-        case .warning: return .orange
+        case .error:   return DesignTokens.Colors.Status.danger
+        case .warning: return DesignTokens.Colors.Status.warning
         case .info:    return .blue
         }
     }

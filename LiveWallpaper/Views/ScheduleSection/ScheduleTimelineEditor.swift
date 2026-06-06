@@ -201,7 +201,7 @@ struct ScheduleTimelineEditor: View {
     ) -> some View {
         let proposedConflict = isPreview && drag?.conflictsKnown == true && drag?.hasConflict == true
         let fill: Color = proposedConflict
-            ? Color.red.opacity(0.55)
+            ? DesignTokens.Colors.Status.danger.opacity(0.55)
             : (slot.videoBookmarkData == nil ? accent.opacity(0.45) : accent.opacity(0.70))
 
         ZStack(alignment: .topLeading) {

@@ -107,17 +107,17 @@ public struct SystemMonitorView: View {
     }
 
     private func colorForPercent(_ pct: Double) -> Color {
-        if pct >= 80 { return .red }
-        if pct >= 50 { return .orange }
-        return .green
+        if pct >= 80 { return DesignTokens.Colors.Status.danger }
+        if pct >= 50 { return DesignTokens.Colors.Status.warning }
+        return DesignTokens.Colors.Status.active
     }
 
     private var thermalColor: Color {
         switch monitor.thermalState {
-        case .nominal:  return .green
-        case .fair:     return .yellow
-        case .serious:  return .orange
-        case .critical: return .red
+        case .nominal:  return DesignTokens.Colors.Status.active
+        case .fair:     return DesignTokens.Colors.Status.caution
+        case .serious:  return DesignTokens.Colors.Status.warning
+        case .critical: return DesignTokens.Colors.Status.danger
         @unknown default: return .gray
         }
     }
@@ -264,11 +264,11 @@ struct PowerStatusCard: View {
     private var statusColor: Color {
         switch powerSource {
         case .battery(let level):
-            if level <= 0.2 { return .red }
-            if level <= 0.5 { return .orange }
-            return .green
+            if level <= 0.2 { return DesignTokens.Colors.Status.danger }
+            if level <= 0.5 { return DesignTokens.Colors.Status.warning }
+            return DesignTokens.Colors.Status.active
         case .external:
-            return .green
+            return DesignTokens.Colors.Status.active
         }
     }
 }

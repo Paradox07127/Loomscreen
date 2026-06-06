@@ -342,17 +342,17 @@ struct WorkshopBrowseCard: View {
     /// Single source for the restricted/banned badge — reused by VoiceOver.
     private var statusInfo: (text: String, tint: Color, symbol: String)? {
         if item.isBanned {
-            return (String(localized: "Unavailable", comment: "Workshop item removed or hidden on Steam."), .red, "xmark.octagon.fill")
+            return (String(localized: "Unavailable", comment: "Workshop item removed or hidden on Steam."), DesignTokens.Colors.Status.danger, "xmark.octagon.fill")
         }
         switch item.visibility {
         case .friendsOnly:
-            return (String(localized: "Friends-only", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Friends-only", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         case .private:
-            return (String(localized: "Private", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Private", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         case .public, .unknown:
             return nil
         @unknown default:
-            return (String(localized: "Restricted", comment: "Workshop item visibility."), .orange, "exclamationmark.triangle.fill")
+            return (String(localized: "Restricted", comment: "Workshop item visibility."), DesignTokens.Colors.Status.warning, "exclamationmark.triangle.fill")
         }
     }
 

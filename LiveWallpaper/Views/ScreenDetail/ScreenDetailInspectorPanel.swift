@@ -329,9 +329,9 @@ struct ScreenDetailInspectorPanel: View {
                     .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.red)
-            .tint(Color.red)
-            .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
+            .foregroundStyle(DesignTokens.Colors.Status.danger)
+            .tint(DesignTokens.Colors.Status.danger)
+            .adaptiveGlassSurface(.capsule, tint: DesignTokens.Colors.Status.danger, interactive: true)
             .contentShape(Capsule())
             .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
             Spacer()

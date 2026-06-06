@@ -129,7 +129,7 @@ struct VideoPreviewSection: View {
         VStack(spacing: 14) {
             Image(systemName: errorMessage == nil ? (previewController.isLoading ? "hourglass" : "photo") : "exclamationmark.triangle")
                 .font(.system(size: 36))
-                .foregroundStyle(errorMessage == nil ? Color.secondary : Color.orange)
+                .foregroundStyle(errorMessage == nil ? Color.secondary : DesignTokens.Colors.Status.warning)
             Text(errorMessage ?? (previewController.isLoading ? "Loading preview..." : "Preview paused"))
                 .font(.subheadline)
                 .foregroundStyle(errorMessage == nil ? Color.secondary : Color.primary)
