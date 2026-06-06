@@ -107,7 +107,12 @@ struct ScreenDetailInspectorPanel: View {
                 .padding(.vertical, 14)
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        // Let the native inspector's system material show through instead of
+        // an opaque fill — HIG: AppKit presents the inspector with the right
+        // glass material automatically, and a hard windowBackgroundColor here
+        // flattened it and clashed with the glass sidebar. Cards (GroupBox /
+        // AdaptiveGlass) still provide their own legible surfaces.
+        .scrollContentBackground(.hidden)
         .clipped()
         .accessibilityLabel(Text("Wallpaper Properties"))
         #if !LITE_BUILD
