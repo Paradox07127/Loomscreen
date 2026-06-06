@@ -108,11 +108,10 @@ struct ScreenDetailInspectorPanel: View {
                 .padding(.bottom, 14)
             }
         }
-        // Let the native inspector's system material show through instead of
-        // an opaque fill — HIG: AppKit presents the inspector with the right
-        // glass material automatically, and a hard windowBackgroundColor here
-        // flattened it and clashed with the glass sidebar. Cards (GroupBox /
-        // AdaptiveGlass) still provide their own legible surfaces.
+        // The AppKit NSSplitViewItem(inspectorWithViewController:) supplies the
+        // native inspector material/chrome. Keep the SwiftUI scroll content
+        // clear so that surface remains visible behind the cards (GroupBox /
+        // AdaptiveGlass still provide their own legible surfaces).
         .scrollContentBackground(.hidden)
         .clipped()
         .accessibilityLabel(Text("Wallpaper Properties"))

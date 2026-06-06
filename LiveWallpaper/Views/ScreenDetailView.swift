@@ -197,42 +197,37 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            ScreenDetailPreviewArea(
-                screen: screen,
-                draft: $draft,
-                featureCatalog: featureCatalog,
-                previewController: previewController,
-                isLoading: isLoading,
-                isDraggingOver: isDraggingOver,
-                reduceMotion: reduceMotion,
-                showsGuideEmptyState: shouldShowGuideEmptyState,
-                onChooseVideo: triggerVideoGuideAction,
-                onChooseHTML: triggerHTMLGuideAction,
-                onChooseShader: triggerShaderGuideAction,
-                onChooseScene: triggerSceneGuideAction,
-                onSelectVideoFile: showFilePicker,
-                onStartPreview: setupPreviewPlayer,
-                onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
-                onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
-            )
-            .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
+            // Xcode-style inspector: a real AppKit split (InspectorSplit) hosts
+            // the editor (preview) and the inspector as siblings inside this
+            // detail column. Opening it resizes only the editor — the window
+            // never grows and the toolbar region is untouched (no `>>`), unlike
+            // SwiftUI's window-level `.inspector()`.
+            InspectorSplit(isPresented: inspectorPresentedBinding) {
+                ScreenDetailPreviewArea(
+                    screen: screen,
+                    draft: $draft,
+                    featureCatalog: featureCatalog,
+                    previewController: previewController,
+                    isLoading: isLoading,
+                    isDraggingOver: isDraggingOver,
+                    reduceMotion: reduceMotion,
+                    showsGuideEmptyState: shouldShowGuideEmptyState,
+                    onChooseVideo: triggerVideoGuideAction,
+                    onChooseHTML: triggerHTMLGuideAction,
+                    onChooseShader: triggerShaderGuideAction,
+                    onChooseScene: triggerSceneGuideAction,
+                    onSelectVideoFile: showFilePicker,
+                    onStartPreview: setupPreviewPlayer,
+                    onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
+                    onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
+                )
+                .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
+            } inspector: {
+                inspectorPanel
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DesignTokens.Colors.pageBackground)
-        .inspector(isPresented: inspectorPresentedBinding) {
-            inspectorPanel
-                // ideal == min so SwiftUI only ever asks for this exact width and
-                // never sends a "grab a wider ideal" signal that grows the window.
-                // It fits inside the current window by yielding preview width
-                // instead. The window floor (1160) ≥ sidebar(210) + preview
-                // min(480) + this width, so the inspector is shown at its full
-                // width — never compressed or pushed off-screen — and the sidebar
-                // is untouched.
-                .inspectorColumnWidth(
-                    min: DesignTokens.Inspector.idealWidth,
-                    ideal: DesignTokens.Inspector.idealWidth,
-                    max: DesignTokens.Inspector.maxWidth
-                )
-        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
