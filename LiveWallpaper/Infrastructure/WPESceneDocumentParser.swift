@@ -463,7 +463,7 @@ enum WPESceneDocumentParser {
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
         let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
-        let parallaxDepth = unwrapDouble(dict["parallaxDepth"]) ?? unwrapDouble(dict["parallaxdepth"]) ?? 0
+        let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
         // WPE text-box footprint ("size") + transparent margin ("padding"). A
         // text object renders like an image layer whose texture is this box, so
         // the rendered text must fill the box (minus padding) × scale — not the
@@ -665,7 +665,7 @@ enum WPESceneDocumentParser {
         let visible = parseBool(dict["visible"]) ?? true
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
-        let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+        let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
         let instanceOverride = parseParticleInstanceOverride(
             dict["instanceoverride"] ?? dict["instanceOverride"]
         )
@@ -874,7 +874,7 @@ enum WPESceneDocumentParser {
             diagnostics.append(.init(severity: .warning, message: "Image \(name) uses .tex texture — falls back to first-frame stub if available"))
         }
 
-        let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+        let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
 
         return WPESceneImageObject(
             id: id,
@@ -1035,6 +1035,23 @@ enum WPESceneDocumentParser {
 
     static func parseDouble(_ raw: Any?) -> Double? {
         WPEValueParser.double(raw)
+    }
+
+    /// WPE stores object `parallaxDepth` as a PER-AXIS vector string ("x y"),
+    /// not a scalar — e.g. "1.000 1.000". A plain `parseDouble` returns nil for
+    /// that (Swift's `Double(_:)` rejects the embedded space), so every object's
+    /// depth silently fell back to 0 and the camera-parallax pipeline received
+    /// all-zero depths → no layer ever shifted with the cursor. The editor always
+    /// writes x == y, so reduce to a single scalar (first component). A bare
+    /// number or a `{ "user", "value" }` wrapper is also accepted; absent → 0
+    /// (layer pinned, no parallax).
+    static func parseParallaxDepth(_ raw: Any?) -> Double {
+        if let dict = raw as? [String: Any], let value = dict["value"] {
+            return parseParallaxDepth(value)
+        }
+        if let scalar = parseDouble(raw) { return scalar }
+        if let vector = parseVector3(raw) { return vector.x }
+        return 0
     }
 
     private static func parseInt(_ raw: Any?) -> Int? {

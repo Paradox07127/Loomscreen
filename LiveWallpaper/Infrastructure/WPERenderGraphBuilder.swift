@@ -109,7 +109,49 @@ struct WPERenderGraphBuilder: Sendable {
                     preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
                 )
             }
-        return WPERenderGraph(layers: applyAttachmentAnchorOffsets(to: layers))
+        let parallaxAligned = Self.propagatingParallaxDepthThroughParents(layers)
+        return WPERenderGraph(layers: applyAttachmentAnchorOffsets(to: parallaxAligned))
+    }
+
+    /// Camera parallax is a CAMERA-level shift that, in WPE, propagates down the
+    /// object hierarchy: an attached child moves with its parent, not on its own
+    /// depth. Our executor instead applies parallax per layer from each layer's
+    /// own `parallaxDepth`, so a body at depth 1 with a face/hair child left at
+    /// depth 0 would shear apart ("散架") once parallax is active — and an identity
+    /// child at depth 0 would also skip the object-quad path entirely. Pinning
+    /// every parented layer to its ROOT ancestor's depth makes a whole attachment
+    /// tree shift as one rigid unit. Parallax-off scenes are unaffected (the
+    /// per-frame offset is zero regardless of depth), and roots / unparented
+    /// layers keep their own depth.
+    static func propagatingParallaxDepthThroughParents(
+        _ layers: [WPERenderLayer]
+    ) -> [WPERenderLayer] {
+        guard layers.contains(where: { $0.parentObjectID != nil }) else { return layers }
+        let depthByID = Dictionary(
+            layers.map { ($0.objectID, $0.parallaxDepth) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let parentByID = Dictionary(
+            layers.compactMap { layer in layer.parentObjectID.map { (layer.objectID, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // Walk up to the topmost ancestor still present in the graph; a cycle or a
+        // parent that was filtered out stops the walk at the last resolvable node.
+        func rootDepth(of id: String) -> Double {
+            var current = id
+            var seen: Set<String> = []
+            while seen.insert(current).inserted,
+                  let parent = parentByID[current],
+                  depthByID[parent] != nil {
+                current = parent
+            }
+            return depthByID[current] ?? 0
+        }
+        return layers.map { layer in
+            guard layer.parentObjectID != nil else { return layer }
+            let inherited = rootDepth(of: layer.objectID)
+            return inherited == layer.parallaxDepth ? layer : layer.withParallaxDepth(inherited)
+        }
     }
 
     /// Body-split rigs attach face/hair/clothing child layers to a parent puppet's named MDAT anchor
@@ -1155,6 +1197,27 @@ private extension WPERenderLayer {
             localFBOs: localFBOs,
             passes: passes,
             parallaxDepth: parallaxDepth
+        )
+    }
+
+    func withParallaxDepth(_ depth: Double) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: depth
         )
     }
 }
