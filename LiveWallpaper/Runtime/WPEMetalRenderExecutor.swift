@@ -93,17 +93,16 @@ final class WPEMetalRenderExecutor {
         #endif
     }
 
-    /// Prototype flag: defer the puppet mesh warp from the base material pass to
-    /// the final scene composite, so the base image + entire effect chain run in
-    /// puppet atlas/local UV space (effect masks align with the mesh). Default-off
-    /// and DEBUG-only so Release builds stay byte-identical while the core puppet
-    /// pipeline is validated. Enable: `defaults write Taijia.LiveWallpaper
-    /// WPEPuppetDeferMeshWarp -bool YES`.
-    static var deferPuppetMeshWarp: Bool {
+    /// Optional developer override for the per-puppet deferred-warp decision (see
+    /// `shouldDeferPuppetMeshWarp`). `nil` (the default, and always in Release) means "decide
+    /// automatically per puppet"; an explicit DEBUG `defaults write Taijia.LiveWallpaper
+    /// WPEPuppetDeferMeshWarp -bool YES|NO` forces the warp deferred/direct for every non-clip puppet
+    /// (A/B testing). Clip-composite puppets ignore this and never defer.
+    static var deferPuppetMeshWarpOverride: Bool? {
         #if DEBUG
-        return UserDefaults.standard.bool(forKey: "WPEPuppetDeferMeshWarp")
+        return UserDefaults.standard.object(forKey: "WPEPuppetDeferMeshWarp") as? Bool
         #else
-        return false
+        return nil
         #endif
     }
 
@@ -1616,7 +1615,7 @@ final class WPEMetalRenderExecutor {
               let model = puppetModel else {
             return false
         }
-        if Self.deferPuppetMeshWarp {
+        if shouldDeferPuppetMeshWarp(for: layer, model: model) {
             // Intentional fallthrough: the dispatcher's genericimage2/4 path resolves
             // texture0 with the SAME atlas precedence used below
             // (`textureBindings[0] ?? textures[0] ?? source`). Because this pass targets
@@ -1789,10 +1788,10 @@ final class WPEMetalRenderExecutor {
         return true
     }
 
-    /// Deferred-warp final composite (gated by `deferPuppetMeshWarp`): the base + effect chain ran in
-    /// puppet atlas/local UV space; here the skinned mesh warps that result into the scene, replacing
-    /// the rectangular `copy`-to-`.scene` pass. Placement is copied 1:1 from `objectQuadUniforms` so a
-    /// bind-pose, no-effect puppet stays byte-identical to the current path.
+    /// Deferred-warp final composite (gated per-puppet by `shouldDeferPuppetMeshWarp`): the base +
+    /// effect chain ran in puppet atlas/local UV space; here the skinned mesh warps that result into the
+    /// scene, replacing the rectangular `copy`-to-`.scene` pass. Placement is copied 1:1 from
+    /// `objectQuadUniforms` so a bind-pose, no-effect puppet stays byte-identical to the current path.
     private func encodePuppetSceneCompositePassIfNeeded(
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -1804,15 +1803,14 @@ final class WPEMetalRenderExecutor {
         encoder: MTLRenderCommandEncoder,
         depthPixelFormat: MTLPixelFormat
     ) throws -> Bool {
-        guard Self.deferPuppetMeshWarp,
-              case .scene = pass.pass.target,
-              let model = puppetModel else {
+        guard case .scene = pass.pass.target,
+              let model = puppetModel,
+              // Mirrors the material-pass deferral decision (clip puppets already warped+clipped at
+              // material time → false here → plain rectangular copy; no-effect puppets → false → the
+              // material pass already warped directly). Only deferred puppets warp at the scene composite.
+              shouldDeferPuppetMeshWarp(for: layer, model: model) else {
             return false
         }
-        // A clip-composite puppet already warped (and clipped) its mesh at material time, so its layer
-        // composite is in final screen space — re-warping here would double-apply the deformation. Let it
-        // fall through to the plain rectangular copy-to-scene instead.
-        guard !puppetUsesClipComposite(layer: layer, model: model) else { return false }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard !meshes.isEmpty else { return false }
         guard WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "copy" else {
@@ -2079,6 +2077,18 @@ final class WPEMetalRenderExecutor {
             clipMaskReference: clipMaskReference,
             clipTargetName: clipTargetName
         )
+    }
+
+    /// Per-puppet deferred-warp decision (replaces the old global flag). The deferred warp only matters
+    /// for puppets with an effect chain — running base+effects in atlas/local UV space so effect masks
+    /// align with the mesh, then warping at the scene composite. A no-effect puppet renders identically
+    /// either way, so it stays on the direct (material-time warp) path and is byte-identical to the
+    /// pre-deferral behaviour. Clip-composite puppets warp+clip at material time and never defer. A DEBUG
+    /// `WPEPuppetDeferMeshWarp` override forces the decision for non-clip puppets (A/B testing).
+    private func shouldDeferPuppetMeshWarp(for layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
+        if puppetUsesClipComposite(layer: layer, model: model) { return false }
+        if let forced = Self.deferPuppetMeshWarpOverride { return forced }
+        return layer.passes.contains { if case .effect = $0.phase { return true }; return false }
     }
 
     /// True when this puppet renders via the clip composite (clip flag on, has a clip mask, and the

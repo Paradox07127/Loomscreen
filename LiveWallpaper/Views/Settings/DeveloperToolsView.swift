@@ -265,8 +265,8 @@ struct DeveloperToolsView: View {
                   help: "Log why each puppet's GPU skinning is enabled or gated off (blink/body-sway depend on it). Filter logs for 🦴 [puppet-skin]. Logged once per change."),
             .init(key: "WPEMetalBypassEffects", title: "Bypass effect passes",
                   help: "Draw only base image layers, skipping effects (note: breaks solid-color layers)."),
-            .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp",
-                  help: "Run the puppet base + effect chain in atlas/local UV space and warp the skinned mesh at composite, so effect masks align with the puppet. Reload the scene to apply."),
+            .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp (override)",
+                  help: "Override the automatic per-puppet decision (default: defer only puppets that have an effect chain, so their effect masks align). ON forces every non-clip puppet to defer; OFF forces direct warp. Clip-eye puppets ignore this. Reload the scene to apply."),
         ]
         #endif
         return flags
