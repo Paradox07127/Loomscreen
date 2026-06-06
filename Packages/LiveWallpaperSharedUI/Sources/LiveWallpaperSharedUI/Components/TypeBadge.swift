@@ -17,10 +17,10 @@ public struct TypeBadge: View {
         HStack(spacing: systemImage == nil ? 0 : 3) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(DesignTokens.Typography.badge)
             }
             Text(verbatim: title.uppercased(with: .current))
-                .font(.system(size: 9, weight: .bold))
+                .font(DesignTokens.Typography.badge)
                 .tracking(0.5)
         }
         .foregroundStyle(foreground)
