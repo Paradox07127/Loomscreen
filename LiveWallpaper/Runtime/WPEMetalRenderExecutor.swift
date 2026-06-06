@@ -174,6 +174,9 @@ final class WPEMetalRenderExecutor {
     /// shaders. Library + blend + format set is the key.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
     private var previousFrameHistory: PreviousFrameHistory?
+    /// Clip-composite role detection is static per puppet, so cache the resolved (source→target)
+    /// part pairs by puppet path. Keyed empty when a clip puppet needs no clip (no eligible pair).
+    private var puppetClipPairsCache: [String: [PuppetClipPair]] = [:]
     private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
     private var msdfNeutralWhiteTexture: MTLTexture?
 
@@ -1995,10 +1998,18 @@ final class WPEMetalRenderExecutor {
 
     /// Resolved routing for a clip-composite puppet: which part is the clip-mask source,
     /// which is the clip target, and the clip-mask texture + intermediate RT bindings.
+    /// One resolved clip relationship: `target` (e.g. a pupil that does not squish) is clipped to
+    /// the silhouette of `source` (e.g. the eye-white that squishes shut), recovered from geometry.
+    private struct PuppetClipPair: Equatable {
+        let source: UInt32
+        let target: UInt32
+    }
+
     private struct PuppetClipCompositePlan {
-        let sourcePartID: UInt32
-        let targetPartID: UInt32
-        let normalPartIDs: Set<UInt32>
+        /// Distinct clip-mask source part IDs, in mesh draw order. Each renders to its own clip RT.
+        let sourcePartIDs: [UInt32]
+        /// Maps a clip-target part ID to the source part whose silhouette clips it.
+        let sourceForTarget: [UInt32: UInt32]
         let clipMaskReference: WPETextureReference
         let clipTargetName: String
     }
@@ -2008,10 +2019,15 @@ final class WPEMetalRenderExecutor {
             && (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
     }
 
-    /// Mirrors the WPE eye draw structure (parts id1/id2/id3..N) once the builder has injected
-    /// the clip-mask asset (slot 1) and the intermediate clip RT (slot 8) onto a genericimage4 pass.
+    /// Resolves the WPE clip-composite routing for any genericimage4 puppet the builder flagged with a
+    /// clip mask (slot 1) + intermediate clip RT (slot 8). Part roles are recovered from animated
+    /// geometry rather than a hardcoded layout: a clip *target* is a part that stays near full height
+    /// across the animation while an enclosing *source* part squishes shut, so the target must be
+    /// clipped to the source silhouette (the eye-white/pupil blink pattern). Any number of source→
+    /// target pairs is supported (e.g. two eyes); a puppet with no such pair yields nil → flat draw.
     private func puppetClipCompositePlan(
         for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
         model: WPEPuppetModel,
         renderableMeshes: [WPEPuppetMesh]
     ) -> PuppetClipCompositePlan? {
@@ -2023,28 +2039,197 @@ final class WPEMetalRenderExecutor {
               case .fbo(let clipTargetName) = clipTargetReference,
               renderableMeshes.count == 1,
               let mesh = renderableMeshes.first,
-              mesh.parts.count >= 3 else {
+              mesh.parts.filter({ $0.count > 0 }).count >= 2 else {
             return nil
         }
-        let parts = mesh.parts
-        let normalParts = parts.dropFirst(2)
-        // Only the captured Kelsey eye (id1=eye-white 426, id2=pupil 312, rest=1179) has a proven
-        // clip-shape/clip-target role mapping. Until other clip puppets are oracle-validated, no-op on
-        // any other part layout so we never mis-render an unknown clip rig.
-        let normalIndexCount = normalParts.reduce(0) { $0 + $1.count }
-        guard parts[0].id == 1, parts[0].count == 426,
-              parts[1].id == 2, parts[1].count == 312,
-              normalIndexCount == 1179 else {
-            return nil
+        let pairs = resolvePuppetClipPairs(for: layer, model: model, mesh: mesh)
+        guard !pairs.isEmpty else { return nil }
+
+        // Preserve mesh draw order for the source RTs; dedupe shared sources (two targets, one source).
+        var sourceIDs: [UInt32] = []
+        var sourceForTarget: [UInt32: UInt32] = [:]
+        for part in mesh.parts where part.count > 0 {
+            for pair in pairs where pair.source == part.id && !sourceIDs.contains(part.id) {
+                sourceIDs.append(part.id)
+            }
         }
+        for pair in pairs where sourceForTarget[pair.target] == nil {
+            sourceForTarget[pair.target] = pair.source
+        }
+        guard !sourceIDs.isEmpty, !sourceForTarget.isEmpty else { return nil }
+
         return PuppetClipCompositePlan(
-            sourcePartID: parts[0].id,
-            targetPartID: parts[1].id,
-            normalPartIDs: Set(normalParts.map(\.id)),
+            sourcePartIDs: sourceIDs,
+            sourceForTarget: sourceForTarget,
             clipMaskReference: clipMaskReference,
             clipTargetName: clipTargetName
         )
     }
+
+    /// Cached geometry-driven clip-role detection (see `Self.detectClipPairs`). Keyed by puppet path.
+    private func resolvePuppetClipPairs(
+        for layer: WPERenderLayer,
+        model: WPEPuppetModel,
+        mesh: WPEPuppetMesh
+    ) -> [PuppetClipPair] {
+        if let cacheKey = layer.puppetPath, let cached = puppetClipPairsCache[cacheKey] {
+            return cached
+        }
+        let animationLayers = puppetAnimationLayers(for: layer, model: model)
+        let pairs = Self.detectClipPairs(mesh: mesh, animationLayers: animationLayers, bones: model.bones)
+        if let cacheKey = layer.puppetPath {
+            puppetClipPairsCache[cacheKey] = pairs
+        }
+        return pairs
+    }
+
+    /// Geometry signature of one mesh part under a given skinning palette: its 2D bounding box.
+    private struct PuppetClipPartBox {
+        let id: UInt32
+        var minX: Float
+        var maxX: Float
+        var minY: Float
+        var maxY: Float
+        var width: Float { maxX - minX }
+        var height: Float { maxY - minY }
+        var area: Float { max(maxX - minX, 0) * max(maxY - minY, 0) }
+        var centerX: Float { (minX + maxX) * 0.5 }
+        var centerY: Float { (minY + maxY) * 0.5 }
+    }
+
+    /// Skins a single vertex with the palette exactly as `wpe_skin_puppet_position` does, so detection
+    /// matches the rendered geometry. An empty palette returns the bind position.
+    private static func skinPuppetVertex(_ vertex: WPEPuppetVertex, palette: [simd_float4x4]) -> SIMD3<Float> {
+        let source = SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 1)
+        guard !palette.isEmpty else { return vertex.position }
+        let weights = SIMD4<Float>(
+            max(vertex.skinBlendWeights.x, 0), max(vertex.skinBlendWeights.y, 0),
+            max(vertex.skinBlendWeights.z, 0), max(vertex.skinBlendWeights.w, 0)
+        )
+        let weightSum = weights.x + weights.y + weights.z + weights.w
+        guard weightSum > 1e-5 else { return vertex.position }
+        let indices = [vertex.skinBlendIndices.x, vertex.skinBlendIndices.y,
+                       vertex.skinBlendIndices.z, vertex.skinBlendIndices.w]
+        let weightLanes = [weights.x, weights.y, weights.z, weights.w]
+        var skinned = SIMD4<Float>(0, 0, 0, 0)
+        for lane in 0..<4 where weightLanes[lane] > 0 {
+            let bone = Int(indices[lane])
+            let contribution = (bone >= 0 && bone < palette.count) ? palette[bone] * source : source
+            skinned += weightLanes[lane] * contribution
+        }
+        skinned /= weightSum
+        return SIMD3<Float>(skinned.x, skinned.y, skinned.z)
+    }
+
+    /// 2D bounding boxes for every non-empty part under `palette` (empty palette → bind pose).
+    private static func clipPartBoxes(mesh: WPEPuppetMesh, palette: [simd_float4x4]) -> [PuppetClipPartBox] {
+        var boxes: [PuppetClipPartBox] = []
+        for part in mesh.parts where part.count > 0 {
+            let start = max(part.start, 0)
+            let end = min(part.start + part.count, mesh.indices.count)
+            guard end > start else { continue }
+            var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
+            var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
+            var seen = false
+            var visited = Set<UInt16>()
+            for i in start..<end {
+                let vertexIndex = mesh.indices[i]
+                guard visited.insert(vertexIndex).inserted, Int(vertexIndex) < mesh.vertices.count else { continue }
+                let p = skinPuppetVertex(mesh.vertices[Int(vertexIndex)], palette: palette)
+                minX = min(minX, p.x); maxX = max(maxX, p.x)
+                minY = min(minY, p.y); maxY = max(maxY, p.y)
+                seen = true
+            }
+            guard seen else { continue }
+            boxes.append(PuppetClipPartBox(id: part.id, minX: minX, maxX: maxX, minY: minY, maxY: maxY))
+        }
+        return boxes
+    }
+
+    /// Detects clip source→target pairs from animated geometry. A target part stays near full height
+    /// across the blink while an enclosing source part squishes shut; the target is then clipped to the
+    /// source silhouette. Returns [] when no part squishes under an enclosing part (no clip needed).
+    private static func detectClipPairs(
+        mesh: WPEPuppetMesh,
+        animationLayers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone]
+    ) -> [PuppetClipPair] {
+        let bindBoxes = clipPartBoxes(mesh: mesh, palette: [])
+        guard bindBoxes.count >= 2 else { return [] }
+        var bindByID: [UInt32: PuppetClipPartBox] = [:]
+        var minWidthByID: [UInt32: Float] = [:]
+        var minHeightByID: [UInt32: Float] = [:]
+        for box in bindBoxes where box.height > 1e-4 && box.width > 1e-4 {
+            bindByID[box.id] = box
+            minWidthByID[box.id] = box.width
+            minHeightByID[box.id] = box.height
+        }
+        guard bindByID.count >= 2 else { return [] }
+
+        guard let base = animationLayers.first(where: { !$0.additive }) ?? animationLayers.first else { return [] }
+        let frameCount = max(base.animation.frameCount, 1)
+        let fps = base.animation.fps > 0 ? Double(base.animation.fps) : 30
+        let duration = Double(frameCount) / fps
+        // Sample the animation densely enough to catch the most-closed instant without skinning the
+        // whole timeline; clamp to the frame count for very short clips.
+        let sampleCount = min(max(frameCount, 8), 48)
+        for sample in 0..<sampleCount {
+            let time = sampleCount > 1 ? duration * Double(sample) / Double(sampleCount - 1) : 0
+            let palette = WPEPuppetAnimationEvaluator.palette(layers: animationLayers, bones: bones, at: time)
+            guard !palette.isEmpty else { continue }
+            for box in clipPartBoxes(mesh: mesh, palette: palette) {
+                if let w = minWidthByID[box.id] { minWidthByID[box.id] = min(w, box.width) }
+                if let h = minHeightByID[box.id] { minHeightByID[box.id] = min(h, box.height) }
+            }
+        }
+
+        // A part "squishes" when it collapses well below bind on EITHER axis (anime eyes usually close
+        // vertically, but the silhouette test stays axis-agnostic); a clip target stays near full on
+        // both axes across the whole clip.
+        let sourceMaxRatio: Float = 0.8
+        let targetMinRatio: Float = 0.85
+        func ratio(_ id: UInt32) -> Float {
+            guard let bind = bindByID[id], bind.width > 1e-4, bind.height > 1e-4 else { return 1 }
+            let widthRatio = (minWidthByID[id] ?? bind.width) / bind.width
+            let heightRatio = (minHeightByID[id] ?? bind.height) / bind.height
+            return min(widthRatio, heightRatio)
+        }
+        let sources = bindByID.values.filter { ratio($0.id) < sourceMaxRatio }
+        let targets = bindByID.values.filter { ratio($0.id) > targetMinRatio }
+        guard !sources.isEmpty, !targets.isEmpty else { return [] }
+
+        func encloses(_ outer: PuppetClipPartBox, _ inner: PuppetClipPartBox) -> Bool {
+            let centerInside = inner.centerX >= outer.minX && inner.centerX <= outer.maxX
+                && inner.centerY >= outer.minY && inner.centerY <= outer.maxY
+            return centerInside && outer.area >= inner.area * 0.8
+        }
+
+        var pairs: [PuppetClipPair] = []
+        for target in targets {
+            // Tightest enclosing squishing part is the clip silhouette (e.g. the eye-white wrapping
+            // the pupil), never the part itself.
+            let source = sources
+                .filter { $0.id != target.id && encloses($0, target) }
+                .min(by: { $0.area < $1.area })
+            if let source {
+                pairs.append(PuppetClipPair(source: source.id, target: target.id))
+            }
+        }
+        return pairs
+    }
+
+    #if DEBUG
+    /// Test seam for the geometry-driven clip-role detection. Returns (source, target) part-ID pairs
+    /// without surfacing the private `PuppetClipPair` type.
+    static func _testDetectClipPairs(
+        mesh: WPEPuppetMesh,
+        animationLayers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone]
+    ) -> [(source: UInt32, target: UInt32)] {
+        detectClipPairs(mesh: mesh, animationLayers: animationLayers, bones: bones)
+            .map { (source: $0.source, target: $0.target) }
+    }
+    #endif
 
     /// Encodes the four-draw clip composite (eye-white base → clip-mask RT → clipped pupil →
     /// remaining parts) in place of the flat puppet draw. Returns false when the pass is not a
@@ -2067,7 +2252,7 @@ final class WPEMetalRenderExecutor {
             return false
         }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
-        guard let plan = puppetClipCompositePlan(for: pass, model: model, renderableMeshes: meshes) else {
+        guard let plan = puppetClipCompositePlan(for: pass, layer: layer, model: model, renderableMeshes: meshes) else {
             return false
         }
 
@@ -2083,11 +2268,6 @@ final class WPEMetalRenderExecutor {
             textures: textures,
             frameState: frameState,
             currentTargetID: destination.id
-        )
-        let clipTarget = try targetTexture(
-            for: .fbo(name: plan.clipTargetName),
-            layer: layer,
-            frameState: &frameState
         )
 
         let paletteState = puppetBonePalette(for: skinningState)
@@ -2110,51 +2290,70 @@ final class WPEMetalRenderExecutor {
 
         let transparentClear = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
 
-        // 1) eye-white base parts → main (plain).
-        try encodePuppetClipCompositeDraw(
-            pass: pass, layer: layer, meshes: meshes,
-            partSelection: .only([plan.sourcePartID]),
-            destination: destination, loadAction: shouldLoadDestination ? .load : .clear,
-            clearColor: clearColor(for: destination.id),
-            primary: primary, mask: primary, clipTexture: nil,
-            vertexName: "wpe_puppet_mesh_vertex", fragmentName: "wpe_genericimage4_fragment",
-            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.none,
-            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
-        )
+        // 1) Render each clip-source silhouette to its own intermediate clip-mask RT
+        //    (clippingmaskimage4). The first source reuses the builder-registered RT (scale 2); any
+        //    additional sources (e.g. a second eye) get derived RT names from the same base.
+        var clipRTBySource: [UInt32: (id: WPEMetalTargetID, texture: MTLTexture)] = [:]
+        for (index, sourceID) in plan.sourcePartIDs.enumerated() {
+            let rtName = index == 0 ? plan.clipTargetName : "\(plan.clipTargetName)_s\(index)"
+            let clipRT = try targetTexture(for: .fbo(name: rtName), layer: layer, frameState: &frameState)
+            try encodePuppetClipCompositeDraw(
+                pass: pass, layer: layer, meshes: meshes,
+                partSelection: .only([sourceID]),
+                destination: clipRT, loadAction: .clear, clearColor: transparentClear,
+                primary: primary, mask: clipMask, clipTexture: nil,
+                vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_puppet_clippingmaskimage4_fragment",
+                blendMode: "disabled", hasMask: true, clipMode: PuppetClipFragmentMode.none,
+                meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+            )
+            frameState.registerWrite(texture: clipRT.texture, targetID: clipRT.id)
+            clipRTBySource[sourceID] = clipRT
+        }
 
-        // 2) clip-shape → intermediate clip-mask RT (clippingmaskimage4).
-        try encodePuppetClipCompositeDraw(
-            pass: pass, layer: layer, meshes: meshes,
-            partSelection: .only([plan.sourcePartID]),
-            destination: clipTarget, loadAction: .clear, clearColor: transparentClear,
-            primary: primary, mask: clipMask, clipTexture: nil,
-            vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_puppet_clippingmaskimage4_fragment",
-            blendMode: "disabled", hasMask: true, clipMode: PuppetClipFragmentMode.none,
-            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
-        )
-        frameState.registerWrite(texture: clipTarget.texture, targetID: clipTarget.id)
+        // 2) Draw all parts to the main target in mesh draw order. A clip-target part multiplies its
+        //    alpha by its source silhouette (screen-space CLIPPINGTARGET); every other part draws plain.
+        //    Consecutive plain parts batch into one draw, preserving translucent ordering.
+        var didClearMain = false
+        func mainLoadAction() -> MTLLoadAction {
+            defer { didClearMain = true }
+            return (didClearMain || shouldLoadDestination) ? .load : .clear
+        }
+        var plainRun: [UInt32] = []
+        func flushPlainRun() throws {
+            guard !plainRun.isEmpty else { return }
+            let selection = plainRun
+            plainRun.removeAll(keepingCapacity: true)
+            try encodePuppetClipCompositeDraw(
+                pass: pass, layer: layer, meshes: meshes,
+                partSelection: .only(Set(selection)),
+                destination: destination, loadAction: mainLoadAction(),
+                clearColor: clearColor(for: destination.id),
+                primary: primary, mask: primary, clipTexture: nil,
+                vertexName: "wpe_puppet_mesh_vertex", fragmentName: "wpe_genericimage4_fragment",
+                blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.none,
+                meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+            )
+        }
 
-        // 3) pupil clip-target → main (alpha *= clip mask, sampled in screen space).
-        try encodePuppetClipCompositeDraw(
-            pass: pass, layer: layer, meshes: meshes,
-            partSelection: .only([plan.targetPartID]),
-            destination: destination, loadAction: .load, clearColor: clearColor(for: destination.id),
-            primary: primary, mask: primary, clipTexture: clipTarget.texture,
-            vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_genericimage4_puppet_clip_fragment",
-            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.target,
-            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
-        )
-
-        // 4) remaining parts (eyelids/lashes) → main (plain).
-        try encodePuppetClipCompositeDraw(
-            pass: pass, layer: layer, meshes: meshes,
-            partSelection: .only(plan.normalPartIDs),
-            destination: destination, loadAction: .load, clearColor: clearColor(for: destination.id),
-            primary: primary, mask: primary, clipTexture: nil,
-            vertexName: "wpe_puppet_mesh_vertex", fragmentName: "wpe_genericimage4_fragment",
-            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.none,
-            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
-        )
+        for part in meshes.first?.parts ?? [] where part.count > 0 {
+            guard let sourceID = plan.sourceForTarget[part.id],
+                  let clipRT = clipRTBySource[sourceID] else {
+                plainRun.append(part.id)
+                continue
+            }
+            try flushPlainRun()
+            try encodePuppetClipCompositeDraw(
+                pass: pass, layer: layer, meshes: meshes,
+                partSelection: .only([part.id]),
+                destination: destination, loadAction: mainLoadAction(),
+                clearColor: clearColor(for: destination.id),
+                primary: primary, mask: primary, clipTexture: clipRT.texture,
+                vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_genericimage4_puppet_clip_fragment",
+                blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.target,
+                meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+            )
+        }
+        try flushPlainRun()
         return true
     }
 
