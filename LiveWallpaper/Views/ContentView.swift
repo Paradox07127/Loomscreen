@@ -407,10 +407,17 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Pin the sidebar FIRM (min == ideal == max). A flexible sidebar is a
+        // "donor" column under `.balanced`, so opening the trailing inspector
+        // reclaimed the sidebar's slack first — compressing it mid-animation,
+        // colliding the toolbar regions into a `>>` overflow, and reshuffling.
+        // Fixed-width keeps the sidebar stationary so the inspector's width is
+        // absorbed by the detail/preview alone — smooth, no overflow. Matches
+        // HIG fixed-width settings sidebars (System Settings).
         .navigationSplitViewColumnWidth(
             min: SettingsWindowMetrics.sidebarColumnWidth,
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
-            max: SettingsWindowMetrics.sidebarColumnMaxWidth
+            max: SettingsWindowMetrics.sidebarColumnWidth
         )
     }
 
