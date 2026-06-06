@@ -31,11 +31,12 @@ struct WPEPuppetClipRoleTests {
         [base, base + 1, base + 2, base, base + 2, base + 3]
     }
 
-    /// One channel that scales Y from 1 (bind) down to `closedScaleY` at mid-clip and back.
-    private func channel(bone: Int, closedScaleY: Float, frameCount: Int) -> WPEPuppetAnimChannel {
-        let mid = frameCount / 2
+    /// One channel that scales Y from 1 (bind) down to `closedScaleY` on `closedFrame` (default: mid-clip)
+    /// and stays 1 elsewhere.
+    private func channel(bone: Int, closedScaleY: Float, frameCount: Int, closedFrame: Int? = nil) -> WPEPuppetAnimChannel {
+        let closed = closedFrame ?? frameCount / 2
         let keyframes = (0..<frameCount).map { frame -> WPEPuppetAnimKey in
-            let scaleY = frame == mid ? closedScaleY : 1
+            let scaleY = frame == closed ? closedScaleY : 1
             return WPEPuppetAnimKey(
                 frame: frame,
                 translation: .zero,
@@ -111,6 +112,39 @@ struct WPEPuppetClipRoleTests {
 
         let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
         #expect(pairs.isEmpty)
+    }
+
+    @Test("Most-closed pose on the final loop frame is still detected (no duration wrap-around)")
+    func detectsFinalFrameClosure() {
+        let frameCount = 16
+        let vertices = quad(bone: 0, minX: -10, maxX: 10, minY: -5, maxY: 5)
+            + quad(bone: 1, minX: -3, maxX: 3, minY: -3, maxY: 3)
+        let indices = quadIndices(base: 0) + quadIndices(base: 4)
+        let mesh = WPEPuppetMesh(
+            materialPath: "eye",
+            vertices: vertices,
+            indices: indices,
+            parts: [
+                WPEPuppetMeshPart(id: 1, start: 0, count: 6),
+                WPEPuppetMeshPart(id: 2, start: 6, count: 6)
+            ],
+            clipMaskName: "masks/clipping_mask_test"
+        )
+        // Eye-white squishes ONLY on the last frame; with time-based sampling that frame would wrap to 0.
+        let animation = WPEPuppetAnimation(
+            id: 1, name: "blink", mode: "loop", fps: 30, frameCount: frameCount,
+            channels: [
+                channel(bone: 0, closedScaleY: 0.18, frameCount: frameCount, closedFrame: frameCount - 1),
+                channel(bone: 1, closedScaleY: 1, frameCount: frameCount)
+            ]
+        )
+        let bones = (0..<2).map { WPEPuppetBone(index: $0, parentIndex: nil, rawMatrix: identityColumnMajor()) }
+        let layers = [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)]
+
+        let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
+        #expect(pairs.count == 1)
+        #expect(pairs.first?.source == 1)
+        #expect(pairs.first?.target == 2)
     }
 
     @Test("No clip when the first part doesn't close (convention guard rejects)")

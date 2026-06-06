@@ -1677,7 +1677,7 @@ final class WPEMetalRenderExecutor {
         if normalizedShader == "genericimage4" {
             // A clip-composite binding (slot 8) is consumed by the dedicated clip pass; the
             // injected slot-1 mask must NOT be applied as a flat static mask to every part here.
-            let maskRef = hasPuppetClipCompositeBinding(pass)
+            let maskRef = hasPuppetClipCompositeBinding(pass, layer: layer)
                 ? nil
                 : (pass.textureBindings[1] ?? pass.pass.textures[1])
             if let maskRef {
@@ -2040,9 +2040,13 @@ final class WPEMetalRenderExecutor {
         let clipTargetName: String
     }
 
-    private func hasPuppetClipCompositeBinding(_ pass: WPEPreparedRenderPass) -> Bool {
-        Self.puppetClipCompositeEnabled
-            && (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
+    /// True only when slot 8 is the EXACT builder-injected clip RT for this object — the same predicate
+    /// `puppetUsesClipComposite` uses for defer routing, so the clip encoder and the deferred-warp
+    /// decision can never disagree (an authored slot-8 FBO with another name is not a clip pass).
+    private func hasPuppetClipCompositeBinding(_ pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> Bool {
+        guard Self.puppetClipCompositeEnabled else { return false }
+        let slot8 = pass.textureBindings[8] ?? pass.pass.textures[8]
+        return slot8 == .fbo(Self.puppetClipRTName(objectID: layer.objectID))
     }
 
     /// Resolves the WPE clip-composite routing for a genericimage4 puppet the builder flagged with a clip
@@ -2058,7 +2062,7 @@ final class WPEMetalRenderExecutor {
         renderableMeshes: [WPEPuppetMesh]
     ) -> PuppetClipCompositePlan? {
         guard Self.puppetClipCompositeEnabled,
-              hasPuppetClipCompositeBinding(pass),
+              hasPuppetClipCompositeBinding(pass, layer: layer),
               WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "genericimage4",
               let clipMaskReference = pass.textureBindings[1] ?? pass.pass.textures[1],
               let clipTargetReference = pass.textureBindings[8] ?? pass.pass.textures[8],
@@ -2100,8 +2104,21 @@ final class WPEMetalRenderExecutor {
     /// `WPEPuppetDeferMeshWarp` override forces the decision for non-clip puppets (A/B testing).
     private func shouldDeferPuppetMeshWarp(for layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
         if puppetUsesClipComposite(layer: layer, model: model) { return false }
+        // The deferred warp can only be applied if there's a `.scene` copy pass to land it on; without
+        // one, deferring the material-time warp would lose it (the puppet would render unwarped). So even
+        // a forced override stays on the direct path when no scene-warp target exists.
+        guard layerHasDeferredWarpTarget(layer) else { return false }
         if let forced = Self.deferPuppetMeshWarpOverride { return forced }
         return layerHasEffectChain(layer)
+    }
+
+    /// The deferred warp is applied by `encodePuppetSceneCompositePassIfNeeded`, which only runs on a
+    /// `.scene`-target `copy` pass. A layer without one cannot receive a deferred warp.
+    private func layerHasDeferredWarpTarget(_ layer: WPERenderLayer) -> Bool {
+        layer.passes.contains { pass in
+            guard case .scene = pass.target else { return false }
+            return WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "copy"
+        }
     }
 
     /// True when the puppet layer runs an effect — a material-kind effect (`.effect`) OR a command-kind
@@ -2260,13 +2277,16 @@ final class WPEMetalRenderExecutor {
         guard let base = animationLayers.first(where: { !$0.additive }) ?? animationLayers.first else { return [] }
         let frameCount = max(base.animation.frameCount, 1)
         let fps = base.animation.fps > 0 ? Double(base.animation.fps) : 30
-        let duration = Double(frameCount) / fps
-        // Sample the animation densely enough to catch the most-closed instant without skinning the
-        // whole timeline; clamp to the frame count for very short clips.
+        // Sample evenly-spaced integer FRAME indices in [0, frameCount-1]. Sampling by time up to the
+        // full `duration` would land the last sample on `frameCount/fps`, which a loop animation wraps
+        // back to frame 0 — hiding a most-closed eye pose that only occurs on the final frame.
         let sampleCount = min(max(frameCount, 8), 48)
         for sample in 0..<sampleCount {
-            let time = sampleCount > 1 ? duration * Double(sample) / Double(sampleCount - 1) : 0
-            let palette = WPEPuppetAnimationEvaluator.palette(layers: animationLayers, bones: bones, at: time)
+            let frame = frameCount <= 1 || sampleCount <= 1
+                ? 0
+                : Int((Double(sample) * Double(frameCount - 1) / Double(sampleCount - 1)).rounded())
+            let palette = WPEPuppetAnimationEvaluator.palette(
+                layers: animationLayers, bones: bones, at: Double(frame) / fps)
             guard !palette.isEmpty else { continue }
             for box in clipPartBoxes(mesh: mesh, palette: palette) {
                 if let w = minWidthByID[box.id] { minWidthByID[box.id] = min(w, box.width) }
