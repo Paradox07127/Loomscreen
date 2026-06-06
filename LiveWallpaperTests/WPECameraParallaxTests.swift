@@ -197,37 +197,39 @@ struct WPECameraParallaxTests {
         )
     }
 
-    @Test("Attachment children inherit the root ancestor's per-axis parallaxDepth")
-    func childInheritsRootDepth() {
-        // body(depth 1,0.5) ← head(.zero, attached) ← eye(.zero, attached): the
-        // rig must shift as one unit, so head/eye are pinned to the body's depth.
+    @Test("Whole parented rig inherits the root's per-axis depth (3719111841 shape)")
+    func parentedRigInheritsRootDepth() {
+        // Mirrors 3719111841: hairRoot carries the per-axis depth; the body is
+        // PLAIN-parented to it (no attachment) at depth 0; head/eye parts attach
+        // under the body. Everything must shift as one unit, or the body shears
+        // off ("散架"). Backgrounds are separate roots and keep their own depth.
         let pinned = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
-            layer("body", depth: SIMD2<Double>(1, 0.5)),
+            layer("hairRoot", depth: SIMD2<Double>(0.41, -0.36)),
+            layer("body", depth: SIMD2<Double>(0, 0), parent: "hairRoot"),           // no attachment
             layer("head", depth: SIMD2<Double>(0, 0), parent: "body", attachment: "头部"),
             layer("eye", depth: SIMD2<Double>(0, 0), parent: "head", attachment: "眼"),
-            layer("bg", depth: SIMD2<Double>(0, 0))
+            layer("bg", depth: SIMD2<Double>(-0.17, -0.17))
         ])
         let byID = Dictionary(uniqueKeysWithValues: pinned.map { ($0.objectID, $0.parallaxDepth) })
-        #expect(byID["body"] == SIMD2<Double>(1, 0.5))
-        #expect(byID["head"] == SIMD2<Double>(1, 0.5))
-        #expect(byID["eye"] == SIMD2<Double>(1, 0.5))
-        #expect(byID["bg"] == SIMD2<Double>(0, 0)) // unparented root keeps its own depth
+        #expect(byID["hairRoot"] == SIMD2<Double>(0.41, -0.36))
+        #expect(byID["body"] == SIMD2<Double>(0.41, -0.36))  // plain-parented body follows root
+        #expect(byID["head"] == SIMD2<Double>(0.41, -0.36))
+        #expect(byID["eye"] == SIMD2<Double>(0.41, -0.36))
+        #expect(byID["bg"] == SIMD2<Double>(-0.17, -0.17))    // separate root keeps own depth
     }
 
-    @Test("Plain transform-parenting (no attachment) keeps its own depth")
-    func unattachedParentingNotPinned() {
-        // A child parented for transform grouping but NOT attached keeps WPE's
-        // intentional per-layer depth — only rigid attachment subtrees are pinned.
+    @Test("A depth-0 root pins its children to 0 (Clock/Day/Date stay put)")
+    func zeroDepthRootKeepsChildrenStill() {
         let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
-            layer("group", depth: SIMD2<Double>(1, 1)),
-            layer("child", depth: SIMD2<Double>(0.3, 0.3), parent: "group")
+            layer("clock", depth: SIMD2<Double>(0, 0)),
+            layer("day", depth: SIMD2<Double>(0, 0), parent: "clock"),
+            layer("date", depth: SIMD2<Double>(0, 0), parent: "clock")
         ])
-        let byID = Dictionary(uniqueKeysWithValues: out.map { ($0.objectID, $0.parallaxDepth) })
-        #expect(byID["child"] == SIMD2<Double>(0.3, 0.3))
+        #expect(out.allSatisfy { $0.parallaxDepth == SIMD2<Double>(0, 0) })
     }
 
-    @Test("No attachment subtrees → input returned unchanged")
-    func noAttachmentNoOp() {
+    @Test("No parented layers → input returned unchanged")
+    func noParentsNoOp() {
         let input = [layer("a", depth: SIMD2<Double>(1, 1)), layer("b", depth: SIMD2<Double>(0.5, 0.5))]
         let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents(input)
         #expect(out == input)
@@ -235,10 +237,11 @@ struct WPECameraParallaxTests {
 
     @Test("A parent missing from the graph stops the walk at the last resolvable node")
     func danglingParentStopsWalk() {
-        // attached 'child' points at 'ghost' which isn't a layer → keeps own depth.
+        // 'child' (depth 0) points at 'ghost' which isn't a layer → resolves to its
+        // own depth (0) rather than crashing or inheriting a phantom.
         let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
-            layer("child", depth: SIMD2<Double>(0.7, 0.7), parent: "ghost", attachment: "头部")
+            layer("child", depth: SIMD2<Double>(0, 0), parent: "ghost")
         ])
-        #expect(out.first?.parallaxDepth == SIMD2<Double>(0.7, 0.7))
+        #expect(out.first?.parallaxDepth == SIMD2<Double>(0, 0))
     }
 }

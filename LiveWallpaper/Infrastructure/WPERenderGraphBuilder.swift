@@ -113,28 +113,27 @@ struct WPERenderGraphBuilder: Sendable {
         return WPERenderGraph(layers: applyAttachmentAnchorOffsets(to: parallaxAligned))
     }
 
-    /// Camera parallax shifts each layer by its own `parallaxDepth`. A body-split
-    /// puppet rig splits one character into a parent body plus ATTACHED children
-    /// (face/hair/eyes via MDAT anchors); those children must stay rigid with the
-    /// body. If a child were left at depth 0 while the body is depth 1, parallax
-    /// would shear it away ("散架"), and an identity child at depth 0 would also
-    /// skip the object-quad path entirely. Pin every ATTACHED layer to its root
-    /// ancestor's depth so the whole rig shifts as one unit. Scope is limited to
-    /// `attachment != nil` so plain transform-parenting keeps WPE's intentional
-    /// per-layer depth (inter-layer parallax), and parallax-off scenes are
-    /// unaffected (the per-frame offset is zero regardless of depth).
+    /// Camera parallax in WPE propagates DOWN the parent transform: a child layer
+    /// is placed relative to its parent, so it inherits the parent's cursor shift.
+    /// Scenes therefore put the depth on a ROOT object and parent the rest of a
+    /// character to it with no depth of its own — e.g. 3719111841's body (主体) is
+    /// parented to the hair root (长发3, depth "0.41 -0.36"), and the head/chest/
+    /// hair parts attach under the body, all at depth 0. Our executor applies
+    /// parallax per layer from each layer's OWN depth, so without propagation the
+    /// depth-0 body and its parts stay still while the root shifts — the character
+    /// shears apart ("散架"). Pin every parented layer to its ROOT ancestor's depth
+    /// so the whole tree moves as one unit. (Independent parallax is authored as a
+    /// SEPARATE root with its own depth — 背景/光束 here — not as a parented child,
+    /// so this never suppresses intended motion.) Parallax-off scenes are
+    /// unaffected: the per-frame offset is zero regardless of depth.
     static func propagatingParallaxDepthThroughParents(
         _ layers: [WPERenderLayer]
     ) -> [WPERenderLayer] {
-        guard layers.contains(where: { $0.attachment != nil && $0.parentObjectID != nil }) else {
-            return layers
-        }
+        guard layers.contains(where: { $0.parentObjectID != nil }) else { return layers }
         let depthByID = Dictionary(
             layers.map { ($0.objectID, $0.parallaxDepth) },
             uniquingKeysWith: { first, _ in first }
         )
-        // Built from ALL parented layers so the walk can climb through an
-        // intermediate (possibly unattached) parent up to the rig root.
         let parentByID = Dictionary(
             layers.compactMap { layer in layer.parentObjectID.map { (layer.objectID, $0) } },
             uniquingKeysWith: { first, _ in first }
@@ -152,7 +151,7 @@ struct WPERenderGraphBuilder: Sendable {
             return depthByID[current] ?? SIMD2<Double>(0, 0)
         }
         return layers.map { layer in
-            guard layer.attachment != nil, layer.parentObjectID != nil else { return layer }
+            guard layer.parentObjectID != nil else { return layer }
             let inherited = rootDepth(of: layer.objectID)
             return inherited == layer.parallaxDepth ? layer : layer.withParallaxDepth(inherited)
         }
