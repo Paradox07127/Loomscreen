@@ -3,9 +3,10 @@ import Testing
 import simd
 @testable import LiveWallpaper
 
-/// Covers the geometry-driven clip-role detection that generalises the WPE eye-white/pupil
-/// clip-composite to any puppet: a clip *target* stays near full height across the blink while an
-/// enclosing *source* part squishes shut, so the target must be clipped to the source silhouette.
+/// Covers the WPE clip-role detection: parts[0] is the clip silhouette (eye-white) that squishes shut
+/// and parts[1] is the clipped target (pupil) that stays full inside it. The convention is validated by
+/// squish geometry, so a layout that doesn't match (first part stays open, target collapses, etc.) emits
+/// no clip pair instead of mis-clipping.
 @Suite("WPE puppet clip-role detection")
 struct WPEPuppetClipRoleTests {
     private func identityColumnMajor() -> [Float] {
@@ -178,5 +179,35 @@ struct WPEPuppetClipRoleTests {
         #expect(pairs.count == 1)
         #expect(pairs.first?.source == 1)
         #expect(pairs.first?.target == 2)
+    }
+}
+
+/// Covers the per-puppet deferred-warp decision's effect-chain predicate: a puppet defers only when it
+/// runs an effect (material-kind `.effect` OR command-kind effect), but never for the synthesized
+/// rectangular copy-to-scene command alone.
+@Suite("WPE puppet effect-chain detection")
+struct WPEPuppetEffectChainTests {
+    @Test("Material pass alone is not an effect chain")
+    func materialOnly() {
+        #expect(WPEMetalRenderExecutor.hasEffectChain(passPhases: [.material]) == false)
+    }
+
+    @Test("Material plus the final scene-copy command is not an effect chain")
+    func materialPlusSceneCopy() {
+        #expect(WPEMetalRenderExecutor.hasEffectChain(
+            passPhases: [.material, .command(file: "materials/util/copy.json")]) == false)
+    }
+
+    @Test("A material-kind effect pass is an effect chain")
+    func materialEffect() {
+        #expect(WPEMetalRenderExecutor.hasEffectChain(
+            passPhases: [.material, .effect(file: "effects/bloom/effect.json")]) == true)
+    }
+
+    @Test("A command-kind effect pass is an effect chain (not just .effect)")
+    func commandEffect() {
+        #expect(WPEMetalRenderExecutor.hasEffectChain(
+            passPhases: [.material, .command(file: "effects/blur/effect.json"),
+                         .command(file: "materials/util/copy.json")]) == true)
     }
 }

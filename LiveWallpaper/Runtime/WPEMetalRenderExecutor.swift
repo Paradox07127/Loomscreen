@@ -100,7 +100,7 @@ final class WPEMetalRenderExecutor {
     /// (A/B testing). Clip-composite puppets ignore this and never defer.
     static var deferPuppetMeshWarpOverride: Bool? {
         #if DEBUG
-        return UserDefaults.standard.object(forKey: "WPEPuppetDeferMeshWarp") as? Bool
+        return puppetDefaultsFlagOptional("WPEPuppetDeferMeshWarp")
         #else
         return nil
         #endif
@@ -137,6 +137,17 @@ final class WPEMetalRenderExecutor {
             return suite.bool(forKey: key)
         }
         return UserDefaults.standard.bool(forKey: key)
+    }
+
+    /// Suite-first variant that distinguishes "unset" (`nil`) from an explicit value, for override flags.
+    static func puppetDefaultsFlagOptional(_ key: String) -> Bool? {
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"), suite.object(forKey: key) != nil {
+            return suite.bool(forKey: key)
+        }
+        if UserDefaults.standard.object(forKey: key) != nil {
+            return UserDefaults.standard.bool(forKey: key)
+        }
+        return nil
     }
 
     /// Rollback gate for sub-region compose-layer output (the audio-visualizer
@@ -179,10 +190,10 @@ final class WPEMetalRenderExecutor {
     /// shaders. Library + blend + format set is the key.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
     private var previousFrameHistory: PreviousFrameHistory?
-    /// Clip-composite role detection is static per puppet, so cache the resolved (source→target)
-    /// part pairs by puppet path. Keyed empty when a clip puppet needs no clip (no eligible pair).
+    /// Clip-composite role detection depends on the object's animation layers, so cache the resolved
+    /// (source→target) part pairs per `objectID` (empty array = clip puppet with no eligible pair).
     private var puppetClipPairsCache: [String: [PuppetClipPair]] = [:]
-    /// Throttles the one-shot clip-activation diagnostic to once per puppet path.
+    /// Throttles the one-shot clip-activation diagnostic to once per objectID.
     private var loggedClipActivation: Set<String> = []
     private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
     private var msdfNeutralWhiteTexture: MTLTexture?
@@ -2001,18 +2012,16 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// `alphaMaskUV.w` modes consumed by `wpe_genericimage4_puppet_clip_fragment`.
+    /// `alphaMaskUV.w` modes consumed by `wpe_genericimage4_puppet_clip_fragment`. Only `none`/`target`
+    /// are emitted today (the shader also defines compose/both for future use).
     private enum PuppetClipFragmentMode {
         static let none: Float = 0
         static let target: Float = 1
-        static let compose: Float = 2
-        static let targetAndCompose: Float = 3
     }
 
-    /// Resolved routing for a clip-composite puppet: which part is the clip-mask source,
-    /// which is the clip target, and the clip-mask texture + intermediate RT bindings.
-    /// One resolved clip relationship: `target` (e.g. a pupil that does not squish) is clipped to
-    /// the silhouette of `source` (e.g. the eye-white that squishes shut), recovered from geometry.
+    /// One resolved clip relationship: `target` (e.g. a pupil that does not squish) is clipped to the
+    /// silhouette of `source` (e.g. the eye-white that squishes shut), per WPE's first→second-part
+    /// convention validated by squish geometry.
     private struct PuppetClipPair: Equatable {
         let source: UInt32
         let target: UInt32
@@ -2032,12 +2041,12 @@ final class WPEMetalRenderExecutor {
             && (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
     }
 
-    /// Resolves the WPE clip-composite routing for any genericimage4 puppet the builder flagged with a
-    /// clip mask (slot 1) + intermediate clip RT (slot 8). Part roles are recovered from animated
-    /// geometry rather than a hardcoded layout: a clip *target* is a part that stays near full height
-    /// across the animation while an enclosing *source* part squishes shut, so the target must be
-    /// clipped to the source silhouette (the eye-white/pupil blink pattern). Any number of source→
-    /// target pairs is supported (e.g. two eyes); a puppet with no such pair yields nil → flat draw.
+    /// Resolves the WPE clip-composite routing for a genericimage4 puppet the builder flagged with a clip
+    /// mask (slot 1) + intermediate clip RT (slot 8). Part roles follow WPE's first→second-part
+    /// convention (`detectClipPairs`): parts[0] is the clip silhouette, parts[1] is clipped to it, gated
+    /// by squish geometry. A puppet whose convention/geometry doesn't hold yields nil → flat draw. The
+    /// plan/encoder still model a list of source→target pairs so the data path generalises if WPE ever
+    /// ships a multi-pair clip mesh, even though detection currently returns a single pair.
     private func puppetClipCompositePlan(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -2088,33 +2097,66 @@ final class WPEMetalRenderExecutor {
     private func shouldDeferPuppetMeshWarp(for layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
         if puppetUsesClipComposite(layer: layer, model: model) { return false }
         if let forced = Self.deferPuppetMeshWarpOverride { return forced }
-        return layer.passes.contains { if case .effect = $0.phase { return true }; return false }
+        return layerHasEffectChain(layer)
     }
 
-    /// True when this puppet renders via the clip composite (clip flag on, has a clip mask, and the
-    /// first→second part convention is geometrically confirmed). Such a puppet warps + clips at material
-    /// time, so the deferred-warp scene composite must NOT re-warp it.
+    /// True when the puppet layer runs an effect — a material-kind effect (`.effect`) OR a command-kind
+    /// effect (`.command(file:)`, e.g. blur/bloom passes). The synthesized final scene copy is also a
+    /// `.command` pass but is the composite itself, not an effect, so it's excluded. Only puppets with an
+    /// effect chain benefit from the deferred warp (effect masks align in atlas space).
+    private func layerHasEffectChain(_ layer: WPERenderLayer) -> Bool {
+        Self.hasEffectChain(passPhases: layer.passes.map(\.phase))
+    }
+
+    /// Pure predicate behind `layerHasEffectChain`, extracted for unit testing.
+    static func hasEffectChain(passPhases: [WPERenderPassPhase]) -> Bool {
+        passPhases.contains { phase in
+            switch phase {
+            case .effect: return true
+            case .command(let file): return file != sceneCopyCommandFile
+            case .material: return false
+            }
+        }
+    }
+
+    /// File of the builder's synthesized rectangular copy-to-`.scene` command (see
+    /// `WPERenderLayer.finalizedPasses`); excluded from effect-chain detection.
+    private static let sceneCopyCommandFile = "materials/util/copy.json"
+
+    /// True when this puppet actually renders via the clip composite. Gated on the SAME conditions as
+    /// `puppetClipCompositePlan`/`encodePuppetClipCompositePassIfNeeded` — clip flag on, a genericimage4
+    /// material pass with the builder-injected clip RT (slot 8), and a geometry-confirmed first→second
+    /// part pair — so the defer/clip routing can never disagree about whether the clip pass will run.
     private func puppetUsesClipComposite(layer: WPERenderLayer, model: WPEPuppetModel) -> Bool {
         guard Self.puppetClipCompositeEnabled, model.clipMaskName != nil else { return false }
+        let hasInjectedClipPass = layer.passes.contains { pass in
+            guard case .material = pass.phase,
+                  WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "genericimage4" else {
+                return false
+            }
+            return pass.textures[8] != nil
+        }
+        guard hasInjectedClipPass else { return false }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard meshes.count == 1, let mesh = meshes.first else { return false }
         return !resolvePuppetClipPairs(for: layer, model: model, mesh: mesh).isEmpty
     }
 
-    /// Cached geometry-driven clip-role detection (see `Self.detectClipPairs`). Keyed by puppet path.
+    /// Cached clip-role detection. Keyed by `objectID` (not puppet path): detection depends on this
+    /// object's animation layers, so two objects reusing the same puppet asset with different anims must
+    /// not share a cache entry.
     private func resolvePuppetClipPairs(
         for layer: WPERenderLayer,
         model: WPEPuppetModel,
         mesh: WPEPuppetMesh
     ) -> [PuppetClipPair] {
-        if let cacheKey = layer.puppetPath, let cached = puppetClipPairsCache[cacheKey] {
+        let cacheKey = layer.objectID
+        if let cached = puppetClipPairsCache[cacheKey] {
             return cached
         }
         let animationLayers = puppetAnimationLayers(for: layer, model: model)
         let pairs = Self.detectClipPairs(mesh: mesh, animationLayers: animationLayers, bones: model.bones)
-        if let cacheKey = layer.puppetPath {
-            puppetClipPairsCache[cacheKey] = pairs
-        }
+        puppetClipPairsCache[cacheKey] = pairs
         return pairs
     }
 
@@ -2127,7 +2169,6 @@ final class WPEMetalRenderExecutor {
         var maxY: Float
         var width: Float { maxX - minX }
         var height: Float { maxY - minY }
-        var area: Float { max(maxX - minX, 0) * max(maxY - minY, 0) }
         var centerX: Float { (minX + maxX) * 0.5 }
         var centerY: Float { (minY + maxY) * 0.5 }
     }
@@ -2238,8 +2279,7 @@ final class WPEMetalRenderExecutor {
         guard ordered.count >= 2,
               let shape = bindByID[ordered[0].id],
               let target = bindByID[ordered[1].id] else {
-            Logger.info("[WPE clip] detect: NO PAIR (fewer than 2 measurable parts) minAxisRatios[\(ratioSummary)]",
-                        category: .wpeRender)
+            clipDiagnosticLog("[WPE clip] detect: NO PAIR (fewer than 2 measurable parts) minAxisRatios[\(ratioSummary)]")
             return []
         }
         let shapeRatio = ratio(shape.id)
@@ -2250,22 +2290,28 @@ final class WPEMetalRenderExecutor {
               targetRatio > 0.8,              // the clipped part stays open (would show through)
               targetRatio > shapeRatio + 0.1, // and is clearly fuller than the silhouette
               targetInsideShape else {        // and sits inside the silhouette
-            Logger.info(
+            clipDiagnosticLog(
                 "[WPE clip] detect: NO PAIR (shape id\(shape.id)=\(String(format: "%.2f", shapeRatio)) "
                     + "target id\(target.id)=\(String(format: "%.2f", targetRatio)) inside=\(targetInsideShape)) "
                     + "minAxisRatios[\(ratioSummary)] — first part must close, second must stay open inside it; "
-                    + "if all ~1.0 the mesh isn't deforming (skinning off?)",
-                category: .wpeRender
+                    + "if all ~1.0 the mesh isn't deforming (skinning off?)"
             )
             return []
         }
-        Logger.info(
+        clipDiagnosticLog(
             "[WPE clip] detect: pair=\(shape.id)→\(target.id) "
                 + "(shape=\(String(format: "%.2f", shapeRatio)) target=\(String(format: "%.2f", targetRatio))) "
-                + "minAxisRatios[\(ratioSummary)]",
-            category: .wpeRender
+                + "minAxisRatios[\(ratioSummary)]"
         )
         return [PuppetClipPair(source: shape.id, target: target.id)]
+    }
+
+    /// DEBUG-only `[WPE clip]` diagnostic sink (once-per-puppet/per-build messages); compiled out of
+    /// Release so the clip path adds no log noise to shipped builds.
+    private static func clipDiagnosticLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        Logger.info(message(), category: .wpeRender)
+        #endif
     }
 
     #if DEBUG
@@ -2281,8 +2327,9 @@ final class WPEMetalRenderExecutor {
     }
     #endif
 
-    /// Encodes the four-draw clip composite (eye-white base → clip-mask RT → clipped pupil →
-    /// remaining parts) in place of the flat puppet draw. Returns false when the pass is not a
+    /// Encodes the clip composite in place of the flat puppet draw: render each clip-source silhouette to
+    /// its own clip-mask RT, then draw all parts in mesh order to the main target (clip targets multiply
+    /// alpha by their source silhouette, the rest draw plain). Returns false when the pass is not a
     /// clip-composite puppet so the caller falls through to the legacy path.
     private func encodePuppetClipCompositePassIfNeeded(
         pass: WPEPreparedRenderPass,
@@ -2325,12 +2372,12 @@ final class WPEMetalRenderExecutor {
         )
 
         let paletteState = puppetBonePalette(for: skinningState)
-        if let path = layer.puppetPath, loggedClipActivation.insert(path).inserted {
-            Logger.info(
-                "[WPE clip] ACTIVE \(path): skinning=\(paletteState.skinningEnabled > 0.5 ? "ON" : "OFF") "
+        if loggedClipActivation.insert(layer.objectID).inserted {
+            Self.clipDiagnosticLog(
+                "[WPE clip] ACTIVE \(layer.puppetPath ?? layer.objectID): "
+                    + "skinning=\(paletteState.skinningEnabled > 0.5 ? "ON" : "OFF") "
                     + "sources=\(plan.sourcePartIDs) targets=\(Array(plan.sourceForTarget.keys).sorted()) "
-                    + "— if skinning=OFF the eye renders static (no squish), so nothing is clipped",
-                category: .wpeRender
+                    + "— if skinning=OFF the eye renders static (no squish), so nothing is clipped"
             )
         }
         // localSizeAndMode is taken from the MAIN destination for ALL draws so the clip mask
