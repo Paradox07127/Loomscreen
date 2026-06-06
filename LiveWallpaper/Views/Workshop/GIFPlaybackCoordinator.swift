@@ -1,39 +1,31 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import AppKit
 import Foundation
-import SwiftUI
 
 /// Composable predicate deciding whether an animated thumbnail may decode.
-/// Grid previews activate on hover; detail heroes activate on window focus.
-/// Playback is allowed only when the tile is on-screen, the app is active, the
-/// content isn't spoiler-blurred, and Reduce Motion is off.
+/// Grid previews play on hover; detail surfaces auto-play. Background pausing is
+/// owned by the coordinator's app-resign observer — this app hosts SwiftUI in
+/// AppKit windows, so SwiftUI `scenePhase` is unreliable here and is NOT gated on.
 struct ThumbnailPlaybackGate: Equatable {
-    enum Trigger: Equatable { case hover, focus }
+    enum Trigger: Equatable { case hover, auto }
 
+    /// Hover debounce so a fast sweep across a grid doesn't thrash the decoder.
     static let hoverPreviewDelayNanoseconds: UInt64 = 250_000_000
-    static let hoverPreviewMaximumDuration: TimeInterval = 8
-    static let hoverPreviewMaximumLoops = 4
 
     var isVisible: Bool
     var isHovered: Bool
-    var isFocused: Bool
-    var scenePhase: ScenePhase
     var reduceMotion: Bool
     var isBlurred: Bool
     var trigger: Trigger
 
     var allowsPlayback: Bool {
-        isVisible
-            && triggerAllowsPlayback
-            && scenePhase == .active
-            && !reduceMotion
-            && !isBlurred
+        isVisible && triggerAllowsPlayback && !reduceMotion && !isBlurred
     }
 
     private var triggerAllowsPlayback: Bool {
         switch trigger {
         case .hover: return isHovered
-        case .focus: return isFocused
+        case .auto: return true
         }
     }
 }

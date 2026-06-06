@@ -140,13 +140,11 @@ struct GIFPlaybackCoordinatorTests {
 @Suite("ThumbnailPlaybackGate")
 struct ThumbnailPlaybackGateTests {
 
-    @Test("Grid gate requires visibility, hover, active scene, motion, and unblurred content")
+    @Test("Grid gate requires visibility, hover, motion, and unblurred content")
     func gridGateRequiresAllInputs() {
         var gate = ThumbnailPlaybackGate(
             isVisible: true,
             isHovered: true,
-            isFocused: false,
-            scenePhase: .active,
             reduceMotion: false,
             isBlurred: false,
             trigger: .hover
@@ -161,10 +159,6 @@ struct ThumbnailPlaybackGateTests {
         #expect(!gate.allowsPlayback)
 
         gate.isHovered = true
-        gate.scenePhase = .inactive
-        #expect(!gate.allowsPlayback)
-
-        gate.scenePhase = .active
         gate.reduceMotion = true
         #expect(!gate.allowsPlayback)
 
@@ -173,21 +167,23 @@ struct ThumbnailPlaybackGateTests {
         #expect(!gate.allowsPlayback)
     }
 
-    @Test("Detail gate requires focus instead of hover")
-    func detailGateRequiresFocus() {
+    @Test("Detail gate auto-plays when visible, without hover")
+    func detailGateAutoPlays() {
         var gate = ThumbnailPlaybackGate(
             isVisible: true,
             isHovered: false,
-            isFocused: false,
-            scenePhase: .active,
             reduceMotion: false,
             isBlurred: false,
-            trigger: .focus
+            trigger: .auto
         )
+        #expect(gate.allowsPlayback)
+
+        gate.isVisible = false
         #expect(!gate.allowsPlayback)
 
-        gate.isFocused = true
-        #expect(gate.allowsPlayback)
+        gate.isVisible = true
+        gate.isBlurred = true
+        #expect(!gate.allowsPlayback)
     }
 }
 

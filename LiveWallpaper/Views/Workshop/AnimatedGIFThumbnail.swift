@@ -27,8 +27,6 @@ struct AnimatedGIFThumbnail: View {
     @State private var phase: LoadPhase = .loading
     @State private var isVisible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.controlActiveState) private var controlActiveState
 
     private enum LoadPhase { case loading, ready, failed, empty }
 
@@ -36,11 +34,9 @@ struct AnimatedGIFThumbnail: View {
         ThumbnailPlaybackGate(
             isVisible: isVisible,
             isHovered: isHovered,
-            isFocused: controlActiveState != .inactive,
-            scenePhase: scenePhase,
             reduceMotion: reduceMotion,
             isBlurred: isBlurred,
-            trigger: playbackMode == .hoverToPlay ? .hover : .focus
+            trigger: playbackMode == .hoverToPlay ? .hover : .auto
         )
     }
 
@@ -172,12 +168,7 @@ struct AnimatedGIFThumbnail: View {
             controller.stop()
             return
         }
-        let isGrid = playbackMode == .hoverToPlay
-        controller.play(
-            debounced: isGrid,
-            maximumDuration: isGrid ? ThumbnailPlaybackGate.hoverPreviewMaximumDuration : nil,
-            maximumLoops: isGrid ? ThumbnailPlaybackGate.hoverPreviewMaximumLoops : nil
-        )
+        controller.play(debounced: playbackMode == .hoverToPlay)
     }
 }
 
@@ -206,7 +197,7 @@ final class GIFAnimationController {
     /// Starts playback for the current animated asset. `debounced` adds a short
     /// hover delay (250 ms) so a rapid mouse sweep across a grid doesn't thrash
     /// the decoder; hover-exit during the window cancels before any frame decodes.
-    func play(debounced: Bool, maximumDuration: TimeInterval? = nil, maximumLoops: Int? = nil) {
+    func play(debounced: Bool) {
         guard case .animatedGIF = asset, playbackTask == nil else { return }
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
@@ -214,7 +205,7 @@ final class GIFAnimationController {
                 try? await Task.sleep(nanoseconds: ThumbnailPlaybackGate.hoverPreviewDelayNanoseconds)
             }
             guard !Task.isCancelled else { return }
-            self?.beginPlayback(maximumDuration: maximumDuration, maximumLoops: maximumLoops)
+            self?.beginPlayback()
         }
     }
 
@@ -235,7 +226,7 @@ final class GIFAnimationController {
         }
     }
 
-    private func beginPlayback(maximumDuration: TimeInterval? = nil, maximumLoops: Int? = nil) {
+    private func beginPlayback() {
         guard case .animatedGIF(let gif) = asset, playbackTask == nil else { return }
         let id = clientID
         GIFPlaybackCoordinator.shared.requestPlayback(id: id) { [weak self] in
@@ -244,26 +235,14 @@ final class GIFAnimationController {
         isAnimating = true
         playbackTask = Task { [weak self] in
             var index = 0
-            var elapsed: TimeInterval = 0
-            var completedLoops = 0
             while !Task.isCancelled {
                 let delay = index < gif.frameDelays.count ? gif.frameDelays[index] : 0.1
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { break }
-                elapsed += delay
                 index = (index + 1) % gif.frameCount
                 let frame = await GIFAnimationController.decode(gif, at: index)
                 guard !Task.isCancelled else { break }
                 if let frame { self?.displayedFrame = frame }
-                if index == 0 { completedLoops += 1 }
-                if let maximumLoops, completedLoops >= maximumLoops {
-                    self?.stop()
-                    break
-                }
-                if let maximumDuration, elapsed >= maximumDuration {
-                    self?.stop()
-                    break
-                }
             }
         }
     }
