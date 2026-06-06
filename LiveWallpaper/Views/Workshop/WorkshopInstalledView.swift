@@ -122,7 +122,7 @@ struct WorkshopInstalledView: View {
                         installedInspectorPlaceholder
                     }
                 }
-                .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 380)
             }
     }
 
@@ -204,7 +204,7 @@ struct WorkshopInstalledView: View {
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 20)
                         .padding(.top, DesignTokens.Spacing.sm)
@@ -1135,7 +1135,7 @@ private struct WPEInstalledInspectorContent: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Label("Update available on Steam", systemImage: "arrow.triangle.2.circlepath")
                 .font(DesignTokens.Typography.captionEmphasized)
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
 
             switch updatePhase {
             case .downloading, .importing:
@@ -1155,7 +1155,7 @@ private struct WPEInstalledInspectorContent: View {
                 if case .failed(let message) = updatePhase {
                     Text(verbatim: message)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !canUpdate {
                     Text("Updates use SteamCMD (Settings → Workshop → SteamCMD Doctor).")
@@ -1199,7 +1199,7 @@ private struct WPEInstalledInspectorContent: View {
         if entry.origin.originalType == .application || entry.origin.originalType == .unknown {
             Label("This is a Windows-only wallpaper and can't run on macOS.", systemImage: "exclamationmark.triangle.fill")
                 .font(DesignTokens.Typography.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1208,7 +1208,7 @@ private struct WPEInstalledInspectorContent: View {
         let names = screens.filter { activeScreenIDs.contains($0.id) }.map(\.name).joined(separator: ", ")
         return Label("In use on \(names)", systemImage: "checkmark.circle.fill")
             .font(DesignTokens.Typography.caption)
-            .foregroundStyle(.green)
+            .foregroundStyle(DesignTokens.Colors.Status.active)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -1219,7 +1219,7 @@ private struct WPEInstalledInspectorContent: View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             applyControl
             plainIconButton("Show in Finder", systemImage: "folder", tint: AnyShapeStyle(.secondary), size: 15, action: onShowInFinder)
-            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(.red), size: 15, action: onDelete)
+            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(DesignTokens.Colors.Status.danger), size: 15, action: onDelete)
         }
     }
 
