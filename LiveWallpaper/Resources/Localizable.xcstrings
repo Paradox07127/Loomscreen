@@ -6931,6 +6931,35 @@
         }
       }
     },
+    "Currently in use" : {
+      "comment" : "A11y: this wallpaper is the active one.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Currently in use"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在使用中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前正在使用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前使用中"
+          }
+        }
+      }
+    },
     "Currently in use. Tap to reactivate." : {
       "comment" : "A11y hint for a WPE history row that is the active wallpaper.",
       "localizations" : {
@@ -7138,32 +7167,32 @@
         }
       }
     },
-    "Degraded" : {
+    "Limited Compatibility" : {
       "comment" : "Wallpaper Engine scene capability tier.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Degraded"
+            "value" : "Limited Compatibility"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "縮退"
+            "value" : "制限付き互換"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "降级"
+            "value" : "有限兼容性"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "降級"
+            "value" : "有限相容性"
           }
         }
       }
@@ -10873,6 +10902,7 @@
       }
     },
     "Experimental" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -20033,6 +20063,7 @@
       }
     },
     "Project type is unknown" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -23793,6 +23824,7 @@
       }
     },
     "Scene wallpapers are rendered with the Phase 2.1 image-only engine" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -28571,6 +28603,7 @@
       }
     },
     "Untested" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
