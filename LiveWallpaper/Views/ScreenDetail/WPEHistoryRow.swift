@@ -98,7 +98,7 @@ struct WPEHistoryRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 6) {
-                    TypeBadge(entry.origin.localizedDisplayTypeName)
+                    TypeBadge(entry.origin.localizedDisplayTypeName, systemImage: entry.origin.originalType.symbolName)
 
                     Spacer(minLength: 4)
 
@@ -215,6 +215,19 @@ struct WPEHistoryRow: View {
                 return ("Needs deps", .yellow, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
             }
             return nil
+        }
+    }
+}
+
+extension WPEType {
+    /// SF Symbol for this project type, shared by cards, inspectors, and drag previews.
+    var symbolName: String {
+        switch self {
+        case .video: return "play.rectangle.fill"
+        case .web: return "globe"
+        case .scene: return "cube.transparent.fill"
+        case .application: return "app.dashed"
+        case .unknown: return "questionmark.square.dashed"
         }
     }
 }

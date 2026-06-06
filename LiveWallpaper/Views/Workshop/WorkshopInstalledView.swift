@@ -728,21 +728,11 @@ struct WorkshopInstalledView: View {
     /// Small icon shown under the cursor while dragging — deliberately NOT the
     /// preview image, so it doesn't obscure which display you're hovering.
     private func dragPreview(_ entry: WPEHistoryEntry) -> some View {
-        Image(systemName: dragIconName(for: entry.origin.originalType))
+        Image(systemName: entry.origin.originalType.symbolName)
             .font(.system(size: 22, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 54, height: 54)
             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func dragIconName(for type: WPEType) -> String {
-        switch type {
-        case .video: return "play.rectangle.fill"
-        case .web: return "globe"
-        case .scene: return "cube.transparent.fill"
-        case .application: return "app.dashed"
-        case .unknown: return "questionmark.square.dashed"
-        }
     }
 
     private func handleScreenDrop(_ providers: [NSItemProvider], to screen: Screen) -> Bool {
@@ -1137,7 +1127,7 @@ private struct WPEInstalledInspectorContent: View {
     }()
 
     private var typePill: some View {
-        TypeBadge(entry.origin.localizedDisplayTypeName)
+        TypeBadge(entry.origin.localizedDisplayTypeName, systemImage: entry.origin.originalType.symbolName)
     }
 
     @ViewBuilder
