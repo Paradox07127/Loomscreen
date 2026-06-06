@@ -127,7 +127,13 @@ final class WPEMetalRenderExecutor {
     /// the builder injected a clip-mask binding (texture slot 8) onto a genericimage4 pass.
     /// `defaults write Taijia.LiveWallpaper WPEPuppetClipComposite -bool YES`.
     static var puppetClipCompositeEnabled: Bool {
-        let key = "WPEPuppetClipComposite"
+        puppetDefaultsFlag("WPEPuppetClipComposite")
+    }
+
+    /// Reads an opt-in bool from the app's `Taijia.LiveWallpaper` suite first, falling back to the
+    /// process `.standard` domain. Puppet flags MUST share this so `defaults write Taijia.LiveWallpaper …`
+    /// is honoured uniformly even when the renderer runs in a process whose standard domain isn't the app's.
+    static func puppetDefaultsFlag(_ key: String) -> Bool {
         if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"), suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
@@ -177,6 +183,8 @@ final class WPEMetalRenderExecutor {
     /// Clip-composite role detection is static per puppet, so cache the resolved (source→target)
     /// part pairs by puppet path. Keyed empty when a clip puppet needs no clip (no eligible pair).
     private var puppetClipPairsCache: [String: [PuppetClipPair]] = [:]
+    /// Throttles the one-shot clip-activation diagnostic to once per puppet path.
+    private var loggedClipActivation: Set<String> = []
     private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
     private var msdfNeutralWhiteTexture: MTLTexture?
 
@@ -1323,8 +1331,11 @@ final class WPEMetalRenderExecutor {
         // puppets: their additive eye animation now passed the gate and got bone-skinned into
         // deformation (scenes 3461168300 / 3554161528). Skin only when the user explicitly opts in via
         // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`, until per-scene
-        // skinning correctness is validated.
-        guard UserDefaults.standard.object(forKey: "WPEPuppetEnableSkinning") as? Bool ?? false else {
+        // skinning correctness is validated. Resolve from the SAME domain as `WPEPuppetClipComposite`
+        // (Taijia suite first, .standard fallback) so the documented `defaults write Taijia.LiveWallpaper`
+        // is honoured even when the renderer's standard domain isn't the app's — otherwise the clip flag
+        // turns on but skinning silently stays off and the eye never deforms.
+        guard Self.puppetDefaultsFlag("WPEPuppetEnableSkinning") else {
             return disabled("user-disabled")
         }
         let animationLayers = puppetAnimationLayers(for: layer, model: model)
@@ -2196,7 +2207,18 @@ final class WPEMetalRenderExecutor {
         }
         let sources = bindByID.values.filter { ratio($0.id) < sourceMaxRatio }
         let targets = bindByID.values.filter { ratio($0.id) > targetMinRatio }
-        guard !sources.isEmpty, !targets.isEmpty else { return [] }
+        let ratioSummary = bindByID.keys.sorted()
+            .map { "id\($0)=\(String(format: "%.2f", ratio($0)))" }
+            .joined(separator: " ")
+        guard !sources.isEmpty, !targets.isEmpty else {
+            Logger.info(
+                "[WPE clip] detect: NO PAIR (sources=\(sources.count) targets=\(targets.count)) "
+                    + "minAxisRatios[\(ratioSummary)] — squish must dip <\(sourceMaxRatio) and a clip "
+                    + "target stay >\(targetMinRatio); if all ~1.0 the mesh isn't deforming (skinning off?)",
+                category: .wpeRender
+            )
+            return []
+        }
 
         func encloses(_ outer: PuppetClipPartBox, _ inner: PuppetClipPartBox) -> Bool {
             let centerInside = inner.centerX >= outer.minX && inner.centerX <= outer.maxX
@@ -2215,6 +2237,11 @@ final class WPEMetalRenderExecutor {
                 pairs.append(PuppetClipPair(source: source.id, target: target.id))
             }
         }
+        Logger.info(
+            "[WPE clip] detect: pairs=[\(pairs.map { "\($0.source)→\($0.target)" }.joined(separator: ","))] "
+                + "minAxisRatios[\(ratioSummary)]",
+            category: .wpeRender
+        )
         return pairs
     }
 
@@ -2271,6 +2298,14 @@ final class WPEMetalRenderExecutor {
         )
 
         let paletteState = puppetBonePalette(for: skinningState)
+        if let path = layer.puppetPath, loggedClipActivation.insert(path).inserted {
+            Logger.info(
+                "[WPE clip] ACTIVE \(path): skinning=\(paletteState.skinningEnabled > 0.5 ? "ON" : "OFF") "
+                    + "sources=\(plan.sourcePartIDs) targets=\(Array(plan.sourceForTarget.keys).sorted()) "
+                    + "— if skinning=OFF the eye renders static (no squish), so nothing is clipped",
+                category: .wpeRender
+            )
+        }
         // localSizeAndMode is taken from the MAIN destination for ALL draws so the clip mask
         // (rendered to a different-resolution RT) maps to the same NDC and the screen-space UV aligns.
         var meshUniforms = WPEPuppetMeshUniforms(

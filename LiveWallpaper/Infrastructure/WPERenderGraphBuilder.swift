@@ -665,6 +665,11 @@ struct WPERenderGraphBuilder: Sendable {
         // as a material texture ("眼睛组合"); textureReference + the resolver add `materials/` + `.tex`.
         textures[1] = textures[1] ?? textureReference(clipMaskName, ownerPath: context.object.imageRelativePath)
         textures[8] = .fbo(clipTargetName)
+        Logger.info(
+            "[WPE clip] builder injected clip-composite bindings for \(context.model.puppetPath ?? "?") "
+                + "(mask=\(clipMaskName), rt=\(clipTargetName))",
+            category: .wpeRender
+        )
         return pass.replacingTextures(textures)
     }
 
