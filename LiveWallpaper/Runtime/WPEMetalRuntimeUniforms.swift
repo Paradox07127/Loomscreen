@@ -15,8 +15,9 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
     var smoothed: SIMD2<Float>
     /// Magnitude multiplier for the per-layer shift (`smoothed × depth × gain`,
     /// as a fraction of the scene). Carried on the frame so every consumer
-    /// (image layers, particles, text) uses one value. Tunable live via
-    /// `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`.
+    /// (image layers, particles, text) uses one value. Set per machine with
+    /// `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`; the
+    /// renderer reads it at load, so reload the wallpaper after changing it.
     var gain: Double = WPECameraParallaxFrame.defaultGain
 
     /// Default parallax gain. The previous value baked into `pixelOffset` (0.1,
@@ -29,6 +30,18 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
     /// Safety ceiling so an extreme depth can't fling a layer off-screen — a
     /// fraction of the scene per axis. Generous enough not to clip real scenes.
     static let maxShiftFraction: Float = 0.2
+    /// Upper bound for a `WPEParallaxGain` override; a stray huge value can't
+    /// fling layers around (the per-shift clamp is `maxShiftFraction` anyway).
+    static let maxGain: Double = 20
+
+    /// Normalizes a raw `WPEParallaxGain` override to the usable range. `nil`
+    /// (key absent) or a non-finite value falls back to `defaultGain`; `0` is
+    /// honored (parallax off); negatives clamp to 0; the magnitude is capped at
+    /// `maxGain`. Pure, so the resolution policy is unit-testable.
+    static func clampedGain(_ raw: Double?) -> Double {
+        guard let raw, raw.isFinite else { return defaultGain }
+        return min(max(raw, 0), maxGain)
+    }
 
     static let neutral = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0))
 

@@ -119,8 +119,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var cameraParallaxSettings: WPESceneCameraParallaxSettings = .disabled
     private var cameraParallaxSmoother = WPECameraParallaxSmoother()
     /// Per-machine magnitude multiplier for camera parallax. Defaults to
-    /// `WPECameraParallaxFrame.defaultGain`; override live to match Wallpaper
-    /// Engine with `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`.
+    /// `WPECameraParallaxFrame.defaultGain`. Read once at load — set it with
+    /// `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>` and reload
+    /// the wallpaper to apply.
     private let cameraParallaxGain = WPEMetalSceneRenderer.resolvedParallaxGain()
     private var currentProfile: WallpaperPerformanceProfile = .quality
     /// When false, the per-frame pointer is pinned to the screen center so the
@@ -826,14 +827,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Camera-parallax magnitude multiplier. Reads `WPEParallaxGain` from the
     /// app's `Taijia.LiveWallpaper` suite first, then the process `.standard`
     /// domain (which IS that suite in the renderer process), falling back to the
-    /// built-in default. Clamped to a sane positive range so a stray value can't
-    /// fling layers off-screen. Tune to match Wallpaper Engine with:
+    /// built-in default when the key is absent. A present value is normalized by
+    /// `WPECameraParallaxFrame.clampedGain` (0 honored = parallax off, negatives
+    /// clamp to 0, capped at `maxGain`). Tune to match Wallpaper Engine with:
     ///   defaults write Taijia.LiveWallpaper WPEParallaxGain 0.8
     private static func resolvedParallaxGain() -> Double {
         for defaults in [UserDefaults(suiteName: "Taijia.LiveWallpaper"), .standard] {
             guard let defaults, defaults.object(forKey: "WPEParallaxGain") != nil else { continue }
-            let value = defaults.double(forKey: "WPEParallaxGain")
-            if value > 0 { return min(value, 20) }
+            return WPECameraParallaxFrame.clampedGain(defaults.double(forKey: "WPEParallaxGain"))
         }
         return WPECameraParallaxFrame.defaultGain
     }

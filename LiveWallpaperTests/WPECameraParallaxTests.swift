@@ -102,6 +102,18 @@ struct WPECameraParallaxTests {
         #expect(abs(s.x - 2 * b.x) < 1e-3) // double gain → double shift
     }
 
+    @Test("clampedGain: absent/non-finite → default; 0 honored (off); negatives→0; capped")
+    func clampedGainResolution() {
+        let dflt = WPECameraParallaxFrame.defaultGain
+        #expect(WPECameraParallaxFrame.clampedGain(nil) == dflt)        // key absent
+        #expect(WPECameraParallaxFrame.clampedGain(.nan) == dflt)
+        #expect(WPECameraParallaxFrame.clampedGain(.infinity) == dflt)
+        #expect(WPECameraParallaxFrame.clampedGain(0) == 0)            // user dials parallax OFF
+        #expect(WPECameraParallaxFrame.clampedGain(-3) == 0)           // negatives clamp to 0
+        #expect(WPECameraParallaxFrame.clampedGain(0.8) == 0.8)
+        #expect(WPECameraParallaxFrame.clampedGain(1000) == WPECameraParallaxFrame.maxGain)
+    }
+
     @Test("pixelOffset honors per-axis depth: '1 0' horizontal-only, '0 1' vertical-only")
     func pixelOffsetPerAxis() {
         let frame = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0.3, 0.3)) // gain 0.5
@@ -226,6 +238,23 @@ struct WPECameraParallaxTests {
         #expect(byID["head"] == SIMD2<Double>(0.41, -0.36))
         #expect(byID["eye"] == SIMD2<Double>(0.41, -0.36))
         #expect(byID["bg"] == SIMD2<Double>(-0.17, -0.17))    // separate root keeps own depth
+    }
+
+    @Test("Pinning overwrites an intermediate/child's own nonzero depth (rigid-unit policy)")
+    func inheritanceOverwritesOwnDepth() {
+        // root(0.4) ← mid(0.9, parented) ← leaf(0, parented). The whole parented
+        // subtree is deliberately pinned to the ROOT's depth, so mid's own 0.9 is
+        // overwritten — the rig moves as one unit (WPE propagates the camera shift
+        // down the parent transform; a parented child never parallaxes on its own).
+        let out = WPERenderGraphBuilder.propagatingParallaxDepthThroughParents([
+            layer("root", depth: SIMD2<Double>(0.4, 0.4)),
+            layer("mid", depth: SIMD2<Double>(0.9, 0.9), parent: "root"),
+            layer("leaf", depth: SIMD2<Double>(0, 0), parent: "mid")
+        ])
+        let byID = Dictionary(uniqueKeysWithValues: out.map { ($0.objectID, $0.parallaxDepth) })
+        #expect(byID["root"] == SIMD2<Double>(0.4, 0.4))
+        #expect(byID["mid"] == SIMD2<Double>(0.4, 0.4))   // own 0.9 overwritten by root
+        #expect(byID["leaf"] == SIMD2<Double>(0.4, 0.4))
     }
 
     @Test("A depth-0 root pins its children to 0 (Clock/Day/Date stay put)")
