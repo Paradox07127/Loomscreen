@@ -20,6 +20,18 @@ struct WPERenderGraphBuilder: Sendable {
         return UserDefaults.standard.bool(forKey: key)
     }
 
+    /// Injects the WPE genericimage4 clip-composite bindings (clip-mask asset on slot 1 +
+    /// intermediate clip RT on slot 8) so the executor can occlude an eye puppet's pupil on
+    /// blink close. Default OFF; when OFF the graph is byte-identical (no extra texture/FBO).
+    private static var puppetClipCompositeEnabled: Bool {
+        let key = "WPEPuppetClipComposite"
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
+           suite.object(forKey: key) != nil {
+            return suite.bool(forKey: key)
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
     init(
         cacheRootURL: URL,
         dependencyMounts: [WPEAssetMount] = [],
@@ -419,6 +431,7 @@ struct WPERenderGraphBuilder: Sendable {
 
         var context = LayerBuildContext(
             object: object,
+            model: model,
             compositeA: compositeA,
             compositeB: compositeB,
             nextComposite: compositeA,
@@ -537,7 +550,8 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws {
         for materialPass in passes {
             let target = explicitTarget ?? .layerComposite(name: context.nextComposite)
-            let merged = materialPass.merging(override: override)
+            var merged = materialPass.merging(override: override)
+            merged = materialPassWithPuppetClipCompositeIfNeeded(merged, context: &context)
             let passID = "\(context.object.id).\(context.passes.count)"
             context.passes.append(WPERenderPass(
                 id: passID,
@@ -591,10 +605,13 @@ struct WPERenderGraphBuilder: Sendable {
         }
         let puppetPath = (dict["puppet"] as? String)
             .flatMap { $0.isEmpty ? nil : inheritDependencyPrefix($0, from: object.imageRelativePath) }
+        let clipMaskName = (Self.puppetClipCompositeEnabled ? puppetPath : nil)
+            .flatMap(loadPuppetClipMaskName(path:))
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
             puppetPath: puppetPath,
-            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:))
+            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:)),
+            puppetClipMaskName: clipMaskName
         )
     }
 
@@ -607,6 +624,41 @@ struct WPERenderGraphBuilder: Sendable {
         } catch {
             return nil
         }
+    }
+
+    /// Clip-mask texture name from the puppet's MDLV clip section, used to wire the
+    /// genericimage4 clip-composite path. Nil for puppets without a clip section.
+    private func loadPuppetClipMaskName(path: String) -> String? {
+        guard let data = try? resolver.data(relativePath: path),
+              let model = try? WPEMdlParser.parse(data: data) else {
+            return nil
+        }
+        return model.clipMaskName
+    }
+
+    /// For a genericimage4 puppet pass with an MDLV clip mask, injects the clip-mask asset (slot 1)
+    /// and the intermediate clip render target (slot 8) so the executor runs the clip composite.
+    /// No-op (byte-identical pass) when the flag is off, the puppet has no clip mask, or the shader
+    /// is not genericimage4.
+    private func materialPassWithPuppetClipCompositeIfNeeded(
+        _ pass: WPEMaterialPass,
+        context: inout LayerBuildContext
+    ) -> WPEMaterialPass {
+        guard Self.puppetClipCompositeEnabled,
+              context.model.puppetPath != nil,
+              let clipMaskName = context.model.puppetClipMaskName,
+              WPEBuiltinShaderName.normalized(pass.shader) == "genericimage4",
+              pass.textures[8] == nil else {
+            return pass
+        }
+        let clipTargetName = "_rt_puppetClip_\(context.object.id)"
+        if !context.localFBOs.contains(where: { $0.name == clipTargetName }) {
+            context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 1, format: "rgba8888"))
+        }
+        var textures = pass.textures
+        textures[1] = textures[1] ?? textureReference(clipMaskName, ownerPath: context.object.imageRelativePath)
+        textures[8] = .fbo(clipTargetName)
+        return pass.replacingTextures(textures)
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -840,6 +892,7 @@ struct WPERenderGraphBuilder: Sendable {
 
 private struct LayerBuildContext {
     let object: WPESceneImageObject
+    let model: WPEModelDescriptor
     let compositeA: String
     let compositeB: String
     var nextComposite: String
@@ -890,15 +943,21 @@ private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
     let puppetBounds: WPEPuppetBounds?
+    /// Clip-mask texture NAME from the puppet's MDLV clip section (e.g.
+    /// `masks/clipping_mask_39cb32c5`), resolved like any material texture. Non-nil only when
+    /// the puppet is a clip-composite candidate and the feature flag is enabled.
+    let puppetClipMaskName: String?
 
     init(
         materialPath: String?,
         puppetPath: String?,
-        puppetBounds: WPEPuppetBounds? = nil
+        puppetBounds: WPEPuppetBounds? = nil,
+        puppetClipMaskName: String? = nil
     ) {
         self.materialPath = materialPath
         self.puppetPath = puppetPath
         self.puppetBounds = puppetBounds
+        self.puppetClipMaskName = puppetClipMaskName
     }
 
     /// Re-place a puppet whose raw MDLV mesh bbox is cropped by the declared
@@ -1207,6 +1266,19 @@ private struct WPEMaterialPass {
             textures: mergedTextures,
             constants: constants.merging(override.constants) { _, new in new },
             combos: combos.merging(override.combos) { _, new in new },
+            blending: blending,
+            cullMode: cullMode,
+            depthTest: depthTest,
+            depthWrite: depthWrite
+        )
+    }
+
+    func replacingTextures(_ textures: [Int: WPETextureReference]) -> WPEMaterialPass {
+        WPEMaterialPass(
+            shader: shader,
+            textures: textures,
+            constants: constants,
+            combos: combos,
             blending: blending,
             cullMode: cullMode,
             depthTest: depthTest,

@@ -23,6 +23,11 @@ struct WPEPuppetModel: Equatable, Sendable {
         self.animations = animations
         self.attachments = attachments
     }
+
+    /// Clip-mask texture name if any mesh declares an MDLV clip section (genericimage4 clipping).
+    var clipMaskName: String? {
+        meshes.lazy.compactMap(\.clipMaskName).first
+    }
 }
 
 struct WPEPuppetMesh: Equatable, Sendable {
@@ -30,6 +35,23 @@ struct WPEPuppetMesh: Equatable, Sendable {
     let vertices: [WPEPuppetVertex]
     let indices: [UInt16]
     let parts: [WPEPuppetMeshPart]
+    /// Clip-mask texture name from the MDLV clip section that follows the part table
+    /// (e.g. `masks/clipping_mask_39cb32c5`), used by the genericimage4 clip-composite path.
+    let clipMaskName: String?
+
+    init(
+        materialPath: String,
+        vertices: [WPEPuppetVertex],
+        indices: [UInt16],
+        parts: [WPEPuppetMeshPart],
+        clipMaskName: String? = nil
+    ) {
+        self.materialPath = materialPath
+        self.vertices = vertices
+        self.indices = indices
+        self.parts = parts
+        self.clipMaskName = clipMaskName
+    }
 }
 
 struct WPEPuppetVertex: Equatable, Sendable {
@@ -642,12 +664,33 @@ enum WPEMdlParser {
             ? try parseVersion21Parts(vertexCount: Int(vertexCount), reader: &reader)
             : []
 
+        // The clip section (optional) immediately follows the part table. Read it from a COPY so
+        // the main reader is untouched — MDLS/MDLA are located by tag search regardless.
+        let clipMaskName = version >= 21 ? parseClipMaskName(reader: reader) : nil
+
         return WPEPuppetMesh(
             materialPath: materialPath,
             vertices: vertices,
             indices: indices,
-            parts: parts
+            parts: parts,
+            clipMaskName: clipMaskName
         )
+    }
+
+    /// Best-effort parse of the MDLV clip section that follows the part table:
+    /// `u32 groupCount | per group: u32, u32, cstring maskName, ...`. Returns the clip-mask texture
+    /// name (e.g. `masks/clipping_mask_39cb32c5`) or nil. Defensive: bails on implausible data so a
+    /// puppet without a clip section (part table directly followed by the next section) degrades to nil.
+    private static func parseClipMaskName(reader: WPEMdlBinaryReader) -> String? {
+        var r = reader
+        guard let groupCount = try? r.readUInt32(), groupCount >= 1, groupCount <= 64,
+              (try? r.readUInt32()) != nil, (try? r.readUInt32()) != nil,
+              let name = try? r.readCString(),
+              !name.isEmpty, name.utf8.count <= 256,
+              name.contains("mask") else {
+            return nil
+        }
+        return name
     }
 
     private static func parseVertex(

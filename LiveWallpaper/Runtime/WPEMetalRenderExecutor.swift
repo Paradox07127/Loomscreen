@@ -122,6 +122,18 @@ final class WPEMetalRenderExecutor {
         #endif
     }
 
+    /// WPE genericimage4 puppet clip-composite (clip-mask RT + CLIPPINGTARGET) so an eye
+    /// puppet's pupil is occluded when the blink closes. Default OFF; only takes effect when
+    /// the builder injected a clip-mask binding (texture slot 8) onto a genericimage4 pass.
+    /// `defaults write Taijia.LiveWallpaper WPEPuppetClipComposite -bool YES`.
+    static var puppetClipCompositeEnabled: Bool {
+        let key = "WPEPuppetClipComposite"
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"), suite.object(forKey: key) != nil {
+            return suite.bool(forKey: key)
+        }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
     /// Rollback gate for sub-region compose-layer output (the audio-visualizer
     /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
     /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
@@ -1060,6 +1072,21 @@ final class WPEMetalRenderExecutor {
             frameState: frameState
         )
 
+        if try encodePuppetClipCompositePassIfNeeded(
+            pass: pass,
+            layer: layer,
+            puppetModel: puppetModel,
+            skinningState: skinningState,
+            destination: destination,
+            shouldLoadDestination: shouldLoadExistingAttachment,
+            textures: textures,
+            commandBuffer: commandBuffer,
+            frameState: &frameState
+        ) {
+            frameState.registerWrite(texture: destination.texture, targetID: destination.id)
+            return
+        }
+
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = destination.texture
         descriptor.colorAttachments[0].loadAction = shouldLoadExistingAttachment ? .load : .clear
@@ -1583,7 +1610,11 @@ final class WPEMetalRenderExecutor {
         let maskFallbackToPrimary: Bool
         #endif
         if normalizedShader == "genericimage4" {
-            let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1]
+            // A clip-composite binding (slot 8) is consumed by the dedicated clip pass; the
+            // injected slot-1 mask must NOT be applied as a flat static mask to every part here.
+            let maskRef = hasPuppetClipCompositeBinding(pass)
+                ? nil
+                : (pass.textureBindings[1] ?? pass.pass.textures[1])
             if let maskRef {
                 let mask = try WPEMetalShaderInputs.resolve(
                     reference: maskRef,
@@ -1897,9 +1928,248 @@ final class WPEMetalRenderExecutor {
         encoder.setVertexBuffer(bonePaletteBuffer, offset: 0, index: 2)
     }
 
+    // MARK: - Puppet clip-composite (WPE genericimage4 CLIPPINGTARGET)
+
+    /// Selects which puppet mesh parts a draw should emit.
+    private enum PuppetPartSelection {
+        case all
+        case only(Set<UInt32>)
+
+        var isAll: Bool {
+            if case .all = self { return true }
+            return false
+        }
+
+        func contains(_ part: WPEPuppetMeshPart) -> Bool {
+            switch self {
+            case .all: return true
+            case .only(let ids): return ids.contains(part.id)
+            }
+        }
+    }
+
+    /// `alphaMaskUV.w` modes consumed by `wpe_genericimage4_puppet_clip_fragment`.
+    private enum PuppetClipFragmentMode {
+        static let none: Float = 0
+        static let target: Float = 1
+        static let compose: Float = 2
+        static let targetAndCompose: Float = 3
+    }
+
+    /// Resolved routing for a clip-composite puppet: which part is the clip-mask source,
+    /// which is the clip target, and the clip-mask texture + intermediate RT bindings.
+    private struct PuppetClipCompositePlan {
+        let sourcePartID: UInt32
+        let targetPartID: UInt32
+        let normalPartIDs: Set<UInt32>
+        let clipMaskReference: WPETextureReference
+        let clipTargetName: String
+    }
+
+    private func hasPuppetClipCompositeBinding(_ pass: WPEPreparedRenderPass) -> Bool {
+        (pass.textureBindings[8] ?? pass.pass.textures[8]) != nil
+    }
+
+    /// Mirrors the WPE eye draw structure (parts id1/id2/id3..N) once the builder has injected
+    /// the clip-mask asset (slot 1) and the intermediate clip RT (slot 8) onto a genericimage4 pass.
+    private func puppetClipCompositePlan(
+        for pass: WPEPreparedRenderPass,
+        model: WPEPuppetModel,
+        renderableMeshes: [WPEPuppetMesh]
+    ) -> PuppetClipCompositePlan? {
+        guard Self.puppetClipCompositeEnabled,
+              hasPuppetClipCompositeBinding(pass),
+              WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "genericimage4",
+              let clipMaskReference = pass.textureBindings[1] ?? pass.pass.textures[1],
+              let clipTargetReference = pass.textureBindings[8] ?? pass.pass.textures[8],
+              case .fbo(let clipTargetName) = clipTargetReference,
+              renderableMeshes.count == 1,
+              let mesh = renderableMeshes.first,
+              mesh.parts.count >= 3 else {
+            return nil
+        }
+        let parts = mesh.parts
+        let normalParts = parts.dropFirst(2)
+        return PuppetClipCompositePlan(
+            sourcePartID: parts[0].id,
+            targetPartID: parts[1].id,
+            normalPartIDs: Set(normalParts.map(\.id)),
+            clipMaskReference: clipMaskReference,
+            clipTargetName: clipTargetName
+        )
+    }
+
+    /// Encodes the four-draw clip composite (eye-white base → clip-mask RT → clipped pupil →
+    /// remaining parts) in place of the flat puppet draw. Returns false when the pass is not a
+    /// clip-composite puppet so the caller falls through to the legacy path.
+    private func encodePuppetClipCompositePassIfNeeded(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        puppetModel: WPEPuppetModel?,
+        skinningState: PuppetSkinningState?,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        shouldLoadDestination: Bool,
+        textures: [String: MTLTexture],
+        commandBuffer: MTLCommandBuffer,
+        frameState: inout WPEMetalFrameState
+    ) throws -> Bool {
+        guard case .material = pass.pass.phase,
+              case .layerComposite = pass.pass.target,
+              !Self.deferPuppetMeshWarp,
+              let model = puppetModel else {
+            return false
+        }
+        let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
+        guard let plan = puppetClipCompositePlan(for: pass, model: model, renderableMeshes: meshes) else {
+            return false
+        }
+
+        let primaryRef = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let primary = try WPEMetalShaderInputs.resolve(
+            reference: primaryRef,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let clipMask = try WPEMetalShaderInputs.resolve(
+            reference: plan.clipMaskReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let clipTarget = try targetTexture(
+            for: .fbo(name: plan.clipTargetName),
+            layer: layer,
+            frameState: &frameState
+        )
+
+        let paletteState = puppetBonePalette(for: skinningState)
+        // localSizeAndMode is taken from the MAIN destination for ALL draws so the clip mask
+        // (rendered to a different-resolution RT) maps to the same NDC and the screen-space UV aligns.
+        var meshUniforms = WPEPuppetMeshUniforms(
+            localSizeAndMode: SIMD4<Float>(
+                Float(max(destination.texture.width, 1)),
+                Float(max(destination.texture.height, 1)),
+                Float(paletteState.bonePalette.count),
+                paletteState.skinningEnabled
+            ),
+            meshCenterAndPadding: SIMD4<Float>(
+                Float(layer.geometry.puppetMeshCenter.x),
+                Float(layer.geometry.puppetMeshCenter.y),
+                0,
+                0
+            )
+        )
+
+        let transparentClear = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+
+        // 1) eye-white base parts → main (plain).
+        try encodePuppetClipCompositeDraw(
+            pass: pass, layer: layer, meshes: meshes,
+            partSelection: .only([plan.sourcePartID]),
+            destination: destination, loadAction: shouldLoadDestination ? .load : .clear,
+            clearColor: clearColor(for: destination.id),
+            primary: primary, mask: primary, clipTexture: nil,
+            vertexName: "wpe_puppet_mesh_vertex", fragmentName: "wpe_genericimage4_fragment",
+            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.none,
+            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+        )
+
+        // 2) clip-shape → intermediate clip-mask RT (clippingmaskimage4).
+        try encodePuppetClipCompositeDraw(
+            pass: pass, layer: layer, meshes: meshes,
+            partSelection: .only([plan.sourcePartID]),
+            destination: clipTarget, loadAction: .clear, clearColor: transparentClear,
+            primary: primary, mask: clipMask, clipTexture: nil,
+            vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_puppet_clippingmaskimage4_fragment",
+            blendMode: "disabled", hasMask: true, clipMode: PuppetClipFragmentMode.none,
+            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+        )
+        frameState.registerWrite(texture: clipTarget.texture, targetID: clipTarget.id)
+
+        // 3) pupil clip-target → main (alpha *= clip mask, sampled in screen space).
+        try encodePuppetClipCompositeDraw(
+            pass: pass, layer: layer, meshes: meshes,
+            partSelection: .only([plan.targetPartID]),
+            destination: destination, loadAction: .load, clearColor: clearColor(for: destination.id),
+            primary: primary, mask: primary, clipTexture: clipTarget.texture,
+            vertexName: "wpe_puppet_mesh_clip_vertex", fragmentName: "wpe_genericimage4_puppet_clip_fragment",
+            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.target,
+            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+        )
+
+        // 4) remaining parts (eyelids/lashes) → main (plain).
+        try encodePuppetClipCompositeDraw(
+            pass: pass, layer: layer, meshes: meshes,
+            partSelection: .only(plan.normalPartIDs),
+            destination: destination, loadAction: .load, clearColor: clearColor(for: destination.id),
+            primary: primary, mask: primary, clipTexture: nil,
+            vertexName: "wpe_puppet_mesh_vertex", fragmentName: "wpe_genericimage4_fragment",
+            blendMode: pass.pass.blending, hasMask: false, clipMode: PuppetClipFragmentMode.none,
+            meshUniforms: &meshUniforms, paletteState: paletteState, commandBuffer: commandBuffer
+        )
+        return true
+    }
+
+    private func encodePuppetClipCompositeDraw(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        meshes: [WPEPuppetMesh],
+        partSelection: PuppetPartSelection,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        loadAction: MTLLoadAction,
+        clearColor: MTLClearColor,
+        primary: MTLTexture,
+        mask: MTLTexture,
+        clipTexture: MTLTexture?,
+        vertexName: String,
+        fragmentName: String,
+        blendMode: String,
+        hasMask: Bool,
+        clipMode: Float,
+        meshUniforms: inout WPEPuppetMeshUniforms,
+        paletteState: (bonePalette: [simd_float4x4], skinningEnabled: Float),
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = destination.texture
+        descriptor.colorAttachments[0].loadAction = loadAction
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = clearColor
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        defer { encoder.endEncoding() }
+
+        encoder.setFrontFacing(.counterClockwise)
+        encoder.setCullMode(WPEMetalPipelineCache.cullMode(for: pass.pass.cullMode))
+        encoder.setDepthStencilState(depthCache.stencilState(depthTest: "disabled", depthWrite: "disabled"))
+        encoder.setRenderPipelineState(try renderPipeline(
+            vertexName: vertexName,
+            fragmentName: fragmentName,
+            blendMode: blendMode,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: .invalid
+        ))
+        encoder.setFragmentTexture(primary, index: 0)
+        encoder.setFragmentTexture(mask, index: 1)
+        if let clipTexture {
+            encoder.setFragmentTexture(clipTexture, index: 8)
+        }
+
+        var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
+        uniforms.alphaMaskUV.w = clipMode
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
+        try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
+        encoder.setVertexBytes(&meshUniforms, length: MemoryLayout<WPEPuppetMeshUniforms>.stride, index: 1)
+        try drawPuppetMeshes(meshes, encoder: encoder, partSelection: partSelection)
+    }
+
     private func drawPuppetMeshes(
         _ meshes: [WPEPuppetMesh],
-        encoder: MTLRenderCommandEncoder
+        encoder: MTLRenderCommandEncoder,
+        partSelection: PuppetPartSelection = .all
     ) throws {
         for mesh in meshes {
             let vertices = mesh.vertices.map { vertex in
@@ -1937,6 +2207,7 @@ final class WPEMetalRenderExecutor {
             }
 
             if mesh.parts.isEmpty {
+                guard partSelection.isAll else { continue }
                 encoder.drawIndexedPrimitives(
                     type: .triangle,
                     indexCount: indices.count,
@@ -1945,7 +2216,7 @@ final class WPEMetalRenderExecutor {
                     indexBufferOffset: 0
                 )
             } else {
-                for part in mesh.parts where part.count > 0 {
+                for part in mesh.parts where part.count > 0 && partSelection.contains(part) {
                     let start = max(part.start, 0)
                     let count = min(part.count, max(indices.count - start, 0))
                     guard count > 0 else { continue }
