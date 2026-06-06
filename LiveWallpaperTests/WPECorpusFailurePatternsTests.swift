@@ -43,6 +43,79 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    // MARK: - Audio spectrum line (3719111841 — audioline workshop effect)
+
+    /// The "音频线 Audio Spectrum" effect: a custom workshop frag that indexes
+    /// `g_AudioSpectrum64Left/Right[64]` DIRECTLY (not via a local copy), uses a
+    /// helper taking the spectrum, `frac`, `pow`, `smoothstep`, and reads the
+    /// framebuffer + `g_Texture0Resolution`. Probe: does it translate + compile?
+    @Test("audioline workshop shader translates and compiles")
+    func audioLineSpectrumShaderCompiles() throws {
+        // Source as the WPE preprocessor hands it to the transpiler (texSample2D
+        // already rewritten to texture()).
+        let source = """
+        uniform sampler2D g_Texture0;
+        uniform vec3 u_curveColor;
+        uniform float u_curveOpacity;
+        uniform float u_amplitude;
+        uniform float u_maxFreqBand;
+        uniform float u_envelopeSteepness;
+        uniform float u_curveThickness;
+        uniform float u_smoothness;
+        uniform float u_verticalOffset;
+        uniform vec4 g_Texture0Resolution;
+        uniform float g_AudioSpectrum64Left[64];
+        uniform float g_AudioSpectrum64Right[64];
+        const int BANDS = 64;
+        varying vec2 v_TexCoord;
+
+        float getMirroredAudioValue(int index, int maxBand) {
+            index = abs(index);
+            if (index > maxBand) { index = maxBand - (index - maxBand); }
+            index = clamp(index, 0, BANDS - 1);
+            return (g_AudioSpectrum64Left[index] + g_AudioSpectrum64Right[index]) * 0.5;
+        }
+        float cubicSpline(float p0, float p1, float p2, float p3, float t) {
+            float t2 = t * t; float t3 = t2 * t;
+            return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+        }
+        void main() {
+            vec2 uv = v_TexCoord - 0.5;
+            uv.x *= g_Texture0Resolution.x / g_Texture0Resolution.y;
+            float x_norm = abs(uv.x) / (0.5 * g_Texture0Resolution.x / g_Texture0Resolution.y);
+            float freq_norm = 1.0 - x_norm;
+            float audioIndexFloat = freq_norm * u_maxFreqBand;
+            int index1 = int(floor(audioIndexFloat));
+            float t = frac(audioIndexFloat);
+            int maxBandInt = int(u_maxFreqBand);
+            float p0 = getMirroredAudioValue(index1 - 1, maxBandInt);
+            float p1 = getMirroredAudioValue(index1, maxBandInt);
+            float p2 = getMirroredAudioValue(index1 + 1, maxBandInt);
+            float p3 = getMirroredAudioValue(index1 + 2, maxBandInt);
+            float rawAudioValue = max(0.0, cubicSpline(p0, p1, p2, p3, t));
+            float envelope = pow(max(0.0, 1.0 - x_norm), u_envelopeSteepness);
+            float finalAudioValue = rawAudioValue * envelope * u_amplitude;
+            float curve_y = u_verticalOffset - finalAudioValue;
+            float dist = abs(uv.y - curve_y);
+            float halfThickness = u_curveThickness / 2.0;
+            float lineIntensity = 1.0 - smoothstep(halfThickness, halfThickness + u_smoothness, dist);
+            vec4 originalColor = texture(g_Texture0, v_TexCoord.xy);
+            float effectiveCurveAlpha = lineIntensity * u_curveOpacity;
+            vec3 finalColor = mix(originalColor.rgb, u_curveColor, effectiveCurveAlpha);
+            float finalAlpha = max(originalColor.a, effectiveCurveAlpha);
+            gl_FragColor = vec4(finalColor, finalAlpha);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/3578699527/effects/audioline",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     // MARK: - Named FBO chains (Blue Archive — blur_start_2)
 
     @Test("Scene-authored named FBO chain reads must resolve to prior writes")
