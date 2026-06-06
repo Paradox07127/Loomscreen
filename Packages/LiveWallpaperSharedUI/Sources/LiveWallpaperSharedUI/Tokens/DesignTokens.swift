@@ -95,18 +95,8 @@ public enum DesignTokens {
         public static let minWidth: CGFloat = 268
         public static let idealWidth: CGFloat = 292
         public static let maxWidth: CGFloat = 340
-        public static let defaultWidth: CGFloat = idealWidth
         public static let horizontalPadding: CGFloat = Spacing.md
         public static let verticalPadding: CGFloat = Spacing.lg
-        /// Horizontal padding floor when the inspector is dragged to its min width.
-        /// Vertical padding stays constant — only horizontal compresses with width.
-        public static let minHorizontalPadding: CGFloat = 9
-        /// Linear interpolation: padding == horizontalPadding when width == maxWidth,
-        /// floors at `minHorizontalPadding` when the user drags toward `minWidth`.
-        public static func horizontalPadding(for width: CGFloat) -> CGFloat {
-            let target = width * (horizontalPadding / maxWidth)
-            return min(max(target, minHorizontalPadding), horizontalPadding)
-        }
     }
 
     public enum PreviewArea {

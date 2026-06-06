@@ -9,7 +9,6 @@ struct ScreenDetailInspectorPanel: View {
     let screenManager: ScreenManager
     let featureCatalog: FeatureCatalog
     let reduceMotion: Bool
-    let inspectorPanelWidth: CGFloat
     @Binding var isEnvironmentExpanded: Bool
     @Binding var isColorExpanded: Bool
     let onParticleEffectChange: (ParticleEffect) -> Void
@@ -104,12 +103,10 @@ struct ScreenDetailInspectorPanel: View {
                     }
                     #endif
                 }
-                .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
+                .padding(.horizontal, DesignTokens.Inspector.horizontalPadding)
                 .padding(.vertical, 14)
             }
         }
-        .frame(width: inspectorPanelWidth)
-        .fixedSize(horizontal: true, vertical: false)
         .background(Color(NSColor.windowBackgroundColor))
         .clipped()
         .accessibilityLabel(Text("Wallpaper Properties"))
