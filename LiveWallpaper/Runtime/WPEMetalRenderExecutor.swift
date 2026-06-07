@@ -385,6 +385,10 @@ final class WPEMetalRenderExecutor {
                     traceIndex: traceIndex
                 ) {
                     didEncode = true
+                    // Mark the scene target written so a later scene pass loads
+                    // (instead of clearing away) the particles, and so
+                    // previous-frame history + full-frame aliases see them.
+                    frameState.registerWrite(texture: output, targetID: .scene)
                     #if DEBUG
                     captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
                     #endif

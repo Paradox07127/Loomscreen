@@ -106,7 +106,7 @@ enum WPESceneDocumentParser {
                 diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported in Phase 2.0"))
             }
             if resolution.primary == .particle {
-                diagnostics.append(.init(severity: .info, message: "Particle object \(objectName) parsed; runtime emitter not yet implemented"))
+                diagnostics.append(.init(severity: .info, message: "Particle object \(objectName) parsed; rendered by the Metal particle simulator"))
             }
             if resolution.primary == .text {
                 diagnostics.append(.init(severity: .info, message: "Text object \(objectName) parsed; CoreText rasterizer renders static content"))

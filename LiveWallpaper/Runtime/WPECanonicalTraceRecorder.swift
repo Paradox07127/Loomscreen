@@ -394,9 +394,10 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
     }
 
     /// Record one particle-system draw as a pass so the divergence engine can
-    /// align it against WPE's POINTLIST particle passes. Particles render via a
-    /// separate path (`drawParticles`) from the effect chain, so without this hook
-    /// they show up only as "missing" WPE passes even though we render them.
+    /// align it against WPE's POINTLIST particle passes. Particles are encoded
+    /// inline in the scene pass (`encodeParticleSystem`, interleaved by paint
+    /// index), so without this hook they show up only as "missing" WPE passes
+    /// even though we render them.
     func recordParticlePass(
         index: Int,
         particleCount: Int,
