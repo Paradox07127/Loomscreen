@@ -1,6 +1,12 @@
 <!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>④ Scene 库</title>
-<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/app.css"></head>
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/app.css">
+<style>
+  /* per-display Scene = lightweight quick-apply; full library lives in Workshop */
+  .section-head .right { display:flex; align-items:center; gap:12px; }
+  .browse-link { font:600 12px/1 var(--font); color:var(--accent); cursor:default;
+    display:inline-flex; align-items:center; gap:5px; }
+</style></head>
 <body>
 <div class="win">
   <div class="titlebar" data-seg="Video,HTML,Shader,Scene|Scene"></div>
@@ -12,7 +18,7 @@
         <div><div class="ttl">MPG321CX OLED</div><div class="meta"><span>1920×1080</span><span>240 Hz</span></div></div>
       </div>
       <div class="detail-pad">
-        <div class="section-head"><span>RECENT IMPORTED PROJECTS</span><span class="pill-btn" data-ic="plus" data-s="12">&nbsp;Apply Project…</span></div>
+        <div class="section-head"><span>RECENT IMPORTED PROJECTS</span><span class="right"><a class="browse-link">Browse all 24 in Workshop →</a><span class="pill-btn" data-ic="plus" data-s="12">&nbsp;Apply Project…</span></span></div>
         <div class="grid">
           <div class="card"><div class="thumb" style="background:linear-gradient(135deg,#7a8ba8,#3a4a66)"><div class="ov br"><span class="badge">4K</span></div></div><div class="card-foot"><div class="card-title">"日向の幽霊" / "Hyuga の Ghost" byCogecha</div><div class="card-meta"><span class="type-badge">scene</span><span class="sz">90 MB</span></div></div></div>
           <div class="card"><div class="thumb" style="background:linear-gradient(135deg,#dfe3e8,#b6bfca)"><div class="ov tr"><span class="badge success">✓ In Library</span></div></div><div class="card-foot"><div class="card-title">【明日方舟】凯尔希·思衡托 Kal'tsit</div><div class="card-meta"><span class="type-badge">scene</span><span class="sz">120 MB</span></div></div></div>

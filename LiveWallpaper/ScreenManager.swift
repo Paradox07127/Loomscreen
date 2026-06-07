@@ -824,9 +824,14 @@ final class ScreenManager {
     // MARK: - Video Management
 
     /// Replaces the primary video while preserving per-screen settings.
-    func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
+    func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
         recordBookmarkDisplayName(bookmarkData, name: url.lastPathComponent)
-        playbackCoordinator.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
+        playbackCoordinator.setVideo(
+            url: url,
+            bookmarkData: bookmarkData,
+            packageEntryName: packageEntryName,
+            for: screen
+        )
     }
 
     @discardableResult

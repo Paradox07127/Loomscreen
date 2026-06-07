@@ -55,6 +55,90 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.entryFile == "index.html")
     }
 
+    @Test("Packaged web imports in place from scene.pkg without extracting to wpe-cache")
+    func packagedWebImportsInPlaceWithoutExtraction() async throws {
+        // index.html lives only inside scene.pkg (project.json stays loose).
+        let fixture = try makeFixture(type: .web, entryFile: "index.html", pkgEntries: [
+            PackageEntrySpec("index.html", Array("<html><body>hi</body></html>".utf8)),
+            PackageEntrySpec("app.js", Array("console.log(1)".utf8))
+        ])
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, let origin) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .html(let source, let config) = content else {
+            Issue.record("Expected .html content, got \(content)")
+            return
+        }
+        guard case .folder(_, let indexFileName) = source else {
+            Issue.record("Expected .folder source, got \(source)")
+            return
+        }
+        #expect(indexFileName == "index.html")
+        #expect(config.physicalPixelLayout)
+        // Package-aware: served in place from the source folder, no cache copy.
+        #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .sourceFolder)
+        #expect(origin.entryFile == "index.html")
+        // Nothing was extracted into wpe-cache for this id.
+        let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
+    }
+
+    @Test("WallpaperContent.video round-trips packageEntryName and decodes legacy payloads")
+    func videoContentPackageEntryRoundTrips() throws {
+        // New packaged-video payload survives a Codable round trip.
+        let packaged = WallpaperContent.video(bookmarkData: Data([0xAA, 0xBB]), packageEntryName: "video.mp4")
+        let encoded = try JSONEncoder().encode(packaged)
+        let decoded = try JSONDecoder().decode(WallpaperContent.self, from: encoded)
+        #expect(decoded == packaged)
+        #expect(decoded.packageVideoEntryName == "video.mp4")
+
+        // Legacy payload (no packageEntryName key) decodes as a loose video.
+        let legacyJSON = #"{"video":{"bookmarkData":"qrs="}}"#
+        let legacy = try JSONDecoder().decode(WallpaperContent.self, from: Data(legacyJSON.utf8))
+        #expect(legacy.activeVideoBookmarkData != nil)
+        #expect(legacy.packageVideoEntryName == nil)
+    }
+
+    @Test("Packaged-video config keeps its package entry across bookmark refresh and saved-restore")
+    func packagedVideoConfigPreservesPackageEntry() throws {
+        let pkgBookmark = Data([0x01, 0x02])
+        var config = ScreenConfiguration(screenID: 1, videoBookmarkData: pkgBookmark)
+        config.activeWallpaper = .video(bookmarkData: pkgBookmark, packageEntryName: "video.mp4")
+        config.savedVideoBookmarkData = pkgBookmark
+        config.savedVideoPackageEntryName = "video.mp4"
+
+        // A bookmark refresh keeps the entry on the active wallpaper (else the
+        // next apply would treat the scene.pkg as a plain video file).
+        let refreshed = config.withUpdatedActiveBookmark(Data([0x03, 0x04]))
+        #expect(refreshed.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // Swap to HTML, then restore the saved primary video → entry survives.
+        var swapped = refreshed
+        swapped.activeWallpaper = .html(source: .inline("<html></html>"), config: .default)
+        let restored = swapped.activateSavedVideoWallpaper()
+        #expect(restored)
+        #expect(swapped.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // Codable round trip preserves both the active and saved package entry.
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.savedVideoPackageEntryName == "video.mp4")
+        #expect(decoded.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // The WPE-import new-config path builds the config from a packaged-video
+        // wallpaper; the saved entry must be derived (not just the active one).
+        let fromWallpaper = ScreenConfiguration(
+            screenID: 2,
+            wallpaper: .video(bookmarkData: Data([0x05]), packageEntryName: "clip.mp4")
+        )
+        #expect(fromWallpaper.savedVideoPackageEntryName == "clip.mp4")
+    }
+
     @Test("Unsupported scene returns unsupported result")
     func unsupportedSceneReturnsUnsupportedResult() async throws {
         let fixture = try makeFixture(type: .scene, entryFile: "scene.json", pkgEntries: nil)
@@ -83,64 +167,29 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.originalType == .application)
     }
 
-    @Test("Cache is idempotent")
-    func cacheIsIdempotent() async throws {
+    @Test("Packaged video imports in place from scene.pkg without extracting to wpe-cache")
+    func packagedVideoImportsInPlaceWithoutExtraction() async throws {
         let fixture = try makeFixture(type: .video, entryFile: "video.mp4", pkgEntries: [
-            PackageEntrySpec("video.mp4", [0x01])
-        ])
-        defer { fixture.cleanup() }
-
-        _ = try await fixture.service.importProject(folder: fixture.folderURL)
-        let markerURL = fixture.cacheURL
-            .appendingPathComponent(fixture.workshopID, isDirectory: true)
-            .appendingPathComponent("marker.txt")
-        try Data("marker".utf8).write(to: markerURL)
-
-        _ = try await fixture.service.importProject(folder: fixture.folderURL)
-
-        #expect(FileManager.default.fileExists(atPath: markerURL.path))
-    }
-
-    @Test("Cache invalidates on pkg change")
-    func cacheInvalidatesOnPkgChange() async throws {
-        let fixture = try makeFixture(type: .video, entryFile: "video.mp4", pkgEntries: [
-            PackageEntrySpec("video.mp4", [0x01])
-        ])
-        defer { fixture.cleanup() }
-
-        _ = try await fixture.service.importProject(folder: fixture.folderURL)
-        let extractedURL = fixture.cacheURL
-            .appendingPathComponent(fixture.workshopID, isDirectory: true)
-            .appendingPathComponent("video.mp4")
-        let markerURL = extractedURL.deletingLastPathComponent().appendingPathComponent("marker.txt")
-        try Data("marker".utf8).write(to: markerURL)
-
-        try await Task.sleep(nanoseconds: 1_500_000_000)
-        let changed = makePackage(entries: [PackageEntrySpec("video.mp4", [0x02, 0x03])])
-        try changed.write(to: fixture.folderURL.appendingPathComponent("scene.pkg"), options: .atomic)
-
-        _ = try await fixture.service.importProject(folder: fixture.folderURL)
-
-        #expect(try Data(contentsOf: extractedURL) == Data([0x02, 0x03]))
-        #expect(!FileManager.default.fileExists(atPath: markerURL.path))
-    }
-
-    @Test("Video import sets WPE origin cache path")
-    func videoImportSetsWPEOrigin() async throws {
-        let fixture = try makeFixture(type: .video, entryFile: "video.mp4", pkgEntries: [
-            PackageEntrySpec("video.mp4", [0x01])
+            PackageEntrySpec("video.mp4", [0x01, 0x02, 0x03])
         ])
         defer { fixture.cleanup() }
 
         let result = try await fixture.service.importProject(folder: fixture.folderURL)
 
-        guard case .ready(_, let origin) = result else {
+        guard case .ready(let content, let origin) = result else {
             Issue.record("Expected .ready, got \(result)")
             return
         }
-        #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
-        #expect(origin.resourceLocation == .cache)
+        // The video plays in place from the package — entry carried, no copy.
+        #expect(content.packageVideoEntryName == "video.mp4")
+        #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .sourceFolder)
         #expect(origin.entryFile == "video.mp4")
+        // Nothing extracted into wpe-cache for this id.
+        let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
+        // Cache idempotency / fingerprint-invalidation stay covered directly by
+        // WallpaperEngineCacheTests (the extraction fallback still relies on them).
     }
 
     @Test("Scene import sets origin without cache path")
@@ -780,11 +829,13 @@ struct WallpaperEngineImportServiceTests {
 
         let content = resolver.content(for: origin)
 
-        guard case .video(let bookmarkData) = content else {
+        guard case .video(let bookmarkData, let packageEntryName) = content else {
             Issue.record("Expected cached video content, got \(String(describing: content))")
             return
         }
         #expect(bookmarkData == Data(videoURL.path.utf8))
+        // Extraction-fallback rebuild → loose file, not a package entry.
+        #expect(packageEntryName == nil)
     }
 
     private func makeFixture(

@@ -81,6 +81,20 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     private var activeFolderURL: URL?
     private var sessionNonce: String?
     private var activeTasks: [ObjectIdentifier: ActiveTask] = [:]
+
+    /// Optional in-place package backend. When set, a request that the folder
+    /// does NOT have as a loose file is resolved against the parsed `scene.pkg`
+    /// table-of-contents (entries are contiguous, uncompressed byte slices).
+    /// Loose files always win, so an ordinary HTML folder next to a `scene.pkg`
+    /// keeps its plain-folder behaviour; the package only serves the packaged
+    /// payload (index + bundle). Set/cleared together with `folderURL`; changing
+    /// the folder always clears it.
+    private var activePackageBacking: PackageBacking?
+
+    struct PackageBacking: Sendable {
+        let url: URL
+        let package: WallpaperEnginePackage
+    }
     /// Filenames already reported as missing for the current folder session.
     /// Wallpaper Engine projects routinely reference voiceline / sprite
     /// resources that were never packaged (the author shipped placeholders),
@@ -105,8 +119,18 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                 reportedOggSubstitutions.removeAll()
             }
             activeFolderURL = newValue
+            // A folder swap invalidates any prior package backend; the caller
+            // re-supplies one via `setPackageBacking(_:)` right after if needed.
+            activePackageBacking = nil
             sessionNonce = newValue == nil ? nil : UUID().uuidString
         }
+    }
+
+    /// Supplies (or clears) the in-place package backend for the current folder
+    /// session. Must be called *after* assigning `folderURL` (which resets it),
+    /// and does not regenerate the session nonce.
+    func setPackageBacking(_ backing: PackageBacking?) {
+        activePackageBacking = backing
     }
 
     /// Nonce produced for the current `folderURL` session. `HTMLWallpaperView`
@@ -128,21 +152,30 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             return
         }
 
-        guard let folderURL = activeFolderURL else {
+        guard activeFolderURL != nil else {
             urlSchemeTask.didFailWithError(Self.makeError(.notConnectedToInternet, "No active folder"))
             return
         }
 
+        // Resolve the loose candidate first (rejects path traversal). A loose
+        // file — when it actually exists — wins, preserving plain-folder
+        // semantics for ordinary HTML folders that merely happen to sit next to
+        // a `scene.pkg`. Only paths the folder does NOT have loose fall back to
+        // an in-place package entry (that's the packaged web payload).
         let primaryURL: URL
         do {
-            primaryURL = try Self.resolvedFileURL(for: url, inside: folderURL)
+            primaryURL = try Self.resolvedFileURL(for: url, inside: activeFolderURL!)
         } catch {
             urlSchemeTask.didFailWithError(error)
             return
         }
 
-        let fileURL: URL
-        if let fallback = Self.oggFallbackURL(for: primaryURL) {
+        let source: ByteSource
+        let mime: String
+        if Self.isRegularFile(primaryURL) {
+            source = .file(primaryURL)
+            mime = Self.mimeType(for: primaryURL)
+        } else if let fallback = Self.oggFallbackURL(for: primaryURL) {
             if !reportedOggSubstitutions.contains(primaryURL.lastPathComponent) {
                 reportedOggSubstitutions.insert(primaryURL.lastPathComponent)
                 Logger.info(
@@ -150,12 +183,18 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                     category: .screenManager
                 )
             }
-            fileURL = fallback
+            source = .file(fallback)
+            mime = Self.mimeType(for: fallback)
+        } else if let resolved = packageByteSource(for: url) {
+            source = resolved.source
+            mime = resolved.mime
         } else {
-            fileURL = primaryURL
+            // Nothing loose, nothing in the package: serve the loose candidate
+            // so the worker emits the existing 404 + missing-resource log.
+            source = .file(primaryURL)
+            mime = Self.mimeType(for: primaryURL)
         }
 
-        let mime = Self.mimeType(for: fileURL)
         let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range")
         let delivery = SchemeTaskDelivery(urlSchemeTask)
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
@@ -171,12 +210,12 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
 
         activeTasks[taskID]?.cancel()
 
-        let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID, cspHeader] in
+        let worker = Task.detached(priority: .userInitiated) { [weak self, source, mime, rangeHeader, url, delivery, taskID, cspHeader] in
             do {
-                let fileSize = try Self.fileSize(for: fileURL)
-                let range = Self.byteRange(from: rangeHeader, totalLength: fileSize)
+                let totalLength = try Self.totalLength(of: source)
+                let range = Self.byteRange(from: rangeHeader, totalLength: totalLength)
                 let statusCode = range == nil ? 200 : 206
-                let contentLength = range?.length ?? fileSize
+                let contentLength = range?.length ?? totalLength
 
                 var headers = [
                     "Content-Type": mime,
@@ -194,7 +233,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                     headers["Access-Control-Allow-Origin"] = "*"
                 }
                 if let range {
-                    headers["Content-Range"] = "bytes \(range.start)-\(range.end)/\(fileSize)"
+                    headers["Content-Range"] = "bytes \(range.start)-\(range.end)/\(totalLength)"
                 }
 
                 let response = HTTPURLResponse(
@@ -210,8 +249,8 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                 )
 
                 await delivery.deliver(response: response)
-                try await Self.streamFile(
-                    fileURL,
+                try await Self.stream(
+                    source,
                     to: delivery,
                     offset: range?.start ?? 0,
                     length: contentLength
@@ -223,10 +262,10 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                 let isMissingFile = (error as NSError).domain == NSCocoaErrorDomain
                     && ((error as NSError).code == NSFileReadNoSuchFileError
                         || (error as NSError).code == NSFileNoSuchFileError)
-                if isMissingFile {
+                if isMissingFile, case .file(let fileURL) = source {
                     await self?.logMissingResource(fileURL: fileURL, requestURL: url)
                 } else {
-                    Logger.warning("FolderScheme: \(fileURL.lastPathComponent) — \(error.localizedDescription)", category: .screenManager)
+                    Logger.warning("FolderScheme: \(source.lastComponent) — \(error.localizedDescription)", category: .screenManager)
                 }
                 await delivery.fail(with: error)
             }
@@ -240,6 +279,61 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         if delivery.hasTerminated {
             activeTasks.removeValue(forKey: taskID)
         }
+    }
+
+    /// Resolves a request to an in-place `scene.pkg` entry when a package
+    /// backend is active. Returns `nil` (→ loose-folder fallback) when there is
+    /// no package, the path is unsafe, or the entry isn't in the package. Path
+    /// safety is enforced by `canonicalLookupName` (rejects leading `/` / `..`).
+    private func packageByteSource(for url: URL) -> (source: ByteSource, mime: String)? {
+        guard let backing = activePackageBacking else { return nil }
+        let requestPath = url.path.removingPercentEncoding ?? url.path
+        let relativePath = requestPath.hasPrefix("/") ? String(requestPath.dropFirst()) : requestPath
+        guard let lookup = WallpaperEnginePackage.canonicalLookupName(relativePath) else { return nil }
+
+        if let entry = backing.package.entry(named: lookup) {
+            return (Self.packageSource(for: entry, in: backing), Self.mimeType(forEntryName: entry.name))
+        }
+        // Ogg-family substitution, mirroring the loose-folder workaround but
+        // resolved against the package's in-memory table of contents.
+        if let fallback = Self.packageOggFallbackEntry(for: lookup, in: backing.package) {
+            let requested = (lookup as NSString).lastPathComponent
+            if !reportedOggSubstitutions.contains(requested) {
+                reportedOggSubstitutions.insert(requested)
+                Logger.info(
+                    "FolderScheme: serving \(fallback.name) for \(requested) from package (macOS WebKit Ogg/Opus decoder workaround)",
+                    category: .screenManager
+                )
+            }
+            return (Self.packageSource(for: fallback, in: backing), Self.mimeType(forEntryName: fallback.name))
+        }
+        return nil
+    }
+
+    nonisolated private static func packageSource(
+        for entry: WallpaperEnginePackage.Entry,
+        in backing: PackageBacking
+    ) -> ByteSource {
+        .packageEntry(
+            packageURL: backing.url,
+            absoluteStart: backing.package.dataStart + entry.dataOffset,
+            size: entry.dataSize
+        )
+    }
+
+    nonisolated private static func packageOggFallbackEntry(
+        for lookup: String,
+        in package: WallpaperEnginePackage
+    ) -> WallpaperEnginePackage.Entry? {
+        let ext = (lookup as NSString).pathExtension.lowercased()
+        guard ext == "ogg" || ext == "oga" || ext == "opus" else { return nil }
+        let base = (lookup as NSString).deletingPathExtension
+        for candidateExt in oggFallbackExtensions {
+            if let entry = package.entry(named: "\(base).\(candidateExt)") {
+                return entry
+            }
+        }
+        return nil
     }
 
     /// Diagnostic log for the "file not found" branch. The lightweight version
@@ -426,6 +520,76 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         }
     }
 
+    /// Total servable length of a byte source: the file's size, or the package
+    /// entry's declared `dataSize`.
+    nonisolated private static func totalLength(of source: ByteSource) throws -> Int {
+        switch source {
+        case .file(let url):
+            return try fileSize(for: url)
+        case .packageEntry(_, _, let size):
+            guard let length = Int(exactly: size) else {
+                throw makeError(.cannotOpenFile, "Package entry exceeds addressable size")
+            }
+            return length
+        }
+    }
+
+    /// Streams `length` bytes from `offset` within the source to the delivery.
+    nonisolated private static func stream(
+        _ source: ByteSource,
+        to delivery: SchemeTaskDelivery,
+        offset: Int,
+        length: Int
+    ) async throws {
+        switch source {
+        case .file(let url):
+            try await streamFile(url, to: delivery, offset: offset, length: length)
+        case .packageEntry(let packageURL, let absoluteStart, _):
+            try await streamPackageEntry(
+                packageURL: packageURL,
+                absoluteStart: absoluteStart,
+                to: delivery,
+                offset: offset,
+                length: length
+            )
+        }
+    }
+
+    /// Streams a slice of a `scene.pkg` entry. Each task opens its **own** file
+    /// handle (entries are contiguous, uncompressed byte ranges) so concurrent
+    /// subresource requests never contend on a shared seek offset.
+    nonisolated private static func streamPackageEntry(
+        packageURL: URL,
+        absoluteStart: UInt64,
+        to delivery: SchemeTaskDelivery,
+        offset: Int,
+        length: Int
+    ) async throws {
+        let handle = try FileHandle(forReadingFrom: packageURL)
+        defer { try? handle.close() }
+
+        try handle.seek(toOffset: absoluteStart + UInt64(max(0, offset)))
+
+        var bytesRemaining = length
+        while bytesRemaining > 0 {
+            try Task.checkCancellation()
+            let chunkLimit = min(responseChunkSize, bytesRemaining)
+            let chunk = try handle.read(upToCount: chunkLimit) ?? Data()
+            guard !chunk.isEmpty else { break }
+            bytesRemaining -= chunk.count
+            await delivery.deliver(chunk: chunk)
+        }
+        // A package entry has a known exact size; a short read means a truncated
+        // or corrupt package, not EOF — surface it instead of a silent success.
+        if bytesRemaining > 0 {
+            throw makeError(.cannotParseResponse, "Package entry truncated by \(bytesRemaining) bytes")
+        }
+    }
+
+    nonisolated private static func isRegularFile(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+    }
+
     private struct ByteRange: Sendable {
         let start: Int
         let end: Int
@@ -464,7 +628,15 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     }
 
     nonisolated private static func mimeType(for url: URL) -> String {
-        let ext = url.pathExtension.lowercased()
+        mimeType(forPathExtension: url.pathExtension)
+    }
+
+    nonisolated private static func mimeType(forEntryName name: String) -> String {
+        mimeType(forPathExtension: (name as NSString).pathExtension)
+    }
+
+    nonisolated private static func mimeType(forPathExtension rawExtension: String) -> String {
+        let ext = rawExtension.lowercased()
         if let utType = UTType(filenameExtension: ext), let mime = utType.preferredMIMEType {
             return mime
         }
@@ -505,6 +677,23 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
 }
 
 // MARK: - Internal Types
+
+/// Where a resolved request's bytes come from: a loose file on disk, or a
+/// contiguous slice of an in-place `scene.pkg`.
+private enum ByteSource: Sendable {
+    case file(URL)
+    case packageEntry(packageURL: URL, absoluteStart: UInt64, size: UInt64)
+
+    /// A short label for diagnostics.
+    var lastComponent: String {
+        switch self {
+        case .file(let url):
+            return url.lastPathComponent
+        case .packageEntry(let packageURL, _, _):
+            return "\(packageURL.lastPathComponent)#entry"
+        }
+    }
+}
 
 private struct ActiveTask {
     let worker: Task<Void, Never>

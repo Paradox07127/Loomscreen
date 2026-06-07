@@ -116,14 +116,27 @@ struct EmptyStateGuideView: View {
     private var hint: some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.down.doc")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 13, weight: .medium))
                 .accessibilityHidden(true)
             Text("Or drag a video, HTML file, or folder here.")
                 .font(DesignTokens.Typography.caption)
-                .foregroundStyle(.tertiary)
         }
-        .padding(.top, 2)
+        .foregroundStyle(Color.accentColor)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 24)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
+                .strokeBorder(
+                    Color.accentColor.opacity(0.4),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                )
+        )
+        .padding(.top, 6)
     }
 }
 
@@ -147,7 +160,7 @@ private struct GuideCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack {
-                    Circle()
+                    RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                         .fill(iconTint.opacity(0.15))
                         .frame(width: 40, height: 40)
                     Image(systemName: icon)
@@ -185,7 +198,7 @@ private struct GuideCard: View {
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
-                    .fill(.regularMaterial)
+                    .fill(DesignTokens.Colors.surfaceRaised)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)

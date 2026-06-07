@@ -7,7 +7,13 @@ import SwiftUI
 struct WPESceneSection: View {
     let screen: Screen
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The per-display grid is a quick-apply surface, not the full library —
+    /// the Workshop tab owns search / filter / management. Cap the inline grid
+    /// so a large library never turns this into an unsearchable long scroll.
+    private let recentGridCap = 18
 
     @State private var recentImports: [WPEHistoryEntry] = []
     @State private var selectedHistoryEntry: WPEHistoryEntry?
@@ -75,10 +81,15 @@ struct WPESceneSection: View {
                 .controlSize(.large)
                 .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
 
-                Text("Browse and manage your whole library in the Steam Workshop tab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                #if DIRECT_DISTRIBUTION
+                if featureCatalog.isEnabled(.wpeImport) {
+                    browseWorkshopButton("Browse all in Workshop")
+                } else {
+                    workshopHintText
+                }
+                #else
+                workshopHintText
+                #endif
             }
             .padding(.top, 4)
 
@@ -93,10 +104,15 @@ struct WPESceneSection: View {
     private var historyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("Recent Imported Projects")
-                        .font(.headline)
+                        .font(DesignTokens.Typography.sectionTitle)
                     Spacer()
+                    #if DIRECT_DISTRIBUTION
+                    if featureCatalog.isEnabled(.wpeImport) {
+                        browseWorkshopButton("Browse all in Workshop")
+                    }
+                    #endif
                     Button {
                         presentFolderPicker()
                     } label: {
@@ -111,7 +127,7 @@ struct WPESceneSection: View {
                     alignment: .leading,
                     spacing: 16
                 ) {
-                    ForEach(recentImports) { entry in
+                    ForEach(recentImports.prefix(recentGridCap)) { entry in
                         WPEHistoryRow(
                             entry: entry,
                             isActive: activeWorkshopID == entry.id,
@@ -187,6 +203,37 @@ struct WPESceneSection: View {
             EmptyView()
         }
     }
+
+    /// Informational fallback for builds without the in-app Workshop tab
+    /// (non-direct-distribution), where there is nothing to jump to.
+    private var workshopHintText: some View {
+        Text("Browse and manage your whole library in the Steam Workshop tab.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+    }
+
+    #if DIRECT_DISTRIBUTION
+    /// Accent link that jumps to the Workshop tab — the single surface that
+    /// owns search / filter / management of the full library. The per-display
+    /// grid stays a lightweight quick-apply list.
+    @ViewBuilder
+    private func browseWorkshopButton(_ title: LocalizedStringKey) -> some View {
+        Button {
+            NotificationCenter.default.post(name: .openWorkshopPane, object: nil)
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                Image(systemName: "arrow.right")
+                    .imageScale(.small)
+            }
+            .font(DesignTokens.Typography.body)
+            .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text("Opens the Steam Workshop tab to browse and manage your full library"))
+    }
+    #endif
 
     // MARK: - Actions
 

@@ -226,9 +226,15 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         let intent = userIntendsToPlay
         let profile = currentProfile
 
+        let packageEntryName = oldPlayer.packageEntryName
         oldPlayer.cleanup()
 
-        let replacement = WallpaperVideoPlayer(url: url, frame: frame, fitMode: fitMode)
+        let replacement = WallpaperVideoPlayer(
+            url: url,
+            frame: frame,
+            fitMode: fitMode,
+            packageEntryName: packageEntryName
+        )
         attachErrorHandler(to: replacement)
         replacement.setVolume(volume)
         replacement.setMuted(muted)

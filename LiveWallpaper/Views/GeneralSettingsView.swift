@@ -356,16 +356,28 @@ struct GeneralSettingsView: View {
                         .accessibilityHint(Text("Automatically launch LiveWallpaper when you log in"))
                 }
 
-                SettingRow(icon: "lock.display", iconColor: .blue, title: "Refresh desktop picture on lock", subtitle: "When your Mac locks, capture the current frame for screens with Desktop Picture enabled") {
+                SettingRow(
+                    icon: "lock.display",
+                    iconColor: .blue,
+                    title: "Preserve wallpaper on the lock screen",
+                    subtitle: "Show your wallpaper's last frame when locked, instead of the default picture",
+                    info: "On lock, the current wallpaper frame is captured as the macOS desktop picture so the lock screen keeps your wallpaper's look. Only affects displays that already have a Desktop Picture set."
+                ) {
                     Toggle("", isOn: $preservePlaybackOnLock)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Refresh desktop picture on lock"))
-                        .accessibilityHint(Text("When your Mac locks, capture the current frame for screens with Desktop Picture enabled"))
+                        .accessibilityLabel(Text("Preserve wallpaper on the lock screen"))
+                        .accessibilityHint(Text("Shows your wallpaper's last frame on the lock screen instead of the default picture"))
                 }
 
-                SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
+                SettingRow(
+                    icon: "dock.rectangle",
+                    iconColor: .indigo,
+                    title: "Show in Dock",
+                    subtitle: "Make the app visible in the Dock and Cmd-Tab switcher",
+                    info: "When off, the app keeps running in the background — reopen this window anytime from the menu bar icon at the top-right of your screen."
+                ) {
                     Toggle("", isOn: $showInDock)
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -501,7 +513,13 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
             }
 
-            SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85 percent of a display, even if none is full-screen") {
+            SettingRow(
+                icon: "rectangle.on.rectangle",
+                iconColor: .purple,
+                title: "Pause when windows cover the desktop",
+                subtitle: "Pause when app windows cover most of the screen, even without full-screen",
+                info: "When open windows cover about 85% or more of a display, the wallpaper pauses to free CPU and GPU. It resumes as soon as you reveal the desktop."
+            ) {
                 Toggle("", isOn: $pauseOnWindowOcclusion)
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -551,8 +569,8 @@ struct GeneralSettingsView: View {
                 icon: "memorychip",
                 iconColor: .pink,
                 title: "Video memory cache",
-                subtitle: "Per-screen RAM budget",
-                info: "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
+                subtitle: "Preload video loops into memory to reduce disk reads",
+                info: "Caching keeps each looping video in RAM so it doesn't re-read your disk every cycle — saving SSD wear and power. Drag to Off to stream straight from disk and use the least memory. The value below is the budget per screen (and the total across all displays)."
             ) {
                 // Slider sits in the SettingRow's trailing slot so the
                 // header, the affordance, and the current value all read as
@@ -623,11 +641,15 @@ struct GeneralSettingsView: View {
     @ViewBuilder
     private var weatherSection: some View {
         Section {
-            VStack(spacing: 8) {
-                // Centered fixed-size pill matches macOS System Settings'
-                // top-of-section segmented controls (e.g. Display arrangement
-                // mode), reading as a "choose your input" hero rather than a
-                // dense form row.
+            // Standard SettingRow (icon + title + subtitle + trailing control)
+            // so the weather source reads like every other setting instead of
+            // an anonymous segmented pill that breaks the form's visual rhythm.
+            SettingRow(
+                icon: "cloud.sun",
+                iconColor: .cyan,
+                title: "Weather Location",
+                subtitle: "Where weather-reactive effects read conditions"
+            ) {
                 Picker("Source", selection: weatherSourceBinding) {
                     Text("Off").tag(WeatherLocationPreference.Source.off)
                     Text("System").tag(WeatherLocationPreference.Source.coreLocation)
@@ -637,23 +659,22 @@ struct GeneralSettingsView: View {
                 .labelsHidden()
                 .fixedSize()
                 .accessibilityLabel(Text("Weather location source"))
-
-                if weatherLocation.source == .manual {
-                    ManualLocationPicker(
-                        currentSelection: weatherLocation.manual,
-                        onCommit: { manual in
-                            weatherLocation.manual = manual
-                            persistWeatherLocation()
-                        }
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
-            .frame(maxWidth: .infinity)
+
+            if weatherLocation.source == .manual {
+                ManualLocationPicker(
+                    currentSelection: weatherLocation.manual,
+                    onCommit: { manual in
+                        weatherLocation.manual = manual
+                        persistWeatherLocation()
+                    }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         } header: {
             Text("Weather")
         } footer: {
-            Text("Used by weather-reactive effects like rain, snow, and fog.")
+            Text("System uses Location Services; Manual lets you pick a city. Powers rain, snow, and fog effects.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

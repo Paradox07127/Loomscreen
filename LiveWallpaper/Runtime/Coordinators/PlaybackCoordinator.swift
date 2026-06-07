@@ -317,19 +317,27 @@ final class PlaybackCoordinator {
 
     // MARK: - Video session lifecycle
 
-    func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
+    func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
         let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
+        // Identity is (resolved URL, package entry): two different entries inside
+        // the same scene.pkg resolve to the same URL but are different videos.
         let isSameURL = Self.bookmarkResolves(to: url, bookmark: existing?.videoBookmarkData)
+            && existing?.activeWallpaper.packageVideoEntryName == packageEntryName
 
         let previousContent = existing?.activeWallpaper
         var configuration: ScreenConfiguration
         if var prior = existing {
-            prior.replacePrimaryVideo(bookmarkData: bookmarkData)
+            prior.replacePrimaryVideo(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
             configuration = prior
         } else {
             configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: bookmarkData)
+            // Carry the in-place package entry (the convenience init defaults to
+            // a loose video) on both the active and saved primary, so a later
+            // type-swap restore doesn't downgrade it to raw-package playback.
+            configuration.activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
+            configuration.savedVideoPackageEntryName = packageEntryName
         }
         originReconciler.reconcile(
             &configuration,
@@ -350,7 +358,11 @@ final class PlaybackCoordinator {
         let task = Task {
             do {
                 try Task.checkCancellation()
-                try await videoLoader.validatePlayableVideo(at: url)
+                if let packageEntryName {
+                    try await WallpaperVideoPlayer.validatePackagedVideo(packageURL: url, entryName: packageEntryName)
+                } else {
+                    try await videoLoader.validatePlayableVideo(at: url)
+                }
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
                     guard let self,
@@ -457,7 +469,8 @@ final class PlaybackCoordinator {
     ) {
         let existingPlayer = screen.videoPlayer
         let needsNewPlayer = existingPlayer == nil ||
-            Self.videoAudioURLKey(for: existingPlayer?.videoURL) != Self.videoAudioURLKey(for: url)
+            Self.videoAudioURLKey(for: existingPlayer?.videoURL) != Self.videoAudioURLKey(for: url) ||
+            existingPlayer?.packageEntryName != configuration.activeWallpaper.packageVideoEntryName
 
         if !needsNewPlayer, let player = existingPlayer {
             let currentTime = preservingState ? player.player?.currentTime() : .zero
@@ -490,7 +503,8 @@ final class PlaybackCoordinator {
             let player = WallpaperVideoPlayer(
                 url: url,
                 frame: screen.frame,
-                fitMode: configuration.fitMode
+                fitMode: configuration.fitMode,
+                packageEntryName: configuration.activeWallpaper.packageVideoEntryName
             )
             let session = VideoWallpaperSession(player: player)
             session.onRuntimeErrorChange = { [markSessionStateChanged] in markSessionStateChanged() }
@@ -528,7 +542,8 @@ final class PlaybackCoordinator {
         let player = WallpaperVideoPlayer(
             url: url,
             frame: screen.frame,
-            fitMode: configuration?.fitMode ?? .aspectFill
+            fitMode: configuration?.fitMode ?? .aspectFill,
+            packageEntryName: configuration?.activeWallpaper.packageVideoEntryName
         )
 
         if let configuration {

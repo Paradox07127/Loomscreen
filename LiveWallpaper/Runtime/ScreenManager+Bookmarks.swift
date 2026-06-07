@@ -9,7 +9,7 @@ extension ScreenManager {
         }
 
         switch bookmark.content {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, let packageEntryName):
             guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
                 bookmarkData,
                 target: .transient
@@ -17,7 +17,12 @@ extension ScreenManager {
                 Logger.warning("Bookmark video unresolvable; user may need to re-pick", category: .fileAccess)
                 return
             }
-            setVideo(url: resolved.url, bookmarkData: resolved.bookmarkData, for: screen)
+            setVideo(
+                url: resolved.url,
+                bookmarkData: resolved.bookmarkData,
+                packageEntryName: packageEntryName,
+                for: screen
+            )
         case .html(let source, let config):
             setHTMLWallpaper(source: source, config: config, for: screen)
         case .metalShader(let source):

@@ -435,7 +435,7 @@ final class SettingsManager {
         }
 
         switch definition {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, _):
             return validateVideoBookmark(bookmarkData, for: screenID, configuration: configuration)
         case .html(let source, _):
             return validateHTMLSource(source, for: screenID)

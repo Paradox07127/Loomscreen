@@ -93,7 +93,7 @@ final class WallpaperPersistenceCoordinator {
             result.append(bookmarkData)
         }
 
-        if case .video(let bookmarkData) = configuration.activeWallpaper {
+        if case .video(let bookmarkData, _) = configuration.activeWallpaper {
             append(bookmarkData)
         }
         append(configuration.savedVideoBookmarkData)

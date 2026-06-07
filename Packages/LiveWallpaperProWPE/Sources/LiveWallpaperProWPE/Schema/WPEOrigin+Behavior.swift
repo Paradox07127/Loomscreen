@@ -76,8 +76,17 @@ extension WPEOrigin {
 
         switch origin.originalType {
         case .video:
-            guard let expected = origin.sourceEntryURL else { return false }
-            return resolvedPath == expected.path
+            // Loose video: bookmark points at the entry file in the folder.
+            if let expected = origin.sourceEntryURL, resolvedPath == expected.path {
+                return true
+            }
+            // In-place packaged video: bookmark points at the source
+            // `scene.pkg` (the entry is read windowed from it, not extracted).
+            let packagePath = sourceURL
+                .appendingPathComponent("scene.pkg")
+                .standardizedFileURL
+                .path
+            return resolvedPath == packagePath
         case .web:
             return resolvedPath == sourcePath
         case .scene, .application, .unknown:

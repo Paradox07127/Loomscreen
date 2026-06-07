@@ -185,7 +185,7 @@ struct BookmarksPopover: View {
 
     private func sourceDisplayName(for content: WallpaperContent) -> String? {
         switch content {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, _):
             return screenManager.bookmarkDisplayName(for: bookmarkData)
         case .html(let source, _):
             return source.displayName

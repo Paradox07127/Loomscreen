@@ -1,10 +1,21 @@
 import Foundation
 
 public enum WallpaperContent: Equatable, Sendable {
-    case video(bookmarkData: Data)
+    /// A video wallpaper.
+    ///
+    /// - `bookmarkData` resolves to a plain video file when `packageEntryName`
+    ///   is `nil` (loose / legacy imports), or to a `scene.pkg` when it is set
+    ///   (in-place packaged video). For the package case the player serves the
+    ///   entry via a resource loader windowed into the package — no extraction.
+    case video(bookmarkData: Data, packageEntryName: String?)
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
+
+    /// Convenience constructor for the common loose-file video (no package entry).
+    public static func video(bookmarkData: Data) -> WallpaperContent {
+        .video(bookmarkData: bookmarkData, packageEntryName: nil)
+    }
 
     public var wallpaperType: WallpaperType {
         switch self {
@@ -20,8 +31,15 @@ public enum WallpaperContent: Equatable, Sendable {
     }
 
     public var activeVideoBookmarkData: Data? {
-        guard case .video(let bookmarkData) = self else { return nil }
+        guard case .video(let bookmarkData, _) = self else { return nil }
         return bookmarkData
+    }
+
+    /// The `scene.pkg` entry name when this is an in-place packaged video,
+    /// else `nil` (loose video file).
+    public var packageVideoEntryName: String? {
+        guard case .video(_, let entryName) = self else { return nil }
+        return entryName
     }
 
     public var htmlSource: HTMLSource? {
@@ -61,6 +79,7 @@ extension WallpaperContent: Codable {
 
     private enum VideoCodingKeys: String, CodingKey {
         case bookmarkData
+        case packageEntryName
     }
 
     private enum HTMLCodingKeys: String, CodingKey {
@@ -82,7 +101,9 @@ extension WallpaperContent: Codable {
 
         if let videoNested = try? container.nestedContainer(keyedBy: VideoCodingKeys.self, forKey: .video) {
             let bookmark = try videoNested.decode(Data.self, forKey: .bookmarkData)
-            self = .video(bookmarkData: bookmark)
+            // Absent in legacy payloads → loose video file.
+            let packageEntryName = try videoNested.decodeIfPresent(String.self, forKey: .packageEntryName)
+            self = .video(bookmarkData: bookmark, packageEntryName: packageEntryName)
             return
         }
 
@@ -124,9 +145,10 @@ extension WallpaperContent: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, let packageEntryName):
             var nested = container.nestedContainer(keyedBy: VideoCodingKeys.self, forKey: .video)
             try nested.encode(bookmarkData, forKey: .bookmarkData)
+            try nested.encodeIfPresent(packageEntryName, forKey: .packageEntryName)
         case .html(let source, let config):
             var nested = container.nestedContainer(keyedBy: HTMLCodingKeys.self, forKey: .html)
             try nested.encode(source, forKey: .source)

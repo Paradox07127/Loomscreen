@@ -189,7 +189,7 @@ struct ProtocolizedDependenciesTests {
     }
 
     private static func activeVideoBookmark(_ configuration: ScreenConfiguration?) -> Data? {
-        guard case .video(let bookmark) = configuration?.activeWallpaper else { return nil }
+        guard case .video(let bookmark, _) = configuration?.activeWallpaper else { return nil }
         return bookmark
     }
 

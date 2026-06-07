@@ -172,7 +172,7 @@ struct SceneDescriptorCodableTests {
 
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
 
-        guard case .video(let bookmarkData) = decoded.activeWallpaper else {
+        guard case .video(let bookmarkData, _) = decoded.activeWallpaper else {
             Issue.record("Expected unsafe legacy scene backfill to fall back to empty video")
             return
         }

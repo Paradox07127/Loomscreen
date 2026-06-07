@@ -121,7 +121,161 @@ struct FolderURLSchemeHandlerIsolationTests {
         #expect(task.didFinishCalled)
     }
 
+    @Test("Package backend serves a scene.pkg entry's exact bytes")
+    func packageBackendServesEntryBytes() async throws {
+        let handler = FolderURLSchemeHandler()
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let jsBytes = Data("console.log('pkg-entry')".utf8)
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        try Self.makePackageData(entries: [
+            ("index.html", Data("<html>pkg</html>".utf8)),
+            ("app.js", jsBytes)
+        ]).write(to: pkgURL)
+
+        let backing = try Self.packageBacking(at: pkgURL)
+        handler.folderURL = folder
+        handler.setPackageBacking(backing)
+
+        var request = URLRequest(url: URL(string: "livewallpaper://wallpaper/app.js")!)
+        request.mainDocumentURL = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")
+        let task = FakeURLSchemeTask(request: request)
+        handler.webView(WKWebView(), start: task)
+        try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
+
+        #expect(task.failedError == nil)
+        #expect(task.didFinishCalled)
+        #expect(task.receivedData.reduce(Data(), +) == jsBytes)
+        let http = task.receivedResponse as? HTTPURLResponse
+        #expect(http?.value(forHTTPHeaderField: "Content-Type")?.contains("javascript") == true)
+        #expect(http?.value(forHTTPHeaderField: "Content-Length") == "\(jsBytes.count)")
+    }
+
+    @Test("Package backend honours a Range request against an entry slice")
+    func packageBackendHonoursRange() async throws {
+        let handler = FolderURLSchemeHandler()
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let full = Data((0..<200).map { UInt8($0 & 0xff) })
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        try Self.makePackageData(entries: [
+            ("index.html", Data("<html></html>".utf8)),
+            ("clip.bin", full)
+        ]).write(to: pkgURL)
+
+        handler.folderURL = folder
+        handler.setPackageBacking(try Self.packageBacking(at: pkgURL))
+
+        var request = URLRequest(url: URL(string: "livewallpaper://wallpaper/clip.bin")!)
+        request.mainDocumentURL = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")
+        request.setValue("bytes=10-19", forHTTPHeaderField: "Range")
+        let task = FakeURLSchemeTask(request: request)
+        handler.webView(WKWebView(), start: task)
+        try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
+
+        #expect(task.failedError == nil)
+        #expect(task.receivedData.reduce(Data(), +) == full[10...19])
+        let http = task.receivedResponse as? HTTPURLResponse
+        #expect(http?.statusCode == 206)
+        #expect(http?.value(forHTTPHeaderField: "Content-Range") == "bytes 10-19/200")
+    }
+
+    @Test("Loose files win over same-named package entries (no plain-folder regression)")
+    func packageBackendPrefersLooseFileOverPackageEntry() async throws {
+        let handler = FolderURLSchemeHandler()
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        // Both a loose index.html and a package index.html exist; the loose one
+        // must win so an ordinary HTML folder next to a scene.pkg is unaffected.
+        let looseBytes = Data("<html>loose-wins</html>".utf8)
+        try looseBytes.write(to: folder.appendingPathComponent("index.html"))
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        try Self.makePackageData(entries: [
+            ("index.html", Data("<html>packaged</html>".utf8))
+        ]).write(to: pkgURL)
+
+        handler.folderURL = folder
+        handler.setPackageBacking(try Self.packageBacking(at: pkgURL))
+
+        let url = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")!
+        let task = FakeURLSchemeTask(request: URLRequest(url: url))
+        handler.webView(WKWebView(), start: task)
+        try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
+
+        #expect(task.failedError == nil)
+        #expect(task.receivedData.reduce(Data(), +) == looseBytes)
+    }
+
+    @Test("Package backend falls back to a loose sibling for non-package files")
+    func packageBackendFallsBackToLooseFile() async throws {
+        let handler = FolderURLSchemeHandler()
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        try Self.makePackageData(entries: [
+            ("index.html", Data("<html></html>".utf8))
+        ]).write(to: pkgURL)
+        // project.json is loose on disk, NOT inside the package.
+        let looseBytes = Data("{\"loose\":true}".utf8)
+        try looseBytes.write(to: folder.appendingPathComponent("project.json"))
+
+        handler.folderURL = folder
+        handler.setPackageBacking(try Self.packageBacking(at: pkgURL))
+
+        var request = URLRequest(url: URL(string: "livewallpaper://wallpaper/project.json")!)
+        request.mainDocumentURL = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")
+        let task = FakeURLSchemeTask(request: request)
+        handler.webView(WKWebView(), start: task)
+        try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
+
+        #expect(task.failedError == nil)
+        #expect(task.receivedData.reduce(Data(), +) == looseBytes)
+    }
+
     // MARK: - helpers
+
+    private static func packageBacking(at pkgURL: URL) throws -> FolderURLSchemeHandler.PackageBacking {
+        let handle = try FileHandle(forReadingFrom: pkgURL)
+        defer { try? handle.close() }
+        let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
+        return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: package)
+    }
+
+    /// Builds a minimal `scene.pkg` blob (`PKGV0022` header) in the same layout
+    /// the real parser reads: `[magicLen|magic][count]({nameLen|name|off|size})*[payload]`.
+    static func makePackageData(entries: [(name: String, bytes: Data)]) -> Data {
+        var payload = Data()
+        var resolved: [(name: String, offset: UInt32, size: UInt32)] = []
+        for entry in entries {
+            resolved.append((entry.name, UInt32(payload.count), UInt32(entry.bytes.count)))
+            payload.append(entry.bytes)
+        }
+
+        var data = Data()
+        func appendU32(_ value: UInt32) {
+            data.append(UInt8(value & 0xff))
+            data.append(UInt8((value >> 8) & 0xff))
+            data.append(UInt8((value >> 16) & 0xff))
+            data.append(UInt8((value >> 24) & 0xff))
+        }
+        let magic = Array("PKGV0022".utf8)
+        appendU32(UInt32(magic.count))
+        data.append(contentsOf: magic)
+        appendU32(UInt32(resolved.count))
+        for entry in resolved {
+            let nameBytes = Array(entry.name.utf8)
+            appendU32(UInt32(nameBytes.count))
+            data.append(contentsOf: nameBytes)
+            appendU32(entry.offset)
+            appendU32(entry.size)
+        }
+        data.append(payload)
+        return data
+    }
 
     private func makeTemporaryFolder() -> URL {
         let url = FileManager.default.temporaryDirectory

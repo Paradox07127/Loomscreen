@@ -62,20 +62,25 @@ struct ScreenDetailHeader: View {
                 HStack(spacing: 8) {
                     applyToAllButton
 
-                    Button {
-                        showBookmarks = true
-                    } label: {
-                        Image(systemName: isCurrentBookmarked ? "bookmark.fill" : "bookmark")
-                    }
-                    .adaptiveGlassButton(isCurrentBookmarked ? .prominent : .regular)
-                    .controlSize(.regular)
-                    .help(Text(isCurrentBookmarked
-                        ? "Bookmarked — click to rename or remove"
-                        : "Bookmark this wallpaper"))
-                    .accessibilityLabel(Text(isCurrentBookmarked ? "Bookmarked" : "Bookmark"))
-                    .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                        BookmarksPopover(screen: screen, candidateContent: inspectorContent)
-                            .environment(screenManager)
+                    // Bookmark is an "add the current project" action, so only
+                    // offer it when this type actually has bookmarkable content —
+                    // no empty bookmark icon on a display with nothing configured.
+                    if inspectorContent != nil {
+                        Button {
+                            showBookmarks = true
+                        } label: {
+                            Image(systemName: isCurrentBookmarked ? "bookmark.fill" : "bookmark")
+                        }
+                        .adaptiveGlassButton(isCurrentBookmarked ? .prominent : .regular)
+                        .controlSize(.regular)
+                        .help(Text(isCurrentBookmarked
+                            ? "Bookmarked — click to rename or remove"
+                            : "Bookmark this wallpaper"))
+                        .accessibilityLabel(Text(isCurrentBookmarked ? "Bookmarked" : "Bookmark"))
+                        .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                            BookmarksPopover(screen: screen, candidateContent: inspectorContent)
+                                .environment(screenManager)
+                        }
                     }
 
                     if showsHeaderWallpaperActions {
@@ -175,8 +180,8 @@ struct ScreenDetailHeader: View {
         let config = screenManager.getConfiguration(for: screen)
         switch draft.selectedWallpaperType {
         case .video:
-            if case .video(let bookmark)? = config?.activeWallpaper {
-                return .video(bookmarkData: bookmark)
+            if case .video(let bookmark, let packageEntryName)? = config?.activeWallpaper {
+                return .video(bookmarkData: bookmark, packageEntryName: packageEntryName)
             }
             if let saved = config?.savedVideoBookmarkData {
                 return .video(bookmarkData: saved)

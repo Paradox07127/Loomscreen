@@ -32,11 +32,7 @@ struct WPEMultiRootResourceResolver: Sendable {
                 cacheRootURL: $0.appendingPathComponent("assets", isDirectory: true)
             )
         }
-        var mounts: [String: SceneResourceResolver] = [:]
-        for mount in dependencyMounts {
-            mounts[mount.workshopID] = SceneResourceResolver(cacheRootURL: mount.rootURL)
-        }
-        self.dependencyMounts = mounts
+        self.dependencyMounts = Self.makeMountResolvers(dependencyMounts)
         self.tracer = tracer
     }
 
@@ -56,12 +52,27 @@ struct WPEMultiRootResourceResolver: Sendable {
                 cacheRootURL: $0.appendingPathComponent("assets", isDirectory: true)
             )
         }
+        self.dependencyMounts = Self.makeMountResolvers(dependencyMounts)
+        self.tracer = tracer
+    }
+
+    /// Builds a per-dependency resolver: a directory mount reads its on-disk
+    /// root; a package mount reads entries in place from `scene.pkg` via a
+    /// package provider (no extraction). A package that can't be opened is
+    /// dropped, so its references resolve as missing rather than crashing.
+    private static func makeMountResolvers(_ dependencyMounts: [WPEAssetMount]) -> [String: SceneResourceResolver] {
         var mounts: [String: SceneResourceResolver] = [:]
         for mount in dependencyMounts {
-            mounts[mount.workshopID] = SceneResourceResolver(cacheRootURL: mount.rootURL)
+            switch mount.backing {
+            case .directory(let rootURL):
+                mounts[mount.workshopID] = SceneResourceResolver(cacheRootURL: rootURL)
+            case .package(let packageURL):
+                if let provider = try? WPEPackageSceneAssetProvider(packageURL: packageURL) {
+                    mounts[mount.workshopID] = SceneResourceResolver(provider: provider)
+                }
+            }
         }
-        self.dependencyMounts = mounts
-        self.tracer = tracer
+        return mounts
     }
 
     /// Existence probe across the same cascade, without staging or reading

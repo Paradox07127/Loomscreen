@@ -37,12 +37,12 @@ struct WPEDependencyMountResolver {
             }
 
             if let workshopRoot,
-               let siblingRoot = validSourceSiblingRoot(
+               let siblingMount = validSourceSiblingMount(
                    workshopID: id,
                    workshopRootURL: workshopRoot,
                    fileManager: fileManager
                ) {
-                mounts.append(WPEAssetMount(workshopID: id, rootURL: siblingRoot))
+                mounts.append(siblingMount)
             }
         }
         return mounts
@@ -66,11 +66,11 @@ struct WPEDependencyMountResolver {
         return cacheRoot
     }
 
-    private func validSourceSiblingRoot(
+    private func validSourceSiblingMount(
         workshopID: String,
         workshopRootURL: URL,
         fileManager: FileManager
-    ) -> URL? {
+    ) -> WPEAssetMount? {
         let siblingRoot = workshopRootURL
             .appendingPathComponent(workshopID, isDirectory: true)
             .standardizedFileURL
@@ -80,9 +80,17 @@ struct WPEDependencyMountResolver {
             return nil
         }
 
+        // Packaged dependency: assets live inside scene.pkg → mount the package
+        // for in-place reading (no extraction). Prefer this over the loose folder.
+        let pkgURL = siblingRoot.appendingPathComponent("scene.pkg")
+        if fileManager.fileExists(atPath: pkgURL.path) {
+            return WPEAssetMount(workshopID: workshopID, packageURL: pkgURL)
+        }
+
+        // Unpacked dependency: mount the folder if it carries a project.json.
         let manifest = siblingRoot.appendingPathComponent("project.json")
         guard fileManager.fileExists(atPath: manifest.path) else { return nil }
-        return siblingRoot
+        return WPEAssetMount(workshopID: workshopID, rootURL: siblingRoot)
     }
 
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
