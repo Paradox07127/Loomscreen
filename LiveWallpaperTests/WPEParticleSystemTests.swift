@@ -1072,6 +1072,62 @@ struct WPEParticleSystemTests {
         #expect((maxY - minY) > 80)   // it lands on render Y after the rotation
     }
 
+    @Test("object scale enlarges sprite size (WPE T·R·S model)")
+    func objectScaleEnlargesSpriteSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 50, sizeMax: 50,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2(1000, 1000), objectOrigin: SIMD3(500, 500, 0),
+            objectScale: SIMD3(2, 2, 1), objectAngleZ: 0
+        )
+        let system = try #require(WPEParticleSystem(
+            definition: def, device: device, sceneTransform: transform))
+        system.tick(now: 0); system.tick(now: 0.05)
+        let w = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.w
+        #expect(abs(w - 100) < 1)   // 50 base × object scale 2
+    }
+
+    @Test("additive sprite size is capped near scene height; translucent is not")
+    func additiveSpriteSizeCapped() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        func makeSized(blend: WPEParticleBlendMode) throws -> Float {
+            let def = WPEParticleDefinition(
+                materialRelativePath: nil, maxCount: 1,
+                rate: 1000, startDelay: 0,
+                lifetimeMin: 100, lifetimeMax: 100,
+                sizeMin: 50, sizeMax: 50,
+                originOffset: SIMD3(0, 0, 0),
+                dispersalMin: 0, dispersalMax: 0,
+                velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+                colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+                fadeInSeconds: 0
+            )
+            // object scale 100 → 50×100 = 5000 px before any cap.
+            let transform = WPEParticleSceneTransform(
+                sceneSize: SIMD2(1000, 1000), objectOrigin: SIMD3(500, 500, 0),
+                objectScale: SIMD3(100, 100, 1), objectAngleZ: 0
+            )
+            let system = try #require(WPEParticleSystem(
+                definition: def, device: device, blendMode: blend, sceneTransform: transform))
+            system.tick(now: 0); system.tick(now: 0.05)
+            return system.instanceBuffer.contents()
+                .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.w
+        }
+        #expect(abs(try makeSized(blend: .additive) - 1000) < 1)      // capped to scene height
+        #expect(try makeSized(blend: .translucent) > 4000)            // uncapped (≈5000)
+    }
+
     @Test("Parser captures sizerandom exponent; spawn biases size toward min")
     func sizeRandomExponentBiasesTowardMin() throws {
         let json = #"""

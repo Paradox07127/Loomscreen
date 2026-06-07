@@ -40,6 +40,9 @@ struct WPEParticleSceneTransform {
     var renderOrigin: SIMD3<Float>
     var objectScale: SIMD3<Float>
     var objectAngleZ: Float
+    /// Scene render height (px); used to cap pathologically large additive
+    /// sprites so a hugely-scaled emitter can't saturate the whole frame.
+    var sceneHeight: Float
 
     init(sceneSize: SIMD2<Float>, objectOrigin: SIMD3<Float>, objectScale: SIMD3<Float>, objectAngleZ: Float) {
         self.renderOrigin = SIMD3<Float>(
@@ -49,6 +52,7 @@ struct WPEParticleSceneTransform {
         )
         self.objectScale = objectScale
         self.objectAngleZ = objectAngleZ
+        self.sceneHeight = max(1, sceneSize.y)
     }
 
     static let identity = WPEParticleSceneTransform(
@@ -96,26 +100,15 @@ struct WPEParticleSceneTransform {
     }
 
     func worldSizeMultiplier() -> Float {
-        // WPE authors particle sizes in absolute scene pixels. The scene
-        // object's scale governs the *emitter* — it spreads spawn positions
-        // (applyModelMatrix) and velocities (applyModelDirection) — but must
-        // NOT enlarge each billboard sprite. Folding object scale into sprite
-        // size made large-scaled emitters (e.g. a light-shaft layer scaled
-        // ~7×, scene 3426865175) blow each 850–1000px sprite up to ~6500px,
-        // saturating the whole frame with additive glow. Keep sprite size at
-        // its authored value; only the emitter region scales.
-        //
-        // KNOWN LIMITATION (deferred to a visual-fidelity pass): the WPE
-        // reference (Almamu CParticle model matrix `T·R·S(scale)`) DOES scale
-        // the sprite quad by object scale, so this 1.0 under-sizes moderately
-        // scaled particle scenes — e.g. 3725117707's leaves (object scale 3×)
-        // render at ~70px instead of the original's ~210px. The right fix is
-        // to restore the scale→size coupling but CLAMP the result (cap near
-        // scene height) so the pathological 7.8× light-shaft can't saturate,
-        // rather than disabling it globally. Re-enable when tuning effect
-        // appearance; verify both 3725117707 (too small now) and 3426865175
-        // (must not re-saturate) on device.
-        return 1.0
+        // WPE's CParticle model matrix is `T·R·S(scale)`, so the scene object's
+        // scale DOES enlarge each billboard sprite (verified vs the 3426865175
+        // preview: the 7.8× light-shaft renders large, and 落花/leaves track
+        // their object scale). Use the 2D (x,y) scale magnitude; sprites are
+        // square so average the axes. The additive-saturation risk from a
+        // hugely-scaled emitter is handled by a blend-aware size cap at spawn
+        // (translucent fog stays uncapped), not by disabling the coupling.
+        let s = (abs(objectScale.x) + abs(objectScale.y)) * 0.5
+        return max(0, s)
     }
 
     func visualScaleSigns() -> SIMD2<Float> {
@@ -756,7 +749,14 @@ final class WPEParticleSystem {
         } else {
             sizeSample = definition.sizeMin
         }
-        let size = Float(sizeSample) * sizeScale
+        var size = Float(sizeSample) * sizeScale
+        // Blend-aware cap: a hugely-scaled ADDITIVE emitter (e.g. 3426865175's
+        // 7.8× light-shaft) would otherwise fill the frame with additive glow
+        // and saturate to white (until HDR tonemap lands). Cap additive sprites
+        // near scene height; translucent sprites (atmospheric fog) stay uncapped.
+        if blendMode == .additive {
+            size = min(size, sceneTransform.sceneHeight)
+        }
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
         let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))
