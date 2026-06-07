@@ -81,11 +81,7 @@ final class WallpaperEngineImportService {
     ) async -> ImportResult {
         guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
               provider.exists(atRelativePath: project.entryFile) else {
-            return await importPackagedVideoViaExtraction(
-                project: project,
-                pkgURL: pkgURL,
-                sourceBookmark: sourceBookmark
-            )
+            return .rejected(reason: "Missing video entry \(project.entryFile) in package")
         }
 
         // One-time probe on a staged copy of just the video entry; the
@@ -115,44 +111,6 @@ final class WallpaperEngineImportService {
             .video(bookmarkData: videoBookmark, packageEntryName: project.entryFile),
             origin: origin
         )
-    }
-
-    /// Legacy fallback: extracts the whole `scene.pkg` into `wpe-cache` and
-    /// points the wallpaper at the extracted video file. Used only when the
-    /// package can't be opened for in-place reading.
-    private func importPackagedVideoViaExtraction(
-        project: WallpaperEngineProject,
-        pkgURL: URL,
-        sourceBookmark: Data
-    ) async -> ImportResult {
-        let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
-        guard case .success(let cacheURL) = cacheResult else {
-            if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
-            return .rejected(reason: "Extraction failed")
-        }
-
-        guard let videoURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
-              fileManager.fileExists(atPath: videoURL.path) else {
-            return .rejected(reason: "Missing video entry \(project.entryFile)")
-        }
-
-        do {
-            try await validateVideo(videoURL)
-        } catch {
-            return .rejected(reason: describe(error))
-        }
-
-        guard let videoBookmark = makeBookmark(videoURL) else {
-            return .rejected(reason: "Cannot create video bookmark")
-        }
-
-        let origin = makeOrigin(
-            project: project,
-            sourceBookmark: sourceBookmark,
-            cacheRelativePath: cacheRelativePath(for: project),
-            resourceLocation: .cache
-        )
-        return .ready(.video(bookmarkData: videoBookmark), origin: origin)
     }
 
     private func importUnpackagedVideo(
@@ -265,53 +223,9 @@ final class WallpaperEngineImportService {
             return .ready(content, origin: origin)
         }
 
-        return await importPackagedWebViaExtraction(
-            project: project,
-            pkgURL: pkgURL,
-            sourceBookmark: sourceBookmark
-        )
+        return .rejected(reason: "Missing web entry \(project.entryFile) in package")
     }
 
-    /// Legacy fallback: extracts the whole `scene.pkg` into `wpe-cache` and
-    /// points the wallpaper at the extracted folder. Used only when the package
-    /// can't be opened for in-place reading.
-    private func importPackagedWebViaExtraction(
-        project: WallpaperEngineProject,
-        pkgURL: URL,
-        sourceBookmark: Data
-    ) async -> ImportResult {
-        let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
-        guard case .success(let cacheURL) = cacheResult else {
-            if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
-            return .rejected(reason: "Extraction failed")
-        }
-
-        guard let indexURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
-              fileManager.fileExists(atPath: indexURL.path) else {
-            return .rejected(reason: "Missing web entry \(project.entryFile)")
-        }
-
-        guard let folderBookmark = makeBookmark(cacheURL) else {
-            return .rejected(reason: "Cannot create cached web folder bookmark")
-        }
-
-        let originKind = WallpaperEngineImportService.originKind(forSourceFolder: pkgURL.deletingLastPathComponent())
-        let origin = makeOrigin(
-            project: project,
-            sourceBookmark: sourceBookmark,
-            cacheRelativePath: cacheRelativePath(for: project),
-            resourceLocation: .cache,
-            originKind: originKind
-        )
-        let content = WallpaperContent.html(
-            source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
-            config: HTMLConfig(
-                physicalPixelLayout: true,
-                originKind: originKind
-            )
-        )
-        return .ready(content, origin: origin)
-    }
 
     /// Marks an HTML wallpaper's `HTMLConfig` as Workshop-sourced when the
     /// source folder lives under a SteamCMD-managed
@@ -373,10 +287,10 @@ final class WallpaperEngineImportService {
 
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
-            // Default: read the packaged scene in place from scene.pkg — no
-            // extraction, so no second multi-GB copy in wpe-cache. Falls back to
-            // extracting into the cache only when the package can't be opened or
-            // parsed for in-place use.
+            // Read the packaged scene in place from scene.pkg — no extraction,
+            // so no second on-disk copy in wpe-cache. A package that can't be
+            // opened/parsed is unsupported (extraction used the same parser, so
+            // it could never have recovered what in-place reading can't).
             if let packageResult = await finishScenePackageBackedImport(
                 project: project,
                 pkgURL: pkgURL,
@@ -385,19 +299,7 @@ final class WallpaperEngineImportService {
             ) {
                 return packageResult
             }
-
-            let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
-            guard case .success(let cacheURL) = cacheResult else {
-                if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
-                return .rejected(reason: "Extraction failed")
-            }
-
-            return finishSceneImport(
-                project: project,
-                cacheURL: cacheURL,
-                sourceFolderURL: folderURL,
-                sourceBookmark: sourceBookmark
-            )
+            return .rejected(reason: "Packaged scene \(project.entryFile) could not be read from the package")
         }
 
         guard let entryURL = resourceURL(root: folderURL, relativePath: project.entryFile),
@@ -410,9 +312,9 @@ final class WallpaperEngineImportService {
             ))
         }
 
-        // Default: read the unpacked folder scene in place from the source — no
-        // mirror copy in wpe-cache. Falls back to mirroring only if in-place
-        // reading fails (e.g. the entry can't be read/parsed).
+        // Read the unpacked folder scene in place from the source — no mirror
+        // copy in wpe-cache. If in-place reading fails it's unsupported (a
+        // mirror copies the same files, so it couldn't have recovered either).
         if let directoryResult = await finishSceneSourceDirectoryImport(
             project: project,
             folderURL: folderURL,
@@ -420,90 +322,7 @@ final class WallpaperEngineImportService {
         ) {
             return directoryResult
         }
-
-        let cacheResult = await ensureMirrored(project: project, folderURL: folderURL)
-        guard case .success(let cacheURL) = cacheResult else {
-            if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
-            return .rejected(reason: "Directory mirror failed")
-        }
-
-        return finishSceneImport(
-            project: project,
-            cacheURL: cacheURL,
-            sourceFolderURL: folderURL,
-            sourceBookmark: sourceBookmark
-        )
-    }
-
-    private func finishSceneImport(
-        project: WallpaperEngineProject,
-        cacheURL: URL,
-        sourceFolderURL: URL,
-        sourceBookmark: Data
-    ) -> ImportResult {
-        // `scene.pkg` archives never carry `project.json` (it lives next to
-        // them in the workshop folder), so the .pkg extraction path leaves
-        // the cache without authoring metadata. Top it up here so the
-        // inspector schema loader and downstream readers find it without
-        // re-opening the source bookmark on every cold start.
-        copyProjectManifestIfNeeded(from: sourceFolderURL, to: cacheURL)
-
-
-        guard let entryURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
-              fileManager.fileExists(atPath: entryURL.path) else {
-            return .rejected(reason: "Missing scene entry \(project.entryFile)")
-        }
-
-        let sceneData: Data
-        do {
-            sceneData = try Data(contentsOf: entryURL)
-        } catch {
-            return .rejected(reason: "Cannot read \(project.entryFile): \(describe(error))")
-        }
-
-        let document: WPESceneDocument
-        do {
-            document = try WPESceneDocumentParser.parse(data: sceneData)
-        } catch {
-            return .rejected(reason: describe(error))
-        }
-
-        let dependencyMounts = WPEDependencyMountResolver().mounts(
-            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
-            origin: nil
-        )
-        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
-        let tier = WPESceneCapabilityClassifier().capabilityTier(
-            for: document,
-            cacheURL: cacheURL,
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineRoot
-        )
-        let preflight = WPEScenePreflight.classify(
-            document: document,
-            project: project,
-            scenePackageEntries: scenePackageEntryNames(in: cacheURL, fileManager: fileManager)
-        )
-        let descriptor = SceneDescriptor(
-            workshopID: project.workshopID,
-            cacheRelativePath: cacheRelativePath(for: project),
-            entryFile: project.entryFile,
-            capabilityTier: tier,
-            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
-            preflightTier: preflight.tier,
-            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
-        )
-        let origin = makeOrigin(
-            project: project,
-            sourceBookmark: sourceBookmark,
-            cacheRelativePath: cacheRelativePath(for: project),
-            resourceLocation: .cache
-        )
-
-        if tier == .unsupported {
-            return .unsupported(origin: origin)
-        }
-        return .ready(.scene(descriptor), origin: origin)
+        return .rejected(reason: "Scene \(project.entryFile) could not be read from the source folder")
     }
 
     /// Imports a packaged scene to read in place from `scene.pkg` (no
@@ -647,27 +466,6 @@ final class WallpaperEngineImportService {
         }
     }
 
-    private func ensureExtracted(project: WallpaperEngineProject, pkgURL: URL) async -> Result<URL, ExtractionFailure> {
-        do {
-            let url = try await cache.ensureExtracted(workshopID: project.workshopID, sourcePkgURL: pkgURL)
-            return .success(url)
-        } catch {
-            return .failure(ExtractionFailure(reason: describe(error)))
-        }
-    }
-
-    private func ensureMirrored(project: WallpaperEngineProject, folderURL: URL) async -> Result<URL, ExtractionFailure> {
-        do {
-            let url = try await cache.ensureMirroredDirectory(
-                workshopID: project.workshopID,
-                sourceFolderURL: folderURL
-            )
-            return .success(url)
-        } catch {
-            return .failure(ExtractionFailure(reason: describe(error)))
-        }
-    }
-
     private func makeOrigin(
         project: WallpaperEngineProject,
         sourceBookmark: Data,
@@ -725,20 +523,6 @@ final class WallpaperEngineImportService {
         "wpe-cache/\(project.workshopID)"
     }
 
-    private func copyProjectManifestIfNeeded(from sourceFolder: URL, to cacheURL: URL) {
-        let destination = cacheURL.appendingPathComponent("project.json")
-        if fileManager.fileExists(atPath: destination.path) { return }
-        let source = sourceFolder.appendingPathComponent("project.json")
-        guard fileManager.fileExists(atPath: source.path) else { return }
-        do {
-            try fileManager.copyItem(at: source, to: destination)
-        } catch {
-            Logger.warning(
-                "WPE cache: failed to copy project.json into cache (\(error.localizedDescription))",
-                category: .screenManager
-            )
-        }
-    }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {
         WPEPathSafety.resourceURL(root: root, relativePath: relativePath)
