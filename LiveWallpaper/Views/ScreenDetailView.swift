@@ -211,9 +211,11 @@ struct ScreenDetailView: View {
             if inspectorApplicable {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0.04)) {
-                            inspectorUserVisible.toggle()
-                        }
+                        // No withAnimation here: a toolbar button lives in the
+                        // separate NSToolbar host, so its transaction doesn't
+                        // reach the GeometryReader content. The width glide is
+                        // driven by `.animation(value:)` on the layout instead.
+                        inspectorUserVisible.toggle()
                     } label: {
                         Image(systemName: "sidebar.right")
                     }
@@ -295,6 +297,14 @@ struct ScreenDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
         .transaction(value: liveInspectorWidth) { $0.animation = nil }
+        // Glide the width only when the user toggles the panel — keyed on
+        // `inspectorUserVisible`, not `showsInspector`, so switching wallpaper
+        // type (which flips `inspectorApplicable`) stays instant, and a drag
+        // resize (liveInspectorWidth) stays un-sprung via the transactions above.
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0.04),
+            value: inspectorUserVisible
+        )
     }
 
     /// Header + runtime banner + preview, stacked vertically. Sized to the
