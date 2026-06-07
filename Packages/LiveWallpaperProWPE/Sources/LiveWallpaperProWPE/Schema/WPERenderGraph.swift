@@ -46,6 +46,9 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     /// `.zero` pins the layer. Inherited from the root attachment ancestor by the
     /// graph builder so a rigid puppet subtree shifts as one unit.
     public let parallaxDepth: SIMD2<Double>
+    /// Original scene-object paint index. Earlier indices paint behind later
+    /// ones; particles interleave against this in the executor.
+    public let sortIndex: Int
 
     public init(
         objectID: String,
@@ -63,7 +66,8 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         compositeB: String,
         localFBOs: [WPERenderFBO],
         passes: [WPERenderPass],
-        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
+        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0),
+        sortIndex: Int = 0
     ) {
         self.objectID = objectID
         self.objectName = objectName
@@ -81,6 +85,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         self.localFBOs = localFBOs
         self.passes = passes
         self.parallaxDepth = parallaxDepth
+        self.sortIndex = sortIndex
     }
 }
 

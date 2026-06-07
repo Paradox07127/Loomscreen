@@ -165,6 +165,9 @@ final class WPEParticleSystem {
     /// drives the per-frame parallax translation applied to the whole system at
     /// draw time.
     var parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
+    /// Owning particle object's WPE scene paint index — where this system
+    /// composites relative to image layers (background behind, character front).
+    var sortIndex: Int = 0
     /// Live cursor position in the centered render frame (Y-up), or `nil` when
     /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
     /// by the renderer each frame; drives pointer-locked control points

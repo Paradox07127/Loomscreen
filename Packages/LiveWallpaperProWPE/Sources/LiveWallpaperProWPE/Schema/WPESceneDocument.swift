@@ -13,6 +13,9 @@ public struct WPESceneDocument: Equatable, Sendable {
     public let particleObjects: [WPESceneParticleObject]
     public let textObjects: [WPESceneTextObject]
     public let soundObjects: [WPESceneSoundObject]
+    /// Original WPE `objects`-array paint order: object id → scene index
+    /// (earlier paints behind later). Drives particle/layer z-interleaving.
+    public let objectPaintOrder: [String: Int]
     /// Maps each user-property key (the `{"user":K}` envelopes found in
     /// `scene.json`) to the render targets it drives, so a settings change
     /// can be classified as incremental or reload without re-parsing.
@@ -26,6 +29,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         particleObjects: [WPESceneParticleObject] = [],
         textObjects: [WPESceneTextObject] = [],
         soundObjects: [WPESceneSoundObject] = [],
+        objectPaintOrder: [String: Int] = [:],
         propertyBindings: [String: [WPEScenePropertyBinding]] = [:],
         diagnostics: [WPESceneDiagnostic]
     ) {
@@ -35,6 +39,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.particleObjects = particleObjects
         self.textObjects = textObjects
         self.soundObjects = soundObjects
+        self.objectPaintOrder = objectPaintOrder
         self.propertyBindings = propertyBindings
         self.diagnostics = diagnostics
     }

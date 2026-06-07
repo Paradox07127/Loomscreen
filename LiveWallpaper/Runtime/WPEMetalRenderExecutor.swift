@@ -305,7 +305,10 @@ final class WPEMetalRenderExecutor {
         textures: [String: MTLTexture],
         runtimeUniforms: WPEMetalRuntimeUniforms = .zero,
         cameraUniforms: WPEMetalCameraUniforms = .identity,
-        sceneID: String? = nil
+        sceneID: String? = nil,
+        particleSystems: [WPEParticleSystem] = [],
+        particleTextures: [ObjectIdentifier: MTLTexture] = [:],
+        particleParallax: WPECameraParallaxFrame = .neutral
     ) throws -> MTLTexture {
         #if DEBUG
         scenePassDumps.removeAll()
@@ -355,7 +358,43 @@ final class WPEMetalRenderExecutor {
             sceneSize: size
         )
 
+        // Particles composite at their scene paint index, interleaved between
+        // layers: a particle with sortIndex P draws after every layer with a
+        // lower sortIndex and before any higher one (background → rain → character).
+        let sortedParticles = particleSystems.enumerated()
+            .filter { $0.element.liveInstanceCount > 0 }
+            .sorted { lhs, rhs in
+                lhs.element.sortIndex != rhs.element.sortIndex
+                    ? lhs.element.sortIndex < rhs.element.sortIndex
+                    : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+        var particleCursor = 0
+        func flushParticles(before threshold: Int) throws {
+            while particleCursor < sortedParticles.count,
+                  sortedParticles[particleCursor].sortIndex < threshold {
+                let system = sortedParticles[particleCursor]
+                let traceIndex = particleCursor
+                if try encodeParticleSystem(
+                    system,
+                    into: commandBuffer,
+                    output: output,
+                    sceneSize: size,
+                    cameraParallax: particleParallax,
+                    texturesByMaterial: particleTextures,
+                    traceIndex: traceIndex
+                ) {
+                    didEncode = true
+                    #if DEBUG
+                    captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
+                    #endif
+                }
+                particleCursor += 1
+            }
+        }
+
         for layer in preparedPipeline.layers {
+            try flushParticles(before: layer.graphLayer.sortIndex)
             // Attached children (face/hair on a body-split rig) follow the parent puppet's animated
             // anchor bone; `graphLayer` carries the followed transform, falling back to the static
             // layer when there is no resolved attachment. Skinning is validated/cached once per frame.
@@ -450,6 +489,8 @@ final class WPEMetalRenderExecutor {
             }
         }
 
+        try flushParticles(before: Int.max)
+
         guard didEncode else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
@@ -484,33 +525,26 @@ final class WPEMetalRenderExecutor {
         return output
     }
 
-    /// Phase 2D-L: render every alive particle system on top of the supplied output texture.
-    func drawParticles(
-        systems: [WPEParticleSystem],
-        texturesByMaterial: [ObjectIdentifier: MTLTexture],
-        sceneSize: CGSize,
+    /// Encode one particle system on top of `output`, in its own render pass
+    /// (loadAction `.load`), into the SHARED scene command buffer — so particles
+    /// interleave with layers at their scene paint index. Returns false (no
+    /// encode) when the system has no live particles or its texture is missing.
+    @discardableResult
+    private func encodeParticleSystem(
+        _ system: WPEParticleSystem,
+        into commandBuffer: MTLCommandBuffer,
         output: MTLTexture,
-        cameraParallax: WPECameraParallaxFrame = .neutral
-    ) throws {
-        let alive = systems.filter { $0.liveInstanceCount > 0 }
-        guard !alive.isEmpty else { return }
+        sceneSize: CGSize,
+        cameraParallax: WPECameraParallaxFrame,
+        texturesByMaterial: [ObjectIdentifier: MTLTexture],
+        traceIndex: Int
+    ) throws -> Bool {
+        guard system.liveInstanceCount > 0 else { return false }
+        // Systems whose texture failed to load were filtered at scene-load; skip
+        // defensively so a stale texture-slot binding can't leak in.
+        guard let texture = texturesByMaterial[ObjectIdentifier(system)] else { return false }
+        let state = try particlePipelineState(colorPixelFormat: output.pixelFormat, blendMode: system.blendMode)
 
-        // Resolve per-system pipeline states (throwing) BEFORE opening the encoder,
-        // so a failure can't dealloc an encoder without endEncoding (Metal asserts
-        // "Command encoder released without endEncoding").
-        let draws: [(system: WPEParticleSystem, texture: MTLTexture, state: MTLRenderPipelineState)] =
-            try alive.compactMap { system in
-                // Systems whose texture failed to load were filtered at scene-load;
-                // skip defensively so a stale texture-slot binding can't leak in.
-                guard let texture = texturesByMaterial[ObjectIdentifier(system)] else { return nil }
-                let state = try particlePipelineState(colorPixelFormat: output.pixelFormat, blendMode: system.blendMode)
-                return (system, texture, state)
-            }
-        guard !draws.isEmpty else { return }
-
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
-        }
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = output
         descriptor.colorAttachments[0].loadAction = .load
@@ -526,72 +560,68 @@ final class WPEMetalRenderExecutor {
                 0, 0
             )
         )
+        // Translate the whole system by its camera-parallax depth (pixels),
+        // carried in `padding.xy` and added to each particle's screen position.
+        let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
+        projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
 
-        for (idx, draw) in draws.enumerated() {
-            let system = draw.system
-            let texture = draw.texture
-            encoder.setRenderPipelineState(draw.state)
-            // Translate the whole system by its camera-parallax depth (pixels),
-            // carried in `padding.xy` and added to each particle's screen
-            // position in the vertex shader.
-            let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
-            projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
-            encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
-            encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
-            let useFrameRects = system.frameRectsBuffer != nil
-            var sprite = WPEParticleSpriteParams(
-                grid: SIMD4<Float>(
-                    Float(system.spriteSheet?.cols ?? 1),
-                    Float(system.spriteSheet?.rows ?? 1),
-                    Float(system.spriteSheet?.frameCount ?? 1),
-                    (system.spriteSheet?.isAlphaMask ?? false) ? 1 : 0
-                ),
-                frameRectMode: SIMD4<Float>(
-                    useFrameRects ? 1 : 0,
-                    Float(system.spriteSheet?.frameRects?.count ?? 0),
-                    0,
-                    0
-                )
+        let useFrameRects = system.frameRectsBuffer != nil
+        var sprite = WPEParticleSpriteParams(
+            grid: SIMD4<Float>(
+                Float(system.spriteSheet?.cols ?? 1),
+                Float(system.spriteSheet?.rows ?? 1),
+                Float(system.spriteSheet?.frameCount ?? 1),
+                (system.spriteSheet?.isAlphaMask ?? false) ? 1 : 0
+            ),
+            frameRectMode: SIMD4<Float>(
+                useFrameRects ? 1 : 0,
+                Float(system.spriteSheet?.frameRects?.count ?? 0),
+                0,
+                0
             )
-            encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
-            // Buffer(4) must always be bound for the vertex function's signature.
-            // Use the system's pre-allocated frame-rect buffer (any frame count);
-            // a 1-element dummy covers the uniform-grid path.
-            if let frameRectsBuffer = system.frameRectsBuffer {
-                encoder.setVertexBuffer(frameRectsBuffer, offset: 0, index: 4)
-            } else {
-                var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
-                encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)
-            }
-            encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
-            encoder.setFragmentTexture(texture, index: 0)
-            encoder.drawPrimitives(
-                type: .triangleStrip,
-                vertexStart: 0,
-                vertexCount: 4,
-                instanceCount: system.liveInstanceCount
-            )
-            #if !LITE_BUILD && DEBUG
-            WPECanonicalTraceRecorder.shared.recordParticlePass(
-                index: idx,
-                particleCount: system.liveInstanceCount,
-                sprite: texture,
-                blendMode: system.blendMode.rawValue,
-                target: output,
-                spriteSheet: system.spriteSheet.map {
-                    (cols: $0.cols, rows: $0.rows, frames: $0.frameCount, alphaMask: $0.isAlphaMask)
-                }
-            )
-            if WPESceneDebugArtifacts.shared.isEnabled {
-                WPESceneDebugArtifacts.shared.recordNoteOnce(
-                    name: "particle-state-\(idx).txt",
-                    contents: system.particleStateDumpText())
-            }
-            #endif
+        )
+
+        encoder.setRenderPipelineState(state)
+        encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
+        encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
+        encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
+        // Buffer(4) must always be bound for the vertex function's signature.
+        // Use the system's pre-allocated frame-rect buffer (any frame count);
+        // a 1-element dummy covers the uniform-grid path.
+        if let frameRectsBuffer = system.frameRectsBuffer {
+            encoder.setVertexBuffer(frameRectsBuffer, offset: 0, index: 4)
+        } else {
+            var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
+            encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)
         }
+        encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.drawPrimitives(
+            type: .triangleStrip,
+            vertexStart: 0,
+            vertexCount: 4,
+            instanceCount: system.liveInstanceCount
+        )
         encoder.endEncoding()
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+
+        #if !LITE_BUILD && DEBUG
+        WPECanonicalTraceRecorder.shared.recordParticlePass(
+            index: traceIndex,
+            particleCount: system.liveInstanceCount,
+            sprite: texture,
+            blendMode: system.blendMode.rawValue,
+            target: output,
+            spriteSheet: system.spriteSheet.map {
+                (cols: $0.cols, rows: $0.rows, frames: $0.frameCount, alphaMask: $0.isAlphaMask)
+            }
+        )
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            WPESceneDebugArtifacts.shared.recordNoteOnce(
+                name: "particle-state-\(traceIndex).txt",
+                contents: system.particleStateDumpText())
+        }
+        #endif
+        return true
     }
 
     /// Mirrors `WPEParticleSpriteParams` in `WPEMetalBuiltins.metal` —
@@ -1631,7 +1661,8 @@ final class WPEMetalRenderExecutor {
             compositeB: layer.compositeB,
             localFBOs: layer.localFBOs,
             passes: layer.passes,
-            parallaxDepth: layer.parallaxDepth
+            parallaxDepth: layer.parallaxDepth,
+            sortIndex: layer.sortIndex
         )
     }
 

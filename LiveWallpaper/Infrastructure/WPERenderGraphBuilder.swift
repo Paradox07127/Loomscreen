@@ -69,7 +69,10 @@ struct WPERenderGraphBuilder: Sendable {
         var originalIndexByID: [String: Int] = [:]
         for (index, object) in document.imageObjects.enumerated() where objectByID[object.id] == nil {
             objectByID[object.id] = object
-            originalIndexByID[object.id] = index
+            // Use the GLOBAL scene paint index when available so layer tie-breaks
+            // stay consistent with where particles interleave; fall back to the
+            // image-filtered index for documents without paint-order metadata.
+            originalIndexByID[object.id] = document.objectPaintOrder[object.id] ?? index
         }
 
         // Objects whose visibility a user property can toggle at runtime are
@@ -106,7 +109,8 @@ struct WPERenderGraphBuilder: Sendable {
                     object: object,
                     sceneSize: sceneSize,
                     finalUntargetedPassToScene: visibleLayerIDs.contains(object.id),
-                    preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
+                    preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id),
+                    sortIndex: document.objectPaintOrder[object.id] ?? 0
                 )
             }
         let parallaxAligned = Self.propagatingParallaxDepthThroughParents(layers)
@@ -474,7 +478,8 @@ struct WPERenderGraphBuilder: Sendable {
         object: WPESceneImageObject,
         sceneSize: CGSize,
         finalUntargetedPassToScene: Bool,
-        preserveFinalCompositeForScene: Bool
+        preserveFinalCompositeForScene: Bool,
+        sortIndex: Int
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
@@ -589,7 +594,8 @@ struct WPERenderGraphBuilder: Sendable {
                 finalUntargetedPassToScene: finalUntargetedPassToScene,
                 preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.puppetPath != nil
             ),
-            parallaxDepth: object.parallaxDepth
+            parallaxDepth: object.parallaxDepth,
+            sortIndex: sortIndex
         )
     }
 
@@ -1226,7 +1232,8 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
         )
     }
 
@@ -1247,7 +1254,8 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
-            parallaxDepth: depth
+            parallaxDepth: depth,
+            sortIndex: sortIndex
         )
     }
 }

@@ -49,6 +49,23 @@ struct WPESceneDocumentParserTests {
         #expect(legacy.imageObjects.first?.visible == true)
     }
 
+    @Test("Object paint order preserves original objects-array indices")
+    func objectPaintOrderPreservesOriginalIndices() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                ["id": "background", "name": "Background", "type": "image", "image": "materials/background.png"],
+                ["id": "matrix", "name": "Matrix Rain", "type": "particle", "particle": "particles/matrix/spawner.json"],
+                ["id": "title", "name": "Title", "type": "text", "text": "Hello"]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.objectPaintOrder == ["background": 0, "matrix": 1, "title": 2])
+    }
+
     @Test("Combo bindings are classified as reload")
     func comboBindingsRequireReload() throws {
         let payload: [String: Any] = [

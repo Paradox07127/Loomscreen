@@ -132,7 +132,8 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
         )
     }
 
@@ -153,7 +154,8 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
         )
     }
 }

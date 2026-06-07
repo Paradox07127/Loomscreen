@@ -1091,15 +1091,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         uniforms.pointerClick = mtkView.clickCaptureEnabled ? mtkView.pointerFrame : .neutral
         previousPointer = pointer
         lastRuntimeUniforms = uniforms
-        let currentTextures = texturesForCurrentFrame(time: uniforms.time)
-        let frame = try executor.render(
-            pipeline: pipeline,
-            size: sceneRenderSize,
-            textures: currentTextures,
-            runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms,
-            sceneID: descriptor.workshopID
-        )
+        // Particles tick (CPU sim) BEFORE the layer composite so the executor can
+        // interleave their draws at each system's scene paint index.
         if !particleSystems.isEmpty {
             // Cursor in the centered render frame (Y-up), or nil when Follow
             // Cursor is off — drives pointer-locked particle control points
@@ -1130,14 +1123,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 }
                 system.tick(now: uniforms.time)
             }
-            try executor.drawParticles(
-                systems: particleSystems,
-                texturesByMaterial: particleTextures,
-                sceneSize: sceneRenderSize,
-                output: frame,
-                cameraParallax: parallaxFrame
-            )
         }
+        let currentTextures = texturesForCurrentFrame(time: uniforms.time)
+        let frame = try executor.render(
+            pipeline: pipeline,
+            size: sceneRenderSize,
+            textures: currentTextures,
+            runtimeUniforms: uniforms,
+            cameraUniforms: cameraUniforms,
+            sceneID: descriptor.workshopID,
+            particleSystems: particleSystems,
+            particleTextures: particleTextures,
+            particleParallax: parallaxFrame
+        )
         if let textRenderer, !textObjects.isEmpty {
             // CoreText draws for objects that don't take the MSDF path this frame.
             var draws: [WPETextOverlayDraw] = []
@@ -1375,7 +1373,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 ancestry: [],
                 parentSystem: nil,
                 followFromParent: false,
-                object: object
+                object: object,
+                sortIndex: document.objectPaintOrder[object.id] ?? 0
             )
         }
     }
@@ -1393,7 +1392,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         ancestry: [String],
         parentSystem: WPEParticleSystem?,
         followFromParent: Bool,
-        object: WPESceneParticleObject
+        object: WPESceneParticleObject,
+        sortIndex: Int
     ) async {
         guard ancestry.count < 16 else {
             debugStage("particle", "skip \(object.name) — particle child depth limit reached at: \(path)")
@@ -1418,7 +1418,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 object: object,
                 particlePath: particlePath,
                 followParent: followFromParent ? parentSystem : nil,
-                requiresFollowParent: followFromParent
+                requiresFollowParent: followFromParent,
+                sortIndex: sortIndex
             )
         } else {
             registered = nil
@@ -1438,7 +1439,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 ancestry: childAncestry,
                 parentSystem: childParentSystem,
                 followFromParent: child.isEventFollow,
-                object: object
+                object: object,
+                sortIndex: sortIndex
             )
         }
     }
@@ -1464,7 +1466,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         object: WPESceneParticleObject,
         particlePath: String,
         followParent: WPEParticleSystem? = nil,
-        requiresFollowParent: Bool = false
+        requiresFollowParent: Bool = false,
+        sortIndex: Int = 0
     ) async -> WPEParticleSystem? {
         let material = definition.materialRelativePath
             .flatMap(parseParticleMaterial(at:))
@@ -1536,6 +1539,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             spriteSheet: spriteSheet
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
+        system.sortIndex = sortIndex
         if requiresFollowParent {
             system.followParent = followParent
             system.requiresFollowParent = true

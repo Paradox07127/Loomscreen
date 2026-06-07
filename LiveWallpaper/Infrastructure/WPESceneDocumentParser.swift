@@ -59,11 +59,16 @@ enum WPESceneDocumentParser {
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
         var soundObjects: [WPESceneSoundObject] = []
+        var objectPaintOrder: [String: Int] = [:]
 
-        for entry in rawObjects {
+        for (index, entry) in rawObjects.enumerated() {
             let objectName = entry["name"] as? String ?? "?"
             let resolution = objectKindResolution(for: entry)
-            let transform = objectID(in: entry).flatMap { objectTransforms[$0] }
+            let entryID = objectID(in: entry)
+            if let entryID {
+                objectPaintOrder[entryID] = index
+            }
+            let transform = entryID.flatMap { objectTransforms[$0] }
                 ?? localTransform(in: entry)
             if resolution.isAmbiguous {
                 let declared = resolution.candidates.map(\.rawValue).joined(separator: ", ")
@@ -141,6 +146,7 @@ enum WPESceneDocumentParser {
             particleObjects: particleObjects,
             textObjects: textObjects,
             soundObjects: soundObjects,
+            objectPaintOrder: objectPaintOrder,
             propertyBindings: propertyBindings,
             diagnostics: diagnostics
         )
