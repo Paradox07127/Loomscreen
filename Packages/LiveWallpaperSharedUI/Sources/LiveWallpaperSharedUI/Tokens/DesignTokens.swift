@@ -109,10 +109,6 @@ public enum DesignTokens {
         }
     }
 
-    public enum PreviewArea {
-        public static let minWidth: CGFloat = 480
-    }
-
     public enum Sidebar {
         public static let width: CGFloat = 210
         public static let maxWidth: CGFloat = width * 1.15

@@ -125,7 +125,7 @@ struct ScreenDetailView: View {
     /// The current content actually exposes an inspector worth showing.
     private var inspectorApplicable: Bool { derivedState.showsInspector }
     /// Final visibility = applicable AND the user hasn't collapsed the panel
-    /// from the header toggle.
+    /// from the toolbar toggle.
     private var showsInspector: Bool { inspectorApplicable && inspectorUserVisible }
     private var showsHeaderWallpaperActions: Bool { derivedState.showsHeaderWallpaperActions }
 
@@ -188,17 +188,25 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
-    /// User-driven show/hide for the properties panel (header toggle). Persisted
-    /// so a collapsed inspector stays collapsed across launches.
+    /// User-driven show/hide for the properties panel (toolbar toggle).
+    /// Persisted so a collapsed inspector stays collapsed across launches.
     @AppStorage("Inspector.Visible") private var inspectorUserVisible = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GeometryReader { geo in
-            detailLayout(available: geo.size.width)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-        }
+        ResizableInspectorSplit(
+            isMounted: inspectorApplicable,
+            isVisible: showsInspector,
+            // Keyed on the user toggle, not `showsInspector`, so switching
+            // wallpaper type (which flips `inspectorApplicable`) stays instant.
+            animationTrigger: AnyHashable(inspectorUserVisible),
+            reduceMotion: reduceMotion,
+            storedWidth: $inspectorWidth,
+            liveWidth: $liveInspectorWidth,
+            main: { mainColumn },
+            inspector: { width in inspectorPanel(width: width) }
+        )
         .background(DesignTokens.Colors.pageBackground)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -253,62 +261,8 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Detail body: a full-height main column (header + preview) with the
-    /// inspector as a full-height sibling on the trailing edge — so the panel
-    /// rises all the way to the header band instead of starting below it.
-    ///
-    /// Widths resolve against the live container width, so showing/hiding or
-    /// resizing the inspector only redistributes the detail's own width. It
-    /// never pushes a larger minimum onto the split view, which is what used to
-    /// steal width from the sidebar and overflow the toolbar into `»`.
-    @ViewBuilder
-    private func detailLayout(available: CGFloat) -> some View {
-        let fullWidth = resolvedInspectorWidth(available: available)
-        // The panel is MOUNTED whenever the content has an inspector; only its
-        // visible width animates between 0 and `fullWidth`. Keeping the heavy
-        // panel (ScrollView + async schema cards) built means toggling animates
-        // a single width value instead of rebuilding the subtree on the same
-        // frame the animation starts — which is what used to stutter on expand.
-        let shownWidth = showsInspector ? fullWidth : 0
-        HStack(spacing: 0) {
-            mainColumn
-                .frame(width: max(0, available - shownWidth))
-
-            if inspectorApplicable {
-                inspectorPanel(width: fullWidth)
-                    .frame(width: shownWidth, alignment: .leading)
-                    .clipped()
-                    .allowsHitTesting(showsInspector)
-                    .accessibilityHidden(!showsInspector)
-                    .overlay(alignment: .leading) {
-                        if showsInspector {
-                            InspectorResizeHandle(
-                                width: fullWidth,
-                                minWidth: DesignTokens.Inspector.minWidth,
-                                maxWidth: inspectorMaxWidth(available: available),
-                                onPreviewWidthChange: previewInspectorWidth,
-                                onCommitWidth: commitInspectorWidth
-                            )
-                            .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
-                        }
-                    }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
-        .transaction(value: liveInspectorWidth) { $0.animation = nil }
-        // Glide the width only when the user toggles the panel — keyed on
-        // `inspectorUserVisible`, not `showsInspector`, so switching wallpaper
-        // type (which flips `inspectorApplicable`) stays instant, and a drag
-        // resize (liveInspectorWidth) stays un-sprung via the transactions above.
-        .animation(
-            reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0.04),
-            value: inspectorUserVisible
-        )
-    }
-
-    /// Header + runtime banner + preview, stacked vertically. Sized to the
-    /// remaining width once the inspector takes its slice.
+    /// Header + runtime banner + preview, stacked vertically. The split sizes
+    /// this to the remaining width once the inspector takes its slice.
     private var mainColumn: some View {
         VStack(spacing: 0) {
             screenHeader
@@ -388,27 +342,6 @@ struct ScreenDetailView: View {
         )
     }
 
-    /// Smallest preview slice we keep visible no matter how wide the inspector
-    /// is dragged — guarantees the main column never collapses under the panel
-    /// or spills content past the window edge.
-    private let inspectorPreviewFloor: CGFloat = 360
-
-    /// Largest inspector width that still leaves the preview its floor, clamped
-    /// to the design min/max. At the window's minimum width this stays well
-    /// inside the detail column, so the inspector never demands extra room.
-    private func inspectorMaxWidth(available: CGFloat) -> CGFloat {
-        let room = available - inspectorPreviewFloor
-        return min(DesignTokens.Inspector.maxWidth, max(DesignTokens.Inspector.minWidth, room))
-    }
-
-    /// The inspector's rendered width: the stored/live width clamped into
-    /// `[minWidth, inspectorMaxWidth(available:)]`.
-    private func resolvedInspectorWidth(available: CGFloat) -> CGFloat {
-        let stored = CGFloat(liveInspectorWidth ?? inspectorWidth)
-        let cap = inspectorMaxWidth(available: available)
-        return min(max(stored, DesignTokens.Inspector.minWidth), cap)
-    }
-
     private var dropFailurePresented: Binding<Bool> {
         Binding(
             get: { dropFailure != nil },
@@ -446,29 +379,6 @@ struct ScreenDetailView: View {
         ) {
             screenManager.resetDisplaySettings(for: screen)
         }
-    }
-
-    private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
-        min(max(width, DesignTokens.Inspector.minWidth), DesignTokens.Inspector.maxWidth)
-    }
-
-    private func previewInspectorWidth(_ width: CGFloat) {
-        withoutResizeAnimation {
-            liveInspectorWidth = Double(clampedInspectorWidth(width))
-        }
-    }
-
-    private func commitInspectorWidth(_ width: CGFloat) {
-        withoutResizeAnimation {
-            inspectorWidth = Double(clampedInspectorWidth(width))
-            liveInspectorWidth = nil
-        }
-    }
-
-    private func withoutResizeAnimation(_ update: () -> Void) {
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
-        withTransaction(transaction, update)
     }
 
     // MARK: - Drag and Drop
