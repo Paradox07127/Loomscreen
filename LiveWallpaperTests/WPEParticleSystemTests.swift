@@ -702,6 +702,43 @@ struct WPEParticleSystemTests {
         #expect(def.usesPointer == true)            // attractor references pointer-locked id 1
     }
 
+    @Test("controlpointattract repels particles away from a pointer-locked cursor (scene 3554161528 mechanism)")
+    func cursorRepelPushesParticlesAway() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            controlPoints: [
+                WPEParticleControlPoint(id: 0, offset: SIMD3(0, 0, 0), pointerLocked: false),
+                WPEParticleControlPoint(id: 1, offset: SIMD3(0, 0, 0), pointerLocked: true)
+            ],
+            attractors: [
+                WPEParticleControlPointAttractor(controlPointID: 1, scale: -1000, threshold: 200)
+            ]
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        // Cursor just to the right of the spawn origin (0,0); a negative-scale
+        // attractor must push the particle LEFT (away from the +x cursor).
+        system.pointerCentered = SIMD2<Float>(20, 0)
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        let x0 = pointer[0].positionAndSize.x
+        for step in 2...6 { system.tick(now: Double(step) * 0.05) }
+        let x1 = pointer[0].positionAndSize.x
+        #expect(x1 < x0)                                  // repelled away from the cursor
+        #expect(system.lastAttractorAffectedCount >= 1)   // attractor actually fired
+        #expect(system.cursorDebugSummary() != nil)       // reports as cursor-reactive
+    }
+
     @Test("Pointer-locked emitter spawns particles at the cursor")
     func pointerLockedEmitterSpawnsAtCursor() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

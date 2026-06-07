@@ -195,6 +195,10 @@ final class WPEParticleSystem {
     private let pointerLockedControlPointIDs: Set<Int>
 
     private var aliveCount: Int = 0
+    /// Diagnostic (for `WPEParticleCursorDebug`): how many particles a
+    /// control-point attractor pushed/pulled on the last tick. With attractors
+    /// present and a live pointer, 0 means nothing is landing in range.
+    private(set) var lastAttractorAffectedCount = 0
     private var particles: [Particle]
     private var spawnAccumulator: Double = 0
     /// One-shot guard for the emitter's `instantaneous` burst, which fires the
@@ -347,6 +351,21 @@ final class WPEParticleSystem {
             return SIMD3<Float>(p.x, p.y, 0) + sceneTransform.applyModelDirection(rawOffset)
         }
         return sceneTransform.applyModelMatrix(toLocalPoint: rawOffset)
+    }
+
+    /// One-line cursor-reactivity snapshot for the `WPEParticleCursorDebug`
+    /// flag; `nil` for systems with no cursor interaction. Reports whether the
+    /// pointer-locked control point resolves (i.e. the cursor is live) and how
+    /// many particles the attractors actually moved last tick.
+    func cursorDebugSummary() -> String? {
+        guard !attractors.isEmpty || !pointerLockedControlPointIDs.isEmpty else { return nil }
+        func fmt(_ v: SIMD3<Float>?) -> String {
+            v.map { "(\(Int($0.x)),\(Int($0.y)))" } ?? "nil"
+        }
+        let lockedCPs = pointerLockedControlPointIDs.sorted()
+        let resolved = lockedCPs.map { "cp\($0)=\(fmt(controlPointPosition($0)))" }.joined(separator: " ")
+        return "alive=\(aliveCount) attractors=\(attractors.count) "
+            + "pointerLocked=[\(resolved)] affectedLastTick=\(lastAttractorAffectedCount)"
     }
 
     private func uniform(_ low: Double, _ high: Double) -> Double {
@@ -542,6 +561,7 @@ final class WPEParticleSystem {
         let turbulenceEnabled = definition.turbulenceSpeedMax > 0
         let elapsedFloat = Float(elapsed)
 
+        var attractorAffectedThisTick = 0
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
             particles[index].age += dt
@@ -557,6 +577,7 @@ final class WPEParticleSystem {
             // to zero at `threshold`, in the scene plane.
             if !attractors.isEmpty {
                 let pos = particles[index].position
+                var affectedThisParticle = false
                 for attractor in attractors {
                     guard let cp = controlPointPosition(attractor.controlPointID) else { continue }
                     let dx = cp.x - pos.x
@@ -568,7 +589,9 @@ final class WPEParticleSystem {
                     let accel = Float(attractor.scale) * falloff / dist
                     particles[index].velocity.x += dx * accel * dt
                     particles[index].velocity.y += dy * accel * dt
+                    affectedThisParticle = true
                 }
+                if affectedThisParticle { attractorAffectedThisTick += 1 }
             }
             var step = particles[index].velocity
             if turbulenceEnabled && particles[index].turbulenceSpeed > 0 {
@@ -590,6 +613,7 @@ final class WPEParticleSystem {
             if angularDragScalar < 1 { particles[index].angularVelocityZ *= angularDragScalar }
             particles[index].rotationZ += particles[index].angularVelocityZ * dt
         }
+        lastAttractorAffectedCount = attractorAffectedThisTick
 
         if elapsed >= definition.startDelay {
             // One-time `instantaneous` burst (explosions, fireworks, initial

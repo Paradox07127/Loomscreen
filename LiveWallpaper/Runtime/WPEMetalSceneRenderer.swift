@@ -89,6 +89,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// audio-reactive scenes that don't move.
     private let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
     private var audioDiagCounter = 0
+    /// `defaults write Taijia.LiveWallpaper WPEParticleCursorDebug -bool YES`:
+    /// logs (~1/s) the sampled cursor + each cursor-reactive particle system's
+    /// resolved control-point position and how many particles its attractors
+    /// actually pushed last tick — disambiguates "no cursor sampled" from
+    /// "cursor sampled but force feels wrong".
+    private let cursorDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEParticleCursorDebug")
+    private var cursorDiagCounter = 0
     /// Last throttle state we logged, so a focus/unfocus transition (which
     /// flips the scene between 60 FPS and `throttledPreferredFPS` = 1) emits a
     /// line immediately instead of waiting out the per-60-frame cadence. This
@@ -1122,6 +1129,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
                 }
                 system.tick(now: uniforms.time)
+            }
+            if cursorDebugLogEnabled {
+                cursorDiagCounter += 1
+                if cursorDiagCounter % 60 == 1 {
+                    let ptr = particlePointer.map { "(\(Int($0.x)),\(Int($0.y)))" }
+                        ?? "nil (mouseInteraction off / off-view)"
+                    let lines = particleSystems.enumerated().compactMap { i, system in
+                        system.cursorDebugSummary().map { "  [\(i)] \($0)" }
+                    }
+                    let body = lines.isEmpty
+                        ? " — no cursor-reactive systems in this scene"
+                        : "\n" + lines.joined(separator: "\n")
+                    Logger.notice("[WPEParticleCursorDebug] pointer=\(ptr)\(body)", category: .wpeRender)
+                }
             }
         }
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
