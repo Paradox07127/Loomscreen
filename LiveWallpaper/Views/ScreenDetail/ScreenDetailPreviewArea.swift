@@ -52,7 +52,11 @@ struct ScreenDetailPreviewArea: View {
                 #endif
             }
         }
-        .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
+        // No hard minWidth: the parent assigns this area an explicit width
+        // (container width minus the inspector slice), so the content must
+        // compress to fit rather than demand a floor that would overflow the
+        // window or steal width from the sidebar.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
         .overlay {
             dragHintOverlay

@@ -9,6 +9,12 @@ struct ScreenDetailHeader: View {
     let wallpaperSessionSummary: WallpaperSessionSummary
     let reduceMotion: Bool
     let showsHeaderWallpaperActions: Bool
+    /// Whether the current content has a properties panel to toggle. Hides the
+    /// toggle button entirely for types without an inspector (e.g. shader).
+    var canToggleInspector: Bool = false
+    /// User-driven show/hide for the properties panel. Toggling only compresses
+    /// the preview area beside it — the top buttons keep their arrangement.
+    @Binding var inspectorVisible: Bool
     @Binding var showBookmarks: Bool
     let onReload: () -> Void
     let onApplyToAll: () -> Void
@@ -114,6 +120,24 @@ struct ScreenDetailHeader: View {
                         .controlSize(.regular)
                         .help(Text(clearHelpText))
                         .accessibilityLabel(Text(clearAccessibilityLabel))
+                    }
+
+                    // Properties-panel toggle. Lives in the header (not the
+                    // window toolbar) so flipping it never reflows the toolbar
+                    // into a `»` overflow — it only compresses the preview.
+                    if canToggleInspector {
+                        Button {
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                                inspectorVisible.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "sidebar.right")
+                        }
+                        .adaptiveGlassButton(inspectorVisible ? .prominent : .regular)
+                        .controlSize(.regular)
+                        .help(Text(inspectorVisible ? "Hide the properties panel" : "Show the properties panel"))
+                        .accessibilityLabel(Text("Toggle properties panel"))
+                        .accessibilityHint(Text("Show or hide the wallpaper properties on the right"))
                     }
                 }
             }
