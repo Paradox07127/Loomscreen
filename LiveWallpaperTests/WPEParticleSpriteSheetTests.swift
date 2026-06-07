@@ -25,6 +25,23 @@ struct WPEParticleSpriteSheetTests {
         #expect(sheet.frameCount == 30)
         #expect(abs(sheet.baseFrameRate - 30) < 0.001)
         #expect(sheet.isAlphaMask == false)
+        #expect(sheet.frameRects == nil)
+    }
+
+    @Test("Explicit frame-rect sheets derive frame count from the rects")
+    func explicitFrameRectsDeriveFrameCount() throws {
+        let rects = [
+            SIMD4<Float>(0, 0, 0.25, 0.5),
+            SIMD4<Float>(0.25, 0, 0.5, 0.5)
+        ]
+        let sheet = WPEParticleSpriteSheet(
+            cols: 1, rows: 1, frameCount: 99, baseFrameRate: 10, isAlphaMask: false, frameRects: rects
+        )
+        #expect(sheet.frameCount == 2)
+        #expect(sheet.frameRects == rects)
+        #expect(sheet == WPEParticleSpriteSheet(
+            cols: 1, rows: 1, frameCount: 2, baseFrameRate: 10, isAlphaMask: false, frameRects: rects
+        ))
     }
 
     @Test("Parses fog1.tex-json into 8×8 / 64 frame / r8 mask sheet")

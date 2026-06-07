@@ -114,22 +114,51 @@ struct WPETexAnimatedTextureSourceTests {
         #expect(source.texture(at: 0.2) === textures[2])
     }
 
-    private func makeTexture(device: MTLDevice, value: UInt8) throws -> MTLTexture {
+    @MainActor
+    @Test("Normalizes TEXS source sub-rects against atlas dimensions")
+    func normalizesSourceSubRectsForParticleSpriteSheets() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let atlas = try makeTexture(device: device, value: 0, width: 100, height: 50)
+        let frames = [
+            WPETexAnimatedFrame(texture: atlas, sourceSubRect: CGRect(x: 0, y: 0, width: 25, height: 25), duration: 0.1),
+            WPETexAnimatedFrame(texture: atlas, sourceSubRect: CGRect(x: 25, y: 0, width: 25, height: 25), duration: 0.1),
+            WPETexAnimatedFrame(texture: atlas, sourceSubRect: CGRect(x: 0, y: 25, width: 25, height: 25), duration: 0.1)
+        ]
+        let source = WPETexAnimatedTextureSource(frames: frames, frameRate: 10, loop: true)
+
+        #expect(source.spriteSheetFrameRate == 10)
+        #expect(source.spriteSheetFrameRectsNormalized() == [
+            SIMD4<Float>(0, 0, 0.25, 0.5),
+            SIMD4<Float>(0.25, 0, 0.5, 0.5),
+            SIMD4<Float>(0, 0.5, 0.25, 1.0)
+        ])
+    }
+
+    private func makeTexture(
+        device: MTLDevice,
+        value: UInt8,
+        width: Int = 1,
+        height: Int = 1
+    ) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
-            width: 1,
-            height: 1,
+            width: width,
+            height: height,
             mipmapped: false
         )
         descriptor.usage = [.shaderRead]
         descriptor.storageMode = .shared
         let texture = try #require(device.makeTexture(descriptor: descriptor))
-        var bytes = [value, 0, 0, 255]
+        var bytes = Array(repeating: UInt8(0), count: width * height * 4)
+        for offset in stride(from: 0, to: bytes.count, by: 4) {
+            bytes[offset] = value
+            bytes[offset + 3] = 255
+        }
         texture.replace(
-            region: MTLRegionMake2D(0, 0, 1, 1),
+            region: MTLRegionMake2D(0, 0, width, height),
             mipmapLevel: 0,
             withBytes: &bytes,
-            bytesPerRow: 4
+            bytesPerRow: width * 4
         )
         return texture
     }

@@ -74,6 +74,29 @@ final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
         return frames[frameIndex(at: time)].texture
     }
 
+    /// TEXS frame rate, surfaced for particle sprite sheets built from the
+    /// `.tex` animation track (no `.tex-json` sidecar).
+    var spriteSheetFrameRate: Double { frameRate }
+
+    /// Per-frame sub-rects normalized to `[0, 1]` UV against the atlas
+    /// dimensions, for particle sprite-sheet slicing. Returns `[]` if any
+    /// frame lacks a sub-rect (the whole-atlas / single-frame case).
+    func spriteSheetFrameRectsNormalized() -> [SIMD4<Float>] {
+        guard !frames.isEmpty else { return [] }
+        var rects: [SIMD4<Float>] = []
+        rects.reserveCapacity(frames.count)
+        for frame in frames {
+            guard let rect = frame.sourceSubRect else { return [] }
+            let atlasWidth = CGFloat(max(frame.texture.width, 1))
+            let atlasHeight = CGFloat(max(frame.texture.height, 1))
+            rects.append(SIMD4<Float>(
+                Float(rect.minX / atlasWidth), Float(rect.minY / atlasHeight),
+                Float(rect.maxX / atlasWidth), Float(rect.maxY / atlasHeight)
+            ))
+        }
+        return rects
+    }
+
     func frameIndex(at time: TimeInterval) -> Int {
         guard !frames.isEmpty else { return 0 }
         let bounded: TimeInterval

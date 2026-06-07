@@ -580,6 +580,7 @@ struct WPEParticleProjection {
 // reads colour from the per-particle tint instead of the texture.
 struct WPEParticleSpriteParams {
     float4 grid;              // x=cols, y=rows, z=frameCount, w=isAlphaMask
+    float4 frameRectMode;     // x=use explicit rects, y=rect count
 };
 
 vertex WPEParticleVertexOut wpe_particle_vertex(
@@ -587,7 +588,8 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     uint instanceID [[instance_id]],
     constant WPEParticleInstance* instances [[buffer(1)]],
     constant WPEParticleProjection& projection [[buffer(2)]],
-    constant WPEParticleSpriteParams& sprite [[buffer(3)]]
+    constant WPEParticleSpriteParams& sprite [[buffer(3)]],
+    constant float4* frameRects [[buffer(4)]]
 ) {
     float2 corner;
     float2 unitUV;
@@ -631,26 +633,41 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     float cols = max(sprite.grid.x, 1.0);
     float rows = max(sprite.grid.y, 1.0);
     float frameCount = max(sprite.grid.z, 1.0);
+    bool useFrameRects = sprite.frameRectMode.x > 0.5 && sprite.frameRectMode.y > 0.5;
+    float frameRectCount = max(sprite.frameRectMode.y, 1.0);
+    if (useFrameRects) {
+        frameCount = min(frameCount, frameRectCount);
+    }
     float2 frameUVScale = float2(1.0 / cols, 1.0 / rows);
     float frameContinuous = instance.rotationAndLife.z;
     float frameLo = floor(frameContinuous);
     float blend = frameContinuous - frameLo;
     float frameHi = (frameLo + 1.0 >= frameCount) ? 0.0 : (frameLo + 1.0);
 
+    uint frameCountI = max(uint(frameCount), 1u);
     uint colsI = max(uint(cols), 1u);
-    uint frameLoI = uint(frameLo);
-    uint colLo = frameLoI % colsI;
-    uint rowLo = frameLoI / colsI;
-    uint frameHiI = uint(frameHi);
-    uint colHi = frameHiI % colsI;
-    uint rowHi = frameHiI / colsI;
-    float2 uvOriginLo = float2(float(colLo), float(rowLo)) * frameUVScale;
-    float2 uvOriginHi = float2(float(colHi), float(rowHi)) * frameUVScale;
+    uint frameLoI = min(uint(frameLo), frameCountI - 1u);
+    uint frameHiI = min(uint(frameHi), frameCountI - 1u);
 
     WPEParticleVertexOut out;
     out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
-    out.uvCurrent = uvOriginLo + unitUV * frameUVScale;
-    out.uvNext = uvOriginHi + unitUV * frameUVScale;
+    if (useFrameRects) {
+        // Explicit TEXS sub-rects (x0,y0,x1,y1) in normalized UV. mix() maps
+        // the quad's unit corners into the frame's rect.
+        float4 rLo = frameRects[frameLoI];
+        float4 rHi = frameRects[frameHiI];
+        out.uvCurrent = mix(rLo.xy, rLo.zw, unitUV);
+        out.uvNext = mix(rHi.xy, rHi.zw, unitUV);
+    } else {
+        uint colLo = frameLoI % colsI;
+        uint rowLo = frameLoI / colsI;
+        uint colHi = frameHiI % colsI;
+        uint rowHi = frameHiI / colsI;
+        float2 uvOriginLo = float2(float(colLo), float(rowLo)) * frameUVScale;
+        float2 uvOriginHi = float2(float(colHi), float(rowHi)) * frameUVScale;
+        out.uvCurrent = uvOriginLo + unitUV * frameUVScale;
+        out.uvNext = uvOriginHi + unitUV * frameUVScale;
+    }
     out.frameBlend = blend;
     out.color = instance.color;
     return out;

@@ -1449,11 +1449,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             return
         }
         let texture: MTLTexture?
+        let animatedTextureSource: WPETexAnimatedTextureSource?
         switch texturePayload {
         case .staticTexture(let t):
             texture = t
+            animatedTextureSource = nil
         case .dynamicSource(let source):
             texture = source.texture(at: 0)
+            animatedTextureSource = source as? WPETexAnimatedTextureSource
         }
         guard let resolved = texture else {
             debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
@@ -1463,6 +1466,25 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             texturePath: texturePath,
             atlasPixelSize: (width: resolved.width, height: resolved.height)
         )
+        // No `.tex-json` sidecar (or a single-frame one) but the `.tex` carries
+        // a TEXS animation track: slice the atlas by the decoded per-frame
+        // sub-rects. This is the Matrix-glyph case — frames live in the TEXS
+        // chunk, not a sidecar, so the uniform-grid path would draw the whole
+        // atlas as one quad.
+        if spriteSheet == nil || (spriteSheet?.frameCount ?? 1) <= 1,
+           let animatedTextureSource {
+            let frameRects = animatedTextureSource.spriteSheetFrameRectsNormalized()
+            if !frameRects.isEmpty {
+                spriteSheet = WPEParticleSpriteSheet(
+                    cols: 1,
+                    rows: 1,
+                    frameCount: frameRects.count,
+                    baseFrameRate: animatedTextureSource.spriteSheetFrameRate,
+                    isAlphaMask: resolved.pixelFormat == .r8Unorm,
+                    frameRects: frameRects
+                )
+            }
+        }
         // Defensive: an R8 particle texture whose `.tex-json` sidecar is
         // missing/invalid would otherwise fall through to the non-mask path
         // and sample `.r8Unorm` alpha as 1 → an opaque quad (the RG88

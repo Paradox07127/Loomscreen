@@ -13,19 +13,37 @@ import Foundation
 public struct WPEParticleSpriteSheet: Sendable, Equatable {
     public let cols: Int
     public let rows: Int
+    /// Number of frames the particle simulator cycles through. When
+    /// `frameRects` is present this is derived from `frameRects.count` so the
+    /// CPU frame index and the GPU rect lookup cannot diverge.
     public let frameCount: Int
     /// Frames-per-second baseline from the `.tex-json` (sequence
     /// `frames / duration`). The runtime multiplies this by the
     /// particle JSON's `sequencemultiplier` to derive the live frame.
     public let baseFrameRate: Double
     public let isAlphaMask: Bool
+    /// Explicit normalized UV rects, one per frame, in top-left texture
+    /// coordinates `(x0, y0, x1, y1)`. TEXS-backed atlases (e.g. the Matrix
+    /// glyph sheet) don't fill the texture as a uniform `cols × rows` grid, so
+    /// the Metal vertex path slices by these rects when present. `nil` ⇒ the
+    /// uniform-grid path.
+    public let frameRects: [SIMD4<Float>]?
 
-    public init(cols: Int, rows: Int, frameCount: Int, baseFrameRate: Double, isAlphaMask: Bool) {
+    public init(
+        cols: Int,
+        rows: Int,
+        frameCount: Int,
+        baseFrameRate: Double,
+        isAlphaMask: Bool,
+        frameRects: [SIMD4<Float>]? = nil
+    ) {
+        let resolvedRects = (frameRects?.isEmpty == false) ? frameRects : nil
         self.cols = max(1, cols)
         self.rows = max(1, rows)
-        self.frameCount = max(1, frameCount)
+        self.frameCount = resolvedRects?.count ?? max(1, frameCount)
         self.baseFrameRate = max(0, baseFrameRate)
         self.isAlphaMask = isAlphaMask
+        self.frameRects = resolvedRects
     }
 }
 

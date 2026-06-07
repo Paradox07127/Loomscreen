@@ -538,13 +538,33 @@ final class WPEMetalRenderExecutor {
             projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
-            var sprite = WPEParticleSpriteParams(grid: SIMD4<Float>(
-                Float(system.spriteSheet?.cols ?? 1),
-                Float(system.spriteSheet?.rows ?? 1),
-                Float(system.spriteSheet?.frameCount ?? 1),
-                (system.spriteSheet?.isAlphaMask ?? false) ? 1 : 0
-            ))
+            let frameRects = system.spriteSheet?.frameRects
+            let useFrameRects = frameRects?.isEmpty == false
+            var sprite = WPEParticleSpriteParams(
+                grid: SIMD4<Float>(
+                    Float(system.spriteSheet?.cols ?? 1),
+                    Float(system.spriteSheet?.rows ?? 1),
+                    Float(system.spriteSheet?.frameCount ?? 1),
+                    (system.spriteSheet?.isAlphaMask ?? false) ? 1 : 0
+                ),
+                frameRectMode: SIMD4<Float>(
+                    useFrameRects ? 1 : 0,
+                    Float(frameRects?.count ?? 0),
+                    0,
+                    0
+                )
+            )
             encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
+            // Buffer(4) must always be bound for the vertex function's signature;
+            // a 1-element dummy covers the uniform-grid path.
+            if let frameRects, useFrameRects {
+                frameRects.withUnsafeBytes { rectBytes in
+                    encoder.setVertexBytes(rectBytes.baseAddress!, length: rectBytes.count, index: 4)
+                }
+            } else {
+                var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
+                encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)
+            }
             encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
             encoder.setFragmentTexture(texture, index: 0)
             encoder.drawPrimitives(
@@ -581,8 +601,12 @@ final class WPEMetalRenderExecutor {
     /// `grid.w = 1` flags an r8 alpha-mask atlas (fog particles) so the
     /// fragment shader pulls colour from the per-particle tint and uses
     /// the texture sample only as the opacity.
+    ///
+    /// `frameRectMode.x = 1` switches the vertex shader from uniform-grid
+    /// slicing to explicit `frameRects` from buffer(4); `.y` is the rect count.
     struct WPEParticleSpriteParams {
         var grid: SIMD4<Float>
+        var frameRectMode: SIMD4<Float>
     }
 
     /// Phase 2D-N: composite a list of pre-rasterized text overlays on top of the supplied output texture.
