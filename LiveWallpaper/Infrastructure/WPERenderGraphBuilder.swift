@@ -730,11 +730,25 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
-        path.lowercased() == "models/util/solidlayer.json"
+        Self.builtinSolidLayerDepthTest(forModelPath: path) != nil
+    }
+
+    /// The two bundled solid-layer models (`solidlayer.json` and its depth-test
+    /// variant) are both `"solidlayer": true`. Returns the pass's depth-test
+    /// state for a recognized solid-layer model path, or nil otherwise.
+    private static func builtinSolidLayerDepthTest(forModelPath path: String) -> String? {
+        switch path.lowercased() {
+        case "models/util/solidlayer.json":
+            return "disabled"
+        case "models/util/solidlayer_depthtest.json":
+            return "enabled"
+        default:
+            return nil
+        }
     }
 
     private func builtinMaterial(path: String, object: WPESceneImageObject) throws -> WPEMaterialAsset? {
-        guard path.lowercased() == "models/util/solidlayer.json" else {
+        guard let depthTest = Self.builtinSolidLayerDepthTest(forModelPath: path) else {
             return nil
         }
 
@@ -744,9 +758,14 @@ struct WPERenderGraphBuilder: Sendable {
             passes: [
                 WPEMaterialPass(
                     // Premultiplied render targets: use the `solidlayer` builtin
-                    // (outputs rgb*alpha) rather than `solidcolor` (straight),
-                    // so transparent solid layers composite correctly under the
-                    // premultiplied blend the graph now routes this pass to.
+                    // (outputs rgb*alpha) rather than `solidcolor` (straight), so
+                    // a transparent solid layer (alpha 0) composites to NOTHING
+                    // under the premultiplied blend the graph routes this pass to
+                    // — not an opaque white fill. The `_depthtest` variant only
+                    // differs in depth-test state and must take this path too:
+                    // routing it to the bundled `solidcolor` material blew out
+                    // 3719111841's audio-line base to opaque white, hiding the
+                    // whole background behind the (otherwise correct) line.
                     shader: "solidlayer",
                     textures: [:],
                     constants: [
@@ -755,7 +774,7 @@ struct WPERenderGraphBuilder: Sendable {
                     combos: [:],
                     blending: object.blendMode.rawValue,
                     cullMode: "nocull",
-                    depthTest: "disabled",
+                    depthTest: depthTest,
                     depthWrite: "disabled"
                 )
             ]

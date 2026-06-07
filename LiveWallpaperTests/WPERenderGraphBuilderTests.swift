@@ -839,6 +839,36 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[2].binds[0] == .fbo("blur_start_2"))
     }
 
+    @Test("Both solidlayer model variants use the premultiplied solidlayer builtin")
+    func solidLayerVariantsUsePremultipliedBuiltin() throws {
+        func shaders(forModel model: String) throws -> [String] {
+            let object = WPESceneImageObject(
+                id: "1", name: "solid", imageRelativePath: model,
+                materialRelativePath: nil,
+                origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0), visible: true, alpha: 1,
+                color: SIMD3<Double>(1, 1, 1), brightness: 1, blendMode: .normal,
+                alignment: .center, size: nil, effects: [], animationLayers: [],
+                parallaxDepth: SIMD2<Double>(0, 0)
+            )
+            let document = WPESceneDocument(
+                camera: .defaultCamera, general: .defaultGeneral,
+                imageObjects: [object], diagnostics: []
+            )
+            let graph = try WPERenderGraphBuilder(cacheRootURL: FileManager.default.temporaryDirectory)
+                .build(document: document)
+            return try #require(graph.layers.first).passes.map(\.shader)
+        }
+        // Plain + depth-test variant must BOTH use `solidlayer` (premultiplied,
+        // rgb*alpha) — not `solidcolor` (straight), which paints opaque white
+        // for a transparent base under the premultiplied blend.
+        for model in ["models/util/solidlayer.json", "models/util/solidlayer_depthtest.json"] {
+            let used = try shaders(forModel: model)
+            #expect(used.contains("solidlayer"), "\(model) should use the solidlayer builtin")
+            #expect(!used.contains("solidcolor"), "\(model) must not fall back to solidcolor")
+        }
+    }
+
     @Test("Alpha-0 layer composites to scene only when it carries a visible effect")
     func alphaZeroCompositesWhenItHasAVisibleEffect() {
         func object(alpha: Double, effectVisible: Bool?) -> WPESceneImageObject {
