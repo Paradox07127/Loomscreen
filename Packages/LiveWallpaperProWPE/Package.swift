@@ -20,6 +20,11 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
+        ),
+        .testTarget(
+            name: "LiveWallpaperProWPETests",
+            dependencies: ["LiveWallpaperProWPE"],
+            path: "Tests/LiveWallpaperProWPETests"
         )
     ]
 )

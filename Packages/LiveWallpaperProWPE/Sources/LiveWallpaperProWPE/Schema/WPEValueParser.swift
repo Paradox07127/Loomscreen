@@ -152,8 +152,11 @@ public enum WPEValueParser {
     }
 
     public static func double(_ raw: Any?, boolAsNumber: Bool = false) -> Double? {
-        if boolAsNumber, let bool = strictBool(raw) {
-            return bool ? 1 : 0
+        // A JSON boolean bridges to a CFBoolean-backed NSNumber, so it would otherwise
+        // slip through the `as? NSNumber` path as 0/1 even when the caller asked for a
+        // bool to parse as nil. Resolve it up front: 1/0 only when boolAsNumber, else nil.
+        if let bool = strictBool(raw) {
+            return boolAsNumber ? (bool ? 1 : 0) : nil
         }
         if let number = raw as? NSNumber {
             return number.doubleValue
@@ -171,8 +174,10 @@ public enum WPEValueParser {
     }
 
     public static func int(_ raw: Any?, boolAsNumber: Bool = false) -> Int? {
-        if boolAsNumber, let bool = strictBool(raw) {
-            return bool ? 1 : 0
+        // Mirror `double`: a CFBoolean-backed NSNumber must not slip through the
+        // `as? NSNumber` path as 0/1 when the caller didn't opt into boolAsNumber.
+        if let bool = strictBool(raw) {
+            return boolAsNumber ? (bool ? 1 : 0) : nil
         }
         if let number = raw as? NSNumber {
             return number.intValue
