@@ -393,8 +393,15 @@ final class WPEParticleSystem {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
             let particle = particles[index]
             let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
-            let alpha = particle.alphaBase * envelope
             let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
+            var alpha = particle.alphaBase * envelope
+            if let alphaChange = definition.alphaChange {
+                alpha *= Float(alphaChange.factor(lifetimeFraction: Double(lifetimeFraction)))
+            }
+            if let oscillateAlpha = definition.oscillateAlpha {
+                alpha *= Float(oscillateAlpha.factor(age: Double(particle.age)))
+            }
+            alpha = min(max(alpha, 0), 1)
             let frameIndex: Float
             if animatesSequence {
                 let raw = lifetimeFraction * cyclesPerLifetime * frameCount

@@ -260,6 +260,8 @@ struct WPEParticleSystemTests {
             ],
             "operator": [
                 {"name": "alphafade", "fadeintime": 0.1, "fadeouttime": 0.9},
+                {"name": "alphachange", "starttime": 0, "endtime": 0.8, "startvalue": 1, "endvalue": 0},
+                {"name": "oscillatealpha", "frequency": 0.5, "scale": 0.6, "phasemin": 0.25},
                 {"name": "movement", "gravity": "0 -50 0", "drag": 0.5},
                 {"name": "angularmovement", "force": "0 0 3", "drag": 0.2}
             ]
@@ -274,10 +276,38 @@ struct WPEParticleSystemTests {
         #expect(def.angularVelocityMax.z == 2)
         #expect(def.fadeInSeconds == 0.1)
         #expect(def.fadeOutSeconds == 0.9)
+        let alphaChange = try #require(def.alphaChange)
+        #expect(alphaChange.startTime == 0)
+        #expect(alphaChange.endTime == 0.8)
+        #expect(alphaChange.startValue == 1)
+        #expect(alphaChange.endValue == 0)
+        let oscillateAlpha = try #require(def.oscillateAlpha)
+        #expect(oscillateAlpha.frequency == 0.5)
+        #expect(oscillateAlpha.scale == 0.6)
+        #expect(oscillateAlpha.phase == 0.25)
         #expect(def.gravity.y == -50)
         #expect(def.drag == 0.5)
         #expect(def.angularForceZ == 3)
         #expect(def.angularDrag == 0.2)
+    }
+
+    @Test("alphachange interpolates over lifetime fractions")
+    func alphaChangeInterpolatesOverLifetimeFractions() {
+        let change = WPEParticleAlphaChange(startTime: 0, endTime: 0.8, startValue: 1, endValue: 0)
+        #expect(abs(change.factor(lifetimeFraction: 0) - 1) < 0.0001)
+        #expect(abs(change.factor(lifetimeFraction: 0.4) - 0.5) < 0.0001)
+        #expect(abs(change.factor(lifetimeFraction: 0.8)) < 0.0001)
+        #expect(abs(change.factor(lifetimeFraction: 1)) < 0.0001)
+    }
+
+    @Test("oscillatealpha clamps factor to [0,1]")
+    func oscillateAlphaClampsFactor() {
+        let oscillate = WPEParticleOscillateAlpha(frequency: 1, scale: 2, phase: 0)
+        for age in stride(from: 0.0, through: 1.0, by: 0.05) {
+            let factor = oscillate.factor(age: age)
+            #expect(factor >= 0)
+            #expect(factor <= 1)
+        }
     }
 
     @Test("Angular velocity advances rotationZ over time")
@@ -401,6 +431,44 @@ struct WPEParticleSystemTests {
             .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].color.w
         #expect(early > 0.9)
         #expect(late < early)
+    }
+
+    @Test("alphachange operator reduces written particle alpha over lifetime")
+    func alphaChangeReducesWrittenAlphaOverLifetime() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 1, lifetimeMax: 1,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            alphaChange: WPEParticleAlphaChange(startTime: 0, endTime: 0.8, startValue: 1, endValue: 0)
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        let early = pointer[0].color.w
+
+        for step in 1...4 {
+            system.tick(now: 0.05 + Double(step) * 0.1)
+        }
+        let middle = pointer[0].color.w
+
+        for step in 5...8 {
+            system.tick(now: 0.05 + Double(step) * 0.1)
+        }
+        let late = pointer[0].color.w
+
+        #expect(early > 0.9)
+        #expect(middle < early)
+        #expect(late < 0.05)
     }
 
     @Test("Parser captures turbulence parameters")

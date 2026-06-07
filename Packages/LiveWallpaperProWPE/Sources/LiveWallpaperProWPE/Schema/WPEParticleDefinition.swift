@@ -102,6 +102,53 @@ public struct WPEParticleChildReference: Equatable, Sendable {
     }
 }
 
+/// `alphachange` operator: a lifetime-fraction alpha multiplier ramp from
+/// `startValue` to `endValue` over `[startTime, endTime]` (lifetime fractions).
+public struct WPEParticleAlphaChange: Equatable, Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let startValue: Double
+    public let endValue: Double
+
+    public init(startTime: Double, endTime: Double, startValue: Double, endValue: Double) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.startValue = startValue
+        self.endValue = endValue
+    }
+
+    public func factor(lifetimeFraction: Double) -> Double {
+        let fraction = min(max(lifetimeFraction, 0), 1)
+        let span = endTime - startTime
+        let t: Double
+        if abs(span) < 0.000_001 {
+            t = fraction >= endTime ? 1 : 0
+        } else {
+            t = min(max((fraction - startTime) / span, 0), 1)
+        }
+        return startValue + (endValue - startValue) * t
+    }
+}
+
+/// `oscillatealpha` operator: a sine-wave alpha multiplier clamped to [0, 1].
+public struct WPEParticleOscillateAlpha: Equatable, Sendable {
+    public let frequency: Double
+    public let scale: Double
+    public let phase: Double
+
+    public init(frequency: Double, scale: Double, phase: Double) {
+        self.frequency = frequency
+        self.scale = scale
+        self.phase = phase
+    }
+
+    public func factor(age: Double) -> Double {
+        guard frequency != 0, scale != 0 else { return 1 }
+        let value = 1 + sin((age + phase) * frequency * 2 * Double.pi) * scale
+        return min(max(value, 0), 1)
+    }
+}
+
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
 /// file. Fields cover the subset of the WPE DSL the runtime actually
 /// drives — emitter geometry, the random initializers, and the operator
@@ -144,6 +191,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let angularVelocityMax: SIMD3<Double>
     public let fadeInSeconds: Double
     public let fadeOutSeconds: Double
+    /// `alphachange` operator (lifetime-fraction alpha ramp), if present.
+    public let alphaChange: WPEParticleAlphaChange?
+    /// `oscillatealpha` operator (sine alpha flicker), if present.
+    public let oscillateAlpha: WPEParticleOscillateAlpha?
     /// `operator: movement.gravity` (world units / s²) and drag scalar.
     public let gravity: SIMD3<Double>
     public let drag: Double
@@ -224,6 +275,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         angularVelocityMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         angularVelocityMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         fadeOutSeconds: Double = 0,
+        alphaChange: WPEParticleAlphaChange? = nil,
+        oscillateAlpha: WPEParticleOscillateAlpha? = nil,
         gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         drag: Double = 0,
         angularForceZ: Double = 0,
@@ -271,6 +324,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.angularVelocityMax = angularVelocityMax
         self.fadeInSeconds = fadeInSeconds
         self.fadeOutSeconds = fadeOutSeconds
+        self.alphaChange = alphaChange
+        self.oscillateAlpha = oscillateAlpha
         self.gravity = gravity
         self.drag = drag
         self.angularForceZ = angularForceZ
@@ -336,6 +391,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             angularVelocityMin: angularVelocityMin * speedScale,
             angularVelocityMax: angularVelocityMax * speedScale,
             fadeOutSeconds: fadeOutSeconds,
+            alphaChange: alphaChange,
+            oscillateAlpha: oscillateAlpha,
             gravity: gravity * speedScale,
             drag: drag,
             angularForceZ: angularForceZ * speedScale,
@@ -387,6 +444,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             angularVelocityMin: angularVelocityMin,
             angularVelocityMax: angularVelocityMax,
             fadeOutSeconds: fadeOutSeconds,
+            alphaChange: alphaChange,
+            oscillateAlpha: oscillateAlpha,
             gravity: gravity,
             drag: drag,
             angularForceZ: angularForceZ,
@@ -593,6 +652,8 @@ public enum WPEParticleDefinitionParser {
 
         var fadeInSeconds: Double = 0.1
         var fadeOutSeconds: Double = 0
+        var alphaChange: WPEParticleAlphaChange?
+        var oscillateAlpha: WPEParticleOscillateAlpha?
         var gravity: SIMD3<Double> = SIMD3(0, 0, 0)
         var drag: Double = 0
         var angularForceZ: Double = 0
@@ -615,6 +676,21 @@ public enum WPEParticleDefinitionParser {
                 case "alphafade":
                     fadeInSeconds = WPEValueParser.double(entry["fadeintime"]) ?? fadeInSeconds
                     fadeOutSeconds = WPEValueParser.double(entry["fadeouttime"]) ?? fadeOutSeconds
+                case "alphachange":
+                    alphaChange = WPEParticleAlphaChange(
+                        startTime: WPEValueParser.double(entry["starttime"]) ?? 0,
+                        endTime: WPEValueParser.double(entry["endtime"]) ?? 1,
+                        startValue: WPEValueParser.double(entry["startvalue"]) ?? 1,
+                        endValue: WPEValueParser.double(entry["endvalue"]) ?? 1
+                    )
+                case "oscillatealpha":
+                    let frequency = WPEValueParser.double(entry["frequency"])
+                        ?? WPEValueParser.double(entry["frequencymin"]) ?? 0
+                    let scale = WPEValueParser.double(entry["scale"])
+                        ?? WPEValueParser.double(entry["scalemin"]) ?? 0
+                    let phase = WPEValueParser.double(entry["phase"])
+                        ?? WPEValueParser.double(entry["phasemin"]) ?? 0
+                    oscillateAlpha = WPEParticleOscillateAlpha(frequency: frequency, scale: scale, phase: phase)
                 case "movement":
                     gravity = WPEValueParser.vector3(entry["gravity"]) ?? gravity
                     drag = WPEValueParser.double(entry["drag"]) ?? drag
@@ -669,6 +745,8 @@ public enum WPEParticleDefinitionParser {
             angularVelocityMin: angularVelocityMin,
             angularVelocityMax: angularVelocityMax,
             fadeOutSeconds: max(0, fadeOutSeconds),
+            alphaChange: alphaChange,
+            oscillateAlpha: oscillateAlpha,
             gravity: gravity,
             drag: max(0, drag),
             angularForceZ: angularForceZ,
