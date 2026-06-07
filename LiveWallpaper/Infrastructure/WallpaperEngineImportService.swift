@@ -573,7 +573,12 @@ struct WPECachedContentResolver {
     func content(for origin: WPEOrigin) -> WallpaperContent? {
         switch origin.resourceLocation {
         case .cache:
-            return cacheContent(for: origin)
+            // Cache retirement: rebuild a legacy `.cache` import in place from
+            // its source (video/web via the source folder, scene via the
+            // source-backed scene path inside `cacheContent`). A wallpaper whose
+            // source folder is gone can no longer be rebuilt — the cache was its
+            // only copy; accepted as part of retiring the extraction cache.
+            return sourceFolderContent(for: origin) ?? cacheContent(for: origin)
         case .sourceFolder:
             return sourceFolderContent(for: origin)
         default:
