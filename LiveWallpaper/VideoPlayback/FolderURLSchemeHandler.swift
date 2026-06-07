@@ -156,37 +156,42 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             return
         }
 
-        // Resolve a byte source: an in-place `scene.pkg` entry first (when a
-        // package backend is active), otherwise a loose file under the folder.
+        // Resolve the loose candidate first (rejects path traversal). A loose
+        // file — when it actually exists — wins, preserving plain-folder
+        // semantics for ordinary HTML folders that merely happen to sit next to
+        // a `scene.pkg`. Only paths the folder does NOT have loose fall back to
+        // an in-place package entry (that's the packaged web payload).
+        let primaryURL: URL
+        do {
+            primaryURL = try Self.resolvedFileURL(for: url, inside: activeFolderURL!)
+        } catch {
+            urlSchemeTask.didFailWithError(error)
+            return
+        }
+
         let source: ByteSource
         let mime: String
-        if let resolved = packageByteSource(for: url) {
+        if Self.isRegularFile(primaryURL) {
+            source = .file(primaryURL)
+            mime = Self.mimeType(for: primaryURL)
+        } else if let fallback = Self.oggFallbackURL(for: primaryURL) {
+            if !reportedOggSubstitutions.contains(primaryURL.lastPathComponent) {
+                reportedOggSubstitutions.insert(primaryURL.lastPathComponent)
+                Logger.info(
+                    "FolderScheme: serving \(fallback.lastPathComponent) for \(primaryURL.lastPathComponent) (macOS WebKit Ogg/Opus decoder workaround)",
+                    category: .screenManager
+                )
+            }
+            source = .file(fallback)
+            mime = Self.mimeType(for: fallback)
+        } else if let resolved = packageByteSource(for: url) {
             source = resolved.source
             mime = resolved.mime
         } else {
-            let primaryURL: URL
-            do {
-                primaryURL = try Self.resolvedFileURL(for: url, inside: activeFolderURL!)
-            } catch {
-                urlSchemeTask.didFailWithError(error)
-                return
-            }
-
-            let fileURL: URL
-            if let fallback = Self.oggFallbackURL(for: primaryURL) {
-                if !reportedOggSubstitutions.contains(primaryURL.lastPathComponent) {
-                    reportedOggSubstitutions.insert(primaryURL.lastPathComponent)
-                    Logger.info(
-                        "FolderScheme: serving \(fallback.lastPathComponent) for \(primaryURL.lastPathComponent) (macOS WebKit Ogg/Opus decoder workaround)",
-                        category: .screenManager
-                    )
-                }
-                fileURL = fallback
-            } else {
-                fileURL = primaryURL
-            }
-            source = .file(fileURL)
-            mime = Self.mimeType(for: fileURL)
+            // Nothing loose, nothing in the package: serve the loose candidate
+            // so the worker emits the existing 404 + missing-resource log.
+            source = .file(primaryURL)
+            mime = Self.mimeType(for: primaryURL)
         }
 
         let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range")
@@ -573,6 +578,15 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             bytesRemaining -= chunk.count
             await delivery.deliver(chunk: chunk)
         }
+        // A package entry has a known exact size; a short read means a truncated
+        // or corrupt package, not EOF — surface it instead of a silent success.
+        if bytesRemaining > 0 {
+            throw makeError(.cannotParseResponse, "Package entry truncated by \(bytesRemaining) bytes")
+        }
+    }
+
+    nonisolated private static func isRegularFile(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
     }
 
     private struct ByteRange: Sendable {

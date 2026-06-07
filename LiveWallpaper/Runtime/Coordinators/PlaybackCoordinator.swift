@@ -321,7 +321,10 @@ final class PlaybackCoordinator {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
         let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
+        // Identity is (resolved URL, package entry): two different entries inside
+        // the same scene.pkg resolve to the same URL but are different videos.
         let isSameURL = Self.bookmarkResolves(to: url, bookmark: existing?.videoBookmarkData)
+            && existing?.activeWallpaper.packageVideoEntryName == packageEntryName
 
         let previousContent = existing?.activeWallpaper
         var configuration: ScreenConfiguration
@@ -464,7 +467,8 @@ final class PlaybackCoordinator {
     ) {
         let existingPlayer = screen.videoPlayer
         let needsNewPlayer = existingPlayer == nil ||
-            Self.videoAudioURLKey(for: existingPlayer?.videoURL) != Self.videoAudioURLKey(for: url)
+            Self.videoAudioURLKey(for: existingPlayer?.videoURL) != Self.videoAudioURLKey(for: url) ||
+            existingPlayer?.packageEntryName != configuration.activeWallpaper.packageVideoEntryName
 
         if !needsNewPlayer, let player = existingPlayer {
             let currentTime = preservingState ? player.player?.currentTime() : .zero

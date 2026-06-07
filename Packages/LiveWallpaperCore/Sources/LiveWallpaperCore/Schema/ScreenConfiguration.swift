@@ -7,6 +7,11 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     public var screenID: UInt32
     public var activeWallpaper: WallpaperContent
     public var savedVideoBookmarkData: Data?
+    /// Package entry name paired with `savedVideoBookmarkData` when the saved
+    /// primary is an in-place packaged video (bookmark → `scene.pkg`). Keeps the
+    /// entry across a type swap so restoring the primary doesn't degrade it to a
+    /// raw-package playback. `nil` for a loose saved video.
+    public var savedVideoPackageEntryName: String?
     /// Last applied HTML source — restored on type switch back to HTML.
     public var savedHTMLSource: HTMLSource?
     public var savedHTMLConfig: HTMLConfig?
@@ -64,6 +69,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case screenID
         case activeWallpaper
         case savedVideoBookmarkData
+        case savedVideoPackageEntryName
         case savedHTMLSource
         case savedHTMLConfig
         case playbackSpeed
@@ -113,11 +119,13 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         playlistRotationMinutes: Int? = nil,
         playlistCursorIndex: Int? = nil,
         setAsLockScreen: Bool = false,
-        savedVideoBookmarkData: Data? = nil
+        savedVideoBookmarkData: Data? = nil,
+        savedVideoPackageEntryName: String? = nil
     ) {
         self.screenID = screenID
         self.activeWallpaper = wallpaper
         self.savedVideoBookmarkData = savedVideoBookmarkData ?? wallpaper.activeVideoBookmarkData
+        self.savedVideoPackageEntryName = savedVideoPackageEntryName ?? wallpaper.packageVideoEntryName
         if case .html(let source, let config) = wallpaper, source.isRestorableHTMLSource {
             self.savedHTMLSource = source
             self.savedHTMLConfig = config
@@ -343,11 +351,17 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
         displayFingerprint = try c.decodeIfPresent(String.self, forKey: .displayFingerprint)
+        // Absent in legacy / loose-video payloads → nil. Refined below from the
+        // active wallpaper when it is itself a packaged video.
+        savedVideoPackageEntryName = try c.decodeIfPresent(String.self, forKey: .savedVideoPackageEntryName)
 
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
             savedVideoBookmarkData = try c.decodeIfPresent(Data.self, forKey: .savedVideoBookmarkData)
                 ?? decodedWallpaper.activeVideoBookmarkData
+            if savedVideoPackageEntryName == nil {
+                savedVideoPackageEntryName = decodedWallpaper.packageVideoEntryName
+            }
             if savedHTMLSource == nil,
                case .html(let source, let config) = decodedWallpaper,
                source.isRestorableHTMLSource {
@@ -431,6 +445,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(screenID, forKey: .screenID)
         try c.encode(activeWallpaper, forKey: .activeWallpaper)
         try c.encodeIfPresent(savedVideoBookmarkData, forKey: .savedVideoBookmarkData)
+        try c.encodeIfPresent(savedVideoPackageEntryName, forKey: .savedVideoPackageEntryName)
         try c.encodeIfPresent(savedHTMLSource, forKey: .savedHTMLSource)
         try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
@@ -489,12 +504,23 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     @discardableResult
     public mutating func activateSavedVideoWallpaper() -> Bool {
-        guard let bookmarkData = savedVideoBookmarkData ?? activeWallpaper.activeVideoBookmarkData else {
+        // Pair the bookmark with its package entry from the same source so a
+        // restored packaged primary keeps playing windowed (not as raw pkg).
+        let bookmarkData: Data
+        let packageEntryName: String?
+        if let saved = savedVideoBookmarkData {
+            bookmarkData = saved
+            packageEntryName = savedVideoPackageEntryName
+        } else if let active = activeWallpaper.activeVideoBookmarkData {
+            bookmarkData = active
+            packageEntryName = activeWallpaper.packageVideoEntryName
+        } else {
             return false
         }
         preserveCurrentHTMLIfNeeded()
-        activeWallpaper = .video(bookmarkData: bookmarkData)
+        activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
         savedVideoBookmarkData = bookmarkData
+        savedVideoPackageEntryName = packageEntryName
         playlistCursorIndex = 0
         return true
     }
@@ -515,12 +541,15 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     public mutating func replacePrimaryVideo(bookmarkData: Data, packageEntryName: String? = nil) {
         preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
+        savedVideoPackageEntryName = packageEntryName
         activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
         playlistCursorIndex = 0
         playlistPrimaryIndex = nil
     }
 
     /// Activates a schedule slot without replacing the saved primary video.
+    /// Schedule slots store a bare bookmark, so they only carry loose videos;
+    /// a packaged video can't currently round-trip through a slot.
     public mutating func applyScheduledBookmark(_ bookmarkData: Data) {
         activeWallpaper = .video(bookmarkData: bookmarkData)
     }
@@ -528,6 +557,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     private mutating func preserveCurrentVideoBookmarkIfNeeded() {
         if savedVideoBookmarkData == nil {
             savedVideoBookmarkData = activeWallpaper.activeVideoBookmarkData
+            savedVideoPackageEntryName = activeWallpaper.packageVideoEntryName
         }
     }
 
@@ -543,8 +573,10 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         var copy = self
         let oldActive = copy.activeWallpaper.activeVideoBookmarkData
 
-        if case .video = copy.activeWallpaper {
-            copy.activeWallpaper = .video(bookmarkData: bookmarkData)
+        if case .video(_, let packageEntryName) = copy.activeWallpaper {
+            // Refreshing the bookmark keeps the same logical video — preserve
+            // its package entry so a packaged video isn't downgraded to raw pkg.
+            copy.activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
         }
 
         guard let oldActive else { return copy }

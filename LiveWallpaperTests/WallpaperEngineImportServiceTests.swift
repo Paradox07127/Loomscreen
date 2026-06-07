@@ -105,6 +105,32 @@ struct WallpaperEngineImportServiceTests {
         #expect(legacy.packageVideoEntryName == nil)
     }
 
+    @Test("Packaged-video config keeps its package entry across bookmark refresh and saved-restore")
+    func packagedVideoConfigPreservesPackageEntry() throws {
+        let pkgBookmark = Data([0x01, 0x02])
+        var config = ScreenConfiguration(screenID: 1, videoBookmarkData: pkgBookmark)
+        config.activeWallpaper = .video(bookmarkData: pkgBookmark, packageEntryName: "video.mp4")
+        config.savedVideoBookmarkData = pkgBookmark
+        config.savedVideoPackageEntryName = "video.mp4"
+
+        // A bookmark refresh keeps the entry on the active wallpaper (else the
+        // next apply would treat the scene.pkg as a plain video file).
+        let refreshed = config.withUpdatedActiveBookmark(Data([0x03, 0x04]))
+        #expect(refreshed.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // Swap to HTML, then restore the saved primary video → entry survives.
+        var swapped = refreshed
+        swapped.activeWallpaper = .html(source: .inline("<html></html>"), config: .default)
+        let restored = swapped.activateSavedVideoWallpaper()
+        #expect(restored)
+        #expect(swapped.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // Codable round trip preserves both the active and saved package entry.
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.savedVideoPackageEntryName == "video.mp4")
+        #expect(decoded.activeWallpaper.packageVideoEntryName == "video.mp4")
+    }
+
     @Test("Unsupported scene returns unsupported result")
     func unsupportedSceneReturnsUnsupportedResult() async throws {
         let fixture = try makeFixture(type: .scene, entryFile: "scene.json", pkgEntries: nil)

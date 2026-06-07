@@ -182,6 +182,33 @@ struct FolderURLSchemeHandlerIsolationTests {
         #expect(http?.value(forHTTPHeaderField: "Content-Range") == "bytes 10-19/200")
     }
 
+    @Test("Loose files win over same-named package entries (no plain-folder regression)")
+    func packageBackendPrefersLooseFileOverPackageEntry() async throws {
+        let handler = FolderURLSchemeHandler()
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        // Both a loose index.html and a package index.html exist; the loose one
+        // must win so an ordinary HTML folder next to a scene.pkg is unaffected.
+        let looseBytes = Data("<html>loose-wins</html>".utf8)
+        try looseBytes.write(to: folder.appendingPathComponent("index.html"))
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        try Self.makePackageData(entries: [
+            ("index.html", Data("<html>packaged</html>".utf8))
+        ]).write(to: pkgURL)
+
+        handler.folderURL = folder
+        handler.setPackageBacking(try Self.packageBacking(at: pkgURL))
+
+        let url = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")!
+        let task = FakeURLSchemeTask(request: URLRequest(url: url))
+        handler.webView(WKWebView(), start: task)
+        try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
+
+        #expect(task.failedError == nil)
+        #expect(task.receivedData.reduce(Data(), +) == looseBytes)
+    }
+
     @Test("Package backend falls back to a loose sibling for non-package files")
     func packageBackendFallsBackToLooseFile() async throws {
         let handler = FolderURLSchemeHandler()

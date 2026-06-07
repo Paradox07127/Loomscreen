@@ -340,6 +340,12 @@ final class WallpaperVideoPlayer {
     /// URL to hand the URL-based validator. The loader is held alive across the
     /// async probe so AVFoundation's weak delegate ref stays valid.
     static func validatePackagedVideo(packageURL: URL, entryName: String) async throws {
+        // Mapping the package requires the security scope active; unlike the
+        // player path (which holds it via `accessToken`), this static helper is
+        // reached from the bookmark-apply flow with no scope held.
+        let didStart = packageURL.startAccessingSecurityScopedResource()
+        defer { if didStart { packageURL.stopAccessingSecurityScopedResource() } }
+
         let result = try InMemoryVideoAssetLoader.loadPackageEntry(packageURL: packageURL, entryName: entryName)
         let asset = AVURLAsset(url: result.customURL, options: inMemoryAssetOptions)
         asset.resourceLoader.setDelegate(result.loader, queue: resourceLoaderQueue)
