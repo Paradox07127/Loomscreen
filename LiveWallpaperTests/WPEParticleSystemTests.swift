@@ -1035,6 +1035,84 @@ struct WPEParticleSystemTests {
         #expect((maxY - minY) > 80)   // it lands on render Y after the rotation
     }
 
+    @Test("Parser captures instantaneous burst from a verbatim WPE emitter (scene 3460973721)")
+    func parserCapturesInstantaneousBurst() throws {
+        // Emitter copied verbatim from scene.pkg 3460973721 (野火): a burst of 50
+        // seeds the fire, then a continuous 15/s sustains it.
+        let json = #"""
+        {
+            "maxcount": 200,
+            "emitter": [{"directions": "1 0.5 0", "distancemax": 1024, "distancemin": 0,
+                         "duration": 0, "id": 7, "instantaneous": 50, "name": "sphererandom",
+                         "origin": "0 -0.5 0", "rate": 15, "speedmax": 5}],
+            "operator": []
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.instantaneousCount == 50)
+        #expect(def.rate == 15)
+    }
+
+    @Test("instantaneous burst spawns exactly N particles once, even with rate 0")
+    func instantaneousBurstSpawnsOnceWithZeroRate() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 100,
+            rate: 0, instantaneousCount: 5, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        system.tick(now: 0)
+        #expect(system.liveInstanceCount == 5)   // burst fired on the first tick
+        // rate 0 + once-only burst → count stays put across many ticks.
+        for step in 1...20 { system.tick(now: Double(step) * 0.1) }
+        #expect(system.liveInstanceCount == 5)
+    }
+
+    @Test("instantaneous burst seeds population immediately alongside continuous rate")
+    func instantaneousBurstSeedsWithContinuousRate() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 200,
+            rate: 10, instantaneousCount: 30, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        // First tick has dt 0 (rate adds nothing yet) → only the burst shows,
+        // proving the population is seeded at once instead of ramping from 0.
+        system.tick(now: 0)
+        #expect(system.liveInstanceCount == 30)
+    }
+
+    @Test("instance override count scales the instantaneous burst")
+    func instanceOverrideScalesInstantaneousBurst() {
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 100,
+            rate: 0, instantaneousCount: 10, startDelay: 0,
+            lifetimeMin: 1, lifetimeMax: 1,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let scaled = def.applying(instanceOverride: WPESceneParticleInstanceOverride(count: 2))
+        #expect(scaled.instantaneousCount == 20)
+    }
+
     private func stillParticleDefinition(
         maxCount: Int = 4,
         rate: Double = 1000,

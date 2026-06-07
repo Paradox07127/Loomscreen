@@ -194,6 +194,9 @@ final class WPEParticleSystem {
     private var aliveCount: Int = 0
     private var particles: [Particle]
     private var spawnAccumulator: Double = 0
+    /// One-shot guard for the emitter's `instantaneous` burst, which fires the
+    /// first time `elapsed` reaches `startDelay` (explosions/fireworks/seed).
+    private var hasEmittedBurst = false
     private var lastTickTime: Double?
     private var firstTickTime: Double?
     private var rng: SystemRandomNumberGenerator
@@ -585,12 +588,26 @@ final class WPEParticleSystem {
             particles[index].rotationZ += particles[index].angularVelocityZ * dt
         }
 
-        if elapsed >= definition.startDelay && definition.rate > 0 {
-            spawnAccumulator += Double(dt) * definition.rate
-            while spawnAccumulator >= 1 {
-                spawnAccumulator -= 1
-                guard let slot = nextFreeSlot() else { break }
-                spawn(into: slot)
+        if elapsed >= definition.startDelay {
+            // One-time `instantaneous` burst (explosions, fireworks, initial
+            // seed). Fires once, the first time the emitter starts; capped by
+            // free slots (i.e. maxCount). Independent of `rate`, so rate:0
+            // burst-only emitters still spawn.
+            if !hasEmittedBurst && definition.instantaneousCount > 0 {
+                hasEmittedBurst = true
+                for _ in 0..<definition.instantaneousCount {
+                    guard let slot = nextFreeSlot() else { break }
+                    spawn(into: slot)
+                }
+            }
+            // Continuous `rate` emission (particles per second).
+            if definition.rate > 0 {
+                spawnAccumulator += Double(dt) * definition.rate
+                while spawnAccumulator >= 1 {
+                    spawnAccumulator -= 1
+                    guard let slot = nextFreeSlot() else { break }
+                    spawn(into: slot)
+                }
             }
         }
     }

@@ -265,6 +265,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let rendersSprite: Bool
     public let maxCount: Int
     public let rate: Double
+    /// Emitter `instantaneous` count: particles spawned in a one-time burst
+    /// when the emitter starts (explosions, fireworks hits, initial seeding),
+    /// in addition to the continuous `rate`. Zero ⇒ rate-only emission.
+    public let instantaneousCount: Int
     public let startDelay: Double
     public let lifetimeMin: Double
     public let lifetimeMax: Double
@@ -361,6 +365,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         rendersSprite: Bool = true,
         maxCount: Int,
         rate: Double,
+        instantaneousCount: Int = 0,
         startDelay: Double,
         lifetimeMin: Double,
         lifetimeMax: Double,
@@ -413,6 +418,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.rendersSprite = rendersSprite
         self.maxCount = maxCount
         self.rate = rate
+        self.instantaneousCount = max(0, instantaneousCount)
         self.startDelay = startDelay
         self.lifetimeMin = lifetimeMin
         self.lifetimeMax = lifetimeMax
@@ -476,6 +482,12 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         } else {
             scaledMaxCount = max(1, Int((Double(maxCount) * countScale).rounded()))
         }
+        let scaledInstantaneous: Int
+        if countScale == 0 || instantaneousCount == 0 {
+            scaledInstantaneous = 0
+        } else {
+            scaledInstantaneous = max(1, Int((Double(instantaneousCount) * countScale).rounded()))
+        }
 
         return WPEParticleDefinition(
             materialRelativePath: materialRelativePath,
@@ -483,6 +495,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             rendersSprite: rendersSprite,
             maxCount: scaledMaxCount,
             rate: rate * rateScale,
+            instantaneousCount: scaledInstantaneous,
             startDelay: startDelay,
             lifetimeMin: lifetimeMin * lifetimeScale,
             lifetimeMax: lifetimeMax * lifetimeScale,
@@ -539,6 +552,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             rendersSprite: rendersSprite,
             maxCount: maxCount,
             rate: rate,
+            instantaneousCount: instantaneousCount,
             startDelay: startDelay,
             lifetimeMin: lifetimeMin,
             lifetimeMax: lifetimeMax,
@@ -648,6 +662,7 @@ public enum WPEParticleDefinitionParser {
         let animationMode = WPEParticleAnimationMode(wpeString: json["animationmode"] as? String)
 
         var rate: Double = 0
+        var instantaneousCount: Int = 0
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
         var dispersalMin: Double = 0
         var dispersalMax: Double = 0
@@ -660,6 +675,8 @@ public enum WPEParticleDefinitionParser {
 
         if let emitters = json["emitter"] as? [[String: Any]], let first = emitters.first {
             rate = WPEValueParser.double(first["rate"]) ?? 0
+            // `instantaneous: N` = one-time burst of N particles at emitter start.
+            instantaneousCount = WPEValueParser.double(first["instantaneous"]).map { max(0, Int($0)) } ?? 0
             origin = WPEValueParser.vector3(first["origin"]) ?? SIMD3(0, 0, 0)
             dispersalMin = WPEValueParser.double(first["distancemin"]) ?? 0
             dispersalMax = WPEValueParser.double(first["distancemax"]) ?? 0
@@ -886,6 +903,7 @@ public enum WPEParticleDefinitionParser {
             rendersSprite: rendersSprite,
             maxCount: max(0, maxCount),
             rate: max(0, rate),
+            instantaneousCount: instantaneousCount,
             startDelay: max(0, startDelay),
             lifetimeMin: max(0.0001, lifetimeMin),
             lifetimeMax: max(lifetimeMin, lifetimeMax),
