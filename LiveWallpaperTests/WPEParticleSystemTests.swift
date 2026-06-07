@@ -963,6 +963,78 @@ struct WPEParticleSystemTests {
         #expect(amplitude < 60)
     }
 
+    @Test("colorchange multiplier composes with 0...255 colorrandom normalization")
+    func colorChangeComposesWithColorNormalization() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(128, 128, 128), colorMax: SIMD3(128, 128, 128),
+            fadeInSeconds: 0,
+            colorChange: WPEParticleColorChange(
+                startTime: 0, endTime: 1,
+                startColor: SIMD3(0.5, 0.5, 0.5), endColor: SIMD3(0.5, 0.5, 0.5)
+            )
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let written = pointer[0].color
+        // 128/255 ≈ 0.502 (colorrandom, normalized once at spawn) × 0.5
+        // (colorchange 0…1 multiplier) ≈ 0.251 — guards against re-normalizing.
+        #expect(abs(written.x - 0.251) < 0.02)
+    }
+
+    @Test("oscillateposition mask transforms into render space with object rotation")
+    func oscillatePositionMaskRotatesWithObject() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            oscillatePosition: WPEParticleOscillatePosition(
+                frequencyMin: 1, frequencyMax: 1,
+                scaleMin: 50, scaleMax: 50,
+                phaseMin: 0, phaseMax: 0,
+                mask: SIMD3(1, 0, 0)   // local +X sway
+            )
+        )
+        // A 90° object rotation maps the local +X sway onto the render Y axis.
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2(1000, 1000),
+            objectOrigin: SIMD3(500, 500, 0),
+            objectScale: SIMD3(1, 1, 1),
+            objectAngleZ: Float.pi / 2
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device, sceneTransform: transform))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
+        var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
+        system.tick(now: 0)
+        for step in 1...30 {
+            system.tick(now: Double(step) * 0.05)
+            let p = pointer[0].positionAndSize
+            minX = min(minX, p.x); maxX = max(maxX, p.x)
+            minY = min(minY, p.y); maxY = max(maxY, p.y)
+        }
+        #expect((maxX - minX) < 5)    // local-X sway must NOT land on render X
+        #expect((maxY - minY) > 80)   // it lands on render Y after the rotation
+    }
+
     private func stillParticleDefinition(
         maxCount: Int = 4,
         rate: Double = 1000,
