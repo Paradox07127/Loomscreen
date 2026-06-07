@@ -4,7 +4,7 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Vertical detail content for a single Workshop item, shown in the trailing
-/// `.inspector` of the Browse grid (replaces the old detail sheet). A square
+/// detail panel of the Browse grid (a `ResizableInspectorSplit`). A square
 /// auto-playing hero on top, then title + rating, the download / open / copy
 /// actions, metadata, tags, and the description. "Download" runs SteamCMD via
 /// the configured Doctor and imports into the local library; "Open in Steam"
@@ -17,8 +17,8 @@ struct WorkshopInspectorContent: View {
     var onBrowseCreator: ((String, String?) -> Void)? = nil
     /// Scope the Browse grid to a clicked tag. nil → tags render as plain labels.
     var onSelectTag: ((String) -> Void)? = nil
-    /// Dismisses the inspector. The native `.inspector` only auto-shows a toggle
-    /// when a toolbar hosts one, so we surface an explicit close control here.
+    /// Dismisses the detail panel — the panel is selection-driven (no toolbar
+    /// toggle), so this explicit close control clears the selection.
     var onClose: () -> Void = {}
 
     @Environment(\.openURL) private var openURL

@@ -22,6 +22,11 @@ struct WorkshopBrowsePane: View {
     /// Workshop; mirrored here and pushed into the view-model so the grid reacts.
     @AppStorage("loomscreen.workshop.hidesDownloaded.v1") private var hidesDownloadedPref = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Persisted detail-panel width + the transient width during a drag-resize.
+    @AppStorage("Workshop.Browse.InspectorWidth") private var inspectorWidth = 320.0
+    @State private var liveInspectorWidth: Double?
+
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     /// Stable scroll anchor pinned at the top of the grid (for page steps).
@@ -35,28 +40,22 @@ struct WorkshopBrowsePane: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let creator = viewModel.creatorFilter {
-                creatorFilterBanner(creator)
-                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
-                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
-            } else if let tag = viewModel.pinnedTag {
-                tagFilterBanner(tag)
-                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
-                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
-            } else {
-                // Ribbon self-pads to match the Installed tab's LibraryFilterBar;
-                // no divider below it (the scaffold already draws one under the
-                // header), so the bar reads as one row, not a boxed card.
-                WorkshopBrowseFilterRibbon(
-                    viewModel: viewModel,
-                    hasWebAPIKey: services.hasWebAPIKey
-                )
-            }
-
-            content
-                .overlay(alignment: .top) { rateLimitBanner }
-        }
+        // Same resizable, full-height, click-to-reveal side panel as the
+        // screen-detail inspector — selecting a card glides it open, clicking
+        // away glides it shut, and it only compresses the grid (never the
+        // sidebar / toolbar). `isMounted` stays true so the collapse animates.
+        ResizableInspectorSplit(
+            isMounted: true,
+            isVisible: selectedItem != nil,
+            animationTrigger: AnyHashable(selectedItem != nil),
+            reduceMotion: reduceMotion,
+            storedWidth: $inspectorWidth,
+            liveWidth: $liveInspectorWidth,
+            minWidth: 280,
+            maxWidth: 380,
+            main: { gridColumn },
+            inspector: { width in inspectorColumn(width: width) }
+        )
         .background(DesignTokens.Colors.pageBackground)
         .onAppear {
             rateLimitRemaining = currentRateLimitRemaining
@@ -88,31 +87,59 @@ struct WorkshopBrowsePane: View {
         .onChange(of: viewModel.isPaging) { _, paging in
             if paging { WorkshopRequestCounter.increment() }
         }
-        .inspector(isPresented: Binding(
-            get: { selectedItem != nil },
-            set: { presented in if !presented { selectedItem = nil } }
-        )) {
-            Group {
-                if let selectedItem {
-                    WorkshopInspectorContent(
-                        item: selectedItem,
-                        doctor: doctor,
-                        onBrowseCreator: { steamID, name in
-                            self.selectedItem = nil
-                            Task { await viewModel.browseCreator(steamID: steamID, name: name) }
-                        },
-                        onSelectTag: { tag in
-                            self.selectedItem = nil
-                            Task { await viewModel.browseTag(tag) }
-                        },
-                        onClose: { self.selectedItem = nil }
-                    )
-                } else {
-                    inspectorPlaceholder
-                }
+    }
+
+    /// Filter ribbon (or scope banner) + the grid/skeleton/empty/error states.
+    /// This is the main column the detail panel compresses.
+    private var gridColumn: some View {
+        VStack(spacing: 0) {
+            if let creator = viewModel.creatorFilter {
+                creatorFilterBanner(creator)
+                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
+            } else if let tag = viewModel.pinnedTag {
+                tagFilterBanner(tag)
+                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
+            } else {
+                // Ribbon self-pads to match the Installed tab's LibraryFilterBar;
+                // no divider below it (the scaffold already draws one under the
+                // header), so the bar reads as one row, not a boxed card.
+                WorkshopBrowseFilterRibbon(
+                    viewModel: viewModel,
+                    hasWebAPIKey: services.hasWebAPIKey
+                )
             }
-            .inspectorColumnWidth(min: 280, ideal: 320, max: 380)
+
+            content
+                .overlay(alignment: .top) { rateLimitBanner }
         }
+    }
+
+    /// Detail panel for the selected item (placeholder when nothing is selected;
+    /// only visible when the split reveals it). Built at the split's full width.
+    private func inspectorColumn(width: CGFloat) -> some View {
+        Group {
+            if let selectedItem {
+                WorkshopInspectorContent(
+                    item: selectedItem,
+                    doctor: doctor,
+                    onBrowseCreator: { steamID, name in
+                        self.selectedItem = nil
+                        Task { await viewModel.browseCreator(steamID: steamID, name: name) }
+                    },
+                    onSelectTag: { tag in
+                        self.selectedItem = nil
+                        Task { await viewModel.browseTag(tag) }
+                    },
+                    onClose: { self.selectedItem = nil }
+                )
+            } else {
+                inspectorPlaceholder
+            }
+        }
+        .frame(width: width)
+        .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder
