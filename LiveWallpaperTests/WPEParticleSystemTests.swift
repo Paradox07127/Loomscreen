@@ -44,12 +44,13 @@ struct WPEParticleSystemTests {
         #expect(def.colorMax.x == 255 && def.colorMax.y == 255)
     }
 
-    @Test("Parser captures child particle definitions")
+    @Test("Parser captures child references preserving duplicates and origin")
     func parserCapturesChildParticleDefinitions() throws {
         let json = #"""
         {
             "children": [
-                {"id": 13, "name": "particles/presets/leaves2b.json"}
+                {"id": 13, "name": "particles/presets/leaves2b.json"},
+                {"id": 14, "name": "particles/presets/leaves2b.json", "origin": "60 0 0", "type": "eventfollow"}
             ],
             "maxcount": 5,
             "emitter": [{"rate": 1}]
@@ -58,7 +59,46 @@ struct WPEParticleSystemTests {
 
         let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
 
-        #expect(def.childRelativePaths == ["particles/presets/leaves2b.json"])
+        #expect(def.childRelativePaths == [
+            "particles/presets/leaves2b.json",
+            "particles/presets/leaves2b.json"
+        ])
+        #expect(def.childReferences.count == 2)
+        #expect(def.childReferences[0].id == 13)
+        #expect(def.childReferences[0].originOffset == SIMD3<Double>(0, 0, 0))
+        #expect(!def.childReferences[0].isEventFollow)
+        #expect(def.childReferences[1].id == 14)
+        #expect(def.childReferences[1].originOffset == SIMD3<Double>(60, 0, 0))
+        #expect(def.childReferences[1].isEventFollow)
+    }
+
+    @Test("Parser treats explicit empty renderer as simulate-only")
+    func parserCapturesRendererGate() throws {
+        let spawner = #"""
+        {
+            "renderer": [],
+            "children": [{"name": "particles/presets/child.json"}],
+            "maxcount": 5,
+            "emitter": [{"rate": 1}]
+        }
+        """#
+        let drawable = #"""
+        {
+            "renderer": [{"name": "sprite"}],
+            "maxcount": 5,
+            "emitter": [{"rate": 1}]
+        }
+        """#
+        let legacy = #"""
+        {
+            "maxcount": 5,
+            "emitter": [{"rate": 1}]
+        }
+        """#
+
+        #expect(try #require(WPEParticleDefinitionParser.parse(data: Data(spawner.utf8))).rendersSprite == false)
+        #expect(try #require(WPEParticleDefinitionParser.parse(data: Data(drawable.utf8))).rendersSprite == true)
+        #expect(try #require(WPEParticleDefinitionParser.parse(data: Data(legacy.utf8))).rendersSprite == true)
     }
 
     @Test("Parser defaults sphere random emitters to 2D directions")

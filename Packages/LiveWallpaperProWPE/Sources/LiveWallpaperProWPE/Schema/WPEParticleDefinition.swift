@@ -72,6 +72,36 @@ public struct WPEParticleControlPointAttractor: Equatable, Sendable {
     }
 }
 
+/// A child particle-system reference from a WPE `children` array. Multiple
+/// entries may intentionally point at the same particle file with different
+/// `origin` offsets (e.g. the matrix-rain spawner instances one column
+/// preset 27 times across the screen width), so callers must preserve this
+/// as an ordered list rather than deduping by `relativePath`.
+public struct WPEParticleChildReference: Equatable, Sendable {
+    public let id: Int?
+    public let relativePath: String
+    public let originOffset: SIMD3<Double>
+    public let type: String?
+
+    /// WPE `type: "eventfollow"` — the child system's emitter rides the
+    /// parent's live particles rather than spawning at a static origin.
+    public var isEventFollow: Bool {
+        type?.lowercased() == "eventfollow"
+    }
+
+    public init(
+        id: Int? = nil,
+        relativePath: String,
+        originOffset: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        type: String? = nil
+    ) {
+        self.id = id
+        self.relativePath = relativePath
+        self.originOffset = originOffset
+        self.type = type
+    }
+}
+
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
 /// file. Fields cover the subset of the WPE DSL the runtime actually
 /// drives — emitter geometry, the random initializers, and the operator
@@ -80,7 +110,11 @@ public struct WPEParticleControlPointAttractor: Equatable, Sendable {
 /// default so partial schemas still produce a working emitter.
 public struct WPEParticleDefinition: Equatable, Sendable {
     public let materialRelativePath: String?
-    public let childRelativePaths: [String]
+    public let childReferences: [WPEParticleChildReference]
+    /// Whether this system draws its own sprites. A WPE root spawner with an
+    /// empty `renderer: []` array only emits/expands its children and must NOT
+    /// register a drawable system (it has no material/sprite of its own).
+    public let rendersSprite: Bool
     public let maxCount: Int
     public let rate: Double
     public let startDelay: Double
@@ -141,6 +175,12 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// `controlpointattract` operators (cursor follow/avoid forces).
     public let attractors: [WPEParticleControlPointAttractor]
 
+    /// Ordered child particle file paths. Back-compat accessor over
+    /// `childReferences`; preserves duplicates (same path, different origin).
+    public var childRelativePaths: [String] {
+        childReferences.map(\.relativePath)
+    }
+
     /// True when the emitter's origin (control point `id 0`) tracks the cursor —
     /// the canonical "particles spawn at the pointer" / follow behavior.
     public var emitterTracksPointer: Bool {
@@ -159,6 +199,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public init(
         materialRelativePath: String?,
         childRelativePaths: [String] = [],
+        childReferences: [WPEParticleChildReference]? = nil,
+        rendersSprite: Bool = true,
         maxCount: Int,
         rate: Double,
         startDelay: Double,
@@ -200,7 +242,12 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         attractors: [WPEParticleControlPointAttractor] = []
     ) {
         self.materialRelativePath = materialRelativePath
-        self.childRelativePaths = childRelativePaths
+        // Prefer explicit child references; fall back to bare paths (origin 0)
+        // for the convenience/back-compat `childRelativePaths:` initializer.
+        self.childReferences = childReferences ?? childRelativePaths.map {
+            WPEParticleChildReference(relativePath: $0)
+        }
+        self.rendersSprite = rendersSprite
         self.maxCount = maxCount
         self.rate = rate
         self.startDelay = startDelay
@@ -264,7 +311,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
 
         return WPEParticleDefinition(
             materialRelativePath: materialRelativePath,
-            childRelativePaths: childRelativePaths,
+            childReferences: childReferences,
+            rendersSprite: rendersSprite,
             maxCount: scaledMaxCount,
             rate: rate * rateScale,
             startDelay: startDelay,
@@ -294,6 +342,57 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             angularDrag: angularDrag,
             turbulenceSpeedMin: turbulenceSpeedMin * speedScale,
             turbulenceSpeedMax: turbulenceSpeedMax * speedScale,
+            turbulenceScale: turbulenceScale,
+            turbulenceTimescale: turbulenceTimescale,
+            turbulenceOffset: turbulenceOffset,
+            turbulenceMask: turbulenceMask,
+            turbulencePhaseMin: turbulencePhaseMin,
+            turbulencePhaseMax: turbulencePhaseMax,
+            sequenceMultiplier: sequenceMultiplier,
+            animationMode: animationMode,
+            controlPoints: controlPoints,
+            attractors: attractors
+        )
+    }
+
+    /// Returns a copy whose emitter origin is shifted by `delta`. Used to apply
+    /// the per-child `origin` offset accumulated while expanding a nested
+    /// `children` tree (e.g. spreading matrix-rain columns across the screen).
+    public func offsettingOrigin(by delta: SIMD3<Double>) -> WPEParticleDefinition {
+        guard delta != SIMD3<Double>(0, 0, 0) else { return self }
+        return WPEParticleDefinition(
+            materialRelativePath: materialRelativePath,
+            childReferences: childReferences,
+            rendersSprite: rendersSprite,
+            maxCount: maxCount,
+            rate: rate,
+            startDelay: startDelay,
+            lifetimeMin: lifetimeMin,
+            lifetimeMax: lifetimeMax,
+            sizeMin: sizeMin,
+            sizeMax: sizeMax,
+            originOffset: originOffset + delta,
+            dispersalMin: dispersalMin,
+            dispersalMax: dispersalMax,
+            velocityMin: velocityMin,
+            velocityMax: velocityMax,
+            colorMin: colorMin,
+            colorMax: colorMax,
+            fadeInSeconds: fadeInSeconds,
+            directionMask: directionMask,
+            alphaMin: alphaMin,
+            alphaMax: alphaMax,
+            rotationMin: rotationMin,
+            rotationMax: rotationMax,
+            angularVelocityMin: angularVelocityMin,
+            angularVelocityMax: angularVelocityMax,
+            fadeOutSeconds: fadeOutSeconds,
+            gravity: gravity,
+            drag: drag,
+            angularForceZ: angularForceZ,
+            angularDrag: angularDrag,
+            turbulenceSpeedMin: turbulenceSpeedMin,
+            turbulenceSpeedMax: turbulenceSpeedMax,
             turbulenceScale: turbulenceScale,
             turbulenceTimescale: turbulenceTimescale,
             turbulenceOffset: turbulenceOffset,
@@ -342,16 +441,27 @@ public enum WPEParticleDefinitionParser {
         let def = WPEParticleDefinition.empty
 
         let material = json["material"] as? String
-        let childRelativePaths = (json["children"] as? [[String: Any]])?
-            .compactMap { child -> String? in
+        let childReferences = (json["children"] as? [[String: Any]])?
+            .compactMap { child -> WPEParticleChildReference? in
+                let path: String?
                 if let name = child["name"] as? String, !name.isEmpty {
-                    return name
+                    path = name
+                } else if let particle = child["particle"] as? String, !particle.isEmpty {
+                    path = particle
+                } else {
+                    path = nil
                 }
-                if let particle = child["particle"] as? String, !particle.isEmpty {
-                    return particle
-                }
-                return nil
+                guard let path else { return nil }
+                return WPEParticleChildReference(
+                    id: intValue(child["id"]),
+                    relativePath: path,
+                    originOffset: WPEValueParser.vector3(child["origin"]) ?? SIMD3(0, 0, 0),
+                    type: child["type"] as? String
+                )
             } ?? []
+        // Absent `renderer` keeps legacy drawable behavior; an explicit empty
+        // array marks a simulation-only spawner (renders nothing itself).
+        let rendersSprite = (json["renderer"] as? [[String: Any]]).map { !$0.isEmpty } ?? true
         let maxCount = (json["maxcount"] as? Int)
             ?? (json["maxcount"] as? Double).map { Int($0) }
             ?? 0
@@ -534,7 +644,8 @@ public enum WPEParticleDefinitionParser {
 
         return WPEParticleDefinition(
             materialRelativePath: material,
-            childRelativePaths: childRelativePaths,
+            childReferences: childReferences,
+            rendersSprite: rendersSprite,
             maxCount: max(0, maxCount),
             rate: max(0, rate),
             startDelay: max(0, startDelay),
@@ -575,5 +686,12 @@ public enum WPEParticleDefinitionParser {
             controlPoints: controlPoints,
             attractors: attractors
         )
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let v = value as? Int { return v }
+        if let v = value as? Double { return Int(v) }
+        if let v = value as? String { return Int(v) }
+        return nil
     }
 }

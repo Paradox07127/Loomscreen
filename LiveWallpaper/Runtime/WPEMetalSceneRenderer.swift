@@ -1353,25 +1353,63 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
         for object in document.particleObjects where object.visible {
-            var visited = Set<String>()
-            var pending: [(path: String, parent: String?)] = [(object.particleRelativePath, nil)]
-            while let next = pending.popLast() {
-                let particlePath = resolvedParticleChildPath(next.path, parentPath: next.parent)
-                guard visited.insert(particlePath).inserted else { continue }
-                guard let parsedDefinition = loadParticleDefinition(at: particlePath) else {
-                    debugStage("particle", "skip \(object.name) — particle definition load failed: \(particlePath)")
-                    continue
-                }
-                let definition = parsedDefinition.applying(instanceOverride: object.instanceOverride)
-                await registerParticleSystem(
-                    definition: definition,
-                    object: object,
-                    particlePath: particlePath
-                )
-                for childPath in parsedDefinition.childRelativePaths.reversed() {
-                    pending.append((childPath, particlePath))
-                }
-            }
+            await expandParticleTree(
+                path: object.particleRelativePath,
+                parentPath: nil,
+                originAccum: SIMD3<Double>(0, 0, 0),
+                ancestry: [],
+                object: object
+            )
+        }
+    }
+
+    /// Recursively expand a nested particle `children` tree into drawable
+    /// systems. Unlike a global `visited` set, dedup is per-ancestry-chain so
+    /// same-path siblings with different `origin` offsets (the matrix-rain
+    /// columns) each instantiate; only a path repeating within its own chain
+    /// is skipped to break cycles. A spawner with `renderer: []` is expanded
+    /// but not registered as drawable.
+    private func expandParticleTree(
+        path: String,
+        parentPath: String?,
+        originAccum: SIMD3<Double>,
+        ancestry: [String],
+        object: WPESceneParticleObject
+    ) async {
+        guard ancestry.count < 16 else {
+            debugStage("particle", "skip \(object.name) — particle child depth limit reached at: \(path)")
+            return
+        }
+        let particlePath = resolvedParticleChildPath(path, parentPath: parentPath)
+        guard !ancestry.contains(particlePath) else {
+            debugStage("particle", "skip \(object.name) — particle child cycle detected: \(particlePath)")
+            return
+        }
+        guard let parsedDefinition = loadParticleDefinition(at: particlePath) else {
+            debugStage("particle", "skip \(object.name) — particle definition load failed: \(particlePath)")
+            return
+        }
+        let definition = parsedDefinition
+            .offsettingOrigin(by: originAccum)
+            .applying(instanceOverride: object.instanceOverride)
+        if definition.rendersSprite {
+            await registerParticleSystem(
+                definition: definition,
+                object: object,
+                particlePath: particlePath
+            )
+        } else {
+            debugStage("particle", "expand-only \(object.name) — renderer disabled: \(particlePath)")
+        }
+        let childAncestry = ancestry + [particlePath]
+        for child in parsedDefinition.childReferences {
+            await expandParticleTree(
+                path: child.relativePath,
+                parentPath: particlePath,
+                originAccum: originAccum + child.originOffset,
+                ancestry: childAncestry,
+                object: object
+            )
         }
     }
 
