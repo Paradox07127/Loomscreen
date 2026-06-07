@@ -51,29 +51,62 @@ struct WorkshopSettingsView: View {
             }
 
             Section("Onboarding") {
-                Toggle("Show the welcome sheet next time", isOn: Binding(
-                    get: { !onboardingShown },
-                    set: { onboardingShown = !$0 }
-                ))
-                .toggleStyle(.switch)
+                SettingRow(
+                    icon: "hand.wave",
+                    iconColor: .blue,
+                    title: "Show the welcome sheet next time",
+                    subtitle: "Reopen the Workshop intro the next time you open it"
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { !onboardingShown },
+                        set: { onboardingShown = !$0 }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel(Text("Show the welcome sheet next time"))
+                }
             }
 
             Section {
-                Toggle("Blur mature thumbnails until clicked", isOn: $blurMatureThumbnails)
-                    .toggleStyle(.switch)
-                Toggle("Hide items already in my library when browsing", isOn: $hidesDownloadedInBrowse)
-                    .toggleStyle(.switch)
+                SettingRow(
+                    icon: "eye.slash",
+                    iconColor: .pink,
+                    title: "Blur mature thumbnails",
+                    subtitle: "Hide Mature covers in Browse until you click to reveal"
+                ) {
+                    Toggle("", isOn: $blurMatureThumbnails)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel(Text("Blur mature thumbnails until clicked"))
+                }
+                SettingRow(
+                    icon: "tray.full",
+                    iconColor: .indigo,
+                    title: "Hide items already in my library",
+                    subtitle: "Keep Browse Online focused on wallpapers you don't have yet"
+                ) {
+                    Toggle("", isOn: $hidesDownloadedInBrowse)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel(Text("Hide items already in my library when browsing"))
+                }
             } header: {
                 Text("Content")
             } footer: {
-                Text("Wallpapers tagged Mature show a blurred cover in the browse grid and details until you click to reveal them. Application wallpapers are always hidden because they can't run here. Hiding already-downloaded items keeps Browse Online focused on things you don't have yet — the Installed tab is where you revisit your library.")
+                Text("Application wallpapers are always hidden because they can't run here. The Installed tab is where you revisit your full library.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                LabeledContent {
+                SettingRow(
+                    icon: "stethoscope",
+                    iconColor: .teal,
+                    title: "SteamCMD Doctor",
+                    subtitle: "Check SteamCMD and Steam sign-in before downloading",
+                    info: "Downloading from the Workshop needs the official SteamCMD command-line tool plus your own Steam sign-in. The Doctor runs probes and tells you exactly what's missing."
+                ) {
                     HStack(spacing: DesignTokens.Spacing.xs) {
                         doctorIndicator
                         Button("Open") { showingDoctor = true }
@@ -81,23 +114,25 @@ struct WorkshopSettingsView: View {
                             .controlSize(.small)
                             .help("Open the SteamCMD diagnostics sheet")
                     }
-                } label: {
-                    Label("SteamCMD Doctor", systemImage: "stethoscope")
+                    // Claim intrinsic width: SettingRow's title column is greedy
+                    // (maxWidth:.infinity, layoutPriority 1) and would otherwise
+                    // starve these controls, wrapping/clipping their labels.
+                    .fixedSize()
                 }
             } header: {
                 Text("Downloads")
-            } footer: {
-                Text("Verify your SteamCMD install + Steam sign-in before enabling Workshop downloads.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                LabeledContent {
+                SettingRow(
+                    icon: "key",
+                    iconColor: .orange,
+                    title: "Steam Web API key",
+                    subtitle: "Your own free key — required to browse the Workshop online",
+                    info: "The key belongs to your own Steam account, not Loomscreen. Calls go directly to Valve over HTTPS, and the key is stored only in this Mac's Keychain (no iCloud sync). Get one free at steamcommunity.com/dev/apikey."
+                ) {
                     keyStatusBadge
-                } label: {
-                    Label("Steam Web API key", systemImage: "key")
+                        .fixedSize()
                 }
 
                 HStack(spacing: DesignTokens.Spacing.xs) {
@@ -130,35 +165,39 @@ struct WorkshopSettingsView: View {
             } header: {
                 Text("Browse Online")
             } footer: {
-                Text("The key belongs to your own Steam account, not Loomscreen. Calls go directly to Valve over HTTPS; the key is stored in this Mac's Keychain (no iCloud sync). \"Forget on this Mac\" only removes the local copy — revoke the key itself at steamcommunity.com/dev/apikey.")
+                Text("\"Forget on this Mac\" only removes the local copy — revoke the key itself at steamcommunity.com/dev/apikey.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                LabeledContent {
+                SettingRow(
+                    icon: "internaldrive",
+                    iconColor: .gray,
+                    title: "Workshop browse cache",
+                    subtitle: "Cached browse results (5-min refresh, 100 MB cap)",
+                    info: "Holds the JSON responses behind Browse Online so paging stays fast. Scene assets are read in place from their source — they're no longer copied into a cache."
+                ) {
                     Button("Manage") { showingCacheManagement = true }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .fixedSize()
                         .help("Inspect and clear the Workshop browse cache")
-                } label: {
-                    Label("Workshop browse cache", systemImage: "internaldrive")
                 }
             } header: {
                 Text("Cache")
-            } footer: {
-                Text("The browse cache holds QueryFiles JSON responses (5-minute TTL, 100 MB hard cap). Scene assets are read in place from their source — they're no longer copied into a cache.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                LabeledContent {
+                SettingRow(
+                    icon: "shippingbox",
+                    iconColor: .brown,
+                    title: "Wallpaper Engine assets",
+                    subtitle: "Optional — link a WPE install for extra scene coverage",
+                    info: "Loomscreen bundles clean-room equivalents of the common Wallpaper Engine framework files, so most scenes render without a Wallpaper Engine install. Link one only for scenes that reference uncommon shared assets — read-only access, no files are modified."
+                ) {
                     engineAssetsControl
-                } label: {
-                    Label("Wallpaper Engine assets", systemImage: "shippingbox")
                 }
                 if let error = engineAssets.lastError {
                     Text(error)
@@ -168,17 +207,13 @@ struct WorkshopSettingsView: View {
                 }
             } header: {
                 Text("Scene rendering")
-            } footer: {
-                Text("Optional. Loomscreen bundles clean-room equivalents of the common Wallpaper Engine framework files, so most scenes render without a Wallpaper Engine install. Link one only for extra coverage of scenes that reference uncommon shared assets — read-only access, no files are modified.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .formStyle(.grouped)
-        .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-        .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
-        .background(DesignTokens.Colors.pageBackground)
+        // Use the shared settings chrome (every other tab does) — it hides the
+        // grouped Form's default system background via .scrollContentBackground
+        // and insets via .contentMargins, so this tab no longer shows a
+        // different-colored inset panel.
+        .settingsFormChrome()
         .sheet(isPresented: $showingDoctor) {
             WorkshopDoctorView()
                 .environment(doctorService)
@@ -212,15 +247,18 @@ struct WorkshopSettingsView: View {
                 Button("Change") { Task { _ = await engineAssets.requestAccess() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize()
                     .help("Pick a different Wallpaper Engine install folder")
                 Button("Forget", role: .destructive) { engineAssets.clearAccess() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize()
                     .help("Remove access to the Wallpaper Engine install folder")
             } else {
                 Button("Link folder…") { Task { _ = await engineAssets.requestAccess() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize()
                     .help("Grant read-only access to a Wallpaper Engine install for extra scene coverage")
             }
         }
