@@ -2,8 +2,9 @@
 import Foundation
 
 /// End-to-end Wallpaper Engine workshop import. Reads `project.json`, routes
-/// by `WPEType`, extracts `scene.pkg` via `WallpaperEngineCache` when present,
-/// and produces a `WallpaperContent` (.video / .html(.folder)) ready to apply.
+/// by `WPEType`, and produces a `WallpaperContent` (.video / .html(.folder) /
+/// .scene) that reads its assets in place from `scene.pkg` or the source folder
+/// — no extraction into `wpe-cache`.
 @MainActor
 final class WallpaperEngineImportService {
     enum ImportResult: Equatable, Sendable {
@@ -72,8 +73,8 @@ final class WallpaperEngineImportService {
     /// via a resource loader windowed into the entry's byte range (no
     /// extraction, no resting copy). The video entry is staged to a temp file
     /// once for a playability probe and reclaimed when the provider deinits.
-    /// Falls back to whole-package extraction only when the package can't be
-    /// opened or the entry is missing.
+    /// Rejected as unsupported when the package can't be opened or the entry is
+    /// missing from it.
     private func importPackagedVideo(
         project: WallpaperEngineProject,
         pkgURL: URL,
@@ -185,11 +186,11 @@ final class WallpaperEngineImportService {
     }
 
     /// Package-aware web import: serves the web payload in place from `scene.pkg`
-    /// via the render-time scheme handler (which reads pkg entries first, then
-    /// falls back to loose siblings like `project.json`). No whole-package
-    /// extraction, so no second on-disk copy in `wpe-cache`. Falls back to
-    /// extraction only when the package can't be opened or the index entry is
-    /// missing from it.
+    /// via the render-time scheme handler (which serves loose files first, then
+    /// falls back to package entries for what the folder doesn't have loose, e.g.
+    /// the index + bundle). No extraction, so no second on-disk copy in
+    /// `wpe-cache`. Rejected as unsupported when the package can't be opened or
+    /// its index entry is missing from it.
     private func importPackagedWeb(
         project: WallpaperEngineProject,
         folderURL: URL,
@@ -327,7 +328,7 @@ final class WallpaperEngineImportService {
 
     /// Imports a packaged scene to read in place from `scene.pkg` (no
     /// extraction). Returns `nil` when the package can't be opened/parsed for
-    /// in-place use, so the caller falls back to extracting into the cache.
+    /// in-place use, in which case the caller rejects it as unsupported.
     private func finishScenePackageBackedImport(
         project: WallpaperEngineProject,
         pkgURL: URL,
@@ -391,8 +392,8 @@ final class WallpaperEngineImportService {
     }
 
     /// Imports an unpacked folder scene to read in place from its source folder
-    /// (no mirror copy). Returns `nil` when the entry can't be read/parsed, so
-    /// the caller falls back to mirroring into the cache.
+    /// (no mirror copy). Returns `nil` when the entry can't be read/parsed, in
+    /// which case the caller rejects it as unsupported.
     private func finishSceneSourceDirectoryImport(
         project: WallpaperEngineProject,
         folderURL: URL,
@@ -536,10 +537,6 @@ final class WallpaperEngineImportService {
     }
 }
 
-private struct ExtractionFailure: Error, Sendable {
-    let reason: String
-}
-
 @MainActor
 struct WPECachedContentResolver {
     private let applicationSupportRootURL: URL
@@ -621,7 +618,7 @@ struct WPECachedContentResolver {
             return nil
         case .web:
             // Index may be loose or inside scene.pkg; the scheme handler serves
-            // from the package first, then loose siblings. Bookmark the folder.
+            // loose files first, then package entries. Bookmark the folder.
             guard looseEntryExists || packagedEntryExists,
                   let bookmark = makeBookmark(folderURL) else { return nil }
             return .html(
@@ -660,13 +657,17 @@ struct WPECachedContentResolver {
         let entryExistsInCache = entryURLCandidate.map { fileManager.fileExists(atPath: $0.path) } ?? false
 
         // Source-backed scene: scene.json lives in the source folder or source
-        // `scene.pkg`, not in the now-empty cache. Rebuild the in-place descriptor.
-        if origin.originalType == .scene, !entryExistsInCache {
-            return sourceBackedSceneContent(
-                for: origin,
-                cacheRelativePath: cacheRelativePath,
-                entryFile: entryFile
-            )
+        // `scene.pkg`. Prefer rebuilding in place from the source so a stale
+        // cache entry never shadows it (the extraction cache is being retired);
+        // only fall through to a cache-backed descriptor when the source can no
+        // longer be read.
+        if origin.originalType == .scene,
+           let sourceBacked = sourceBackedSceneContent(
+               for: origin,
+               cacheRelativePath: cacheRelativePath,
+               entryFile: entryFile
+           ) {
+            return sourceBacked
         }
 
         guard let entryURL = entryURLCandidate, entryExistsInCache else {

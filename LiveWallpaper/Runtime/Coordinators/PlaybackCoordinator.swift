@@ -334,8 +334,10 @@ final class PlaybackCoordinator {
         } else {
             configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: bookmarkData)
             // Carry the in-place package entry (the convenience init defaults to
-            // a loose video); everything else the init set stays intact.
+            // a loose video) on both the active and saved primary, so a later
+            // type-swap restore doesn't downgrade it to raw-package playback.
             configuration.activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
+            configuration.savedVideoPackageEntryName = packageEntryName
         }
         originReconciler.reconcile(
             &configuration,

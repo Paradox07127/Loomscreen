@@ -129,6 +129,14 @@ struct WallpaperEngineImportServiceTests {
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: JSONEncoder().encode(config))
         #expect(decoded.savedVideoPackageEntryName == "video.mp4")
         #expect(decoded.activeWallpaper.packageVideoEntryName == "video.mp4")
+
+        // The WPE-import new-config path builds the config from a packaged-video
+        // wallpaper; the saved entry must be derived (not just the active one).
+        let fromWallpaper = ScreenConfiguration(
+            screenID: 2,
+            wallpaper: .video(bookmarkData: Data([0x05]), packageEntryName: "clip.mp4")
+        )
+        #expect(fromWallpaper.savedVideoPackageEntryName == "clip.mp4")
     }
 
     @Test("Unsupported scene returns unsupported result")

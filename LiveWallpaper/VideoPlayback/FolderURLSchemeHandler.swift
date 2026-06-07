@@ -82,12 +82,13 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     private var sessionNonce: String?
     private var activeTasks: [ObjectIdentifier: ActiveTask] = [:]
 
-    /// Optional in-place package backend. When set, a request is resolved
-    /// against the parsed `scene.pkg` table-of-contents first (entries are
-    /// contiguous, uncompressed byte slices); anything not in the package falls
-    /// back to a loose file under `activeFolderURL` (e.g. `project.json`, or
-    /// assets the author shipped unpacked). Set/cleared together with
-    /// `folderURL`; changing the folder always clears it.
+    /// Optional in-place package backend. When set, a request that the folder
+    /// does NOT have as a loose file is resolved against the parsed `scene.pkg`
+    /// table-of-contents (entries are contiguous, uncompressed byte slices).
+    /// Loose files always win, so an ordinary HTML folder next to a `scene.pkg`
+    /// keeps its plain-folder behaviour; the package only serves the packaged
+    /// payload (index + bundle). Set/cleared together with `folderURL`; changing
+    /// the folder always clears it.
     private var activePackageBacking: PackageBacking?
 
     struct PackageBacking: Sendable {
