@@ -1314,13 +1314,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let textures = firstPass["textures"] as? [Any]
         let firstTexturePath = textures?.first as? String
         let constants = firstPass["constantshadervalues"] as? [String: Any]
-        let overbright = (constants?["ui_editor_properties_overbright"] as? NSNumber)
-            .map { Float(truncating: $0) } ?? 1.0
         return ParticleMaterialDescriptor(
             blendMode: WPEParticleBlendMode(materialString: blendString),
             firstTexturePath: firstTexturePath,
-            overbright: max(0, overbright)
+            overbright: Self.overbright(fromConstants: constants)
         )
+    }
+
+    /// Parses `ui_editor_properties_overbright` from a pass's
+    /// `constantshadervalues`. A JSON boolean bridges to an `NSNumber` whose
+    /// `Float` value is 0/1, so guard it out (a stray `false` would otherwise
+    /// black the particle out); clamp to ≥ 0. Absent/malformed → 1.0 (no change).
+    nonisolated static func overbright(fromConstants constants: [String: Any]?) -> Float {
+        let raw = constants?["ui_editor_properties_overbright"]
+        if raw is Bool { return 1.0 }
+        guard let number = raw as? NSNumber else { return 1.0 }
+        return max(0, Float(truncating: number))
     }
 
     /// Best-effort `.tex-json` sidecar lookup. The atlas slicing

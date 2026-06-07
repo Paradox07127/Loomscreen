@@ -1164,6 +1164,22 @@ struct WPEParticleSystemTests {
         #expect(scaled.instantaneousCount == 20)
     }
 
+    @Test("material overbright parse: numeric, absent default, bool guard, negative clamp")
+    func materialOverbrightParse() {
+        // Numeric value (real WPE case, e.g. 1.51).
+        #expect(abs(WPEMetalSceneRenderer.overbright(
+            fromConstants: ["ui_editor_properties_overbright": 1.51]) - 1.51) < 0.0001)
+        // Absent / nil → 1.0 (no change).
+        #expect(WPEMetalSceneRenderer.overbright(fromConstants: [:]) == 1.0)
+        #expect(WPEMetalSceneRenderer.overbright(fromConstants: nil) == 1.0)
+        // A JSON boolean must NOT be read as 0 (would black the particle out).
+        #expect(WPEMetalSceneRenderer.overbright(
+            fromConstants: ["ui_editor_properties_overbright": false]) == 1.0)
+        // Negative clamps to 0.
+        #expect(WPEMetalSceneRenderer.overbright(
+            fromConstants: ["ui_editor_properties_overbright": -3]) == 0)
+    }
+
     private func stillParticleDefinition(
         maxCount: Int = 4,
         rate: Double = 1000,
