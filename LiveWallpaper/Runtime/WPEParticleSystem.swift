@@ -200,6 +200,13 @@ final class WPEParticleSystem {
     private let gravity: SIMD3<Float>
     private let turbulenceMask: SIMD3<Float>
 
+    /// Pre-allocated GPU buffer of explicit TEXS frame UV rects (vertex
+    /// buffer index 4). Built once at init from `spriteSheet.frameRects`,
+    /// so the draw loop never re-uploads them and large atlases can't trip
+    /// the 4 KB `setVertexBytes` inline-constant limit. `nil` ⇒ uniform-grid
+    /// slicing (or no sheet).
+    let frameRectsBuffer: MTLBuffer?
+
     /// Hard ceiling so a single emitter can't blow the GPU memory budget.
     /// 8K particles × 48 bytes = 384 KB per system.
     static let absoluteCap = 8192
@@ -273,6 +280,17 @@ final class WPEParticleSystem {
             Float(definition.turbulenceMask.y),
             Float(definition.turbulenceMask.z)
         )
+        if let rects = spriteSheet?.frameRects, !rects.isEmpty {
+            // Upload once; a failed allocation degrades to uniform-grid slicing
+            // rather than failing the whole system.
+            let buffer = rects.withUnsafeBytes { bytes in
+                device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: [.storageModeShared])
+            }
+            buffer?.label = "WPE particle frame rects"
+            self.frameRectsBuffer = buffer
+        } else {
+            self.frameRectsBuffer = nil
+        }
         self.attractors = definition.attractors
         self.emitterTracksPointer = definition.emitterTracksPointer
         var offsets: [Int: SIMD3<Float>] = [:]

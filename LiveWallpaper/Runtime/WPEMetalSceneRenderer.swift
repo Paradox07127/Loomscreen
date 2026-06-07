@@ -1123,10 +1123,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                         system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
                     }
                 } else if system.requiresFollowParent {
-                    // Weak parent vanished: drop follow state so the system
-                    // falls back to ordinary static particle behavior.
+                    // Parent missing (failed to register or weak ref gone): keep
+                    // the follow gate so the orphan stays disabled instead of
+                    // spawning at a wrong static origin.
                     system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
-                    system.requiresFollowParent = false
                 }
                 system.tick(now: uniforms.time)
             }
@@ -1424,9 +1424,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             registered = nil
             debugStage("particle", "expand-only \(object.name) — renderer disabled: \(particlePath)")
         }
-        // A renderer:[] spawner forwards its OWN parent so its children can still
-        // event-follow up the chain.
-        let childParentSystem = registered ?? parentSystem
+        // A renderer:[] spawner (didn't register) forwards its OWN parent so its
+        // children can still event-follow up the chain. A rendering parent that
+        // FAILED to register forwards nil — its event-follow children must stay
+        // gated rather than silently following the grandparent.
+        let childParentSystem = definition.rendersSprite ? registered : parentSystem
         let childAncestry = ancestry + [particlePath]
         for child in parsedDefinition.childReferences {
             await expandParticleTree(

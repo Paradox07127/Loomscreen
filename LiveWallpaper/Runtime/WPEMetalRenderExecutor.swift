@@ -538,8 +538,7 @@ final class WPEMetalRenderExecutor {
             projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
-            let frameRects = system.spriteSheet?.frameRects
-            let useFrameRects = frameRects?.isEmpty == false
+            let useFrameRects = system.frameRectsBuffer != nil
             var sprite = WPEParticleSpriteParams(
                 grid: SIMD4<Float>(
                     Float(system.spriteSheet?.cols ?? 1),
@@ -549,18 +548,17 @@ final class WPEMetalRenderExecutor {
                 ),
                 frameRectMode: SIMD4<Float>(
                     useFrameRects ? 1 : 0,
-                    Float(frameRects?.count ?? 0),
+                    Float(system.spriteSheet?.frameRects?.count ?? 0),
                     0,
                     0
                 )
             )
             encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
-            // Buffer(4) must always be bound for the vertex function's signature;
+            // Buffer(4) must always be bound for the vertex function's signature.
+            // Use the system's pre-allocated frame-rect buffer (any frame count);
             // a 1-element dummy covers the uniform-grid path.
-            if let frameRects, useFrameRects {
-                frameRects.withUnsafeBytes { rectBytes in
-                    encoder.setVertexBytes(rectBytes.baseAddress!, length: rectBytes.count, index: 4)
-                }
+            if let frameRectsBuffer = system.frameRectsBuffer {
+                encoder.setVertexBuffer(frameRectsBuffer, offset: 0, index: 4)
             } else {
                 var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
                 encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)

@@ -18,15 +18,13 @@ struct WPETexAnimatedFrame {
     let duration: TimeInterval
 }
 
-/// Phase 2E animated `.tex` source. Each TEXS frame is pre-cropped from
-/// its source atlas and uploaded as an independent `MTLTexture`; the
-/// runtime selects the current frame from the runtime clock against a
-/// per-frame duration timeline so variable-rate schedules play correctly.
-///
-/// Pre-P0 the loader uploaded the whole atlas as a single frame and
-/// `WPETexAnimatedTextureSource` ignored TEXS sub-rects entirely — sprite
-/// sheets rendered the whole atlas every frame. P0 introduces per-frame
-/// crops while keeping the existing `texture(at:)` consumer contract.
+/// Phase 2E animated `.tex` source. Per the loader invariant
+/// (`WPEMetalTextureLoader.makeAnimatedTextureSource`), every frame shares the
+/// WHOLE-atlas `MTLTexture` for its source image and carries its TEXS
+/// `sourceSubRect`; `texture(at:)` therefore returns the full atlas and selects
+/// the current frame on a per-frame duration timeline (variable-rate safe).
+/// Shader-aware consumers (particle sprite sheets) slice the atlas via
+/// `spriteSheetFrameRectsNormalized()` instead of relying on per-frame crops.
 @MainActor
 final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
     private let frames: [WPETexAnimatedFrame]
