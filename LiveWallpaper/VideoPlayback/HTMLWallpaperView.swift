@@ -644,6 +644,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             currentLocalReadAccessRoot = folderURL
             updateWallpaperEnginePropertyBridge(for: folderURL)
             folderHandler.folderURL = folderURL
+            // In-place package serving: when the source folder holds a
+            // `scene.pkg`, the handler reads web assets straight from it
+            // (loose siblings like `project.json` still fall back to the
+            // folder). Must be set after `folderURL` (which clears it).
+            folderHandler.setPackageBacking(Self.packageBacking(forFolder: folderURL))
             guard let nonce = folderHandler.currentSessionNonce else {
                 Logger.error("HTML folder load: missing session nonce for \(indexFileName)", category: .screenManager)
                 return
@@ -662,6 +667,29 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         case .inline(let html):
             currentLocalReadAccessRoot = nil
             webView.loadHTMLString(html, baseURL: nil)
+        }
+    }
+
+    /// Detects an in-place `scene.pkg` inside a packaged web wallpaper's source
+    /// folder and parses its table of contents so the scheme handler can serve
+    /// web assets directly from the package. Returns `nil` for an unpacked
+    /// folder (no `scene.pkg`) or an unreadable/invalid package, in which case
+    /// the handler serves loose files only. Parsing reads just the header (it
+    /// seeks past the payload), so cost scales with entry count, not pkg size.
+    private static func packageBacking(forFolder folderURL: URL) -> FolderURLSchemeHandler.PackageBacking? {
+        let pkgURL = folderURL.appendingPathComponent("scene.pkg")
+        guard FileManager.default.fileExists(atPath: pkgURL.path) else { return nil }
+        do {
+            let handle = try FileHandle(forReadingFrom: pkgURL)
+            defer { try? handle.close() }
+            let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
+            return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: package)
+        } catch {
+            Logger.info(
+                "HTML folder load: scene.pkg present but not parseable (\(error)) — serving folder directly",
+                category: .screenManager
+            )
+            return nil
         }
     }
 

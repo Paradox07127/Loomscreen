@@ -139,7 +139,12 @@ final class WallpaperEngineImportService {
     ) async -> ImportResult {
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
-            return await importPackagedWeb(project: project, pkgURL: pkgURL, sourceBookmark: sourceBookmark)
+            return await importPackagedWeb(
+                project: project,
+                folderURL: folderURL,
+                pkgURL: pkgURL,
+                sourceBookmark: sourceBookmark
+            )
         }
 
         guard let indexURL = resourceURL(root: folderURL, relativePath: project.entryFile),
@@ -169,7 +174,56 @@ final class WallpaperEngineImportService {
         return .ready(content, origin: origin)
     }
 
+    /// Package-aware web import: serves the web payload in place from `scene.pkg`
+    /// via the render-time scheme handler (which reads pkg entries first, then
+    /// falls back to loose siblings like `project.json`). No whole-package
+    /// extraction, so no second on-disk copy in `wpe-cache`. Falls back to
+    /// extraction only when the package can't be opened or the index entry is
+    /// missing from it.
     private func importPackagedWeb(
+        project: WallpaperEngineProject,
+        folderURL: URL,
+        pkgURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult {
+        if let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+           provider.exists(atRelativePath: project.entryFile) {
+            // Zero-cache: drop any stale prior extraction for this id so the
+            // source `.pkg` is never shadowed by a redundant, reclaimable copy.
+            await purgeStaleCache(workshopID: project.workshopID)
+
+            guard let folderBookmark = makeBookmark(folderURL) else {
+                return .rejected(reason: "Cannot create web folder bookmark")
+            }
+            let originKind = WallpaperEngineImportService.originKind(forSourceFolder: folderURL)
+            let origin = makeOrigin(
+                project: project,
+                sourceBookmark: sourceBookmark,
+                cacheRelativePath: nil,
+                resourceLocation: .sourceFolder,
+                originKind: originKind
+            )
+            let content = WallpaperContent.html(
+                source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
+                config: HTMLConfig(
+                    physicalPixelLayout: true,
+                    originKind: originKind
+                )
+            )
+            return .ready(content, origin: origin)
+        }
+
+        return await importPackagedWebViaExtraction(
+            project: project,
+            pkgURL: pkgURL,
+            sourceBookmark: sourceBookmark
+        )
+    }
+
+    /// Legacy fallback: extracts the whole `scene.pkg` into `wpe-cache` and
+    /// points the wallpaper at the extracted folder. Used only when the package
+    /// can't be opened for in-place reading.
+    private func importPackagedWebViaExtraction(
         project: WallpaperEngineProject,
         pkgURL: URL,
         sourceBookmark: Data

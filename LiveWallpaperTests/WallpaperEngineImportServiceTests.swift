@@ -55,6 +55,40 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.entryFile == "index.html")
     }
 
+    @Test("Packaged web imports in place from scene.pkg without extracting to wpe-cache")
+    func packagedWebImportsInPlaceWithoutExtraction() async throws {
+        // index.html lives only inside scene.pkg (project.json stays loose).
+        let fixture = try makeFixture(type: .web, entryFile: "index.html", pkgEntries: [
+            PackageEntrySpec("index.html", Array("<html><body>hi</body></html>".utf8)),
+            PackageEntrySpec("app.js", Array("console.log(1)".utf8))
+        ])
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, let origin) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .html(let source, let config) = content else {
+            Issue.record("Expected .html content, got \(content)")
+            return
+        }
+        guard case .folder(_, let indexFileName) = source else {
+            Issue.record("Expected .folder source, got \(source)")
+            return
+        }
+        #expect(indexFileName == "index.html")
+        #expect(config.physicalPixelLayout)
+        // Package-aware: served in place from the source folder, no cache copy.
+        #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .sourceFolder)
+        #expect(origin.entryFile == "index.html")
+        // Nothing was extracted into wpe-cache for this id.
+        let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
+    }
+
     @Test("Unsupported scene returns unsupported result")
     func unsupportedSceneReturnsUnsupportedResult() async throws {
         let fixture = try makeFixture(type: .scene, entryFile: "scene.json", pkgEntries: nil)
