@@ -118,15 +118,11 @@ public struct WPEParticleAlphaChange: Equatable, Sendable {
     }
 
     public func factor(lifetimeFraction: Double) -> Double {
-        let fraction = min(max(lifetimeFraction, 0), 1)
-        let span = endTime - startTime
-        let t: Double
-        if abs(span) < 0.000_001 {
-            t = fraction >= endTime ? 1 : 0
-        } else {
-            t = min(max((fraction - startTime) / span, 0), 1)
-        }
-        return startValue + (endValue - startValue) * t
+        wpeParticleLifetimeRamp(
+            lifetimeFraction,
+            startTime: startTime, endTime: endTime,
+            startValue: startValue, endValue: endValue
+        )
     }
 }
 
@@ -146,6 +142,111 @@ public struct WPEParticleOscillateAlpha: Equatable, Sendable {
         guard frequency != 0, scale != 0 else { return 1 }
         let value = 1 + sin((age + phase) * frequency * 2 * Double.pi) * scale
         return min(max(value, 0), 1)
+    }
+}
+
+/// Shared linear ramp for the lifetime-fraction operators
+/// (`alphachange`/`sizechange`/`colorchange`): clamps the fraction, maps it
+/// across `[startTime, endTime]`, and interpolates `startValue → endValue`.
+@inline(__always)
+func wpeParticleLifetimeRamp(
+    _ lifetimeFraction: Double,
+    startTime: Double,
+    endTime: Double,
+    startValue: Double,
+    endValue: Double
+) -> Double {
+    let fraction = min(max(lifetimeFraction, 0), 1)
+    let span = endTime - startTime
+    let t: Double
+    if abs(span) < 0.000_001 {
+        t = fraction >= endTime ? 1 : 0
+    } else {
+        t = min(max((fraction - startTime) / span, 0), 1)
+    }
+    return startValue + (endValue - startValue) * t
+}
+
+/// `sizechange` operator: a lifetime-fraction SIZE multiplier ramp. Same shape
+/// as `alphachange`, but scales the sprite quad instead of its opacity
+/// (fireworks grow from a point with `startValue:0, endValue:1`; embers shrink).
+public struct WPEParticleSizeChange: Equatable, Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let startValue: Double
+    public let endValue: Double
+
+    public init(startTime: Double, endTime: Double, startValue: Double, endValue: Double) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.startValue = startValue
+        self.endValue = endValue
+    }
+
+    public func factor(lifetimeFraction: Double) -> Double {
+        wpeParticleLifetimeRamp(
+            lifetimeFraction,
+            startTime: startTime, endTime: endTime,
+            startValue: startValue, endValue: endValue
+        )
+    }
+}
+
+/// `colorchange` operator: a lifetime-fraction RGB multiplier ramp. Each channel
+/// interpolates from `startColor` to `endColor` (0…1 tint multipliers) and
+/// modulates the particle's per-instance colour.
+public struct WPEParticleColorChange: Equatable, Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let startColor: SIMD3<Double>
+    public let endColor: SIMD3<Double>
+
+    public init(startTime: Double, endTime: Double, startColor: SIMD3<Double>, endColor: SIMD3<Double>) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.startColor = startColor
+        self.endColor = endColor
+    }
+
+    public func color(lifetimeFraction: Double) -> SIMD3<Double> {
+        SIMD3<Double>(
+            wpeParticleLifetimeRamp(lifetimeFraction, startTime: startTime, endTime: endTime,
+                                    startValue: startColor.x, endValue: endColor.x),
+            wpeParticleLifetimeRamp(lifetimeFraction, startTime: startTime, endTime: endTime,
+                                    startValue: startColor.y, endValue: endColor.y),
+            wpeParticleLifetimeRamp(lifetimeFraction, startTime: startTime, endTime: endTime,
+                                    startValue: startColor.z, endValue: endColor.z)
+        )
+    }
+}
+
+/// `oscillateposition` operator: a per-particle sine sway. Frequency, amplitude
+/// (`scale`, in pixels) and phase are randomized per particle from their
+/// min/max ranges at spawn; `mask` selects which axes sway. The displacement is
+/// transient — derived from age each frame, never integrated into the stored
+/// position — so the particle sways without drifting off its path.
+public struct WPEParticleOscillatePosition: Equatable, Sendable {
+    public let frequencyMin: Double
+    public let frequencyMax: Double
+    public let scaleMin: Double
+    public let scaleMax: Double
+    public let phaseMin: Double
+    public let phaseMax: Double
+    public let mask: SIMD3<Double>
+
+    public init(
+        frequencyMin: Double, frequencyMax: Double,
+        scaleMin: Double, scaleMax: Double,
+        phaseMin: Double, phaseMax: Double,
+        mask: SIMD3<Double>
+    ) {
+        self.frequencyMin = min(frequencyMin, frequencyMax)
+        self.frequencyMax = max(frequencyMin, frequencyMax)
+        self.scaleMin = min(scaleMin, scaleMax)
+        self.scaleMax = max(scaleMin, scaleMax)
+        self.phaseMin = min(phaseMin, phaseMax)
+        self.phaseMax = max(phaseMin, phaseMax)
+        self.mask = mask
     }
 }
 
@@ -195,6 +296,12 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let alphaChange: WPEParticleAlphaChange?
     /// `oscillatealpha` operator (sine alpha flicker), if present.
     public let oscillateAlpha: WPEParticleOscillateAlpha?
+    /// `sizechange` operator (lifetime-fraction size ramp), if present.
+    public let sizeChange: WPEParticleSizeChange?
+    /// `colorchange` operator (lifetime-fraction RGB ramp), if present.
+    public let colorChange: WPEParticleColorChange?
+    /// `oscillateposition` operator (per-particle sine sway), if present.
+    public let oscillatePosition: WPEParticleOscillatePosition?
     /// `operator: movement.gravity` (world units / s²) and drag scalar.
     public let gravity: SIMD3<Double>
     public let drag: Double
@@ -277,6 +384,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         fadeOutSeconds: Double = 0,
         alphaChange: WPEParticleAlphaChange? = nil,
         oscillateAlpha: WPEParticleOscillateAlpha? = nil,
+        sizeChange: WPEParticleSizeChange? = nil,
+        colorChange: WPEParticleColorChange? = nil,
+        oscillatePosition: WPEParticleOscillatePosition? = nil,
         gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         drag: Double = 0,
         angularForceZ: Double = 0,
@@ -326,6 +436,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.fadeOutSeconds = fadeOutSeconds
         self.alphaChange = alphaChange
         self.oscillateAlpha = oscillateAlpha
+        self.sizeChange = sizeChange
+        self.colorChange = colorChange
+        self.oscillatePosition = oscillatePosition
         self.gravity = gravity
         self.drag = drag
         self.angularForceZ = angularForceZ
@@ -393,6 +506,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             fadeOutSeconds: fadeOutSeconds,
             alphaChange: alphaChange,
             oscillateAlpha: oscillateAlpha,
+            sizeChange: sizeChange,
+            colorChange: colorChange,
+            oscillatePosition: oscillatePosition,
             gravity: gravity * speedScale,
             drag: drag,
             angularForceZ: angularForceZ * speedScale,
@@ -446,6 +562,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             fadeOutSeconds: fadeOutSeconds,
             alphaChange: alphaChange,
             oscillateAlpha: oscillateAlpha,
+            sizeChange: sizeChange,
+            colorChange: colorChange,
+            oscillatePosition: oscillatePosition,
             gravity: gravity,
             drag: drag,
             angularForceZ: angularForceZ,
@@ -654,6 +773,9 @@ public enum WPEParticleDefinitionParser {
         var fadeOutSeconds: Double = 0
         var alphaChange: WPEParticleAlphaChange?
         var oscillateAlpha: WPEParticleOscillateAlpha?
+        var sizeChange: WPEParticleSizeChange?
+        var colorChange: WPEParticleColorChange?
+        var oscillatePosition: WPEParticleOscillatePosition?
         var gravity: SIMD3<Double> = SIMD3(0, 0, 0)
         var drag: Double = 0
         var angularForceZ: Double = 0
@@ -691,6 +813,46 @@ public enum WPEParticleDefinitionParser {
                     let phase = WPEValueParser.double(entry["phase"])
                         ?? WPEValueParser.double(entry["phasemin"]) ?? 0
                     oscillateAlpha = WPEParticleOscillateAlpha(frequency: frequency, scale: scale, phase: phase)
+                case "sizechange":
+                    sizeChange = WPEParticleSizeChange(
+                        startTime: WPEValueParser.double(entry["starttime"]) ?? 0,
+                        endTime: WPEValueParser.double(entry["endtime"]) ?? 1,
+                        startValue: WPEValueParser.double(entry["startvalue"]) ?? 1,
+                        endValue: WPEValueParser.double(entry["endvalue"]) ?? 1
+                    )
+                case "colorchange":
+                    // 0…1 RGB multipliers (unlike `colorrandom`, which is 0…255).
+                    let identity = SIMD3<Double>(1, 1, 1)
+                    let start = WPEValueParser.vector3(entry["startvalue"]) ?? identity
+                    let end = WPEValueParser.vector3(entry["endvalue"]) ?? identity
+                    colorChange = WPEParticleColorChange(
+                        startTime: WPEValueParser.double(entry["starttime"]) ?? 0,
+                        endTime: WPEValueParser.double(entry["endtime"]) ?? 1,
+                        startColor: start,
+                        endColor: end
+                    )
+                case "oscillateposition":
+                    let freqMin = WPEValueParser.double(entry["frequencymin"])
+                        ?? WPEValueParser.double(entry["frequency"]) ?? 0
+                    let freqMax = WPEValueParser.double(entry["frequencymax"])
+                        ?? WPEValueParser.double(entry["frequency"]) ?? freqMin
+                    let scaleMin = WPEValueParser.double(entry["scalemin"])
+                        ?? WPEValueParser.double(entry["scale"]) ?? 0
+                    let scaleMax = WPEValueParser.double(entry["scalemax"])
+                        ?? WPEValueParser.double(entry["scale"]) ?? scaleMin
+                    let phaseMin = WPEValueParser.double(entry["phasemin"])
+                        ?? WPEValueParser.double(entry["phase"]) ?? 0
+                    let phaseMax = WPEValueParser.double(entry["phasemax"])
+                        ?? WPEValueParser.double(entry["phase"]) ?? phaseMin
+                    let mask = WPEValueParser.vector3(entry["mask"]) ?? SIMD3<Double>(1, 1, 1)
+                    if scaleMax > 0, freqMax > 0 {
+                        oscillatePosition = WPEParticleOscillatePosition(
+                            frequencyMin: freqMin, frequencyMax: freqMax,
+                            scaleMin: scaleMin, scaleMax: scaleMax,
+                            phaseMin: phaseMin, phaseMax: phaseMax,
+                            mask: mask
+                        )
+                    }
                 case "movement":
                     gravity = WPEValueParser.vector3(entry["gravity"]) ?? gravity
                     drag = WPEValueParser.double(entry["drag"]) ?? drag
@@ -747,6 +909,9 @@ public enum WPEParticleDefinitionParser {
             fadeOutSeconds: max(0, fadeOutSeconds),
             alphaChange: alphaChange,
             oscillateAlpha: oscillateAlpha,
+            sizeChange: sizeChange,
+            colorChange: colorChange,
+            oscillatePosition: oscillatePosition,
             gravity: gravity,
             drag: max(0, drag),
             angularForceZ: angularForceZ,

@@ -815,6 +815,154 @@ struct WPEParticleSystemTests {
         #expect(abs(position.y + 8) < 1)
     }
 
+    @Test("Parser captures sizechange, colorchange, oscillateposition operators")
+    func parserCapturesModulationOperators() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "operator": [
+                {"name": "sizechange", "starttime": 0, "endtime": 1, "startvalue": 0, "endvalue": 1},
+                {"name": "colorchange", "startvalue": "1 1 1", "endvalue": "1 0 0"},
+                {"name": "oscillateposition", "frequencymin": 0.8, "frequencymax": 1.0,
+                 "scalemin": 20, "scalemax": 35, "phasemin": 0, "phasemax": 1, "mask": "1 0.5 0"}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        let size = try #require(def.sizeChange)
+        #expect(size.startValue == 0)
+        #expect(size.endValue == 1)
+        let color = try #require(def.colorChange)
+        #expect(color.endColor.x == 1)
+        #expect(color.endColor.y == 0)
+        let osc = try #require(def.oscillatePosition)
+        #expect(osc.frequencyMin == 0.8)
+        #expect(osc.frequencyMax == 1.0)
+        #expect(osc.scaleMin == 20)
+        #expect(osc.scaleMax == 35)
+        #expect(osc.mask.x == 1)
+        #expect(osc.mask.y == 0.5)
+    }
+
+    @Test("sizechange factor ramps over lifetime")
+    func sizeChangeFactorRamps() {
+        let s = WPEParticleSizeChange(startTime: 0, endTime: 1, startValue: 0, endValue: 1)
+        #expect(abs(s.factor(lifetimeFraction: 0)) < 0.0001)
+        #expect(abs(s.factor(lifetimeFraction: 0.5) - 0.5) < 0.0001)
+        #expect(abs(s.factor(lifetimeFraction: 1) - 1) < 0.0001)
+    }
+
+    @Test("colorchange interpolates each channel independently")
+    func colorChangeInterpolatesChannels() {
+        let c = WPEParticleColorChange(
+            startTime: 0, endTime: 1,
+            startColor: SIMD3(1, 1, 1), endColor: SIMD3(1, 0, 0)
+        )
+        let mid = c.color(lifetimeFraction: 0.5)
+        #expect(abs(mid.x - 1) < 0.0001)
+        #expect(abs(mid.y - 0.5) < 0.0001)
+        #expect(abs(mid.z - 0.5) < 0.0001)
+    }
+
+    @Test("sizechange grows the written sprite size over lifetime")
+    func sizeChangeGrowsWrittenSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 1, lifetimeMax: 1,
+            sizeMin: 10, sizeMax: 10,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            sizeChange: WPEParticleSizeChange(startTime: 0, endTime: 1, startValue: 0, endValue: 1)
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let early = pointer[0].positionAndSize.w
+        for step in 1...8 { system.tick(now: 0.05 + Double(step) * 0.1) }
+        let late = pointer[0].positionAndSize.w
+        #expect(early < 2)
+        #expect(late > 6)
+        #expect(late > early)
+    }
+
+    @Test("colorchange multiplies the written tint over lifetime")
+    func colorChangeMultipliesWrittenColor() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 1, lifetimeMax: 1,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            colorChange: WPEParticleColorChange(
+                startTime: 0, endTime: 1,
+                startColor: SIMD3(1, 1, 1), endColor: SIMD3(1, 0, 0)
+            )
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let early = pointer[0].color
+        for step in 1...8 { system.tick(now: 0.05 + Double(step) * 0.1) }
+        let late = pointer[0].color
+        #expect(early.y > 0.8)        // green starts ~white
+        #expect(late.x > 0.8)         // red channel preserved (multiplier 1)
+        #expect(late.y < late.x)      // green ramped down below red
+    }
+
+    @Test("oscillateposition sways the written position with bounded amplitude (transient, no drift)")
+    func oscillatePositionSwaysBounded() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            oscillatePosition: WPEParticleOscillatePosition(
+                frequencyMin: 1, frequencyMax: 1,
+                scaleMin: 50, scaleMax: 50,
+                phaseMin: 0, phaseMax: 0,
+                mask: SIMD3(1, 0, 0)
+            )
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        var minX = Float.greatestFiniteMagnitude
+        var maxX = -Float.greatestFiniteMagnitude
+        // Sample over >1 full period (freq 1 → 1s). A transient sine sway stays
+        // bounded by ±scale forever; an integrated offset would widen each cycle.
+        system.tick(now: 0)
+        for step in 1...30 {
+            system.tick(now: Double(step) * 0.05)
+            let x = pointer[0].positionAndSize.x
+            minX = min(minX, x)
+            maxX = max(maxX, x)
+        }
+        let amplitude = (maxX - minX) / 2
+        #expect(amplitude > 40)
+        #expect(amplitude < 60)
+    }
+
     private func stillParticleDefinition(
         maxCount: Int = 4,
         rate: Double = 1000,

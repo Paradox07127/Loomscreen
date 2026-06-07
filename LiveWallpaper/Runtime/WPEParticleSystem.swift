@@ -202,6 +202,11 @@ final class WPEParticleSystem {
     /// and rotation without translating.
     private let gravity: SIMD3<Float>
     private let turbulenceMask: SIMD3<Float>
+    /// `oscillateposition` sway mask transformed into render space (so the
+    /// displacement rotates/scales with the scene object, like velocity).
+    /// `applyModelDirection` is linear, so the per-particle amplitude can be
+    /// multiplied in afterwards. Zero when the operator is absent.
+    private let oscillatePositionMask: SIMD3<Float>
 
     /// Pre-allocated GPU buffer of explicit TEXS frame UV rects (vertex
     /// buffer index 4). Built once at init from `spriteSheet.frameRects`,
@@ -232,6 +237,12 @@ final class WPEParticleSystem {
         /// in `.randomFrame` mode (chosen once at spawn). Ignored by
         /// `.sequence` particles, which animate off `age/lifetime`.
         var staticFrame: Float
+        /// Per-particle `oscillateposition` inputs sampled once at spawn
+        /// (frequency, amplitude in pixels, phase). The operator adds a
+        /// transient sine displacement every frame; zero when absent.
+        var oscPosFrequency: Float
+        var oscPosScale: Float
+        var oscPosPhase: Float
     }
 
     init?(
@@ -259,7 +270,10 @@ final class WPEParticleSystem {
             age: .greatestFiniteMagnitude,
             turbulenceSpeed: 0,
             turbulencePhase: 0,
-            staticFrame: 0
+            staticFrame: 0,
+            oscPosFrequency: 0,
+            oscPosScale: 0,
+            oscPosPhase: 0
         ), count: cap)
         guard let buffer = device.makeBuffer(
             length: cap * MemoryLayout<WPEParticleInstance>.stride,
@@ -283,6 +297,13 @@ final class WPEParticleSystem {
             Float(definition.turbulenceMask.y),
             Float(definition.turbulenceMask.z)
         )
+        if let osc = definition.oscillatePosition {
+            self.oscillatePositionMask = sceneTransform.applyModelDirection(SIMD3<Float>(
+                Float(osc.mask.x), Float(osc.mask.y), Float(osc.mask.z)
+            ))
+        } else {
+            self.oscillatePositionMask = .zero
+        }
         if let rects = spriteSheet?.frameRects, !rects.isEmpty {
             // Upload once; a failed allocation degrades to uniform-grid slicing
             // rather than failing the whole system.
@@ -437,6 +458,24 @@ final class WPEParticleSystem {
                 alpha *= Float(oscillateAlpha.factor(age: Double(particle.age)))
             }
             alpha = min(max(alpha, 0), 1)
+            // `sizechange`: lifetime-fraction multiplier on the sprite quad.
+            var spriteSize = particle.size
+            if let sizeChange = definition.sizeChange {
+                spriteSize *= Float(sizeChange.factor(lifetimeFraction: Double(lifetimeFraction)))
+            }
+            // `colorchange`: lifetime-fraction RGB multiplier on the tint.
+            var rgb = particle.color
+            if let colorChange = definition.colorChange {
+                let c = colorChange.color(lifetimeFraction: Double(lifetimeFraction))
+                rgb *= SIMD3<Float>(Float(c.x), Float(c.y), Float(c.z))
+            }
+            // `oscillateposition`: transient sine sway (never integrated into
+            // the stored position, so the particle sways without drifting).
+            var drawPosition = particle.position
+            if particle.oscPosScale != 0, particle.oscPosFrequency != 0 {
+                let sway = sin((particle.age + particle.oscPosPhase) * particle.oscPosFrequency * 2 * Float.pi)
+                drawPosition += oscillatePositionMask * (sway * particle.oscPosScale)
+            }
             let frameIndex: Float
             if animatesSequence {
                 let raw = lifetimeFraction * cyclesPerLifetime * frameCount
@@ -449,9 +488,9 @@ final class WPEParticleSystem {
             }
             pointer[written] = WPEParticleInstance(
                 positionAndSize: SIMD4<Float>(
-                    particle.position.x, particle.position.y, visualScaleSigns.x, particle.size
+                    drawPosition.x, drawPosition.y, visualScaleSigns.x, spriteSize
                 ),
-                color: SIMD4<Float>(particle.color.x, particle.color.y, particle.color.z, alpha),
+                color: SIMD4<Float>(rgb.x, rgb.y, rgb.z, alpha),
                 rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, visualScaleSigns.y)
             )
             written += 1
@@ -658,6 +697,18 @@ final class WPEParticleSystem {
         let angularVec = uniformVector(definition.angularVelocityMin, definition.angularVelocityMax)
         let turbulenceSpeed = Float(uniform(definition.turbulenceSpeedMin, definition.turbulenceSpeedMax))
         let turbulencePhase = Float(uniform(definition.turbulencePhaseMin, definition.turbulencePhaseMax))
+        let oscPosFrequency: Float
+        let oscPosScale: Float
+        let oscPosPhase: Float
+        if let osc = definition.oscillatePosition {
+            oscPosFrequency = Float(uniform(osc.frequencyMin, osc.frequencyMax))
+            oscPosScale = Float(uniform(osc.scaleMin, osc.scaleMax))
+            oscPosPhase = Float(uniform(osc.phaseMin, osc.phaseMax))
+        } else {
+            oscPosFrequency = 0
+            oscPosScale = 0
+            oscPosPhase = 0
+        }
         // `.randomFrame`: lock onto one atlas cell for life so each shard
         // is a different *static* piece of the sheet (WPE shatter look).
         // `.sequence` / single-frame sprites leave this at 0 — `tick`
@@ -684,7 +735,10 @@ final class WPEParticleSystem {
             age: 0,
             turbulenceSpeed: turbulenceSpeed,
             turbulencePhase: turbulencePhase,
-            staticFrame: staticFrame
+            staticFrame: staticFrame,
+            oscPosFrequency: oscPosFrequency,
+            oscPosScale: oscPosScale,
+            oscPosPhase: oscPosPhase
         )
     }
 
