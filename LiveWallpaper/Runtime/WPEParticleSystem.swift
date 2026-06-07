@@ -745,7 +745,18 @@ final class WPEParticleSystem {
         }
         let velocity = sceneTransform.applyModelDirection(localVelocity)
         let sizeScale = sceneTransform.worldSizeMultiplier()
-        let size = Float(uniform(definition.sizeMin, definition.sizeMax)) * sizeScale
+        // `sizerandom` exponent: WPE samples min + (max-min)·rand^exp (exp>1
+        // biases toward min). `uniform` is exp==1; only pay `pow` when it differs.
+        let sizeSample: Double
+        if abs(definition.sizeExponent - 1) < 0.0001 {
+            sizeSample = uniform(definition.sizeMin, definition.sizeMax)
+        } else if definition.sizeMax > definition.sizeMin {
+            let r = pow(Double.random(in: 0...1, using: &rng), definition.sizeExponent)
+            sizeSample = definition.sizeMin + (definition.sizeMax - definition.sizeMin) * r
+        } else {
+            sizeSample = definition.sizeMin
+        }
+        let size = Float(sizeSample) * sizeScale
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
         let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))

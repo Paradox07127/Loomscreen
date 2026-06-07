@@ -274,6 +274,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let lifetimeMax: Double
     public let sizeMin: Double
     public let sizeMax: Double
+    /// `sizerandom` `exponent` (default 1). WPE samples `min + (max-min)·rand^exp`,
+    /// so exp>1 biases toward `min` (e.g. petals/leaves with exp 2 are mostly
+    /// small). Sampling uniformly over-sizes the average.
+    public let sizeExponent: Double
     public let originOffset: SIMD3<Double>
     public let dispersalMin: Double
     public let dispersalMax: Double
@@ -371,6 +375,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         lifetimeMax: Double,
         sizeMin: Double,
         sizeMax: Double,
+        sizeExponent: Double = 1,
         originOffset: SIMD3<Double>,
         dispersalMin: Double,
         dispersalMax: Double,
@@ -424,6 +429,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.lifetimeMax = lifetimeMax
         self.sizeMin = sizeMin
         self.sizeMax = sizeMax
+        self.sizeExponent = max(0.0001, sizeExponent)
         self.originOffset = originOffset
         self.dispersalMin = dispersalMin
         self.dispersalMax = dispersalMax
@@ -501,6 +507,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             lifetimeMax: lifetimeMax * lifetimeScale,
             sizeMin: sizeMin * sizeScale,
             sizeMax: sizeMax * sizeScale,
+            sizeExponent: sizeExponent,
             originOffset: originOffset,
             dispersalMin: dispersalMin,
             dispersalMax: dispersalMax,
@@ -558,6 +565,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             lifetimeMax: lifetimeMax,
             sizeMin: sizeMin,
             sizeMax: sizeMax,
+            sizeExponent: sizeExponent,
             originOffset: originOffset + delta,
             dispersalMin: dispersalMin,
             dispersalMax: dispersalMax,
@@ -689,6 +697,7 @@ public enum WPEParticleDefinitionParser {
         var lifetimeMax: Double = def.lifetimeMax
         var sizeMin: Double = def.sizeMin
         var sizeMax: Double = def.sizeMax
+        var sizeExponent: Double = def.sizeExponent
         var velocityMin = def.velocityMin
         var velocityMax = def.velocityMax
         var colorMin = def.colorMin
@@ -722,6 +731,7 @@ public enum WPEParticleDefinitionParser {
                 case "sizerandom":
                     sizeMin = WPEValueParser.double(entry["min"]) ?? sizeMin
                     sizeMax = WPEValueParser.double(entry["max"]) ?? sizeMax
+                    sizeExponent = WPEValueParser.double(entry["exponent"]) ?? sizeExponent
                 case "size":
                     if let v = WPEValueParser.double(entry["value"]) {
                         sizeMin = v; sizeMax = v
@@ -909,6 +919,7 @@ public enum WPEParticleDefinitionParser {
             lifetimeMax: max(lifetimeMin, lifetimeMax),
             sizeMin: max(0, sizeMin),
             sizeMax: max(sizeMin, sizeMax),
+            sizeExponent: sizeExponent,
             originOffset: origin,
             dispersalMin: max(0, dispersalMin),
             dispersalMax: max(dispersalMin, dispersalMax),

@@ -1072,6 +1072,31 @@ struct WPEParticleSystemTests {
         #expect((maxY - minY) > 80)   // it lands on render Y after the rotation
     }
 
+    @Test("Parser captures sizerandom exponent; spawn biases size toward min")
+    func sizeRandomExponentBiasesTowardMin() throws {
+        let json = #"""
+        {
+            "maxcount": 200, "material": "materials/particle/leaves5_1.json",
+            "emitter": [{"name": "sphererandom", "rate": 1000}],
+            "initializer": [{"name": "sizerandom", "min": 40, "max": 80, "exponent": 2}]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.sizeExponent == 2)
+        // exp 2 → mean ≈ min + (max-min)/3 = 53.3 (vs uniform 60). Confirm the
+        // written sizes average below the uniform midpoint.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        for step in 0...40 { system.tick(now: Double(step) * 0.05) }
+        let n = system.liveInstanceCount
+        let ptr = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: n)
+        let mean = (0..<n).map { ptr[$0].positionAndSize.w }.reduce(0, +) / Float(max(1, n))
+        #expect(n > 30)
+        #expect(mean < 58)   // below the uniform midpoint (60) from the exp-2 bias
+        #expect(mean > 40)
+    }
+
     @Test("Parser captures instantaneous burst from a verbatim WPE emitter (scene 3460973721)")
     func parserCapturesInstantaneousBurst() throws {
         // Emitter copied verbatim from scene.pkg 3460973721 (野火): a burst of 50
