@@ -67,9 +67,18 @@ struct ShortcutsSettingsView: View {
     /// footer rather than repeating itself as a subtitle inside the row.
     private var masterEnableSection: some View {
         Section {
-            Toggle("Enable Global Shortcuts", isOn: masterEnableBinding)
-                .toggleStyle(.switch)
-                .accessibilityHint(Text("Master switch for every global shortcut. Bindings are preserved while off."))
+            SettingRow(
+                icon: "command",
+                iconColor: .blue,
+                title: "Enable Global Shortcuts",
+                subtitle: "Master switch — your bindings are kept while it's off"
+            ) {
+                Toggle("", isOn: masterEnableBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel(Text("Enable Global Shortcuts"))
+                    .accessibilityHint(Text("Master switch for every global shortcut. Bindings are preserved while off."))
+            }
         }
     }
 
