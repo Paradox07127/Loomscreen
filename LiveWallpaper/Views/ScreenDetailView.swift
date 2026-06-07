@@ -211,7 +211,7 @@ struct ScreenDetailView: View {
             if inspectorApplicable {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0.04)) {
                             inspectorUserVisible.toggle()
                         }
                     } label: {
@@ -261,24 +261,35 @@ struct ScreenDetailView: View {
     /// steal width from the sidebar and overflow the toolbar into `»`.
     @ViewBuilder
     private func detailLayout(available: CGFloat) -> some View {
-        let inspectorW = showsInspector ? resolvedInspectorWidth(available: available) : 0
+        let fullWidth = resolvedInspectorWidth(available: available)
+        // The panel is MOUNTED whenever the content has an inspector; only its
+        // visible width animates between 0 and `fullWidth`. Keeping the heavy
+        // panel (ScrollView + async schema cards) built means toggling animates
+        // a single width value instead of rebuilding the subtree on the same
+        // frame the animation starts — which is what used to stutter on expand.
+        let shownWidth = showsInspector ? fullWidth : 0
         HStack(spacing: 0) {
             mainColumn
-                .frame(width: max(0, available - inspectorW))
+                .frame(width: max(0, available - shownWidth))
 
-            if showsInspector {
-                inspectorPanel(width: inspectorW)
+            if inspectorApplicable {
+                inspectorPanel(width: fullWidth)
+                    .frame(width: shownWidth, alignment: .leading)
+                    .clipped()
+                    .allowsHitTesting(showsInspector)
+                    .accessibilityHidden(!showsInspector)
                     .overlay(alignment: .leading) {
-                        InspectorResizeHandle(
-                            width: inspectorW,
-                            minWidth: DesignTokens.Inspector.minWidth,
-                            maxWidth: inspectorMaxWidth(available: available),
-                            onPreviewWidthChange: previewInspectorWidth,
-                            onCommitWidth: commitInspectorWidth
-                        )
-                        .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
+                        if showsInspector {
+                            InspectorResizeHandle(
+                                width: fullWidth,
+                                minWidth: DesignTokens.Inspector.minWidth,
+                                maxWidth: inspectorMaxWidth(available: available),
+                                onPreviewWidthChange: previewInspectorWidth,
+                                onCommitWidth: commitInspectorWidth
+                            )
+                            .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
+                        }
                     }
-                    .transition(reduceMotion ? .identity : .move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
