@@ -171,6 +171,16 @@ final class WPEParticleSystem {
     /// (emitter-follow + `controlpointattract`).
     var pointerCentered: SIMD2<Float>?
 
+    /// Event-follow (`type:"eventfollow"`) wiring. The renderer injects the
+    /// parent system's live particle position into `injectedControlPoints` each
+    /// frame so this child's emitter + `controlpointattract` ride the parent
+    /// (the matrix trail follows its falling code head). WPE's follow control
+    /// point is id 1.
+    weak var followParent: WPEParticleSystem?
+    var followControlPointID: Int = 1
+    var requiresFollowParent: Bool = false
+    var injectedControlPoints: [Int: SIMD3<Float>] = [:]
+
     private let attractors: [WPEParticleControlPointAttractor]
     private let emitterTracksPointer: Bool
     /// Raw control-point offsets keyed by id; pointer-locked ids resolve against
@@ -276,9 +286,13 @@ final class WPEParticleSystem {
     }
 
     /// Resolves a control point's position in the centered render frame.
-    /// Pointer-locked points follow the live cursor (nil when unavailable);
-    /// static points are placed via the scene-object transform.
-    private func controlPointPosition(_ id: Int) -> SIMD3<Float>? {
+    /// Injected points (event-follow parent position) win first, so a follow
+    /// child attracts toward the parent particle instead of its static authored
+    /// control point. Pointer-locked points follow the live cursor (nil when
+    /// unavailable); static points are placed via the scene-object transform.
+    func controlPointPosition(_ id: Int) -> SIMD3<Float>? {
+        if let injected = injectedControlPoints[id] { return injected }
+        if requiresFollowParent && id == followControlPointID { return nil }
         let rawOffset = controlPointRawOffsets[id] ?? .zero
         if pointerLockedControlPointIDs.contains(id) {
             guard let p = pointerCentered else { return nil }
@@ -425,6 +439,20 @@ final class WPEParticleSystem {
     }
 
     var liveInstanceCount: Int { aliveCount }
+
+    /// Representative live particle in render-frame coordinates, used as the
+    /// event-follow anchor for child systems. The youngest alive particle is
+    /// the right choice (a maxcount-1 head returns its sole particle); `nil`
+    /// when nothing is alive.
+    var primaryLiveParticlePosition: SIMD3<Float>? {
+        var bestPosition: SIMD3<Float>?
+        var bestAge = Float.greatestFiniteMagnitude
+        for particle in particles where particle.age != .greatestFiniteMagnitude && particle.age < bestAge {
+            bestAge = particle.age
+            bestPosition = particle.position
+        }
+        return bestPosition
+    }
 
     /// Integrate every alive particle and spawn new ones. Split from
     /// `tick(now:)` so `prewarm` can advance the simulator without
@@ -582,12 +610,19 @@ final class WPEParticleSystem {
         )
         let localPoint = emitterOriginLocal + dispersal
         let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        // Pointer-locked emitter (control point 0 tracks the cursor): spawn at
-        // the cursor instead of the scene-object origin, keeping the emitter's
-        // local shape (rotation/scale) intact. Falls back to the static origin
-        // when no pointer is available (Follow Cursor off / load-time prewarm).
         let position: SIMD3<Float>
-        if emitterTracksPointer, let p = pointerCentered {
+        if requiresFollowParent {
+            // Event-follow child: ride the parent's live particle. Skip spawning
+            // when the parent has no live particle this frame (no stale origin).
+            guard let followPosition = injectedControlPoints[followControlPointID] else { return }
+            // The parent particle is already in render space and already carries
+            // the inherited column/object offset; only scatter this emitter's
+            // local dispersal around it (re-adding originOffset would double it).
+            position = followPosition + sceneTransform.applyModelDirection(dispersal)
+        } else if emitterTracksPointer, let p = pointerCentered {
+            // Pointer-locked emitter (control point 0 tracks the cursor): spawn
+            // at the cursor instead of the scene-object origin, keeping the
+            // emitter's local shape (rotation/scale) intact.
             position = SIMD3<Float>(p.x, p.y, 0) + sceneTransform.applyModelDirection(localPoint)
         } else {
             position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)

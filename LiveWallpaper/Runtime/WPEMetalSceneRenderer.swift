@@ -1111,8 +1111,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     Float((0.5 - pointer.y) * sceneRenderSize.height)
                 )
                 : nil
+            // Parents precede their children in `particleSystems` (DFS
+            // registration order), so a parent's `primaryLiveParticlePosition`
+            // is already this-frame-fresh when its event-follow child ticks.
             for system in particleSystems {
                 system.pointerCentered = particlePointer
+                if let parent = system.followParent {
+                    if let followPosition = parent.primaryLiveParticlePosition {
+                        system.injectedControlPoints[system.followControlPointID] = followPosition
+                    } else {
+                        system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
+                    }
+                } else if system.requiresFollowParent {
+                    // Weak parent vanished: drop follow state so the system
+                    // falls back to ordinary static particle behavior.
+                    system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
+                    system.requiresFollowParent = false
+                }
                 system.tick(now: uniforms.time)
             }
             try executor.drawParticles(
@@ -1358,6 +1373,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 parentPath: nil,
                 originAccum: SIMD3<Double>(0, 0, 0),
                 ancestry: [],
+                parentSystem: nil,
+                followFromParent: false,
                 object: object
             )
         }
@@ -1374,6 +1391,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         parentPath: String?,
         originAccum: SIMD3<Double>,
         ancestry: [String],
+        parentSystem: WPEParticleSystem?,
+        followFromParent: Bool,
         object: WPESceneParticleObject
     ) async {
         guard ancestry.count < 16 else {
@@ -1392,15 +1411,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let definition = parsedDefinition
             .offsettingOrigin(by: originAccum)
             .applying(instanceOverride: object.instanceOverride)
+        let registered: WPEParticleSystem?
         if definition.rendersSprite {
-            await registerParticleSystem(
+            registered = await registerParticleSystem(
                 definition: definition,
                 object: object,
-                particlePath: particlePath
+                particlePath: particlePath,
+                followParent: followFromParent ? parentSystem : nil,
+                requiresFollowParent: followFromParent
             )
         } else {
+            registered = nil
             debugStage("particle", "expand-only \(object.name) — renderer disabled: \(particlePath)")
         }
+        // A renderer:[] spawner forwards its OWN parent so its children can still
+        // event-follow up the chain.
+        let childParentSystem = registered ?? parentSystem
         let childAncestry = ancestry + [particlePath]
         for child in parsedDefinition.childReferences {
             await expandParticleTree(
@@ -1408,6 +1434,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 parentPath: particlePath,
                 originAccum: originAccum + child.originOffset,
                 ancestry: childAncestry,
+                parentSystem: childParentSystem,
+                followFromParent: child.isEventFollow,
                 object: object
             )
         }
@@ -1428,25 +1456,28 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return WPEParticleDefinitionParser.parse(data: data)
     }
 
+    @discardableResult
     private func registerParticleSystem(
         definition: WPEParticleDefinition,
         object: WPESceneParticleObject,
-        particlePath: String
-    ) async {
+        particlePath: String,
+        followParent: WPEParticleSystem? = nil,
+        requiresFollowParent: Bool = false
+    ) async -> WPEParticleSystem? {
         let material = definition.materialRelativePath
             .flatMap(parseParticleMaterial(at:))
         let blendMode = material?.blendMode ?? .translucent
         let sceneTransform = makeParticleSceneTransform(for: object)
         guard let texturePath = material?.firstTexturePath else {
             debugStage("particle", "skip \(object.name) — material missing texture binding: \(particlePath)")
-            return
+            return nil
         }
         guard let texturePayload = try? await makeTextureResource(
             relativePath: texturePath,
             label: "particle texture \(texturePath)"
         ) else {
             debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
-            return
+            return nil
         }
         let texture: MTLTexture?
         let animatedTextureSource: WPETexAnimatedTextureSource?
@@ -1460,7 +1491,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         guard let resolved = texture else {
             debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
-            return
+            return nil
         }
         var spriteSheet = parseParticleSpriteSheet(
             texturePath: texturePath,
@@ -1501,8 +1532,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             blendMode: blendMode,
             sceneTransform: sceneTransform,
             spriteSheet: spriteSheet
-        ) else { return }
+        ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
+        if requiresFollowParent {
+            system.followParent = followParent
+            system.requiresFollowParent = true
+        }
         // Prewarm long enough that the first-spawned particles have lived a full
         // lifetime, so the emitter starts at its STEADY-STATE age/position spread
         // (matches WPE, which loads with a populated emitter). `+2s` only aged
@@ -1542,6 +1577,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             "particle.binding",
             "\(object.name) particle=\(particlePath) count=\(definition.maxCount) rate=\(definition.rate) blend=\(blendMode.rawValue) texturePath=\(texturePath) texture=\(textureLabel) \(sheetDescription)"
         )
+        return system
     }
 
     func reload() async throws {

@@ -731,4 +731,118 @@ struct WPEParticleSystemTests {
         #expect(abs(inst.positionAndSize.x - 200) < 1)
         #expect(abs(inst.positionAndSize.y - 150) < 1)
     }
+
+    @Test("Event-follow control point injection wins over static resolution")
+    func eventFollowControlPointInjectionWins() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = stillParticleDefinition(rate: 0, originOffset: SIMD3(300, 300, 0))
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            sceneTransform: centeredParticleTransform
+        ))
+        let injected = SIMD3<Float>(120, -35, 9)
+
+        system.injectedControlPoints[system.followControlPointID] = injected
+
+        #expect(system.controlPointPosition(system.followControlPointID) == injected)
+    }
+
+    @Test("Event-follow child spawns at injected parent particle position")
+    func eventFollowChildSpawnsAtInjectedParentPosition() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = stillParticleDefinition(maxCount: 1, originOffset: SIMD3(300, 300, 0))
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            sceneTransform: centeredParticleTransform
+        ))
+        let injected = SIMD3<Float>(42, -84, 0)
+        system.requiresFollowParent = true
+        system.injectedControlPoints[system.followControlPointID] = injected
+
+        system.tick(now: 0)
+        system.tick(now: 0.02)
+
+        #expect(system.liveInstanceCount == 1)
+        let inst = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0]
+        #expect(abs(inst.positionAndSize.x - injected.x) < 1)
+        #expect(abs(inst.positionAndSize.y - injected.y) < 1)
+    }
+
+    @Test("Event-follow child does not spawn without a live parent injection")
+    func eventFollowChildSkipsSpawnWithoutInjectedPosition() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let parent = try #require(WPEParticleSystem(
+            definition: stillParticleDefinition(maxCount: 1),
+            device: device,
+            sceneTransform: centeredParticleTransform
+        ))
+        let child = try #require(WPEParticleSystem(
+            definition: stillParticleDefinition(maxCount: 1),
+            device: device,
+            sceneTransform: centeredParticleTransform
+        ))
+        child.followParent = parent
+        child.requiresFollowParent = true
+
+        child.tick(now: 0)
+        child.tick(now: 0.05)
+
+        #expect(child.liveInstanceCount == 0)
+    }
+
+    @Test("Primary live particle position reports the youngest live particle")
+    func primaryLiveParticlePositionReportsLiveParticle() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = stillParticleDefinition(maxCount: 1, originOffset: SIMD3(12, -8, 0))
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            sceneTransform: centeredParticleTransform
+        ))
+
+        #expect(system.primaryLiveParticlePosition == nil)
+        system.tick(now: 0)
+        system.tick(now: 0.02)
+
+        let position = try #require(system.primaryLiveParticlePosition)
+        #expect(abs(position.x - 12) < 1)
+        #expect(abs(position.y + 8) < 1)
+    }
+
+    private func stillParticleDefinition(
+        maxCount: Int = 4,
+        rate: Double = 1000,
+        originOffset: SIMD3<Double> = SIMD3(0, 0, 0)
+    ) -> WPEParticleDefinition {
+        WPEParticleDefinition(
+            materialRelativePath: nil,
+            maxCount: maxCount,
+            rate: rate,
+            startDelay: 0,
+            lifetimeMin: 10,
+            lifetimeMax: 10,
+            sizeMin: 1,
+            sizeMax: 1,
+            originOffset: originOffset,
+            dispersalMin: 0,
+            dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0),
+            velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255),
+            colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+    }
+
+    private var centeredParticleTransform: WPEParticleSceneTransform {
+        WPEParticleSceneTransform(
+            sceneSize: SIMD2(1000, 1000),
+            objectOrigin: SIMD3(500, 500, 0),
+            objectScale: SIMD3(1, 1, 1),
+            objectAngleZ: 0
+        )
+    }
 }
