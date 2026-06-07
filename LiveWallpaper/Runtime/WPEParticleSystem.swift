@@ -168,6 +168,9 @@ final class WPEParticleSystem {
     /// Owning particle object's WPE scene paint index — where this system
     /// composites relative to image layers (background behind, character front).
     var sortIndex: Int = 0
+    /// Material `ui_editor_properties_overbright` colour multiplier (>1 brighter,
+    /// <1 dimmer). Bound into the fragment uniform; defaults to 1 (no change).
+    var overbright: Float = 1.0
     /// Live cursor position in the centered render frame (Y-up), or `nil` when
     /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
     /// by the renderer each frame; drives pointer-locked control points

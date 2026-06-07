@@ -1297,6 +1297,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private struct ParticleMaterialDescriptor {
         let blendMode: WPEParticleBlendMode
         let firstTexturePath: String?
+        /// `constantshadervalues.ui_editor_properties_overbright` — HDR colour
+        /// multiplier on the shader output (1 = unchanged). Drives additive
+        /// glow intensity.
+        let overbright: Float
     }
 
     private func parseParticleMaterial(at relativePath: String) -> ParticleMaterialDescriptor? {
@@ -1309,9 +1313,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let blendString = firstPass["blending"] as? String
         let textures = firstPass["textures"] as? [Any]
         let firstTexturePath = textures?.first as? String
+        let constants = firstPass["constantshadervalues"] as? [String: Any]
+        let overbright = (constants?["ui_editor_properties_overbright"] as? NSNumber)
+            .map { Float(truncating: $0) } ?? 1.0
         return ParticleMaterialDescriptor(
             blendMode: WPEParticleBlendMode(materialString: blendString),
-            firstTexturePath: firstTexturePath
+            firstTexturePath: firstTexturePath,
+            overbright: max(0, overbright)
         )
     }
 
@@ -1540,6 +1548,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
+        system.overbright = material?.overbright ?? 1.0
         if requiresFollowParent {
             system.followParent = followParent
             system.requiresFollowParent = true

@@ -580,7 +580,7 @@ final class WPEMetalRenderExecutor {
             frameRectMode: SIMD4<Float>(
                 useFrameRects ? 1 : 0,
                 Float(system.spriteSheet?.frameRects?.count ?? 0),
-                0,
+                system.overbright,
                 0
             )
         )
@@ -635,7 +635,8 @@ final class WPEMetalRenderExecutor {
     /// the texture sample only as the opacity.
     ///
     /// `frameRectMode.x = 1` switches the vertex shader from uniform-grid
-    /// slicing to explicit `frameRects` from buffer(4); `.y` is the rect count.
+    /// slicing to explicit `frameRects` from buffer(4); `.y` is the rect count;
+    /// `.z` is the material overbright colour multiplier (1 = unchanged).
     struct WPEParticleSpriteParams {
         var grid: SIMD4<Float>
         var frameRectMode: SIMD4<Float>

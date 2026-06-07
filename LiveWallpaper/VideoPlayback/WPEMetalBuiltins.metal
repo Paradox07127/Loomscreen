@@ -580,7 +580,7 @@ struct WPEParticleProjection {
 // reads colour from the per-particle tint instead of the texture.
 struct WPEParticleSpriteParams {
     float4 grid;              // x=cols, y=rows, z=frameCount, w=isAlphaMask
-    float4 frameRectMode;     // x=use explicit rects, y=rect count
+    float4 frameRectMode;     // x=use explicit rects, y=rect count, z=overbright color scale
 };
 
 vertex WPEParticleVertexOut wpe_particle_vertex(
@@ -691,6 +691,11 @@ fragment half4 wpe_particle_instanced_fragment(
     half3 tint = half3(in.color.rgb);
     half3 rgb = isMask ? tint : (sampled.rgb * tint);
     half alpha = (isMask ? sampled.r : sampled.a) * half(in.color.a);
+    // Material `ui_editor_properties_overbright`: an HDR colour multiplier
+    // (>1 intensifies, <1 dims). It scales colour only, not opacity; on the
+    // common additive blend this drives the glow intensity. Defaults to 1.
+    half overbright = max(half(sprite.frameRectMode.z), half(0));
+    rgb *= overbright;
     // Straight (non-premultiplied) alpha. The Metal pipeline state's
     // blend factors handle the translucent/additive/normal split set
     // up by `particlePipelineState`.
