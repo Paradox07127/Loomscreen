@@ -68,7 +68,59 @@ final class WallpaperEngineImportService {
         return await importUnpackagedVideo(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
     }
 
+    /// Package-aware video import: the video plays in place from `scene.pkg`
+    /// via a resource loader windowed into the entry's byte range (no
+    /// extraction, no resting copy). The video entry is staged to a temp file
+    /// once for a playability probe and reclaimed when the provider deinits.
+    /// Falls back to whole-package extraction only when the package can't be
+    /// opened or the entry is missing.
     private func importPackagedVideo(
+        project: WallpaperEngineProject,
+        pkgURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult {
+        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+              provider.exists(atRelativePath: project.entryFile) else {
+            return await importPackagedVideoViaExtraction(
+                project: project,
+                pkgURL: pkgURL,
+                sourceBookmark: sourceBookmark
+            )
+        }
+
+        // One-time probe on a staged copy of just the video entry; the
+        // provider's staging dir is removed on deinit (after this scope), so
+        // nothing persists. Playback reads the entry windowed, in place.
+        do {
+            let stagedURL = try provider.stagedURL(atRelativePath: project.entryFile)
+            try await validateVideo(stagedURL)
+        } catch {
+            return .rejected(reason: describe(error))
+        }
+
+        // Zero-cache: drop any stale prior extraction for this id.
+        await purgeStaleCache(workshopID: project.workshopID)
+
+        guard let videoBookmark = makeBookmark(pkgURL) else {
+            return .rejected(reason: "Cannot create video package bookmark")
+        }
+
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: nil,
+            resourceLocation: .sourceFolder
+        )
+        return .ready(
+            .video(bookmarkData: videoBookmark, packageEntryName: project.entryFile),
+            origin: origin
+        )
+    }
+
+    /// Legacy fallback: extracts the whole `scene.pkg` into `wpe-cache` and
+    /// points the wallpaper at the extracted video file. Used only when the
+    /// package can't be opened for in-place reading.
+    private func importPackagedVideoViaExtraction(
         project: WallpaperEngineProject,
         pkgURL: URL,
         sourceBookmark: Data
@@ -761,15 +813,28 @@ struct WPECachedContentResolver {
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
 
-        guard let entryURL = resourceURL(root: folderURL, relativePath: entryFile),
-              fileManager.fileExists(atPath: entryURL.path) else { return nil }
+        let looseEntryURL = resourceURL(root: folderURL, relativePath: entryFile)
+        let looseEntryExists = looseEntryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let pkgURL = folderURL.appendingPathComponent("scene.pkg")
+        let packagedEntryExists = fileManager.fileExists(atPath: pkgURL.path)
+            && Self.packageContainsEntry(pkgURL, relativePath: entryFile)
 
         switch origin.originalType {
         case .video:
-            guard let bookmark = makeBookmark(entryURL) else { return nil }
-            return .video(bookmarkData: bookmark)
+            // Loose video file → play directly; in-place packaged video →
+            // bookmark the package and carry the entry name for windowed playback.
+            if looseEntryExists, let entryURL = looseEntryURL, let bookmark = makeBookmark(entryURL) {
+                return .video(bookmarkData: bookmark)
+            }
+            if packagedEntryExists, let bookmark = makeBookmark(pkgURL) {
+                return .video(bookmarkData: bookmark, packageEntryName: entryFile)
+            }
+            return nil
         case .web:
-            guard let bookmark = makeBookmark(folderURL) else { return nil }
+            // Index may be loose or inside scene.pkg; the scheme handler serves
+            // from the package first, then loose siblings. Bookmark the folder.
+            guard looseEntryExists || packagedEntryExists,
+                  let bookmark = makeBookmark(folderURL) else { return nil }
             return .html(
                 source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
                 config: HTMLConfig(physicalPixelLayout: true, originKind: origin.originKind)
@@ -777,6 +842,12 @@ struct WPECachedContentResolver {
         case .scene, .application, .unknown:
             return nil
         }
+    }
+
+    /// True when `scene.pkg` at `pkgURL` contains an entry for `relativePath`.
+    private static func packageContainsEntry(_ pkgURL: URL, relativePath: String) -> Bool {
+        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL) else { return false }
+        return provider.exists(atRelativePath: relativePath)
     }
 
     private func cacheContent(for origin: WPEOrigin) -> WallpaperContent? {

@@ -188,7 +188,7 @@ final class WPEImportCoordinator {
         if case .html(let source, let htmlConfig) = content {
             config.savedHTMLSource = source
             config.savedHTMLConfig = htmlConfig
-        } else if case .video(let bookmarkData) = content {
+        } else if case .video(let bookmarkData, _) = content {
             config.savedVideoBookmarkData = bookmarkData
         }
         config.wpeOrigin = origin

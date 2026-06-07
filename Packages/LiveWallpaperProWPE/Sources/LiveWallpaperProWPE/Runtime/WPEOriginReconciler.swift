@@ -27,7 +27,7 @@ public struct WPEOriginReconciler: OriginReconciler {
         }
 
         switch configuration.activeWallpaper {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, _):
             if !WPEOrigin.matchesBookmark(bookmarkData, origin: origin) {
                 configuration.wpeOrigin = nil
             }

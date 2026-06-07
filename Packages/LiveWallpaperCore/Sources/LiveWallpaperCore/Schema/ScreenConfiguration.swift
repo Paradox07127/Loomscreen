@@ -510,10 +510,12 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Swap primary video while preserving per-screen settings + saved HTML.
-    public mutating func replacePrimaryVideo(bookmarkData: Data) {
+    /// `packageEntryName` is non-nil for an in-place packaged video (bookmark →
+    /// `scene.pkg`); `nil` for a loose video file.
+    public mutating func replacePrimaryVideo(bookmarkData: Data, packageEntryName: String? = nil) {
         preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
-        activeWallpaper = .video(bookmarkData: bookmarkData)
+        activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
         playlistCursorIndex = 0
         playlistPrimaryIndex = nil
     }

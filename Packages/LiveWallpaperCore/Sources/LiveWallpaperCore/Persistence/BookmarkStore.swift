@@ -166,7 +166,7 @@ public final class BookmarkStore {
 
     public static func defaultSourceDisplayName(for content: WallpaperContent) -> String? {
         switch content {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, _):
             return ResourceUtilities.resolveBookmarkName(bookmarkData)
         case .html(let source, _):
             return source.displayName

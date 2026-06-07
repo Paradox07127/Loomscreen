@@ -27,7 +27,14 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
             }
         }
 
-        let asset = AVURLAsset(url: url)
+        try await validatePlayableVideo(asset: AVURLAsset(url: url))
+    }
+
+    /// Validates an already-constructed asset. Used for in-place packaged
+    /// videos, where the asset is a custom-scheme `AVURLAsset` backed by a
+    /// resource loader windowed into a `scene.pkg` (there is no plain file URL
+    /// to open). The caller owns the asset's resource-loader delegate lifetime.
+    public static func validatePlayableVideo(asset: AVURLAsset) async throws {
         let isPlayable = try await asset.load(.isPlayable)
 
         guard isPlayable else {
@@ -46,7 +53,12 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
             }
         }
 
-        let asset = AVURLAsset(url: url)
+        return try await detectFormat(asset: AVURLAsset(url: url))
+    }
+
+    /// Probes format info from an already-constructed asset (see
+    /// `validatePlayableVideo(asset:)` for why packaged videos need this).
+    public static func detectFormat(asset: AVURLAsset) async throws -> VideoFormatInfo {
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard let track = videoTracks.first else {
             return VideoFormatInfo()

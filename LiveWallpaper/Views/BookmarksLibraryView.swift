@@ -414,7 +414,10 @@ private struct BookmarkTile: View {
         }
 
         switch bookmark.content {
-        case .video(let bookmarkData):
+        case .video(let bookmarkData, let packageEntryName):
+            // Packaged videos resolve to a scene.pkg, which has no plain video
+            // poster frame; skip the thumbnail rather than mis-decode the pkg.
+            guard packageEntryName == nil else { break }
             guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
                 bookmarkData,
                 target: .transient

@@ -180,8 +180,8 @@ struct ScreenDetailHeader: View {
         let config = screenManager.getConfiguration(for: screen)
         switch draft.selectedWallpaperType {
         case .video:
-            if case .video(let bookmark)? = config?.activeWallpaper {
-                return .video(bookmarkData: bookmark)
+            if case .video(let bookmark, let packageEntryName)? = config?.activeWallpaper {
+                return .video(bookmarkData: bookmark, packageEntryName: packageEntryName)
             }
             if let saved = config?.savedVideoBookmarkData {
                 return .video(bookmarkData: saved)

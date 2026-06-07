@@ -27,6 +27,10 @@ final class WallpaperVideoPlayer {
 
     private(set) var player: AVQueuePlayer?
     var videoURL: URL?
+    /// Non-nil when `videoURL` is a `scene.pkg` and this entry is played in
+    /// place (windowed resource loader, no extraction). Read by the runtime
+    /// session when it rebuilds the player on `retry()`.
+    private(set) var packageEntryName: String?
     /// Whether audio tracks are disabled at the AVPlayerItem level.
     private(set) var isMuted: Bool = true
     /// User-controlled output level applied when audio is not muted.
@@ -87,11 +91,18 @@ final class WallpaperVideoPlayer {
     var isForceSDRActive: Bool { lastColorSpacePreference == .forceSDR }
     
     // MARK: - Initialization
-    init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill, loadImmediately: Bool = true) {
+    init(
+        url: URL,
+        frame: CGRect,
+        fitMode: VideoFitMode = .aspectFill,
+        packageEntryName: String? = nil,
+        loadImmediately: Bool = true
+    ) {
         Logger.functionStart(category: .videoPlayer)
         self.initialFrame = frame
         self.fitMode = fitMode
         self.videoURL = url
+        self.packageEntryName = packageEntryName
         
         guard !frame.isEmpty else {
             let error = NSError(
@@ -142,7 +153,26 @@ final class WallpaperVideoPlayer {
 
             do {
                 let timer = PerformanceTimer(description: "Loading video asset", category: .videoPlayer)
-                let asset = AVURLAsset(url: url)
+
+                // In-place packaged video: build a custom-scheme asset backed by
+                // a resource loader windowed into the scene.pkg. The same asset
+                // is used for probing (isPlayable/tracks/duration) and playback;
+                // there is no plain file URL to open.
+                let asset: AVURLAsset
+                let packagedLoader: InMemoryVideoAssetLoader?
+                if let entryName = self.packageEntryName {
+                    let result = try await Task.detached(priority: .utility) {
+                        try InMemoryVideoAssetLoader.loadPackageEntry(packageURL: url, entryName: entryName)
+                    }.value
+                    try Task.checkCancellation()
+                    let memAsset = AVURLAsset(url: result.customURL, options: Self.inMemoryAssetOptions)
+                    memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
+                    asset = memAsset
+                    packagedLoader = result.loader
+                } else {
+                    asset = AVURLAsset(url: url)
+                    packagedLoader = nil
+                }
 
                 try Task.checkCancellation()
 
@@ -172,64 +202,69 @@ final class WallpaperVideoPlayer {
                 let cmDuration = try? await asset.load(.duration)
                 let durationSeconds = Self.usableDuration(from: cmDuration)
 
-                let fileSize = Self.fileSize(of: url)
-                let memoryCached = Self.shouldUseInMemoryCache(fileSize: fileSize)
-                // Differentiated buffer hint: in-memory path doesn't need
-                // to pre-fetch ahead because the bytes are already in RAM,
-                // so we skip the "buffer the entire short clip" behaviour
-                // that exists to absorb loop-wrap disk reads on streaming.
-                // This cuts AVFoundation's per-player buffer state from
-                // ~duration×bitrate to a flat ~2s, which is the dominant
-                // savings on multi-screen same-video setups.
-                let bufferDuration = memoryCached
-                    ? Self.inMemoryBufferDuration
-                    : Self.bufferDuration(forDuration: durationSeconds)
-
                 let activeAsset: AVURLAsset
                 let loader: InMemoryVideoAssetLoader?
-                if memoryCached {
-                    do {
-                        // Hop off MainActor for the synchronous mmap +
-                        // file-attribute walk inside `load(from:)`. On a
-                        // 4K@60 clip this can touch several hundred MB
-                        // of virtual memory mapping — even when
-                        // `mappedIfSafe` succeeds the syscall cost is
-                        // non-trivial and shouldn't sit on main.
-                        let result = try await Task.detached(priority: .utility) {
-                            try InMemoryVideoAssetLoader.load(from: url)
-                        }.value
-                        try Task.checkCancellation()
-                        let memOptions: [String: Any] = [
-                            AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
-                            AVURLAssetAllowsCellularAccessKey: false,
-                            AVURLAssetAllowsExpensiveNetworkAccessKey: false,
-                            AVURLAssetAllowsConstrainedNetworkAccessKey: false
-                        ]
-                        let memAsset = AVURLAsset(url: result.customURL, options: memOptions)
-                        memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
-                        activeAsset = memAsset
-                        loader = result.loader
-                        Logger.notice(
-                            "Loaded \(fileSize / (1024 * 1024)) MB video into RAM — 0 physical reads expected after warmup",
-                            category: .videoPlayer
-                        )
-                    } catch {
-                        Logger.info(
-                            "In-memory load failed (\(error.localizedDescription)) — falling back to streaming",
-                            category: .videoPlayer
-                        )
+                let bufferDuration: TimeInterval
+
+                if let packagedLoader {
+                    // Packaged video always serves windowed from the mapped
+                    // package (mmap pages in lazily, covering small + large
+                    // clips); skip the file-size in-memory/stream decision.
+                    activeAsset = asset
+                    loader = packagedLoader
+                    bufferDuration = Self.inMemoryBufferDuration
+                } else {
+                    let fileSize = Self.fileSize(of: url)
+                    let memoryCached = Self.shouldUseInMemoryCache(fileSize: fileSize)
+                    // Differentiated buffer hint: in-memory path doesn't need
+                    // to pre-fetch ahead because the bytes are already in RAM,
+                    // so we skip the "buffer the entire short clip" behaviour
+                    // that exists to absorb loop-wrap disk reads on streaming.
+                    // This cuts AVFoundation's per-player buffer state from
+                    // ~duration×bitrate to a flat ~2s, which is the dominant
+                    // savings on multi-screen same-video setups.
+                    bufferDuration = memoryCached
+                        ? Self.inMemoryBufferDuration
+                        : Self.bufferDuration(forDuration: durationSeconds)
+
+                    if memoryCached {
+                        do {
+                            // Hop off MainActor for the synchronous mmap +
+                            // file-attribute walk inside `load(from:)`. On a
+                            // 4K@60 clip this can touch several hundred MB
+                            // of virtual memory mapping — even when
+                            // `mappedIfSafe` succeeds the syscall cost is
+                            // non-trivial and shouldn't sit on main.
+                            let result = try await Task.detached(priority: .utility) {
+                                try InMemoryVideoAssetLoader.load(from: url)
+                            }.value
+                            try Task.checkCancellation()
+                            let memAsset = AVURLAsset(url: result.customURL, options: Self.inMemoryAssetOptions)
+                            memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
+                            activeAsset = memAsset
+                            loader = result.loader
+                            Logger.notice(
+                                "Loaded \(fileSize / (1024 * 1024)) MB video into RAM — 0 physical reads expected after warmup",
+                                category: .videoPlayer
+                            )
+                        } catch {
+                            Logger.info(
+                                "In-memory load failed (\(error.localizedDescription)) — falling back to streaming",
+                                category: .videoPlayer
+                            )
+                            activeAsset = asset
+                            loader = nil
+                        }
+                    } else {
                         activeAsset = asset
                         loader = nil
+                        let budgetMB = SettingsManager.shared.loadGlobalSettings()
+                            .videoCacheMaxBytesPerScreen / (1024 * 1024)
+                        Logger.debug(
+                            "Streaming from disk: \(fileSize / (1024 * 1024)) MB exceeds in-memory budget (\(budgetMB) MB). Raise the slider in General Settings to keep this clip in RAM.",
+                            category: .videoPlayer
+                        )
                     }
-                } else {
-                    activeAsset = asset
-                    loader = nil
-                    let budgetMB = SettingsManager.shared.loadGlobalSettings()
-                        .videoCacheMaxBytesPerScreen / (1024 * 1024)
-                    Logger.debug(
-                        "Streaming from disk: \(fileSize / (1024 * 1024)) MB exceeds in-memory budget (\(budgetMB) MB). Raise the slider in General Settings to keep this clip in RAM.",
-                        category: .videoPlayer
-                    )
                 }
 
                 timer.checkpoint("Properties loaded")
@@ -242,7 +277,10 @@ final class WallpaperVideoPlayer {
                 }
 
                 do {
-                    try await self.detectFormatInfoIfNeeded(for: url)
+                    // Probe HDR/codec from the active asset: for packaged /
+                    // in-memory videos there is no plain file URL, and the
+                    // windowed custom-scheme asset answers track queries fine.
+                    try await self.detectFormatInfoIfNeeded(asset: activeAsset)
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
@@ -286,6 +324,28 @@ final class WallpaperVideoPlayer {
         label: "app.livewallpaper.video.in-memory-loader",
         qos: .userInitiated
     )
+
+    /// Asset options for custom-scheme (`lwmem://`) assets — both the in-memory
+    /// file loader and the in-place packaged loader. Forbids AVFoundation from
+    /// resolving any external reference or touching the network.
+    private static let inMemoryAssetOptions: [String: Any] = [
+        AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
+        AVURLAssetAllowsCellularAccessKey: false,
+        AVURLAssetAllowsExpensiveNetworkAccessKey: false,
+        AVURLAssetAllowsConstrainedNetworkAccessKey: false
+    ]
+
+    /// Validates an in-place packaged video by building the windowed
+    /// custom-scheme asset and probing `isPlayable` — there is no plain file
+    /// URL to hand the URL-based validator. The loader is held alive across the
+    /// async probe so AVFoundation's weak delegate ref stays valid.
+    static func validatePackagedVideo(packageURL: URL, entryName: String) async throws {
+        let result = try InMemoryVideoAssetLoader.loadPackageEntry(packageURL: packageURL, entryName: entryName)
+        let asset = AVURLAsset(url: result.customURL, options: inMemoryAssetOptions)
+        asset.resourceLoader.setDelegate(result.loader, queue: resourceLoaderQueue)
+        try await PlayableVideoLoader.validatePlayableVideo(asset: asset)
+        withExtendedLifetime(result.loader) {}
+    }
 
 
     private static func fileSize(of url: URL) -> Int {
@@ -405,9 +465,9 @@ final class WallpaperVideoPlayer {
         setupPlayerReadyObserver()
     }
 
-    private func detectFormatInfoIfNeeded(for url: URL) async throws {
+    private func detectFormatInfoIfNeeded(asset: AVURLAsset) async throws {
         guard formatInfo == nil else { return }
-        let detected = try await PlayableVideoLoader.detectFormat(at: url)
+        let detected = try await PlayableVideoLoader.detectFormat(asset: asset)
         try Task.checkCancellation()
         formatInfo = detected
         applyHDRPreferenceIfNeeded(for: detected)

@@ -317,7 +317,7 @@ final class PlaybackCoordinator {
 
     // MARK: - Video session lifecycle
 
-    func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
+    func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
         let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
@@ -326,10 +326,13 @@ final class PlaybackCoordinator {
         let previousContent = existing?.activeWallpaper
         var configuration: ScreenConfiguration
         if var prior = existing {
-            prior.replacePrimaryVideo(bookmarkData: bookmarkData)
+            prior.replacePrimaryVideo(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
             configuration = prior
         } else {
             configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: bookmarkData)
+            // Carry the in-place package entry (the convenience init defaults to
+            // a loose video); everything else the init set stays intact.
+            configuration.activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
         }
         originReconciler.reconcile(
             &configuration,
@@ -350,7 +353,11 @@ final class PlaybackCoordinator {
         let task = Task {
             do {
                 try Task.checkCancellation()
-                try await videoLoader.validatePlayableVideo(at: url)
+                if let packageEntryName {
+                    try await WallpaperVideoPlayer.validatePackagedVideo(packageURL: url, entryName: packageEntryName)
+                } else {
+                    try await videoLoader.validatePlayableVideo(at: url)
+                }
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
                     guard let self,
@@ -490,7 +497,8 @@ final class PlaybackCoordinator {
             let player = WallpaperVideoPlayer(
                 url: url,
                 frame: screen.frame,
-                fitMode: configuration.fitMode
+                fitMode: configuration.fitMode,
+                packageEntryName: configuration.activeWallpaper.packageVideoEntryName
             )
             let session = VideoWallpaperSession(player: player)
             session.onRuntimeErrorChange = { [markSessionStateChanged] in markSessionStateChanged() }
@@ -528,7 +536,8 @@ final class PlaybackCoordinator {
         let player = WallpaperVideoPlayer(
             url: url,
             frame: screen.frame,
-            fitMode: configuration?.fitMode ?? .aspectFill
+            fitMode: configuration?.fitMode ?? .aspectFill,
+            packageEntryName: configuration?.activeWallpaper.packageVideoEntryName
         )
 
         if let configuration {
