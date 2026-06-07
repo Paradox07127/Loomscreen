@@ -481,6 +481,11 @@ final class WPEParticleSystem {
             if let sizeChange = definition.sizeChange {
                 spriteSize *= Float(sizeChange.factor(lifetimeFraction: Double(lifetimeFraction)))
             }
+            // Re-apply the additive cap on the FINAL size: `sizechange` can grow
+            // the sprite past the spawn-time cap and re-hit the saturation path.
+            if blendMode == .additive {
+                spriteSize = min(spriteSize, sceneTransform.sceneHeight)
+            }
             // `colorchange`: lifetime-fraction RGB multiplier on the tint.
             var rgb = particle.color
             if let colorChange = definition.colorChange {
