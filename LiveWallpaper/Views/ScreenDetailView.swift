@@ -204,6 +204,24 @@ struct ScreenDetailView: View {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
             }
+            // Inspector toggle as a top-level toolbar button — the trailing-edge
+            // mirror of the leading sidebar toggle, same native borderless style.
+            // It only appears/disappears when the content gains/loses an
+            // inspector, so flipping visibility never moves it.
+            if inspectorApplicable {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                            inspectorUserVisible.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help(Text(inspectorUserVisible ? "Hide the properties panel" : "Show the properties panel"))
+                    .accessibilityLabel(Text("Toggle properties panel"))
+                    .accessibilityHint(Text("Show or hide the wallpaper properties on the right"))
+                }
+            }
         }
         .confirmDestructive($pendingDestructive)
         .onAppear { scheduleConfigurationLoad() }
@@ -307,8 +325,6 @@ struct ScreenDetailView: View {
             wallpaperSessionSummary: wallpaperSessionSummary,
             reduceMotion: reduceMotion,
             showsHeaderWallpaperActions: showsHeaderWallpaperActions,
-            canToggleInspector: inspectorApplicable,
-            inspectorVisible: $inspectorUserVisible,
             showBookmarks: $showBookmarks,
             onReload: { screenManager.reloadWallpaperForScreen(screen) },
             onApplyToAll: requestApplyToAll,
