@@ -342,7 +342,7 @@ struct WPEParticleSystemTests {
         #expect(abs(pointer[0].rotationAndLife.x - 0.675) < 0.1)
     }
 
-    @Test("Gravity pulls particles down on screen (author writes +Y in Y-down emitter frame)")
+    @Test("Gravity integrates over time, pulling a particle along the gravity vector")
     func gravityIntegrates() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let def = WPEParticleDefinition(
@@ -355,10 +355,13 @@ struct WPEParticleSystemTests {
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.01,
-            // Emitter-internal Y-down: +gy in JSON pulls particles
-            // down on screen. The runtime Y-flips once at init so the
-            // Y-up simulator integrates a -y velocity over time.
-            gravity: SIMD3(0, 10, 0)
+            // Author space is Y-up with NO Y-flip anywhere (see the
+            // WPEParticleSceneTransform doc comment — the flip is the bug,
+            // not the fix). The simulator integrates the authored gravity
+            // vector as-is, so a negative gravity.y — "down on screen", the
+            // sign real WPE presets use ("0 -50 0") — drives the particle's
+            // Y downward over successive ticks.
+            gravity: SIMD3(0, -10, 0)
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
         system.tick(now: 0)
