@@ -594,10 +594,18 @@ final class WPEParticleSystem {
             // free slots (i.e. maxCount). Independent of `rate`, so rate:0
             // burst-only emitters still spawn.
             if !hasEmittedBurst && definition.instantaneousCount > 0 {
-                hasEmittedBurst = true
+                var blockedByMissingFollowParent = false
                 for _ in 0..<definition.instantaneousCount {
                     guard let slot = nextFreeSlot() else { break }
-                    spawn(into: slot)
+                    if !spawn(into: slot) {
+                        // Event-follow child with no live parent yet — retry the
+                        // whole burst next tick rather than burning it on a no-op.
+                        blockedByMissingFollowParent = true
+                        break
+                    }
+                }
+                if !blockedByMissingFollowParent {
+                    hasEmittedBurst = true
                 }
             }
             // Continuous `rate` emission (particles per second).
@@ -661,7 +669,11 @@ final class WPEParticleSystem {
         return nil
     }
 
-    private func spawn(into slot: Int) {
+    /// Spawns into `slot`, returning whether a particle was actually written.
+    /// Event-follow children return `false` when the parent has no live
+    /// particle this frame, so a one-shot burst isn't consumed on a no-op.
+    @discardableResult
+    private func spawn(into slot: Int) -> Bool {
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
@@ -691,7 +703,7 @@ final class WPEParticleSystem {
         if requiresFollowParent {
             // Event-follow child: ride the parent's live particle. Skip spawning
             // when the parent has no live particle this frame (no stale origin).
-            guard let followPosition = injectedControlPoints[followControlPointID] else { return }
+            guard let followPosition = injectedControlPoints[followControlPointID] else { return false }
             // The parent particle is already in render space and already carries
             // the inherited column/object offset; only scatter this emitter's
             // local dispersal around it (re-adding originOffset would double it).
@@ -757,6 +769,7 @@ final class WPEParticleSystem {
             oscPosScale: oscPosScale,
             oscPosPhase: oscPosPhase
         )
+        return true
     }
 
     /// Cheap deterministic 2D noise field built from sine products —

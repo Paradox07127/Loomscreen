@@ -1096,6 +1096,57 @@ struct WPEParticleSystemTests {
         #expect(system.liveInstanceCount == 30)
     }
 
+    @Test("event-follow instantaneous burst waits for a live parent injection")
+    func eventFollowInstantaneousBurstWaitsForParentInjection() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 10,
+            rate: 0, instantaneousCount: 4, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let child = try #require(WPEParticleSystem(definition: def, device: device))
+        child.requiresFollowParent = true
+
+        // No live parent yet → the burst must NOT be consumed.
+        child.tick(now: 0)
+        #expect(child.liveInstanceCount == 0)
+
+        // Parent appears → the burst fires (retried), at the injected position.
+        let parentPosition = SIMD3<Float>(25, -10, 0)
+        child.injectedControlPoints[child.followControlPointID] = parentPosition
+        child.tick(now: 0.05)
+        #expect(child.liveInstanceCount == 4)
+        let first = child.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
+        #expect(abs(first.positionAndSize.x - parentPosition.x) < 1)
+        #expect(abs(first.positionAndSize.y - parentPosition.y) < 1)
+    }
+
+    @Test("instantaneous burst is capped by maxCount")
+    func instantaneousBurstCappedByMaxCount() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 3,
+            rate: 0, instantaneousCount: 10, startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        system.tick(now: 0)
+        #expect(system.liveInstanceCount == 3)   // burst of 10 capped to capacity
+    }
+
     @Test("instance override count scales the instantaneous burst")
     func instanceOverrideScalesInstantaneousBurst() {
         let def = WPEParticleDefinition(
