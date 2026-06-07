@@ -56,7 +56,7 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
 
     @ViewBuilder
     private func layout(available: CGFloat) -> some View {
-        let fullWidth = resolvedWidth(available: available)
+        let fullWidth = resolvedWidth()
         let shownWidth = isVisible ? fullWidth : 0
         HStack(spacing: 0) {
             main()
@@ -66,6 +66,11 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
                 inspector(fullWidth)
                     .frame(width: shownWidth, alignment: .leading)
                     .clipped()
+                    // The panel wins any layout contention, so opening the left
+                    // sidebar (or anything else that narrows the detail column)
+                    // compresses the MAIN column, never the panel. Both edges
+                    // stay put; only the middle gives.
+                    .layoutPriority(1)
                     .allowsHitTesting(isVisible)
                     .accessibilityHidden(!isVisible)
                     .overlay(alignment: .leading) {
@@ -95,7 +100,9 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
         )
     }
 
-    /// Largest inspector width that still leaves the main column its floor.
+    /// Largest inspector width a *drag* may reach — still leaving the main
+    /// column its floor at the current container width. Only the resize handle
+    /// uses this; the rendered width below ignores `available` on purpose.
     private func maxWidthCap(available: CGFloat) -> CGFloat {
         let room = available - mainFloor
         return min(maxWidth, max(minWidth, room))
@@ -105,7 +112,12 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
         min(max(candidate, minWidth), maxWidthCap(available: available))
     }
 
-    private func resolvedWidth(available: CGFloat) -> CGFloat {
-        clampWidth(CGFloat(liveWidth ?? storedWidth), available: available)
+    /// The rendered panel width. Clamped to the design min/max ONLY — never to
+    /// `available` — so opening/closing the left sidebar (which changes the
+    /// detail column width) leaves the panel untouched and lets the main column
+    /// absorb the change. `maxWidth` is small enough that even at the minimum
+    /// window the main column keeps ample room, so this never overflows.
+    private func resolvedWidth() -> CGFloat {
+        min(max(CGFloat(liveWidth ?? storedWidth), minWidth), maxWidth)
     }
 }
