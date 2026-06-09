@@ -379,11 +379,7 @@ struct Sidebar: View {
                 #if !LITE_BUILD
                 if featureCatalog.isEnabled(.developerTools), developerModeEnabled {
                     NavigationLink(value: Navigation.developerTools) {
-                        HStack {
-                            Label("Developer Tools", systemImage: "wrench.and.screwdriver")
-                            Spacer()
-                            DevPill()
-                        }
+                        Label("Developer Tools", systemImage: "wrench.and.screwdriver")
                     }
                     .accessibilityHint(Text("Diagnostic harness. Only visible while Developer Mode is on."))
                 }
