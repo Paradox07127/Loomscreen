@@ -104,8 +104,8 @@ public enum DesignTokens {
         /// settings). The readout font (`Typography.metric`) is already
         /// monospaced, so call sites don't need a separate `.monospacedDigit()`.
         public static let sliderWidth: CGFloat = 96
-        public static let sliderValueWidth: CGFloat = 44
-        public static let sliderValueSpacing: CGFloat = 6
+        public static let sliderValueWidth: CGFloat = 40
+        public static let sliderValueSpacing: CGFloat = 4
         /// Horizontal padding floor when the inspector is dragged to its min width.
         /// Vertical padding stays constant — only horizontal compresses with width.
         public static let minHorizontalPadding: CGFloat = 9
@@ -118,7 +118,7 @@ public enum DesignTokens {
     }
 
     public enum Sidebar {
-        public static let width: CGFloat = 185
+        public static let width: CGFloat = 180
         public static let maxWidth: CGFloat = width * 1.2
         public static let sectionHeaderSpacing: CGFloat = 6
         public static let sectionHeaderBottomPadding: CGFloat = 0
