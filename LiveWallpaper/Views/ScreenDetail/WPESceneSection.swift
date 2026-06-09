@@ -143,27 +143,29 @@ struct WPESceneSection: View {
 
     @ViewBuilder
     private func unsupportedDetail(for entry: WPEHistoryEntry) -> some View {
-        VStack(spacing: 16) {
-            HStack {
-                Button {
-                    selectedHistoryEntry = nil
-                } label: {
-                    Image(systemName: "chevron.left")
+        ScrollView {
+            VStack(spacing: 16) {
+                HStack {
+                    Button {
+                        selectedHistoryEntry = nil
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .adaptiveGlassButton(.regular)
+                    .controlSize(.regular)
+                    .help(Text("Back to library"))
+                    .accessibilityLabel(Text("Back to library"))
+                    .accessibilityHint(Text("Return to the recent imported projects grid"))
+                    Spacer()
                 }
-                .adaptiveGlassButton(.regular)
-                .controlSize(.regular)
-                .help(Text("Back to library"))
-                .accessibilityLabel(Text("Back to library"))
-                .accessibilityHint(Text("Return to the recent imported projects grid"))
-                Spacer()
+                WPEFallbackCard(
+                    origin: entry.origin,
+                    reason: WPEFallbackCard.reason(for: entry.origin)
+                )
             }
-            WPEFallbackCard(
-                origin: entry.origin,
-                reason: WPEFallbackCard.reason(for: entry.origin)
-            )
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var hasActiveSceneWallpaper: Bool {
@@ -185,20 +187,22 @@ struct WPESceneSection: View {
             // Focused preview + diagnostics. Custom settings live in the app's
             // right inspector sidebar; Apply / Workshop live in the screen header
             // and the sidebar, so the card itself stays chrome-free.
-            WPESceneDetailView(
-                origin: origin,
-                descriptor: descriptor,
-                session: session,
-                onClearWallpaper: {
-                    pendingDestructive = PendingDestructive(
-                        .clearScene(sceneName: origin.title, displayName: screen.name)
-                    ) {
-                        screenManager.clearWallpaperForScreen(screen)
+            ScrollView {
+                WPESceneDetailView(
+                    origin: origin,
+                    descriptor: descriptor,
+                    session: session,
+                    onClearWallpaper: {
+                        pendingDestructive = PendingDestructive(
+                            .clearScene(sceneName: origin.title, displayName: screen.name)
+                        ) {
+                            screenManager.clearWallpaperForScreen(screen)
+                        }
                     }
-                }
-            )
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .top)
+                )
+                .padding(24)
+                .frame(maxWidth: .infinity)
+            }
         } else {
             EmptyView()
         }
