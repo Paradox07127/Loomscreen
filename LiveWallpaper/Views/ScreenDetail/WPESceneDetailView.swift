@@ -79,7 +79,11 @@ struct WPESceneDetailView: View {
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 260)
+        // Bounded (not greedy `maxHeight: .infinity`): the card now lives inside
+        // a ScrollView so the whole detail can scroll at small window heights.
+        // An unbounded preview would expand without limit under the scroll's
+        // infinite height proposal.
+        .frame(height: 300)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 

@@ -143,18 +143,17 @@ struct CommonPlaybackInspector: View {
             iconColor: isMuted ? .secondary : .blue,
             title: "Audio"
         ) {
-            HStack(spacing: 8) {
+            HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                 Slider(value: unifiedAudioBinding, in: 0...1)
                     .controlSize(.small)
-                    .frame(width: 96)
+                    .frame(width: DesignTokens.Inspector.sliderWidth)
                     .accessibilityLabel(Text("Audio"))
                     .accessibilityValue(audioAccessibilityValue(isMuted: isMuted, percent: percent))
 
                 audioLevelLabel(isMuted: isMuted, percent: percent)
                     .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-                    .monospacedDigit()
+                    .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
             }
         }
     }

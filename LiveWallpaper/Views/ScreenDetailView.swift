@@ -122,7 +122,11 @@ struct ScreenDetailView: View {
     }
 
     private var shouldShowGuideEmptyState: Bool { derivedState.showsGuideEmptyState }
-    private var showsInspector: Bool { derivedState.showsInspector }
+    /// The current content actually exposes an inspector worth showing.
+    private var inspectorApplicable: Bool { derivedState.showsInspector }
+    /// Final visibility = applicable AND the user hasn't collapsed the panel
+    /// from the toolbar toggle.
+    private var showsInspector: Bool { inspectorApplicable && inspectorUserVisible }
     private var showsHeaderWallpaperActions: Bool { derivedState.showsHeaderWallpaperActions }
 
     /// User-facing pickerable error states. Each case carries enough context
@@ -184,59 +188,49 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
+    /// User-driven show/hide for the properties panel (toolbar toggle).
+    /// Persisted so a collapsed inspector stays collapsed across launches.
+    @AppStorage("Inspector.Visible") private var inspectorUserVisible = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            screenHeader
-
-            runtimeErrorBannerView
-
-            Divider()
-
-            HStack(spacing: 0) {
-                ScreenDetailPreviewArea(
-                    screen: screen,
-                    draft: $draft,
-                    featureCatalog: featureCatalog,
-                    previewController: previewController,
-                    isLoading: isLoading,
-                    isDraggingOver: isDraggingOver,
-                    reduceMotion: reduceMotion,
-                    showsGuideEmptyState: shouldShowGuideEmptyState,
-                    onChooseVideo: triggerVideoGuideAction,
-                    onChooseHTML: triggerHTMLGuideAction,
-                    onChooseShader: triggerShaderGuideAction,
-                    onChooseScene: triggerSceneGuideAction,
-                    onSelectVideoFile: showFilePicker,
-                    onStartPreview: setupPreviewPlayer,
-                    onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
-                    onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
-                )
-
-                if showsInspector {
-                    inspectorPanel
-                        .overlay(alignment: .leading) {
-                            InspectorResizeHandle(
-                                width: inspectorPanelWidth,
-                                minWidth: DesignTokens.Inspector.minWidth,
-                                maxWidth: DesignTokens.Inspector.maxWidth,
-                                onPreviewWidthChange: previewInspectorWidth,
-                                onCommitWidth: commitInspectorWidth
-                            )
-                            .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
-                        }
-                        .layoutPriority(0)
-                }
-            }
-            .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
-            .transaction(value: liveInspectorWidth) { $0.animation = nil }
-        }
+        ResizableInspectorSplit(
+            isMounted: inspectorApplicable,
+            isVisible: showsInspector,
+            // Keyed on the user toggle, not `showsInspector`, so switching
+            // wallpaper type (which flips `inspectorApplicable`) stays instant.
+            animationTrigger: AnyHashable(inspectorUserVisible),
+            reduceMotion: reduceMotion,
+            storedWidth: $inspectorWidth,
+            liveWidth: $liveInspectorWidth,
+            main: { mainColumn },
+            inspector: { width in inspectorPanel(width: width) }
+        )
         .background(DesignTokens.Colors.pageBackground)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
+            }
+            // Inspector toggle as a top-level toolbar button — the trailing-edge
+            // mirror of the leading sidebar toggle, same native borderless style.
+            // It only appears/disappears when the content gains/loses an
+            // inspector, so flipping visibility never moves it.
+            if inspectorApplicable {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        // No withAnimation here: a toolbar button lives in the
+                        // separate NSToolbar host, so its transaction doesn't
+                        // reach the GeometryReader content. The width glide is
+                        // driven by `.animation(value:)` on the layout instead.
+                        inspectorUserVisible.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help(Text(inspectorUserVisible ? "Hide the properties panel" : "Show the properties panel"))
+                    .accessibilityLabel(Text("Toggle properties panel"))
+                    .accessibilityHint(Text("Show or hide the wallpaper properties on the right"))
+                }
             }
         }
         .confirmDestructive($pendingDestructive)
@@ -264,6 +258,37 @@ struct ScreenDetailView: View {
             handleDrop(urls: urls)
         } isTargeted: { targeted in
             isDraggingOver = targeted
+        }
+    }
+
+    /// Header + runtime banner + preview, stacked vertically. The split sizes
+    /// this to the remaining width once the inspector takes its slice.
+    private var mainColumn: some View {
+        VStack(spacing: 0) {
+            screenHeader
+
+            runtimeErrorBannerView
+
+            Divider()
+
+            ScreenDetailPreviewArea(
+                screen: screen,
+                draft: $draft,
+                featureCatalog: featureCatalog,
+                previewController: previewController,
+                isLoading: isLoading,
+                isDraggingOver: isDraggingOver,
+                reduceMotion: reduceMotion,
+                showsGuideEmptyState: shouldShowGuideEmptyState,
+                onChooseVideo: triggerVideoGuideAction,
+                onChooseHTML: triggerHTMLGuideAction,
+                onChooseShader: triggerShaderGuideAction,
+                onChooseScene: triggerSceneGuideAction,
+                onSelectVideoFile: showFilePicker,
+                onStartPreview: setupPreviewPlayer,
+                onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
+                onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
+            )
         }
     }
 
@@ -299,29 +324,22 @@ struct ScreenDetailView: View {
         #endif
     }
 
-    @ViewBuilder
-    private var inspectorPanel: some View {
-        if showsInspector {
-            ScreenDetailInspectorPanel(
-                screen: screen,
-                draft: $draft,
-                screenManager: screenManager,
-                featureCatalog: featureCatalog,
-                reduceMotion: reduceMotion,
-                inspectorPanelWidth: inspectorPanelWidth,
-                isEnvironmentExpanded: $isEnvironmentExpanded,
-                isColorExpanded: $isColorExpanded,
-                onParticleEffectChange: { screenManager.updateParticleEffect($0, for: screen) },
-                onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
-                onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
-                onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
-                onResetDisplaySettings: requestResetDisplaySettings
-            )
-        }
-    }
-
-    private var inspectorPanelWidth: CGFloat {
-        clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
+    private func inspectorPanel(width: CGFloat) -> some View {
+        ScreenDetailInspectorPanel(
+            screen: screen,
+            draft: $draft,
+            screenManager: screenManager,
+            featureCatalog: featureCatalog,
+            reduceMotion: reduceMotion,
+            inspectorPanelWidth: width,
+            isEnvironmentExpanded: $isEnvironmentExpanded,
+            isColorExpanded: $isColorExpanded,
+            onParticleEffectChange: { screenManager.updateParticleEffect($0, for: screen) },
+            onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
+            onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
+            onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
+            onResetDisplaySettings: requestResetDisplaySettings
+        )
     }
 
     private var dropFailurePresented: Binding<Bool> {
@@ -361,29 +379,6 @@ struct ScreenDetailView: View {
         ) {
             screenManager.resetDisplaySettings(for: screen)
         }
-    }
-
-    private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
-        min(max(width, DesignTokens.Inspector.minWidth), DesignTokens.Inspector.maxWidth)
-    }
-
-    private func previewInspectorWidth(_ width: CGFloat) {
-        withoutResizeAnimation {
-            liveInspectorWidth = Double(clampedInspectorWidth(width))
-        }
-    }
-
-    private func commitInspectorWidth(_ width: CGFloat) {
-        withoutResizeAnimation {
-            inspectorWidth = Double(clampedInspectorWidth(width))
-            liveInspectorWidth = nil
-        }
-    }
-
-    private func withoutResizeAnimation(_ update: () -> Void) {
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
-        withTransaction(transaction, update)
     }
 
     // MARK: - Drag and Drop

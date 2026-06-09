@@ -65,8 +65,12 @@ struct WPESceneCustomSettingsCard: View {
     }
 
     private var hasOverrides: Bool {
-        let keys = Set(schema.properties.map(\.key))
-        return descriptor.propertyOverrides.keys.contains { keys.contains($0) }
+        // Only count overrides on settings the user can actually see and reset.
+        // A leftover override on a hidden promo/ad entry must not light up the
+        // Reset button with nothing visible to undo.
+        let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
+        let visibleKeys = Set(interactiveProperties(values: values).map(\.key))
+        return descriptor.propertyOverrides.keys.contains { visibleKeys.contains($0) }
     }
 
     private func resetOverrides() {
@@ -75,14 +79,22 @@ struct WPESceneCustomSettingsCard: View {
 
     // MARK: - Property list
 
+    /// Settings the card actually renders: visible, interactive, and not an
+    /// embedded ad/donation/external-link block. Real WPE projects pad
+    /// `properties` with macOS-unsupported file/directory pickers, decorative
+    /// section headers (`group`/`text`), and — most aggressively — promo blocks
+    /// the engine never binds to the render graph. Centralised so the row list
+    /// and the Reset-button state stay in lock-step.
+    private func interactiveProperties(
+        values: [String: WallpaperEngineProjectPropertyValue]
+    ) -> [WallpaperEngineProjectPropertySchema.Property] {
+        schema.visibleProperties(values: values)
+            .filter { Self.isInteractive($0.type) && !$0.isPromotionalLink }
+    }
+
     private var propertyList: some View {
         let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
-        // Only genuinely interactive controls. Real WPE projects pad
-        // `properties` with HTML promo/donation blocks (`text`), decorative
-        // section headers (`group`), and macOS-unsupported file/directory
-        // pickers — none of which the user can act on. Drop them so the column
-        // is a clean list of changeable options.
-        let interactive = schema.visibleProperties(values: values).filter { Self.isInteractive($0.type) }
+        let interactive = interactiveProperties(values: values)
 
         return VStack(spacing: 8) {
             ForEach(interactive) { property in
@@ -117,20 +129,19 @@ struct WPESceneCustomSettingsCard: View {
             }
         case .slider:
             WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
-                HStack(spacing: 6) {
+                HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                     Slider(
                         value: numberBinding(for: property),
                         in: sliderRange(for: property),
                         step: sliderStep(for: property)
                     )
-                    .frame(width: 96)
+                    .frame(width: DesignTokens.Inspector.sliderWidth)
                     .controlSize(.small)
 
                     Text(verbatim: formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
                         .font(DesignTokens.Typography.metric)
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                        .monospacedDigit()
+                        .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
                 }
             }
         case .combo:

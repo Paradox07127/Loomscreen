@@ -622,7 +622,7 @@ struct HTMLTransformInspector: View {
             title: "Scale",
             info: "Scales the rendered page around its center."
         ) {
-            HStack(spacing: 4) {
+            HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                 Slider(
                     value: configDoubleBinding(
                         \.transformScale,
@@ -632,14 +632,13 @@ struct HTMLTransformInspector: View {
                     in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
                 )
                 .controlSize(.small)
-                .frame(width: 96)
+                .frame(width: DesignTokens.Inspector.sliderWidth)
                 .accessibilityLabel(Text("Scale"))
 
                 Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
                     .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
-                    .frame(width: 42, alignment: .trailing)
-                    .monospacedDigit()
+                    .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
             }
         }
     }
@@ -694,7 +693,7 @@ struct HTMLTransformInspector: View {
         fieldValue: Binding<Double>,
         accessibilityLabel: LocalizedStringKey
     ) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
             Text(verbatim: axisLabel)
                 .font(DesignTokens.Typography.caption)
                 .foregroundStyle(.secondary)
@@ -704,7 +703,7 @@ struct HTMLTransformInspector: View {
                 in: -HTMLConfig.maxTransformTranslate...HTMLConfig.maxTransformTranslate
             )
             .controlSize(.small)
-            .frame(width: 96)
+            .frame(width: DesignTokens.Inspector.sliderWidth)
             .accessibilityLabel(Text(accessibilityLabel))
 
             TextField(
@@ -733,7 +732,7 @@ struct HTMLTransformInspector: View {
             title: "Rotation",
             info: "Rotates the rendered page around its center."
         ) {
-            HStack(spacing: 4) {
+            HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                 Slider(
                     value: configDoubleBinding(
                         \.transformRotationDegrees,
@@ -743,14 +742,13 @@ struct HTMLTransformInspector: View {
                     in: -180...180
                 )
                 .controlSize(.small)
-                .frame(width: 78)
+                .frame(width: DesignTokens.Inspector.sliderWidth)
                 .accessibilityLabel(Text("Rotation"))
 
                 Text(verbatim: String(format: "%.0f°", config.transformRotationDegrees))
                     .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .trailing)
-                    .monospacedDigit()
+                    .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
             }
         }
     }

@@ -54,11 +54,30 @@ struct WorkshopInstalledView: View {
     @State private var isCheckingForUpdates = false
     @AppStorage("loomscreen.workshop.updateCheck.epoch.v1") private var lastUpdateCheckEpoch: Double = 0
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Persisted detail-panel width + the transient width during a drag-resize.
+    @AppStorage("Workshop.Installed.InspectorWidth") private var inspectorWidth = 320.0
+    @State private var liveInspectorWidth: Double?
+
     // Match the online Browse grid density (square tiles, ~192px source).
     private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
 
     var body: some View {
-        content
+        // Same resizable, full-height, click-to-reveal side panel as the
+        // screen-detail inspector — selecting a card glides it open and only
+        // compresses the grid (never the sidebar / toolbar).
+        ResizableInspectorSplit(
+            isMounted: true,
+            isVisible: selectedEntry != nil,
+            animationTrigger: AnyHashable(selectedEntry != nil),
+            reduceMotion: reduceMotion,
+            storedWidth: $inspectorWidth,
+            liveWidth: $liveInspectorWidth,
+            minWidth: 280,
+            maxWidth: 380,
+            main: { content },
+            inspector: { width in installedInspectorColumn(width: width) }
+        )
             .background(DesignTokens.Colors.pageBackground)
             .onAppear {
                 reload()
@@ -93,37 +112,38 @@ struct WorkshopInstalledView: View {
                     Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
                 }
             }
-            .inspector(isPresented: Binding(
-                get: { selectedEntry != nil },
-                set: { if !$0 { selectedEntry = nil } }
-            )) {
-                Group {
-                    if let entry = selectedEntry {
-                        WPEInstalledInspectorContent(
-                            entry: entry,
-                            screens: screenManager.screens,
-                            activeScreenIDs: activeScreenIDs(for: entry),
-                            isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
-                            canBookmark: canAddBookmark(entry),
-                            hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
-                            canUpdate: doctor.isDownloadReady,
-                            onApply: { apply(entry, to: $0) },
-                            onApplyToAll: { applyToAll(entry) },
-                            onUpdate: { updateEntry(entry) },
-                            onToggleBookmark: { toggleBookmark(entry) },
-                            onShowInFinder: { showInFinder(entry) },
-                            onDelete: { pendingDelete = entry },
-                            onSelectTag: onBrowseTag.map { browse in
-                                { tag in selectedEntry = nil; browse(tag) }
-                            },
-                            onClose: { selectedEntry = nil }
-                        )
-                    } else {
-                        installedInspectorPlaceholder
-                    }
-                }
-                .inspectorColumnWidth(min: 280, ideal: 320, max: 380)
+    }
+
+    /// Detail panel for the selected library entry (placeholder when nothing is
+    /// selected; only visible when the split reveals it). Built at full width.
+    private func installedInspectorColumn(width: CGFloat) -> some View {
+        Group {
+            if let entry = selectedEntry {
+                WPEInstalledInspectorContent(
+                    entry: entry,
+                    screens: screenManager.screens,
+                    activeScreenIDs: activeScreenIDs(for: entry),
+                    isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
+                    canBookmark: canAddBookmark(entry),
+                    hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
+                    canUpdate: doctor.isDownloadReady,
+                    onApply: { apply(entry, to: $0) },
+                    onApplyToAll: { applyToAll(entry) },
+                    onUpdate: { updateEntry(entry) },
+                    onToggleBookmark: { toggleBookmark(entry) },
+                    onShowInFinder: { showInFinder(entry) },
+                    onDelete: { pendingDelete = entry },
+                    onSelectTag: onBrowseTag.map { browse in
+                        { tag in selectedEntry = nil; browse(tag) }
+                    },
+                    onClose: { selectedEntry = nil }
+                )
+            } else {
+                installedInspectorPlaceholder
             }
+        }
+        .frame(width: width)
+        .frame(maxHeight: .infinity)
     }
 
     private var installedInspectorPlaceholder: some View {

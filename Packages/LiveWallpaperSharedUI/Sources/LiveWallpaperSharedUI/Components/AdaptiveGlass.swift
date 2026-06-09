@@ -11,6 +11,14 @@ public enum AdaptiveGlassProminence: Sendable {
     case prominent
 }
 
+/// Border shape for `adaptiveGlassButton`. `capsule` is the default (labeled
+/// buttons); `circle` is for single-glyph icon buttons, which read as a clean
+/// equal-size cluster and match the macOS 26 Liquid Glass icon-control look.
+public enum AdaptiveGlassButtonShape: Sendable {
+    case capsule
+    case circle
+}
+
 public struct AdaptiveGlassContainer<Content: View>: View {
     private let spacing: CGFloat?
     private let content: Content
@@ -40,8 +48,11 @@ public extension View {
         modifier(AdaptiveGlassSurfaceModifier(shape: shape, tint: tint, interactive: interactive))
     }
 
-    func adaptiveGlassButton(_ prominence: AdaptiveGlassProminence = .regular) -> some View {
-        modifier(AdaptiveGlassButtonModifier(prominence: prominence))
+    func adaptiveGlassButton(
+        _ prominence: AdaptiveGlassProminence = .regular,
+        shape: AdaptiveGlassButtonShape = .capsule
+    ) -> some View {
+        modifier(AdaptiveGlassButtonModifier(prominence: prominence, shape: shape))
     }
 
     /// Liquid-glass chrome for a small badge floating over a thumbnail/preview
@@ -216,15 +227,23 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
 
 private struct AdaptiveGlassButtonModifier: ViewModifier {
     let prominence: AdaptiveGlassProminence
+    let shape: AdaptiveGlassButtonShape
+
+    private var borderShape: ButtonBorderShape {
+        switch shape {
+        case .capsule: return .capsule
+        case .circle:  return .circle
+        }
+    }
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             switch prominence {
             case .regular:
-                content.buttonStyle(.glass)
+                content.buttonStyle(.glass).buttonBorderShape(borderShape)
             case .prominent:
-                content.buttonStyle(.glassProminent)
+                content.buttonStyle(.glassProminent).buttonBorderShape(borderShape)
             }
         } else {
             switch prominence {
@@ -232,12 +251,12 @@ private struct AdaptiveGlassButtonModifier: ViewModifier {
                 content
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .buttonBorderShape(.capsule)
+                    .buttonBorderShape(borderShape)
             case .prominent:
                 content
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
-                    .buttonBorderShape(.capsule)
+                    .buttonBorderShape(borderShape)
             }
         }
     }

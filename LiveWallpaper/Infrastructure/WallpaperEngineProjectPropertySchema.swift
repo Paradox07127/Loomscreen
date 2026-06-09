@@ -116,11 +116,19 @@ extension WallpaperEngineProjectPropertySchema {
         let condition: String?
         let options: [Option]
         let fileType: String?
+        /// True when this entry is an embedded ad / donation / external-link
+        /// block rather than a real wallpaper setting. WPE authors abuse the
+        /// properties panel to render clickable HTML (`<a href>`, `<img src>`,
+        /// QR codes, Ko-fi / Patreon / 爱发电 links); the engine never binds
+        /// these to the render graph, so toggling them changes nothing. The
+        /// scene inspector hides them. See `Self.detectPromotionalLink`.
+        let isPromotionalLink: Bool
 
         fileprivate init?(key: String, dict: [String: Any], localization: Localization) {
             self.key = key
             type = PropertyType(rawValue: (dict["type"] as? String)?.lowercased() ?? "") ?? .unsupported
-            displayText = localization.displayText(for: dict["text"] as? String ?? key)
+            let rawText = dict["text"] as? String
+            displayText = localization.displayText(for: rawText ?? key)
             defaultValue = Self.value(from: dict["value"])
             minimum = Self.double(from: dict["min"])
             maximum = Self.double(from: dict["max"])
@@ -130,12 +138,73 @@ extension WallpaperEngineProjectPropertySchema {
             order = Self.double(from: dict["order"]) ?? Double.greatestFiniteMagnitude
             index = Self.int(from: dict["index"]) ?? Int.max
             condition = (dict["condition"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            if let rawOptions = dict["options"] as? [[String: Any]] {
+            let rawOptions = dict["options"] as? [[String: Any]]
+            if let rawOptions {
                 options = rawOptions.compactMap { Option(dict: $0, localization: localization) }
             } else {
                 options = []
             }
             fileType = (dict["fileType"] as? String) ?? (dict["filetype"] as? String)
+            isPromotionalLink = Self.detectPromotionalLink(
+                key: key,
+                rawText: rawText ?? "",
+                rawOptions: rawOptions,
+                localization: localization
+            )
+        }
+
+        /// Tokens that betray a promotional/donation/external-link entry. They
+        /// appear either inside an HTML-derived key (punctuation stripped, e.g.
+        /// `ahrefhttpskoficom…`) or in the property's display text / option
+        /// labels (with punctuation, e.g. `<a href=`).
+        private static let promoKeyTokens = [
+            "href", "http", "www", "imgsrc", "kofi", "ko-fi", "patreon", "paypal",
+            "donate", "sponsor", "discord", "afdian", "aifadian", "爱发电", "赞助", "赞赏", "打赏"
+        ]
+        private static let promoTextMarkers = [
+            "<a ", "<a>", "href=", "<img", "src=", "http://", "https://", "www.",
+            "ko-fi", "kofi", "patreon", "paypal", "donate", "sponsor", "discord.gg",
+            "爱发电", "赞助", "赞赏", "打赏"
+        ]
+
+        /// Narrow ad/link detector (validated against 57 real workshop scenes:
+        /// flags ~12% of editable properties, all genuine links/donations, with
+        /// no false hit on settings that merely use `<h2>` / `<font>` for label
+        /// styling — those cosmetic tags are stripped for display elsewhere).
+        ///
+        /// A property is promotional when ANY of:
+        ///  - its key is HTML-derived — WPE auto-generates the key from the
+        ///    author's HTML text when no explicit `name` is set, yielding keys
+        ///    like `ahrefhttpskoficom…` / `imgsrchttp…`. A merely long key is not
+        ///    enough; it must also carry a promo token, so a descriptive long key
+        ///    for a real control is never hidden;
+        ///  - its `text` / option labels (raw *and* localized) contain a
+        ///    hyperlink (`<a`, `href=`), an embedded image (`<img`, `src=`), a
+        ///    bare URL, or a donation/social keyword (Ko-fi, Patreon, 赞助, …).
+        fileprivate static func detectPromotionalLink(
+            key: String,
+            rawText: String,
+            rawOptions: [[String: Any]]?,
+            localization: Localization
+        ) -> Bool {
+            let loweredKey = key.lowercased()
+            if ["ahref", "imgsrc", "http"].contains(where: loweredKey.hasPrefix) {
+                return true
+            }
+            if key.count > 40, promoKeyTokens.contains(where: loweredKey.contains) {
+                return true
+            }
+
+            var candidates = localization.detectionCandidates(for: rawText)
+            if let rawOptions {
+                for option in rawOptions {
+                    if let label = option["label"] as? String {
+                        candidates.append(contentsOf: localization.detectionCandidates(for: label))
+                    }
+                }
+            }
+            let haystack = candidates.joined(separator: " ").lowercased()
+            return promoTextMarkers.contains(where: haystack.contains)
         }
 
         fileprivate static func value(from raw: Any?) -> WallpaperEngineProjectPropertyValue? {
@@ -245,6 +314,21 @@ private struct Localization: Equatable {
             return Self.clean(localized)
         }
         return Self.resolveDisplayText(cleaned)
+    }
+
+    /// Strings to scan when classifying a property as a promotional link: the
+    /// raw author value plus any localized variants it resolves to. Returned
+    /// *un-cleaned* so link/image markup (`<a href>`, `<img src>`) that lives
+    /// only in a localized string is still visible to the detector.
+    func detectionCandidates(for raw: String) -> [String] {
+        var candidates = [raw]
+        let cleaned = Self.clean(raw)
+        guard !cleaned.isEmpty else { return candidates }
+        if let localized = selected[cleaned] { candidates.append(localized) }
+        if let localized = fallback[cleaned], localized != selected[cleaned] {
+            candidates.append(localized)
+        }
+        return candidates
     }
 
     private static func selectMap(

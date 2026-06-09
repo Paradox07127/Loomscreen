@@ -98,6 +98,14 @@ public enum DesignTokens {
         public static let defaultWidth: CGFloat = idealWidth
         public static let horizontalPadding: CGFloat = Spacing.md
         public static let verticalPadding: CGFloat = Spacing.lg
+        /// Shared geometry for every inspector "label … [slider][value]" row so
+        /// sliders and their numeric readouts line up across all sections
+        /// (Playback, Environment, Color & Filters, HTML transform, WPE custom
+        /// settings). The readout font (`Typography.metric`) is already
+        /// monospaced, so call sites don't need a separate `.monospacedDigit()`.
+        public static let sliderWidth: CGFloat = 96
+        public static let sliderValueWidth: CGFloat = 40
+        public static let sliderValueSpacing: CGFloat = 4
         /// Horizontal padding floor when the inspector is dragged to its min width.
         /// Vertical padding stays constant — only horizontal compresses with width.
         public static let minHorizontalPadding: CGFloat = 9
@@ -109,13 +117,9 @@ public enum DesignTokens {
         }
     }
 
-    public enum PreviewArea {
-        public static let minWidth: CGFloat = 480
-    }
-
     public enum Sidebar {
-        public static let width: CGFloat = 210
-        public static let maxWidth: CGFloat = width * 1.15
+        public static let width: CGFloat = 180
+        public static let maxWidth: CGFloat = width * 1.2
         public static let sectionHeaderSpacing: CGFloat = 6
         public static let sectionHeaderBottomPadding: CGFloat = 0
         /// Negative inset pulled above each sidebar section header to tighten the
