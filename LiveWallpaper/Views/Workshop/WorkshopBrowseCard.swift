@@ -29,7 +29,6 @@ struct WorkshopBrowseCard: View {
     @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// Blur the tile until the user clicks to reveal: enabled in settings, the
     /// item is Mature-rated, and it hasn't been revealed yet.

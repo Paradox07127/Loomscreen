@@ -14,8 +14,6 @@ struct WorkshopPasteRowCard: View {
     let onOpenInSteam: () -> Void
     let onCopyDiagnostic: () -> Void
 
-    @Environment(\.openURL) private var openURL
-
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             thumbnail
@@ -208,8 +206,6 @@ private struct BadgeChip: View {
 }
 
 private struct SkeletonLines: View {
-    @State private var phase: CGFloat = -1
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(0..<2, id: \.self) { index in

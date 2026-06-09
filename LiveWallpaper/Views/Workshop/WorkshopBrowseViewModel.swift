@@ -243,7 +243,7 @@ final class WorkshopBrowseViewModel {
 
     init(services: WorkshopServices) {
         self.services = services
-        self.currentRequest = WorkshopQueryRequest(sort: .topRated)   // placeholder
+        self.currentRequest = WorkshopQueryRequest(sort: .topRated)
         // Restore the user's last filter selection, then seed `currentRequest`
         // to match it so `hasPendingChanges` is false on launch.
         loadPersistedFilters()

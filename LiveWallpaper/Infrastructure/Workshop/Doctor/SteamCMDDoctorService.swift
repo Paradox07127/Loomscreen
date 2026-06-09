@@ -350,24 +350,6 @@ final class SteamCMDDoctorService {
         }
     }
 
-    func clearBinaryBinding() {
-        binaryBookmarkData = nil
-        lastBinarySHA256 = nil
-        verifiedBinarySHA256 = nil
-        binaryDisplayPath = nil
-        setProbe(.binaryIdentity, status: .notRun)
-        setProbe(.codeSignature, status: .notRun)
-        setProbe(.gatekeeperQuarantine, status: .notRun)
-    }
-
-    func clearWorkdirBinding() {
-        workdirBookmarkData = nil
-        workdirDisplayPath = nil
-        setProbe(.workingDirectory, status: .notRun)
-        setProbe(.cachedLogin, status: .notRun)
-        setProbe(.wallpaperEngineOwnership, status: .notRun)
-    }
-
     /// Surface the Rosetta-install command to the user. Spawning
     /// `softwareupdate --install-rosetta` directly requires the privileged
     /// helper entitlement we don't ship yet, so this method writes the exact
