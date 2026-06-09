@@ -505,14 +505,15 @@ struct ScreenRow: View {
     /// The row icon doubles as the live-status light — it carries the same
     /// red-amber-green semantics the trailing dot used to, so a single glyph
     /// shows both *what* the wallpaper is (symbol) and *how it's doing*
-    /// (color). `.off` keeps the accent tint of a configured-but-stopped
-    /// display; `.inactive` (nothing assigned) stays neutral.
+    /// (color). When nothing is actually on the desktop — master switch
+    /// `.off` or nothing assigned (`.inactive`) — the icon stays neutral gray
+    /// so a stopped display never reads as "live."
     private func iconColor(for summary: WallpaperSessionSummary) -> Color {
         switch summary.activity {
         case .active:   return DesignTokens.Colors.Status.active
         case .paused:   return DesignTokens.Colors.Status.warning
         case .error:    return DesignTokens.Colors.Status.danger
-        case .off:      return .accentColor
+        case .off:      return .secondary
         case .inactive: return .secondary
         }
     }
