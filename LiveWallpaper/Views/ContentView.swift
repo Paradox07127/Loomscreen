@@ -423,7 +423,7 @@ struct Sidebar: View {
     /// Snapshot of how many displays are currently in `.active` activity.
     /// Reads via `wallpaperSummary(_:)` so the read tracks the same
     /// `wallpaperSessionState` observation channel as `ScreenRow`, keeping
-    /// the Usage chip in lock-step with the sidebar dots.
+    /// the Usage chip in lock-step with the sidebar status icons.
     private var activeWallpaperDisplayCount: Int {
         screenManager.screens.reduce(0) { acc, screen in
             acc + (screenManager.wallpaperSummary(for: screen).activity == .active ? 1 : 0)
@@ -472,36 +472,12 @@ struct ScreenRow: View {
                 .truncationMode(.middle)
                 .help(Text(verbatim: screen.name))
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let dotColor = dotColor(for: summary) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
-            }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(displayAccessibilityLabel)
         .accessibilityValue(accessibilityValue(for: summary))
         .accessibilityHint(Text("Select to configure this display"))
-    }
-
-    /// Tri-state status dot — `.green` playing, `.orange` paused, `nil`
-    /// (no dot) for unconfigured/inactive displays. We deliberately use raw
-    /// system colors here instead of `.tint` / `.accentColor` because the
-    /// "is this screen alive right now" signal needs the same universal
-    /// red-amber-green semantics users already learned from the menu-bar
-    /// usage strip — accent on a selected-row accent background would be
-    /// invisible, and `.primary` would lose the playing/paused distinction.
-    private func dotColor(for summary: WallpaperSessionSummary) -> Color? {
-        switch summary.activity {
-        case .active:   return DesignTokens.Colors.Status.active
-        case .paused:   return DesignTokens.Colors.Status.warning
-        case .off:      return .secondary
-        case .error:    return DesignTokens.Colors.Status.danger
-        case .inactive: return nil
-        }
     }
 
     private var displayAccessibilityLabel: Text {
@@ -526,8 +502,19 @@ struct ScreenRow: View {
         }
     }
 
+    /// The row icon doubles as the live-status light — it carries the same
+    /// red-amber-green semantics the trailing dot used to, so a single glyph
+    /// shows both *what* the wallpaper is (symbol) and *how it's doing*
+    /// (color). `.off` keeps the accent tint of a configured-but-stopped
+    /// display; `.inactive` (nothing assigned) stays neutral.
     private func iconColor(for summary: WallpaperSessionSummary) -> Color {
-        summary.isConfigured ? Color.accentColor : Color.secondary
+        switch summary.activity {
+        case .active:   return DesignTokens.Colors.Status.active
+        case .paused:   return DesignTokens.Colors.Status.warning
+        case .error:    return DesignTokens.Colors.Status.danger
+        case .off:      return .accentColor
+        case .inactive: return .secondary
+        }
     }
 
     private func accessibilityValue(for summary: WallpaperSessionSummary) -> Text {

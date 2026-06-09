@@ -24,8 +24,8 @@ struct ScreenDetailInspectorPanel: View {
 
     var body: some View {
         ScrollView {
-            AdaptiveGlassContainer(spacing: 16) {
-                VStack(spacing: 16) {
+            AdaptiveGlassContainer(spacing: 12) {
+                VStack(spacing: 12) {
                     if draft.selectedWallpaperType == .video,
                        featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
                         wallpaperModeCard
@@ -105,7 +105,7 @@ struct ScreenDetailInspectorPanel: View {
                     #endif
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
-                .padding(.vertical, 14)
+                .padding(.vertical, 12)
             }
         }
         .frame(width: inspectorPanelWidth)
@@ -216,7 +216,7 @@ struct ScreenDetailInspectorPanel: View {
     @ViewBuilder
     private var videoSettingsContent: some View {
         if featureCatalog.isEnabled(.videoEffects) {
-            VStack(spacing: 16) {
+            VStack(spacing: 12) {
                 environmentGroup
                 colorGroup
                 resetDisplayButton
@@ -324,9 +324,9 @@ struct ScreenDetailInspectorPanel: View {
             Spacer()
             Button(action: onResetDisplaySettings) {
                 Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
-                    .font(DesignTokens.Typography.body)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .font(DesignTokens.Typography.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesignTokens.Colors.Status.danger)
@@ -336,7 +336,7 @@ struct ScreenDetailInspectorPanel: View {
             .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
             Spacer()
         }
-        .padding(.top, 8)
+        .padding(.top, 2)
     }
 
     private var particleEffectBinding: Binding<ParticleEffect> {

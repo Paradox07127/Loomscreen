@@ -110,7 +110,7 @@ public enum DesignTokens {
     }
 
     public enum Sidebar {
-        public static let width: CGFloat = 210
+        public static let width: CGFloat = 192
         public static let maxWidth: CGFloat = width * 1.15
         public static let sectionHeaderSpacing: CGFloat = 6
         public static let sectionHeaderBottomPadding: CGFloat = 0
