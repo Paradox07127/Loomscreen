@@ -39,7 +39,6 @@ struct ScreenDetailPreviewArea: View {
                       featureCatalog.isEnabled(.metalShader) {
                 #if !LITE_BUILD
                 ShaderWallpaperSection(screen: screen, selectedShaderSource: $draft.selectedShaderSource)
-                    .padding(24)
                 #else
                 EmptyView()
                 #endif
