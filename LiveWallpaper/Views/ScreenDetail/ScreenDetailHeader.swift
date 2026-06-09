@@ -72,7 +72,7 @@ struct ScreenDetailHeader: View {
                             Image(systemName: isCurrentBookmarked ? "bookmark.fill" : "bookmark")
                         }
                         .adaptiveGlassButton(isCurrentBookmarked ? .prominent : .regular, shape: .circle)
-                        .controlSize(.regular)
+                        .controlSize(.large)
                         .help(Text(isCurrentBookmarked
                             ? "Bookmarked — click to rename or remove"
                             : "Bookmark this wallpaper"))
@@ -89,7 +89,7 @@ struct ScreenDetailHeader: View {
                                 Image(systemName: "folder.badge.plus")
                             }
                             .adaptiveGlassButton(.regular, shape: .circle)
-                            .controlSize(.regular)
+                            .controlSize(.large)
                             .help(Text("Select Video — choose a video file for this display"))
                             .accessibilityLabel(Text("Select video"))
                             .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
@@ -100,7 +100,7 @@ struct ScreenDetailHeader: View {
                                 Image(systemName: "folder.badge.plus")
                             }
                             .adaptiveGlassButton(.regular, shape: .circle)
-                            .controlSize(.regular)
+                            .controlSize(.large)
                             .help(Text("Apply Project — choose a Wallpaper Engine project folder for this display"))
                             .accessibilityLabel(Text("Apply project"))
                             .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
@@ -111,7 +111,7 @@ struct ScreenDetailHeader: View {
                         }
                         .adaptiveGlassButton(.regular, shape: .circle)
                         .destructiveControlTint()
-                        .controlSize(.regular)
+                        .controlSize(.large)
                         .help(Text(clearHelpText))
                         .accessibilityLabel(Text(clearAccessibilityLabel))
                     }
@@ -148,7 +148,7 @@ struct ScreenDetailHeader: View {
             .accessibilityLabel(Text("Apply to all displays"))
             .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
             .adaptiveGlassButton(.regular, shape: .circle)
-            .controlSize(.regular)
+            .controlSize(.large)
         }
     }
 
