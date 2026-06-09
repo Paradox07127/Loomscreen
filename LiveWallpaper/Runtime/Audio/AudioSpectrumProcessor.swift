@@ -110,11 +110,6 @@ final class AudioSpectrumProcessor {
         process(left: mono, right: mono, timestampNanos: timestampNanos)
     }
 
-    func resetSmoothing() {
-        for index in previousLeft.indices { previousLeft[index] = 0 }
-        for index in previousRight.indices { previousRight[index] = 0 }
-    }
-
     // Capture sources convert their AudioBufferList into noninterleaved Float
     // channels at the capture boundary, then call
     // process(left:right:timestampNanos:). The conversion lives there because

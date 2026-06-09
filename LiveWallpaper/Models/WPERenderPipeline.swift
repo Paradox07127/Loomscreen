@@ -65,7 +65,7 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
-    /// Phase 2B: returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
+    /// Returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms

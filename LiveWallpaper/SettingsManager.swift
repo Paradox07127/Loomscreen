@@ -226,7 +226,7 @@ final class SettingsManager {
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
-    // MARK: - Workshop Library Root Bookmark (Phase 1.5 gallery)
+    // MARK: - Workshop Library Root Bookmark
 
     /// Persists the security-scoped bookmark to the user-chosen Workshop library root (e.g. `~/Documents/Live Wallpapers/431960/`).
     func saveWorkshopLibraryRootBookmark(_ bookmark: Data) {
@@ -606,7 +606,6 @@ final class SettingsManager {
 
 // MARK: - URL Extension
 extension URL {
-    // Check if URL exists
     var exists: Bool {
         FileManager.default.fileExists(atPath: path(percentEncoded: false))
     }
