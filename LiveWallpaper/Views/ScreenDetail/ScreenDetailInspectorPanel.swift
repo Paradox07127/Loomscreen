@@ -94,7 +94,9 @@ struct ScreenDetailInspectorPanel: View {
                     // controls.
                     if draft.selectedWallpaperType == .scene,
                        let schema = wpeSceneCustomSettingsSchema,
-                       schema.properties.contains(where: { WPESceneCustomSettingsCard.isInteractive($0.type) }),
+                       schema.properties.contains(where: {
+                           WPESceneCustomSettingsCard.isInteractive($0.type) && !$0.isPromotionalLink
+                       }),
                        draft.sceneDescriptor != nil {
                         WPESceneCustomSettingsCard(
                             screen: screen,

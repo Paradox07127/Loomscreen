@@ -89,6 +89,50 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(!hiddenVisible.contains("dockslot"))
     }
 
+    @Test("Flags embedded ad/donation/link properties, keeps real settings")
+    func detectsPromotionalLinkProperties() throws {
+        let manifest = """
+        {
+          "general": {
+            "properties": {
+              "windspeed": { "type": "slider", "text": "Wind Speed", "value": 5, "min": 0, "max": 10 },
+              "clock": { "type": "combo", "text": "<h2>🕑Clock type<h2>", "value": "1", "options": [{"label":"Digital","value":"1"}] },
+              "schemecolor": { "type": "color", "text": "ui_browse_properties_scheme_color", "value": "1 1 1" },
+              "koflink": { "type": "bool", "text": "<a href='https://ko-fi.com/abc'>Support me</a>", "value": true },
+              "qr": { "type": "color", "text": "<img src='http://qq.com/x.png'>", "value": "1 1 1" },
+              "bbyy": { "type": "bool", "text": "显示赞助信息 Display sponsorship", "value": false },
+              "ahrefhttpskoficomabcdefghijklmnopqrstuvwxyz": { "type": "bool", "text": "buy me a coffee", "value": true },
+              "enableparallaxdepthoffieldforbackgroundlayers": { "type": "bool", "text": "Real Setting", "value": true },
+              "bgsource": { "type": "combo", "text": "Background Source", "value": "a", "options": [{"label":"Default","value":"https://example.com/default.jpg"}] },
+              "sociallinks": { "type": "combo", "text": "Links", "value": "1", "options": [{"label":"<a href='https://x.com'>Follow</a>","value":"1"}] }
+            }
+          }
+        }
+        """
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(manifest.utf8),
+            preferredLanguages: ["en-US"],
+            includeSchemeColor: true
+        )
+        let promo = Dictionary(uniqueKeysWithValues: schema.properties.map { ($0.key, $0.isPromotionalLink) })
+
+        // Real, render-affecting settings — keep, even with cosmetic <h2> markup.
+        #expect(promo["windspeed"] == false)
+        #expect(promo["clock"] == false)
+        #expect(promo["schemecolor"] == false)
+        // A descriptive long key with no promo token must NOT be hidden.
+        #expect(promo["enableparallaxdepthoffieldforbackgroundlayers"] == false)
+        // A combo whose option *value* is URL-like but label is clean — keep.
+        #expect(promo["bgsource"] == false)
+
+        // Ads / donations / external links — hide.
+        #expect(promo["koflink"] == true)        // <a href> donation link
+        #expect(promo["qr"] == true)             // embedded <img> QR code
+        #expect(promo["bbyy"] == true)           // 赞助 donation keyword
+        #expect(promo["ahrefhttpskoficomabcdefghijklmnopqrstuvwxyz"] == true) // HTML-derived key
+        #expect(promo["sociallinks"] == true)    // link inside an option label
+    }
+
     @Test("HTMLConfig persists Wallpaper Engine project property overrides")
     func htmlConfigPersistsProjectPropertyOverrides() throws {
         let config = HTMLConfig(
