@@ -222,6 +222,7 @@ struct PlaylistSection: View {
                     .font(DesignTokens.Typography.body)
             }
             .toggleStyle(.switch)
+            .controlSize(.small)
 
             if rotationMinutes != nil {
                 HStack(spacing: 6) {

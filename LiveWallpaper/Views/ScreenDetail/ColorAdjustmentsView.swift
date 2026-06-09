@@ -26,7 +26,7 @@ struct ColorAdjustmentsView: View {
                 Divider()
 
                 HStack {
-                    Text("Auto warm tint by time of day")
+                    Text("Auto warm tint")
                         .font(DesignTokens.Typography.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -34,6 +34,7 @@ struct ColorAdjustmentsView: View {
                     Toggle("", isOn: effectBinding(\.autoTimeTint))
                         .labelsHidden()
                         .toggleStyle(.switch)
+                        .controlSize(.small)
                         .help(Text("Automatically adjust color temperature by time of day"))
                         .accessibilityLabel(Text("Auto warm tint"))
                         .accessibilityHint(Text("Automatically adjusts color warmth based on time of day"))
