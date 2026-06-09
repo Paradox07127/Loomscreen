@@ -274,16 +274,16 @@ struct ScreenDetailInspectorPanel: View {
 
     private var particleDensityRow: some View {
         SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
-            HStack(spacing: 8) {
+            HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                 Slider(value: particleDensityBinding, in: 0.2...3.0)
                     .controlSize(.small)
-                    .frame(width: 80)
+                    .frame(width: DesignTokens.Inspector.sliderWidth)
                     .accessibilityLabel(Text("Particle density"))
                     .accessibilityValue(String(format: "%.1f×", draft.particleDensity))
                 Text(String(format: "%.1f", draft.particleDensity))
                     .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, alignment: .trailing)
+                    .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
             }
         }
     }
@@ -324,15 +324,10 @@ struct ScreenDetailInspectorPanel: View {
             Spacer()
             Button(action: onResetDisplaySettings) {
                 Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
-                    .font(DesignTokens.Typography.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesignTokens.Colors.Status.danger)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .tint(DesignTokens.Colors.Status.danger)
-            .adaptiveGlassSurface(.capsule, tint: DesignTokens.Colors.Status.danger, interactive: true)
-            .contentShape(Capsule())
             .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
             Spacer()
         }

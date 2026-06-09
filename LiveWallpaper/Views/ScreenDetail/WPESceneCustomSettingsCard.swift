@@ -117,20 +117,19 @@ struct WPESceneCustomSettingsCard: View {
             }
         case .slider:
             WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
-                HStack(spacing: 6) {
+                HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                     Slider(
                         value: numberBinding(for: property),
                         in: sliderRange(for: property),
                         step: sliderStep(for: property)
                     )
-                    .frame(width: 96)
+                    .frame(width: DesignTokens.Inspector.sliderWidth)
                     .controlSize(.small)
 
                     Text(verbatim: formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
                         .font(DesignTokens.Typography.metric)
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                        .monospacedDigit()
+                        .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
                 }
             }
         case .combo:

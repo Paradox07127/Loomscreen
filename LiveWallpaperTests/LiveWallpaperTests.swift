@@ -10,7 +10,7 @@ struct SettingsWindowLayoutTests {
     func settingsWindowDefaultsFitMinimumComposedLayout() {
         #expect(SettingsWindowMetrics.defaultContentSize.width >= SettingsWindowMetrics.minimumContentSize.width)
         #expect(SettingsWindowMetrics.defaultContentSize.height >= SettingsWindowMetrics.minimumContentSize.height)
-        #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.15)
+        #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.2)
         #expect(DesignTokens.Inspector.idealWidth >= DesignTokens.Inspector.minWidth)
         #expect(DesignTokens.Inspector.idealWidth <= DesignTokens.Inspector.maxWidth)
     }

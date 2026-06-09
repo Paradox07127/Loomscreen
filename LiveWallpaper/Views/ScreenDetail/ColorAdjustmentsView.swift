@@ -109,7 +109,7 @@ struct ColorAdjustmentsView: View {
         in range: ClosedRange<Double>,
         format: String
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
             Text(title)
                 .font(DesignTokens.Typography.body)
                 .lineLimit(1)
@@ -122,9 +122,9 @@ struct ColorAdjustmentsView: View {
                 .accessibilityValue(Text(verbatim: String(format: format, value.wrappedValue)))
 
             Text(verbatim: String(format: format, value.wrappedValue))
-            .font(DesignTokens.Typography.metric)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, alignment: .trailing)
+                .font(DesignTokens.Typography.metric)
+                .foregroundStyle(.secondary)
+                .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
         }
     }
 }
