@@ -48,6 +48,11 @@ final class WPEMetalTextureMetadataRegistry: @unchecked Sendable {
 
     private let lock = NSLock()
     private var resolutions: [ObjectIdentifier: Entry] = [:]
+    /// Dead entries (weak texture released) are otherwise only purged when
+    /// `resolution(for:)` happens to be queried with the recycled pointer, so
+    /// long sessions accumulate them. Sweep every N registers instead.
+    private var registersSinceSweep = 0
+    private static let sweepInterval = 256
 
     private init() {}
 
@@ -60,6 +65,11 @@ final class WPEMetalTextureMetadataRegistry: @unchecked Sendable {
         )
         lock.lock()
         resolutions[key] = Entry(texture: texture, resolution: resolution)
+        registersSinceSweep += 1
+        if registersSinceSweep >= Self.sweepInterval {
+            registersSinceSweep = 0
+            resolutions = resolutions.filter { $0.value.texture != nil }
+        }
         lock.unlock()
     }
 

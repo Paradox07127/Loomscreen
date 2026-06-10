@@ -23,11 +23,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `MTKView` clamps this to the display's refresh rate.
     static let defaultPreferredFPS = 30
     /// Native vsync cap used when the user picks `.unlimited` — MTKView's
-    /// throttle clamps to the display refresh anyway, but we surface 60
-    /// here so a `setPreferredFramesPerSecond(0)` doesn't get interpreted
-    /// as "as fast as possible" (which on some macOS versions free-runs
-    /// well past vsync).
-    static let unlimitedPreferredFPS = 60
+    /// throttle clamps to the display refresh anyway, but we surface a
+    /// concrete value here so a `setPreferredFramesPerSecond(0)` doesn't get
+    /// interpreted as "as fast as possible" (which on some macOS versions
+    /// free-runs well past vsync). Derived from the fastest attached display
+    /// so ProMotion panels actually reach 120 instead of a literal 60;
+    /// MTKView still clamps per-display, so over-asking on slower screens
+    /// is harmless.
+    static var unlimitedPreferredFPS: Int {
+        let fastest = NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 0
+        return fastest > 0 ? fastest : 60
+    }
     /// Frame rate target when an external coordinator wants the renderer
     /// out of the way (e.g. console window in focus, multi-display
     /// exclusive rendering takeover). 1fps keeps the timer alive so we can
@@ -1000,6 +1006,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `renderCurrentFrame` path (so cross-frame `previousFrameHistory` feedback
     /// accumulates exactly like on-device), returning each frame's output texture.
     func debugRenderSuccessiveFrameTextures(_ frames: Int) throws -> [MTLTexture] {
+        // This diagnostic holds every frame's texture for after-the-fact pixel
+        // comparison; output recycling would alias frame N with frame N+3.
+        executor.isOutputPoolingEnabled = false
+        defer { executor.isOutputPoolingEnabled = true }
         var out: [MTLTexture] = []
         out.reserveCapacity(frames)
         for _ in 0..<frames {

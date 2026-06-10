@@ -198,6 +198,62 @@ final class WPEMetalRenderExecutor {
     private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
     private var msdfNeutralWhiteTexture: MTLTexture?
 
+    /// Scene-output ring: per-frame outputs are recycled instead of freshly
+    /// allocated every `render()` (~32 MB alloc/free per frame at 4K). A slot
+    /// is reused only when (a) no async present of it is still in flight and
+    /// (b) it is not one of the two most recently vended outputs — the
+    /// renderer re-presents the latest output for static scenes, and
+    /// `previousFrameHistory` may still read the prior one.
+    private var outputTexturePool: [MTLTexture] = []
+    /// The two most recently vended output textures (newest last).
+    private var recentOutputTextureIDs: [ObjectIdentifier] = []
+    private let presentTracker = PresentInFlightTracker()
+    /// Diagnostics that hold several successive frame textures at once
+    /// (`debugRenderSuccessiveFrameTextures`) disable recycling so each frame
+    /// keeps distinct storage.
+    var isOutputPoolingEnabled = true
+    /// Cleared `.previous` bootstrap textures, one per (target, size, format).
+    /// They are only ever read (seeded before the target's first write of the
+    /// frame), so the creation-time clear stays valid for the cache lifetime.
+    private var bootstrapPreviousTextureCache: [BootstrapPreviousKey: MTLTexture] = [:]
+
+    private struct BootstrapPreviousKey: Hashable {
+        let targetID: WPEMetalTargetID
+        let width: Int
+        let height: Int
+        let pixelFormat: MTLPixelFormat
+    }
+
+    /// Present completion handlers run on Metal's callback threads while the
+    /// pool is consulted from the render thread, so the in-flight refcounts
+    /// live behind a lock in a Sendable box the handler can capture.
+    private final class PresentInFlightTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var counts: [ObjectIdentifier: Int] = [:]
+
+        func increment(_ id: ObjectIdentifier) {
+            lock.lock()
+            counts[id, default: 0] += 1
+            lock.unlock()
+        }
+
+        func decrement(_ id: ObjectIdentifier) {
+            lock.lock()
+            if let count = counts[id], count > 1 {
+                counts[id] = count - 1
+            } else {
+                counts.removeValue(forKey: id)
+            }
+            lock.unlock()
+        }
+
+        func isInFlight(_ id: ObjectIdentifier) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return (counts[id] ?? 0) > 0
+        }
+    }
+
     private struct MSDFTextPipelineKey: Hashable {
         let libraryID: ObjectIdentifier
         let colorPixelFormat: UInt
@@ -273,6 +329,11 @@ final class WPEMetalRenderExecutor {
         // for a different puppet/material/animation, so drop them when the graph is rebuilt.
         puppetClipPairsCache.removeAll()
         loggedClipActivation.removeAll()
+        // Scene size / pipeline may change across a reload; drop the recycled
+        // frame targets so the next render() re-allocates at the right size.
+        outputTexturePool.removeAll()
+        recentOutputTextureIDs.removeAll()
+        bootstrapPreviousTextureCache.removeAll()
     }
 
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
@@ -999,17 +1060,23 @@ final class WPEMetalRenderExecutor {
         encoder.endEncoding()
 
         commandBuffer.present(drawable)
-        #if DEBUG
-        // Keep only the error case; the per-frame "completed" line spammed the log.
+        // The present buffer reads `source` asynchronously; refcount it so the
+        // output ring doesn't hand the texture to the next frame's render
+        // while this GPU read is still in flight.
+        let sourceID = ObjectIdentifier(source)
+        let tracker = presentTracker
+        tracker.increment(sourceID)
         commandBuffer.addCompletedHandler { cb in
+            tracker.decrement(sourceID)
+            #if DEBUG
             if cb.status == .error {
                 Logger.warning(
                     "[present] commandBuffer ERROR after present: \(cb.error?.localizedDescription ?? "unknown")",
                     category: .wpeRender
                 )
             }
+            #endif
         }
-        #endif
         commandBuffer.commit()
         return true
     }
@@ -3037,10 +3104,19 @@ final class WPEMetalRenderExecutor {
     #endif
 
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
+        let width = max(Int(size.width), 1)
+        let height = max(Int(size.height), 1)
+        if isOutputPoolingEnabled {
+            outputTexturePool.removeAll { $0.width != width || $0.height != height }
+            if let recycled = outputTexturePool.first(where: isOutputTextureReusable) {
+                noteVendedOutputTexture(recycled)
+                return recycled
+            }
+        }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.outputPixelFormat,
-            width: max(Int(size.width), 1),
-            height: max(Int(size.height), 1),
+            width: width,
+            height: height,
             mipmapped: false
         )
         descriptor.usage = [.renderTarget, .shaderRead]
@@ -3049,8 +3125,37 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         texture.label = "WPE Metal executor output"
-        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
+        if isOutputPoolingEnabled {
+            outputTexturePool.append(texture)
+            // Steady state needs 3 (in-render + re-presented latest + history);
+            // anything beyond that came from transient stalls — let ARC reap
+            // the dropped one once its holders release it.
+            if outputTexturePool.count > 4 {
+                outputTexturePool.removeFirst()
+            }
+        }
+        noteVendedOutputTexture(texture)
         return texture
+    }
+
+    private func isOutputTextureReusable(_ texture: MTLTexture) -> Bool {
+        let id = ObjectIdentifier(texture)
+        if recentOutputTextureIDs.contains(id) {
+            return false
+        }
+        if let history = previousFrameHistory?.sceneTexture, history === texture {
+            return false
+        }
+        return !presentTracker.isInFlight(id)
+    }
+
+    private func noteVendedOutputTexture(_ texture: MTLTexture) {
+        let id = ObjectIdentifier(texture)
+        recentOutputTextureIDs.removeAll { $0 == id }
+        recentOutputTextureIDs.append(id)
+        if recentOutputTextureIDs.count > 2 {
+            recentOutputTextureIDs.removeFirst(recentOutputTextureIDs.count - 2)
+        }
     }
 
     private func targetTexture(
@@ -3098,6 +3203,19 @@ final class WPEMetalRenderExecutor {
         targetID: WPEMetalTargetID,
         commandBuffer: MTLCommandBuffer
     ) throws -> MTLTexture {
+        // Bootstrap textures are read-only for their whole life (writes go to
+        // the pool/output, never to the seeded `.previous` source), so one
+        // cleared allocation per (target, size, format) serves every frame —
+        // previously this allocated + cleared a scene-sized texture per frame.
+        let key = BootstrapPreviousKey(
+            targetID: targetID,
+            width: texture.width,
+            height: texture.height,
+            pixelFormat: texture.pixelFormat
+        )
+        if let cached = bootstrapPreviousTextureCache[key] {
+            return cached
+        }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: texture.pixelFormat,
             width: texture.width,
@@ -3110,7 +3228,6 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         cleared.label = "WPE Metal bootstrap previous"
-        WPEMetalTextureMetadataRegistry.shared.register(texture: cleared)
 
         let renderPass = MTLRenderPassDescriptor()
         renderPass.colorAttachments[0].texture = cleared
@@ -3121,6 +3238,7 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
         encoder.endEncoding()
+        bootstrapPreviousTextureCache[key] = cleared
         return cleared
     }
 
