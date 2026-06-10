@@ -36,17 +36,20 @@ struct ShaderWallpaperSection: View {
     private static let thumbnailCornerRadius: CGFloat = 8
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("Shader Wallpaper", systemImage: "wand.and.stars")
-                    .font(DesignTokens.Typography.bodyEmphasized)
-
+        // Frameless scrolling gallery, matching the Scene tab's page frame
+        // (`WPESceneSection.historyList`): no titled card and no in-content
+        // type header — the wallpaper type is already named by the toolbar
+        // picker — and a ScrollView so the preset grid never overflows at
+        // small window heights.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
                 builtinSection
                 customSection
             }
-            .padding(14)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .groupBoxStyle(ContainerGroupBoxStyle())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await loadThumbnails(for: MetalShaderPreset.allCases.map(ShaderSource.builtin))
         }

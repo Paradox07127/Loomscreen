@@ -10,9 +10,17 @@ struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
     let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
+    /// Builds the pane header to host inside the split's main column. nil when
+    /// embedded without the tabbed pane chrome (e.g. the standalone Browse
+    /// sheet), which then renders no header and contributes no toolbar items.
+    var paneHeader: (() -> AnyView)? = nil
 
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?
+    /// User collapsed the detail panel via the header toggle while keeping the
+    /// card selected. Reset whenever a new card is picked so selecting always
+    /// reveals the panel.
+    @State private var inspectorHidden = false
     @State private var rateLimitRemaining: TimeInterval = 0
     /// Editable page-number field in the pager (jump-to-page).
     @State private var pageJumpText: String = "1"
@@ -24,7 +32,9 @@ struct WorkshopBrowsePane: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Persisted detail-panel width + the transient width during a drag-resize.
-    @AppStorage("Workshop.Browse.InspectorWidth") private var inspectorWidth = 320.0
+    /// Shares the screen-detail inspector's width tokens so the panel reads as
+    /// the same sidebar across the app.
+    @AppStorage("Workshop.Browse.InspectorWidth") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -46,17 +56,35 @@ struct WorkshopBrowsePane: View {
         // sidebar / toolbar). `isMounted` stays true so the collapse animates.
         ResizableInspectorSplit(
             isMounted: true,
-            isVisible: selectedItem != nil,
-            animationTrigger: AnyHashable(selectedItem != nil),
+            isVisible: isInspectorVisible,
+            animationTrigger: AnyHashable(isInspectorVisible),
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
-            minWidth: 280,
-            maxWidth: 380,
-            main: { gridColumn },
+            minWidth: DesignTokens.Inspector.minWidth,
+            maxWidth: DesignTokens.Inspector.maxWidth,
+            main: { mainColumn },
             inspector: { width in inspectorColumn(width: width) }
         )
         .background(DesignTokens.Colors.pageBackground)
+        // Detail-panel toggle in the window toolbar's trailing corner — the
+        // same native borderless `sidebar.right` button as the screen-detail
+        // inspector. Only contributed when hosted in the tabbed pane (the
+        // standalone Browse sheet has no window toolbar) and only while a card
+        // is selected, so it never appears with nothing to toggle.
+        .toolbar {
+            if paneHeader != nil, selectedItem != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        inspectorHidden.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help(Text(inspectorHidden ? "Show details" : "Hide details"))
+                    .accessibilityLabel(Text("Toggle details panel"))
+                }
+            }
+        }
         .onAppear {
             rateLimitRemaining = currentRateLimitRemaining
             reloadInstalledIDs()
@@ -86,6 +114,23 @@ struct WorkshopBrowsePane: View {
         }
         .onChange(of: viewModel.isPaging) { _, paging in
             if paging { WorkshopRequestCounter.increment() }
+        }
+    }
+
+    /// The detail panel shows when a card is selected and the user hasn't
+    /// collapsed it with the header toggle.
+    private var isInspectorVisible: Bool { selectedItem != nil && !inspectorHidden }
+
+    /// Header (hosted here so the panel runs full-height alongside it) + the
+    /// grid. The split compresses this whole column when the panel opens. The
+    /// header is absent when embedded without the tabbed pane chrome.
+    private var mainColumn: some View {
+        VStack(spacing: 0) {
+            if let paneHeader {
+                paneHeader()
+                Divider()
+            }
+            gridColumn
         }
     }
 
@@ -176,8 +221,15 @@ struct WorkshopBrowsePane: View {
                                     isInLibrary: installedWorkshopIDs.contains(String(item.id)),
                                     isSelected: selectedItem?.id == item.id
                                 ) {
-                                    // Toggle: clicking the open card again closes the inspector.
-                                    selectedItem = selectedItem?.id == item.id ? nil : item
+                                    // Toggle: clicking the open card again closes
+                                    // the inspector; picking a new card always
+                                    // reveals the (possibly collapsed) panel.
+                                    if selectedItem?.id == item.id {
+                                        selectedItem = nil
+                                    } else {
+                                        selectedItem = item
+                                        inspectorHidden = false
+                                    }
                                 }
                                 .id(item.id)
                             }

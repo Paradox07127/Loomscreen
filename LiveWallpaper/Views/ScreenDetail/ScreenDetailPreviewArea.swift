@@ -39,7 +39,6 @@ struct ScreenDetailPreviewArea: View {
                       featureCatalog.isEnabled(.metalShader) {
                 #if !LITE_BUILD
                 ShaderWallpaperSection(screen: screen, selectedShaderSource: $draft.selectedShaderSource)
-                    .padding(24)
                 #else
                 EmptyView()
                 #endif
@@ -101,22 +100,28 @@ struct ScreenDetailPreviewArea: View {
     }
 
     private var htmlContent: some View {
-        VStack(spacing: 16) {
-            if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
-                HTMLPreviewSection(
-                    source: draft.htmlSource,
-                    config: draft.htmlConfig,
-                    wpePreviewURL: wpeWebPreviewURL,
-                    wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
+        // Same frame as scene/shader: a ScrollView with self-padding so the
+        // preview + source form scroll rather than overflow at small heights.
+        ScrollView {
+            VStack(spacing: 16) {
+                if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
+                    HTMLPreviewSection(
+                        source: draft.htmlSource,
+                        config: draft.htmlConfig,
+                        wpePreviewURL: wpeWebPreviewURL,
+                        wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
+                    )
+                }
+                HTMLSourceSection(
+                    screen: screen,
+                    source: $draft.htmlSource,
+                    config: $draft.htmlConfig
                 )
             }
-            HTMLSourceSection(
-                screen: screen,
-                source: $draft.htmlSource,
-                config: $draft.htmlConfig
-            )
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
-        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// A Wallpaper Engine web project's shipped preview asset, when the selected
