@@ -277,6 +277,115 @@ struct WPEMdlParserTests {
         #expect(mesh.vertices[5].position == SIMD3<Float>(20, 10, 0))
     }
 
+    // MARK: - Hostile-count guards (crafted Workshop files must throw, not OOM-trap)
+
+    @Test("Rejects a header claiming a huge mesh count instead of OOM-allocating")
+    func rejectsHugeMeshCount() {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32.max)        // meshCount
+        data.appendLE(UInt32(1))
+
+        #expect(throws: WPEMdlParserError.implausibleCount(
+            section: "MDLV meshCount", count: .max, limit: 4_096
+        )) {
+            _ = try WPEMdlParser.parse(data: data)
+        }
+    }
+
+    @Test("Rejects a vertex buffer byte count larger than the remaining file")
+    func rejectsOversizedVertexBuffer() {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        // Stride-aligned (80-byte vertices) but ~4 GB over a near-empty buffer.
+        data.appendLE(UInt32(4_000_000_000))
+
+        #expect(throws: WPEMdlParserError.invalidVertexBuffer(byteCount: 4_000_000_000, stride: 80)) {
+            _ = try WPEMdlParser.parse(data: data)
+        }
+    }
+
+    @Test("Rejects an index buffer byte count larger than the remaining file")
+    func rejectsOversizedIndexBuffer() {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+        // UInt16-aligned but far beyond the remaining bytes.
+        data.appendLE(UInt32(4_294_967_294))
+
+        #expect(throws: WPEMdlParserError.invalidIndexBuffer(4_294_967_294)) {
+            _ = try WPEMdlParser.parse(data: data)
+        }
+    }
+
+    @Test("Rejects a part table byte count larger than the remaining file")
+    func rejectsOversizedPartTable() {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+        data.appendLE(UInt32(0))         // index byte count
+        data.append(UInt8(0))            // uv2 marker
+        data.append(UInt8(1))            // hasParts
+        // 16-aligned but ~4 GB over an empty tail.
+        data.appendLE(UInt32(4_294_967_040))
+
+        #expect(throws: WPEMdlParserError.invalidPartTable(4_294_967_040)) {
+            _ = try WPEMdlParser.parse(data: data)
+        }
+    }
+
+    @Test("Recovers the mesh when a skeleton claims a huge bone count, without OOM-allocating")
+    func recoversFromHugeBoneCount() throws {
+        var data = makeSingleVertexSkinnedMDLV23()
+        data.append(contentsOf: Array("MDLS0004".utf8))
+        data.append(UInt8(0))
+        data.appendLE(UInt32(0))         // sectionEnd
+        data.appendLE(UInt32.max)        // boneCount
+
+        // Skeleton metadata is optional: the implausible count must abort the MDLS section
+        // (previously a multi-GB reserveCapacity trap) while the mesh stays renderable.
+        let model = try WPEMdlParser.parse(data: data)
+        #expect(model.bones.isEmpty)
+        #expect(model.meshes.first?.vertices.count == 1)
+    }
+
     private func makeSingleTriangleMDLV23() -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0023".utf8))

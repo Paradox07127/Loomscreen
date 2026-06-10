@@ -534,6 +534,13 @@ enum WPEPuppetAnimationEvaluator {
 }
 
 enum WPEMdlParser {
+    /// Counts come straight from untrusted Workshop bytes: a crafted header claiming up to
+    /// 0xFFFFFFFF entries would drive `reserveCapacity` into a multi-GB allocation (OOM trap)
+    /// before the read loop could fail naturally on truncation. Caps sit far above the corpus
+    /// maxima (dozens of meshes, ≤89 bones observed) — same idea as the MDLA 1024-animation cap.
+    private static let maxMeshCount: UInt32 = 4_096
+    private static let maxBoneCount: UInt32 = 4_096
+
     static func parse(data: Data) throws -> WPEPuppetModel {
         var reader = WPEMdlBinaryReader(data: data)
         let versionTag = try reader.readFixedString(byteCount: 8)
@@ -557,6 +564,11 @@ enum WPEMdlParser {
         } else {
             _ = try reader.readUInt32()
             meshCount = try reader.readUInt32()
+        }
+        guard meshCount <= maxMeshCount else {
+            throw WPEMdlParserError.implausibleCount(
+                section: "MDLV meshCount", count: meshCount, limit: maxMeshCount
+            )
         }
         var meshes: [WPEPuppetMesh] = []
         meshes.reserveCapacity(Int(meshCount))
@@ -641,6 +653,11 @@ enum WPEMdlParser {
         guard vertexStride > 0, vertexByteCount % UInt32(vertexStride) == 0 else {
             throw WPEMdlParserError.invalidVertexBuffer(byteCount: vertexByteCount, stride: vertexStride)
         }
+        // The declared buffer must fit in the remaining bytes — otherwise a crafted byte count
+        // (up to 4 GiB) would size `reserveCapacity` long before the reads hit truncation.
+        guard Int(vertexByteCount) <= reader.dataCount - reader.currentOffset else {
+            throw WPEMdlParserError.invalidVertexBuffer(byteCount: vertexByteCount, stride: vertexStride)
+        }
         let vertexCount = vertexByteCount / UInt32(vertexStride)
         var vertices: [WPEPuppetVertex] = []
         vertices.reserveCapacity(Int(vertexCount))
@@ -650,7 +667,8 @@ enum WPEMdlParser {
         }
 
         let indexByteCount = try reader.readUInt32()
-        guard indexByteCount % UInt32(MemoryLayout<UInt16>.size) == 0 else {
+        guard indexByteCount % UInt32(MemoryLayout<UInt16>.size) == 0,
+              Int(indexByteCount) <= reader.dataCount - reader.currentOffset else {
             throw WPEMdlParserError.invalidIndexBuffer(indexByteCount)
         }
         let indexCount = indexByteCount / UInt32(MemoryLayout<UInt16>.size)
@@ -799,7 +817,8 @@ enum WPEMdlParser {
         guard hasParts != 0 else { return [] }
 
         let byteCount = try reader.readUInt32()
-        guard byteCount % 16 == 0 else {
+        guard byteCount % 16 == 0,
+              Int(byteCount) <= reader.dataCount - reader.currentOffset else {
             throw WPEMdlParserError.invalidPartTable(byteCount)
         }
         let partCount = Int(byteCount / 16)
@@ -830,6 +849,11 @@ enum WPEMdlParser {
             ? min(declaredSectionEnd, reader.dataCount)
             : reader.dataCount
 
+        guard boneCount <= maxBoneCount else {
+            throw WPEMdlParserError.implausibleCount(
+                section: "MDLS boneCount", count: boneCount, limit: maxBoneCount
+            )
+        }
         var bones: [WPEPuppetBone] = []
         bones.reserveCapacity(Int(boneCount))
         for index in 0..<boneCount {
@@ -1083,6 +1107,7 @@ private enum WPEMdlMeshFlags {
 
 enum WPEMdlParserError: Error, Equatable, Sendable {
     case invalidHeader
+    case implausibleCount(section: String, count: UInt32, limit: UInt32)
     case truncated(offset: Int, requested: Int, available: Int)
     case unterminatedString(offset: Int)
     case invalidString(offset: Int)
