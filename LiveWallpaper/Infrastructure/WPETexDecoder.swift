@@ -965,7 +965,15 @@ struct WPETexDecoder: Sendable {
         mipmap: Int
     ) throws -> Data {
         if isCompressed {
-            let outputCount = decompressedByteCount.flatMap { $0 > 0 ? $0 : nil } ?? expectedByteCount ?? 0
+            var outputCount = decompressedByteCount.flatMap { $0 > 0 ? $0 : nil } ?? expectedByteCount ?? 0
+            // `decompressedByteCount` comes straight from the (untrusted) file
+            // header; clamp the allocation to what the mip's format/dimensions
+            // can actually hold BEFORE allocating. `compression_decode_buffer`
+            // stops at a full destination, so this matches the old
+            // inflate-then-prefix behavior without the multi-GB spike.
+            if let expectedByteCount, expectedByteCount > 0 {
+                outputCount = min(outputCount, expectedByteCount)
+            }
             guard outputCount > 0 else {
                 throw WPETexDecodeError.decompressionFailed(mipmap: mipmap)
             }

@@ -29,6 +29,14 @@ final class InspectorPreviewController {
         player != nil || posterImage != nil
     }
 
+    deinit {
+        // `cleanup()` is the normal path; this catches owners that drop the
+        // controller without calling it, which would otherwise leave the
+        // 500 ms position-poll task looping forever.
+        positionTask?.cancel()
+        posterTask?.cancel()
+    }
+
     func loadPoster(from url: URL, syncTime: CMTime? = nil) {
         guard player == nil else { return }
 
@@ -169,12 +177,13 @@ final class InspectorPreviewController {
         positionTask?.cancel()
         positionTask = Task { [weak self, weak player] in
             while !Task.isCancelled {
+                guard let self else { return }
                 if let player {
                     let time = player.currentTime().seconds
-                    self?.currentPosition = Self.validSeconds(time, fallback: self?.currentPosition ?? 0)
+                    self.currentPosition = Self.validSeconds(time, fallback: self.currentPosition)
 
                     let itemDuration = player.currentItem?.duration.seconds
-                    self?.duration = Self.validSeconds(itemDuration, fallback: self?.duration ?? 1)
+                    self.duration = Self.validSeconds(itemDuration, fallback: self.duration)
                 }
                 try? await Task.sleep(for: .milliseconds(500))
             }

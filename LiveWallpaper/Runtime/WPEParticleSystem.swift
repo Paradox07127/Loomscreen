@@ -641,6 +641,10 @@ final class WPEParticleSystem {
                     guard let slot = nextFreeSlot() else { break }
                     spawn(into: slot)
                 }
+                // While the pool is saturated (rate × lifetime > maxCount) the
+                // backlog must not accrue, or every freed wave would replay it
+                // as one synchronized burst instead of a continuous stream.
+                spawnAccumulator = min(spawnAccumulator, 1)
             }
         }
     }
