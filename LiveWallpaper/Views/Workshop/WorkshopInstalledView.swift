@@ -162,8 +162,7 @@ struct WorkshopInstalledView: View {
                     onDelete: { pendingDelete = entry },
                     onSelectTag: onBrowseTag.map { browse in
                         { tag in selectedEntry = nil; browse(tag) }
-                    },
-                    onClose: { selectedEntry = nil }
+                    }
                 )
             } else {
                 installedInspectorPlaceholder
@@ -1053,7 +1052,6 @@ private struct WPEInstalledInspectorContent: View {
     let onDelete: () -> Void
     /// Wired when tags should be tappable (jump to Browse Online by tag).
     let onSelectTag: ((String) -> Void)?
-    let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
     /// Drives the multi-display target popover under the single Apply button.
@@ -1125,9 +1123,6 @@ private struct WPEInstalledInspectorContent: View {
         .overlay {
             RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        }
-        .overlay(alignment: .topLeading) {
-            HeroCloseButton(action: onClose).padding(DesignTokens.Spacing.sm)
         }
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
