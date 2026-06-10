@@ -2,43 +2,31 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// The shared Workshop pane header — brand mark, the Installed / Workshop
-/// segmented switcher, and the contextual actions — extracted so each tab can
-/// host it *inside* its `ResizableInspectorSplit` main column. Placing it there
-/// (rather than as a full-width bar above the split) lets the trailing detail
-/// panel run full-height alongside the header, matching the screen-detail
-/// inspector. The trade-off, also matching screen detail, is that the header
-/// compresses to the grid width when the panel opens.
+/// The shared Workshop pane header — brand mark on the leading edge, the
+/// contextual actions trailing — extracted so each tab can host it *inside*
+/// its `ResizableInspectorSplit` main column. Placing it there (rather than as
+/// a full-width bar above the split) lets the trailing detail panel run
+/// full-height alongside the header, matching the screen-detail inspector.
 ///
-/// The tab injects its own `inspectorToggle` — a `sidebar.right` show/hide
-/// control shown only while a card is selected, the same affordance the
-/// screen-detail toolbar uses — so the toggle can read the tab-local selection.
-struct WorkshopPaneHeader<Toggle: View>: View {
-    @Binding var selectedTab: WorkshopPaneTab
+/// The Installed / Workshop switcher and the detail-panel toggle do NOT live
+/// here: both sit in the window toolbar (`.principal` / `.primaryAction`),
+/// mirroring the screen detail's type picker + inspector toggle, so they stay
+/// put while this header compresses with the panel.
+struct WorkshopPaneHeader: View {
+    let selectedTab: WorkshopPaneTab
     let installedCount: Int
     let isImporting: Bool
     let onImport: () -> Void
     let onPaste: () -> Void
-    @ViewBuilder var inspectorToggle: Toggle
 
     @Environment(WorkshopServices.self) private var services
 
-    // Three-column header: brand mark on the leading edge, the Installed /
-    // Workshop segmented switcher centered, and the contextual actions trailing.
-    // The two flexible side columns share the leftover width equally, so the
-    // switcher stays optically centered and the sides push apart instead of
-    // overlapping it when the column narrows (e.g. when the panel opens).
     var body: some View {
         HStack(spacing: DesignTokens.DetailHeader.contentSpacing) {
             brandMark
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            tabSwitcher
-                .frame(width: 220)
-                .layoutPriority(1)
-
             headerActions
-                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, DesignTokens.DetailHeader.horizontalPadding)
         .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
@@ -108,17 +96,6 @@ struct WorkshopPaneHeader<Toggle: View>: View {
         }
     }
 
-    private var tabSwitcher: some View {
-        Picker("Workshop tab", selection: $selectedTab) {
-            ForEach(WorkshopPaneTab.allCases) { tab in
-                Text(tab.title).tag(tab)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .accessibilityLabel(Text("Workshop tab"))
-    }
-
     private var headerActions: some View {
         AdaptiveGlassContainer(spacing: 8) {
             HStack(spacing: 8) {
@@ -148,10 +125,6 @@ struct WorkshopPaneHeader<Toggle: View>: View {
                 .controlSize(.regular)
                 .help(Text("Add a Steam Workshop item by URL or ID"))
                 .accessibilityLabel(Text("Add from Workshop URL or ID"))
-
-                // The tab's detail-panel show/hide toggle — the trailing-most
-                // control, mirroring the screen-detail inspector toolbar toggle.
-                inspectorToggle
             }
         }
     }

@@ -16,10 +16,10 @@ struct WorkshopInstalledView: View {
     /// switch to Browse Online and scope the grid to that tag. nil = tags are
     /// shown but inert (e.g. if ever embedded without a Browse tab).
     var onBrowseTag: ((String) -> Void)? = nil
-    /// Builds the pane header to host inside the split's main column, given this
-    /// view's detail-panel toggle. nil renders no header (keeps the view
+    /// Builds the pane header to host inside the split's main column. nil
+    /// renders no header and contributes no toolbar items (keeps the view
     /// embeddable like Browse).
-    var paneHeader: ((AnyView) -> AnyView)? = nil
+    var paneHeader: (() -> AnyView)? = nil
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(SteamCMDDoctorService.self) private var doctor
@@ -89,6 +89,23 @@ struct WorkshopInstalledView: View {
             inspector: { width in installedInspectorColumn(width: width) }
         )
             .background(DesignTokens.Colors.pageBackground)
+            // Detail-panel toggle in the window toolbar's trailing corner — the
+            // same native borderless `sidebar.right` button as the screen-detail
+            // inspector. Only contributed when hosted in the tabbed pane and
+            // only while a card is selected.
+            .toolbar {
+                if paneHeader != nil, selectedEntry != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            inspectorHidden.toggle()
+                        } label: {
+                            Image(systemName: "sidebar.right")
+                        }
+                        .help(Text(inspectorHidden ? "Show details" : "Hide details"))
+                        .accessibilityLabel(Text("Toggle details panel"))
+                    }
+                }
+            }
             .onAppear {
                 reload()
                 loadUpdateFlags()
@@ -183,28 +200,10 @@ struct WorkshopInstalledView: View {
     private var mainColumn: some View {
         VStack(spacing: 0) {
             if let paneHeader {
-                paneHeader(AnyView(inspectorToggleButton))
+                paneHeader()
                 Divider()
             }
             content
-        }
-    }
-
-    /// `sidebar.right` show/hide toggle for the detail panel, mirroring the
-    /// screen-detail inspector toolbar toggle. Only present while a card is
-    /// selected (there's nothing to toggle otherwise).
-    @ViewBuilder
-    private var inspectorToggleButton: some View {
-        if selectedEntry != nil {
-            Button {
-                inspectorHidden.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-            }
-            .adaptiveGlassButton(.regular)
-            .controlSize(.regular)
-            .help(Text(inspectorHidden ? "Show details" : "Hide details"))
-            .accessibilityLabel(Text("Toggle details panel"))
         }
     }
 

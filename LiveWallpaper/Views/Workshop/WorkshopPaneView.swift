@@ -28,6 +28,15 @@ struct WorkshopPaneView: View {
         DetailPageScaffold(showsHeader: false, header: { EmptyView() }) {
             tabBody
         }
+        // Installed / Workshop switcher lives in the window toolbar's principal
+        // slot — the same placement as the screen detail's wallpaper-type
+        // picker — so it stays centered and fixed while the detail panel
+        // opens/closes (the in-column header compresses; the toolbar doesn't).
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                tabSwitcher
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)
@@ -72,6 +81,17 @@ struct WorkshopPaneView: View {
         installedCount = SettingsManager.shared.loadGlobalSettings().recentWPEImports.count
     }
 
+    private var tabSwitcher: some View {
+        Picker("Workshop tab", selection: $selectedTab) {
+            ForEach(WorkshopPaneTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(Text("Workshop tab"))
+    }
+
     // MARK: - Tab body
 
     @ViewBuilder
@@ -87,19 +107,17 @@ struct WorkshopPaneView: View {
         }
     }
 
-    /// Builds the shared pane header for a tab's split main column, injecting
-    /// that tab's detail-panel show/hide toggle. Bound to the pane's own state
-    /// (tab selection, install count, import status) so both tabs render an
-    /// identical header.
-    private func makePaneHeader(_ toggle: AnyView) -> AnyView {
+    /// Builds the shared pane header for a tab's split main column. Bound to
+    /// the pane's own state (tab selection, install count, import status) so
+    /// both tabs render an identical header.
+    private func makePaneHeader() -> AnyView {
         AnyView(
             WorkshopPaneHeader(
-                selectedTab: $selectedTab,
+                selectedTab: selectedTab,
                 installedCount: installedCount,
                 isImporting: folderImport.isImporting,
                 onImport: { folderImport.presentImportPanel() },
-                onPaste: { presentPasteFlow() },
-                inspectorToggle: { toggle }
+                onPaste: { presentPasteFlow() }
             )
         )
     }

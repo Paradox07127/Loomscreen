@@ -10,10 +10,10 @@ struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
     let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
-    /// Builds the pane header to host inside the split's main column, given this
-    /// pane's detail-panel toggle. nil when embedded without the tabbed pane
-    /// chrome (e.g. the standalone Browse sheet), which then renders no header.
-    var paneHeader: ((AnyView) -> AnyView)? = nil
+    /// Builds the pane header to host inside the split's main column. nil when
+    /// embedded without the tabbed pane chrome (e.g. the standalone Browse
+    /// sheet), which then renders no header and contributes no toolbar items.
+    var paneHeader: (() -> AnyView)? = nil
 
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?
@@ -67,6 +67,24 @@ struct WorkshopBrowsePane: View {
             inspector: { width in inspectorColumn(width: width) }
         )
         .background(DesignTokens.Colors.pageBackground)
+        // Detail-panel toggle in the window toolbar's trailing corner — the
+        // same native borderless `sidebar.right` button as the screen-detail
+        // inspector. Only contributed when hosted in the tabbed pane (the
+        // standalone Browse sheet has no window toolbar) and only while a card
+        // is selected, so it never appears with nothing to toggle.
+        .toolbar {
+            if paneHeader != nil, selectedItem != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        inspectorHidden.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help(Text(inspectorHidden ? "Show details" : "Hide details"))
+                    .accessibilityLabel(Text("Toggle details panel"))
+                }
+            }
+        }
         .onAppear {
             rateLimitRemaining = currentRateLimitRemaining
             reloadInstalledIDs()
@@ -109,28 +127,10 @@ struct WorkshopBrowsePane: View {
     private var mainColumn: some View {
         VStack(spacing: 0) {
             if let paneHeader {
-                paneHeader(AnyView(inspectorToggleButton))
+                paneHeader()
                 Divider()
             }
             gridColumn
-        }
-    }
-
-    /// `sidebar.right` show/hide toggle for the detail panel, mirroring the
-    /// screen-detail inspector toolbar toggle. Only present while a card is
-    /// selected (there's nothing to toggle otherwise).
-    @ViewBuilder
-    private var inspectorToggleButton: some View {
-        if selectedItem != nil {
-            Button {
-                inspectorHidden.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-            }
-            .adaptiveGlassButton(.regular)
-            .controlSize(.regular)
-            .help(Text(inspectorHidden ? "Show details" : "Hide details"))
-            .accessibilityLabel(Text("Toggle details panel"))
         }
     }
 
