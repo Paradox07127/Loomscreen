@@ -154,9 +154,17 @@ final class WorkshopBrowseViewModel {
     /// browse results (server-side exclusion, not a client-side post-filter).
     nonisolated static let alwaysExcludedTags = ["Application"]
 
-    /// Pending search text. Edits here do NOT query — the user applies the whole
-    /// filter set with the Search control (or Return). See `hasPendingChanges`.
-    var searchInput: String = ""
+    /// Pending search text. Typing schedules a debounced auto-search: once no
+    /// further edits arrive within `Self.searchDebounce`, the query fires on its
+    /// own. Return / the Search control still submit immediately, and the
+    /// debounce only queries when the quiet input actually changes the applied
+    /// request — so explicit submits, clear, and deep-links never double-fire.
+    var searchInput: String = "" {
+        didSet {
+            guard searchInput != oldValue else { return }
+            scheduleAutoSearch()
+        }
+    }
     var preferredSort: WorkshopSortMode = .topRated
     // All four filters share one model: a multi-select Set, default = every
     // option (no filter), and an empty set is treated the same as "all".
@@ -233,6 +241,12 @@ final class WorkshopBrowseViewModel {
 
     @ObservationIgnored private var inflightFetch: Task<Bool, Never>?
     @ObservationIgnored private var currentRequestToken: UInt64 = 0
+    @ObservationIgnored private var autoSearchTask: Task<Void, Never>?
+
+    /// Quiet window after the last keystroke before the auto-search fires.
+    /// Long enough that mid-word states don't burn API quota, short enough
+    /// that results feel live.
+    private static let searchDebounce: Duration = .milliseconds(500)
 
     /// True when the pending filter/search state differs from what's currently
     /// displayed — drives the "Search" button's enabled/prominent state. Filter
@@ -256,8 +270,24 @@ final class WorkshopBrowseViewModel {
         }
     }
 
+    /// Restart the auto-search countdown after a keystroke. Fires `reload()`
+    /// once the input has been quiet for `Self.searchDebounce` AND it would
+    /// actually change the applied request — typing inside a creator/tag scope
+    /// (where search text is ignored) or retyping the submitted query no-ops.
+    private func scheduleAutoSearch() {
+        autoSearchTask?.cancel()
+        autoSearchTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled, let self else { return }
+            guard self.hasPendingChanges, !self.isRateLimited else { return }
+            await self.reload()
+        }
+    }
+
     func reload() async {
         guard !isRateLimited else { return }
+        // An explicit reload supersedes any pending auto-search.
+        autoSearchTask?.cancel()
         inflightFetch?.cancel()
         pageIndex = 1
         let request = makeRequest(page: 1)
@@ -290,10 +320,8 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Search is now submit-driven (Return / the search button) rather than
-    /// debounced-on-keystroke — typing no longer fires partial queries and
-    /// wastes API calls. The text field binds `searchInput` directly; this just
-    /// runs the query for whatever's typed.
+    /// Immediate submit (Return / the search button) — skips the debounce
+    /// window that typing otherwise goes through (`scheduleAutoSearch`).
     func submitSearch() async {
         guard !isRateLimited else { return }
         await reload()
