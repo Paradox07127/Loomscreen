@@ -832,6 +832,7 @@ struct WPERenderPipelineBuilderTests {
             """,
             "shaders/effects/shake.frag": """
             uniform sampler2D g_Texture0;
+            uniform sampler2D g_Texture2; // {"default":"util/black"}
             void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
             """
         ])
