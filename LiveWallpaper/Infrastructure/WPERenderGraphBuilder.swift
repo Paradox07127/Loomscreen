@@ -1005,7 +1005,14 @@ private struct LayerBuildContext {
             return passes.movingFirstBlendModeToFinalPass()
         }
 
-        if preserveFinalCompositeForScene,
+        // Workshop custom effects must NOT be fused into the scene-size pass:
+        // WPE renders them at LAYER size and composites separately (oracle:
+        // 3554161528 pulse_ eid854@1436×456 + composite eid876; our fused
+        // 3840×2160 pass clamp-streaked the small layer across the sky — the
+        // "色块" bug). Builtin effects (waterflow/waterwaves) fuse fine and
+        // match WPE's own fused passes, so they keep the fast path.
+        let lastPassIsWorkshopEffect = lastPass.shader.contains("workshop/")
+        if preserveFinalCompositeForScene || lastPassIsWorkshopEffect,
            let sceneSource = lastPass.target.textureReference {
             var finalized = passes
             finalized.append(WPERenderPass(
