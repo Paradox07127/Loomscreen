@@ -24,7 +24,9 @@ struct WorkshopBrowsePane: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Persisted detail-panel width + the transient width during a drag-resize.
-    @AppStorage("Workshop.Browse.InspectorWidth") private var inspectorWidth = 320.0
+    /// Shares the screen-detail inspector's width tokens so the panel reads as
+    /// the same sidebar across the app.
+    @AppStorage("Workshop.Browse.InspectorWidth") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -51,8 +53,8 @@ struct WorkshopBrowsePane: View {
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
-            minWidth: 280,
-            maxWidth: 380,
+            minWidth: DesignTokens.Inspector.minWidth,
+            maxWidth: DesignTokens.Inspector.maxWidth,
             main: { gridColumn },
             inspector: { width in inspectorColumn(width: width) }
         )
