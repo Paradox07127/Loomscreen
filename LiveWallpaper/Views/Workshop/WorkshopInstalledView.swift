@@ -16,6 +16,10 @@ struct WorkshopInstalledView: View {
     /// switch to Browse Online and scope the grid to that tag. nil = tags are
     /// shown but inert (e.g. if ever embedded without a Browse tab).
     var onBrowseTag: ((String) -> Void)? = nil
+    /// Builds the pane header to host inside the split's main column, given this
+    /// view's detail-panel toggle. nil renders no header (keeps the view
+    /// embeddable like Browse).
+    var paneHeader: ((AnyView) -> AnyView)? = nil
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(SteamCMDDoctorService.self) private var doctor
@@ -40,6 +44,10 @@ struct WorkshopInstalledView: View {
     /// Card tapped → open the trailing detail inspector (apply happens from
     /// inside it, or by dragging a card onto a display). Mirrors online Browse.
     @State private var selectedEntry: WPEHistoryEntry?
+    /// User collapsed the detail panel via the header toggle while keeping the
+    /// card selected. Reset whenever a new card is picked so selecting always
+    /// reveals the panel.
+    @State private var inspectorHidden = false
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
     /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
     @State private var isDraggingEntry = false
@@ -70,14 +78,14 @@ struct WorkshopInstalledView: View {
         // compresses the grid (never the sidebar / toolbar).
         ResizableInspectorSplit(
             isMounted: true,
-            isVisible: selectedEntry != nil,
-            animationTrigger: AnyHashable(selectedEntry != nil),
+            isVisible: isInspectorVisible,
+            animationTrigger: AnyHashable(isInspectorVisible),
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
             minWidth: DesignTokens.Inspector.minWidth,
             maxWidth: DesignTokens.Inspector.maxWidth,
-            main: { content },
+            main: { mainColumn },
             inspector: { width in installedInspectorColumn(width: width) }
         )
             .background(DesignTokens.Colors.pageBackground)
@@ -163,6 +171,43 @@ struct WorkshopInstalledView: View {
     }
 
 
+    // MARK: - Main column
+
+    /// The detail panel shows when a card is selected and the user hasn't
+    /// collapsed it with the header toggle.
+    private var isInspectorVisible: Bool { selectedEntry != nil && !inspectorHidden }
+
+    /// Header (hosted here so the panel runs full-height alongside it) + the
+    /// library grid. The split compresses this whole column when the panel opens.
+    /// The header is absent when embedded without the tabbed pane chrome.
+    private var mainColumn: some View {
+        VStack(spacing: 0) {
+            if let paneHeader {
+                paneHeader(AnyView(inspectorToggleButton))
+                Divider()
+            }
+            content
+        }
+    }
+
+    /// `sidebar.right` show/hide toggle for the detail panel, mirroring the
+    /// screen-detail inspector toolbar toggle. Only present while a card is
+    /// selected (there's nothing to toggle otherwise).
+    @ViewBuilder
+    private var inspectorToggleButton: some View {
+        if selectedEntry != nil {
+            Button {
+                inspectorHidden.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .adaptiveGlassButton(.regular)
+            .controlSize(.regular)
+            .help(Text(inspectorHidden ? "Show details" : "Hide details"))
+            .accessibilityLabel(Text("Toggle details panel"))
+        }
+    }
+
     // MARK: - Content
 
     @ViewBuilder
@@ -242,8 +287,17 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            // Toggle: clicking the open card again closes the inspector.
-                            onTap: { selectedEntry = selectedEntry?.id == entry.id ? nil : entry },
+                            // Toggle: clicking the open card again closes the
+                            // inspector; picking a new card always reveals the
+                            // (possibly collapsed) panel.
+                            onTap: {
+                                if selectedEntry?.id == entry.id {
+                                    selectedEntry = nil
+                                } else {
+                                    selectedEntry = entry
+                                    inspectorHidden = false
+                                }
+                            },
                             onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually

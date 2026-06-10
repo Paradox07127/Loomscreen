@@ -21,11 +21,13 @@ struct WorkshopPaneView: View {
     @State private var installedCount = 0
 
     var body: some View {
-        DetailPageScaffold(
-            showsHeader: true,
-            header: { header },
-            content: { tabBody }
-        )
+        // No scaffold header: each tab hosts the shared `WorkshopPaneHeader`
+        // inside its split's main column so the detail panel runs full-height
+        // alongside the header (matching the screen-detail inspector). The
+        // scaffold still supplies the page background + minimum size.
+        DetailPageScaffold(showsHeader: false, header: { EmptyView() }) {
+            tabBody
+        }
         .overlay(alignment: .bottomTrailing) {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)
@@ -66,140 +68,8 @@ struct WorkshopPaneView: View {
         }
     }
 
-    // MARK: - Header
-
-    // Three-column header: brand mark on the leading edge, the Installed /
-    // Workshop segmented switcher centered (the macOS-native toolbar idiom —
-    // the section identity is the tab pair, not a stacked subtitle), and the
-    // contextual actions trailing. The two flexible side columns share the
-    // leftover width equally, so the switcher stays optically centered and the
-    // sides push apart instead of overlapping it when the window narrows.
-    private var header: some View {
-        HStack(spacing: DesignTokens.DetailHeader.contentSpacing) {
-            brandMark
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            tabSwitcher
-                .frame(width: 220)
-                .layoutPriority(1)
-
-            headerActions
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(.horizontal, DesignTokens.DetailHeader.horizontalPadding)
-        .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
-    }
-
-    // Bold title + statistics subtext, matching the Bookmarks / Aerials hero
-    // (`DetailHeaderBar`): icon disc, primary semibold title, caption stat line.
-    private var brandMark: some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.15))
-                    .frame(
-                        width: DesignTokens.DetailHeader.iconSize,
-                        height: DesignTokens.DetailHeader.iconSize
-                    )
-                Image(systemName: "cube.transparent.fill")
-                    .font(.system(size: DesignTokens.DetailHeader.iconSymbolSize))
-                    .foregroundStyle(Color.accentColor)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: DesignTokens.DetailHeader.textSpacing) {
-                Text("Steam Workshop")
-                    .font(.system(size: DesignTokens.DetailHeader.titleSize, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                headerStatView
-            }
-        }
-    }
-
-    /// Hero subtitle. On Workshop it prefixes the request count with the API-key
-    /// status seal (the ribbon no longer carries a key chip), so key health and
-    /// today's honest request count read in one place.
-    private var headerStatView: some View {
-        HStack(spacing: 4) {
-            if selectedTab == .browseOnline, services.hasWebAPIKey {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(DesignTokens.Colors.Status.active)
-                    .accessibilityHidden(true)
-            }
-            Text(verbatim: headerStat)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .help(selectedTab == .browseOnline && services.hasWebAPIKey
-            ? Text("Steam doesn't expose remaining quota; this counts only the requests this Mac has issued today.")
-            : Text(""))
-    }
-
-    /// Context-aware statistics subtext: library size on Installed, key status +
-    /// today's honest request count on Workshop.
-    private var headerStat: String {
-        switch selectedTab {
-        case .installed:
-            return String(localized: "\(installedCount) installed", comment: "Workshop header stat: number of installed wallpapers.")
-        case .browseOnline:
-            if !services.hasWebAPIKey {
-                return String(localized: "API key required", comment: "Workshop header stat when no Steam Web API key is set.")
-            }
-            return String(localized: "\(WorkshopRequestCounter.countForToday()) API requests today", comment: "Workshop header stat: Steam Web API requests issued today.")
-        }
-    }
-
     private func refreshInstalledCount() {
         installedCount = SettingsManager.shared.loadGlobalSettings().recentWPEImports.count
-    }
-
-    private var tabSwitcher: some View {
-        Picker("Workshop tab", selection: $selectedTab) {
-            ForEach(WorkshopPaneTab.allCases) { tab in
-                Text(tab.title).tag(tab)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .accessibilityLabel(Text("Workshop tab"))
-    }
-
-    private var headerActions: some View {
-        AdaptiveGlassContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                if selectedTab == .installed {
-                    Button {
-                        folderImport.presentImportPanel()
-                    } label: {
-                        if folderImport.isImporting {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "folder.badge.plus")
-                        }
-                    }
-                    .adaptiveGlassButton(.regular)
-                    .controlSize(.regular)
-                    .disabled(folderImport.isImporting)
-                    .help(Text("Import Wallpaper Engine projects from a folder"))
-                    .accessibilityLabel(Text("Import from folder"))
-                }
-
-                Button {
-                    presentPasteFlow()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .adaptiveGlassButton(.regular)
-                .controlSize(.regular)
-                .help(Text("Add a Steam Workshop item by URL or ID"))
-                .accessibilityLabel(Text("Add from Workshop URL or ID"))
-            }
-        }
     }
 
     // MARK: - Tab body
@@ -208,16 +78,41 @@ struct WorkshopPaneView: View {
     private var tabBody: some View {
         switch selectedTab {
         case .installed:
-            WorkshopInstalledView(onBrowseTag: browseByTag)
+            WorkshopInstalledView(
+                onBrowseTag: browseByTag,
+                paneHeader: makePaneHeader
+            )
         case .browseOnline:
             browseTab
         }
     }
 
+    /// Builds the shared pane header for a tab's split main column, injecting
+    /// that tab's detail-panel show/hide toggle. Bound to the pane's own state
+    /// (tab selection, install count, import status) so both tabs render an
+    /// identical header.
+    private func makePaneHeader(_ toggle: AnyView) -> AnyView {
+        AnyView(
+            WorkshopPaneHeader(
+                selectedTab: $selectedTab,
+                installedCount: installedCount,
+                isImporting: folderImport.isImporting,
+                onImport: { folderImport.presentImportPanel() },
+                onPaste: { presentPasteFlow() },
+                inspectorToggle: { toggle }
+            )
+        )
+    }
+
     @ViewBuilder
     private var browseTab: some View {
         if let viewModel = browseViewModel {
-            WorkshopBrowsePane(viewModel: viewModel, doctor: doctor) { isShowingKeyEntry = true }
+            WorkshopBrowsePane(
+                viewModel: viewModel,
+                doctor: doctor,
+                onRequestKeyEntry: { isShowingKeyEntry = true },
+                paneHeader: makePaneHeader
+            )
         } else {
             // Lazily build the view-model on first Browse activation so the
             // Installed tab pays no online-browse cost.

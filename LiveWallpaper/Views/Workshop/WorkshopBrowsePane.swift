@@ -10,9 +10,17 @@ struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
     let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
+    /// Builds the pane header to host inside the split's main column, given this
+    /// pane's detail-panel toggle. nil when embedded without the tabbed pane
+    /// chrome (e.g. the standalone Browse sheet), which then renders no header.
+    var paneHeader: ((AnyView) -> AnyView)? = nil
 
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?
+    /// User collapsed the detail panel via the header toggle while keeping the
+    /// card selected. Reset whenever a new card is picked so selecting always
+    /// reveals the panel.
+    @State private var inspectorHidden = false
     @State private var rateLimitRemaining: TimeInterval = 0
     /// Editable page-number field in the pager (jump-to-page).
     @State private var pageJumpText: String = "1"
@@ -48,14 +56,14 @@ struct WorkshopBrowsePane: View {
         // sidebar / toolbar). `isMounted` stays true so the collapse animates.
         ResizableInspectorSplit(
             isMounted: true,
-            isVisible: selectedItem != nil,
-            animationTrigger: AnyHashable(selectedItem != nil),
+            isVisible: isInspectorVisible,
+            animationTrigger: AnyHashable(isInspectorVisible),
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
             minWidth: DesignTokens.Inspector.minWidth,
             maxWidth: DesignTokens.Inspector.maxWidth,
-            main: { gridColumn },
+            main: { mainColumn },
             inspector: { width in inspectorColumn(width: width) }
         )
         .background(DesignTokens.Colors.pageBackground)
@@ -88,6 +96,41 @@ struct WorkshopBrowsePane: View {
         }
         .onChange(of: viewModel.isPaging) { _, paging in
             if paging { WorkshopRequestCounter.increment() }
+        }
+    }
+
+    /// The detail panel shows when a card is selected and the user hasn't
+    /// collapsed it with the header toggle.
+    private var isInspectorVisible: Bool { selectedItem != nil && !inspectorHidden }
+
+    /// Header (hosted here so the panel runs full-height alongside it) + the
+    /// grid. The split compresses this whole column when the panel opens. The
+    /// header is absent when embedded without the tabbed pane chrome.
+    private var mainColumn: some View {
+        VStack(spacing: 0) {
+            if let paneHeader {
+                paneHeader(AnyView(inspectorToggleButton))
+                Divider()
+            }
+            gridColumn
+        }
+    }
+
+    /// `sidebar.right` show/hide toggle for the detail panel, mirroring the
+    /// screen-detail inspector toolbar toggle. Only present while a card is
+    /// selected (there's nothing to toggle otherwise).
+    @ViewBuilder
+    private var inspectorToggleButton: some View {
+        if selectedItem != nil {
+            Button {
+                inspectorHidden.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .adaptiveGlassButton(.regular)
+            .controlSize(.regular)
+            .help(Text(inspectorHidden ? "Show details" : "Hide details"))
+            .accessibilityLabel(Text("Toggle details panel"))
         }
     }
 
@@ -178,8 +221,15 @@ struct WorkshopBrowsePane: View {
                                     isInLibrary: installedWorkshopIDs.contains(String(item.id)),
                                     isSelected: selectedItem?.id == item.id
                                 ) {
-                                    // Toggle: clicking the open card again closes the inspector.
-                                    selectedItem = selectedItem?.id == item.id ? nil : item
+                                    // Toggle: clicking the open card again closes
+                                    // the inspector; picking a new card always
+                                    // reveals the (possibly collapsed) panel.
+                                    if selectedItem?.id == item.id {
+                                        selectedItem = nil
+                                    } else {
+                                        selectedItem = item
+                                        inspectorHidden = false
+                                    }
                                 }
                                 .id(item.id)
                             }
