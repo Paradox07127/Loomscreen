@@ -924,11 +924,27 @@ struct WPERenderGraphBuilder: Sendable {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: WPETextureReference] = [:]
         for (index, value) in array.enumerated() {
-            if let name = value as? String, !name.isEmpty {
+            if let name = Self.parseTexturePath(value) {
                 result[index] = textureReference(name, ownerPath: ownerPath)
             }
         }
         return result
+    }
+
+    /// Texture arrays mix plain path strings with structured entries
+    /// (`{"name": "masks/…"}`, how per-instance effect masks are declared).
+    static func parseTexturePath(_ raw: Any?) -> String? {
+        if let string = raw as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        guard let dict = raw as? [String: Any] else { return nil }
+        for key in ["value", "name", "texture", "path", "file"] {
+            if let parsed = parseTexturePath(dict[key]) {
+                return parsed
+            }
+        }
+        return nil
     }
 
     private func textureReference(
@@ -1377,7 +1393,9 @@ private struct WPEMaterialPass {
         guard let override else { return self }
         var mergedTextures = textures
         for (index, path) in override.textures {
-            if path.hasPrefix("_") {
+            if path == "previous" {
+                mergedTextures[index] = .previous
+            } else if path.hasPrefix("_") {
                 mergedTextures[index] = .fbo(path)
             } else {
                 mergedTextures[index] = .asset(path)

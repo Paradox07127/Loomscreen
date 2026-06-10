@@ -457,8 +457,8 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEPulseUniforms(
-                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "speed"], in: pass, default: 1),
-                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.25),
+                    frequency: WPEMetalShaderInputs.floatScalar(named: ["g_PulseSpeed", "u_Frequency", "frequency", "speed"], in: pass, default: 1),
+                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["g_PulseAmount", "u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.25),
                     time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )

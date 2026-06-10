@@ -823,6 +823,63 @@ struct WPERenderPipelineBuilderTests {
         #expect(pass.uniformValues["u_Strength"]?.numberValue == 0.75)
     }
 
+    @Test("shake/pulse opacity mask slot 2 defaults to white unless explicitly bound")
+    func effectOpacityMaskSlot2DefaultsToWhite() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/shake.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/shake.frag": """
+            uniform sampler2D g_Texture0;
+            void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        func builtPass(textures: [Int: WPETextureReference]) throws -> WPEPreparedRenderPass {
+            let graph = WPERenderGraph(layers: [
+                WPERenderLayer(
+                    objectID: "161",
+                    objectName: "Layer",
+                    imagePath: "materials/base.png",
+                    materialPath: nil,
+                    geometry: .identity,
+                    compositeA: "a",
+                    compositeB: "b",
+                    localFBOs: [],
+                    passes: [
+                        WPERenderPass(
+                            id: "161.1",
+                            phase: .effect(file: "effects/shake/effect.json"),
+                            shader: "effects/shake",
+                            source: .image("materials/base.png"),
+                            target: .scene,
+                            textures: textures,
+                            binds: [:],
+                            constants: [:],
+                            combos: [:],
+                            blending: "normal",
+                            cullMode: "nocull",
+                            depthTest: "disabled",
+                            depthWrite: "disabled"
+                        )
+                    ]
+                )
+            ])
+            let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+            return try #require(pipeline.layers.first?.passes.first)
+        }
+
+        // Unbound slot 2 → white (full effect); a black/unbound mask silently
+        // disables the effect (oracle: 3554161528 cloud bands froze).
+        let defaulted = try builtPass(textures: [:])
+        #expect(defaulted.textureBindings[2] == .asset("util/white"))
+
+        let explicit = try builtPass(textures: [2: .asset("masks/pulse__mask_9913c181")])
+        #expect(explicit.textureBindings[2] == .asset("masks/pulse__mask_9913c181"))
+    }
+
     @Test("Sampler defaults honor shader require conditions")
     func samplerDefaultsHonorShaderRequireConditions() throws {
         let fixture = try makeFixture(files: [

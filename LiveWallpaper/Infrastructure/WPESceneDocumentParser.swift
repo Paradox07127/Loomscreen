@@ -201,10 +201,8 @@ enum WPESceneDocumentParser {
                         if let passes = effect["passes"] as? [[String: Any]] {
                             for (passIndex, pass) in passes.enumerated() {
                                 let passID = parseInt(pass["id"]) ?? passIndex
-                                if let constants = pass["constantshadervalues"] as? [String: Any] {
-                                    for (name, raw) in constants {
-                                        append(raw: raw, target: .shaderUniform(objectID: objectID, effectID: effectIdentifier, passID: passID, name: name), kind: .uniform, action: .reload)
-                                    }
+                                forEachShaderConstant(in: pass["constantshadervalues"]) { name, raw in
+                                    append(raw: raw, target: .shaderUniform(objectID: objectID, effectID: effectIdentifier, passID: passID, name: name), kind: .uniform, action: .reload)
                                 }
                                 if let combos = pass["combos"] as? [String: Any] {
                                     for (name, raw) in combos {
@@ -1017,11 +1015,52 @@ enum WPESceneDocumentParser {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: String] = [:]
         for (index, value) in array.enumerated() {
-            if let string = value as? String, !string.isEmpty {
+            if let string = parseTextureSlotPath(value) {
                 result[index] = string
             }
         }
         return result
+    }
+
+    /// Effect texture arrays mix plain path strings with structured entries
+    /// (`{"name": "masks/pulse__mask_…"}` — how per-instance opacity masks are
+    /// declared). Resolve both; `NSNull` / empty slots return nil.
+    private static func parseTextureSlotPath(_ raw: Any?) -> String? {
+        if let string = raw as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        guard let dict = raw as? [String: Any] else { return nil }
+        for key in ["value", "name", "texture", "path", "file"] {
+            if let parsed = parseTextureSlotPath(dict[key]) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    /// Iterates `constantshadervalues` in either of WPE's two forms (plain
+    /// dict, or structured array of `{name:…, value:…|default:…}` entries).
+    private static func forEachShaderConstant(
+        in raw: Any?,
+        _ body: (String, Any) -> Void
+    ) {
+        if let dict = raw as? [String: Any] {
+            for (name, value) in dict {
+                body(name, value)
+            }
+            return
+        }
+        guard let array = raw as? [Any] else { return }
+        for entry in array {
+            guard let dict = entry as? [String: Any],
+                  let name = WPEValueParser.shaderConstantEntryName(in: dict) else { continue }
+            if dict.keys.contains("value") {
+                body(name, dict["value"] ?? NSNull())
+            } else if dict.keys.contains("default") {
+                body(name, dict["default"] ?? NSNull())
+            }
+        }
     }
 
     private static func effectName(from file: String) -> String {

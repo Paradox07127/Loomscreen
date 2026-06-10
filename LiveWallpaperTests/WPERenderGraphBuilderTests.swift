@@ -91,6 +91,69 @@ struct WPERenderGraphBuilderTests {
         #expect(effectPass.target == .fbo(name: "_rt_CustomBuffer"))
     }
 
+    @Test("Structured effect overrides: array constants with {user,value} + dict texture slots")
+    func structuredEffectOverridesBindConstantsAndMask() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/layer.json"], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [["shader": "genericimage2", "textures": ["layer_albedo"]]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/pulse_.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/pulse_/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "workshop/2718465779/effects/pulse_",
+                "textures": [NSNull(), "util/noise"],
+                "constantshadervalues": ["pulseamount": 1, "pulsespeed": 1]
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/pulse_.json"))
+
+        // The structured form WPE writes for user-bound effect instances:
+        // constants as an ARRAY of {name, value:{user,value}} entries, and the
+        // per-instance opacity mask as a DICT texture slot entry.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": 161,
+                "name": "Cloud band",
+                "type": "image",
+                "image": "models/layer.json",
+                "effects": [[
+                    "id": 854,
+                    "file": "effects/pulse_/effect.json",
+                    "passes": [[
+                        "constantshadervalues": [
+                            ["name": "pulseamount", "value": ["user": "amt", "value": 2]],
+                            ["name": "pulsespeed", "value": ["user": "spd", "value": 0.84]]
+                        ],
+                        "textures": [NSNull(), NSNull(), ["name": "masks/pulse__mask_9913c181"]]
+                    ]]
+                ]]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let effectPass = try #require(graph.layers.first?.passes.first {
+            $0.shader == "workshop/2718465779/effects/pulse_"
+        })
+
+        #expect(effectPass.textures[1] == .asset("util/noise"))
+        #expect(effectPass.textures[2] == .asset("masks/pulse__mask_9913c181"))
+        #expect(effectPass.constants["pulseamount"]?.numberValue == 2)
+        #expect(effectPass.constants["pulsespeed"]?.numberValue == 0.84)
+    }
+
     @Test("Final pass without an explicit target composites to the scene framebuffer")
     func finalUntargetedPassTargetsScene() throws {
         let root = FileManager.default.temporaryDirectory

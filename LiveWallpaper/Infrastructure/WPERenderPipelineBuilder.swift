@@ -875,7 +875,21 @@ private struct WPEShaderSourceLoader: Sendable {
         for (index, bind) in pass.binds {
             result[index] = bind == .previous ? pass.source : bind
         }
+        // shake/pulse slot 2 is the per-instance OPACITY mask (multiplies the
+        // effect's strength). When the scene doesn't declare one it must
+        // default to WHITE (= full effect everywhere) — a black/unbound slot
+        // silently disables the effect (oracle: 3554161528 cloud bands froze).
+        if usesWhiteOpacityMaskDefault(for: pass),
+           !pass.textures.keys.contains(2), !pass.binds.keys.contains(2) {
+            result[2] = .asset("util/white")
+        }
         return result
+    }
+
+    private func usesWhiteOpacityMaskDefault(for pass: WPERenderPass) -> Bool {
+        guard case .effect = pass.phase else { return false }
+        let shader = pass.shader.lowercased()
+        return shader.contains("effects/shake") || shader.contains("effects/pulse")
     }
 
     private func textureReference(_ name: String) -> WPETextureReference {

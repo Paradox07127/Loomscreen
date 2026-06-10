@@ -12,18 +12,47 @@ public enum WPEValueParser {
         return result
     }
 
+    /// Accepts both forms WPE writes: the plain `{name: value}` dictionary and
+    /// the structured array `[{name:…, value:…}]` used by effect-instance
+    /// overrides (entries may carry `value` or `default`).
     public static func shaderConstants(
         _ raw: Any?,
         boolAsNumber: Bool = false
     ) -> [String: WPESceneShaderConstantValue] {
-        guard let dict = raw as? [String: Any] else { return [:] }
         var result: [String: WPESceneShaderConstantValue] = [:]
-        for (key, value) in dict {
-            if let parsed = shaderConstant(value, boolAsNumber: boolAsNumber) {
-                result[key] = parsed
+        if let dict = raw as? [String: Any] {
+            for (key, value) in dict {
+                if let parsed = shaderConstant(value, boolAsNumber: boolAsNumber) {
+                    result[key] = parsed
+                }
+            }
+            return result
+        }
+        if let array = raw as? [Any] {
+            for entry in array {
+                guard let dict = entry as? [String: Any],
+                      let name = shaderConstantEntryName(in: dict) else { continue }
+                let value = dict.keys.contains("value") ? dict["value"]
+                    : dict.keys.contains("default") ? dict["default"]
+                    : nil
+                if let parsed = shaderConstant(value, boolAsNumber: boolAsNumber) {
+                    result[name] = parsed
+                }
             }
         }
         return result
+    }
+
+    /// Resolves the uniform name of a structured `constantshadervalues` array
+    /// entry (`name` / `uniform` / `material`, first non-empty wins).
+    public static func shaderConstantEntryName(in dict: [String: Any]) -> String? {
+        for key in ["name", "uniform", "material"] {
+            if let string = dict[key] as? String {
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
     }
 
     public static func shaderConstant(
