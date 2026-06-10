@@ -226,4 +226,39 @@ struct WPESceneScriptRuntimeTests {
         let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
         #expect(instance.tickString() == "kept")
     }
+
+    @Test("Runaway update() loop is contained: tick times out and freezes at lastValue")
+    func runawayUpdateLoopIsContained() throws {
+        let script = """
+        export function update(value) {
+            if (value === 'armed') { while (true) {} }
+            return 'armed';
+        }
+        """
+        let instance = try WPESceneScriptInstance(
+            script: script,
+            initialValue: "start",
+            setupBudget: 2.0,
+            tickBudget: 0.2
+        )
+        #expect(instance.tickString() == "armed")
+        // Second tick enters the infinite loop — must return within the
+        // budget instead of hanging the calling thread...
+        #expect(instance.tickString() == "armed")
+        // ...and the instance stays frozen (poisoned) from then on, without
+        // touching the hung JSContext again.
+        #expect(instance.tickString() == "armed")
+    }
+
+    @Test("Runaway module body times out at setup instead of hanging load")
+    func runawaySetupTimesOut() {
+        #expect(throws: WPESceneScriptError.executionTimedOut) {
+            _ = try WPESceneScriptInstance(
+                script: "while (true) {}",
+                initialValue: "init",
+                setupBudget: 0.2,
+                tickBudget: 0.2
+            )
+        }
+    }
 }

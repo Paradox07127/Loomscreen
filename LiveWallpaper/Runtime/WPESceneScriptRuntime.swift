@@ -13,60 +13,160 @@ import JavaScriptCore
 /// preprocessor strips ESM `export` keywords so the WPE-style
 /// `export function update(value)` shape evaluates as a plain
 /// declaration we can later invoke through the JSContext.
+///
+/// Execution-time containment: JavaScriptCore has no public execution
+/// time limit, so an untrusted `while(true){}` would otherwise hang the
+/// calling (load/render) thread forever. Every evaluation therefore runs
+/// on the instance's dedicated serial queue while the caller waits with a
+/// wall-clock budget; on timeout the instance is poisoned — `tickString`
+/// freezes at `lastValue` and the engine is quarantined (kept alive, never
+/// touched again) because releasing a JSContext whose VM lock is held by
+/// the hung worker could block the releasing thread.
 @MainActor
 final class WPESceneScriptInstance {
-    private let context: JSContext
-    private let updateFunction: JSValue?
-    private let initialValue: JSValue
+    private let engine: Engine
+    private let hasUpdateFunction: Bool
+    private let tickBudget: TimeInterval
+    private var isPoisoned = false
     private(set) var lastValue: String
 
+    /// Engines whose worker is stuck inside JS. Retained forever — see the
+    /// class doc. Bounded by the number of hostile scripts ever loaded.
+    private static var quarantine: [Engine] = []
+
     /// `script` is the JS source captured from `text: { script: ...
-    init(script: String, initialValue: String) throws {
-        guard let context = JSContext() else {
-            throw WPESceneScriptError.contextUnavailable
-        }
-        self.context = context
-        self.initialValue = JSValue(object: initialValue, in: context) ?? JSValue(nullIn: context)!
+    /// Budgets: setup covers the whole module body + `init()` (allow real
+    /// work); per-frame `update()` is expected to be microseconds, so an
+    /// overrun only ever means a runaway loop. Tests inject smaller values.
+    init(
+        script: String,
+        initialValue: String,
+        setupBudget: TimeInterval = 2.0,
+        tickBudget: TimeInterval = 0.5
+    ) throws {
         self.lastValue = initialValue
-
-        Self.installSandbox(in: context)
-        WPESceneScriptBaseclasses.install(in: context)
+        self.tickBudget = tickBudget
+        self.engine = Engine()
         let prepared = Self.preprocess(script: script)
-        context.exceptionHandler = { _, ex in
-            _ = ex
+        guard let outcome = engine.setUp(script: prepared, budget: setupBudget) else {
+            Self.quarantine.append(engine)
+            isPoisoned = true
+            Logger.warning(
+                "SceneScript setup exceeded \(setupBudget)s — script disabled",
+                category: .wpeRender
+            )
+            throw WPESceneScriptError.executionTimedOut
         }
-        let _ = context.evaluateScript(prepared)
-
-        let updateValue = context.objectForKeyedSubscript("update")
-        if let updateValue, !updateValue.isUndefined, updateValue.hasProperty("call") {
-            self.updateFunction = updateValue
-        } else {
-            self.updateFunction = nil
-        }
-        if let initFn = context.objectForKeyedSubscript("init"),
-           !initFn.isUndefined, initFn.hasProperty("call") {
-            _ = initFn.call(withArguments: [])
+        switch outcome {
+        case .contextUnavailable:
+            throw WPESceneScriptError.contextUnavailable
+        case .ready(let hasUpdate):
+            self.hasUpdateFunction = hasUpdate
         }
     }
 
     /// Tick the script's `update(value)` and return the latest value as a String.
     func tickString() -> String {
-        guard let updateFunction else { return lastValue }
-        let arg = JSValue(object: lastValue, in: context) ?? initialValue
-        guard let result = updateFunction.call(withArguments: [arg as Any]),
-              !result.isUndefined && !result.isNull else {
+        guard hasUpdateFunction, !isPoisoned else { return lastValue }
+        guard let outcome = engine.tick(lastValue: lastValue, budget: tickBudget) else {
+            isPoisoned = true
+            Self.quarantine.append(engine)
+            Logger.warning(
+                "SceneScript update() exceeded \(tickBudget)s — script frozen at its last value",
+                category: .wpeRender
+            )
             return lastValue
         }
-        if result.isString, let s = result.toString() {
-            lastValue = s
-            return s
-        }
-        if result.isNumber {
-            let s = String(result.toDouble())
-            lastValue = s
-            return s
+        if let newValue = outcome {
+            lastValue = newValue
         }
         return lastValue
+    }
+
+    /// Owns the JSContext and the only thread allowed to touch it. The class
+    /// is `@unchecked Sendable` because `context`/`updateFunction` are only
+    /// ever accessed on `queue`; callers exchange plain `String`s.
+    private final class Engine: @unchecked Sendable {
+        enum SetupOutcome {
+            case ready(hasUpdate: Bool)
+            case contextUnavailable
+        }
+
+        private let queue = DispatchQueue(
+            label: "com.livewallpaper.wpe-scenescript",
+            qos: .userInitiated
+        )
+        private var context: JSContext?
+        private var updateFunction: JSValue?
+
+        /// nil = budget exceeded (worker still running; engine must be quarantined).
+        func setUp(script: String, budget: TimeInterval) -> SetupOutcome? {
+            runWithBudget(budget) { self.setUpOnQueue(script: script) }
+        }
+
+        /// Outer nil = budget exceeded; inner nil = no new value (keep last).
+        func tick(lastValue: String, budget: TimeInterval) -> String?? {
+            runWithBudget(budget) { self.tickOnQueue(lastValue: lastValue) }
+        }
+
+        private func runWithBudget<T>(
+            _ budget: TimeInterval,
+            _ work: @escaping @Sendable () -> T
+        ) -> T? {
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<T>()
+            queue.async {
+                box.value = work()
+                done.signal()
+            }
+            guard done.wait(timeout: .now() + budget) == .success else { return nil }
+            return box.value
+        }
+
+        private func setUpOnQueue(script: String) -> SetupOutcome {
+            guard let context = JSContext() else {
+                return .contextUnavailable
+            }
+            self.context = context
+            WPESceneScriptInstance.installSandbox(in: context)
+            WPESceneScriptBaseclasses.install(in: context)
+            context.exceptionHandler = { _, ex in
+                _ = ex
+            }
+            let _ = context.evaluateScript(script)
+
+            let updateValue = context.objectForKeyedSubscript("update")
+            if let updateValue, !updateValue.isUndefined, updateValue.hasProperty("call") {
+                updateFunction = updateValue
+            } else {
+                updateFunction = nil
+            }
+            if let initFn = context.objectForKeyedSubscript("init"),
+               !initFn.isUndefined, initFn.hasProperty("call") {
+                _ = initFn.call(withArguments: [])
+            }
+            return .ready(hasUpdate: updateFunction != nil)
+        }
+
+        private func tickOnQueue(lastValue: String) -> String? {
+            guard let context, let updateFunction else { return nil }
+            let arg = JSValue(object: lastValue, in: context) ?? JSValue(nullIn: context)!
+            guard let result = updateFunction.call(withArguments: [arg as Any]),
+                  !result.isUndefined && !result.isNull else {
+                return nil
+            }
+            if result.isString, let s = result.toString() {
+                return s
+            }
+            if result.isNumber {
+                return String(result.toDouble())
+            }
+            return nil
+        }
+
+        private final class ResultBox<T>: @unchecked Sendable {
+            var value: T?
+        }
     }
 
     /// Strip `export` keywords + `'use strict'` so the script body evaluates as flat top-level declarations the JSContext can look up by name.
@@ -82,7 +182,8 @@ final class WPESceneScriptInstance {
     }
 
     /// Install a minimal global API surface mirroring the subset of SceneScript that scripts in the corpus actually use.
-    private static func installSandbox(in context: JSContext) {
+    /// `nonisolated`: runs on the engine's worker queue, never on the MainActor.
+    nonisolated private static func installSandbox(in context: JSContext) {
         let console = JSValue(newObjectIn: context)!
         let log: @convention(block) (JSValue) -> Void = { _ in }
         console.setObject(log, forKeyedSubscript: "log" as NSString)
@@ -169,5 +270,8 @@ final class WPESceneScriptInstance {
 
 enum WPESceneScriptError: Error, Equatable {
     case contextUnavailable
+    /// The script exceeded its wall-clock execution budget (runaway loop);
+    /// the instance was disabled before it could hang the render thread.
+    case executionTimedOut
 }
 #endif
