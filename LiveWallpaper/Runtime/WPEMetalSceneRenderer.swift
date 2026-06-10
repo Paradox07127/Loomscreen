@@ -1443,6 +1443,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         object: WPESceneParticleObject,
         sortIndex: Int
     ) async {
+        // Reload/cleanup cancels the owning load task cooperatively; bail
+        // before doing any work (or recursing) on behalf of a dead load.
+        guard !Task.isCancelled else { return }
         guard ancestry.count < 16 else {
             debugStage("particle", "skip \(object.name) — particle child depth limit reached at: \(path)")
             return
@@ -1532,6 +1535,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
             return nil
         }
+        // A reload may have reset `particleSystems` while this load was
+        // suspended above — registering now would append a dead load's
+        // subtree into the NEW load's scene (duplicated particle systems).
+        guard !Task.isCancelled else { return nil }
         let texture: MTLTexture?
         let animatedTextureSource: WPETexAnimatedTextureSource?
         switch texturePayload {
@@ -1947,6 +1954,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         do {
             let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
+            // A cancelled load resumed after a reload reset the texture maps
+            // must not write a stale entry into the new load's state.
+            try Task.checkCancellation()
             switch resource {
             case .staticTexture(let texture):
                 loadedTextures[path] = texture
@@ -1958,6 +1968,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     loadedTextures[path] = try makeDynamicPlaceholderTexture(label: "\(path) placeholder")
                 }
             }
+        } catch is CancellationError {
+            // Keep cancellation transparent — wrapping it in the load-context
+            // error would defeat the session's `catch is CancellationError`.
+            throw CancellationError()
         } catch {
             throw WPEMetalTextureLoadContextError(layerName: layerName, path: path, underlying: error)
         }

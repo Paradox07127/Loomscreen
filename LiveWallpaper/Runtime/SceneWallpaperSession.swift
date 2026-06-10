@@ -15,6 +15,10 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
+    /// Monotonic id of the most recent load/reload. Guards the "clear
+    /// `loadTask` when done" writes so a finished older task can't drop the
+    /// handle of a newer one that replaced it while the older was draining.
+    private var loadGeneration = 0
     private(set) var loadError: SceneRenderingError?
     /// Latest per-layer progress message reported by the renderer.
     /// Phase 2.1 surfaces this via `WPESceneDetailView` so the user sees
@@ -130,9 +134,13 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         guard !didStartLoad, let renderer else { return }
         didStartLoad = true
         installProgressHandler(on: renderer)
+        loadGeneration += 1
+        let generation = loadGeneration
         loadTask = Task { @MainActor [weak self] in
             await self?.runLoad(renderer)
-            self?.loadTask = nil
+            if let self, self.loadGeneration == generation {
+                self.loadTask = nil
+            }
         }
     }
 
@@ -146,23 +154,44 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
             loadError = .cacheRootMissing
             return
         }
+        // Cancel AND drain the in-flight load before touching the renderer.
+        // Cancellation is cooperative: a load resumed after `renderer.reload()`
+        // reset state would append its half-loaded textures/particles into the
+        // new load (duplicated particle systems, torn pipelines).
         loadTask?.cancel()
+        if let previous = loadTask {
+            await previous.value
+        }
         loadTask = nil
         installProgressHandler(on: renderer)
-        do {
-            try await renderer.reload()
-            loadError = nil
-            loadProgress = nil
-        } catch is CancellationError {
-            return
-        } catch let error as SceneRenderingError {
-            loadError = error
-        } catch {
-            if let diagnostic = renderer.loadDiagnostics {
-                loadError = .resourceFailed(diagnostic)
-            } else {
-                loadError = .parseFailed(error.localizedDescription)
+        loadGeneration += 1
+        let generation = loadGeneration
+        // Run the reload inside a tracked task so `cleanup()` can cancel a
+        // reload that is still streaming assets when the session goes away.
+        let task = Task { @MainActor [weak self] in
+            do {
+                try await renderer.reload()
+                guard let self, self.loadGeneration == generation else { return }
+                self.loadError = nil
+                self.loadProgress = nil
+            } catch is CancellationError {
+                return
+            } catch let error as SceneRenderingError {
+                guard let self, self.loadGeneration == generation else { return }
+                self.loadError = error
+            } catch {
+                guard let self, self.loadGeneration == generation else { return }
+                if let diagnostic = renderer.loadDiagnostics {
+                    self.loadError = .resourceFailed(diagnostic)
+                } else {
+                    self.loadError = .parseFailed(error.localizedDescription)
+                }
             }
+        }
+        loadTask = task
+        await task.value
+        if loadGeneration == generation {
+            loadTask = nil
         }
     }
 
