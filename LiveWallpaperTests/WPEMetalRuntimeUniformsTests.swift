@@ -44,8 +44,12 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(uniforms.uniformValues["g_PointerPosition"]?.vectorValue == [0.25, 0.75])
     }
 
-    @Test("Suspended profile maps brightness uniform to zero")
-    func suspendedProfileMapsBrightnessToZero() {
+    @Test("Suspended profile keeps brightness uniform at one")
+    func suspendedProfileKeepsBrightnessAtOne() {
+        // g_Brightness multiplies image-shader albedo, so 0 rendered every
+        // genericimage layer as a black silhouette on frames produced while
+        // suspended (859db5b). Suspension saves power via mtkView.isPaused,
+        // not by dimming content — brightness must stay 1.
         let uniforms = WPEMetalRuntimeUniforms(
             time: 4,
             daytime: 0.5,
@@ -53,8 +57,8 @@ struct WPEMetalRuntimeUniformsTests {
             pointerPosition: SIMD2<Double>(0.5, 0.5)
         )
 
-        #expect(uniforms.brightness == 0)
-        #expect(uniforms.uniformValues["g_Brightness"]?.numberValue == 0)
+        #expect(uniforms.brightness == 1)
+        #expect(uniforms.uniformValues["g_Brightness"]?.numberValue == 1)
     }
 
     @Test("WPE 2.8 neutral frame defaults disable optional effects and pass through SDR")

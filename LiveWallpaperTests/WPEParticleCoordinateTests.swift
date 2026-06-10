@@ -89,19 +89,22 @@ struct WPEParticleCoordinateTests {
         #expect(abs(v.y - (-21)) < 0.0001)
     }
 
-    @Test("Object scale spreads the emitter but does NOT enlarge sprite size")
-    func sceneObjectScaleAffectsEmitterNotSpriteSize() {
+    @Test("Object scale enlarges sprite size (T·R·S) and spreads the emitter")
+    func sceneObjectScaleAffectsEmitterAndSpriteSize() {
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
             objectOrigin: SIMD3<Float>(0, 0, 0),
             objectScale: SIMD3<Float>(3, 3, 1),
             objectAngleZ: 0
         )
-        // Sprite size stays at its authored (scene-pixel) value — object
-        // scale must not fold into the billboard size, or large-scaled
-        // emitters (e.g. a 7×-scaled light-shaft layer) saturate the frame.
-        #expect(abs(transform.worldSizeMultiplier() - 1) < 0.0001)
-        // Object scale still spreads the emitter: a 10px dispersal offset
+        // WPE's CParticle model matrix is T·R·S, so the object's 2D scale
+        // folds into the billboard size as (|x|+|y|)/2 (verified vs the
+        // 7.8×-scaled light-shaft in 3426865175). Additive saturation from
+        // hugely-scaled emitters is handled by the blend-aware sceneHeight
+        // cap at spawn (see WPEParticleSystemTests.additiveSpriteSizeCapped),
+        // not by decoupling sprite size from object scale.
+        #expect(abs(transform.worldSizeMultiplier() - 3) < 0.0001)
+        // Object scale also spreads the emitter: a 10px dispersal offset
         // scales to 30px at scale 3 (isolated via applyModelDirection, which
         // applies scale+rotation without the origin translation).
         let spread = transform.applyModelDirection(SIMD3<Float>(10, 0, 0))

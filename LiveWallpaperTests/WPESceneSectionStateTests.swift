@@ -51,12 +51,17 @@ struct WPESceneSectionStateTests {
 
     @Test("FallbackReason severity tint distinguishes warn vs hard block")
     func severityTintIsHonest() {
-        #expect(FallbackReason.missingDependency(workshopIDs: ["1"]).severityTint == .yellow)
-        #expect(FallbackReason.sceneResourceMissing.severityTint == .yellow)
-        #expect(FallbackReason.texDecodeFailed(detail: "x").severityTint == .yellow)
-        #expect(FallbackReason.requiresWindowsPlugin.severityTint == .orange)
-        #expect(FallbackReason.texContainerUnsupported(magic: "X").severityTint == .orange)
-        #expect(FallbackReason.texUnsupportedFormat(code: 8).severityTint == .orange)
+        // Recoverable/actionable failures use the caution token, permanent
+        // blockers the warning token (Status tokens since 2b11734).
+        let caution = DesignTokens.Colors.Status.caution
+        let warning = DesignTokens.Colors.Status.warning
+        #expect(FallbackReason.missingDependency(workshopIDs: ["1"]).severityTint == caution)
+        #expect(FallbackReason.sceneResourceMissing.severityTint == caution)
+        #expect(FallbackReason.texDecodeFailed(detail: "x").severityTint == caution)
+        #expect(FallbackReason.requiresWindowsPlugin.severityTint == warning)
+        #expect(FallbackReason.texContainerUnsupported(magic: "X").severityTint == warning)
+        #expect(FallbackReason.texUnsupportedFormat(code: 8).severityTint == warning)
+        #expect(caution != warning)
     }
 
     @Test("isActionable matches the Retry button visibility policy")

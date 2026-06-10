@@ -66,6 +66,29 @@ public extension View {
     func thumbnailBadgeGlass(tint: Color = .black, opacity: Double = 0.6) -> some View {
         modifier(ThumbnailBadgeGlassModifier(tint: tint, opacity: opacity))
     }
+
+    /// Dark-tinted interactive glass circle for a single-glyph control that
+    /// floats over artwork (e.g. the hero close button): native Liquid Glass
+    /// on macOS 26 (the dark tint keeps a white glyph legible over bright
+    /// previews and firms up on hover), with a black-fill circle fallback.
+    func floatingGlyphGlass(hovered: Bool) -> some View {
+        modifier(FloatingGlyphGlassModifier(hovered: hovered))
+    }
+}
+
+private struct FloatingGlyphGlassModifier: ViewModifier {
+    let hovered: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(
+                .regular.tint(.black.opacity(hovered ? 0.32 : 0.18)).interactive(),
+                in: .circle
+            )
+        } else {
+            content.background(Circle().fill(.black.opacity(hovered ? 0.6 : 0.4)))
+        }
+    }
 }
 
 private struct ThumbnailBadgeGlassModifier: ViewModifier {

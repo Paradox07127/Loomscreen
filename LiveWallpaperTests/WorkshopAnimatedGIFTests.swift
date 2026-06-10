@@ -49,7 +49,7 @@ struct WorkshopAnimatedGIFDecodeTests {
         #expect(gif.frameDelays.allSatisfy { $0 >= WorkshopAnimatedGIF.minFrameDelay })
     }
 
-    @Test("Data over the 8 MiB byte cap is rejected")
+    @Test("Data over the 32 MiB byte cap is rejected")
     func overByteCapRejected() {
         let oversized = Data(count: WorkshopAnimatedGIF.maxBytes + 1)
         #expect(WorkshopAnimatedGIF.make(from: oversized) == nil)
@@ -60,10 +60,17 @@ struct WorkshopAnimatedGIFDecodeTests {
         #expect(WorkshopAnimatedGIF.make(from: Data([0x00, 0x01, 0x02, 0x03])) == nil)
     }
 
-    @Test("Animations over the 120-frame cap are rejected")
-    func overFrameCapRejected() {
+    @Test("Animations over the 120-frame cap degrade to a static poster")
+    func overFrameCapDegradesToPoster() throws {
+        // Over-cap animations keep their poster instead of returning nil,
+        // which blanked the tile entirely (8c6ea2e, review item #1).
         let data = GIFTestFixtures.gif(width: 2, height: 2, frameCount: WorkshopAnimatedGIF.maxFrameCount + 1, delay: 0.1)
-        #expect(WorkshopAnimatedGIF.make(from: data) == nil)
+        let asset = try #require(WorkshopAnimatedGIF.make(from: data))
+        guard case .staticImage = asset else {
+            Issue.record("Expected over-cap animation to degrade to .staticImage, got \(asset)")
+            return
+        }
+        #expect(asset.isAnimated == false)
     }
 
     @Test("Decoded-pixel budget is overflow-safe and rejects oversized animations")
@@ -283,8 +290,10 @@ enum GIFTestFixtures {
         WorkshopAnimatedGIF.make(from: gif(width: 8, height: 8, frameCount: frameCount, delay: 0.1))!
     }
 
+    /// Generous default: under full-suite parallel load the first timer tick
+    /// can land well past 1 s, which made `animatedPlays` flaky.
     @MainActor
-    static func waitUntil(timeout: Double = 1.0, _ condition: () -> Bool) async {
+    static func waitUntil(timeout: Double = 5.0, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
             try? await Task.sleep(nanoseconds: 10_000_000)

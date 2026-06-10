@@ -32,17 +32,21 @@ struct WPEHistoryTests {
         }
     }
 
-    @Test("Caps at 20")
-    func capsAt20() throws {
+    @Test("Caps at maxRecentWPEImports, dropping the oldest")
+    func capsAtMaxRecentImports() throws {
         withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
-            for index in 0..<25 {
+            // Cap raised 20 → 200 in 84c1276 (Installed library is the
+            // primary managed store now). Overshoot by 5 to exercise it.
+            let cap = SettingsManager.maxRecentWPEImports
+            let total = cap + 5
+            for index in 0..<total {
                 manager.recordWPEImport(makeEntry("\(index)"))
             }
 
             let ids = manager.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID)
-            #expect(ids.count == 20)
-            #expect(ids.first == "24")
+            #expect(ids.count == cap)
+            #expect(ids.first == "\(total - 1)")
             #expect(ids.last == "5")
         }
     }

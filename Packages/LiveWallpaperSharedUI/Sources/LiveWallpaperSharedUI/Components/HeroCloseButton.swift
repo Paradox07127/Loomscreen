@@ -22,7 +22,7 @@ public struct HeroCloseButton: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(hovered ? 1 : 0.8))
                 .frame(width: 28, height: 28)
-                .modifier(HeroCloseGlass(hovered: hovered))
+                .floatingGlyphGlass(hovered: hovered)
                 .overlay(Circle().strokeBorder(.white.opacity(hovered ? 0.35 : 0.2), lineWidth: 0.5))
                 .contentShape(Circle())
         }
@@ -31,23 +31,5 @@ public struct HeroCloseButton: View {
         .keyboardShortcut(.cancelAction)
         .help(Text("Hide details (Esc)"))
         .accessibilityLabel(Text("Hide details"))
-    }
-}
-
-/// Backing for the floating close button: native Liquid Glass circle on macOS
-/// 26 (a dark tint keeps the white glyph legible over bright artwork; firms up
-/// on hover), with the original black-fill circle as the fallback.
-private struct HeroCloseGlass: ViewModifier {
-    let hovered: Bool
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(
-                .regular.tint(.black.opacity(hovered ? 0.32 : 0.18)).interactive(),
-                in: .circle
-            )
-        } else {
-            content.background(Circle().fill(.black.opacity(hovered ? 0.6 : 0.4)))
-        }
     }
 }
