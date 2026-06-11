@@ -162,7 +162,7 @@ final class WorkshopBrowseViewModel {
     var searchInput: String = "" {
         didSet {
             guard searchInput != oldValue else { return }
-            scheduleAutoSearch()
+            scheduleAutoApply()
         }
     }
     var preferredSort: WorkshopSortMode = .topRated
@@ -270,11 +270,13 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Restart the auto-search countdown after a keystroke. Fires `reload()`
-    /// once the input has been quiet for `Self.searchDebounce` AND it would
-    /// actually change the applied request — typing inside a creator/tag scope
-    /// (where search text is ignored) or retyping the submitted query no-ops.
-    private func scheduleAutoSearch() {
+    /// Restart the auto-apply countdown after a keystroke or a filter/sort
+    /// edit. Fires `reload()` once the state has been quiet for
+    /// `Self.searchDebounce` AND it would actually change the applied request —
+    /// typing inside a creator/tag scope (where search text is ignored) or
+    /// retyping the submitted query no-ops. Rapid chip toggling keeps
+    /// restarting the window, so a burst of edits still costs one request.
+    private func scheduleAutoApply() {
         autoSearchTask?.cancel()
         autoSearchTask = Task { [weak self] in
             try? await Task.sleep(for: Self.searchDebounce)
@@ -369,15 +371,16 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    // Filter mutations below are PURE STATE EDITS — none of them query. The user
-    // batches selections and applies them all at once via `submitSearch()`
-    // (the Search control / Return), so adding five tags costs one request, not
-    // five. `hasPendingChanges` reflects unapplied edits.
+    // Filter mutations below edit state and schedule the shared debounced
+    // auto-apply — none of them query directly. A burst of chip toggles keeps
+    // restarting the quiet window, so five edits still cost one request (the
+    // old explicit-Search batching, without the button).
 
     /// Combined sort + trending-window update (period folded into the sort menu).
     func updateSortOption(_ sort: WorkshopSortMode, days: Int) {
         preferredSort = sort
         if sort == .trending { trendingDays = days }
+        scheduleAutoApply()
     }
 
     // NOTE: each toggle mutates its property directly (no `inout` helper).
@@ -388,21 +391,25 @@ final class WorkshopBrowseViewModel {
     func toggleType(_ type: WorkshopContentTypeFilter) {
         if selectedTypes.contains(type) { selectedTypes.remove(type) } else { selectedTypes.insert(type) }
         persistFilters()
+        scheduleAutoApply()
     }
 
     func toggleAgeRating(_ rating: WorkshopAgeRatingFilter) {
         if selectedAgeRatings.contains(rating) { selectedAgeRatings.remove(rating) } else { selectedAgeRatings.insert(rating) }
         persistFilters()
+        scheduleAutoApply()
     }
 
     func toggleResolution(_ resolution: WorkshopResolutionFilter) {
         if selectedResolutions.contains(resolution) { selectedResolutions.remove(resolution) } else { selectedResolutions.insert(resolution) }
         persistFilters()
+        scheduleAutoApply()
     }
 
     func toggleGenre(_ tag: String) {
         if selectedGenres.contains(tag) { selectedGenres.remove(tag) } else { selectedGenres.insert(tag) }
         persistFilters()
+        scheduleAutoApply()
     }
 
     // Option-click "isolate" — collapse a category to just one option (show only
@@ -410,21 +417,25 @@ final class WorkshopBrowseViewModel {
     func isolateType(_ type: WorkshopContentTypeFilter) {
         selectedTypes = isolated(type, in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases)
         persistFilters()
+        scheduleAutoApply()
     }
 
     func isolateAgeRating(_ rating: WorkshopAgeRatingFilter) {
         selectedAgeRatings = isolated(rating, in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases)
         persistFilters()
+        scheduleAutoApply()
     }
 
     func isolateResolution(_ resolution: WorkshopResolutionFilter) {
         selectedResolutions = isolated(resolution, in: selectedResolutions, all: WorkshopResolutionFilter.selectableCases)
         persistFilters()
+        scheduleAutoApply()
     }
 
     func isolateGenre(_ tag: String) {
         selectedGenres = isolated(tag, in: selectedGenres, all: WorkshopGenre.allTags)
         persistFilters()
+        scheduleAutoApply()
     }
 
     private func isolated<T: Hashable>(_ option: T, in current: Set<T>, all: [T]) -> Set<T> {
@@ -439,6 +450,7 @@ final class WorkshopBrowseViewModel {
         selectedResolutions = Set(WorkshopResolutionFilter.selectableCases)
         selectedGenres = Set(WorkshopGenre.allTags)
         persistFilters()
+        scheduleAutoApply()
     }
 
     // MARK: - Persistence
