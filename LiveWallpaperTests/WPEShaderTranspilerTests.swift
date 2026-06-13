@@ -75,6 +75,47 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("waterflow v_Cycles / v_Blend varyings reconstruct from time uniforms (not screen UV)")
+    func reconstructsWaterflowFlowVaryings() throws {
+        // waterflow.vert computes v_Cycles = frac(t·speed)−0.5 (bounded ±0.5) and
+        // v_Blend = smoothstep cross-fade weights. We run a generic vertex, so the
+        // transpiler must reconstruct them from g_Time/g_FlowSpeed/g_PhaseFeather.
+        // The old default float4(uv,uv)/uv made displacement grow across the screen
+        // (the 3554161528 sky distortion band).
+        let source = """
+        // stage: fragment
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform float g_FlowAmp;
+        uniform float g_FlowSpeed;
+        uniform float g_PhaseFeather;
+        uniform float g_Time;
+        in vec4 v_TexCoord;
+        in vec4 v_Cycles;
+        in vec2 v_Blend;
+        void main() {
+            vec2 flowMask = (texture(g_Texture1, v_TexCoord.zw).rg - vec2(0.498)) * 2.0;
+            vec4 off = vec4(flowMask.xyxy * g_FlowAmp * 0.1) * v_Cycles.xxyy;
+            vec4 a = mix(texture(g_Texture0, v_TexCoord.xy + off.xy),
+                         texture(g_Texture0, v_TexCoord.xy + off.zw), v_Blend.x);
+            gl_FragColor = mix(texture(g_Texture0, v_TexCoord.xy), a, length(flowMask));
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "waterflow",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_waterflow_cycles(g_Time, g_FlowSpeed)"))
+        #expect(result.mslSource.contains("wpe_waterflow_blend(g_Time, g_FlowSpeed, g_PhaseFeather)"))
+        // The buggy default must NOT be how v_Cycles is initialized.
+        #expect(!result.mslSource.contains("v_Cycles = float4(in.uv, in.uv)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
     func translatesTextureLodFragment() throws {
         // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.

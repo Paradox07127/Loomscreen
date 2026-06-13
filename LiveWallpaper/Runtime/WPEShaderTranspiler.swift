@@ -2249,6 +2249,18 @@ struct WPEShaderTranspiler {
             inline float2 wpe_bounds_vector(float2 bounds) {
                 return float2(bounds.x, 1.0 / max(bounds.y - bounds.x, 0.000001));
             }
+            inline float4 wpe_waterflow_cycles(float time, float speed) {
+                float t = time * speed;
+                float4 cycles = float4(fract(t), fract(t + 0.5), fract(0.25 + t), fract(0.25 + t + 0.5));
+                return cycles - float4(0.5);
+            }
+            inline float2 wpe_waterflow_blend(float time, float speed, float feather) {
+                float t = time * speed;
+                float bx = 2.0 * abs(fract(t) - 0.5);
+                float bz = 2.0 * abs(fract(0.25 + t) - 0.5);
+                float lo = 0.5 - feather, hi = 0.5 + feather;
+                return float2(smoothstep(lo, hi, bx), smoothstep(lo, hi, bz));
+            }
             inline float3x3 wpe_square_to_quad(float2 p0, float2 p1, float2 p2, float2 p3) {
                 float dx0 = p0.x, dy0 = p0.y;
                 float dx1 = p1.x, dy1 = p1.y;
@@ -2396,6 +2408,20 @@ struct WPEShaderTranspiler {
             if varying.metalType == "float2",
                availableUniforms.contains("g_Bounds") {
                 return "wpe_bounds_vector(g_Bounds)"
+            }
+        case "v_Cycles":
+            // waterflow.vert: four scroll-loop phases (frac(t·speed)+offsets) − 0.5,
+            // bounded to ±0.5 so the flow displacement oscillates instead of growing
+            // with screen position (the default float4(uv,uv) caused the smear band).
+            if varying.metalType == "float4",
+               hasUniforms("g_Time", "g_FlowSpeed", in: availableUniforms) {
+                return "wpe_waterflow_cycles(g_Time, g_FlowSpeed)"
+            }
+        case "v_Blend":
+            // waterflow.vert: smoothstep cross-fade weights between the two phase samples.
+            if varying.metalType == "float2",
+               hasUniforms("g_Time", "g_FlowSpeed", "g_PhaseFeather", in: availableUniforms) {
+                return "wpe_waterflow_blend(g_Time, g_FlowSpeed, g_PhaseFeather)"
             }
         case "v_AudioPulse":
             if varying.metalType == "float" {
