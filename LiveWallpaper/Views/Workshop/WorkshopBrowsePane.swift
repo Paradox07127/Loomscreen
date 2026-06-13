@@ -176,8 +176,7 @@ struct WorkshopBrowsePane: View {
                     onSelectTag: { tag in
                         self.selectedItem = nil
                         Task { await viewModel.browseTag(tag) }
-                    },
-                    onClose: { self.selectedItem = nil }
+                    }
                 )
             } else {
                 inspectorPlaceholder

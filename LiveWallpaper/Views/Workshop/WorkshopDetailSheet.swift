@@ -17,9 +17,6 @@ struct WorkshopInspectorContent: View {
     var onBrowseCreator: ((String, String?) -> Void)? = nil
     /// Scope the Browse grid to a clicked tag. nil → tags render as plain labels.
     var onSelectTag: ((String) -> Void)? = nil
-    /// Dismisses the detail panel — the panel is selection-driven (no toolbar
-    /// toggle), so this explicit close control clears the selection.
-    var onClose: () -> Void = {}
 
     @Environment(\.openURL) private var openURL
     @Environment(ScreenManager.self) private var screenManager
@@ -112,9 +109,6 @@ struct WorkshopInspectorContent: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { if shouldBlurHero { requestReveal() } }
-            .overlay(alignment: .topLeading) {
-                HeroCloseButton(action: onClose).padding(DesignTokens.Spacing.sm)
-            }
             .padding([.horizontal, .top], DesignTokens.Spacing.lg)
             .alert("Show mature content?", isPresented: $showingAgeConfirm) {
                 Button(role: .cancel) {} label: { Text("Cancel") }

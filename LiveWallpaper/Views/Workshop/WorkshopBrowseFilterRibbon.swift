@@ -37,11 +37,11 @@ enum WorkshopRequestCounter {
 }
 
 /// Filter ribbon pinned under the pane header for the Workshop (online) tab.
-/// A glass-capsule search (submit-driven — no per-keystroke querying), the
-/// primary Type chips + a Sort menu that folds the Trending period into itself,
-/// and a "Filters" disclosure that expands a panel DOWNWARD (rather than a
-/// popover) holding Maturity / Resolution / Genre as horizontally-scrolling
-/// chip rows. A refresh control and the key-status / quota chip round it out.
+/// A glass-capsule search, a Sort menu that folds the Trending period into
+/// itself, and a "Filters" disclosure that expands a panel DOWNWARD (rather
+/// than a popover) holding Type / Maturity / Resolution / Genre chip rows.
+/// Search and filter edits auto-apply through the view-model's shared
+/// debounce — there is no explicit Search/Apply button.
 struct WorkshopBrowseFilterRibbon: View {
     let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
@@ -80,10 +80,6 @@ struct WorkshopBrowseFilterRibbon: View {
             searchField
 
             filtersToggle
-
-            if viewModel.hasPendingChanges {
-                searchButton
-            }
 
             Spacer(minLength: DesignTokens.Spacing.sm)
 
@@ -216,10 +212,9 @@ struct WorkshopBrowseFilterRibbon: View {
             .frame(height: min(filterRowsHeight, Self.maxRowsHeight))
             .onPreferenceChange(FilterRowsHeightKey.self) { filterRowsHeight = $0 }
 
-            // Apply lives in the top row's single "Search" button (issue: two
-            // Search controls appeared once the panel was open). Here we keep
-            // only the panel-scoped reset, pinned below the scroll so it's always
-            // reachable.
+            // Chip edits auto-apply (debounced in the view-model), so the panel
+            // carries no Apply control — only the panel-scoped reset, pinned
+            // below the scroll so it's always reachable.
             if activeFilterCount > 0 {
                 Button("Clear filters") { viewModel.resetFilters() }
                     .buttonStyle(.borderless)
@@ -263,8 +258,8 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var searchField: some View {
         HStack(spacing: 7) {
-            // Search is manual now (issue #5): clicking the glass or pressing
-            // Return runs the query — typing alone never fires a request.
+            // Typing auto-searches after the view-model's debounce; clicking
+            // the glass or pressing Return skips the wait and runs it now.
             Button {
                 Task { await viewModel.submitSearch() }
             } label: {
@@ -314,20 +309,6 @@ struct WorkshopBrowseFilterRibbon: View {
             }
         }
         .opacity(controlsDisabled ? 0.5 : 1)
-    }
-
-    /// Appears only when there are unapplied filter/search edits — the single
-    /// "apply everything now" action (issue: stop querying on every tag toggle).
-    private var searchButton: some View {
-        Button {
-            Task { await viewModel.submitSearch() }
-        } label: {
-            Text("Search")
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .disabled(controlsDisabled)
-        .help(Text("Apply filters and search"))
     }
 
     // MARK: - Helpers

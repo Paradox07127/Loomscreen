@@ -33,8 +33,6 @@ struct EmptyStateGuideView: View {
                         title: "Video",
                         subtitle: videoSubtitle,
                         accessibilityLabel: "Video wallpaper type",
-                        actionTitle: "Pick Video",
-                        actionSystemImage: "folder",
                         action: onChooseVideo
                     )
 
@@ -44,8 +42,6 @@ struct EmptyStateGuideView: View {
                         title: "HTML",
                         subtitle: "Web pages, local HTML, and folders.",
                         accessibilityLabel: "HTML wallpaper type",
-                        actionTitle: "Use HTML",
-                        actionSystemImage: "arrow.right",
                         action: onChooseHTML
                     )
 
@@ -56,8 +52,6 @@ struct EmptyStateGuideView: View {
                             title: "Shader",
                             subtitle: "Built-in animated GPU shaders.",
                             accessibilityLabel: "Shader wallpaper type",
-                            actionTitle: "Use Shader",
-                            actionSystemImage: "arrow.right",
                             action: onChooseShader
                         )
                     }
@@ -69,8 +63,6 @@ struct EmptyStateGuideView: View {
                             title: "Scene",
                             subtitle: "Compatible imported scenes.",
                             accessibilityLabel: "Scene wallpaper type",
-                            actionTitle: "Use Scene",
-                            actionSystemImage: "arrow.right",
                             action: onChooseScene
                         )
                     }
@@ -146,8 +138,6 @@ private struct GuideCard: View {
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey
     let accessibilityLabel: LocalizedStringKey
-    let actionTitle: LocalizedStringKey
-    let actionSystemImage: String
     let action: () -> Void
 
     @State private var isHovering = false
@@ -156,9 +146,11 @@ private struct GuideCard: View {
 
     private var isActive: Bool { isHovering || isFocused }
 
+    // The whole card is the button — no inner action pill; the hover/focus
+    // highlight on the card itself is the affordance. Content is centered.
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                         .fill(iconTint.opacity(0.15))
@@ -170,31 +162,19 @@ private struct GuideCard: View {
                 }
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 4) {
                     Text(title)
                         .font(DesignTokens.Typography.sectionTitle)
                     Text(subtitle)
                         .font(DesignTokens.Typography.body)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Spacer(minLength: 2)
-
-                Label(actionTitle, systemImage: actionSystemImage)
-                    .font(DesignTokens.Typography.body)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(Color.accentColor.opacity(isActive ? 0.30 : 0.18))
-                    )
-                    .foregroundStyle(Color.accentColor)
             }
             .padding(14)
-            .frame(minHeight: 152, alignment: .topLeading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 128, alignment: .center)
+            .frame(maxWidth: .infinity)
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
