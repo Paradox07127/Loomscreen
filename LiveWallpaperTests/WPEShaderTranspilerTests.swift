@@ -87,6 +87,7 @@ struct WPEShaderTranspilerTests {
         #version 410 core
         uniform sampler2D g_Texture0;
         uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture1Resolution;
         uniform float g_FlowAmp;
         uniform float g_FlowSpeed;
         uniform float g_PhaseFeather;
@@ -103,13 +104,17 @@ struct WPEShaderTranspilerTests {
         }
         """
         let result = try WPEShaderTranspiler.translateFragment(
-            shaderName: "waterflow",
+            shaderName: "effects/waterflow",
             preprocessedSource: source
         )
         #expect(result.mslSource.contains("wpe_waterflow_cycles(g_Time, g_FlowSpeed)"))
         #expect(result.mslSource.contains("wpe_waterflow_blend(g_Time, g_FlowSpeed, g_PhaseFeather)"))
         // The buggy default must NOT be how v_Cycles is initialized.
         #expect(!result.mslSource.contains("v_Cycles = float4(in.uv, in.uv)"))
+        // v_TexCoord.zw (the flow-mask UV) must reconstruct from g_Texture1Resolution and
+        // keep sampling .zw — NOT be rewritten to .xy (waterflow joins the zw whitelist).
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+        #expect(result.mslSource.contains("v_TexCoord.zw"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0

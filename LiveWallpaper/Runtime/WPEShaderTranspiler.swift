@@ -1096,12 +1096,12 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// waterwaves computes a resolution-scaled mask UV into `v_TexCoord.zw`, which the
-    /// fragment-only path faithfully synthesizes (`wpe_texcoord_with_resolution`). For that
-    /// shader we keep the `.zw` sample so the mask padding correction survives. For every
-    /// other shader the synthesized `.zw` is NOT guaranteed to match the source `.vert`
-    /// (e.g. blur step, clipping-mask transforms), so we keep the historical `.xy` fallback
-    /// to avoid changing their flags-off output.
+    /// waterwaves/waterflow compute a resolution-scaled mask UV into `v_TexCoord.zw`
+    /// (`uv·res.zw/res.xy`), which the fragment-only path synthesizes byte-for-byte via
+    /// `wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)`. For those we keep the
+    /// `.zw` sample so the mask padding correction survives. For every other shader the
+    /// synthesized `.zw` is NOT guaranteed to match the source `.vert` (e.g. blur step,
+    /// clipping-mask transforms), so we keep the historical `.xy` fallback.
     private static func rewriteTexCoordMaskUVFallback(
         _ source: String,
         varyingTypesByName: [String: String],
@@ -1113,17 +1113,22 @@ struct WPEShaderTranspiler {
         return source
     }
 
-    /// Only `effects/waterwaves` has a transpiler-synthesized `v_TexCoord.zw` that matches its
-    /// source `.vert` (the mask-UV resolution scaling). Restrict `.zw` preservation to it so
-    /// other float4-`v_TexCoord` effects keep their historical behavior.
+    /// waterwaves + waterflow synthesize a `v_TexCoord.zw` that matches their source
+    /// `.vert` (mask-UV resolution scaling). Restrict `.zw` preservation to those so other
+    /// float4-`v_TexCoord` effects keep their historical behavior.
     private static func shouldPreserveTexCoordZW(shaderName: String) -> Bool {
         let normalized = shaderName
             .lowercased()
             .replacingOccurrences(of: ".frag", with: "")
             .replacingOccurrences(of: ".vert", with: "")
-        return normalized == "effect_waterwaves"
-            || normalized == "effects/waterwaves"
-            || normalized.hasSuffix("/effects/waterwaves")
+        for family in ["waterwaves", "waterflow"] {
+            if normalized == "effect_\(family)"
+                || normalized == "effects/\(family)"
+                || normalized.hasSuffix("/effects/\(family)") {
+                return true
+            }
+        }
+        return false
     }
 
     /// Metal accepts aggregate array initializers, not GLSL constructor syntax
