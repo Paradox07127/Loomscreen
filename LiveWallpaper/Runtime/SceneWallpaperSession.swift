@@ -48,9 +48,9 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     var videoPlayer: WallpaperVideoPlayer? { nil }
     var wallpaperWindow: NSWindow? { window }
 
-    /// Hand the renderer out so coordinators outside the session (e.g.
-    /// the exclusive-rendering coordinator) can flip throttle state without
-    /// reaching through `wallpaperWindow.contentView`.
+    /// Hand the renderer out so views outside the session (e.g. the scene
+    /// detail's diagnostics) can read its state without reaching through
+    /// `wallpaperWindow.contentView`.
     var sceneRenderer: WPEMetalSceneRenderer? { renderer }
 
     /// Property-key → render-target bindings the Metal renderer exposes.
@@ -97,11 +97,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
         renderer?.applyPerformanceProfile(isVisible ? profile : .suspended)
-    }
-
-    /// Exclusive-rendering coordinator entry point.
-    func setThrottled(_ throttled: Bool) {
-        renderer?.setThrottled(throttled)
     }
 
     /// Per-screen cursor-reactivity toggle (camera parallax + pointer shaders).

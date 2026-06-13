@@ -14,8 +14,8 @@ private struct WPEMetalTextureLoadContextError: Error {
 
 @MainActor
 final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
-    /// Default frame rate target when not throttled and no user override
-    /// has been applied. 30 FPS matches Wallpaper Engine's stock default
+    /// Default frame rate target when no user override has been applied.
+    /// 30 FPS matches Wallpaper Engine's stock default
     /// (Almamu's reference open-source impl ships `maximumFPS = 30`; the
     /// official Windows app's "Balanced" preset also defaults to 30) —
     /// most published WPE shaders are tuned around a 30 FPS clock, so
@@ -28,11 +28,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// as "as fast as possible" (which on some macOS versions free-runs
     /// well past vsync).
     static let unlimitedPreferredFPS = 60
-    /// Frame rate target when an external coordinator wants the renderer
-    /// out of the way (e.g. console window in focus, multi-display
-    /// exclusive rendering takeover). 1fps keeps the timer alive so we can
-    /// bounce back when throttling is released.
-    static let throttledPreferredFPS = 1
     /// Above this raw-bytes footprint, eager-upload a multi-frame `.tex`
     /// would burn far more VRAM than the runtime needs at any one moment
     /// — route through `WPETexLazyAnimatedTextureSource` instead. Threshold
@@ -89,12 +84,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// audio-reactive scenes that don't move.
     private let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
     private var audioDiagCounter = 0
-    /// Last throttle state we logged, so a focus/unfocus transition (which
-    /// flips the scene between 60 FPS and `throttledPreferredFPS` = 1) emits a
-    /// line immediately instead of waiting out the per-60-frame cadence. This
-    /// is the key signal for "the bars look frozen": when the app's own
-    /// console window is key, the scene on that screen drops to 1 FPS.
-    private var audioDiagLastThrottled: Bool?
     /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
@@ -112,7 +101,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
     private var didLoad = false
-    private var isThrottled = false
     /// Scene-level camera parallax: the parsed settings plus the per-frame
     /// exponential smoother that drives every layer's depth shift. Neutral when
     /// the scene disables parallax.
@@ -127,8 +115,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Previous frame's pointer UV, fed as the official `g_PointerPositionLast`.
     private var previousPointer = SIMD2<Double>(0.5, 0.5)
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
-    /// whenever the renderer is not throttled / suspended. Defaults to the
-    /// WPE-compatible 30 FPS until `setFrameRateLimit(_:)` overrides it.
+    /// whenever the renderer is not suspended. Defaults to the WPE-compatible
+    /// 30 FPS until `setFrameRateLimit(_:)` overrides it.
     private var userPreferredFPS: Int = WPEMetalSceneRenderer.defaultPreferredFPS
     /// Inspector mute state cached here so callers that arrive before
     /// `startSoundRuntime` can still record intent; `startSoundRuntime`
@@ -1038,16 +1026,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             let audio = SystemAudioCaptureManager.broker.snapshot()
             if audioDebugLogEnabled {
                 audioDiagCounter += 1
-                // Log every ~60 frames, OR immediately when the throttle flips
-                // (focus/unfocus of the app's console window). The latter makes
-                // the "frozen bars" cause visible: throttled=true ⇒ fps=1.
-                let throttledNow = isThrottled
-                if audioDiagCounter % 60 == 1 || audioDiagLastThrottled != throttledNow {
-                    audioDiagLastThrottled = throttledNow
+                // Periodic (~every 60 frames) snapshot of what the renderer sees
+                // on the shared audio broker — diagnoses audio-reactive scenes
+                // whose bars don't move.
+                if audioDiagCounter % 60 == 1 {
                     let peakL = audio.left.max() ?? 0
                     let peakR = audio.right.max() ?? 0
                     Logger.notice(
-                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) throttled=\(throttledNow) fps=\(mtkView.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
+                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) fps=\(mtkView.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
                         category: .audioCapture
                     )
                 }
@@ -1544,21 +1530,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return true
     }
 
-    /// Resolves the effective `preferredFramesPerSecond` honouring the
-    /// renderer-wide throttle (per-screen visibility) and the user's
-    /// frame-rate ceiling. Performance profile is intentionally not a knob
-    /// here — graduated FPS reduction conflicts with the user's per-screen
-    /// cap, so the runtime only switches between full quality and suspended.
-    private var effectivePreferredFramesPerSecond: Int {
-        isThrottled ? Self.throttledPreferredFPS : userPreferredFPS
-    }
-
-    func setThrottled(_ throttled: Bool) {
-        isThrottled = throttled
-        guard currentProfile != .suspended else { return }
-        mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
-    }
-
     func setMouseInteractionEnabled(_ enabled: Bool) {
         mouseInteractionEnabled = enabled
         refreshLiveness()
@@ -1593,7 +1564,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard resolved != userPreferredFPS else { return }
         userPreferredFPS = resolved
         guard currentProfile != .suspended else { return }
-        mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
+        mtkView.preferredFramesPerSecond = userPreferredFPS
     }
 
     /// Forwards the inspector's mute toggle into the scene's audio
@@ -1663,7 +1634,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         case .quality:
             mtkView.isPaused = !needsContinuousFrames
             mtkView.enableSetNeedsDisplay = !needsContinuousFrames
-            mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
+            mtkView.preferredFramesPerSecond = userPreferredFPS
         case .suspended:
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true

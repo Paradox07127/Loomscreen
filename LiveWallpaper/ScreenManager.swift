@@ -124,8 +124,6 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private var lastScreenSignatures: [CGDirectDisplayID: ScreenConfigurationSignature] = [:]
     @ObservationIgnored private var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
-    @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
-    @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
     private enum UserAbsenceReason: Hashable {
         case screenLocked
         case displaySleep
@@ -290,13 +288,10 @@ final class ScreenManager {
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
-    /// Bumped each time `scheduleConsoleKeyTracking()` registers a new
-    /// observer. The onChange callback short-circuits when its captured
-    /// generation no longer matches the latest value, so accidentally
-    /// re-registering does not cascade into stacked callbacks.
-    @ObservationIgnored private var consoleKeyTrackingGeneration: UInt64 = 0
-    /// Same idempotency token as `consoleKeyTrackingGeneration`, applied to
-    /// `observeFullScreenChanges()`.
+    /// Bumped each time `observeFullScreenChanges()` registers a new observer.
+    /// The onChange callback short-circuits when its captured generation no
+    /// longer matches the latest value, so accidentally re-registering does
+    /// not cascade into stacked callbacks.
     @ObservationIgnored private var fullScreenTrackingGeneration: UInt64 = 0
     // MARK: - Initialization
     init(startupOptions: ScreenManagerStartupOptions = ScreenManagerStartupOptions()) {
@@ -315,9 +310,6 @@ final class ScreenManager {
             setupMemoryMonitoring()
         }
         setupFullScreenDetection()
-        if featureCatalog.isEnabled(.scene) {
-            setupExclusiveRenderingCoordinator()
-        }
         if featureCatalog.isEnabled(.lockScreenSnapshots) {
             _ = lockScreenSnapshotCoordinator
         }
@@ -542,57 +534,6 @@ final class ScreenManager {
         fullScreenDetector.checkNow()
         handleFullScreenChange(fullScreenDetector.hiddenScreens)
     }
-
-    /// Wires the console-key-window observer so scene wallpapers throttle to 1 fps while the user is interacting with the LiveWallpaper UI.
-    private func setupExclusiveRenderingCoordinator() {
-        exclusiveRenderingCoordinator.start()
-        scheduleConsoleKeyTracking()
-    }
-
-    private func scheduleConsoleKeyTracking() {
-        consoleKeyTrackingGeneration &+= 1
-        let generation = consoleKeyTrackingGeneration
-        applyConsoleKeyState()
-        withObservationTracking {
-            // Reading both flags inside the same tracker batches a single
-            // re-fire when either changes (key window toggle OR window
-            // dragged to a different screen).
-            _ = exclusiveRenderingCoordinator.isConsoleKeyWindow
-            _ = exclusiveRenderingCoordinator.consoleKeyScreenID
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self,
-                      self.consoleKeyTrackingGeneration == generation else { return }
-                self.applyConsoleKeyState()
-                self.scheduleConsoleKeyTracking()
-            }
-        }
-    }
-
-    private func applyConsoleKeyState() {
-        #if !LITE_BUILD
-        // Throttle only the scene whose screen hosts the focused console
-        // window. Sibling screens stay at full FPS because the user can
-        // still see them — the previous "throttle every scene whenever any
-        // app window is key" rule made multi-display scenes look stuttery
-        // until the user clicked through to unfocus the app.
-        let throttledScreenID = throttledSceneScreenID()
-        for screen in screens {
-            guard let session = screen.runtimeSession as? SceneWallpaperSession else { continue }
-            session.setThrottled(throttledScreenID == screen.id)
-        }
-        #endif
-    }
-
-    #if !LITE_BUILD
-    /// `nil` when no console window is key, or when the key window cannot
-    /// be mapped to a known screen — both mean every scene stays at full
-    /// FPS.
-    private func throttledSceneScreenID() -> CGDirectDisplayID? {
-        guard exclusiveRenderingCoordinator.isConsoleKeyWindow else { return nil }
-        return exclusiveRenderingCoordinator.consoleKeyScreenID
-    }
-    #endif
 
     private func observeFullScreenChanges() {
         fullScreenTrackingGeneration &+= 1
@@ -1625,7 +1566,6 @@ final class ScreenManager {
             }
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
-            sceneSession.setThrottled(throttledSceneScreenID() == screen.id)
             // Push the persisted playback inspector state into the freshly
             // installed scene session so the user's saved Frame Rate /
             // Mute / Volume take effect from the first frame instead of
