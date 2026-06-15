@@ -520,9 +520,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 
-        // Production submits frames asynchronously (no per-frame CPU stall on the
-        // GPU); fall back to synchronous only when a read-back needs finished pixels.
-        executor.synchronizeFrameCompletion = shouldSynchronizeFrames()
+        // Render the FIRST frame synchronously: it is read back on the CPU right
+        // after load() by the scene-debug snapshot, the corpus harness, and the
+        // `renderedTexture` accessor (tests) — an async submission would let those
+        // read-backs race the GPU and sample an unfinished frame. It is a one-time
+        // cost; the steady-state draw loop switches to async below.
+        executor.synchronizeFrameCompletion = true
         let capture = beginGPUCaptureIfRequested()
         outputTexture = try renderCurrentFrame()
         capture?.stop()
@@ -557,6 +560,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         hasPresentedFrame = true
         didLoad = true
+        // Steady-state draw loop: async in production (no per-frame CPU stall on
+        // the GPU); stay synchronous only when a per-frame read-back is active
+        // (scene-debug / GPU capture / pass dumps) or pinned via WPEMetalSerializeFrames.
+        executor.synchronizeFrameCompletion = shouldSynchronizeFrames()
         applyPerformanceProfile(currentProfile)
         mtkView.setNeedsDisplay(mtkView.bounds)
         debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
