@@ -47,6 +47,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// (60 × 122 MB raw) to the streaming source.
     private static let lazyAnimationRawByteThreshold = 200_000_000
 
+    /// When true, emitters are pre-populated to their steady-state spread on
+    /// load (`WPEParticleSystem.prewarm`, up to ~900 substeps/system — the
+    /// dominant `particles.load` cost). Default OFF: emitters start empty and
+    /// fill naturally, trading the populated-on-load look for a faster load.
+    /// Flip `WPEParticlePrewarmEnabled` (Developer Tools → "Particle prewarm").
+    private static var particlePrewarmEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "WPEParticlePrewarmEnabled")
+    }
+
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
@@ -1740,14 +1749,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             system.followParent = followParent
             system.requiresFollowParent = true
         }
-        // Prewarm long enough that the first-spawned particles have lived a full
-        // lifetime, so the emitter starts at its STEADY-STATE age/position spread
-        // (matches WPE, which loads with a populated emitter). `+2s` only aged
-        // particles to ~2s, leaving them clustered near the origin instead of
-        // spread across their fall path. Cap to bound load-time prewarm cost.
-        let prewarmSeconds = max(0, definition.startDelay)
-            + min(max(definition.lifetimeMax, 2.0), 15.0)
-        system.prewarm(simulatedSeconds: prewarmSeconds)
+        // Prewarm pre-populates the emitter to its STEADY-STATE age/position
+        // spread so it loads already-full (matches WPE's populated-on-load
+        // look) instead of filling from empty. It is the dominant
+        // `particles.load` cost — up to ~900 substeps/system run synchronously
+        // on the main actor — so it is gated: default OFF = emitters start at
+        // zero and fill naturally (faster load); flip `WPEParticlePrewarmEnabled`
+        // (Developer Tools → "Particle prewarm") to restore the populated look.
+        if Self.particlePrewarmEnabled {
+            // Prewarm long enough that the first-spawned particles have lived a
+            // full lifetime (a `+2s` cap left them clustered near the origin).
+            let prewarmSeconds = max(0, definition.startDelay)
+                + min(max(definition.lifetimeMax, 2.0), 15.0)
+            system.prewarm(simulatedSeconds: prewarmSeconds)
+        }
         particleSystems.append(system)
         particleTextures[ObjectIdentifier(system)] = resolved
         if WPESceneDebugArtifacts.shared.isEnabled {
