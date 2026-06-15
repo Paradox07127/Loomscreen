@@ -102,6 +102,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// "cursor sampled but force feels wrong".
     private let cursorDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEParticleCursorDebug")
     private var cursorDiagCounter = 0
+    /// Per-load stage profiler; non-nil only while `WPEMetalLoadTiming` is set.
+    /// Fed by `debugStage`, it logs a per-phase load breakdown at first-frame.
+    private var loadTiming: WPESceneLoadTiming?
     /// Last throttle state we logged, so a focus/unfocus transition (which
     /// flips the scene between 60 FPS and `throttledPreferredFPS` = 1) emits a
     /// line immediately instead of waiting out the per-60-frame cadence. This
@@ -281,6 +284,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             descriptor: descriptorSummary
         )
         #endif
+        loadTiming = WPESceneLoadTiming.isEnabled
+            ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
+            : nil
         debugStage("load.begin", descriptorSummary)
         do {
             try await performLoad()
@@ -964,6 +970,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// even builds the (per-stage, per-pass) interpolated strings. Flip the
     /// switch on to get the full console + scene.log stage trace back.
     private func debugStage(_ stage: String, _ detail: @autoclosure () -> String) {
+        // Feed the load profiler first — it's gated independently of scene-debug,
+        // so load timing can be gathered without enabling the dump machinery.
+        loadTiming?.mark(stage)
         guard WPESceneDebugArtifacts.shared.isEnabled else { return }
         let detail = detail()
         Logger.debug(
