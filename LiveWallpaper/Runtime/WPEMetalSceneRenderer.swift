@@ -2071,44 +2071,190 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         case dynamicSource(WPEDynamicTextureSource)
     }
 
+    /// One unique external texture to load, captured before fan-out so the
+    /// off-actor lane never races on a shared dedup map.
+    private struct WPETextureLoadJob: Sendable {
+        let path: String
+        let layerName: String
+        let candidates: [String]
+    }
+
+    /// Outcome of the off-actor resolve+upload lane. `staticTexture` carries a
+    /// fully-built Metal texture (a thread-safe object) back to the main actor;
+    /// `needsOnActor` flags a dynamic/video/animated/heavy-streaming source
+    /// whose construction is `@MainActor`-isolated and is handled serially.
+    /// `@unchecked Sendable` is the idiomatic escape hatch for ferrying an
+    /// `MTLTexture` (documented thread-safe) across the actor hop.
+    private enum WPEParallelTextureResult: @unchecked Sendable {
+        case staticTexture(MTLTexture)
+        case needsOnActor
+    }
+
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
         loadedTextures = [:]
         dynamicTextureSources = [:]
 
+        // Collect the unique external textures in pipeline order. Deduping up
+        // front (instead of the old per-iteration map check) means concurrent
+        // resolves never touch the same path, so the @MainActor texture maps
+        // are written exactly once each, on this actor.
+        var jobs: [WPETextureLoadJob] = []
+        var seen = Set<String>()
         for layer in pipeline.layers {
-            try Task.checkCancellation()
+            let layerName = layer.graphLayer.objectName
             if layer.passes.isEmpty {
-                try await loadTexture(
-                    reference: .image(layer.graphLayer.imagePath),
-                    layerName: layer.graphLayer.objectName
-                )
+                if let path = externalTexturePath(for: .image(layer.graphLayer.imagePath)),
+                   seen.insert(path).inserted {
+                    jobs.append(WPETextureLoadJob(path: path, layerName: layerName, candidates: textureCandidates(for: path)))
+                }
                 continue
             }
             for preparedPass in layer.passes {
                 for reference in requiredTextureReferences(for: preparedPass) {
-                    try Task.checkCancellation()
-                    try await loadTexture(
-                        reference: reference,
-                        layerName: layer.graphLayer.objectName
-                    )
+                    if let path = externalTexturePath(for: reference),
+                       seen.insert(path).inserted {
+                        jobs.append(WPETextureLoadJob(path: path, layerName: layerName, candidates: textureCandidates(for: path)))
+                    }
                 }
+            }
+        }
+        guard !jobs.isEmpty else { return }
+
+        // Snapshot the load generation so a reload/cleanup that resets the maps
+        // mid-flight can't get a stale texture written into the new load.
+        let generation = loadGeneration
+        let resolver = resourceResolver
+        let loader = textureLoader
+        let threshold = Self.lazyAnimationRawByteThreshold
+        // Width bounded like the upload lane: parallelizes the per-texture
+        // inflate (the on-main serial cost today) without over-subscribing the
+        // upload queue, which keeps its own 1-2 slot admission bound.
+        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+        try await withThrowingTaskGroup(of: (Int, WPEParallelTextureResult).self) { group in
+            var nextIndex = 0
+            func spawnNext() -> Bool {
+                guard nextIndex < jobs.count else { return false }
+                let index = nextIndex
+                nextIndex += 1
+                let job = jobs[index]
+                group.addTask(priority: .userInitiated) {
+                    do {
+                        let result = try await Self.resolveStaticTextureOrDefer(
+                            relativePath: job.path,
+                            label: "WPE texture \(job.path)",
+                            candidates: job.candidates,
+                            resolver: resolver,
+                            loader: loader,
+                            streamingThreshold: threshold
+                        )
+                        return (index, result)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        throw WPEMetalTextureLoadContextError(layerName: job.layerName, path: job.path, underlying: error)
+                    }
+                }
+                return true
+            }
+
+            for _ in 0..<width where spawnNext() {}
+
+            while let (index, result) = try await group.next() {
+                try Task.checkCancellation()
+                guard loadGeneration == generation else {
+                    group.cancelAll()
+                    return
+                }
+                switch result {
+                case .staticTexture(let texture):
+                    loadedTextures[jobs[index].path] = texture
+                case .needsOnActor:
+                    // Rare: video / multi-frame animation / heavy-streaming
+                    // `.tex`. Their source construction is @MainActor-only, so
+                    // route through the untouched serial resolver rather than
+                    // duplicating that logic in the parallel lane.
+                    try await loadDynamicTextureOnActor(path: jobs[index].path, layerName: jobs[index].layerName)
+                }
+                _ = spawnNext()
             }
         }
     }
 
-    private func loadTexture(
-        reference: WPETextureReference,
-        layerName: String
-    ) async throws {
-        guard let path = externalTexturePath(for: reference),
-              loadedTextures[path] == nil,
-              dynamicTextureSources[path] == nil else {
-            return
+    /// Off-actor: resolve + upload a *static* texture, or report that the
+    /// reference needs @MainActor construction. Mirrors the candidate-walk in
+    /// `makeTextureResource`; only the static-image / static-payload branches
+    /// build here (the upload still flows through the bounded upload queue).
+    private nonisolated static func resolveStaticTextureOrDefer(
+        relativePath: String,
+        label: String,
+        candidates: [String],
+        resolver: WPEMultiRootResourceResolver,
+        loader: WPEMetalTextureLoader,
+        streamingThreshold: Int
+    ) async throws -> WPEParallelTextureResult {
+        var lastError: Error?
+        for candidate in candidates {
+            do {
+                if shouldTryTexturePayload(candidate) {
+                    do {
+                        if detectHeavyStreaming(candidate, resolver: resolver, threshold: streamingThreshold) {
+                            return .needsOnActor
+                        }
+                        let payload = try resolver.resolveTexturePayload(relativePath: candidate)
+                        if payload.videoPayload != nil || payload.animationTrack != nil {
+                            return .needsOnActor
+                        }
+                        return .staticTexture(try await loader.makeTexture(from: payload, label: label))
+                    } catch {
+                        lastError = error
+                    }
+                }
+                let image = try resolver.resolveImage(relativePath: candidate)
+                return .staticTexture(try await loader.makeTexture(from: image, label: label))
+            } catch {
+                lastError = error
+            }
         }
+        throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
+    }
+
+    /// `nonisolated` heavy-`.tex` probe matching `resolveStreamingPayloadIfHeavy`'s
+    /// decision (same threshold + probe candidates), minus the opt-in debug
+    /// marks. When this returns true the on-actor path re-resolves and builds
+    /// the lazy streaming source.
+    private nonisolated static func detectHeavyStreaming(
+        _ candidate: String,
+        resolver: WPEMultiRootResourceResolver,
+        threshold: Int
+    ) -> Bool {
+        let ext = (candidate as NSString).pathExtension.lowercased()
+        let probeCandidates: [String]
+        if ext == "tex" {
+            probeCandidates = [candidate]
+        } else if ext.isEmpty {
+            let stripped = (candidate as NSString).deletingPathExtension
+            probeCandidates = [candidate, "materials/\(stripped).tex"]
+        } else {
+            return false
+        }
+        for probe in probeCandidates {
+            guard let payload = try? resolver.resolveStreamingTexturePayload(relativePath: probe) else {
+                continue
+            }
+            if payload.totalUncompressedImageBytes > threshold {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// On-actor build for the dynamic/video/animated/heavy-streaming minority,
+    /// reusing the serial `makeTextureResource`. Paths are pre-deduped by the
+    /// caller, so no map guard is needed here.
+    private func loadDynamicTextureOnActor(path: String, layerName: String) async throws {
         do {
             let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
-            // A cancelled load resumed after a reload reset the texture maps
-            // must not write a stale entry into the new load's state.
             try Task.checkCancellation()
             switch resource {
             case .staticTexture(let texture):
@@ -2383,8 +2529,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {
+        Self.shouldTryTexturePayload(path)
+    }
+
+    /// `nonisolated` twin so the off-actor parallel-resolve lane can make the
+    /// same `.tex`-vs-raster decision the on-actor path uses.
+    private nonisolated static func shouldTryTexturePayload(_ path: String) -> Bool {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        return !Self.knownRawImageExtensions.contains(extensionName)
+        return !knownRawImageExtensions.contains(extensionName)
     }
 
     /// Raster image extensions that `WPETextureLoader` can load via ImageIO
@@ -2392,7 +2544,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// of these are taken at face value; anything else (including names that
     /// merely *look* like they end in an extension because they contain a dot)
     /// goes through the materials/-prefix fallback below.
-    static let knownRawImageExtensions: Set<String> = [
+    nonisolated static let knownRawImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
     ]
 
