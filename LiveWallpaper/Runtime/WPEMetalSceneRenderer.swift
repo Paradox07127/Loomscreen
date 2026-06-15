@@ -1282,7 +1282,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 }
             }
         }
+        // Split the (synchronous) first load frame into CPU texture prep (lazy
+        // .tex decode + dynamic-source refresh) vs GPU render (encode + upload
+        // completion + draw + wait), so we can tell which dominates render.firstFrame
+        // on heavy scenes. Only the load-time first frame, only when timing is on.
+        let splitFirstFrame = WPESceneLoadTiming.isEnabled && !didLoad
+        let texPrepStart = splitFirstFrame ? DispatchTime.now() : nil
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
+        let gpuRenderStart = splitFirstFrame ? DispatchTime.now() : nil
         let frame = try executor.render(
             pipeline: pipeline,
             size: sceneRenderSize,
@@ -1294,6 +1301,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             particleTextures: particleTextures,
             particleParallax: parallaxFrame
         )
+        if let texPrepStart, let gpuRenderStart {
+            let prepMs = Double(gpuRenderStart.uptimeNanoseconds &- texPrepStart.uptimeNanoseconds) / 1_000_000
+            let renderMs = Double(DispatchTime.now().uptimeNanoseconds &- gpuRenderStart.uptimeNanoseconds) / 1_000_000
+            Logger.notice(
+                "[load-timing] scene=\(descriptor.workshopID) firstFrame-split: texture-prep=\(String(format: "%.1f", prepMs))ms gpu-render=\(String(format: "%.1f", renderMs))ms",
+                category: .performance
+            )
+        }
         if let textRenderer, !textObjects.isEmpty {
             // CoreText draws for objects that don't take the MSDF path this frame.
             var draws: [WPETextOverlayDraw] = []
