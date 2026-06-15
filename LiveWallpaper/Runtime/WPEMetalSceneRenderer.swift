@@ -128,6 +128,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
     private var didLoad = false
+    /// Bumped on every load and on teardown (`reload`/`cleanup`) so a deferred
+    /// task — e.g. the off-critical-path audio startup — can detect that the
+    /// renderer has since reloaded or torn down and bail on a stale scene.
+    private var loadGeneration = 0
     private var isThrottled = false
     /// Scene-level camera parallax: the parsed settings plus the per-frame
     /// exponential smoother that drives every layer's depth shift. Neutral when
@@ -285,6 +289,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         )
         #endif
         WPEMetalCompileTimer.reset()
+        loadGeneration &+= 1
         loadTiming = WPESceneLoadTiming.isEnabled
             ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
             : nil
@@ -511,12 +516,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("text.load.done", "objects=\(textObjects.count)")
         try Task.checkCancellation()
 
-        debugStage("audio.start", "begin")
-        onProgress?("Starting audio runtime")
-        startSoundRuntime(from: document)
-        debugStage("audio.start.done", "runtime=\(soundRuntime == nil ? "absent" : "active")")
-        try Task.checkCancellation()
-
+        // Audio startup is deferred to after the first frame (see below): the
+        // synchronous `runtime.start(sounds:)` is a 300-900ms hit that does not
+        // gate any pixels, so keeping it on the load path only inflates perceived
+        // load time.
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 
@@ -575,7 +578,34 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         applyPerformanceProfile(currentProfile)
         mtkView.setNeedsDisplay(mtkView.bounds)
         debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
+        scheduleDeferredAudioStartup(from: document)
         _ = id
+    }
+
+    /// Start the sound runtime off the load critical path. The wallpaper is
+    /// already on screen by the time this runs, so the synchronous
+    /// `runtime.start(sounds:)` (300-900ms of file load + engine spin-up) no
+    /// longer inflates perceived load time. Pending mute/volume intent set before
+    /// load completes is preserved by `startSoundRuntime`. Bails if the renderer
+    /// reloaded or tore down before the task ran (generation guard + `weak self`).
+    private func scheduleDeferredAudioStartup(from document: WPESceneDocument) {
+        guard !document.soundObjects.isEmpty else {
+            soundRuntime = nil
+            return
+        }
+        let generation = loadGeneration
+        Task { @MainActor [weak self] in
+            guard let self, self.loadGeneration == generation else { return }
+            let start = DispatchTime.now()
+            self.startSoundRuntime(from: document)
+            if WPESceneLoadTiming.isEnabled {
+                let ms = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
+                Logger.notice(
+                    "[load-timing] scene=\(self.descriptor.workshopID) deferred-audio=\(String(format: "%.1f", ms))ms (off critical path, after first frame)",
+                    category: .performance
+                )
+            }
+        }
     }
 
     #if DEBUG
@@ -1698,6 +1728,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     func reload() async throws {
+        loadGeneration &+= 1
         didLoad = false
         hasPresentedFrame = false
         outputTexture = nil
@@ -1907,6 +1938,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     func cleanup() {
+        loadGeneration &+= 1
         mtkView.delegate = nil
         outputTexture = nil
         scenePropertyBindings = [:]
