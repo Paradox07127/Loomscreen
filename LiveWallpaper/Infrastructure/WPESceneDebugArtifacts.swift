@@ -10,8 +10,10 @@ import Metal
 /// the compiler saw (original/processed GLSL, translated MSL, error text,
 /// scene-info, scene.log mirror, optional first-frame.png).
 ///
-/// Always on in DEBUG; in Release gated by the `WPESceneDebugArtifactsEnabled`
-/// UserDefaults flag (Developer Mode → Developer Tools).
+/// Opt-in in all builds: gated by the `WPESceneDebugArtifactsEnabled`
+/// UserDefaults flag (Developer Mode → Developer Tools). Off by default so a
+/// normal launch never pays for shader dumps / first-frame read-back / per-pass
+/// binding diagnostics; the corpus harness and trace tests flip it on explicitly.
 ///
 /// `@unchecked Sendable`: `session` is guarded by `sessionLock`; I/O via `writeQueue`.
 final class WPESceneDebugArtifacts: @unchecked Sendable {
@@ -71,8 +73,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     }
     #endif
 
-    /// Caps on the scene-debug directory so DEBUG builds (where dumps default on)
-    /// don't accumulate unbounded PNG/MSL artifacts. The oldest session folders
+    /// Caps on the scene-debug directory so builds with dumps enabled don't
+    /// accumulate unbounded PNG/MSL artifacts. The oldest session folders
     /// are pruned first when either bound is exceeded; the newest is always kept.
     private let maxSessionFolders = 40
     private let maxTotalBytes: UInt64 = 512 * 1024 * 1024  // 512 MiB
@@ -90,7 +92,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         let testingOverride = testingEnabledOverride
         testingEnabledOverrideLock.unlock()
         if let testingOverride { return testingOverride }
-        return UserDefaults.standard.object(forKey: Self.defaultsKey) as? Bool ?? true
+        return UserDefaults.standard.bool(forKey: Self.defaultsKey)
         #else
         return UserDefaults.standard.bool(forKey: Self.defaultsKey)
         #endif

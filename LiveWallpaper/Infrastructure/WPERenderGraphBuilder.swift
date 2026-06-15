@@ -726,11 +726,15 @@ struct WPERenderGraphBuilder: Sendable {
         textures[1] = textures[1] ?? textureReference(clipMaskName, ownerPath: context.object.imageRelativePath)
         textures[8] = .fbo(clipTargetName)
         #if DEBUG
-        Logger.info(
-            "[WPE clip] builder injected clip-composite bindings for \(context.model.puppetPath ?? "?") "
-                + "(mask=\(clipMaskName), rt=\(clipTargetName))",
-            category: .wpeRender
-        )
+        // Gated behind the scene-debug switch (off by default) so clip-composite
+        // injection doesn't log on every load of a genericimage4 puppet scene.
+        if UserDefaults.standard.bool(forKey: "WPESceneDebugArtifactsEnabled") {
+            Logger.info(
+                "[WPE clip] builder injected clip-composite bindings for \(context.model.puppetPath ?? "?") "
+                    + "(mask=\(clipMaskName), rt=\(clipTargetName))",
+                category: .wpeRender
+            )
+        }
         #endif
         return pass.replacingTextures(textures)
     }

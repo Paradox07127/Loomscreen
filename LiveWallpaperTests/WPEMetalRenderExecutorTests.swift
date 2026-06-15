@@ -35,6 +35,47 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Async submission renders past the in-flight bound without deadlock")
+    func asyncSubmissionDoesNotDeadlock() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        func makePipeline() -> WPEPreparedRenderPipeline {
+            let pass = solidPass()
+            return WPEPreparedRenderPipeline(layers: [
+                WPEPreparedRenderLayer(
+                    graphLayer: graphLayer(pass: pass),
+                    passes: [WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(name: "solidcolor", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: ["g_Color": .vector([1, 0, 0, 1])]
+                    )]
+                )
+            ])
+        }
+
+        // Submit more frames than the in-flight bound. If a completion handler
+        // failed to signal the semaphore, the (maxFramesInFlight+1)th call would
+        // block here forever — so reaching the end proves the permit accounting
+        // balances under async submission.
+        executor.synchronizeFrameCompletion = false
+        let size = CGSize(width: 4, height: 4)
+        for _ in 0..<(WPEMetalRenderExecutor.maxFramesInFlight + 3) {
+            let output = try executor.render(pipeline: makePipeline(), size: size, textures: [:])
+            #expect(output.width == 4)
+        }
+
+        // Back on the synchronous path the same executor still renders correct
+        // pixels (semaphore balanced, output ring intact after the async run).
+        executor.synchronizeFrameCompletion = true
+        let output = try executor.render(pipeline: makePipeline(), size: size, textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+    }
+
     @Test("Custom shader without recognizable main surfaces a precise translator error")
     func rejectsUntranslatableCustomShader() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -1745,6 +1786,11 @@ struct WPEMetalRenderExecutorTests {
             0, 0, 0, 0
         ]))
         mask.label = "mask-texture"
+        // recordTextureBinding only records while scene-debug is enabled (now
+        // opt-in by default), so force it on for the duration of this diagnostic
+        // test rather than depending on the global default or test run order.
+        WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
+        defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
         defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
 
@@ -1816,6 +1862,11 @@ struct WPEMetalRenderExecutorTests {
             0, 255, 0, 255
         ]))
         primary.label = "base-texture"
+        // recordTextureBinding only records while scene-debug is enabled (now
+        // opt-in by default), so force it on for the duration of this diagnostic
+        // test rather than depending on the global default or test run order.
+        WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
+        defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
         defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
 

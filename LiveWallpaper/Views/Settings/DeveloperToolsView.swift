@@ -251,6 +251,8 @@ struct DeveloperToolsView: View {
         var flags: [DiagnosticBoolFlag] = [
             .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
                   help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
+            .init(key: "WPEMetalLoadTiming", title: "Load timing",
+                  help: "Log a per-phase scene-load time breakdown ([load-timing] …) at first frame, for measuring + comparing load cost."),
             .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
                   help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
             .init(key: "WPEAudioDebugLog", title: "Audio debug log",

@@ -62,7 +62,7 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         do {
             let options = MTLCompileOptions()
             options.languageVersion = .version3_0
-            library = try device.makeLibrary(source: translation.mslSource, options: options)
+            library = try WPEMetalCompileTimer.measure { try device.makeLibrary(source: translation.mslSource, options: options) }
         } catch {
             WPESceneDebugArtifacts.shared.recordShaderFailure(
                 shaderName: request.shaderName,
