@@ -284,6 +284,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             descriptor: descriptorSummary
         )
         #endif
+        WPEMetalCompileTimer.reset()
         loadTiming = WPESceneLoadTiming.isEnabled
             ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
             : nil
@@ -528,6 +529,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let capture = beginGPUCaptureIfRequested()
         outputTexture = try renderCurrentFrame()
         capture?.stop()
+        if WPESceneLoadTiming.isEnabled {
+            // How much of render.firstFrame was one-time shader/pipeline
+            // compilation (cacheable via a binary archive) vs GPU work.
+            Logger.notice(
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", WPEMetalCompileTimer.milliseconds))ms (shader+pipeline, lands inside render.firstFrame)",
+                category: .performance
+            )
+        }
 
         if let outputTexture {
             // Capture per-pass scene-target RT hashes BEFORE finishFrame latches

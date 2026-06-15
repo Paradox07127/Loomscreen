@@ -922,7 +922,7 @@ final class WPEMetalRenderExecutor {
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.sourceAlphaBlendFactor = .one
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        let state = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: pipelineDescriptor) }
         msdfTextPipelineCache[key] = state
         return state
     }
@@ -1020,7 +1020,7 @@ final class WPEMetalRenderExecutor {
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.sourceAlphaBlendFactor = .one
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
         textOverlayPipelineCache[colorPixelFormat.rawValue] = state
         return state
     }
@@ -1075,7 +1075,7 @@ final class WPEMetalRenderExecutor {
             attachment.sourceAlphaBlendFactor = .sourceAlpha
             attachment.destinationAlphaBlendFactor = .one
         }
-        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
         particlePipelineCache[key] = state
         return state
     }
@@ -3617,7 +3617,7 @@ final class WPEMetalRenderExecutor {
         Self.applyBlendMode(blendMode.lowercased(), to: colorAttachment)
         let state: MTLRenderPipelineState
         do {
-            state = try device.makeRenderPipelineState(descriptor: descriptor)
+            state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
         } catch {
             throw WPEMetalRenderExecutorError.pipelineStateBuildFailed(
                 name: result.fragmentFunctionName,
