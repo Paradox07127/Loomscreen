@@ -128,4 +128,35 @@ struct WPESoundRuntimeTests {
         // does not throw on out-of-range input.
         #expect(true)
     }
+
+    @Test("prepare() attaches without playing; play() is a no-op when nothing prepared")
+    func prepareDefersPlayback() throws {
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: FileManager.default.temporaryDirectory,
+            dependencyMounts: []
+        )
+        let runtime = WPESoundRuntime(resolver: resolver)
+        defer { runtime.stop() }
+        // No resolvable sound files → nothing attaches. prepare must not throw,
+        // and play() returns false (no players) — the empty/guard path the
+        // deferred-audio fix relies on so nothing ever plays prematurely.
+        let attached = runtime.prepare(sounds: [])
+        #expect(attached == 0)
+        #expect(runtime.play() == false)
+    }
+
+    @Test("prepare() then stop() without play() (stale-scene teardown) is safe")
+    func prepareThenStopWithoutPlayIsSafe() throws {
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: FileManager.default.temporaryDirectory,
+            dependencyMounts: []
+        )
+        let runtime = WPESoundRuntime(resolver: resolver)
+        // Simulates the deferred-audio path bailing on reload/cleanup: prepared
+        // off-main, but the generation changed so play() never ran. stop() must
+        // release the engine cleanly without a prior play().
+        _ = runtime.prepare(sounds: [])
+        runtime.stop()
+        #expect(true)
+    }
 }

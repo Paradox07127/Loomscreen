@@ -54,8 +54,22 @@ final class WPESoundRuntime: @unchecked Sendable {
         self.imagBuffer = [Float](repeating: 0, count: Self.fftSize / 2)
     }
 
-    /// Boot the engine.
+    /// Convenience: `prepare` + `play` in one call (used by tests). The renderer
+    /// splits the two so the expensive `prepare` runs off the main actor and
+    /// `play` only happens once the scene is confirmed current.
+    @discardableResult
     func start(sounds: [WPESceneSoundObject]) -> Int {
+        let attached = prepare(sounds: sounds)
+        play()
+        return attached
+    }
+
+    /// Resolve + decode the sound files and wire up the engine WITHOUT starting
+    /// playback. This is the expensive part (file I/O + PCM buffer load,
+    /// ~300-900ms) and is safe to run off the main actor; nothing is audible
+    /// until `play()`. Returns the number of attached players.
+    @discardableResult
+    func prepare(sounds: [WPESceneSoundObject]) -> Int {
         let mainMixer = engine.mainMixerNode
         let outputFormat = mainMixer.outputFormat(forBus: 0)
 
@@ -88,18 +102,26 @@ final class WPESoundRuntime: @unchecked Sendable {
         mainMixer.installTap(onBus: 0, bufferSize: bufferSize, format: outputFormat) { [weak self] buffer, _ in
             self?.processTap(buffer: buffer)
         }
+        engine.prepare()
+        return attached
+    }
 
+    /// Start the engine and begin looping playback. Fast — call only after the
+    /// caller has confirmed the scene is still current. No-op-safe when nothing
+    /// was prepared. Returns false (and removes the tap) if the engine won't start.
+    @discardableResult
+    func play() -> Bool {
+        guard !players.isEmpty else { return false }
         do {
             try engine.start()
         } catch {
-            mainMixer.removeTap(onBus: 0)
-            return 0
+            engine.mainMixerNode.removeTap(onBus: 0)
+            return false
         }
-
         for player in players {
             player.play()
         }
-        return attached
+        return true
     }
 
     func stop() {

@@ -139,6 +139,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// The in-flight off-main audio-startup task, tracked so `reload`/`cleanup`
     /// can cancel it.
     private var deferredAudioStartupTask: Task<Void, Never>?
+    /// `WPEMetalCompileTimer.milliseconds` snapshot at load start; the per-load
+    /// metal-compile figure is reported as a delta against this (no global reset).
+    private var compileMillisecondsAtLoadStart: Double = 0
 
     #if DEBUG
     /// Test-only: audio startup is deferred (waiting on the first present), not yet started.
@@ -303,7 +306,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             descriptor: descriptorSummary
         )
         #endif
-        WPEMetalCompileTimer.reset()
+        // Snapshot the global compile accumulator and report a delta (instead of
+        // resetting it), so a concurrent scene load on another display can't zero
+        // it mid-flight. (Truly concurrent loads still over-count by each other's
+        // compiles — a known limit of this opt-in diagnostic.)
+        compileMillisecondsAtLoadStart = WPEMetalCompileTimer.milliseconds
         loadGeneration &+= 1
         loadTiming = WPESceneLoadTiming.isEnabled
             ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
@@ -551,7 +558,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             // How much of render.firstFrame was one-time shader/pipeline
             // compilation (cacheable via a binary archive) vs GPU work.
             Logger.notice(
-                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", WPEMetalCompileTimer.milliseconds))ms (shader+pipeline, lands inside render.firstFrame)",
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart))ms (shader+pipeline, lands inside render.firstFrame)",
                 category: .performance
             )
         }
@@ -606,14 +613,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Boot the sound runtime once the first frame has actually presented (called
-    /// from `draw(in:)` after the first successful `present`). The runtime is
-    /// built on the main actor — cheap — but the expensive `start(sounds:)`
-    /// (file loads + AVAudioEngine spin-up, ~300-900ms) runs OFF the main actor
-    /// so the wallpaper never stalls, then the live runtime is published back.
-    /// Bails (and stops the runtime) if the scene reloaded or tore down while
-    /// audio was starting (generation guard + cancellation). Mute/volume intent
-    /// is applied before start and re-applied after, so a toggle during the
-    /// off-main window is not lost.
+    /// from `draw(in:)` after the first successful `present`). The expensive
+    /// `prepare(sounds:)` (file loads + buffer decode, ~300-900ms) runs OFF the
+    /// main actor so the wallpaper never stalls but produces NO audio. Playback
+    /// (`play()`) only starts back on the main actor, AFTER confirming the scene
+    /// is still current — so a reload/cleanup during preparation can never let a
+    /// stale scene's audio play (it just releases the prepared engine). Mute and
+    /// volume are re-applied with the latest values immediately before `play()`,
+    /// so a toggle during the off-main window is honored before any sound.
     private func beginDeferredAudioStartup() {
         guard let document = pendingAudioStartupDocument else { return }
         pendingAudioStartupDocument = nil
@@ -630,16 +637,21 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = Task.detached(priority: .userInitiated) { [weak self] in
             let start = DispatchTime.now()
-            _ = runtime.start(sounds: sounds)
+            _ = runtime.prepare(sounds: sounds)   // off-main, decodes files; nothing audible yet
             let ms = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
             await MainActor.run {
                 guard let self, !Task.isCancelled, self.loadGeneration == generation else {
+                    // Scene reloaded / torn down while we were preparing. play()
+                    // never ran, so no stale audio leaked; release the engine.
                     runtime.stop()
                     return
                 }
-                self.soundRuntime = runtime
+                // Apply the latest mute/volume (may have changed during prepare),
+                // THEN start playback, THEN publish.
                 runtime.setMuted(self.pendingAudioMuted)
                 runtime.setMasterVolume(self.pendingAudioVolume)
+                runtime.play()
+                self.soundRuntime = runtime
                 if WPESceneLoadTiming.isEnabled {
                     Logger.notice(
                         "[load-timing] scene=\(workshopID) deferred-audio=\(String(format: "%.1f", ms))ms (off main, after first present)",
@@ -1286,7 +1298,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // .tex decode + dynamic-source refresh) vs GPU render (encode + upload
         // completion + draw + wait), so we can tell which dominates render.firstFrame
         // on heavy scenes. Only the load-time first frame, only when timing is on.
-        let splitFirstFrame = WPESceneLoadTiming.isEnabled && !didLoad
+        // `!didLoad` first: it short-circuits the UserDefaults read on every
+        // steady-state frame (only the load-time first frame ever gets past it).
+        let splitFirstFrame = !didLoad && WPESceneLoadTiming.isEnabled
         let texPrepStart = splitFirstFrame ? DispatchTime.now() : nil
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let gpuRenderStart = splitFirstFrame ? DispatchTime.now() : nil

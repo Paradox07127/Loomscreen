@@ -600,14 +600,14 @@ final class WPEMetalRenderExecutor {
             let semaphore = inFlightSemaphore
             commandBuffer.addCompletedHandler { cb in
                 semaphore.signal()
-                #if DEBUG
+                // Logged in every build (the old synchronous path threw on error,
+                // which the caller logged) so a GPU failure isn't silent in release.
                 if cb.status == .error {
                     Logger.warning(
                         "[WPE async-frame] command buffer error: \(cb.error?.localizedDescription ?? "unknown")",
                         category: .wpeRender
                     )
                 }
-                #endif
             }
             commandBuffer.commit()
             didCommitAsync = true

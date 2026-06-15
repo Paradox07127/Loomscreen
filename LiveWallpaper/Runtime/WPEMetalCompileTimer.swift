@@ -9,9 +9,12 @@ import Foundation
 /// work or texture-upload completion.
 ///
 /// Active only while the `WPEMetalLoadTiming` diagnostic is on, so production
-/// pays nothing. The accumulator is global (compilation happens across the
-/// executor's caches and the shader compiler); a renderer resets it at load
-/// start and reads it once the first frame is done.
+/// pays nothing. The accumulator is global + monotonic (compilation happens
+/// across the executor's caches and the shader compiler); a renderer snapshots
+/// `milliseconds` at load start and reports the delta at first frame rather than
+/// resetting — so a concurrent load on another display can't zero it mid-flight.
+/// Truly concurrent loads still over-count each other's compiles; acceptable for
+/// an opt-in diagnostic usually exercised one scene at a time.
 enum WPEMetalCompileTimer {
     private static let lock = NSLock()
     // Manually serialized by `lock`; the unchecked annotation is the idiomatic
@@ -36,12 +39,7 @@ enum WPEMetalCompileTimer {
         return try body()
     }
 
-    static func reset() {
-        lock.lock()
-        totalNanos = 0
-        lock.unlock()
-    }
-
+    /// Monotonic running total in milliseconds; callers snapshot + diff it.
     static var milliseconds: Double {
         lock.lock()
         defer { lock.unlock() }
