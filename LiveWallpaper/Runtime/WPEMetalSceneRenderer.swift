@@ -520,6 +520,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 
+        // Production submits frames asynchronously (no per-frame CPU stall on the
+        // GPU); fall back to synchronous only when a read-back needs finished pixels.
+        executor.synchronizeFrameCompletion = shouldSynchronizeFrames()
         let capture = beginGPUCaptureIfRequested()
         outputTexture = try renderCurrentFrame()
         capture?.stop()
@@ -964,6 +967,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         WPESceneDebugArtifacts.shared.appendLog("[\(stage)] \(detail)")
     }
 
+    /// Whether the executor should submit frames synchronously (block on GPU
+    /// completion) for this scene. True only when a CPU read-back of the rendered
+    /// frame will happen — scene-debug artifacts (first-frame snapshot / stats),
+    /// GPU capture, per-pass dumps — or the operator pins it via
+    /// `WPEMetalSerializeFrames`. Production has none of these, so frames submit
+    /// asynchronously and the CPU never stalls on the GPU per frame.
+    private func shouldSynchronizeFrames() -> Bool {
+        if UserDefaults.standard.bool(forKey: "WPEMetalSerializeFrames") { return true }
+        if WPESceneDebugArtifacts.shared.isEnabled { return true }
+        #if DEBUG
+        if gpuCaptureRequestedForCurrentScene() { return true }
+        if !(UserDefaults.standard.string(forKey: "WPEDumpScenePasses") ?? "").isEmpty { return true }
+        #endif
+        return false
+    }
+
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
     #if DEBUG
     /// Test-only: render the loaded scene but keep only the first `passLimit`
@@ -974,6 +993,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
+        // The returned texture is read back on the CPU for bisection, so force the
+        // synchronous path regardless of the scene's live submission mode.
+        let previousSync = executor.synchronizeFrameCompletion
+        executor.synchronizeFrameCompletion = true
+        defer { executor.synchronizeFrameCompletion = previousSync }
         let truncated = WPEPreparedRenderPipeline(
             layers: pipeline.layers.map { layer in
                 WPEPreparedRenderLayer(
@@ -1009,7 +1033,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // This diagnostic holds every frame's texture for after-the-fact pixel
         // comparison; output recycling would alias frame N with frame N+3.
         executor.isOutputPoolingEnabled = false
-        defer { executor.isOutputPoolingEnabled = true }
+        // Each frame's texture is held + pixel-diffed on the CPU afterwards, so it
+        // must be fully rendered before the next iteration overwrites GPU state.
+        let previousSync = executor.synchronizeFrameCompletion
+        executor.synchronizeFrameCompletion = true
+        defer {
+            executor.isOutputPoolingEnabled = true
+            executor.synchronizeFrameCompletion = previousSync
+        }
         var out: [MTLTexture] = []
         out.reserveCapacity(frames)
         for _ in 0..<frames {

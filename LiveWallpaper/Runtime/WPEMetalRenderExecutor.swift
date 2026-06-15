@@ -201,17 +201,39 @@ final class WPEMetalRenderExecutor {
     /// Scene-output ring: per-frame outputs are recycled instead of freshly
     /// allocated every `render()` (~32 MB alloc/free per frame at 4K). A slot
     /// is reused only when (a) no async present of it is still in flight and
-    /// (b) it is not one of the two most recently vended outputs — the
-    /// renderer re-presents the latest output for static scenes, and
-    /// `previousFrameHistory` may still read the prior one.
+    /// (b) it is not among the most recently vended outputs (`maxFramesInFlight`,
+    /// min 2) — the renderer re-presents the latest output for static scenes,
+    /// `previousFrameHistory` may still read the prior one, and under async
+    /// submission an in-flight render may still be writing it.
     private var outputTexturePool: [MTLTexture] = []
-    /// The two most recently vended output textures (newest last).
+    /// The most recently vended output textures (newest last); retained count is
+    /// `max(2, maxFramesInFlight)` — see `noteVendedOutputTexture`.
     private var recentOutputTextureIDs: [ObjectIdentifier] = []
     private let presentTracker = PresentInFlightTracker()
     /// Diagnostics that hold several successive frame textures at once
     /// (`debugRenderSuccessiveFrameTextures`) disable recycling so each frame
     /// keeps distinct storage.
     var isOutputPoolingEnabled = true
+
+    /// Max frames whose command buffers may be in flight at once when submitting
+    /// asynchronously. MUST equal the `recentOutputTextureIDs` retention: a vended
+    /// output target stays out of the reuse set for exactly that many subsequent
+    /// vends, and the semaphore guarantees its render has completed by the time it
+    /// falls out — so a target is never recycled while its GPU write is in flight.
+    /// (See `isOutputTextureReusable` / `noteVendedOutputTexture`.)
+    static let maxFramesInFlight = 2
+    /// Backpressure for asynchronous frame submission: blocks the render caller
+    /// once `maxFramesInFlight` frames are queued so the CPU cannot outrun the GPU
+    /// (which would starve the output ring and grow latency unboundedly).
+    private let inFlightSemaphore = DispatchSemaphore(value: maxFramesInFlight)
+    /// When true, `render()` and the text passes block on GPU completion
+    /// (`waitUntilCompleted`) so a CPU read-back of the frame (scene-debug
+    /// first-frame snapshot, visual-stats, GPU capture, test pixel diffs) observes
+    /// finished pixels. When false — the production live path — frames submit
+    /// asynchronously and the CPU only stalls via `inFlightSemaphore`, letting
+    /// frame N+1's setup overlap frame N's GPU work. The live renderer sets this
+    /// per scene; defaults to the safe synchronous behavior for any other caller.
+    var synchronizeFrameCompletion = true
     /// Cleared `.previous` bootstrap textures, one per (target, size, format).
     /// They are only ever read (seeded before the target's first write of the
     /// frame), so the creation-time clear stays valid for the cache lifetime.
@@ -371,6 +393,15 @@ final class WPEMetalRenderExecutor {
         particleTextures: [ObjectIdentifier: MTLTexture] = [:],
         particleParallax: WPECameraParallaxFrame = .neutral
     ) throws -> MTLTexture {
+        // Async submission: take a permit up front so the CPU blocks here (rather
+        // than queuing another frame) once `maxFramesInFlight` are outstanding.
+        // The matching signal is emitted from the command buffer's completion
+        // handler on success; the `defer` releases it on any early throw so a
+        // permit is never lost.
+        let asyncSubmission = !synchronizeFrameCompletion
+        if asyncSubmission { inFlightSemaphore.wait() }
+        var didCommitAsync = false
+        defer { if asyncSubmission && !didCommitAsync { inFlightSemaphore.signal() } }
         #if DEBUG
         scenePassDumps.removeAll()
         let dumpScenePasses = sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false
@@ -560,10 +591,32 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
 
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        if commandBuffer.status == .error {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
+        if asyncSubmission {
+            // Bound in-flight depth (signal mirrors the wait above) and surface
+            // GPU errors from the handler — they land after we've returned, so we
+            // log rather than throw; the wallpaper just renders the next frame.
+            // GPU-side ordering on the shared queue still guarantees the text and
+            // present buffers (committed later) observe this frame's writes.
+            let semaphore = inFlightSemaphore
+            commandBuffer.addCompletedHandler { cb in
+                semaphore.signal()
+                #if DEBUG
+                if cb.status == .error {
+                    Logger.warning(
+                        "[WPE async-frame] command buffer error: \(cb.error?.localizedDescription ?? "unknown")",
+                        category: .wpeRender
+                    )
+                }
+                #endif
+            }
+            commandBuffer.commit()
+            didCommitAsync = true
+        } else {
+            commandBuffer.commit()
+            commandBuffer.waitUntilCompleted()
+            if commandBuffer.status == .error {
+                throw WPEMetalRenderExecutorError.commandBufferFailed
+            }
         }
         previousFrameHistory = PreviousFrameHistory(
             sceneSize: size,
@@ -753,7 +806,9 @@ final class WPEMetalRenderExecutor {
         }
         encoder.endEncoding()
         commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+        // Same queue as the scene render, so this composites after it GPU-side
+        // without a CPU stall; only block when a read-back needs finished pixels.
+        if synchronizeFrameCompletion { commandBuffer.waitUntilCompleted() }
     }
 
     /// Draw GPU MSDF text: compile the translated `font.frag` (cached per combo
@@ -821,7 +876,9 @@ final class WPEMetalRenderExecutor {
         }
         encoder.endEncoding()
         commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+        // Same queue as the scene render, so this composites after it GPU-side
+        // without a CPU stall; only block when a read-back needs finished pixels.
+        if synchronizeFrameCompletion { commandBuffer.waitUntilCompleted() }
     }
 
     private func compileMSDFFontShader(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
@@ -3153,8 +3210,14 @@ final class WPEMetalRenderExecutor {
         let id = ObjectIdentifier(texture)
         recentOutputTextureIDs.removeAll { $0 == id }
         recentOutputTextureIDs.append(id)
-        if recentOutputTextureIDs.count > 2 {
-            recentOutputTextureIDs.removeFirst(recentOutputTextureIDs.count - 2)
+        // Keep the last `maxFramesInFlight` vended targets out of the reuse set:
+        // under async submission their render may still be running, and the
+        // in-flight semaphore guarantees it has finished by the time the target
+        // ages out of this window. Keep at least 2 for the static-scene re-present
+        // + `previousFrameHistory` reads even when only 1 frame is in flight.
+        let retain = max(2, Self.maxFramesInFlight)
+        if recentOutputTextureIDs.count > retain {
+            recentOutputTextureIDs.removeFirst(recentOutputTextureIDs.count - retain)
         }
     }
 
