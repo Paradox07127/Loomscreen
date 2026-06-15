@@ -2524,6 +2524,9 @@ final class WPEMetalRenderExecutor {
     /// Release so the clip path adds no log noise to shipped builds.
     private static func clipDiagnosticLog(_ message: @autoclosure () -> String) {
         #if DEBUG
+        // Gated behind the scene-debug switch (off by default) so genericimage4
+        // puppet scenes don't print clip-detection lines on every load.
+        guard UserDefaults.standard.bool(forKey: "WPESceneDebugArtifactsEnabled") else { return }
         Logger.info(message(), category: .wpeRender)
         #endif
     }
