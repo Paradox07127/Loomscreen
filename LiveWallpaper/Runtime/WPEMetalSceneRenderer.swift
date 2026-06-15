@@ -132,6 +132,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// task — e.g. the off-critical-path audio startup — can detect that the
     /// renderer has since reloaded or torn down and bail on a stale scene.
     private var loadGeneration = 0
+    /// Set at the end of `performLoad` for scenes with sound; consumed by the
+    /// first successful `present` in `draw(in:)`, so audio startup begins only
+    /// after the first frame is actually on screen.
+    private var pendingAudioStartupDocument: WPESceneDocument?
+    /// The in-flight off-main audio-startup task, tracked so `reload`/`cleanup`
+    /// can cancel it.
+    private var deferredAudioStartupTask: Task<Void, Never>?
+
+    #if DEBUG
+    /// Test-only: audio startup is deferred (waiting on the first present), not yet started.
+    var debugAudioStartupPending: Bool { pendingAudioStartupDocument != nil }
+    /// Test-only: the sound runtime has been published (audio actually started).
+    var debugSoundRuntimeActive: Bool { soundRuntime != nil }
+    #endif
     private var isThrottled = false
     /// Scene-level camera parallax: the parsed settings plus the per-frame
     /// exponential smoother that drives every layer's depth shift. Neutral when
@@ -155,9 +169,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// whenever the renderer is not throttled / suspended. Defaults to the
     /// WPE-compatible 30 FPS until `setFrameRateLimit(_:)` overrides it.
     private var userPreferredFPS: Int = WPEMetalSceneRenderer.defaultPreferredFPS
-    /// Inspector mute state cached here so callers that arrive before
-    /// `startSoundRuntime` can still record intent; `startSoundRuntime`
-    /// reads these to seed `WPESoundRuntime` at the right level.
+    /// Inspector mute state cached here so callers that arrive before the
+    /// deferred audio startup can still record intent; `beginDeferredAudioStartup`
+    /// reads these to seed `WPESoundRuntime` at the right level (and re-applies
+    /// them once the off-main start finishes, in case they changed meanwhile).
     private var pendingAudioMuted: Bool = false
     private var pendingAudioVolume: Double = 1.0
 
@@ -578,32 +593,59 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         applyPerformanceProfile(currentProfile)
         mtkView.setNeedsDisplay(mtkView.bounds)
         debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
-        scheduleDeferredAudioStartup(from: document)
+        // Defer audio startup to the first actual present (handled in draw(in:))
+        // so it never blocks the first visible frame. Empty-sound scenes clear
+        // any prior runtime now.
+        if document.soundObjects.isEmpty {
+            soundRuntime = nil
+            pendingAudioStartupDocument = nil
+        } else {
+            pendingAudioStartupDocument = document
+        }
         _ = id
     }
 
-    /// Start the sound runtime off the load critical path. The wallpaper is
-    /// already on screen by the time this runs, so the synchronous
-    /// `runtime.start(sounds:)` (300-900ms of file load + engine spin-up) no
-    /// longer inflates perceived load time. Pending mute/volume intent set before
-    /// load completes is preserved by `startSoundRuntime`. Bails if the renderer
-    /// reloaded or tore down before the task ran (generation guard + `weak self`).
-    private func scheduleDeferredAudioStartup(from document: WPESceneDocument) {
-        guard !document.soundObjects.isEmpty else {
+    /// Boot the sound runtime once the first frame has actually presented (called
+    /// from `draw(in:)` after the first successful `present`). The runtime is
+    /// built on the main actor — cheap — but the expensive `start(sounds:)`
+    /// (file loads + AVAudioEngine spin-up, ~300-900ms) runs OFF the main actor
+    /// so the wallpaper never stalls, then the live runtime is published back.
+    /// Bails (and stops the runtime) if the scene reloaded or tore down while
+    /// audio was starting (generation guard + cancellation). Mute/volume intent
+    /// is applied before start and re-applied after, so a toggle during the
+    /// off-main window is not lost.
+    private func beginDeferredAudioStartup() {
+        guard let document = pendingAudioStartupDocument else { return }
+        pendingAudioStartupDocument = nil
+        let sounds = document.soundObjects
+        guard !sounds.isEmpty else {
             soundRuntime = nil
             return
         }
+        let runtime = WPESoundRuntime(resolver: resourceResolver)
+        runtime.setMuted(pendingAudioMuted)
+        runtime.setMasterVolume(pendingAudioVolume)
         let generation = loadGeneration
-        Task { @MainActor [weak self] in
-            guard let self, self.loadGeneration == generation else { return }
+        let workshopID = descriptor.workshopID
+        deferredAudioStartupTask?.cancel()
+        deferredAudioStartupTask = Task.detached(priority: .userInitiated) { [weak self] in
             let start = DispatchTime.now()
-            self.startSoundRuntime(from: document)
-            if WPESceneLoadTiming.isEnabled {
-                let ms = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
-                Logger.notice(
-                    "[load-timing] scene=\(self.descriptor.workshopID) deferred-audio=\(String(format: "%.1f", ms))ms (off critical path, after first frame)",
-                    category: .performance
-                )
+            _ = runtime.start(sounds: sounds)
+            let ms = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
+            await MainActor.run {
+                guard let self, !Task.isCancelled, self.loadGeneration == generation else {
+                    runtime.stop()
+                    return
+                }
+                self.soundRuntime = runtime
+                runtime.setMuted(self.pendingAudioMuted)
+                runtime.setMasterVolume(self.pendingAudioVolume)
+                if WPESceneLoadTiming.isEnabled {
+                    Logger.notice(
+                        "[load-timing] scene=\(workshopID) deferred-audio=\(String(format: "%.1f", ms))ms (off main, after first present)",
+                        category: .performance
+                    )
+                }
             }
         }
     }
@@ -1341,22 +1383,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Phase 2D-O: spin up the audio runtime and start playback if the scene declared sound objects.
-    private func startSoundRuntime(from document: WPESceneDocument) {
-        guard !document.soundObjects.isEmpty else {
-            soundRuntime = nil
-            return
-        }
-        let runtime = WPESoundRuntime(resolver: resourceResolver)
-        // Seed the runtime with whatever pending inspector state arrived
-        // before load completed — otherwise muting a scene before it
-        // finishes loading would silently revert to the scene-declared
-        // sound.volume the moment audio starts.
-        runtime.setMuted(pendingAudioMuted)
-        runtime.setMasterVolume(pendingAudioVolume)
-        _ = runtime.start(sounds: document.soundObjects)
-        soundRuntime = runtime
-    }
-
     /// Phase 2D-N: build the WPETextRenderer + cache the parsed text object list.
     private func loadTextOverlays(from document: WPESceneDocument) {
         textObjects = document.textObjects
@@ -1729,6 +1755,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     func reload() async throws {
         loadGeneration &+= 1
+        deferredAudioStartupTask?.cancel()
+        deferredAudioStartupTask = nil
+        pendingAudioStartupDocument = nil
         didLoad = false
         hasPresentedFrame = false
         outputTexture = nil
@@ -1862,9 +1891,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Forwards the inspector's mute toggle into the scene's audio
-    /// runtime. Cached so calls that arrive before `startSoundRuntime`
-    /// (which only fires from `performLoad`) still take effect once the
-    /// runtime exists.
+    /// runtime. Cached so calls that arrive before the deferred audio
+    /// startup (which fires after the first present) still take effect once
+    /// the runtime exists.
     func setAudioMuted(_ muted: Bool) {
         pendingAudioMuted = muted
         soundRuntime?.setMuted(muted)
@@ -1873,7 +1902,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Forwards the inspector's audio slider into the scene's audio
     /// runtime as a master gain multiplied into each scene-declared
     /// `sound.volume`. Cached so pre-load calls survive across the
-    /// `startSoundRuntime` boundary.
+    /// deferred audio-startup boundary.
     func setAudioVolume(_ volume: Double) {
         pendingAudioVolume = volume
         soundRuntime?.setMasterVolume(volume)
@@ -1939,6 +1968,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     func cleanup() {
         loadGeneration &+= 1
+        deferredAudioStartupTask?.cancel()
+        deferredAudioStartupTask = nil
+        pendingAudioStartupDocument = nil
         mtkView.delegate = nil
         outputTexture = nil
         scenePropertyBindings = [:]
@@ -1989,7 +2021,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     textureToPresent = outputTexture
                 }
                 guard let texture = textureToPresent else { return }
-                _ = try executor.present(texture: texture, in: view)
+                let presented = try executor.present(texture: texture, in: view)
+                // Start audio only after the first frame is actually on screen, so
+                // the synchronous engine spin-up can never delay the first pixels.
+                if presented, pendingAudioStartupDocument != nil {
+                    beginDeferredAudioStartup()
+                }
             } catch {
                 Logger.warning("Experimental Metal scene present failed: \(error.localizedDescription)", category: .screenManager)
             }

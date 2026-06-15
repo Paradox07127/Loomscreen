@@ -369,10 +369,38 @@ struct WPEMetalSceneRendererTests {
         )
 
         // Before load: soundRuntime is nil, the calls should not crash
-        // and the state is cached for later application during startSoundRuntime.
+        // and the state is cached for later application by the deferred audio startup.
         renderer.setAudioMuted(true)
         renderer.setAudioVolume(0.4)
         #expect(true)
+    }
+
+    @Test("Audio startup is deferred until the first present, not started during load")
+    func audioStartupIsDeferredUntilPresent() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.soundScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        // load() rendered the first frame, but audio must NOT have started
+        // synchronously — it is deferred to the first present, which a headless
+        // test never triggers. The scene's sound objects leave it pending.
+        #expect(renderer.debugSoundRuntimeActive == false)
+        #expect(renderer.debugAudioStartupPending == true)
+
+        // Tearing down (cleanup) clears the pending startup + cancels the task so
+        // a late present can't boot a stale scene's audio. (reload(), by contrast,
+        // re-loads and legitimately re-defers, so it is not the invalidation case.)
+        renderer.cleanup()
+        #expect(renderer.debugAudioStartupPending == false)
     }
 }
 
@@ -508,6 +536,44 @@ private struct MetalSceneFixture {
                 capabilityTier: .imageOnly
             ),
             dependencyRoot: dependencyRoot
+        )
+    }
+
+    /// An image layer plus a sound object. The sound file need not exist: audio
+    /// startup is deferred to the first present (never triggered in a headless
+    /// test), so `start()` — the only thing that reads the file — is never called.
+    static func soundScene() throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        let models = root.appendingPathComponent("models", isDirectory: true)
+        let materials = root.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: materials, withIntermediateDirectories: true)
+        try writePNG(at: materials.appendingPathComponent("base.png"), color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        try Data(#"{ "material": "materials/base.json" }"#.utf8)
+            .write(to: models.appendingPathComponent("base.json"))
+        try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/base.png"] }] }"#.utf8)
+            .write(to: materials.appendingPathComponent("base.json"))
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [
+            { "id": "img", "name": "Img", "type": "image", "image": "models/base.json", "origin": "0.5 0.5 0", "scale": "1 1 1", "alpha": 1 },
+            { "id": "snd", "name": "Loop", "type": "sound", "sound": ["sounds/loop.mp3"] }
+          ]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
         )
     }
 
