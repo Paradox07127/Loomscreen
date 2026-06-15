@@ -1786,6 +1786,11 @@ struct WPEMetalRenderExecutorTests {
             0, 0, 0, 0
         ]))
         mask.label = "mask-texture"
+        // recordTextureBinding only records while scene-debug is enabled (now
+        // opt-in by default), so force it on for the duration of this diagnostic
+        // test rather than depending on the global default or test run order.
+        WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
+        defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
         defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
 
@@ -1857,6 +1862,11 @@ struct WPEMetalRenderExecutorTests {
             0, 255, 0, 255
         ]))
         primary.label = "base-texture"
+        // recordTextureBinding only records while scene-debug is enabled (now
+        // opt-in by default), so force it on for the duration of this diagnostic
+        // test rather than depending on the global default or test run order.
+        WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
+        defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
         defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
 
