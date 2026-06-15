@@ -281,14 +281,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             descriptor: descriptorSummary
         )
         #endif
-        WPESceneDebugArtifacts.shared.appendLog(
-            "load() began for \(descriptorSummary)",
-            level: .info
-        )
-        Logger.debug(
-            "[WPE-DEBUG][scene:\(descriptor.workshopID)][stage:load.begin] \(descriptorSummary)",
-            category: .wpeRender
-        )
+        debugStage("load.begin", descriptorSummary)
         do {
             try await performLoad()
             loadDiagnostics = nil
@@ -965,10 +958,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// the `wpeRender` os.Logger category AND mirrors into the per-scene
     /// `scene.log` so the file artifact stays self-contained without the
     /// reader having to cross-reference Console.app.
-    private func debugStage(_ stage: String, _ detail: String) {
-        let id = descriptor.workshopID
+    /// Per-load stage breadcrumb. Gated on the scene-debug switch (Developer
+    /// Tools → "Scene debug artifacts"), which is off by default — so a normal
+    /// run emits none of these and, because `detail` is `@autoclosure`, never
+    /// even builds the (per-stage, per-pass) interpolated strings. Flip the
+    /// switch on to get the full console + scene.log stage trace back.
+    private func debugStage(_ stage: String, _ detail: @autoclosure () -> String) {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return }
+        let detail = detail()
         Logger.debug(
-            "[WPE-DEBUG][scene:\(id)][stage:\(stage)] \(detail)",
+            "[WPE-DEBUG][scene:\(descriptor.workshopID)][stage:\(stage)] \(detail)",
             category: .wpeRender
         )
         WPESceneDebugArtifacts.shared.appendLog("[\(stage)] \(detail)")
