@@ -4,28 +4,90 @@ import Foundation
 /// Lightweight gate that flags "user is gaming" so the policy engine can
 /// suspend wallpaper rendering and let the active game claim the GPU.
 ///
-/// macOS Game Mode itself has no public query API, but Apple documents its
-/// trigger: it activates when the **frontmost app declares a game
-/// `LSApplicationCategoryType`** and goes full-screen. We detect that same
-/// category signal — which, unlike a launcher bundle-ID allowlist, keeps
-/// matching after Steam/Epic/Battle.net hand off to the actual game
-/// executable (the game declares `public.app-category.*games`). The
-/// full-screen half of Apple's condition is intentionally *not* required
-/// here so a windowed game still yields; `pauseOnFullScreen` covers the
-/// full-screen overlap independently.
+/// macOS exposes **no** public, sandbox-safe API for its Game Mode state, so
+/// this is a heuristic on the frontmost app. The frontmost app is classified
+/// as a game when ANY of these hold:
 ///
-/// Signals merged (any → active):
-/// - Frontmost app's `LSApplicationCategoryType` is a game category.
-/// - Frontmost app matches a known launcher prefix (fast path for when the
-///   launcher itself — not yet a game category — is in front).
-/// - `ProcessInfo.isLowPowerModeEnabled` — the explicit system power-saving
-///   toggle, treated as a request to yield GPU/decoder work.
-@MainActor
+/// 1. Its executable / bundle lives under a known game-library install root
+///    (`…/steamapps/common/…`, Epic, Battle.net, GOG). This is the load-bearing
+///    signal: a game launched through Steam/Epic runs its OWN executable, whose
+///    bundle ID is not a storefront prefix and which very often declares no
+///    `LSApplicationCategoryType` at all — so the older category/prefix checks
+///    missed essentially every real game. The install path does not, and a
+///    normal app (Safari, Finder, an editor under `/Applications` or `/System`)
+///    never matches it, so it cleanly separates "a game" from "a maximised
+///    non-game window".
+/// 2. The frontmost bundle ID matches a storefront/launcher prefix — the fast
+///    path for when the launcher window itself is in front.
+/// 3. It declares a `public.app-category.*games` `LSApplicationCategoryType`
+///    (catches store-installed games outside the path roots).
+///
+/// Plus `ProcessInfo.isLowPowerModeEnabled` as an explicit "yield GPU" request.
+/// Full-screen is intentionally NOT required (a windowed game still yields);
+/// `pauseOnFullScreen` covers full-screen overlap of non-games independently.
+///
+/// The classifier is split into pure, injectable functions so the
+/// game-vs-non-game decision is unit-testable without a live game; `isActive`
+/// is the thin `NSWorkspace` / `ProcessInfo` adapter.
 enum GameModeDetector {
-    static var isActive: Bool {
-        if ProcessInfo.processInfo.isLowPowerModeEnabled { return true }
-        return frontmostAppIsGame()
+    /// Snapshot of the frontmost app, decoupled from `NSWorkspace` so the
+    /// classifier below is a pure function.
+    struct FrontmostApp: Equatable, Sendable {
+        var bundleID: String?
+        var bundlePath: String?
+        var executablePath: String?
+        /// `LSApplicationCategoryType` from the app's Info.plist, if readable.
+        var category: String?
     }
+
+    @MainActor
+    static var isActive: Bool {
+        evaluate(
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            frontmost: snapshotFrontmost()
+        )
+    }
+
+    /// Pure decision: Low Power Mode, or the frontmost app looks like a game.
+    static func evaluate(lowPowerMode: Bool, frontmost: FrontmostApp?) -> Bool {
+        if lowPowerMode { return true }
+        guard let frontmost else { return false }
+        return isGame(frontmost)
+    }
+
+    /// Pure game classifier — see the three signals in the type doc.
+    static func isGame(_ app: FrontmostApp) -> Bool {
+        if let path = app.executablePath ?? app.bundlePath, isGameInstallPath(path) {
+            return true
+        }
+        if let bundleID = app.bundleID,
+           knownGameBundlePrefixes.contains(where: { bundleID.hasPrefix($0) }) {
+            return true
+        }
+        return isGameCategory(app.category)
+    }
+
+    /// True when a filesystem path sits under a known game-library install root.
+    /// Markers are full path segments (e.g. `/steamapps/common/`, not just
+    /// `Steam`) so a launcher's own helper processes don't match.
+    static func isGameInstallPath(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        return gameInstallPathMarkers.contains { lower.contains($0) }
+    }
+
+    /// True for a `public.app-category.*games` category string.
+    static func isGameCategory(_ category: String?) -> Bool {
+        guard let category, category.hasPrefix("public.app-category.") else { return false }
+        return category.contains("games")
+    }
+
+    private static let gameInstallPathMarkers: [String] = [
+        "/steamapps/common/",   // Steam (default library + custom SteamLibrary folders)
+        "/epic games/",         // Epic Games Launcher
+        "/battle.net/",         // Blizzard Battle.net
+        "/gog games/",          // GOG
+        "/goggalaxy/",          // GOG Galaxy
+    ]
 
     private static let knownGameBundlePrefixes: [String] = [
         "com.valvesoftware.steam",
@@ -36,23 +98,16 @@ enum GameModeDetector {
         "com.ubisoft.",
     ]
 
-    private static func frontmostAppIsGame() -> Bool {
-        guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
-        if let bundleID = frontmost.bundleIdentifier,
-           knownGameBundlePrefixes.contains(where: { bundleID.hasPrefix($0) }) {
-            return true
-        }
-        return isGameCategory(frontmost)
-    }
-
-    /// Reads the frontmost app's declared App Store category from its bundle.
-    /// Game categories are `public.app-category.games` plus the genre variants
-    /// (`action-games`, `role-playing-games`, …) — all contain "games".
-    private static func isGameCategory(_ app: NSRunningApplication) -> Bool {
-        guard let bundleURL = app.bundleURL,
-              let bundle = Bundle(url: bundleURL),
-              let category = bundle.infoDictionary?["LSApplicationCategoryType"] as? String
-        else { return false }
-        return category.hasPrefix("public.app-category.") && category.contains("games")
+    @MainActor
+    private static func snapshotFrontmost() -> FrontmostApp? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let category = app.bundleURL
+            .flatMap { Bundle(url: $0)?.infoDictionary?["LSApplicationCategoryType"] as? String }
+        return FrontmostApp(
+            bundleID: app.bundleIdentifier,
+            bundlePath: app.bundleURL?.path,
+            executablePath: app.executableURL?.path,
+            category: category
+        )
     }
 }
