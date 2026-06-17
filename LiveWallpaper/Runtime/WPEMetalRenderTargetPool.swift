@@ -84,6 +84,47 @@ final class WPEMetalRenderTargetPool {
         declaredFBOs.removeAll(keepingCapacity: true)
     }
 
+    /// Read-only twin of the `texture(...)` keying — computes the slot key a
+    /// target would resolve to WITHOUT allocating anything. Used by the
+    /// `WPEMetalFBOMemoryReport` diagnostic to account FBO memory statically.
+    func diagnosticKey(
+        for target: WPERenderTarget,
+        layer: WPERenderLayer,
+        sceneSize: CGSize,
+        declaredFBOs: [String: WPERenderFBO]
+    ) -> WPEMetalRenderTargetKey {
+        let spec: WPERenderFBO
+        switch target {
+        case .scene:
+            spec = WPERenderFBO(name: "scene", scale: 1, format: "rgba8888")
+        case .layerComposite(let name):
+            spec = WPERenderFBO(name: name, scale: 1, format: "rgba8888")
+        case .fbo(let name):
+            spec = declaredFBOs[name]
+                ?? layer.localFBOs.first(where: { $0.name == name })
+                ?? WPERenderFBO(name: name, scale: 1, format: "rgba8888")
+        }
+
+        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
+        if case .layerComposite = target {
+            let localSize = Self.layerCompositeSize(for: layer, sceneSize: sceneSize)
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
+                height: wpeRenderTargetDimension(localSize.height, scale: spec.scale),
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        }
+        return WPEMetalRenderTargetKey(
+            name: spec.name,
+            sceneSize: sceneSize,
+            scale: spec.scale,
+            format: spec.format,
+            pixelFormat: pixelFormat
+        )
+    }
+
     func texture(
         for target: WPERenderTarget,
         layer: WPERenderLayer,

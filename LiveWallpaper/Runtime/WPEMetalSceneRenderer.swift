@@ -551,6 +551,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // synchronous `runtime.start(sounds:)` is a 300-900ms hit that does not
         // gate any pixels, so keeping it on the load path only inflates perceived
         // load time.
+        executor.logFBOMemoryReportIfRequested(
+            pipeline: pipeline,
+            sceneSize: sceneRenderSize,
+            sceneID: descriptor.workshopID
+        )
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 

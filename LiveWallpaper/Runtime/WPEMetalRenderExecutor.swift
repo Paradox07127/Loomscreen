@@ -358,6 +358,267 @@ final class WPEMetalRenderExecutor {
         bootstrapPreviousTextureCache.removeAll()
     }
 
+    // MARK: - FBO memory diagnostic (read-only)
+
+    private struct FBOMemoryLifetime {
+        var firstPassIndex: Int
+        var lastPassIndex: Int
+
+        mutating func touch(_ passIndex: Int) {
+            firstPassIndex = min(firstPassIndex, passIndex)
+            lastPassIndex = max(lastPassIndex, passIndex)
+        }
+    }
+
+    /// Logs a static account of the scene's render-target (FBO) memory when
+    /// `WPEMetalFBOMemoryReport` is set — total (sum) vs estimated peak-concurrent
+    /// (the aliasing headroom), per-target bytes + lifetime, and ping-pong
+    /// secondaries. Read-only: computes keys WITHOUT allocating, mutates nothing.
+    func logFBOMemoryReportIfRequested(
+        pipeline: WPEPreparedRenderPipeline,
+        sceneSize: CGSize,
+        sceneID: String?
+    ) {
+        guard UserDefaults.standard.bool(forKey: "WPEMetalFBOMemoryReport") else { return }
+        Logger.notice(
+            fboMemoryReport(pipeline: pipeline, sceneSize: sceneSize, sceneID: sceneID),
+            category: .performance
+        )
+    }
+
+    private func fboMemoryReport(
+        pipeline: WPEPreparedRenderPipeline,
+        sceneSize: CGSize,
+        sceneID: String?
+    ) -> String {
+        let declaredFBOs = Self.fboReportDeclaredFBOs(in: pipeline)
+        var flattened: [(index: Int, layer: WPEPreparedRenderLayer, pass: WPEPreparedRenderPass)] = []
+        var passIndex = 0
+        for layer in pipeline.layers {
+            for pass in layer.passes {
+                flattened.append((passIndex, layer, pass))
+                passIndex += 1
+            }
+        }
+
+        // Only `.fbo` / `.layerComposite` allocate through the targetPool;
+        // `.scene` resolves to the output texture (separate output pool), so it
+        // is NOT an FBO-pool allocation and must be excluded from this account.
+        func poolKey(for target: WPERenderTarget, layer: WPEPreparedRenderLayer) -> WPEMetalRenderTargetKey? {
+            switch target {
+            case .scene:
+                return nil
+            case .fbo, .layerComposite:
+                return targetPool.diagnosticKey(
+                    for: target,
+                    layer: layer.graphLayer,
+                    sceneSize: sceneSize,
+                    declaredFBOs: declaredFBOs
+                )
+            }
+        }
+
+        var bytesByKey: [WPEMetalRenderTargetKey: Int] = [:]
+        var keysByName: [String: Set<WPEMetalRenderTargetKey>] = [:]
+        for item in flattened {
+            guard let targetKey = poolKey(for: item.pass.pass.target, layer: item.layer) else { continue }
+            bytesByKey[targetKey] = Self.fboReportBytes(for: targetKey)
+            keysByName[targetKey.name, default: []].insert(targetKey)
+        }
+
+        var lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime] = [:]
+        var secondaryKeys = Set<WPEMetalRenderTargetKey>()
+        var writtenTargets = Set<WPEMetalTargetID>()
+
+        func touch(_ key: WPEMetalRenderTargetKey, at index: Int) {
+            if lifetimes[key] != nil {
+                lifetimes[key]?.touch(index)
+            } else {
+                lifetimes[key] = FBOMemoryLifetime(firstPassIndex: index, lastPassIndex: index)
+            }
+        }
+
+        for item in flattened {
+            let targetID = WPEMetalTargetID(target: item.pass.pass.target)
+            let targetKey = poolKey(for: item.pass.pass.target, layer: item.layer)
+            if let targetKey {
+                touch(targetKey, at: item.index)
+                // A pool secondary (ping-pong) is only allocated when the target
+                // was already written this frame — a first-write `.previous` reads
+                // the cleared bootstrap, not a pool secondary.
+                if writtenTargets.contains(targetID),
+                   passReadsCurrentTarget(item.pass, targetID: targetID) {
+                    secondaryKeys.insert(targetKey)
+                }
+            }
+            // Lifetime uses the EFFECTIVE bindings (the builder rewrites bind
+            // `.previous` → source), so a stale raw `.previous` doesn't extend the
+            // wrong target's lifetime and inflate the peak estimate.
+            for reference in fboReportEffectiveTextureReferences(for: item.pass) {
+                switch reference {
+                case .fbo(let name):
+                    for namedKey in keysByName[name] ?? [] {
+                        touch(namedKey, at: item.index)
+                    }
+                case .previous:
+                    if let targetKey { touch(targetKey, at: item.index) }
+                case .image, .asset:
+                    break
+                }
+            }
+            writtenTargets.insert(targetID)
+        }
+
+        let uniqueKeys = bytesByKey.keys.sorted(by: Self.fboReportSort)
+        let sumBytes = uniqueKeys.reduce(0) { $0 + (bytesByKey[$1] ?? 0) }
+        let secondaryBytes = secondaryKeys.reduce(0) { $0 + (bytesByKey[$1] ?? 0) }
+        let peakBytes = Self.fboReportPeakBytes(lifetimes: lifetimes, bytesByKey: bytesByKey)
+        let aliased = Self.fboReportSameSizeAliased(lifetimes: lifetimes, bytesByKey: bytesByKey)
+        let aliasHeapBytes = Self.fboReportAliasHeapBytes(lifetimes: lifetimes, bytesByKey: bytesByKey)
+        let totalBytes = sumBytes + secondaryBytes
+        let sceneLabel = sceneID ?? "-"
+
+        var lines = [
+            "[fbo-report] scene=\(sceneLabel) size=\(Int(sceneSize.width))x\(Int(sceneSize.height)) "
+                + "count=\(uniqueKeys.count) sum=\(Self.fboReportMiB(sumBytes))MiB "
+                + "secondary=\(Self.fboReportMiB(secondaryBytes))MiB(\(secondaryKeys.count)) "
+                + "total=\(Self.fboReportMiB(totalBytes))MiB "
+                + "peakFloor=\(Self.fboReportMiB(peakBytes))MiB "
+                + "aliasSameSize=\(Self.fboReportMiB(aliased.bytes))MiB(save\(Self.fboReportMiB(sumBytes - aliased.bytes))MiB) "
+                + "aliasHeap=\(Self.fboReportMiB(aliasHeapBytes))MiB(save\(Self.fboReportMiB(sumBytes - aliasHeapBytes))MiB)"
+        ]
+        for key in uniqueKeys {
+            let bytes = bytesByKey[key] ?? 0
+            let range = lifetimes[key].map { "\($0.firstPassIndex)..\($0.lastPassIndex)" } ?? "-"
+            let secondary = secondaryKeys.contains(key) ? " secondary" : ""
+            lines.append(
+                "[fbo-report]   \(key.name) \(key.width)x\(key.height) \(key.format) "
+                    + "\(Self.fboReportMiB(bytes))MiB life=\(range)\(secondary)"
+            )
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func fboReportDeclaredFBOs(in pipeline: WPEPreparedRenderPipeline) -> [String: WPERenderFBO] {
+        var declared: [String: WPERenderFBO] = [:]
+        for layer in pipeline.layers {
+            for fbo in layer.graphLayer.localFBOs {
+                declared[fbo.name] = fbo
+            }
+        }
+        return declared
+    }
+
+    /// Effective texture reads — `pass.source` plus the rewritten bindings (the
+    /// builder turns bind `.previous` into `pass.source`), used for accurate
+    /// name-based lifetime/peak (unlike the raw hazard predicate).
+    private func fboReportEffectiveTextureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {
+        var references: [WPETextureReference] = [pass.pass.source]
+        references.append(contentsOf: pass.textureBindings.values)
+        return references
+    }
+
+    private static func fboReportBytes(for key: WPEMetalRenderTargetKey) -> Int {
+        key.width * key.height * fboReportBytesPerPixel(for: key.pixelFormat)
+    }
+
+    private static func fboReportBytesPerPixel(for pixelFormat: MTLPixelFormat) -> Int {
+        switch pixelFormat {
+        case .rgba16Float:
+            return 8
+        case .r8Unorm:
+            return 1
+        default:
+            return 4
+        }
+    }
+
+    private static func fboReportPeakBytes(
+        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
+        bytesByKey: [WPEMetalRenderTargetKey: Int]
+    ) -> Int {
+        guard let maxPass = lifetimes.values.map(\.lastPassIndex).max() else { return 0 }
+        var peak = 0
+        for index in 0...maxPass {
+            let liveBytes = lifetimes.reduce(0) { partial, entry in
+                guard entry.value.firstPassIndex <= index, index <= entry.value.lastPassIndex else {
+                    return partial
+                }
+                return partial + (bytesByKey[entry.key] ?? 0)
+            }
+            peak = max(peak, liveBytes)
+        }
+        return peak
+    }
+
+    /// Realizable memory if same-(size,format) FBOs with non-overlapping
+    /// lifetimes share one physical texture (greedy interval coloring per
+    /// group) — the SAFE aliasing approach: same-MTLTexture reuse within the
+    /// frame, `.tracked` heaps barrier the transitions, no makeAliasable/offset
+    /// math. Less than the placement-heap `peakFloor` (which packs mixed sizes).
+    private static func fboReportSameSizeAliased(
+        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
+        bytesByKey: [WPEMetalRenderTargetKey: Int]
+    ) -> (bytes: Int, slots: Int) {
+        struct Group: Hashable {
+            let width: Int
+            let height: Int
+            let pixelFormat: UInt
+        }
+        var intervalsByGroup: [Group: [(first: Int, last: Int)]] = [:]
+        var bytesByGroup: [Group: Int] = [:]
+        for (key, lifetime) in lifetimes {
+            let group = Group(width: key.width, height: key.height, pixelFormat: key.pixelFormat.rawValue)
+            intervalsByGroup[group, default: []].append((lifetime.firstPassIndex, lifetime.lastPassIndex))
+            bytesByGroup[group] = bytesByKey[key] ?? 0
+        }
+        var totalBytes = 0
+        var totalSlots = 0
+        for (group, intervals) in intervalsByGroup {
+            // Greedy interval coloring: reuse a slot only when its occupant's
+            // last use ended STRICTLY before this FBO's first use (no same-pass
+            // read/write of a shared texture).
+            var slotEnds: [Int] = []
+            for interval in intervals.sorted(by: { $0.first < $1.first }) {
+                if let slot = slotEnds.firstIndex(where: { $0 < interval.first }) {
+                    slotEnds[slot] = interval.last
+                } else {
+                    slotEnds.append(interval.last)
+                }
+            }
+            totalSlots += slotEnds.count
+            totalBytes += slotEnds.count * (bytesByGroup[group] ?? 0)
+        }
+        return (totalBytes, totalSlots)
+    }
+
+    /// Realizable memory with full placement-heap aliasing (mixed sizes packed
+    /// by `WPEMetalFBOAliasPlanner`) — the consistent big win, ≈ peakFloor. This
+    /// is the size the Phase-B shared heap will actually allocate.
+    private static func fboReportAliasHeapBytes(
+        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
+        bytesByKey: [WPEMetalRenderTargetKey: Int]
+    ) -> Int {
+        var intervals: [WPEMetalFBOAliasPlanner.Interval] = []
+        for (index, key) in lifetimes.keys.enumerated() {
+            guard let lifetime = lifetimes[key], let size = bytesByKey[key] else { continue }
+            intervals.append(.init(id: index, size: size, firstPass: lifetime.firstPassIndex, lastPass: lifetime.lastPassIndex))
+        }
+        return WPEMetalFBOAliasPlanner.plan(intervals).heapSize
+    }
+
+    private static func fboReportSort(_ lhs: WPEMetalRenderTargetKey, _ rhs: WPEMetalRenderTargetKey) -> Bool {
+        if lhs.name != rhs.name { return lhs.name < rhs.name }
+        if lhs.width != rhs.width { return lhs.width < rhs.width }
+        if lhs.height != rhs.height { return lhs.height < rhs.height }
+        if lhs.format != rhs.format { return lhs.format < rhs.format }
+        return lhs.pixelFormat.rawValue < rhs.pixelFormat.rawValue
+    }
+
+    private static func fboReportMiB(_ bytes: Int) -> String {
+        String(format: "%.1f", Double(bytes) / 1_048_576.0)
+    }
+
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
     /// (confirms the builtin effect_waterwaves path actually runs + the debug flag value reaching it).
     private var loggedWaterWavesDispatch = false
