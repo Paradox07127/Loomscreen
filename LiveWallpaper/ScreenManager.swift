@@ -124,6 +124,12 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private var lastScreenSignatures: [CGDirectDisplayID: ScreenConfigurationSignature] = [:]
     @ObservationIgnored private var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
+    /// App Nap throttles an `LSUIElement` accessory app's render loop to ~1fps
+    /// the moment another app becomes active, freezing the wallpaper whenever
+    /// the user focuses any other window. Held while a wallpaper is on screen
+    /// to keep the MTKView clock at full rate in the background; released when
+    /// the last session goes away. See `refreshAppNapAssertion()`.
+    @ObservationIgnored private var renderingActivityToken: (any NSObjectProtocol)?
     private enum UserAbsenceReason: Hashable {
         case screenLocked
         case displaySleep
@@ -682,6 +688,7 @@ final class ScreenManager {
         setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
         playbackCoordinator.refreshVideoAudioLeadership()
+        refreshAppNapAssertion()
     }
 
     func resetAllWallpaperSessions() {
@@ -1096,6 +1103,25 @@ final class ScreenManager {
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
+        }
+    }
+
+    /// Hold a `.userInitiated` activity assertion whenever ≥1 wallpaper session
+    /// is live, so macOS doesn't App-Nap our background render loop down to
+    /// ~1fps when the user focuses another window. `.userInitiated` disables
+    /// App Nap only — it does NOT keep the display or system awake, so the Mac
+    /// still sleeps on its own schedule. Released once the last session ends.
+    private func refreshAppNapAssertion() {
+        let isRendering = screens.contains { $0.runtimeSession != nil }
+        if isRendering {
+            guard renderingActivityToken == nil else { return }
+            renderingActivityToken = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiated,
+                reason: "Rendering live wallpaper"
+            )
+        } else if let token = renderingActivityToken {
+            ProcessInfo.processInfo.endActivity(token)
+            renderingActivityToken = nil
         }
     }
 
@@ -1566,6 +1592,7 @@ final class ScreenManager {
             }
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
+            refreshAppNapAssertion()
             // Push the persisted playback inspector state into the freshly
             // installed scene session so the user's saved Frame Rate /
             // Mute / Volume take effect from the first frame instead of
@@ -1604,6 +1631,7 @@ final class ScreenManager {
 
         observeRuntimeErrors(for: session)
         screen.installRuntimeSession(session)
+        refreshAppNapAssertion()
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         applyPerformancePolicy(
             to: screen,
