@@ -607,6 +607,81 @@ final class WPEMetalRenderExecutor {
         return WPEMetalFBOAliasPlanner.plan(intervals).heapSize
     }
 
+    /// Conservative alias intervals handed to the target pool: per pool-FBO key,
+    /// its `[firstPass, lastPass]` over the flattened render order. Reads use the
+    /// UNION (`textureReferences`) so a target's last use is never under-counted
+    /// — the pool may only make it aliasable AFTER this index, never before
+    /// (which would corrupt the frame). Ping-pong secondaries are excluded (they
+    /// need two simultaneous textures and stay on the discrete path).
+    private func fboAliasIntervals(
+        pipeline: WPEPreparedRenderPipeline,
+        sceneSize: CGSize
+    ) -> [WPEMetalRenderTargetPool.AliasInterval] {
+        let declaredFBOs = Self.fboReportDeclaredFBOs(in: pipeline)
+        var flattened: [(index: Int, layer: WPEPreparedRenderLayer, pass: WPEPreparedRenderPass)] = []
+        var passIndex = 0
+        for layer in pipeline.layers {
+            for pass in layer.passes {
+                flattened.append((passIndex, layer, pass))
+                passIndex += 1
+            }
+        }
+
+        func poolKey(for target: WPERenderTarget, layer: WPEPreparedRenderLayer) -> WPEMetalRenderTargetKey? {
+            switch target {
+            case .scene:
+                return nil
+            case .fbo, .layerComposite:
+                return targetPool.diagnosticKey(for: target, layer: layer.graphLayer, sceneSize: sceneSize, declaredFBOs: declaredFBOs)
+            }
+        }
+
+        var keysByName: [String: Set<WPEMetalRenderTargetKey>] = [:]
+        for item in flattened {
+            if let key = poolKey(for: item.pass.pass.target, layer: item.layer) {
+                keysByName[key.name, default: []].insert(key)
+            }
+        }
+
+        var firstPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
+        var lastPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
+        var secondaryKeys = Set<WPEMetalRenderTargetKey>()
+        var writtenTargets = Set<WPEMetalTargetID>()
+
+        func touch(_ key: WPEMetalRenderTargetKey, _ index: Int) {
+            if firstPassByKey[key] == nil { firstPassByKey[key] = index }
+            lastPassByKey[key] = max(lastPassByKey[key] ?? index, index)
+        }
+
+        for item in flattened {
+            let targetID = WPEMetalTargetID(target: item.pass.pass.target)
+            let targetKey = poolKey(for: item.pass.pass.target, layer: item.layer)
+            if let targetKey {
+                touch(targetKey, item.index)
+                if writtenTargets.contains(targetID),
+                   passReadsCurrentTarget(item.pass, targetID: targetID) {
+                    secondaryKeys.insert(targetKey)
+                }
+            }
+            for reference in textureReferences(for: item.pass) {
+                switch reference {
+                case .fbo(let name):
+                    for namedKey in keysByName[name] ?? [] { touch(namedKey, item.index) }
+                case .previous:
+                    if let targetKey { touch(targetKey, item.index) }
+                case .image, .asset:
+                    break
+                }
+            }
+            writtenTargets.insert(targetID)
+        }
+
+        return firstPassByKey.compactMap { key, first in
+            guard !secondaryKeys.contains(key), let last = lastPassByKey[key] else { return nil }
+            return WPEMetalRenderTargetPool.AliasInterval(key: key, firstPass: first, lastPass: last)
+        }
+    }
+
     private static func fboReportSort(_ lhs: WPEMetalRenderTargetKey, _ rhs: WPEMetalRenderTargetKey) -> Bool {
         if lhs.name != rhs.name { return lhs.name < rhs.name }
         if lhs.width != rhs.width { return lhs.width < rhs.width }
@@ -685,7 +760,14 @@ final class WPEMetalRenderExecutor {
             previousFrameHistory = nil
         }
 
-        targetPool.prepare(pipeline: preparedPipeline)
+        // Aliasing is disabled while the debug bypass path is active — bypass
+        // skips a layer's passes, which would break the lockstep pass index the
+        // alias plan relies on.
+        let aliasIntervals = (WPEMetalRenderTargetPool.isFBOAliasingEnabled && !Self.bypassEffectsForDebug)
+            ? fboAliasIntervals(pipeline: preparedPipeline, sceneSize: size)
+            : []
+        targetPool.prepare(pipeline: preparedPipeline, aliasIntervals: aliasIntervals)
+        targetPool.beginAliasFrame()
         // The per-frame output texture is freshly allocated and `.shared`; its
         // backing store is NOT zeroed by Metal. A scene-alias read of
         // `_rt_FullFrameBuffer` before any scene-target pass writes (e.g.
@@ -750,6 +832,10 @@ final class WPEMetalRenderExecutor {
             }
         }
 
+        // Flattened pass index for FBO aliasing — MUST advance in lockstep with
+        // the same `for layer { for pass in layer.passes }` order the alias plan
+        // used, across every branch below, or makeAliasable could fire early.
+        var aliasPassCounter = 0
         for layer in preparedPipeline.layers {
             try flushParticles(before: layer.graphLayer.sortIndex)
             // Attached children (face/hair on a body-split rig) follow the parent puppet's animated
@@ -814,6 +900,12 @@ final class WPEMetalRenderExecutor {
                 continue
             }
             for pass in layer.passes {
+                // Advance the alias index for EVERY pass (defer fires endPass at
+                // iteration exit, including the hidden-pass `continue` below), so
+                // makeAliasable only happens AFTER this pass is encoded.
+                let passAliasIndex = aliasPassCounter
+                aliasPassCounter += 1
+                defer { targetPool.endPass(passIndex: passAliasIndex) }
                 // Hidden layer: still encode passes that write a composite/FBO
                 // (dependents may sample them), but skip the final scene draw so
                 // the layer is invisible. Toggling `visible` true re-includes it
