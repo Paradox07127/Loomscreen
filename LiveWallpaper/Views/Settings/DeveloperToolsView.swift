@@ -30,6 +30,8 @@ struct DeveloperToolsView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var singleSceneWorkshopID: String = ""
     @State private var singleSceneStatus: String = ""
+    @State private var flagDiffStatus: String = ""
+    @State private var flagDiffReports: [WPEMetalRenderFlagDiff.ComparisonReport] = []
     @State private var selectedTab: DevToolsTab = .corpusTest
 
     private enum DevToolsTab: String, CaseIterable, Identifiable {
@@ -166,6 +168,7 @@ struct DeveloperToolsView: View {
     private var corpusTestContent: some View {
         configurationSection
         sceneDebugSection
+        flagDiffSection
         if let startupError {
             errorBanner(startupError)
         }
@@ -174,6 +177,44 @@ struct DeveloperToolsView: View {
                 .progressViewStyle(.linear)
         }
         resultsTable
+    }
+
+    /// Verdicts for the render-flag pixel-diff button — live status while the
+    /// ~5 corpus passes run, then a PASS/FAIL row per comparison plus any
+    /// divergent scenes (the same lines that go to the console log).
+    @ViewBuilder
+    private var flagDiffSection: some View {
+        if !flagDiffStatus.isEmpty || !flagDiffReports.isEmpty {
+            GroupBox(label: Text("Render-flag pixel diff").font(.headline)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !flagDiffStatus.isEmpty {
+                        Text(verbatim: flagDiffStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    ForEach(Array(flagDiffReports.enumerated()), id: \.offset) { _, report in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label {
+                                Text(verbatim: "\(report.variantLabel): \(report.identical)/\(report.comparedScenes) identical · \(report.divergences.count) divergent")
+                            } icon: {
+                                Image(systemName: report.passed ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                                    .foregroundStyle(report.passed ? Color.green : Color.red)
+                            }
+                            .font(.callout)
+                            ForEach(Array(report.divergences.prefix(12).enumerated()), id: \.offset) { _, divergence in
+                                Text(verbatim: "• \(divergence.description)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     /// Per-scene debug iteration loop. Runs `WPECorpusPlaybackHarness` with
@@ -580,15 +621,16 @@ struct DeveloperToolsView: View {
         startupError = nil
         entries.removeAll()
         lastReport = nil
+        flagDiffReports = []
         progressFraction = 0
-        progressLabel = "flag-diff: starting…"
+        flagDiffStatus = "Starting…"
 
         runTask = Task { @MainActor in
             func capture(_ config: WPEMetalRenderFlagDiff.FlagConfig, pass: Int) async -> [String: WPEMetalRenderFlagDiff.SceneDigest] {
                 await WPEMetalRenderFlagDiff.captureCorpus(config, timeoutSeconds: perSceneTimeout) { event in
                     if case .running(let index, let total, let workshopID, let title) = event {
                         let name = title.isEmpty ? workshopID : title
-                        self.progressLabel = "flag-diff \(pass)/5 [\(config.label)] — \(index)/\(total) \(name)"
+                        self.flagDiffStatus = "Pass \(pass)/5 [\(config.label)] — \(index)/\(total) \(name)"
                         self.progressFraction = total > 0 ? Double(index) / Double(total) : 0
                     }
                 }
@@ -597,25 +639,33 @@ struct DeveloperToolsView: View {
             let baseline = Self.flagDiffConfigs[0]
             let baselineA = await capture(baseline, pass: 1)
             guard !baselineA.isEmpty else {
-                self.startupError = "No corpus / library bookmark available. Open the Workshop library in the app first."
+                self.flagDiffStatus = ""
+                self.startupError = "No corpus found — no scenes in the Workshop library bookmark or the steamcmd download folder."
                 self.isRunning = false
                 return
             }
-            if self.cancelRequested { self.isRunning = false; return }
+            if self.cancelRequested {
+                self.flagDiffStatus = "Cancelled."
+                self.isRunning = false
+                return
+            }
             let baselineB = await capture(baseline, pass: 2)
             let aliasing = await capture(Self.flagDiffConfigs[1], pass: 3)
             let prewarm = await capture(Self.flagDiffConfigs[2], pass: 4)
             let both = await capture(Self.flagDiffConfigs[3], pass: 5)
 
             let reports = [
-                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "baseline#2"),
+                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "determinism (baseline×2)"),
                 WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: aliasing, baselineLabel: "baseline", variantLabel: "aliasing"),
                 WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: prewarm, baselineLabel: "baseline", variantLabel: "prewarm"),
                 WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: both, baselineLabel: "baseline", variantLabel: "both"),
             ]
             reports.forEach { $0.log() }
-            let verdict = reports.map { ($0.passed ? "✅" : "❌\($0.divergences.count)") + " " + $0.variantLabel }.joined(separator: "  ")
-            self.progressLabel = "flag-diff done — \(verdict)  (details in console log)"
+            self.flagDiffReports = reports
+            let allPass = reports.allSatisfy { $0.passed }
+            self.flagDiffStatus = allPass
+                ? "Done — all \(reports.count) comparisons pixel-identical ✅"
+                : "Done — \(reports.filter { !$0.passed }.count)/\(reports.count) comparisons DIVERGED ❌ (see below)"
             self.progressFraction = 1
             self.isRunning = false
         }
