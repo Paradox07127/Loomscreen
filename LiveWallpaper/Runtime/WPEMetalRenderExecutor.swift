@@ -4277,24 +4277,26 @@ final class WPEMetalRenderExecutor {
         let premultipliedOutput = Self.usesPremultipliedOutput(blendMode: pass.pass.blending)
         let request: WPEShaderCompileRequest
         do {
-            request = try processor.process(
-                shaderName: program.name,
-                vertexSource: program.vertexSource,
-                fragmentSource: program.fragmentSource,
-                comboValues: pass.comboValues,
-                materialTextureBindings: Dictionary(
-                    uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
-                        switch ref {
-                        case .image(let p), .asset(let p): return (slot, p)
-                        case .fbo(let n): return (slot, n)
-                        case .previous: return nil
+            request = try WPEMetalTranspileTimer.measure {
+                try processor.process(
+                    shaderName: program.name,
+                    vertexSource: program.vertexSource,
+                    fragmentSource: program.fragmentSource,
+                    comboValues: pass.comboValues,
+                    materialTextureBindings: Dictionary(
+                        uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
+                            switch ref {
+                            case .image(let p), .asset(let p): return (slot, p)
+                            case .fbo(let n): return (slot, n)
+                            case .previous: return nil
+                            }
                         }
-                    }
+                    )
+                ).replacingPremultipliedAlphaSettings(
+                    inputSlots: premultipliedInputSlots,
+                    output: premultipliedOutput
                 )
-            ).replacingPremultipliedAlphaSettings(
-                inputSlots: premultipliedInputSlots,
-                output: premultipliedOutput
-            )
+            }
         } catch let error as WPEShaderCompilerError {
             WPESceneDebugArtifacts.shared.recordShaderFailure(
                 shaderName: program.name,

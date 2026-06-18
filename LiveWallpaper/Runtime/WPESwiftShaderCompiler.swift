@@ -25,13 +25,15 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             vertexSource: request.processedVertexSource
         )
         do {
-            translation = try WPEShaderTranspiler.translateFragment(
-                shaderName: request.shaderName,
-                preprocessedSource: fragmentSource,
-                comboValues: request.comboValues,
-                premultipliedInputSlots: request.premultipliedInputSlots,
-                premultipliedOutput: request.premultipliedOutput
-            )
+            translation = try WPEMetalTranspileTimer.measure {
+                try WPEShaderTranspiler.translateFragment(
+                    shaderName: request.shaderName,
+                    preprocessedSource: fragmentSource,
+                    comboValues: request.comboValues,
+                    premultipliedInputSlots: request.premultipliedInputSlots,
+                    premultipliedOutput: request.premultipliedOutput
+                )
+            }
         } catch let err as WPEShaderCompilerError {
             WPESceneDebugArtifacts.shared.recordShaderFailure(
                 shaderName: request.shaderName,

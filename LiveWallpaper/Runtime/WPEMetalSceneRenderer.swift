@@ -151,6 +151,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `WPEMetalCompileTimer.milliseconds` snapshot at load start; the per-load
     /// metal-compile figure is reported as a delta against this (no global reset).
     private var compileMillisecondsAtLoadStart: Double = 0
+    /// `WPEMetalTranspileTimer.milliseconds` snapshot at load start; the per-load
+    /// transpile figure (GLSL preprocess + MSL transpile, the shader-prep NOT in
+    /// the compile timer) is reported as a delta against this.
+    private var transpileMillisecondsAtLoadStart: Double = 0
 
     #if DEBUG
     /// Test-only: audio startup is deferred (waiting on the first present), not yet started.
@@ -320,6 +324,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // it mid-flight. (Truly concurrent loads still over-count by each other's
         // compiles — a known limit of this opt-in diagnostic.)
         compileMillisecondsAtLoadStart = WPEMetalCompileTimer.milliseconds
+        transpileMillisecondsAtLoadStart = WPEMetalTranspileTimer.milliseconds
         loadGeneration &+= 1
         loadTiming = WPESceneLoadTiming.isEnabled
             ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
@@ -569,10 +574,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         outputTexture = try renderCurrentFrame()
         capture?.stop()
         if WPESceneLoadTiming.isEnabled {
-            // How much of render.firstFrame was one-time shader/pipeline
-            // compilation (cacheable via a binary archive) vs GPU work.
+            // Split render.firstFrame's one-time CPU cost: metal-compile is
+            // makeLibrary+makeRenderPipelineState (binary-archive cacheable);
+            // transpile is the GLSL preprocess + regex MSL transpile that is NOT
+            // in the compile timer. If transpile+metal-compile ≈ firstFrame, the
+            // floor is lazy shader prep (off-thread pre-warm during the parallel
+            // load window would hide it); if transpile is small, the floor is
+            // per-pass command encoding instead.
+            let metalCompile = WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart
+            let transpile = WPEMetalTranspileTimer.milliseconds - transpileMillisecondsAtLoadStart
             Logger.notice(
-                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart))ms (shader+pipeline, lands inside render.firstFrame)",
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms (both land inside render.firstFrame; transpile=GLSL preprocess+MSL transpile)",
                 category: .performance
             )
         }
