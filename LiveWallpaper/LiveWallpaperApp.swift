@@ -117,6 +117,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.notice("Tail the runtime log → \(hint)", category: .startup)
         }
 
+        #if !LITE_BUILD
+        // Reclaim WPE package staging dirs orphaned by a prior session's
+        // abnormal termination (deinit never ran). Runs off-main and before any
+        // scene provider is created, so it can't race a live provider's dir.
+        if !runtimeOptions.isTesting {
+            WPEPackageSceneAssetProvider.sweepStaleStagingDirectoriesAtLaunch()
+        }
+        #endif
+
         let startupPlan = AppStartupPlan(
             runtimeOptions: runtimeOptions,
             onboardingCompleted: UserDefaults.standard.bool(forKey: "Onboarding.Completed")

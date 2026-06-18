@@ -3,7 +3,11 @@ import CoreGraphics
 import Metal
 import MetalKit
 
-struct WPEMetalTextureLoader {
+// `@unchecked Sendable` so the loader can be captured by the parallel
+// texture-resolve lane in `WPEMetalSceneRenderer.loadTextures`: `device` is a
+// thread-safe Metal object, `capabilities` is a value type, and `uploadQueue`
+// is itself `@unchecked Sendable`. Nothing here is mutated after init.
+struct WPEMetalTextureLoader: @unchecked Sendable {
     private let device: MTLDevice
     private let capabilities: WPEMetalTextureCapabilities
     private let uploadQueue: WPEMetalTextureUploadQueue

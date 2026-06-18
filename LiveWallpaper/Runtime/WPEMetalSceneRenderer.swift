@@ -42,6 +42,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// (60 × 122 MB raw) to the streaming source.
     private static let lazyAnimationRawByteThreshold = 200_000_000
 
+    /// When true, emitters are pre-populated to their steady-state spread on
+    /// load (`WPEParticleSystem.prewarm`, up to ~900 substeps/system — the
+    /// dominant `particles.load` cost). Default OFF: emitters start empty and
+    /// fill naturally, trading the populated-on-load look for a faster load.
+    /// Flip `WPEParticlePrewarmEnabled` (Developer Tools → "Particle prewarm").
+    private static var particlePrewarmEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "WPEParticlePrewarmEnabled")
+    }
+
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
@@ -131,6 +140,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `WPEMetalCompileTimer.milliseconds` snapshot at load start; the per-load
     /// metal-compile figure is reported as a delta against this (no global reset).
     private var compileMillisecondsAtLoadStart: Double = 0
+    /// `WPEMetalTranspileTimer.milliseconds` snapshot at load start; the per-load
+    /// transpile figure (GLSL preprocess + MSL transpile, the shader-prep NOT in
+    /// the compile timer) is reported as a delta against this.
+    private var transpileMillisecondsAtLoadStart: Double = 0
 
     #if DEBUG
     /// Test-only: audio startup is deferred (waiting on the first present), not yet started.
@@ -299,6 +312,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // it mid-flight. (Truly concurrent loads still over-count by each other's
         // compiles — a known limit of this opt-in diagnostic.)
         compileMillisecondsAtLoadStart = WPEMetalCompileTimer.milliseconds
+        transpileMillisecondsAtLoadStart = WPEMetalTranspileTimer.milliseconds
         loadGeneration &+= 1
         loadTiming = WPESceneLoadTiming.isEnabled
             ? WPESceneLoadTiming(workshopID: descriptor.workshopID)
@@ -504,6 +518,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
 
+        // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
+        // load below; awaited at the render.firstFrame gate so the first synchronous
+        // render() hits the warmed cache instead of paying the lazy transpile inline.
+        // No-op when WPEMetalShaderPrewarmEnabled is off.
+        async let shaderWarm: Void = prewarmCustomShaders(for: pipeline)
+
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
@@ -530,6 +550,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // synchronous `runtime.start(sounds:)` is a 300-900ms hit that does not
         // gate any pixels, so keeping it on the load path only inflates perceived
         // load time.
+        executor.logFBOMemoryReportIfRequested(
+            pipeline: pipeline,
+            sceneSize: sceneRenderSize,
+            sceneID: descriptor.workshopID
+        )
+        // Finish seeding the shader cache before the first (synchronous) render() so it
+        // hits warmed entries. By now this has overlapped the entire texture/particle/text
+        // load above; on heavy scenes the ~1.9s transpile is already absorbed.
+        await shaderWarm
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 
@@ -543,10 +572,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         outputTexture = try renderCurrentFrame()
         capture?.stop()
         if WPESceneLoadTiming.isEnabled {
-            // How much of render.firstFrame was one-time shader/pipeline
-            // compilation (cacheable via a binary archive) vs GPU work.
+            // Split the one-time shader-prep cost: metal-compile is makeLibrary +
+            // makeRenderPipelineState; transpile is the GLSL preprocess + MSL transpile
+            // (the dominant first-frame CPU, which shader prewarm moves off-thread into
+            // the load window when enabled). Both are zero-cost unless WPEMetalLoadTiming.
+            let metalCompile = WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart
+            let transpile = WPEMetalTranspileTimer.milliseconds - transpileMillisecondsAtLoadStart
             Logger.notice(
-                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart))ms (shader+pipeline, lands inside render.firstFrame)",
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms",
                 category: .performance
             )
         }
@@ -1726,14 +1759,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             system.followParent = followParent
             system.requiresFollowParent = true
         }
-        // Prewarm long enough that the first-spawned particles have lived a full
-        // lifetime, so the emitter starts at its STEADY-STATE age/position spread
-        // (matches WPE, which loads with a populated emitter). `+2s` only aged
-        // particles to ~2s, leaving them clustered near the origin instead of
-        // spread across their fall path. Cap to bound load-time prewarm cost.
-        let prewarmSeconds = max(0, definition.startDelay)
-            + min(max(definition.lifetimeMax, 2.0), 15.0)
-        system.prewarm(simulatedSeconds: prewarmSeconds)
+        // Prewarm pre-populates the emitter to its STEADY-STATE age/position
+        // spread so it loads already-full (matches WPE's populated-on-load
+        // look) instead of filling from empty. It is the dominant
+        // `particles.load` cost — up to ~900 substeps/system run synchronously
+        // on the main actor — so it is gated: default OFF = emitters start at
+        // zero and fill naturally (faster load); flip `WPEParticlePrewarmEnabled`
+        // (Developer Tools → "Particle prewarm") to restore the populated look.
+        if Self.particlePrewarmEnabled {
+            // Prewarm long enough that the first-spawned particles have lived a
+            // full lifetime (a `+2s` cap left them clustered near the origin).
+            let prewarmSeconds = max(0, definition.startDelay)
+                + min(max(definition.lifetimeMax, 2.0), 15.0)
+            system.prewarm(simulatedSeconds: prewarmSeconds)
+        }
         particleSystems.append(system)
         particleTextures[ObjectIdentifier(system)] = resolved
         if WPESceneDebugArtifacts.shared.isEnabled {
@@ -2042,44 +2081,268 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         case dynamicSource(WPEDynamicTextureSource)
     }
 
+    /// One unique external texture to load, captured before fan-out so the
+    /// off-actor lane never races on a shared dedup map.
+    private struct WPETextureLoadJob: Sendable {
+        let path: String
+        let layerName: String
+        let candidates: [String]
+    }
+
+    /// Outcome of the off-actor resolve+upload lane. `staticTexture` carries a
+    /// fully-built Metal texture (a thread-safe object) back to the main actor;
+    /// `needsOnActor` flags a dynamic/video/animated/heavy-streaming source
+    /// whose construction is `@MainActor`-isolated and is handled serially.
+    /// `@unchecked Sendable` is the idiomatic escape hatch for ferrying an
+    /// `MTLTexture` (documented thread-safe) across the actor hop.
+    private enum WPEParallelTextureResult: @unchecked Sendable {
+        case staticTexture(MTLTexture)
+        case needsOnActor
+    }
+
+    /// Off-thread shader-transpile pre-warm. Builds the deterministic, runtime-independent
+    /// compile request for every custom-shader pass on the main actor (deduped by cache key),
+    /// then translates + makeLibrary's them in parallel OFF the main actor and seeds
+    /// `executor.translatedShaderCache` — so the first synchronous `render()` gets cache hits
+    /// instead of paying the ~1.9s lazy GLSL→MSL transpile inline. Launched as an `async let`
+    /// during the load window (overlapping texture/particle/text load) and awaited at the
+    /// render.firstFrame gate. Flag-gated; per-pass failures are swallowed (the real first
+    /// render re-hits and records them as today). Respects `loadGeneration` so a superseded
+    /// load never seeds. Captures only `Sendable` values (the compiler protocol is `Sendable`,
+    /// requests are `Sendable`) — never the non-`Sendable` executor.
+    private func prewarmCustomShaders(for pipeline: WPEPreparedRenderPipeline) async {
+        guard WPEMetalRenderExecutor.isShaderPrewarmEnabled else { return }
+        let generation = loadGeneration
+        debugStage("shader.prewarm", "begin")
+
+        // Build + dedup requests on the main actor (the preprocess is cheap; only the
+        // translate+makeLibrary that follows is the heavy CPU). recordFailure:false keeps
+        // the warm silent — the real first-frame render stays the sole failure recorder.
+        var requestsByKey: [String: WPEShaderCompileRequest] = [:]
+        for layer in pipeline.layers {
+            for pass in layer.passes where pass.shader?.isBuiltin == false {
+                guard let request = try? WPEMetalRenderExecutor.makeCompileRequest(for: pass, recordFailure: false) else { continue }
+                requestsByKey[request.translationCacheKey] = request
+            }
+        }
+        let requests = Array(requestsByKey.values)
+        guard !requests.isEmpty, loadGeneration == generation else {
+            debugStage("shader.prewarm.done", "passes=0")
+            return
+        }
+
+        let compiler = executor.shaderCompiler
+        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+        let warmed: [(key: String, result: WPEShaderCompileResult)]
+        do {
+            warmed = try await withThrowingTaskGroup(
+                of: (key: String, result: WPEShaderCompileResult)?.self
+            ) { group in
+                var next = 0
+                func spawn() -> Bool {
+                    guard next < requests.count else { return false }
+                    let request = requests[next]
+                    next += 1
+                    group.addTask(priority: .userInitiated) {
+                        try Task.checkCancellation()
+                        // Swallow an unsupported shader: leave it uncached so the real
+                        // first-frame render re-hits compileCustomShader and records it.
+                        guard let result = try? compiler.compile(request, recordFailure: false) else {
+                            return nil
+                        }
+                        return (key: request.translationCacheKey, result: result)
+                    }
+                    return true
+                }
+                for _ in 0..<width where spawn() {}
+                var collected: [(key: String, result: WPEShaderCompileResult)] = []
+                while let entry = try await group.next() {
+                    if loadGeneration != generation {
+                        group.cancelAll()
+                        break
+                    }
+                    if let entry { collected.append(entry) }
+                    _ = spawn()
+                }
+                return collected
+            }
+        } catch {
+            // A superseded load cancelled the group mid-drain; drop the partial results.
+            debugStage("shader.prewarm.cancelled", "\(error)")
+            return
+        }
+
+        guard loadGeneration == generation else { return }
+        executor.seedTranslatedShaderCache(warmed)
+        debugStage("shader.prewarm.done", "warmed=\(warmed.count)/\(requests.count)")
+    }
+
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
         loadedTextures = [:]
         dynamicTextureSources = [:]
 
+        // Collect the unique external textures in pipeline order. Deduping up
+        // front (instead of the old per-iteration map check) means concurrent
+        // resolves never touch the same path, so the @MainActor texture maps
+        // are written exactly once each, on this actor.
+        var jobs: [WPETextureLoadJob] = []
+        var seen = Set<String>()
         for layer in pipeline.layers {
-            try Task.checkCancellation()
+            let layerName = layer.graphLayer.objectName
             if layer.passes.isEmpty {
-                try await loadTexture(
-                    reference: .image(layer.graphLayer.imagePath),
-                    layerName: layer.graphLayer.objectName
-                )
+                if let path = externalTexturePath(for: .image(layer.graphLayer.imagePath)),
+                   seen.insert(path).inserted {
+                    jobs.append(WPETextureLoadJob(path: path, layerName: layerName, candidates: textureCandidates(for: path)))
+                }
                 continue
             }
             for preparedPass in layer.passes {
                 for reference in requiredTextureReferences(for: preparedPass) {
-                    try Task.checkCancellation()
-                    try await loadTexture(
-                        reference: reference,
-                        layerName: layer.graphLayer.objectName
-                    )
+                    if let path = externalTexturePath(for: reference),
+                       seen.insert(path).inserted {
+                        jobs.append(WPETextureLoadJob(path: path, layerName: layerName, candidates: textureCandidates(for: path)))
+                    }
                 }
+            }
+        }
+        guard !jobs.isEmpty else { return }
+
+        // Snapshot the load generation so a reload/cleanup that resets the maps
+        // mid-flight can't get a stale texture written into the new load.
+        let generation = loadGeneration
+        let resolver = resourceResolver
+        let loader = textureLoader
+        let threshold = Self.lazyAnimationRawByteThreshold
+        // Width bounded like the upload lane: parallelizes the per-texture
+        // inflate (the on-main serial cost today) without over-subscribing the
+        // upload queue, which keeps its own 1-2 slot admission bound.
+        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+        try await withThrowingTaskGroup(of: (Int, WPEParallelTextureResult).self) { group in
+            var nextIndex = 0
+            func spawnNext() -> Bool {
+                guard nextIndex < jobs.count else { return false }
+                let index = nextIndex
+                nextIndex += 1
+                let job = jobs[index]
+                group.addTask(priority: .userInitiated) {
+                    do {
+                        let result = try await Self.resolveStaticTextureOrDefer(
+                            relativePath: job.path,
+                            label: "WPE texture \(job.path)",
+                            candidates: job.candidates,
+                            resolver: resolver,
+                            loader: loader,
+                            streamingThreshold: threshold
+                        )
+                        return (index, result)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        throw WPEMetalTextureLoadContextError(layerName: job.layerName, path: job.path, underlying: error)
+                    }
+                }
+                return true
+            }
+
+            for _ in 0..<width where spawnNext() {}
+
+            while let (index, result) = try await group.next() {
+                try Task.checkCancellation()
+                guard loadGeneration == generation else {
+                    group.cancelAll()
+                    return
+                }
+                switch result {
+                case .staticTexture(let texture):
+                    loadedTextures[jobs[index].path] = texture
+                case .needsOnActor:
+                    // Rare: video / multi-frame animation / heavy-streaming
+                    // `.tex`. Their source construction is @MainActor-only, so
+                    // route through the untouched serial resolver rather than
+                    // duplicating that logic in the parallel lane.
+                    try await loadDynamicTextureOnActor(path: jobs[index].path, layerName: jobs[index].layerName)
+                }
+                _ = spawnNext()
             }
         }
     }
 
-    private func loadTexture(
-        reference: WPETextureReference,
-        layerName: String
-    ) async throws {
-        guard let path = externalTexturePath(for: reference),
-              loadedTextures[path] == nil,
-              dynamicTextureSources[path] == nil else {
-            return
+    /// Off-actor: resolve + upload a *static* texture, or report that the
+    /// reference needs @MainActor construction. Mirrors the candidate-walk in
+    /// `makeTextureResource`; only the static-image / static-payload branches
+    /// build here (the upload still flows through the bounded upload queue).
+    private nonisolated static func resolveStaticTextureOrDefer(
+        relativePath: String,
+        label: String,
+        candidates: [String],
+        resolver: WPEMultiRootResourceResolver,
+        loader: WPEMetalTextureLoader,
+        streamingThreshold: Int
+    ) async throws -> WPEParallelTextureResult {
+        var lastError: Error?
+        for candidate in candidates {
+            do {
+                if shouldTryTexturePayload(candidate) {
+                    do {
+                        if detectHeavyStreaming(candidate, resolver: resolver, threshold: streamingThreshold) {
+                            return .needsOnActor
+                        }
+                        let payload = try resolver.resolveTexturePayload(relativePath: candidate)
+                        if payload.videoPayload != nil || payload.animationTrack != nil {
+                            return .needsOnActor
+                        }
+                        return .staticTexture(try await loader.makeTexture(from: payload, label: label))
+                    } catch {
+                        lastError = error
+                    }
+                }
+                let image = try resolver.resolveImage(relativePath: candidate)
+                return .staticTexture(try await loader.makeTexture(from: image, label: label))
+            } catch {
+                lastError = error
+            }
         }
+        throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
+    }
+
+    /// `nonisolated` heavy-`.tex` probe matching `resolveStreamingPayloadIfHeavy`'s
+    /// decision (same threshold + probe candidates), minus the opt-in debug
+    /// marks. When this returns true the on-actor path re-resolves and builds
+    /// the lazy streaming source.
+    private nonisolated static func detectHeavyStreaming(
+        _ candidate: String,
+        resolver: WPEMultiRootResourceResolver,
+        threshold: Int
+    ) -> Bool {
+        let ext = (candidate as NSString).pathExtension.lowercased()
+        let probeCandidates: [String]
+        if ext == "tex" {
+            probeCandidates = [candidate]
+        } else if ext.isEmpty {
+            let stripped = (candidate as NSString).deletingPathExtension
+            probeCandidates = [candidate, "materials/\(stripped).tex"]
+        } else {
+            return false
+        }
+        for probe in probeCandidates {
+            guard let payload = try? resolver.resolveStreamingTexturePayload(relativePath: probe) else {
+                continue
+            }
+            if payload.totalUncompressedImageBytes > threshold {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// On-actor build for the dynamic/video/animated/heavy-streaming minority,
+    /// reusing the serial `makeTextureResource`. Paths are pre-deduped by the
+    /// caller, so no map guard is needed here.
+    private func loadDynamicTextureOnActor(path: String, layerName: String) async throws {
         do {
             let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
-            // A cancelled load resumed after a reload reset the texture maps
-            // must not write a stale entry into the new load's state.
             try Task.checkCancellation()
             switch resource {
             case .staticTexture(let texture):
@@ -2354,8 +2617,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {
+        Self.shouldTryTexturePayload(path)
+    }
+
+    /// `nonisolated` twin so the off-actor parallel-resolve lane can make the
+    /// same `.tex`-vs-raster decision the on-actor path uses.
+    private nonisolated static func shouldTryTexturePayload(_ path: String) -> Bool {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        return !Self.knownRawImageExtensions.contains(extensionName)
+        return !knownRawImageExtensions.contains(extensionName)
     }
 
     /// Raster image extensions that `WPETextureLoader` can load via ImageIO
@@ -2363,7 +2632,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// of these are taken at face value; anything else (including names that
     /// merely *look* like they end in an extension because they contain a dot)
     /// goes through the materials/-prefix fallback below.
-    static let knownRawImageExtensions: Set<String> = [
+    nonisolated static let knownRawImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
     ]
 

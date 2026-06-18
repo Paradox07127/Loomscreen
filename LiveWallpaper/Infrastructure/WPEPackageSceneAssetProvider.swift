@@ -16,23 +16,31 @@ import Foundation
 /// rather than fully materializing the entry in resident memory. The same
 /// staged file backs `stagedURL` consumers (AVFoundation video/audio, fonts).
 /// The staging directory's lifetime equals the scene session — removed on
-/// deinit, so staged files never outlive the wallpaper that needed them.
+/// `deinit`, so staged files never outlive the wallpaper that needed them.
+/// `deinit` does not run on crash / force-quit / wallpaper-agent kill, so a
+/// launch-time sweep (`sweepStaleStagingDirectoriesAtLaunch`) backstops
+/// abnormal termination by reclaiming any staging directory a prior session
+/// orphaned. Each directory is per-session, so none should ever survive a launch.
 final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Sendable {
     /// Entries larger than this are staged + memory-mapped instead of read into
     /// RAM, matching the historical `.mappedIfSafe` behavior for big `.tex`.
     private static let mmapThreshold: UInt64 = 64 * 1024 * 1024
     private static let copyChunkSize = 1 << 20
+    /// Name prefix shared by every per-session staging directory under
+    /// `NSTemporaryDirectory()`. The launch-time sweep keys off it.
+    static let stagingDirectoryNamePrefix = "LiveWallpaper-WPEPkgStage-"
 
     private let package: WallpaperEnginePackage
     private let handle: FileHandle
     private let lock = NSLock()
-    /// Per-provider staging directory (lazily created); removed on deinit.
+    /// Per-provider staging directory (lazily created); removed on deinit, with
+    /// the launch sweep reclaiming it after abnormal termination.
     private let stagingRoot: URL
     private var stagedPaths: [String: URL] = [:]
 
     init(packageURL: URL) throws {
         self.stagingRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("LiveWallpaper-WPEPkgStage-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("\(Self.stagingDirectoryNamePrefix)\(UUID().uuidString)", isDirectory: true)
         let handle = try FileHandle(forReadingFrom: packageURL)
         do {
             self.package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
@@ -46,6 +54,49 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
     deinit {
         try? handle.close()
         try? FileManager.default.removeItem(at: stagingRoot)
+    }
+
+    // MARK: - Stale staging-dir sweep
+
+    /// Pure filter over a temp-directory listing: returns the entry names that
+    /// are our per-session staging directories. Split out from
+    /// `sweepStaleStagingDirectories` so it is unit-testable without I/O.
+    static func staleStagingDirectoryNames(in entries: [String]) -> [String] {
+        entries.filter { $0.hasPrefix(stagingDirectoryNamePrefix) }
+    }
+
+    /// Removes every stale staging entry found directly under `directory` and
+    /// returns how many it reclaimed. Best-effort: anything that can't be listed
+    /// or removed is skipped rather than throwing.
+    @discardableResult
+    static func sweepStaleStagingDirectories(
+        in directory: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+        fileManager: FileManager = .default
+    ) -> Int {
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
+            return 0
+        }
+        var removed = 0
+        for name in staleStagingDirectoryNames(in: entries) {
+            let url = directory.appendingPathComponent(name, isDirectory: true)
+            if (try? fileManager.removeItem(at: url)) != nil {
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// Launch-time backstop for staging directories orphaned by abnormal
+    /// termination (crash / force-quit / agent kill), where `deinit` never ran.
+    /// Runs off the main thread. Call once, early in startup, before any
+    /// provider is created so it can never race a live provider's staging dir.
+    static func sweepStaleStagingDirectoriesAtLaunch() {
+        DispatchQueue.global(qos: .utility).async {
+            let removed = sweepStaleStagingDirectories()
+            if removed > 0 {
+                Logger.notice("Swept \(removed) stale WPE package staging dir(s)", category: .startup)
+            }
+        }
     }
 
     func data(atRelativePath relativePath: String) throws -> Data {
