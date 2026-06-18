@@ -829,18 +829,21 @@ final class SteamCMDDoctorService {
         return visited
     }
 
-    /// Moves any app-managed SteamCMD download folder(s) for `workshopID` to the
-    /// Trash (recoverable). Scans the same two roots as
-    /// `enumerateDownloadedItemFolders` — the sandbox-redirected container Steam
-    /// dir and the bound workdir — so deleting an item also frees the download
-    /// that seeded its cache copy (otherwise the bytes linger and, absent a
-    /// delete tombstone, the auto-scan re-imports it). Returns the number of
-    /// folders trashed; a no-op for ids never downloaded here (e.g. external
-    /// folder imports).
+    /// Permanently deletes any app-managed SteamCMD download folder(s) for
+    /// `workshopID` to reclaim disk space. The Trash is unusable here: under
+    /// App Sandbox `trashItem` on the container-internal Steam dir lands in the
+    /// container's hidden `.Trash`, invisible in Finder and not space-freeing —
+    /// so "move to Trash" looked like nothing happened. Scans the same two roots
+    /// as `enumerateDownloadedItemFolders` — the sandbox-redirected container
+    /// Steam dir and the bound workdir — so deleting an item also frees the
+    /// download that seeded its cache copy (otherwise the bytes linger and,
+    /// absent a delete tombstone, the auto-scan re-imports it). Returns the
+    /// number of folders deleted; a no-op for ids never downloaded here (e.g.
+    /// external folder imports).
     @discardableResult
-    func trashDownloadedItemFolders(workshopID: String) async -> Int {
+    func deleteDownloadedItemFolders(workshopID: String) async -> Int {
         guard WPEPathSafety.isSafeWorkshopID(workshopID) else { return 0 }
-        var trashed = 0
+        var deleted = 0
 
         if let appSupport = try? fileManager.url(
             for: .applicationSupportDirectory,
@@ -849,33 +852,34 @@ final class SteamCMDDoctorService {
             create: false
         ) {
             // Anchor the resolved Steam root back under resolved Application
-            // Support so a symlinked `Steam` can't re-base the trash target.
+            // Support so a symlinked `Steam` can't re-base the delete target.
             let safeAppSupport = appSupport.standardizedFileURL.resolvingSymlinksInPath()
             let steam = safeAppSupport
                 .appendingPathComponent("Steam", isDirectory: true)
                 .standardizedFileURL
                 .resolvingSymlinksInPath()
             if WPEPathSafety.contains(steam, in: safeAppSupport),
-               trashItemFolder(workshopID: workshopID, under: steam) {
-                trashed += 1
+               deleteItemFolder(workshopID: workshopID, under: steam) {
+                deleted += 1
             }
         }
 
         if let workdir = try? resolveWorkdirURL() {
             let scope = workdir.startAccessingSecurityScopedResource()
             defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
-            if trashItemFolder(workshopID: workshopID, under: workdir) { trashed += 1 }
+            if deleteItemFolder(workshopID: workshopID, under: workdir) { deleted += 1 }
         }
-        return trashed
+        return deleted
     }
 
-    /// Trashes `<base>/steamapps/workshop/content/431960/<workshopID>` only when
-    /// it exists and resolves (symlinks included) to a directory still contained
-    /// in the content root — never a sibling, parent, or symlink-escaped target.
-    private func trashItemFolder(workshopID: String, under base: URL) -> Bool {
+    /// Permanently removes `<base>/steamapps/workshop/content/431960/<workshopID>`
+    /// only when it exists and resolves (symlinks included) to a directory still
+    /// contained in the content root — never a sibling, parent, or
+    /// symlink-escaped target.
+    private func deleteItemFolder(workshopID: String, under base: URL) -> Bool {
         // Anchor the whole chain: the resolved content root must stay inside the
         // resolved trusted base, so a symlinked `steamapps`/`workshop`/`content`/
-        // `431960` can't re-base the trash target outside it. The final
+        // `431960` can't re-base the delete target outside it. The final
         // item-in-contentRoot check below is necessary but not sufficient alone.
         let safeBase = base.standardizedFileURL.resolvingSymlinksInPath()
         let contentRoot = workshopContentRoot(under: safeBase).standardizedFileURL.resolvingSymlinksInPath()
@@ -889,8 +893,7 @@ final class SteamCMDDoctorService {
         guard fileManager.fileExists(atPath: item.path(percentEncoded: false), isDirectory: &isDirectory),
               isDirectory.boolValue else { return false }
         do {
-            var resultingURL: NSURL?
-            try fileManager.trashItem(at: item, resultingItemURL: &resultingURL)
+            try fileManager.removeItem(at: item)
             return true
         } catch {
             return false
