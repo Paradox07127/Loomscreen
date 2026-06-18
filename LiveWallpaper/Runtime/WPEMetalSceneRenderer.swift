@@ -581,24 +581,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // cost; the steady-state draw loop switches to async below.
         executor.synchronizeFrameCompletion = true
         let capture = beginGPUCaptureIfRequested()
-        let firstFrameCompileStart = WPEMetalCompileTimer.milliseconds
-        let firstFrameTranspileStart = WPEMetalTranspileTimer.milliseconds
         outputTexture = try renderCurrentFrame()
         capture?.stop()
         if WPESceneLoadTiming.isEnabled {
-            // metal-compile / transpile are WHOLE-LOAD deltas: with shader prewarm on,
-            // the transpile is absorbed in the load window (overlapping textures), not
-            // the first frame, so those totals stay large by design. The firstFrame-*
-            // deltas isolate only the shader prep STILL paid inside the synchronous
-            // first render() — firstFrame-transpile collapses toward 0 when prewarm
-            // hits (the win); firstFrame-compile keeps the small lazy
-            // makeRenderPipelineState that stays runtime-keyed per pass.
+            // Split the one-time shader-prep cost: metal-compile is makeLibrary +
+            // makeRenderPipelineState; transpile is the GLSL preprocess + MSL transpile
+            // (the dominant first-frame CPU, which shader prewarm moves off-thread into
+            // the load window when enabled). Both are zero-cost unless WPEMetalLoadTiming.
             let metalCompile = WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart
             let transpile = WPEMetalTranspileTimer.milliseconds - transpileMillisecondsAtLoadStart
-            let firstFrameCompile = WPEMetalCompileTimer.milliseconds - firstFrameCompileStart
-            let firstFrameTranspile = WPEMetalTranspileTimer.milliseconds - firstFrameTranspileStart
             Logger.notice(
-                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms firstFrame-compile=\(String(format: "%.1f", firstFrameCompile))ms firstFrame-transpile=\(String(format: "%.1f", firstFrameTranspile))ms (firstFrame-* = shader prep still inside render.firstFrame; transpile collapses to ~0 when prewarm hits)",
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms",
                 category: .performance
             )
         }

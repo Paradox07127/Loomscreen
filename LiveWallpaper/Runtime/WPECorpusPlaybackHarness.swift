@@ -83,22 +83,14 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
             let nonTransparentPixelCount: Int
             let nonBlackBounds: WPEMetalTextureVisualBounds?
             let nonBlackCoversFullFrame: Bool
-            /// SHA256 of the first-frame RGBA bytes when `captureContentHash` is on;
-            /// nil otherwise and on archives predating the flag-diff gate.
-            let contentHash: String?
 
-            init(stats: WPEMetalTextureVisualStats, contentHash: String? = nil) {
+            init(stats: WPEMetalTextureVisualStats) {
                 self.width = stats.width
                 self.height = stats.height
                 self.nonBlackPixelCount = stats.nonBlackPixelCount
                 self.nonTransparentPixelCount = stats.nonTransparentPixelCount
                 self.nonBlackBounds = stats.nonBlackBounds
                 self.nonBlackCoversFullFrame = stats.nonBlackCoversFullFrame
-                self.contentHash = contentHash
-            }
-
-            var oneLine: String {
-                "size=\(width)x\(height) nonBlack=\(nonBlackPixelCount) nonTransparent=\(nonTransparentPixelCount)"
             }
         }
     }
@@ -125,27 +117,7 @@ final class WPECorpusPlaybackHarness {
         /// can iterate on one failing scene without burning through the
         /// whole corpus run.
         var workshopIDFilter: Set<String>? = nil
-        /// When true, each passing scene's first-frame RGBA bytes are SHA256'd
-        /// into `Entry.visual.contentHash` — the exact fingerprint the flag-diff
-        /// gate compares across two render-flag configs. Off by default (one extra
-        /// full-frame readback + hash per scene).
-        var captureContentHash: Bool = false
-        /// When true the headless renderer pins its time-varying inputs — a frame
-        /// clock at t=0 (fixed date) and a centered pointer — so `g_Time`-driven
-        /// motion and cursor-parallax render the SAME first frame every run.
-        /// Required for the flag-diff hash gate to be deterministic — otherwise
-        /// animated/cursor scenes sample different inputs each pass and hash every
-        /// config as "divergent".
-        var useDeterministicInputs: Bool = false
     }
-
-    /// Clock pinned to elapsed time 0 and a fixed date — `elapsed = 0 - 0`. Makes
-    /// the captured first frame deterministic across runs.
-    static let fixedFrameClock = WPEMetalFrameClock(
-        loadTime: 0,
-        currentMediaTime: { 0 },
-        currentDate: { Date(timeIntervalSince1970: 0) }
-    )
 
     enum Progress: Sendable {
         case scanning
@@ -356,7 +328,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: nil,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
+                    visual: Self.visualSummary(from: headless.renderer)
                 )
             } catch let error as TimeoutError {
                 return makeEntry(
@@ -368,7 +340,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: error.errorDescription,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
+                    visual: Self.visualSummary(from: headless.renderer)
                 )
             } catch {
                 let diagnosticMessage = headless.renderer.loadDiagnostics?.errorDescription
@@ -381,7 +353,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: diagnosticMessage ?? Self.describe(error),
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
+                    visual: Self.visualSummary(from: headless.renderer)
                 )
             }
         } catch HarnessError.metalUnavailable {
@@ -421,9 +393,7 @@ final class WPECorpusPlaybackHarness {
             dependencyMounts: dependencyMounts,
             engineAssetsRootURL: engineAssetsRoot,
             frame: frame,
-            device: device,
-            frameClock: configuration.useDeterministicInputs ? Self.fixedFrameClock : WPEMetalFrameClock(),
-            pointerSampler: configuration.useDeterministicInputs ? .fixed(SIMD2<Double>(0.5, 0.5)) : .live
+            device: device
         )
 
         let window = VideoWallpaperWindow(frame: frame)
@@ -573,15 +543,13 @@ final class WPECorpusPlaybackHarness {
     }
 
     private static func visualSummary(
-        from renderer: WPEMetalSceneRenderer,
-        captureContentHash: Bool
+        from renderer: WPEMetalSceneRenderer
     ) -> WPECorpusPlaybackReport.Entry.VisualSummary? {
         guard let texture = renderer.renderedTexture,
               let stats = WPEMetalTextureVisualStats.analyze(texture: texture) else {
             return nil
         }
-        let contentHash = captureContentHash ? WPEMetalTextureContentHasher.sha256Hex(of: texture) : nil
-        return WPECorpusPlaybackReport.Entry.VisualSummary(stats: stats, contentHash: contentHash)
+        return WPECorpusPlaybackReport.Entry.VisualSummary(stats: stats)
     }
 
     private static func readProject(from folderURL: URL) async throws -> WallpaperEngineProject {

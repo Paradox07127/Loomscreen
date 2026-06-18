@@ -30,8 +30,6 @@ struct DeveloperToolsView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var singleSceneWorkshopID: String = ""
     @State private var singleSceneStatus: String = ""
-    @State private var flagDiffStatus: String = ""
-    @State private var flagDiffReports: [WPEMetalRenderFlagDiff.ComparisonReport] = []
     @State private var selectedTab: DevToolsTab = .corpusTest
 
     private enum DevToolsTab: String, CaseIterable, Identifiable {
@@ -118,13 +116,6 @@ struct DeveloperToolsView: View {
                 .keyboardShortcut("r", modifiers: [.command])
 
                 Button {
-                    startFlagDiff()
-                } label: {
-                    Label("Run render-flag pixel diff", systemImage: "rectangle.on.rectangle")
-                }
-                .help("Renders the whole corpus under baseline / aliasing / prewarm / both and diffs first-frame pixels. Verdicts log to the console.")
-
-                Button {
                     exportReport()
                 } label: {
                     Label("Export JSON", systemImage: "square.and.arrow.up")
@@ -168,7 +159,6 @@ struct DeveloperToolsView: View {
     private var corpusTestContent: some View {
         configurationSection
         sceneDebugSection
-        flagDiffSection
         if let startupError {
             errorBanner(startupError)
         }
@@ -177,44 +167,6 @@ struct DeveloperToolsView: View {
                 .progressViewStyle(.linear)
         }
         resultsTable
-    }
-
-    /// Verdicts for the render-flag pixel-diff button — live status while the
-    /// ~5 corpus passes run, then a PASS/FAIL row per comparison plus any
-    /// divergent scenes (the same lines that go to the console log).
-    @ViewBuilder
-    private var flagDiffSection: some View {
-        if !flagDiffStatus.isEmpty || !flagDiffReports.isEmpty {
-            GroupBox(label: Text("Render-flag pixel diff").font(.headline)) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if !flagDiffStatus.isEmpty {
-                        Text(verbatim: flagDiffStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    ForEach(Array(flagDiffReports.enumerated()), id: \.offset) { _, report in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label {
-                                Text(verbatim: "\(report.variantLabel): \(report.identical)/\(report.comparedScenes) identical · \(report.divergences.count) divergent")
-                            } icon: {
-                                Image(systemName: report.passed ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                                    .foregroundStyle(report.passed ? Color.green : Color.red)
-                            }
-                            .font(.callout)
-                            ForEach(Array(report.divergences.prefix(12).enumerated()), id: \.offset) { _, divergence in
-                                Text(verbatim: "• \(divergence.description)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.red)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 
     /// Per-scene debug iteration loop. Runs `WPECorpusPlaybackHarness` with
@@ -603,87 +555,6 @@ struct DeveloperToolsView: View {
         }
     }
 
-    private static let flagDiffConfigs: [WPEMetalRenderFlagDiff.FlagConfig] = [
-        .init(label: "baseline", aliasing: false, prewarm: false),
-        .init(label: "aliasing", aliasing: true, prewarm: false),
-        .init(label: "prewarm", aliasing: false, prewarm: true),
-        .init(label: "both", aliasing: true, prewarm: true),
-    ]
-
-    /// Render the whole corpus under baseline/aliasing/prewarm/both and pixel-diff
-    /// each variant against a baseline capture (plus a baseline-vs-baseline
-    /// determinism calibration). Verdicts + any divergent scenes log to the console;
-    /// the live label tracks the current pass and scene. ~5 full corpus passes.
-    private func startFlagDiff() {
-        guard !isRunning else { return }
-        isRunning = true
-        cancelRequested = false
-        startupError = nil
-        entries.removeAll()
-        lastReport = nil
-        flagDiffReports = []
-        progressFraction = 0
-        flagDiffStatus = "Starting…"
-
-        runTask = Task { @MainActor in
-            func capture(_ config: WPEMetalRenderFlagDiff.FlagConfig, pass: Int) async -> [String: WPEMetalRenderFlagDiff.SceneDigest] {
-                await WPEMetalRenderFlagDiff.captureCorpus(config, timeoutSeconds: perSceneTimeout) { event in
-                    if case .running(let index, let total, let workshopID, let title) = event {
-                        let name = title.isEmpty ? workshopID : title
-                        self.flagDiffStatus = "Pass \(pass)/5 [\(config.label)] — \(index)/\(total) \(name)"
-                        self.progressFraction = total > 0 ? Double(index) / Double(total) : 0
-                    }
-                }
-            }
-
-            let baseline = Self.flagDiffConfigs[0]
-            let baselineA = await capture(baseline, pass: 1)
-            guard !baselineA.isEmpty else {
-                self.flagDiffStatus = ""
-                self.startupError = "No corpus found — no scenes in the Workshop library bookmark or the steamcmd download folder."
-                self.isRunning = false
-                return
-            }
-            if self.cancelRequested {
-                self.flagDiffStatus = "Cancelled."
-                self.isRunning = false
-                return
-            }
-            let baselineB = await capture(baseline, pass: 2)
-            let aliasing = await capture(Self.flagDiffConfigs[1], pass: 3)
-            let prewarm = await capture(Self.flagDiffConfigs[2], pass: 4)
-            let both = await capture(Self.flagDiffConfigs[3], pass: 5)
-
-            let determinism = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "determinism (baseline×2 nondeterministic)")
-            let rawAliasing = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: aliasing, baselineLabel: "baseline", variantLabel: "aliasing")
-            let rawPrewarm = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: prewarm, baselineLabel: "baseline", variantLabel: "prewarm")
-            let rawBoth = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: both, baselineLabel: "baseline", variantLabel: "both")
-            [determinism, rawAliasing, rawPrewarm, rawBoth].forEach { $0.log() }
-
-            // Differential gate: subtract scenes that already diverge baseline-vs-
-            // baseline (intrinsic nondeterminism the pinned clock didn't remove) so
-            // each flag's report shows only the NEW divergences it actually causes.
-            let intrinsic = Set(determinism.divergences.map(\.workshopID))
-            func novel(_ report: WPEMetalRenderFlagDiff.ComparisonReport) -> WPEMetalRenderFlagDiff.ComparisonReport {
-                let new = report.divergences.filter { !intrinsic.contains($0.workshopID) }
-                return WPEMetalRenderFlagDiff.ComparisonReport(
-                    baselineLabel: report.baselineLabel,
-                    variantLabel: report.variantLabel + " (new)",
-                    comparedScenes: report.comparedScenes,
-                    identical: report.comparedScenes - new.count,
-                    divergences: new
-                )
-            }
-            let variants = [novel(rawAliasing), novel(rawPrewarm), novel(rawBoth)]
-            self.flagDiffReports = [determinism] + variants
-            let newDivergences = variants.reduce(0) { $0 + $1.divergences.count }
-            self.flagDiffStatus = newDivergences == 0
-                ? "Done — no flag changed any pixel beyond intrinsic jitter ✅  (determinism: \(determinism.divergences.count)/\(determinism.comparedScenes) scenes nondeterministic)"
-                : "Done — a flag changed \(newDivergences) scene(s) beyond intrinsic jitter ❌ (see below)"
-            self.progressFraction = 1
-            self.isRunning = false
-        }
-    }
 
     @MainActor
     private func handleProgress(_ progress: WPECorpusPlaybackHarness.Progress) {
