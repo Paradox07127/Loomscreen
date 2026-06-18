@@ -116,6 +116,13 @@ struct DeveloperToolsView: View {
                 .keyboardShortcut("r", modifiers: [.command])
 
                 Button {
+                    startFlagDiff()
+                } label: {
+                    Label("Run render-flag pixel diff", systemImage: "rectangle.on.rectangle")
+                }
+                .help("Renders the whole corpus under baseline / aliasing / prewarm / both and diffs first-frame pixels. Verdicts log to the console.")
+
+                Button {
                     exportReport()
                 } label: {
                     Label("Export JSON", systemImage: "square.and.arrow.up")
@@ -551,6 +558,65 @@ struct DeveloperToolsView: View {
                 progress: handleProgress,
                 isCancelled: { self.cancelRequested }
             )
+            self.isRunning = false
+        }
+    }
+
+    private static let flagDiffConfigs: [WPEMetalRenderFlagDiff.FlagConfig] = [
+        .init(label: "baseline", aliasing: false, prewarm: false),
+        .init(label: "aliasing", aliasing: true, prewarm: false),
+        .init(label: "prewarm", aliasing: false, prewarm: true),
+        .init(label: "both", aliasing: true, prewarm: true),
+    ]
+
+    /// Render the whole corpus under baseline/aliasing/prewarm/both and pixel-diff
+    /// each variant against a baseline capture (plus a baseline-vs-baseline
+    /// determinism calibration). Verdicts + any divergent scenes log to the console;
+    /// the live label tracks the current pass and scene. ~5 full corpus passes.
+    private func startFlagDiff() {
+        guard !isRunning else { return }
+        isRunning = true
+        cancelRequested = false
+        startupError = nil
+        entries.removeAll()
+        lastReport = nil
+        progressFraction = 0
+        progressLabel = "flag-diff: starting…"
+
+        runTask = Task { @MainActor in
+            func capture(_ config: WPEMetalRenderFlagDiff.FlagConfig, pass: Int) async -> [String: WPEMetalRenderFlagDiff.SceneDigest] {
+                await WPEMetalRenderFlagDiff.captureCorpus(config, timeoutSeconds: perSceneTimeout) { event in
+                    if case .running(let index, let total, let workshopID, let title) = event {
+                        let name = title.isEmpty ? workshopID : title
+                        self.progressLabel = "flag-diff \(pass)/5 [\(config.label)] — \(index)/\(total) \(name)"
+                        self.progressFraction = total > 0 ? Double(index) / Double(total) : 0
+                    }
+                }
+            }
+
+            let baseline = Self.flagDiffConfigs[0]
+            let baselineA = await capture(baseline, pass: 1)
+            guard !baselineA.isEmpty else {
+                self.startupError = "No corpus / library bookmark available. Open the Workshop library in the app first."
+                self.isRunning = false
+                return
+            }
+            if self.cancelRequested { self.isRunning = false; return }
+            let baselineB = await capture(baseline, pass: 2)
+            let aliasing = await capture(Self.flagDiffConfigs[1], pass: 3)
+            let prewarm = await capture(Self.flagDiffConfigs[2], pass: 4)
+            let both = await capture(Self.flagDiffConfigs[3], pass: 5)
+
+            let reports = [
+                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "baseline#2"),
+                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: aliasing, baselineLabel: "baseline", variantLabel: "aliasing"),
+                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: prewarm, baselineLabel: "baseline", variantLabel: "prewarm"),
+                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: both, baselineLabel: "baseline", variantLabel: "both"),
+            ]
+            reports.forEach { $0.log() }
+            let verdict = reports.map { ($0.passed ? "✅" : "❌\($0.divergences.count)") + " " + $0.variantLabel }.joined(separator: "  ")
+            self.progressLabel = "flag-diff done — \(verdict)  (details in console log)"
+            self.progressFraction = 1
             self.isRunning = false
         }
     }

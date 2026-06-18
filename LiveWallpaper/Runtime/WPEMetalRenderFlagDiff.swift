@@ -68,7 +68,8 @@ enum WPEMetalRenderFlagDiff {
     /// load reads them fresh), restoring the prior values afterward.
     static func captureCorpus(
         _ config: FlagConfig,
-        timeoutSeconds: Double = 8
+        timeoutSeconds: Double = 8,
+        progress: @escaping @MainActor (WPECorpusPlaybackHarness.Progress) -> Void = { _ in }
     ) async -> [String: SceneDigest] {
         let defaults = UserDefaults.standard
         let aliasKey = WPEMetalRenderTargetPool.fboAliasingDefaultsKey
@@ -89,13 +90,14 @@ enum WPEMetalRenderFlagDiff {
 
         var captured: WPECorpusPlaybackReport?
         await harness.run(
-            progress: { progress in
-                switch progress {
+            progress: { event in
+                switch event {
                 case .finished(let report), .cancelled(let report):
                     captured = report
                 default:
                     break
                 }
+                progress(event)
             },
             isCancelled: { false }
         )
