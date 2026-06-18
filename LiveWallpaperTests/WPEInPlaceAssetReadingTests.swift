@@ -144,6 +144,56 @@ struct WPEInPlaceAssetReadingTests {
         #expect(try provider.data(atRelativePath: "MATERIAL.JSON") == Data("first".utf8))
     }
 
+    // MARK: - Stale staging-dir sweep
+
+    @Test("staleStagingDirectoryNames matches only the per-session staging prefix")
+    func staleStagingNamesFilterOurDirsOnly() {
+        let prefix = WPEPackageSceneAssetProvider.stagingDirectoryNamePrefix
+        let ours = ["\(prefix)\(UUID().uuidString)", "\(prefix)2222", prefix]
+        let others = [
+            "LiveWallpaper-Other-thing",
+            "com.apple.something",
+            "scene.pkg",
+            "WPEPkgStage-missing-leading-prefix",
+        ]
+        let stale = WPEPackageSceneAssetProvider.staleStagingDirectoryNames(in: ours + others)
+        #expect(Set(stale) == Set(ours))
+    }
+
+    @Test("sweepStaleStagingDirectories reclaims matching entries and spares others")
+    func sweepReclaimsOnlyStagingEntries() throws {
+        let root = try makeTempDir()
+        let fm = FileManager.default
+        let prefix = WPEPackageSceneAssetProvider.stagingDirectoryNamePrefix
+
+        let staging1 = root.appendingPathComponent("\(prefix)\(UUID().uuidString)", isDirectory: true)
+        let staging2 = root.appendingPathComponent("\(prefix)\(UUID().uuidString)", isDirectory: true)
+        let unrelated = root.appendingPathComponent("keep-me", isDirectory: true)
+        for dir in [staging1, staging2, unrelated] {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        // A non-empty staging dir must still be removed (mirrors a real session).
+        try Data([0xAB]).write(to: staging1.appendingPathComponent("asset.bin"))
+        // A stray top-level entry carrying the prefix is reclaimed too.
+        let stray = root.appendingPathComponent("\(prefix)stray", isDirectory: false)
+        try Data([0xCD]).write(to: stray)
+
+        let removed = WPEPackageSceneAssetProvider.sweepStaleStagingDirectories(in: root, fileManager: fm)
+
+        #expect(removed == 3)
+        #expect(!fm.fileExists(atPath: staging1.path))
+        #expect(!fm.fileExists(atPath: staging2.path))
+        #expect(!fm.fileExists(atPath: stray.path))
+        #expect(fm.fileExists(atPath: unrelated.path))
+    }
+
+    @Test("sweepStaleStagingDirectories tolerates a missing directory")
+    func sweepToleratesMissingDirectory() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does-not-exist-\(UUID().uuidString)", isDirectory: true)
+        #expect(WPEPackageSceneAssetProvider.sweepStaleStagingDirectories(in: missing) == 0)
+    }
+
     // MARK: - SceneDescriptor.assetStorage
 
     @Test("SceneDescriptor without assetStorage decodes as .cache")
