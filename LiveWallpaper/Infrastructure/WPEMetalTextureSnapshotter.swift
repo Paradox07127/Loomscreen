@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import CryptoKit
 import Metal
 
 /// Background readback helper that converts the Metal renderer's offscreen
@@ -188,6 +189,30 @@ struct WPEMetalTextureVisualStats: Codable, Equatable, Sendable, CustomStringCon
             nonTransparentPixelCount: nonTransparentPixelCount,
             nonBlackBounds: bounds
         )
+    }
+}
+
+/// Exact content fingerprint of a rendered first frame — SHA256 over the raw
+/// RGBA bytes. Used by the flag-diff gate: aliasing/prewarm are output-invariant
+/// optimizations, so two flag configs MUST produce byte-identical first frames
+/// (identical hashes). Any hash mismatch is a real pixel divergence to triage.
+enum WPEMetalTextureContentHasher {
+    static func sha256Hex(of texture: MTLTexture) -> String? {
+        guard texture.width > 0, texture.height > 0,
+              texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+            return nil
+        }
+        let bytesPerPixel = 4
+        let bytesPerRow = texture.width * bytesPerPixel
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+        texture.getBytes(
+            &bytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+        let digest = SHA256.hash(data: Data(bytes))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 #endif

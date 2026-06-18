@@ -83,14 +83,22 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
             let nonTransparentPixelCount: Int
             let nonBlackBounds: WPEMetalTextureVisualBounds?
             let nonBlackCoversFullFrame: Bool
+            /// SHA256 of the first-frame RGBA bytes when `captureContentHash` is on;
+            /// nil otherwise and on archives predating the flag-diff gate.
+            let contentHash: String?
 
-            init(stats: WPEMetalTextureVisualStats) {
+            init(stats: WPEMetalTextureVisualStats, contentHash: String? = nil) {
                 self.width = stats.width
                 self.height = stats.height
                 self.nonBlackPixelCount = stats.nonBlackPixelCount
                 self.nonTransparentPixelCount = stats.nonTransparentPixelCount
                 self.nonBlackBounds = stats.nonBlackBounds
                 self.nonBlackCoversFullFrame = stats.nonBlackCoversFullFrame
+                self.contentHash = contentHash
+            }
+
+            var oneLine: String {
+                "size=\(width)x\(height) nonBlack=\(nonBlackPixelCount) nonTransparent=\(nonTransparentPixelCount)"
             }
         }
     }
@@ -117,6 +125,11 @@ final class WPECorpusPlaybackHarness {
         /// can iterate on one failing scene without burning through the
         /// whole corpus run.
         var workshopIDFilter: Set<String>? = nil
+        /// When true, each passing scene's first-frame RGBA bytes are SHA256'd
+        /// into `Entry.visual.contentHash` — the exact fingerprint the flag-diff
+        /// gate compares across two render-flag configs. Off by default (one extra
+        /// full-frame readback + hash per scene).
+        var captureContentHash: Bool = false
     }
 
     enum Progress: Sendable {
@@ -325,7 +338,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: nil,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer)
+                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
                 )
             } catch let error as TimeoutError {
                 return makeEntry(
@@ -337,7 +350,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: error.errorDescription,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer)
+                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
                 )
             } catch {
                 let diagnosticMessage = headless.renderer.loadDiagnostics?.errorDescription
@@ -350,7 +363,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: diagnosticMessage ?? Self.describe(error),
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
-                    visual: Self.visualSummary(from: headless.renderer)
+                    visual: Self.visualSummary(from: headless.renderer, captureContentHash: configuration.captureContentHash)
                 )
             }
         } catch HarnessError.metalUnavailable {
@@ -519,13 +532,15 @@ final class WPECorpusPlaybackHarness {
     }
 
     private static func visualSummary(
-        from renderer: WPEMetalSceneRenderer
+        from renderer: WPEMetalSceneRenderer,
+        captureContentHash: Bool
     ) -> WPECorpusPlaybackReport.Entry.VisualSummary? {
         guard let texture = renderer.renderedTexture,
               let stats = WPEMetalTextureVisualStats.analyze(texture: texture) else {
             return nil
         }
-        return WPECorpusPlaybackReport.Entry.VisualSummary(stats: stats)
+        let contentHash = captureContentHash ? WPEMetalTextureContentHasher.sha256Hex(of: texture) : nil
+        return WPECorpusPlaybackReport.Entry.VisualSummary(stats: stats, contentHash: contentHash)
     }
 
     private static func readProject(from folderURL: URL) async throws -> WallpaperEngineProject {
