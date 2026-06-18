@@ -69,6 +69,7 @@ enum WPEMetalRenderFlagDiff {
     static func captureCorpus(
         _ config: FlagConfig,
         timeoutSeconds: Double = 8,
+        workshopIDFilter: Set<String>? = nil,
         progress: @escaping @MainActor (WPECorpusPlaybackHarness.Progress) -> Void = { _ in }
     ) async -> [String: SceneDigest] {
         let defaults = UserDefaults.standard
@@ -86,6 +87,8 @@ enum WPEMetalRenderFlagDiff {
         var harnessConfig = WPECorpusPlaybackHarness.Configuration()
         harnessConfig.perSceneTimeoutSeconds = timeoutSeconds
         harnessConfig.captureContentHash = true
+        harnessConfig.useDeterministicInputs = true  // pinned clock (t=0) + centered pointer
+        harnessConfig.workshopIDFilter = workshopIDFilter
         let harness = WPECorpusPlaybackHarness(configuration: harnessConfig)
 
         var captured: WPECorpusPlaybackReport?

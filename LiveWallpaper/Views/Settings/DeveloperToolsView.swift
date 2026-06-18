@@ -654,18 +654,32 @@ struct DeveloperToolsView: View {
             let prewarm = await capture(Self.flagDiffConfigs[2], pass: 4)
             let both = await capture(Self.flagDiffConfigs[3], pass: 5)
 
-            let reports = [
-                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "determinism (baseline×2)"),
-                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: aliasing, baselineLabel: "baseline", variantLabel: "aliasing"),
-                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: prewarm, baselineLabel: "baseline", variantLabel: "prewarm"),
-                WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: both, baselineLabel: "baseline", variantLabel: "both"),
-            ]
-            reports.forEach { $0.log() }
-            self.flagDiffReports = reports
-            let allPass = reports.allSatisfy { $0.passed }
-            self.flagDiffStatus = allPass
-                ? "Done — all \(reports.count) comparisons pixel-identical ✅"
-                : "Done — \(reports.filter { !$0.passed }.count)/\(reports.count) comparisons DIVERGED ❌ (see below)"
+            let determinism = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: baselineB, baselineLabel: "baseline#1", variantLabel: "determinism (baseline×2 nondeterministic)")
+            let rawAliasing = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: aliasing, baselineLabel: "baseline", variantLabel: "aliasing")
+            let rawPrewarm = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: prewarm, baselineLabel: "baseline", variantLabel: "prewarm")
+            let rawBoth = WPEMetalRenderFlagDiff.compare(baseline: baselineA, variant: both, baselineLabel: "baseline", variantLabel: "both")
+            [determinism, rawAliasing, rawPrewarm, rawBoth].forEach { $0.log() }
+
+            // Differential gate: subtract scenes that already diverge baseline-vs-
+            // baseline (intrinsic nondeterminism the pinned clock didn't remove) so
+            // each flag's report shows only the NEW divergences it actually causes.
+            let intrinsic = Set(determinism.divergences.map(\.workshopID))
+            func novel(_ report: WPEMetalRenderFlagDiff.ComparisonReport) -> WPEMetalRenderFlagDiff.ComparisonReport {
+                let new = report.divergences.filter { !intrinsic.contains($0.workshopID) }
+                return WPEMetalRenderFlagDiff.ComparisonReport(
+                    baselineLabel: report.baselineLabel,
+                    variantLabel: report.variantLabel + " (new)",
+                    comparedScenes: report.comparedScenes,
+                    identical: report.comparedScenes - new.count,
+                    divergences: new
+                )
+            }
+            let variants = [novel(rawAliasing), novel(rawPrewarm), novel(rawBoth)]
+            self.flagDiffReports = [determinism] + variants
+            let newDivergences = variants.reduce(0) { $0 + $1.divergences.count }
+            self.flagDiffStatus = newDivergences == 0
+                ? "Done — no flag changed any pixel beyond intrinsic jitter ✅  (determinism: \(determinism.divergences.count)/\(determinism.comparedScenes) scenes nondeterministic)"
+                : "Done — a flag changed \(newDivergences) scene(s) beyond intrinsic jitter ❌ (see below)"
             self.progressFraction = 1
             self.isRunning = false
         }

@@ -130,7 +130,22 @@ final class WPECorpusPlaybackHarness {
         /// gate compares across two render-flag configs. Off by default (one extra
         /// full-frame readback + hash per scene).
         var captureContentHash: Bool = false
+        /// When true the headless renderer pins its time-varying inputs — a frame
+        /// clock at t=0 (fixed date) and a centered pointer — so `g_Time`-driven
+        /// motion and cursor-parallax render the SAME first frame every run.
+        /// Required for the flag-diff hash gate to be deterministic — otherwise
+        /// animated/cursor scenes sample different inputs each pass and hash every
+        /// config as "divergent".
+        var useDeterministicInputs: Bool = false
     }
+
+    /// Clock pinned to elapsed time 0 and a fixed date — `elapsed = 0 - 0`. Makes
+    /// the captured first frame deterministic across runs.
+    static let fixedFrameClock = WPEMetalFrameClock(
+        loadTime: 0,
+        currentMediaTime: { 0 },
+        currentDate: { Date(timeIntervalSince1970: 0) }
+    )
 
     enum Progress: Sendable {
         case scanning
@@ -406,7 +421,9 @@ final class WPECorpusPlaybackHarness {
             dependencyMounts: dependencyMounts,
             engineAssetsRootURL: engineAssetsRoot,
             frame: frame,
-            device: device
+            device: device,
+            frameClock: configuration.useDeterministicInputs ? Self.fixedFrameClock : WPEMetalFrameClock(),
+            pointerSampler: configuration.useDeterministicInputs ? .fixed(SIMD2<Double>(0.5, 0.5)) : .live
         )
 
         let window = VideoWallpaperWindow(frame: frame)
