@@ -183,46 +183,49 @@ final class WPECorpusPlaybackHarness {
         progress(.scanning)
         Logger.info("WPE corpus playback: scanning Workshop library", category: .screenManager)
 
-        guard let rootBookmarkData = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
-            let message = "Workshop library root bookmark is missing."
+        // Two scene sources, merged + deduped by workshop ID:
+        //   1. the user's Workshop library bookmark — a real Steam install OUTSIDE
+        //      the container, which needs a held security scope during runScene; and
+        //   2. steamcmd's sandbox-redirected download tree INSIDE the container
+        //      (Application Support/Steam/…/431960), where in-app "download" items
+        //      actually land — full access, no bookmark.
+        // Either may be empty; we only fail if BOTH are.
+        var libraryScope: URL?
+        var projects: [WallpaperEngineLibraryScanner.DiscoveredProject] = []
+        var seenIDs = Set<String>()
+
+        func ingest(_ scanned: [WallpaperEngineLibraryScanner.DiscoveredProject]) {
+            for project in scanned where project.type == .scene && project.hasScenePackage {
+                if let allow = configuration.workshopIDFilter, !allow.contains(project.workshopID) { continue }
+                guard seenIDs.insert(project.workshopID).inserted else { continue }
+                projects.append(project)
+            }
+        }
+
+        if let rootBookmarkData = SettingsManager.shared.loadWorkshopLibraryRootBookmark() {
+            if case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                rootBookmarkData, target: .workshopLibraryRoot
+            ), resolved.url.startAccessingSecurityScopedResource() {
+                libraryScope = resolved.url
+            }
+            if let scanned = try? await WallpaperEngineLibraryScanner()
+                .scan(rootBookmarkData: rootBookmarkData, alreadyImportedWorkshopIDs: []) {
+                ingest(scanned)
+            }
+        }
+        defer { libraryScope?.stopAccessingSecurityScopedResource() }
+
+        if let steamContentRoot = Self.steamcmdContentRoot,
+           let scanned = try? await WallpaperEngineLibraryScanner()
+            .scan(rootURL: steamContentRoot, alreadyImportedWorkshopIDs: []) {
+            ingest(scanned)
+        }
+
+        guard !projects.isEmpty else {
+            let message = "No scenes found — neither the Workshop library bookmark nor the steamcmd download folder (\(Self.steamcmdContentRoot?.path ?? "n/a")) has any scene.pkg projects."
             Logger.error("WPE corpus playback could not start: \(message)", category: .screenManager)
             progress(.failedToStart(message))
             return
-        }
-
-        let projects: [WallpaperEngineLibraryScanner.DiscoveredProject]
-        do {
-            let scanned = try await WallpaperEngineLibraryScanner()
-                .scan(rootBookmarkData: rootBookmarkData, alreadyImportedWorkshopIDs: [])
-                .filter { $0.type == .scene && $0.hasScenePackage }
-            if let allow = configuration.workshopIDFilter {
-                projects = scanned.filter { allow.contains($0.workshopID) }
-            } else {
-                projects = scanned
-            }
-        } catch {
-            let message = Self.describe(error)
-            Logger.error("WPE corpus playback scan failed: \(message)", category: .screenManager)
-            progress(.failedToStart(message))
-            return
-        }
-
-        let libraryRoot: URL
-        switch SecurityScopedBookmarkResolver.shared.resolve(
-            rootBookmarkData,
-            target: .workshopLibraryRoot
-        ) {
-        case .success(let resolved):
-            libraryRoot = resolved.url
-        case .failure(let failure):
-            let message = failure.errorDescription ?? "Workshop bookmark resolution failed"
-            Logger.error("WPE corpus playback could not resolve library root: \(message)", category: .screenManager)
-            progress(.failedToStart(message))
-            return
-        }
-        let didStartScope = libraryRoot.startAccessingSecurityScopedResource()
-        defer {
-            if didStartScope { libraryRoot.stopAccessingSecurityScopedResource() }
         }
 
         Logger.info("WPE corpus playback: running \(projects.count) scene projects", category: .screenManager)
@@ -411,6 +414,27 @@ final class WPECorpusPlaybackHarness {
         window.alphaValue = 0
         window.orderBack(nil)
         return HeadlessSession(renderer: renderer, window: window)
+    }
+
+    /// steamcmd's sandbox-redirected Workshop download tree inside the app container
+    /// (`Application Support/Steam/steamapps/workshop/content/431960`). A steamcmd
+    /// spawned by this sandboxed app writes to its own STEAMROOT, which the sandbox
+    /// redirects here — so this is where in-app "download" items actually land,
+    /// regardless of any bound workdir. Mirrors `SteamCMDDoctorService`'s layout.
+    /// 431960 = Wallpaper Engine's Steam app ID.
+    private static var steamcmdContentRoot: URL? {
+        guard let appSupport = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) else { return nil }
+        return appSupport
+            .appendingPathComponent("Steam", isDirectory: true)
+            .appendingPathComponent("steamapps", isDirectory: true)
+            .appendingPathComponent("workshop", isDirectory: true)
+            .appendingPathComponent("content", isDirectory: true)
+            .appendingPathComponent("431960", isDirectory: true)
     }
 
     /// Re-derive the cache URL from the descriptor's `cacheRelativePath`, matching the contract `AmbientWallpaperSessionBuilder` enforces.
