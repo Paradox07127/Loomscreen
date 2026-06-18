@@ -518,7 +518,7 @@ struct GeneralSettingsView: View {
                 iconColor: .purple,
                 title: "Pause when windows cover the desktop",
                 subtitle: "Pause when app windows cover most of the screen, even without full-screen",
-                info: "When open windows cover about 85% or more of a display, the wallpaper pauses to free CPU and GPU. It resumes as soon as you reveal the desktop."
+                info: "When open windows cover about 85 percent or more of a display, the wallpaper pauses to free CPU and GPU. It resumes as soon as you reveal the desktop."
             ) {
                 Toggle("", isOn: $pauseOnWindowOcclusion)
                     .labelsHidden()

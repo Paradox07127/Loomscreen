@@ -63,6 +63,9 @@ struct WorkshopBrowsePane: View {
             liveWidth: $liveInspectorWidth,
             minWidth: DesignTokens.Inspector.minWidth,
             maxWidth: DesignTokens.Inspector.maxWidth,
+            // Dragging the handle past the panel's minimum collapses it — the
+            // direct-manipulation mirror of the toolbar toggle.
+            onClose: { inspectorHidden = true },
             main: { mainColumn },
             inspector: { width in inspectorColumn(width: width) }
         )
@@ -358,17 +361,36 @@ struct WorkshopBrowsePane: View {
             Text("Set your Steam Web API key to browse online.")
                 .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
-            Text(verbatim: WorkshopAPIKeyOwnershipInfo.passwordReassurance)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
+
+            // Spell out the eligibility gate + where to get the key right here,
+            // so the empty state teaches the prerequisites instead of dead-ending
+            // at a single button. Same copy/links as the entry sheet (one shared,
+            // already-localized source) so nothing new needs translating.
+            Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
+                .font(.caption)
+                .tint(Color.accentColor)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
             Button {
                 onRequestKeyEntry()
             } label: {
                 Label("Set Web API key", systemImage: "key")
             }
             .buttonStyle(.borderedProminent)
+            .padding(.top, DesignTokens.Spacing.xs)
+
+            Text(verbatim: WorkshopAPIKeyOwnershipInfo.passwordReassurance)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(DesignTokens.Spacing.xl)

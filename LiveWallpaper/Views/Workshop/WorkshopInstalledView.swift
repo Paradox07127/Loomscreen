@@ -85,6 +85,9 @@ struct WorkshopInstalledView: View {
             liveWidth: $liveInspectorWidth,
             minWidth: DesignTokens.Inspector.minWidth,
             maxWidth: DesignTokens.Inspector.maxWidth,
+            // Dragging the handle past the panel's minimum collapses it — the
+            // direct-manipulation mirror of the toolbar toggle.
+            onClose: { inspectorHidden = true },
             main: { mainColumn },
             inspector: { width in installedInspectorColumn(width: width) }
         )

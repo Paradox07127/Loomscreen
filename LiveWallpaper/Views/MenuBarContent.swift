@@ -153,7 +153,7 @@ struct MenuBarContent: View {
         let ramPercent = monitor.systemMemoryUsage * 100
         let thermalState = monitor.thermalState
 
-        return HStack(spacing: 8) {
+        return HStack(spacing: 2) {
             performanceItem(
                 tint: usageColor(for: cpuPercent),
                 label: "CPU",
@@ -213,25 +213,31 @@ struct MenuBarContent: View {
         return DesignTokens.Colors.Status.active
     }
 
+    /// One usage readout: a small severity dot + label + value. The semantic
+    /// colour lives only in the dot so the value can stay high-contrast
+    /// `.primary` — coloured text on the menu's pale glass washed out badly
+    /// (green/orange on near-white is well under the 4.5:1 readable ratio).
+    /// The dot carries the at-a-glance load signal; the digits stay legible.
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(tint)
+                .frame(width: 6, height: 6)
+                .animation(.easeInOut(duration: 0.25), value: tint)
+                .accessibilityHidden(true)
+
             Text(verbatim: label)
                 .font(DesignTokens.Typography.captionEmphasized)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(width: 28, alignment: .leading)
 
             Text(verbatim: value)
-                .font(.system(.callout, design: .monospaced).weight(.bold))
-                .foregroundStyle(tint)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.primary)
                 .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: 36, alignment: .trailing)
         }
-        .frame(width: 68)
-        .animation(.easeInOut(duration: 0.25), value: tint)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(label) \(value)"))
     }

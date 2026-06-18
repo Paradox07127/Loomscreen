@@ -204,6 +204,9 @@ struct ScreenDetailView: View {
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
+            // Dragging the handle past the panel's minimum collapses it — the
+            // direct-manipulation mirror of the toolbar toggle.
+            onClose: { inspectorUserVisible = false },
             main: { mainColumn },
             inspector: { width in inspectorPanel(width: width) }
         )
