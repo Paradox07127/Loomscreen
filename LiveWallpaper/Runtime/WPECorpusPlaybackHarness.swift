@@ -189,12 +189,16 @@ final class WPECorpusPlaybackHarness {
             }
         }
 
-        if let rootBookmarkData = SettingsManager.shared.loadWorkshopLibraryRootBookmark() {
-            if case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
-                rootBookmarkData, target: .workshopLibraryRoot
-            ), resolved.url.startAccessingSecurityScopedResource() {
-                libraryScope = resolved.url
-            }
+        if let rootBookmarkData = SettingsManager.shared.loadWorkshopLibraryRootBookmark(),
+           case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+               rootBookmarkData, target: .workshopLibraryRoot
+           ),
+           resolved.url.startAccessingSecurityScopedResource() {
+            // Only ingest the out-of-container bookmarked scenes while we actually
+            // HOLD the root scope — runScene reads each project's folderURL directly,
+            // which fails without it. If the scope didn't open, fall through to the
+            // in-container steamcmd source (which needs no scope) instead.
+            libraryScope = resolved.url
             if let scanned = try? await WallpaperEngineLibraryScanner()
                 .scan(rootBookmarkData: rootBookmarkData, alreadyImportedWorkshopIDs: []) {
                 ingest(scanned)
