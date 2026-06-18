@@ -530,6 +530,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
 
+        // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
+        // load below; awaited at the render.firstFrame gate so the first synchronous
+        // render() hits the warmed cache instead of paying the lazy transpile inline.
+        // No-op when WPEMetalShaderPrewarmEnabled is off.
+        async let shaderWarm: Void = prewarmCustomShaders(for: pipeline)
+
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
@@ -561,6 +567,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             sceneSize: sceneRenderSize,
             sceneID: descriptor.workshopID
         )
+        // Finish seeding the shader cache before the first (synchronous) render() so it
+        // hits warmed entries. By now this has overlapped the entire texture/particle/text
+        // load above; on heavy scenes the ~1.9s transpile is already absorbed.
+        await shaderWarm
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 
@@ -571,20 +581,24 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // cost; the steady-state draw loop switches to async below.
         executor.synchronizeFrameCompletion = true
         let capture = beginGPUCaptureIfRequested()
+        let firstFrameCompileStart = WPEMetalCompileTimer.milliseconds
+        let firstFrameTranspileStart = WPEMetalTranspileTimer.milliseconds
         outputTexture = try renderCurrentFrame()
         capture?.stop()
         if WPESceneLoadTiming.isEnabled {
-            // Split render.firstFrame's one-time CPU cost: metal-compile is
-            // makeLibrary+makeRenderPipelineState (binary-archive cacheable);
-            // transpile is the GLSL preprocess + regex MSL transpile that is NOT
-            // in the compile timer. If transpile+metal-compile ≈ firstFrame, the
-            // floor is lazy shader prep (off-thread pre-warm during the parallel
-            // load window would hide it); if transpile is small, the floor is
-            // per-pass command encoding instead.
+            // metal-compile / transpile are WHOLE-LOAD deltas: with shader prewarm on,
+            // the transpile is absorbed in the load window (overlapping textures), not
+            // the first frame, so those totals stay large by design. The firstFrame-*
+            // deltas isolate only the shader prep STILL paid inside the synchronous
+            // first render() — firstFrame-transpile collapses toward 0 when prewarm
+            // hits (the win); firstFrame-compile keeps the small lazy
+            // makeRenderPipelineState that stays runtime-keyed per pass.
             let metalCompile = WPEMetalCompileTimer.milliseconds - compileMillisecondsAtLoadStart
             let transpile = WPEMetalTranspileTimer.milliseconds - transpileMillisecondsAtLoadStart
+            let firstFrameCompile = WPEMetalCompileTimer.milliseconds - firstFrameCompileStart
+            let firstFrameTranspile = WPEMetalTranspileTimer.milliseconds - firstFrameTranspileStart
             Logger.notice(
-                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms (both land inside render.firstFrame; transpile=GLSL preprocess+MSL transpile)",
+                "[load-timing] scene=\(descriptor.workshopID) metal-compile=\(String(format: "%.1f", metalCompile))ms transpile=\(String(format: "%.1f", transpile))ms firstFrame-compile=\(String(format: "%.1f", firstFrameCompile))ms firstFrame-transpile=\(String(format: "%.1f", firstFrameTranspile))ms (firstFrame-* = shader prep still inside render.firstFrame; transpile collapses to ~0 when prewarm hits)",
                 category: .performance
             )
         }
@@ -2120,6 +2134,84 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private enum WPEParallelTextureResult: @unchecked Sendable {
         case staticTexture(MTLTexture)
         case needsOnActor
+    }
+
+    /// Off-thread shader-transpile pre-warm. Builds the deterministic, runtime-independent
+    /// compile request for every custom-shader pass on the main actor (deduped by cache key),
+    /// then translates + makeLibrary's them in parallel OFF the main actor and seeds
+    /// `executor.translatedShaderCache` — so the first synchronous `render()` gets cache hits
+    /// instead of paying the ~1.9s lazy GLSL→MSL transpile inline. Launched as an `async let`
+    /// during the load window (overlapping texture/particle/text load) and awaited at the
+    /// render.firstFrame gate. Flag-gated; per-pass failures are swallowed (the real first
+    /// render re-hits and records them as today). Respects `loadGeneration` so a superseded
+    /// load never seeds. Captures only `Sendable` values (the compiler protocol is `Sendable`,
+    /// requests are `Sendable`) — never the non-`Sendable` executor.
+    private func prewarmCustomShaders(for pipeline: WPEPreparedRenderPipeline) async {
+        guard WPEMetalRenderExecutor.isShaderPrewarmEnabled else { return }
+        let generation = loadGeneration
+        debugStage("shader.prewarm", "begin")
+
+        // Build + dedup requests on the main actor (the preprocess is cheap; only the
+        // translate+makeLibrary that follows is the heavy CPU). recordFailure:false keeps
+        // the warm silent — the real first-frame render stays the sole failure recorder.
+        var requestsByKey: [String: WPEShaderCompileRequest] = [:]
+        for layer in pipeline.layers {
+            for pass in layer.passes where pass.shader?.isBuiltin == false {
+                guard let request = try? WPEMetalRenderExecutor.makeCompileRequest(for: pass, recordFailure: false) else { continue }
+                requestsByKey[request.translationCacheKey] = request
+            }
+        }
+        let requests = Array(requestsByKey.values)
+        guard !requests.isEmpty, loadGeneration == generation else {
+            debugStage("shader.prewarm.done", "passes=0")
+            return
+        }
+
+        let compiler = executor.shaderCompiler
+        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+        let warmed: [(key: String, result: WPEShaderCompileResult)]
+        do {
+            warmed = try await withThrowingTaskGroup(
+                of: (key: String, result: WPEShaderCompileResult)?.self
+            ) { group in
+                var next = 0
+                func spawn() -> Bool {
+                    guard next < requests.count else { return false }
+                    let request = requests[next]
+                    next += 1
+                    group.addTask(priority: .userInitiated) {
+                        try Task.checkCancellation()
+                        // Swallow an unsupported shader: leave it uncached so the real
+                        // first-frame render re-hits compileCustomShader and records it.
+                        guard let result = try? compiler.compile(request, recordFailure: false) else {
+                            return nil
+                        }
+                        return (key: request.translationCacheKey, result: result)
+                    }
+                    return true
+                }
+                for _ in 0..<width where spawn() {}
+                var collected: [(key: String, result: WPEShaderCompileResult)] = []
+                while let entry = try await group.next() {
+                    if loadGeneration != generation {
+                        group.cancelAll()
+                        break
+                    }
+                    if let entry { collected.append(entry) }
+                    _ = spawn()
+                }
+                return collected
+            }
+        } catch {
+            // A superseded load cancelled the group mid-drain; drop the partial results.
+            debugStage("shader.prewarm.cancelled", "\(error)")
+            return
+        }
+
+        guard loadGeneration == generation else { return }
+        executor.seedTranslatedShaderCache(warmed)
+        debugStage("shader.prewarm.done", "warmed=\(warmed.count)/\(requests.count)")
     }
 
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {

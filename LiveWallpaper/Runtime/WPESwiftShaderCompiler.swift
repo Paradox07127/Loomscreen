@@ -18,7 +18,7 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         self.device = device
     }
 
-    func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
+    func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool) throws -> WPEShaderCompileResult {
         let translation: WPEShaderTranslationResult
         let fragmentSource = Self.fragmentSourceByAddingVertexUniformsIfNeeded(
             fragmentSource: request.processedFragmentSource,
@@ -35,26 +35,30 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
                 )
             }
         } catch let err as WPEShaderCompilerError {
-            WPESceneDebugArtifacts.shared.recordShaderFailure(
-                shaderName: request.shaderName,
-                originalVertex: nil,
-                processedVertex: request.processedVertexSource,
-                originalFragment: nil,
-                processedFragment: request.processedFragmentSource,
-                translatedMSL: nil,
-                errorText: "translation failed: \(String(describing: err))"
-            )
+            if recordFailure {
+                WPESceneDebugArtifacts.shared.recordShaderFailure(
+                    shaderName: request.shaderName,
+                    originalVertex: nil,
+                    processedVertex: request.processedVertexSource,
+                    originalFragment: nil,
+                    processedFragment: request.processedFragmentSource,
+                    translatedMSL: nil,
+                    errorText: "translation failed: \(String(describing: err))"
+                )
+            }
             throw err
         } catch {
-            WPESceneDebugArtifacts.shared.recordShaderFailure(
-                shaderName: request.shaderName,
-                originalVertex: nil,
-                processedVertex: request.processedVertexSource,
-                originalFragment: nil,
-                processedFragment: request.processedFragmentSource,
-                translatedMSL: nil,
-                errorText: "transpiler crashed: \(error)"
-            )
+            if recordFailure {
+                WPESceneDebugArtifacts.shared.recordShaderFailure(
+                    shaderName: request.shaderName,
+                    originalVertex: nil,
+                    processedVertex: request.processedVertexSource,
+                    originalFragment: nil,
+                    processedFragment: request.processedFragmentSource,
+                    translatedMSL: nil,
+                    errorText: "transpiler crashed: \(error)"
+                )
+            }
             throw WPEShaderCompilerError.translationFailed(
                 "transpiler crashed for '\(request.shaderName)': \(error)"
             )
@@ -66,15 +70,17 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             options.languageVersion = .version3_0
             library = try WPEMetalCompileTimer.measure { try device.makeLibrary(source: translation.mslSource, options: options) }
         } catch {
-            WPESceneDebugArtifacts.shared.recordShaderFailure(
-                shaderName: request.shaderName,
-                originalVertex: nil,
-                processedVertex: request.processedVertexSource,
-                originalFragment: nil,
-                processedFragment: request.processedFragmentSource,
-                translatedMSL: translation.mslSource,
-                errorText: "Metal rejected MSL: \(error.localizedDescription)"
-            )
+            if recordFailure {
+                WPESceneDebugArtifacts.shared.recordShaderFailure(
+                    shaderName: request.shaderName,
+                    originalVertex: nil,
+                    processedVertex: request.processedVertexSource,
+                    originalFragment: nil,
+                    processedFragment: request.processedFragmentSource,
+                    translatedMSL: translation.mslSource,
+                    errorText: "Metal rejected MSL: \(error.localizedDescription)"
+                )
+            }
             // Don't inline the generated MSL into the thrown reason: it
             // can flow into user-facing diagnostics, and the full source
             // has already been written to `WPESceneDebugArtifacts` above

@@ -9,7 +9,17 @@ import Metal
 /// handle throw `.translationFailed`, which surfaces as
 /// `SceneRenderingError.metalRendererUnsupported` (the scene's load error).
 protocol WPEShaderCompiling: Sendable {
-    func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult
+    /// `recordFailure` gates the scene-debug shader-failure artifact. The
+    /// off-thread transpile pre-warm passes `false` so a failing shader is
+    /// recorded once — by the real first-frame render — not twice.
+    func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool) throws -> WPEShaderCompileResult
+}
+
+extension WPEShaderCompiling {
+    /// Default entry point: the lazy render path records failures as before.
+    func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
+        try compile(request, recordFailure: true)
+    }
 }
 
 /// One compile job. The `processed*Source` strings are already through

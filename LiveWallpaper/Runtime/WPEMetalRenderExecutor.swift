@@ -186,6 +186,26 @@ final class WPEMetalRenderExecutor {
     /// Phase 2D-H: memoize the per-shader compile across frames so we
     /// don't re-translate every draw call.
     private var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
+
+    static let shaderPrewarmDefaultsKey = "WPEMetalShaderPrewarmEnabled"
+    /// Off-thread shader-transpile pre-warm. Default OFF until on-device corpus
+    /// validation (puppet/video/HDR/text) confirms no first-frame regression,
+    /// then flip to `?? true` like `WPEMetalFBOAliasingEnabled`. Manual override:
+    /// `defaults write … WPEMetalShaderPrewarmEnabled -bool YES`.
+    static var isShaderPrewarmEnabled: Bool {
+        UserDefaults.standard.object(forKey: shaderPrewarmDefaultsKey) as? Bool ?? false
+    }
+
+    /// Merge pre-warmed transpile results into the shader cache. Called on the
+    /// main actor AFTER the warm task group drains and BEFORE the first
+    /// `render()`, so it never races the lazy compile path (which also runs on
+    /// the main actor during render). Idempotent: same source-hash key ⇒ same
+    /// deterministic result, so an existing entry is left untouched.
+    func seedTranslatedShaderCache(_ entries: [(key: String, result: WPEShaderCompileResult)]) {
+        for entry in entries where translatedShaderCache[entry.key] == nil {
+            translatedShaderCache[entry.key] = entry.result
+        }
+    }
     /// Phase 2D-H: cache MTLRenderPipelineState built from translated
     /// shaders. Library + blend + format set is the key.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
@@ -4264,20 +4284,26 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over the given prepared pass.
-    func compileCustomShader(
-        for pass: WPEPreparedRenderPass
-    ) throws -> WPEShaderCompileResult {
-        guard let program = pass.shader else {
-            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
-        }
-        let processor = WPEShaderPreprocessor { _, _ in
-            nil
-        }
-        let premultipliedInputSlots = Self.premultipliedInputSlots(for: pass)
-        let premultipliedOutput = Self.usesPremultipliedOutput(blendMode: pass.pass.blending)
-        let request: WPEShaderCompileRequest
+    /// Build the deterministic, runtime-independent compile request for a custom-shader
+    /// pass — the cheap preprocess half of `compileCustomShader`, factored out so the
+    /// off-thread pre-warm computes the IDENTICAL `translationCacheKey` (a load-time warm
+    /// then guarantees a first-frame cache hit). Returns nil for built-in / shader-less
+    /// passes. `recordFailure` gates the scene-debug artifact so the warm stays silent and
+    /// the real first-frame render remains the sole recorder. Static + value-only inputs so
+    /// the warm can call it off the main actor without capturing the executor.
+    static func makeCompileRequest(
+        for pass: WPEPreparedRenderPass,
+        recordFailure: Bool
+    ) throws -> WPEShaderCompileRequest? {
+        guard let program = pass.shader, !program.isBuiltin else { return nil }
+        // The null include-resolver is load-bearing: program.*Source is already
+        // #include-expanded at graph-build time (WPERenderPipelineBuilder.preprocess),
+        // so a real resolver here could diverge the cache key. Keep it nil.
+        let processor = WPEShaderPreprocessor { _, _ in nil }
+        let premultipliedInputSlots = premultipliedInputSlots(for: pass)
+        let premultipliedOutput = usesPremultipliedOutput(blendMode: pass.pass.blending)
         do {
-            request = try WPEMetalTranspileTimer.measure {
+            return try WPEMetalTranspileTimer.measure {
                 try processor.process(
                     shaderName: program.name,
                     vertexSource: program.vertexSource,
@@ -4298,19 +4324,32 @@ final class WPEMetalRenderExecutor {
                 )
             }
         } catch let error as WPEShaderCompilerError {
-            WPESceneDebugArtifacts.shared.recordShaderFailure(
-                shaderName: program.name,
-                originalVertex: program.vertexSource,
-                processedVertex: nil,
-                originalFragment: program.fragmentSource,
-                processedFragment: nil,
-                translatedMSL: nil,
-                errorText: "preprocess failed: \(String(describing: error))"
-            )
+            if recordFailure {
+                WPESceneDebugArtifacts.shared.recordShaderFailure(
+                    shaderName: program.name,
+                    originalVertex: program.vertexSource,
+                    processedVertex: nil,
+                    originalFragment: program.fragmentSource,
+                    processedFragment: nil,
+                    translatedMSL: nil,
+                    errorText: "preprocess failed: \(String(describing: error))"
+                )
+            }
             throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
                 name: program.name,
                 reason: String(describing: error)
             )
+        }
+    }
+
+    func compileCustomShader(
+        for pass: WPEPreparedRenderPass
+    ) throws -> WPEShaderCompileResult {
+        guard let program = pass.shader else {
+            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
+        }
+        guard let request = try Self.makeCompileRequest(for: pass, recordFailure: true) else {
+            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
         if let cached = translatedShaderCache[request.translationCacheKey] {
             return cached
