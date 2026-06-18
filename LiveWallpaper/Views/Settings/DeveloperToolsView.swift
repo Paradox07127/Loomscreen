@@ -253,6 +253,8 @@ struct DeveloperToolsView: View {
                   help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
             .init(key: "WPEMetalLoadTiming", title: "Load timing",
                   help: "Log a per-phase scene-load time breakdown ([load-timing] …) at first frame, for measuring + comparing load cost."),
+            .init(key: "WPEParticlePrewarmEnabled", title: "Particle prewarm",
+                  help: "Pre-populate emitters to their steady-state spread on load (the WPE-matching populated look). Off (default): emitters start empty and fill naturally — cuts the dominant particles.load cost. Reload the scene to apply."),
             .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
                   help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
             .init(key: "WPEAudioDebugLog", title: "Audio debug log",
@@ -552,6 +554,7 @@ struct DeveloperToolsView: View {
             self.isRunning = false
         }
     }
+
 
     @MainActor
     private func handleProgress(_ progress: WPECorpusPlaybackHarness.Progress) {

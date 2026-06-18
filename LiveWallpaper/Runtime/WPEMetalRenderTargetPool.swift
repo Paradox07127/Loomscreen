@@ -59,10 +59,35 @@ final class WPEMetalRenderTargetPool {
         var secondary: Allocation?
     }
 
+    /// A render target's within-frame lifetime `[firstPass, lastPass]` (flattened
+    /// pass order), fed by the executor so the pool can pack non-overlapping
+    /// targets into one shared heap. Lifetimes are computed conservatively (last
+    /// use never under-estimated), so a target is only made aliasable AFTER its
+    /// real last GPU use — never before (which would corrupt the frame).
+    struct AliasInterval {
+        let key: WPEMetalRenderTargetKey
+        let firstPass: Int
+        let lastPass: Int
+    }
+
+    static let fboAliasingDefaultsKey = "WPEMetalFBOAliasingEnabled"
+    /// Default ON (placement-heap FBO aliasing, on-device validated). The manual
+    /// override still wins: `defaults write … WPEMetalFBOAliasingEnabled -bool NO`
+    /// forces the discrete-per-target path back on.
+    static var isFBOAliasingEnabled: Bool {
+        UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
+    }
+
     private let device: MTLDevice
     private let maximumTextureDimension2D: Int
     private var slots: [WPEMetalRenderTargetKey: Slot] = [:]
     private var declaredFBOs: [String: WPERenderFBO] = [:]
+
+    // Aliasing state (only populated when WPEMetalFBOAliasingEnabled).
+    private var aliasHeap: MTLHeap?
+    private var aliasLastPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
+    private var aliasFrameTextures: [WPEMetalRenderTargetKey: (texture: MTLTexture, lastPass: Int)] = [:]
+    private var aliasPlanSignature: Int?
 
     init(device: MTLDevice, maximumTextureDimension2D: Int? = nil) {
         self.device = device
@@ -70,18 +95,92 @@ final class WPEMetalRenderTargetPool {
             ?? WPEMetalTextureLimits.maximum2DTextureDimension(for: device)
     }
 
-    func prepare(pipeline: WPEPreparedRenderPipeline) {
+    func prepare(
+        pipeline: WPEPreparedRenderPipeline,
+        aliasIntervals: [AliasInterval] = []
+    ) {
         declaredFBOs.removeAll(keepingCapacity: true)
         for layer in pipeline.layers {
             for fbo in layer.graphLayer.localFBOs {
                 declaredFBOs[fbo.name] = fbo
             }
         }
+
+        guard Self.isFBOAliasingEnabled, !aliasIntervals.isEmpty else {
+            releaseAliasState()
+            return
+        }
+        prepareAliasPlan(aliasIntervals)
     }
 
     func releaseAll() {
         slots.removeAll(keepingCapacity: true)
         declaredFBOs.removeAll(keepingCapacity: true)
+        releaseAliasState()
+    }
+
+    /// Called once at the start of each `render()`. The prior frame's aliasable
+    /// textures are dropped so this frame allocates fresh from the heap; the
+    /// single serial command queue guarantees the prior frame's GPU work has
+    /// finished before this frame reuses the memory.
+    func beginAliasFrame() {
+        guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
+        for entry in aliasFrameTextures.values {
+            entry.texture.makeAliasable()
+        }
+        aliasFrameTextures.removeAll(keepingCapacity: true)
+    }
+
+    /// Called after each pass is encoded. Any aliased target whose last use is
+    /// this pass is made aliasable so a later target can reuse its heap memory.
+    /// The driver (tracked automatic heap) inserts the read-before-write barrier.
+    func endPass(passIndex: Int) {
+        guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
+        for (key, entry) in aliasFrameTextures where entry.lastPass == passIndex {
+            entry.texture.makeAliasable()
+            aliasFrameTextures.removeValue(forKey: key)
+        }
+    }
+
+    /// Read-only twin of the `texture(...)` keying — computes the slot key a
+    /// target would resolve to WITHOUT allocating anything. Used by the
+    /// `WPEMetalFBOMemoryReport` diagnostic to account FBO memory statically.
+    func diagnosticKey(
+        for target: WPERenderTarget,
+        layer: WPERenderLayer,
+        sceneSize: CGSize,
+        declaredFBOs: [String: WPERenderFBO]
+    ) -> WPEMetalRenderTargetKey {
+        let spec: WPERenderFBO
+        switch target {
+        case .scene:
+            spec = WPERenderFBO(name: "scene", scale: 1, format: "rgba8888")
+        case .layerComposite(let name):
+            spec = WPERenderFBO(name: name, scale: 1, format: "rgba8888")
+        case .fbo(let name):
+            spec = declaredFBOs[name]
+                ?? layer.localFBOs.first(where: { $0.name == name })
+                ?? WPERenderFBO(name: name, scale: 1, format: "rgba8888")
+        }
+
+        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
+        if case .layerComposite = target {
+            let localSize = Self.layerCompositeSize(for: layer, sceneSize: sceneSize)
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
+                height: wpeRenderTargetDimension(localSize.height, scale: spec.scale),
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        }
+        return WPEMetalRenderTargetKey(
+            name: spec.name,
+            sceneSize: sceneSize,
+            scale: spec.scale,
+            format: spec.format,
+            pixelFormat: pixelFormat
+        )
     }
 
     func texture(
@@ -99,6 +198,14 @@ final class WPEMetalRenderTargetPool {
             sceneSize: sceneSize,
             pixelFormat: pixelFormat
         )
+
+        // Aliased primary: heap-backed, shared with non-overlapping targets.
+        // Ping-pong secondaries (textureToAvoid != nil) and non-planned keys
+        // fall through to the discrete per-key path below.
+        if Self.isFBOAliasingEnabled, textureToAvoid == nil, let lastPass = aliasLastPassByKey[key] {
+            return try aliasTexture(for: key, lastPass: lastPass)
+        }
+
         let slot = slots[key] ?? Slot()
         slots[key] = slot
 
@@ -194,19 +301,108 @@ final class WPEMetalRenderTargetPool {
         WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath)
     }
 
-    private func makeAllocation(key: WPEMetalRenderTargetKey, label: String) throws -> Allocation {
-        let width = key.width
-        let height = key.height
-        try validateTextureDimensions(targetName: key.name, width: width, height: height)
-
+    private func textureDescriptor(for key: WPEMetalRenderTargetKey) throws -> MTLTextureDescriptor {
+        try validateTextureDimensions(targetName: key.name, width: key.width, height: key.height)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: key.pixelFormat,
-            width: width,
-            height: height,
+            width: key.width,
+            height: key.height,
             mipmapped: false
         )
         descriptor.usage = [.renderTarget, .shaderRead]
         descriptor.storageMode = .private
+        return descriptor
+    }
+
+    // MARK: - FBO aliasing (placement heap, hazard-tracked by the driver)
+
+    private func aliasTexture(for key: WPEMetalRenderTargetKey, lastPass: Int) throws -> MTLTexture {
+        if let existing = aliasFrameTextures[key] {
+            return existing.texture
+        }
+        if let aliasHeap,
+           let descriptor = try? textureDescriptor(for: key),
+           let texture = aliasHeap.makeTexture(descriptor: descriptor) {
+            texture.label = "WPE \(key.name) alias texture"
+            WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
+            aliasFrameTextures[key] = (texture, lastPass)
+            return texture
+        }
+        // Heap exhausted / unavailable: fall back to a discrete persistent
+        // allocation so a planning shortfall degrades to today's behavior, never
+        // a render failure.
+        let slot = slots[key] ?? Slot()
+        slots[key] = slot
+        if slot.primary == nil {
+            slot.primary = try makeAllocation(key: key, label: "primary")
+        }
+        guard let primary = slot.primary else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        return primary.texture
+    }
+
+    private func prepareAliasPlan(_ intervals: [AliasInterval]) {
+        var plannerIntervals: [WPEMetalFBOAliasPlanner.Interval] = []
+        var lastPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
+        var maxAlignment = 1
+        for (index, interval) in intervals.enumerated() {
+            guard interval.firstPass <= interval.lastPass,
+                  let descriptor = try? textureDescriptor(for: interval.key) else { continue }
+            let sizeAndAlign = device.heapTextureSizeAndAlign(descriptor: descriptor)
+            guard sizeAndAlign.size > 0 else { continue }
+            maxAlignment = max(maxAlignment, sizeAndAlign.align)
+            plannerIntervals.append(.init(
+                id: index,
+                size: Self.align(sizeAndAlign.size, to: sizeAndAlign.align),
+                firstPass: interval.firstPass,
+                lastPass: interval.lastPass
+            ))
+            lastPassByKey[interval.key] = interval.lastPass
+        }
+
+        guard !plannerIntervals.isEmpty else {
+            releaseAliasState()
+            return
+        }
+
+        var hasher = Hasher()
+        for interval in plannerIntervals {
+            hasher.combine(interval.size)
+            hasher.combine(interval.firstPass)
+            hasher.combine(interval.lastPass)
+        }
+        let signature = hasher.finalize()
+        if aliasPlanSignature == signature, aliasHeap != nil {
+            return // same scene/plan as last prepare — keep the heap.
+        }
+
+        releaseAliasState()
+
+        let plan = WPEMetalFBOAliasPlanner.plan(plannerIntervals, alignment: maxAlignment)
+        guard plan.heapSize > 0 else { return }
+
+        let heapDescriptor = MTLHeapDescriptor()
+        heapDescriptor.type = .automatic
+        heapDescriptor.storageMode = .private
+        heapDescriptor.hazardTrackingMode = .tracked
+        heapDescriptor.size = Self.align(plan.heapSize + maxAlignment, to: maxAlignment)
+        guard let heap = device.makeHeap(descriptor: heapDescriptor) else { return }
+
+        aliasHeap = heap
+        aliasLastPassByKey = lastPassByKey
+        aliasPlanSignature = signature
+    }
+
+    private func releaseAliasState() {
+        aliasFrameTextures.removeAll(keepingCapacity: false)
+        aliasLastPassByKey.removeAll(keepingCapacity: false)
+        aliasHeap = nil
+        aliasPlanSignature = nil
+    }
+
+    private func makeAllocation(key: WPEMetalRenderTargetKey, label: String) throws -> Allocation {
+        let descriptor = try textureDescriptor(for: key)
 
         let sizeAndAlign = device.heapTextureSizeAndAlign(descriptor: descriptor)
         if sizeAndAlign.size > 0 {
