@@ -129,12 +129,12 @@ struct WorkshopInstalledView: View {
                     performDelete(entry)
                     pendingDelete = nil
                 } label: {
-                    Text(deletesFiles(entry) ? "Delete & Move Files to Trash" : "Remove from Library")
+                    Text(deletesFiles(entry) ? "Delete & Free Up Space" : "Remove from Library")
                 }
                 Button("Cancel", role: .cancel) { pendingDelete = nil }
             } message: { entry in
                 if deletesFiles(entry) {
-                    Text("“\(entry.origin.title)” will be removed from your library and its downloaded files moved to the Trash. You can restore them from the Trash if needed.")
+                    Text("“\(entry.origin.title)” will be removed from your library and its downloaded files deleted to free up disk space. This can't be undone, but you can download it again from the Workshop.")
                 } else {
                     Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
                 }
@@ -652,10 +652,12 @@ struct WorkshopInstalledView: View {
     }
 
     /// Real, confirmed deletion. Always removes the library entry + any bookmark.
-    /// For cache-backed items it ALSO moves our managed copy
-    /// (`…/wpe-cache/<id>/`) to the Trash — a recoverable, path-validated delete
-    /// that can never escape the cache root. User-imported source folders are
-    /// never touched.
+    /// For cache-backed items it ALSO permanently deletes our managed copy
+    /// (`…/wpe-cache/<id>/`) plus the SteamCMD download that seeded it — a
+    /// path-validated delete that can never escape the managed roots. We delete
+    /// rather than Trash because, under App Sandbox, trashing a container file
+    /// only reaches the invisible per-container `.Trash` and never frees space.
+    /// User-imported source folders are never touched.
     private func performDelete(_ entry: WPEHistoryEntry) {
         errorMessage = nil
         // Close the detail inspector if it's showing the item being removed.
@@ -670,18 +672,18 @@ struct WorkshopInstalledView: View {
 
         if origin.resourceLocation == .cache, !workshopID.isEmpty {
             do {
-                try WallpaperEngineCache().moveToTrash(workshopID: workshopID)
+                try WallpaperEngineCache().deleteFiles(workshopID: workshopID)
             } catch {
                 errorMessage = String(
-                    localized: "Removed \(origin.title) from the library, but its files couldn't be moved to the Trash.",
-                    comment: "Workshop delete: history removed but cache files couldn't be trashed."
+                    localized: "Removed \(origin.title) from the library, but its files couldn't be deleted.",
+                    comment: "Workshop delete: history removed but cache files couldn't be deleted."
                 )
             }
             // Also free the SteamCMD download that seeded this cache copy —
-            // otherwise its bytes linger on disk. Best-effort + recoverable
-            // (Trash); the delete tombstone recorded in `removeWorkshop` already
-            // prevents the auto-scan from resurrecting it on its own.
-            Task { await doctor.trashDownloadedItemFolders(workshopID: workshopID) }
+            // otherwise its bytes linger on disk. Best-effort; the delete
+            // tombstone recorded in `removeWorkshop` already prevents the
+            // auto-scan from resurrecting it on its own.
+            Task { await doctor.deleteDownloadedItemFolders(workshopID: workshopID) }
         }
         reload()
     }
