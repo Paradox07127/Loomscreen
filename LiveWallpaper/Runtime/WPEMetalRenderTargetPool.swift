@@ -71,8 +71,11 @@ final class WPEMetalRenderTargetPool {
     }
 
     static let fboAliasingDefaultsKey = "WPEMetalFBOAliasingEnabled"
+    /// Default ON (placement-heap FBO aliasing, on-device validated). The manual
+    /// override still wins: `defaults write … WPEMetalFBOAliasingEnabled -bool NO`
+    /// forces the discrete-per-target path back on.
     static var isFBOAliasingEnabled: Bool {
-        UserDefaults.standard.bool(forKey: fboAliasingDefaultsKey)
+        UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
     }
 
     private let device: MTLDevice
