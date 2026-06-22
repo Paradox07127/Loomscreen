@@ -77,6 +77,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
+    /// How the final scene texture is fitted onto the screen drawable. Defaults
+    /// to `.cover` (crop-to-fill), matching the persisted `fitMode` default, so
+    /// non-16:9 displays don't distort the scene. Pushed in from the session.
+    private var presentFitMode: WPEPresentFitMode = .cover
     /// Phase 2D-L: alive particle systems and the per-system sprite
     /// texture. Built on load from the scene's `particleObjects`; ticked
     /// + drawn each frame.
@@ -1897,6 +1901,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         refreshLiveness()
     }
 
+    /// Updates how the scene is fitted to the screen. For a static (non-continuous)
+    /// scene, re-present once so the new fit shows immediately rather than waiting
+    /// for the next content change.
+    func setPresentFitMode(_ mode: WPEPresentFitMode) {
+        guard mode != presentFitMode else { return }
+        presentFitMode = mode
+        if !needsContinuousFrames, outputTexture != nil {
+            mtkView.draw()
+        }
+    }
+
     func setClickCaptureEnabled(_ enabled: Bool) {
         mtkView.clickCaptureEnabled = enabled
         refreshLiveness()
@@ -2060,7 +2075,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     textureToPresent = outputTexture
                 }
                 guard let texture = textureToPresent else { return }
-                let presented = try executor.present(texture: texture, in: view)
+                let presented = try executor.present(texture: texture, in: view, fitMode: presentFitMode)
                 // Start audio only after the first frame is actually on screen, so
                 // the synchronous engine spin-up can never delay the first pixels.
                 if presented, pendingAudioStartupDocument != nil {

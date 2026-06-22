@@ -1,6 +1,64 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "How the scene fills the screen on non-16:9 displays. Fill crops to cover, Fit adds letterbox bars, Stretch distorts to fill." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How the scene fills the screen on non-16:9 displays. Fill crops to cover, Fit adds letterbox bars, Stretch distorts to fill."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16:9 以外のディスプレイでシーンを画面にどう合わせるか。フィルは切り抜いて覆い、フィットはレターボックスの帯を追加、引き伸ばしは歪めて埋めます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在非 16:9 屏幕上场景如何填满屏幕。填充裁切以覆盖,适应添加黑边,拉伸变形填满。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在非 16:9 螢幕上場景如何填滿螢幕。填滿裁切以覆蓋,符合加上黑邊,延展變形填滿。"
+          }
+        }
+      }
+    },
+    "Scaling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scaling"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スケーリング"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缩放"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "縮放"
+          }
+        }
+      }
+    },
     "" : {
       "localizations" : {
         "en" : {

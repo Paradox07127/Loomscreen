@@ -162,6 +162,19 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    /// Scene fit mode (how the scene fills a non-16:9 display): persists + pushes
+    /// live. Reuses the shared `fitMode` field; only the apply path differs from
+    /// video (`SceneWallpaperSession` instead of the AV player).
+    func updateSceneFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+              fitMode != configuration.fitMode else { return }
+        configuration.fitMode = fitMode
+        save(configuration)
+        #if !LITE_BUILD
+        (screen.runtimeSession as? SceneWallpaperSession)?.setSceneFitMode(fitMode)
+        #endif
+    }
+
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               configuration.videoColorSpace != colorSpace else { return }

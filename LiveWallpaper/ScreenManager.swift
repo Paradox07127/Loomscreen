@@ -1345,6 +1345,10 @@ final class ScreenManager {
         playbackCoordinator.updateFitMode(fitMode, for: screen)
     }
 
+    func updateSceneFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
+        playbackCoordinator.updateSceneFitMode(fitMode, for: screen)
+    }
+
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
         playbackCoordinator.updateFrameRateLimit(frameRateLimit, for: screen)
     }
@@ -1602,6 +1606,7 @@ final class ScreenManager {
             sceneSession.frameRateController?.setFrameRateLimit(configuration.frameRateLimit)
             sceneSession.setMouseInteractionEnabled(configuration.sceneMouseInteractionEnabled)
             sceneSession.setClickCaptureEnabled(configuration.sceneClickCaptureEnabled)
+            sceneSession.setSceneFitMode(configuration.fitMode)
             if let audio = sceneSession.audioController {
                 audio.setAudioMuted(configuration.muted)
                 audio.setAudioVolume(configuration.videoVolume)

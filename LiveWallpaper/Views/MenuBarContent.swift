@@ -63,7 +63,7 @@ struct MenuBarContent: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Text(verbatim: BundleIdentity.productDisplayName)
                     .font(.title2.weight(.semibold))
@@ -90,7 +90,7 @@ struct MenuBarContent: View {
                     }
                 ))
                 .toggleStyle(.switch)
-                .controlSize(.regular)
+                .controlSize(.small)
                 .labelsHidden()
                 .disabled(isWallpaperSwitchDisabled)
                 .accessibilityElement(children: .ignore)
@@ -475,12 +475,12 @@ struct MenuBarContent: View {
 /// single-shell layout where the outer Liquid Glass capsule already provides
 /// breathing room; values match the previous "comfortable" preset.
 private enum MenuBarMetrics {
-    static let popoverWidth: CGFloat = 320
-    static let outerPadding: CGFloat = 12
-    static let componentSpacing: CGFloat = 10
+    static let popoverWidth: CGFloat = 300
+    static let outerPadding: CGFloat = 10
+    static let componentSpacing: CGFloat = 8
     static let controlSpacing: CGFloat = 7
     static let rowPaddingHorizontal: CGFloat = 10
-    static let rowPaddingVertical: CGFloat = 9
+    static let rowPaddingVertical: CGFloat = 8
 }
 
 private enum DisplayVisualState: Equatable {

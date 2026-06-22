@@ -258,6 +258,48 @@ fragment half4 wpe_solidcolor_fragment(
     return half4(uniforms.color);
 }
 
+struct WPEPresentUniforms {
+    float2 ndcScale;
+    float2 uvScale;
+    float2 uvOffset;
+    float2 padding;
+};
+
+// Final on-screen blit with aspect handling, kept separate from the reused
+// fullscreen copy/compose path so changing it can't affect scene-internal
+// copies. `ndcScale` shrinks the quad (letterboxed Fit); `uvScale`/`uvOffset`
+// crop the source UV (crop-to-fill). All-identity reproduces the legacy
+// full-bleed Stretch.
+vertex WPEVertexOut wpe_present_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEPresentUniforms& u [[buffer(0)]]
+) {
+    float2 positions[4] = {
+        float2(-1.0, -1.0),
+        float2( 1.0, -1.0),
+        float2(-1.0,  1.0),
+        float2( 1.0,  1.0)
+    };
+    float2 uvs[4] = {
+        float2(0.0, 1.0),
+        float2(1.0, 1.0),
+        float2(0.0, 0.0),
+        float2(1.0, 0.0)
+    };
+    WPEVertexOut out;
+    out.position = float4(positions[vertexID] * u.ndcScale, 0.0, 1.0);
+    out.uv = uvs[vertexID] * u.uvScale + u.uvOffset;
+    return out;
+}
+
+fragment half4 wpe_present_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    return texture0.sample(linearSampler, in.uv);
+}
+
 fragment half4 wpe_copy_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],

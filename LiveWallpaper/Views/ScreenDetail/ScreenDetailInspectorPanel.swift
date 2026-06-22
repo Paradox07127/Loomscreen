@@ -41,6 +41,7 @@ struct ScreenDetailInspectorPanel: View {
                         syncToLockScreen: $draft.setAsLockScreen,
                         sceneMouseInteractionEnabled: $draft.sceneMouseInteractionEnabled,
                         sceneClickCaptureEnabled: $draft.sceneClickCaptureEnabled,
+                        sceneFitMode: $draft.selectedFitMode,
                         htmlConfig: draft.selectedWallpaperType == .html ? $draft.htmlConfig : nil,
                         videoColorSpace: draft.videoColorSpace
                     )

@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperCore
 import LiveWallpaperVideoWeb
 
 /// Adapter that exposes a WPE scene renderer to
@@ -113,6 +114,19 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func setClickCaptureEnabled(_ enabled: Bool) {
         (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(enabled)
         renderer?.setClickCaptureEnabled(enabled)
+    }
+
+    /// Per-screen scene fit mode. Maps the shared `VideoFitMode` onto the
+    /// renderer-local present transform (the renderer has no AVFoundation
+    /// dependency).
+    func setSceneFitMode(_ mode: VideoFitMode) {
+        let present: WPEPresentFitMode
+        switch mode {
+        case .stretch: present = .stretch
+        case .aspectFit: present = .contain
+        case .aspectFill: present = .cover
+        }
+        renderer?.setPresentFitMode(present)
     }
 
     func cleanup() {

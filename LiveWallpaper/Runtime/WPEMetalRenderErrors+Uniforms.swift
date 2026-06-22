@@ -139,6 +139,75 @@ struct WPECopyUniforms {
     var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
 }
 
+/// How the final scene texture maps onto the screen drawable. Renderer-local
+/// (no dependency on `VideoFitMode`'s AVFoundation semantics); the session maps
+/// `VideoFitMode` onto this. `stretch` = legacy full-bleed (may distort);
+/// `contain` = letterbox preserving aspect; `cover` = crop-to-fill preserving
+/// aspect.
+enum WPEPresentFitMode: Equatable {
+    case stretch
+    case contain
+    case cover
+}
+
+/// Layout MUST match `WPEPresentUniforms` in `WPEMetalBuiltins.metal`. Drives
+/// the final on-screen blit's aspect handling: `ndcScale` shrinks the quad for
+/// letterboxed `contain`; `uvScale`/`uvOffset` crop the source for `cover`.
+/// All-identity reproduces the legacy `stretch` full-bleed.
+struct WPEPresentUniforms {
+    var ndcScale: SIMD2<Float>
+    var uvScale: SIMD2<Float>
+    var uvOffset: SIMD2<Float>
+    var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
+
+    /// Computes the blit transform that fits a `sourceWidth×sourceHeight`
+    /// texture into a `targetWidth×targetHeight` drawable under `fitMode`.
+    /// Degenerate sizes fall back to identity (stretch).
+    static func make(
+        fitMode: WPEPresentFitMode,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        targetWidth: Int,
+        targetHeight: Int
+    ) -> WPEPresentUniforms {
+        var u = WPEPresentUniforms(
+            ndcScale: SIMD2<Float>(1, 1),
+            uvScale: SIMD2<Float>(1, 1),
+            uvOffset: SIMD2<Float>(0, 0)
+        )
+        guard sourceWidth > 0, sourceHeight > 0, targetWidth > 0, targetHeight > 0 else {
+            return u
+        }
+        let srcAspect = Double(sourceWidth) / Double(sourceHeight)
+        let dstAspect = Double(targetWidth) / Double(targetHeight)
+        switch fitMode {
+        case .stretch:
+            break
+        case .contain:
+            // Shrink the quad on the over-long axis; the cleared margin shows
+            // through as letterbox bars.
+            if srcAspect > dstAspect {
+                u.ndcScale.y = Float(dstAspect / srcAspect)
+            } else if srcAspect < dstAspect {
+                u.ndcScale.x = Float(srcAspect / dstAspect)
+            }
+        case .cover:
+            // Keep the quad full-bleed; crop the source UV on the over-long
+            // axis, centered.
+            if srcAspect > dstAspect {
+                let s = Float(dstAspect / srcAspect)
+                u.uvScale.x = s
+                u.uvOffset.x = (1 - s) / 2
+            } else if srcAspect < dstAspect {
+                let s = Float(srcAspect / dstAspect)
+                u.uvScale.y = s
+                u.uvOffset.y = (1 - s) / 2
+            }
+        }
+        return u
+    }
+}
+
 // Phase 2D-C: per-effect uniform structs. Field order MUST match the
 // matching MSL struct in `WPEMetalBuiltins.metal` exactly so that
 // `setFragmentBytes(...)` lays out correctly.

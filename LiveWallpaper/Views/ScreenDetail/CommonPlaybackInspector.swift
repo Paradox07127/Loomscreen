@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import LiveWallpaperCore
 import LiveWallpaperSharedUI
 
 /// Shared playback / privacy controls that sit above the type-specific
@@ -33,6 +34,10 @@ struct CommonPlaybackInspector: View {
     /// Scene-only click-capture toggle (real mouse interaction; steals desktop
     /// clicks while on).
     @Binding var sceneClickCaptureEnabled: Bool
+    /// Scene-only fit mode: how the scene texture fills a non-16:9 display.
+    /// Reuses the shared `fitMode` field via the draft; only the scene row reads
+    /// it. Applies through `ScreenManager.updateSceneFitMode`.
+    @Binding var sceneFitMode: VideoFitMode
 
     /// One-shot "you understand this steals desktop clicks" acknowledgement so
     /// the first enable shows a confirmation; later toggles are silent.
@@ -71,6 +76,10 @@ struct CommonPlaybackInspector: View {
                     if showsVideoDisplayModeRow {
                         Divider()
                         videoDisplayModeRow
+                    }
+                    if showsFitModeRow {
+                        Divider()
+                        fitModeRow
                     }
                     if showsMouseInteractionRow {
                         Divider()
@@ -120,6 +129,13 @@ struct CommonPlaybackInspector: View {
     /// Cursor-reactivity is a scene-only concept (camera parallax / pointer
     /// shaders) — video / HTML / shader wallpapers don't sample the pointer here.
     private var showsMouseInteractionRow: Bool {
+        wallpaperType == .scene
+    }
+
+    /// Scene-only: how the rendered scene texture is fitted onto the display.
+    /// Video has its own fit control in the preview area; HTML/shader don't map
+    /// a fixed-aspect texture onto the screen here.
+    private var showsFitModeRow: Bool {
         wallpaperType == .scene
     }
 
@@ -198,6 +214,37 @@ struct CommonPlaybackInspector: View {
                 ? Text("Disabled — Force SDR is active", comment: "Accessibility value when the frame-rate picker is dimmed because Force SDR owns the video composition slot.")
                 : Text(frameRateLimit.titleKey))
         }
+    }
+
+    private var fitModeRow: some View {
+        SettingRow(
+            icon: "aspectratio",
+            iconColor: .blue,
+            title: "Scaling",
+            info: "How the scene fills the screen on non-16:9 displays. Fill crops to cover, Fit adds letterbox bars, Stretch distorts to fill."
+        ) {
+            Picker("", selection: fitModeBinding) {
+                ForEach(VideoFitMode.allCases) { mode in
+                    Text(mode.titleKey).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel(Text("Scaling"))
+            .accessibilityValue(Text(sceneFitMode.titleKey))
+        }
+    }
+
+    private var fitModeBinding: Binding<VideoFitMode> {
+        Binding(
+            get: { sceneFitMode },
+            set: { newValue in
+                guard sceneFitMode != newValue else { return }
+                sceneFitMode = newValue
+                screenManager.updateSceneFitMode(newValue, for: screen)
+            }
+        )
     }
 
     private var videoDisplayModeRow: some View {

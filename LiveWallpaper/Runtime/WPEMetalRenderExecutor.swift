@@ -1454,7 +1454,7 @@ final class WPEMetalRenderExecutor {
     }
 
     @MainActor
-    func present(texture source: MTLTexture, in view: MTKView) throws -> Bool {
+    func present(texture source: MTLTexture, in view: MTKView, fitMode: WPEPresentFitMode = .stretch) throws -> Bool {
         guard let drawable = view.currentDrawable else {
             #if DEBUG
             Logger.info(
@@ -1475,7 +1475,8 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
         let copyState = try renderPipeline(
-            fragmentName: "wpe_copy_fragment",
+            vertexName: "wpe_present_vertex",
+            fragmentName: "wpe_present_fragment",
             blendMode: "disabled",
             colorPixelFormat: drawable.texture.pixelFormat
         )
@@ -1484,8 +1485,17 @@ final class WPEMetalRenderExecutor {
         }
         encoder.setRenderPipelineState(copyState)
         encoder.setFragmentTexture(source, index: 0)
-        var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
+        // Fit the scene texture's aspect to the drawable. Stretch reproduces the
+        // legacy full-bleed; Fit/Fill preserve aspect (letterbox / crop) so
+        // non-16:9 displays don't distort the scene.
+        var presentUniforms = WPEPresentUniforms.make(
+            fitMode: fitMode,
+            sourceWidth: source.width,
+            sourceHeight: source.height,
+            targetWidth: drawable.texture.width,
+            targetHeight: drawable.texture.height
+        )
+        encoder.setVertexBytes(&presentUniforms, length: MemoryLayout<WPEPresentUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         encoder.endEncoding()
 
