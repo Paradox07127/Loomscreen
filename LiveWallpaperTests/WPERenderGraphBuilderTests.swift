@@ -783,6 +783,91 @@ struct WPERenderGraphBuilderTests {
         #expect(geometry.brightness == 1.25)
     }
 
+    @Test("A hidden parent suppresses its visible children from the scene (variant visibility inheritance)")
+    func hiddenAncestorSuppressesVisibleChildren() throws {
+        func image(_ id: String, visible: Bool, parent: String?) -> WPESceneImageObject {
+            WPESceneImageObject(
+                id: id,
+                name: id,
+                imageRelativePath: "materials/\(id).png",
+                materialRelativePath: nil,
+                parentObjectID: parent,
+                origin: SIMD3<Double>(0, 0, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                visible: visible,
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1,
+                blendMode: .normal,
+                alignment: .center,
+                size: nil,
+                effects: [],
+                animationLayers: [],
+                parallaxDepth: SIMD2<Double>(0, 0)
+            )
+        }
+        // A body-split style variant: a hidden variant background with an authored-visible
+        // child body, alongside the shown variant. Only the shown variant's subtree should
+        // composite — the hidden variant's visible child must inherit the hidden state.
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [
+                image("hiddenVariant", visible: false, parent: nil),
+                image("hiddenChildBody", visible: true, parent: "hiddenVariant"),
+                image("hiddenGrandchildMask", visible: true, parent: "hiddenChildBody"),
+                image("shownVariant", visible: true, parent: nil),
+                image("shownChildBody", visible: true, parent: "shownVariant")
+            ],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+
+        let built = Set(graph.layers.map(\.objectID))
+        // Hidden variant and its (authored-visible) descendants are dropped from the graph.
+        #expect(!built.contains("hiddenVariant"))
+        #expect(!built.contains("hiddenChildBody"))
+        #expect(!built.contains("hiddenGrandchildMask"))
+        // The shown variant subtree is unaffected.
+        #expect(built.contains("shownVariant"))
+        #expect(built.contains("shownChildBody"))
+    }
+
+    @Test("A visible child of a user-toggleable (condition-less) hidden parent stays in the graph")
+    func liveToggleableHiddenParentKeepsVisibleChildren() throws {
+        // Parser-driven so the real property-binding → live-visibility flow runs: the parent
+        // resolves hidden (toggle == false) but its `visible` binding is a condition-less live
+        // toggle, so it stays in the graph — and so must its authored-visible child, otherwise
+        // toggling the parent back on at runtime would reveal an empty subtree.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 1, "name": "toggleParent", "image": "models/util/solidlayer.json",
+                    "visible": ["user": "toggle", "value": true]
+                ],
+                [
+                    "id": 2, "name": "child", "image": "models/util/solidlayer.json",
+                    "parent": 1, "visible": true
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data, userValues: ["toggle": .bool(false)])
+        #expect(document.imageObjects.first(where: { $0.id == "1" })?.visible == false)
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+
+        #expect(Set(graph.layers.map(\.objectID)).contains("2"))
+    }
+
     @Test("Underscore-prefixed texture refs route through .fbo regardless of suffix")
     func underscorePrefixTexturesRouteToFBO() throws {
         let root = FileManager.default.temporaryDirectory

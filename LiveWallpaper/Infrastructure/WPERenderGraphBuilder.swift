@@ -82,6 +82,7 @@ struct WPERenderGraphBuilder: Sendable {
         let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
         let visibleLayerIDs = Set(document.imageObjects
             .filter { Self.compositesToScene($0, liveVisibilityIDs: liveVisibilityIDs) }
+            .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
             .map(\.id))
         var layerIDsToBuild = visibleLayerIDs
         var pendingIDs = Array(visibleLayerIDs)
@@ -351,12 +352,44 @@ struct WPERenderGraphBuilder: Sendable {
         return object.visible || liveVisibilityIDs.contains(object.id)
     }
 
+    /// True when any ancestor up the `parentObjectID` chain is explicitly hidden
+    /// (`visible == false`). WPE propagates a parent's visibility to its children, so a
+    /// body-split rig's face/mask/body child layers (authored `visible: true`) must inherit
+    /// the hidden state of a conditionally-hidden variant parent. Without this, the visible
+    /// children of a hidden style variant still composited — 3226487183 drew its 默认/面具/抬头
+    /// poses (and their masks) all at once. A container that is merely alpha-0 keeps
+    /// `visible == true`, so a transparent grouping layer never suppresses its own subtree.
+    static func hasHiddenAncestor(
+        _ object: WPESceneImageObject,
+        objectByID: [String: WPESceneImageObject],
+        liveVisibilityIDs: Set<String>
+    ) -> Bool {
+        var seen: Set<String> = []
+        var current = object.parentObjectID
+        while let id = current, seen.insert(id).inserted, let parent = objectByID[id] {
+            // A user-toggleable (condition-less) hidden parent stays in the graph so a live
+            // visibility toggle can re-show it — its authored-visible children must stay too,
+            // or toggling the parent back on would reveal an empty subtree. Only an ancestor
+            // that is hidden AND not live-toggleable (e.g. a resolved style-selector variant)
+            // suppresses its subtree.
+            if !parent.visible && !liveVisibilityIDs.contains(parent.id) { return true }
+            current = parent.parentObjectID
+        }
+        return false
+    }
+
     /// Image-object IDs that have an incremental (`visible`) property binding —
     /// i.e. their on-screen visibility can be toggled live from project settings.
     private static func userToggleableVisibilityIDs(in document: WPESceneDocument) -> Set<String> {
         var ids = Set<String>()
         for bindings in document.propertyBindings.values {
-            for binding in bindings where binding.kind == .visible && binding.action == .incremental {
+            // Condition-form (style-selector / combo) visibility is resolved from the combo
+            // value at build time, not a live boolean toggle. Treating it as live-toggleable
+            // put conditionally-hidden variant layers into the always-composite set, so every
+            // style variant (默认/面具/抬头) rendered at once (3226487183). Only simple,
+            // condition-less `visible` bindings are genuine live toggles.
+            for binding in bindings
+            where binding.kind == .visible && binding.action == .incremental && binding.condition == nil {
                 if case .imageObject(let id) = binding.target {
                     ids.insert(id)
                 }
