@@ -214,6 +214,57 @@ struct WPERenderPipelineBuilderTests {
         #expect(mesh.parts == [WPEPuppetMeshPart(id: 7, start: 0, count: 3)])
     }
 
+    @Test("A legacy MDLV<21 puppet refuses the whole scene instead of rendering it misaligned")
+    func legacyPuppetGenerationRefusesScene() throws {
+        // Same parseable puppet, but tagged MDLV0019 (the exploded-pieces generation we
+        // cannot assemble). loadPuppetModel must throw so the scene is skipped + warned,
+        // not silently degraded to a scattered render.
+        var legacyMDL = makeSingleTrianglePuppetMDL()
+        legacyMDL.replaceSubrange(0..<8, with: "MDLV0019".utf8)
+        let fixture = try makeFixture(dataFiles: [
+            "models/layer_puppet.mdl": legacyMDL
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "7",
+                objectName: "Layer",
+                imagePath: "models/layer.json",
+                materialPath: "materials/layer.json",
+                puppetPath: "models/layer_puppet.mdl",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_7_a",
+                compositeB: "_rt_imageLayerComposite_7_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "7.0",
+                        phase: .material,
+                        shader: "genericimage4",
+                        source: .image("materials/layer.png"),
+                        target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        #expect {
+            _ = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        } throws: { error in
+            guard case SceneRenderingError.metalRendererUnsupported(let reason) = error else { return false }
+            return reason.contains("MDLV0019")
+        }
+    }
+
     @Test("Loads puppet model through dependency mounts")
     func loadsPuppetModelThroughDependencyMounts() throws {
         let fixture = try makeFixture()

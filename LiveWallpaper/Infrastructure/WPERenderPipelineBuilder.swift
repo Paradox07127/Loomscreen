@@ -52,32 +52,46 @@ struct WPERenderPipelineBuilder: Sendable {
             }
             return WPEPreparedRenderLayer(
                 graphLayer: layer,
-                puppetModel: loadPuppetModel(for: layer),
+                puppetModel: try loadPuppetModel(for: layer),
                 passes: passes
             )
         }
         return WPEPreparedRenderPipeline(layers: layers)
     }
 
-    private func loadPuppetModel(for layer: WPERenderLayer) -> WPEPuppetModel? {
+    private func loadPuppetModel(for layer: WPERenderLayer) throws -> WPEPuppetModel? {
         guard let puppetPath = layer.puppetPath else { return nil }
+        let model: WPEPuppetModel
         do {
             let data = try resolver.data(relativePath: puppetPath)
-            let model = try WPEMdlParser.parse(data: data)
-            // Only the modern pre-assembled puppet generations (MDLV0021/0023)
-            // ship MDLV vertices already in assembled object space, which the
-            // renderer can draw directly. Older generations (e.g. MDLV0019)
-            // store an *exploded* "pieces" mesh whose assembled pose is produced
-            // by WPE's editor-side puppet solver and is not recoverable from the
-            // file (the bind/tp/MDLA data does not encode it). The reference
-            // linux-wallpaperengine likewise renders only MDLV0021/0023 and
-            // rejects older meshes. Degrade those objects to their flat material
-            // image rather than drawing scattered pieces.
-            guard model.version >= 21 else { return nil }
-            return model
+            model = try WPEMdlParser.parse(data: data)
         } catch {
+            // Missing / corrupt .mdl → degrade to the flat material image (unchanged).
             return nil
         }
+        // Only the modern pre-assembled puppet generations (MDLV0021/0023) ship MDLV
+        // vertices already in assembled object space, which the renderer can draw
+        // directly. Older generations (MDLV0019 and below) store an *exploded* "pieces"
+        // mesh whose assembled pose is produced by WPE's closed editor-side puppet solver
+        // and is NOT recoverable from the file (verified 2026-06-22 via vertex-occupancy
+        // analysis: the mesh is genuinely disjoint clusters; linux-wallpaperengine also
+        // rejects <21). Drawing them — as a mesh or as the flat atlas — yields scattered,
+        // misaligned puppets. Per the product decision, refuse the whole scene with a
+        // warning instead of shipping a misaligned wallpaper, rather than silently
+        // degrading to a broken flat render.
+        guard model.version >= 21 else {
+            let generation = String(format: "MDLV%04d", model.version)
+            Logger.warning(
+                "WPE scene uses unsupported puppet generation \(generation) "
+                    + "('\(puppetPath)'); refusing to render to avoid a misaligned wallpaper.",
+                category: .wpeRender
+            )
+            throw SceneRenderingError.metalRendererUnsupported(
+                reason: "this wallpaper uses the legacy \(generation) puppet format, "
+                    + "which this renderer cannot assemble correctly"
+            )
+        }
+        return model
     }
 
     private func preparedPass(for pass: WPERenderPass) throws -> WPEPreparedRenderPass {
