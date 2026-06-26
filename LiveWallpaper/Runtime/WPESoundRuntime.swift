@@ -115,7 +115,10 @@ final class WPESoundRuntime: @unchecked Sendable {
         do {
             try engine.start()
         } catch {
-            engine.mainMixerNode.removeTap(onBus: 0)
+            // Keep the (already-installed, still-valid) FFT tap so a later
+            // resume() can recover audio-reactive data — the callback can't fire
+            // while the engine is stopped anyway.
+            Logger.warning("WPESoundRuntime play: engine.start() failed: \(error.localizedDescription)", category: .wpeRender)
             return false
         }
         for player in players {
@@ -133,6 +136,38 @@ final class WPESoundRuntime: @unchecked Sendable {
         players.removeAll(keepingCapacity: false)
         buffers.removeAll(keepingCapacity: false)
         sceneVolumes.removeAll(keepingCapacity: false)
+    }
+
+    /// Suspend playback without discarding the prepared players/buffers/tap.
+    /// Unlike `stop()` (which tears the graph down and needs a full re-decode
+    /// to come back), this just halts the engine so a paused wallpaper costs no
+    /// audio CPU — the FFT tap stops firing — while the loaded PCM stays
+    /// resident for an instant `resume()`. Used by the `.suspended` profile.
+    func pause() {
+        guard engine.isRunning else { return }
+        engine.pause()
+    }
+
+    /// Start (or resume) looping playback for already-prepared players. Handles
+    /// both cases the renderer needs:
+    ///   - resuming after `pause()` (engine paused, players still "playing"), and
+    ///   - starting a runtime that was `prepare`-d while suspended and never
+    ///     `play()`-ed (engine stopped, players idle).
+    /// No-op when nothing was prepared. On engine-start failure the tap is left
+    /// intact (it's still valid) so a later retry can recover audio-reactive FFT.
+    func resume() {
+        guard !players.isEmpty else { return }
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                Logger.warning("WPESoundRuntime resume: engine.start() failed: \(error.localizedDescription)", category: .wpeRender)
+                return
+            }
+        }
+        for player in players where !player.isPlaying {
+            player.play()
+        }
     }
 
     /// Master mute applied on top of the scene-declared per-sound volume.

@@ -101,6 +101,48 @@ struct WPEMetalTextureLoaderTests {
         #expect(texture.swizzle.alpha == .green)
     }
 
+    @Test("RG88 shake flow mask keeps raw (R,G) channels — NOT the glow swizzle")
+    func rg88FlowMaskIsNotSwizzled() async throws {
+        // shake masks are RG88 too, but R/G are x/y displacement, not luminance/alpha.
+        // The (R,R,R,G) swizzle collapses .g onto .r and destroys the y-flow, smearing
+        // the whole frame (criss-cross tearing). Mask paths must keep identity channels.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 2,
+                height: 2,
+                textureFormatCode: WPETexFormat.rg88.rawValue,
+                format: .rg88,
+                mipmapCount: 1,
+                flags: 0
+            ),
+            mipmaps: [WPETexTextureMipmap(index: 0, width: 2, height: 2, bytes: bytes)],
+            hasAnimationFrames: false
+        )
+
+        let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "masks/shake_mask_d3e38905")
+
+        #expect(texture.pixelFormat == .rg8Unorm)
+        // Identity channels: .g must stay .green (the y-flow), not be swizzled to .red.
+        #expect(texture.swizzle.red == .red)
+        #expect(texture.swizzle.green == .green)
+        #expect(texture.swizzle.blue == .blue)
+        #expect(texture.swizzle.alpha == .alpha)
+    }
+
+    @Test("rg88NeedsLuminanceAlphaSwizzle: glow swizzles, mask path does not")
+    func rg88SwizzleDiscriminator() {
+        #expect(WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "particles/fog3"))
+        #expect(WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "effects/light_shafts/beam_1"))
+        #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "masks/shake_mask_3fab49d9"))
+        #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "MASKS/Shake_Mask_X"))
+        // Non-RG88 never swizzles regardless of name.
+        #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: false, label: "particles/fog3"))
+    }
+
     @Test("Rejects BC payload when current device cannot sample BC")
     func rejectsBCWithoutDeviceSupport() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

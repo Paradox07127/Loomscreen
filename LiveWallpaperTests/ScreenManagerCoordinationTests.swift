@@ -397,9 +397,8 @@ struct ScreenManagerCoordinationTests {
         var releaseCount = 0
         let coordinator = PlaybackCoordinator(
             configurationStore: store,
-            powerMonitor: FakePowerMonitor(),
-            fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
+            applyPolicy: { _ in },
             applyVideoEffects: { _, _ in },
             refreshRateLookup: { _ in 60 },
             screensProvider: { [screen] },
@@ -449,9 +448,8 @@ struct ScreenManagerCoordinationTests {
 
         let coordinator = PlaybackCoordinator(
             configurationStore: store,
-            powerMonitor: FakePowerMonitor(),
-            fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
+            applyPolicy: { _ in },
             applyVideoEffects: { _, _ in },
             refreshRateLookup: { _ in 60 },
             screensProvider: { [screen] },

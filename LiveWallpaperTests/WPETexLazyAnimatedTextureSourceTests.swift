@@ -154,6 +154,166 @@ struct WPETexLazyAnimatedTextureSourceTests {
         ])
     }
 
+#if DEBUG
+    @Test("Prefetch decodes the next image off the main path before it is needed")
+    func prefetchDecodesNextImageBeforeFrameUploadNeedsIt() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let source = try WPETexLazyAnimatedTextureSource(
+            payload: makeCompressedStreamingPayload(),
+            device: device,
+            label: "lazy-prefetch-next"
+        )
+
+        _ = try #require(source.texture(at: 0.0))   // frame 0 → image 0 (sync)
+        #expect(source.debugSynchronousDecodedImageIDs == [0])
+
+        // image 1 (the upcoming frame's source) is decoded on the prefetch queue.
+        #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(1) })
+
+        _ = try #require(source.texture(at: 0.21))   // frame 2 → image 1 (cache hit)
+        #expect(source.debugSynchronousDecodedImageIDs == [0])
+    }
+
+    @Test("Loop-end prefetch wraps to frame zero's image")
+    func loopEndPrefetchWrapsToFrameZero() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let source = try WPETexLazyAnimatedTextureSource(
+            payload: makeCompressedStreamingPayload(),
+            device: device,
+            label: "lazy-prefetch-wrap"
+        )
+
+        _ = try #require(source.texture(at: 0.31))   // last frame (3) → image 1
+        #expect(source.debugSynchronousDecodedImageIDs == [1])
+        // Prefetch wraps past the end and warms frame 0's image before the seam.
+        #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(0) })
+    }
+
+    @Test("Invalidate drops outstanding prefetch results")
+    func invalidateDropsOutstandingPrefetchResults() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let source = try WPETexLazyAnimatedTextureSource(
+            payload: makeCompressedStreamingPayload(),
+            device: device,
+            label: "lazy-prefetch-invalidate"
+        )
+        source.debugPrefetchDecodeDelay = 0.15
+
+        _ = try #require(source.texture(at: 0.0))
+        #expect(source.debugPrefetchInFlightImageIDs.contains(1))
+
+        source.invalidate()
+        #expect(source.debugDecodedImageCacheIDs.isEmpty)
+        #expect(source.debugPrefetchInFlightImageIDs.isEmpty)
+
+        // The in-flight decode completes after invalidate; its result is dropped.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(source.debugDecodedImageCacheIDs.isEmpty)
+        #expect(source.debugPrefetchInFlightImageIDs.isEmpty)
+    }
+
+    @Test("A failed image decode is recorded and never re-scheduled")
+    func failedImageDecodeIsRecordedNotReScheduled() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let source = try WPETexLazyAnimatedTextureSource(
+            payload: try makeCorruptSecondImagePayload(),
+            device: device,
+            label: "lazy-prefetch-fail"
+        )
+
+        _ = try #require(source.texture(at: 0.0))   // frame 0 → image 0 ok; prefetch image 1 (corrupt)
+        #expect(await waitUntil { source.debugPrefetchFailedImageIDs.contains(1) })
+
+        // Advancing to a new frame re-runs scheduling; the failed image must NOT
+        // be put back in flight (no per-tick background respin on a corrupt image).
+        _ = source.texture(at: 0.11)
+        #expect(!source.debugPrefetchInFlightImageIDs.contains(1))
+    }
+
+    /// Same 4-frame (image 0,0,1,1) looping layout as `makeStreamingPayload`, but
+    /// with LZ4-compressed source images so the prefetch exercises a real inflate.
+    private func makeCompressedStreamingPayload() throws -> WPETexStreamingPayload {
+        let image0 = makeImage(width: 4, height: 4, blue: 0)
+        let image1 = makeImage(width: 4, height: 4, blue: 0x40)
+        let mip0 = WPETexCompressedMipmap(
+            index: 0, width: 4, height: 4, isCompressed: true,
+            compressedBytes: try lz4RawCompress(image0), decompressedByteCount: image0.count
+        )
+        let mip1 = WPETexCompressedMipmap(
+            index: 0, width: 4, height: 4, isCompressed: true,
+            compressedBytes: try lz4RawCompress(image1), decompressedByteCount: image1.count
+        )
+        return WPETexStreamingPayload(
+            info: WPETexInfo(
+                containerVersion: 5, infoVersion: 1, width: 4, height: 4,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue, format: .rgba8888,
+                mipmapCount: 1, flags: 0
+            ),
+            compressedImages: [
+                WPETexCompressedImage(width: 4, height: 4, payloads: [mip0]),
+                WPETexCompressedImage(width: 4, height: 4, payloads: [mip1])
+            ],
+            frames: [
+                WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 0, y: 0, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 2, y: 0, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 1, subRect: CGRect(x: 0, y: 2, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 1, subRect: CGRect(x: 2, y: 2, width: 2, height: 2), duration: 0.1)
+            ],
+            frameRate: 10,
+            loop: true
+        )
+    }
+
+    /// Frames [0,0,1,1] but image 1 inflates to fewer bytes than its declared
+    /// `decompressedByteCount` (a valid LZ4 stream of 16 bytes claiming 64), so
+    /// the inflate THROWS — exercising the failure path without feeding the
+    /// system decoder malformed bytes (which can crash, not just error).
+    private func makeCorruptSecondImagePayload() throws -> WPETexStreamingPayload {
+        let image0 = makeImage(width: 4, height: 4, blue: 0)
+        let mip0 = WPETexCompressedMipmap(
+            index: 0, width: 4, height: 4, isCompressed: false,
+            compressedBytes: image0, decompressedByteCount: image0.count
+        )
+        let mipBad = WPETexCompressedMipmap(
+            index: 0, width: 4, height: 4, isCompressed: true,
+            compressedBytes: try lz4RawCompress(image0),
+            decompressedByteCount: 128   // inflates to 64; the mismatch throws
+        )
+        return WPETexStreamingPayload(
+            info: WPETexInfo(
+                containerVersion: 5, infoVersion: 1, width: 4, height: 4,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue, format: .rgba8888,
+                mipmapCount: 1, flags: 0
+            ),
+            compressedImages: [
+                WPETexCompressedImage(width: 4, height: 4, payloads: [mip0]),
+                WPETexCompressedImage(width: 4, height: 4, payloads: [mipBad])
+            ],
+            frames: [
+                WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 0, y: 0, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 2, y: 0, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 1, subRect: CGRect(x: 0, y: 2, width: 2, height: 2), duration: 0.1),
+                WPETexStreamingFrame(imageID: 1, subRect: CGRect(x: 2, y: 2, width: 2, height: 2), duration: 0.1)
+            ],
+            frameRate: 10,
+            loop: true
+        )
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        pollInterval: UInt64 = 10_000_000,
+        _ condition: () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: pollInterval)
+        }
+        return condition()
+    }
+#endif
+
     /// Mirror of the helper in `WPETexDecoderTests`; kept private here
     /// so the lazy-source tests are self-contained.
     private func lz4RawCompress(_ data: Data) throws -> Data {

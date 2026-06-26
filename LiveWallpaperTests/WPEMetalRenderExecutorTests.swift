@@ -3542,3 +3542,193 @@ private extension WPEMetalRenderExecutorTests {
         expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 255, a: 255))
     }
 }
+
+// MARK: - P6 static-layer composite cache
+
+private extension WPEMetalRenderExecutorTests {
+    @Test("Static layer cache flag defaults off")
+    func staticLayerCacheFlagDefaultsOff() {
+        let defaults = UserDefaults.standard
+        let key = WPEMetalRenderExecutor.staticLayerCacheDefaultsKey
+        let previous = defaults.object(forKey: key)
+        defaults.removeObject(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        #expect(WPEMetalRenderExecutor.isStaticLayerCacheEnabled == false)
+        defaults.set(true, forKey: key)
+        #expect(WPEMetalRenderExecutor.isStaticLayerCacheEnabled == true)
+    }
+
+    @Test("Static layer classification is conservative")
+    func staticLayerClassificationIsConservative() {
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: ["genericimage4", "compose", "commands/copy"]),
+            dynamicTextureNames: []) != nil)
+
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: ["genericimage4", "effects/blur", "commands/copy"]),
+            dynamicTextureNames: []) == nil)
+
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: ["genericimage4", "workshop/custom", "commands/copy"]),
+            dynamicTextureNames: []) == nil)
+
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(
+                shaderNames: ["genericimage4", "compose", "commands/copy"],
+                puppetModel: WPEPuppetModel(version: 23, meshes: [])),
+            dynamicTextureNames: []) == nil)
+
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(
+                shaderNames: ["genericimage4", "compose", "commands/copy"],
+                source: .image("materials/dynamic.tex")),
+            dynamicTextureNames: ["materials/dynamic.tex"]) == nil)
+    }
+
+    @Test("Animated (keyframe) layers are not cached")
+    func animatedLayerIsNotCached() {
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(
+                shaderNames: ["genericimage4", "compose", "commands/copy"],
+                animationLayers: [WPESceneAnimationLayer(id: 1, rate: 1, visible: true, blend: 1, animation: 0)]),
+            dynamicTextureNames: []) == nil)
+    }
+
+    @Test("Single-pass layers are below the cache cost gate")
+    func singlePassLayerIsNotCached() {
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: ["genericimage4", "commands/copy"]),
+            dynamicTextureNames: []) == nil)
+    }
+
+    @Test("Frame-dependent reads are rejected (previous / scene-alias / external FBO / custom shader / multi-scene)")
+    func frameDependentLayersAreRejected() {
+        let base = ["genericimage4", "compose", "commands/copy"]
+        // .previous (ping-pong / cross-frame feedback) → not invariant.
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .previous),
+            dynamicTextureNames: []) == nil)
+        // Scene-alias FBO resolves to the live scene output (prior layers/particles).
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .fbo("_rt_FullFrameBuffer")),
+            dynamicTextureNames: []) == nil)
+        // An FBO produced by ANOTHER (possibly dynamic) layer.
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .fbo("_rt_someOtherLayer")),
+            dynamicTextureNames: []) == nil)
+        // A custom (non-builtin) material shader could still sample g_Time/pointer/audio.
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: base, isBuiltin: false),
+            dynamicTextureNames: []) == nil)
+        // More than one scene pass — only one source would be cached.
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: base, extraScenePass: true),
+            dynamicTextureNames: []) == nil)
+    }
+
+    @Test("Static layer cache LRU evicts oldest over budget")
+    func staticLayerCacheLRUEvictsOldestOverBudget() {
+        var lru = WPEMetalStaticLayerCacheLRU(budgetBytes: 100)
+        #expect(lru.admit("a", bytes: 40).isEmpty)
+        #expect(lru.admit("b", bytes: 40).isEmpty)
+        lru.touch("a")
+        let evicted = lru.admit("c", bytes: 40)
+        #expect(evicted == ["b"])
+        #expect(lru.entries["a"] != nil)
+        #expect(lru.entries["b"] == nil)
+        #expect(lru.entries["c"] != nil)
+        #expect(lru.totalBytes == 80)
+    }
+}
+
+private func staticCachePreparedLayer(
+    shaderNames: [String],
+    source: WPETextureReference = .image("materials/base.png"),
+    puppetModel: WPEPuppetModel? = nil,
+    animationLayers: [WPESceneAnimationLayer] = [],
+    geometry: WPERenderLayerGeometry = .identity,
+    isBuiltin: Bool = true,
+    injectReadIntoFirstPass: WPETextureReference? = nil,
+    firstPassConstants: [String: WPESceneShaderConstantValue] = [:],
+    extraScenePass: Bool = false
+) -> WPEPreparedRenderLayer {
+    let compA = "_rt_imageLayerComposite_static_a"
+    let compB = "_rt_imageLayerComposite_static_b"
+    // First pass writes compA; middle passes write compB; the last is the scene
+    // copy sampling the final composite. A 2-shader list collapses to one
+    // composite write + scene copy (single-pass, below the cache gate).
+    let count = shaderNames.count
+    var passes = shaderNames.enumerated().map { index, shader -> WPERenderPass in
+        let isLast = index == count - 1
+        let target: WPERenderTarget = isLast
+            ? .scene
+            : .layerComposite(name: index == 0 ? compA : compB)
+        let src: WPETextureReference = index == 0
+            ? source
+            : (isLast ? .fbo(index == 1 ? compA : compB) : .fbo(compA))
+        var textures: [Int: WPETextureReference] = [0: src]
+        if index == 0, let injectReadIntoFirstPass {
+            textures[1] = injectReadIntoFirstPass
+        }
+        return WPERenderPass(
+            id: "static.\(index)",
+            phase: index == 0 ? .material : .command(file: "commands/copy/effect.json"),
+            shader: shader,
+            source: src,
+            target: target,
+            textures: textures,
+            binds: [:],
+            constants: index == 0 ? firstPassConstants : [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+    }
+    if extraScenePass {
+        passes.append(WPERenderPass(
+            id: "static.extra-scene",
+            phase: .command(file: "commands/copy/effect.json"),
+            shader: "commands/copy",
+            source: .fbo(compB),
+            target: .scene,
+            textures: [0: .fbo(compB)],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        ))
+    }
+    let layer = WPERenderLayer(
+        objectID: "static-layer",
+        objectName: "Static Layer",
+        imagePath: "materials/base.png",
+        materialPath: nil,
+        animationLayers: animationLayers,
+        geometry: geometry,
+        compositeA: compA,
+        compositeB: compB,
+        localFBOs: [],
+        passes: passes
+    )
+    return WPEPreparedRenderLayer(
+        graphLayer: layer,
+        puppetModel: puppetModel,
+        passes: passes.map { pass in
+            WPEPreparedRenderPass(
+                pass: pass,
+                shader: WPEShaderProgram(name: pass.shader, vertexSource: "", fragmentSource: "", isBuiltin: isBuiltin),
+                textureBindings: [:],
+                comboValues: [:],
+                uniformValues: [:]
+            )
+        }
+    )
+}

@@ -162,11 +162,24 @@ public struct WPESceneSoundObject: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One resolved scriptProperty binding (a WPE SceneScript editor property the
+/// scene configures per object — e.g. a clock's `dayFormat`/`showDay`). WPE
+/// sliders are numeric, but checkboxes are bools and combos/text are strings.
+public enum WPESceneScriptPropertyValue: Equatable, Sendable {
+    case number(Double)
+    case bool(Bool)
+    case string(String)
+}
+
 public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
     public let text: String
     public let textScript: String?
+    /// The scene's per-object scriptProperty overrides (e.g. `dayFormat`,
+    /// `showDay`), so the text script renders with the scene's configuration
+    /// instead of the script's own declared defaults.
+    public let scriptProperties: [String: WPESceneScriptPropertyValue]
     public let fontRelativePath: String?
     public let pointSize: Double
     public let color: SIMD3<Double>
@@ -204,6 +217,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         name: String,
         text: String,
         textScript: String? = nil,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
         fontRelativePath: String?,
         pointSize: Double,
         color: SIMD3<Double>,
@@ -230,6 +244,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.name = name
         self.text = text
         self.textScript = textScript
+        self.scriptProperties = scriptProperties
         self.fontRelativePath = fontRelativePath
         self.pointSize = pointSize
         self.color = color
@@ -266,6 +281,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
             name: name,
             text: liveText,
             textScript: textScript,
+            scriptProperties: scriptProperties,
             fontRelativePath: fontRelativePath,
             pointSize: pointSize,
             color: color,

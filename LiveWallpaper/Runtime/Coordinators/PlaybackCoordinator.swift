@@ -15,9 +15,11 @@ final class PlaybackCoordinator {
     let transition = PlaybackTransitionRegistry()
 
     private let configurationStore: WallpaperConfigurationStore
-    private let powerMonitor: any PowerMonitoring
-    private let fullScreenDetector: any FullScreenDetecting
     private let playableVideoLoader: any PlayableVideoLoading
+    /// Applies the unified performance policy to a freshly built/replaced
+    /// session. Injected from `ScreenManager` (the single source of truth) so
+    /// this coordinator never re-assembles the policy inputs itself.
+    private let applyPolicy: @MainActor (Screen) -> Void
     /// Hook into ScreenManager-owned effect application — kept as a callback
     /// because `applyVideoEffects` reaches into Combine lifetimes that aren't
     /// part of this coordinator's responsibility yet.
@@ -53,16 +55,11 @@ final class PlaybackCoordinator {
     /// disabled — mirrors the gate `ScreenManager.restoreWallpaperSession`
     /// applies to scene/HTML sessions.
     private let isGloballyEnabled: @MainActor () -> Bool
-    /// Whether the user is away (lock screen / display sleep / system sleep).
-    /// Folded into the effective performance profile so a freshly-built video
-    /// honours user-absence on its very first frame.
-    private let isUserAbsent: @MainActor () -> Bool
 
     init(
         configurationStore: WallpaperConfigurationStore,
-        powerMonitor: any PowerMonitoring,
-        fullScreenDetector: any FullScreenDetecting,
         playableVideoLoader: any PlayableVideoLoading,
+        applyPolicy: @MainActor @escaping (Screen) -> Void,
         applyVideoEffects: @MainActor @escaping (Screen, ScreenConfiguration) -> Void,
         refreshRateLookup: @MainActor @escaping (CGDirectDisplayID) -> Int,
         screensProvider: @MainActor @escaping () -> [Screen],
@@ -71,13 +68,11 @@ final class PlaybackCoordinator {
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
         reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in },
         originReconciler: any OriginReconciler,
-        isGloballyEnabled: @MainActor @escaping () -> Bool = { true },
-        isUserAbsent: @MainActor @escaping () -> Bool = { false }
+        isGloballyEnabled: @MainActor @escaping () -> Bool = { true }
     ) {
         self.configurationStore = configurationStore
-        self.powerMonitor = powerMonitor
-        self.fullScreenDetector = fullScreenDetector
         self.playableVideoLoader = playableVideoLoader
+        self.applyPolicy = applyPolicy
         self.applyVideoEffects = applyVideoEffects
         self.refreshRateLookup = refreshRateLookup
         self.screensProvider = screensProvider
@@ -87,7 +82,6 @@ final class PlaybackCoordinator {
         self.reportRuntimeError = reportRuntimeError
         self.originReconciler = originReconciler
         self.isGloballyEnabled = isGloballyEnabled
-        self.isUserAbsent = isUserAbsent
     }
 
     // MARK: - Configuration setters
@@ -601,22 +595,7 @@ final class PlaybackCoordinator {
     }
 
     private func applyPerformancePolicy(to screen: Screen) {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
-            fullScreenDetector.isDesktopHidden(for: screen.id)
-        let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
-            fullScreenDetector.isDesktopOccluded(for: screen.id)
-        let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: globalSettings,
-            powerSource: powerMonitor.currentPowerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen,
-            isWindowOccluding: isWindowOccluding,
-            isApplicationRuleActive: ApplicationPerformanceRuleEngine.isActive(for: globalSettings),
-            thermalState: ProcessInfo.processInfo.thermalState,
-            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive,
-            isUserAbsent: isUserAbsent()
-        )
-        screen.runtimeSession?.applyPerformanceProfile(profile)
+        applyPolicy(screen)
     }
 
     private static func clampedVideoVolume(_ value: Double) -> Double {

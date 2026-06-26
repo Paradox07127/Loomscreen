@@ -121,6 +121,479 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("v_AudioShift reconstructs the audio response (rest = 0), not the in.uv.x default")
+    func reconstructsAudioShiftVarying() throws {
+        // chromatic_aberration.vert / hue_shift.vert compute v_AudioShift =
+        // CreateAudioResponse(spectrum...), which is 0 when silent. The fragment-only
+        // transpile has no vertex stage, so the float varying used to fall through to
+        // the `in.uv.x` default — a 0→1 horizontal ramp that smeared RGB / hue across
+        // the whole frame (scene 3265584934 "色彩异常红蓝偏移"). It must instead rebuild
+        // the response from the audio uniforms so it rests at 0 with no audio.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float u_rOffset;
+        uniform float u_gOffset;
+        uniform float u_bOffset;
+        uniform float g_AudioSpectrum16Left[16];
+        uniform float g_AudioSpectrum16Right[16];
+        uniform float g_AudioFrequencyMin;
+        uniform float g_AudioFrequencyMax;
+        uniform float g_AudioPower;
+        uniform vec2 g_AudioBounds;
+        uniform float g_AudioMultiply;
+        in vec4 v_TexCoord;
+        in float v_AudioShift;
+        void main() {
+            vec4 rValue = texture(g_Texture0, v_TexCoord.xy - (u_rOffset * v_AudioShift));
+            vec4 gValue = texture(g_Texture0, v_TexCoord.xy - (u_gOffset * v_AudioShift));
+            vec4 bValue = texture(g_Texture0, v_TexCoord.xy - (u_bOffset * v_AudioShift));
+            gl_FragColor = vec4(rValue.r, gValue.g, bValue.b, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2423877731/effects/chromatic_aberration",
+            preprocessedSource: source,
+            comboValues: ["AUDIOPROCESSING": 2]
+        )
+        // Reconstructed from the spectrum + audio uniforms with the right-channel mode (2).
+        #expect(result.mslSource.contains(
+            "wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, 2,"
+        ))
+        // The buggy screen-space default must NOT be how v_AudioShift is initialized.
+        #expect(!result.mslSource.contains("v_AudioShift = in.uv.x"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("filmgrain v_TexCoordNoise tiles by g_NoiseScale/time, not raw screen UV")
+    func reconstructsFilmgrainNoiseVarying() throws {
+        // filmgrain.vert scrolls v_TexCoordNoise by frac(g_Time) and tiles it by
+        // g_NoiseScale (20×). It shares the varying NAME with foliage but has no
+        // g_Ratio/g_Direction, so it used to fall through to float4(uv,uv): the 256²
+        // noise stretched once over the whole frame, soft-light blended into a static
+        // "retro filter" overlay (scene 3265584934). It must tile via g_NoiseScale.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture0Resolution;
+        uniform float g_Time;
+        uniform float g_NoiseScale;
+        uniform float g_NoiseAlpha;
+        uniform float g_NoisePower;
+        in vec4 v_TexCoord;
+        in vec4 v_TexCoordNoise;
+        void main() {
+            vec3 noise = texture(g_Texture1, v_TexCoordNoise.xy).rgb;
+            vec3 noise2 = texture(g_Texture1, v_TexCoordNoise.zw).gbr;
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            albedo.rgb = mix(albedo.rgb, noise * noise2, g_NoiseAlpha * g_NoisePower);
+            gl_FragColor = albedo;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/filmgrain",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains(
+            "wpe_filmgrain_texcoord_noise(in.uv, g_Time, g_NoiseScale, g_Texture0Resolution)"
+        ))
+        // The buggy raw-UV default must NOT be how v_TexCoordNoise is initialized.
+        #expect(!result.mslSource.contains("v_TexCoordNoise = float4(in.uv, in.uv)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Tiled noise texture samples with repeatSampler; framebuffer keeps clamp")
+    func noiseTextureUsesRepeatSampler() throws {
+        // filmgrain tiles util/noise at coords far beyond [0,1] (v_TexCoordNoise = uv·scale).
+        // The single clamp_to_edge linearSampler collapsed that into a scrolling edge-smear
+        // cross-hatch (scene 3265584934). Noise samplers (annotated "...noise...") must use
+        // address::repeat; the framebuffer (g_Texture0) keeps clamp so shake/offset reads
+        // don't wrap the frame at its edges.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0; // {"hidden":true}
+        uniform sampler2D g_Texture1; // {"label":"ui_editor_properties_noise","default":"util/noise"}
+        uniform vec4 g_Texture0Resolution;
+        uniform float g_Time;
+        uniform float g_NoiseScale;
+        uniform float g_NoiseAlpha;
+        in vec4 v_TexCoord;
+        in vec4 v_TexCoordNoise;
+        void main() {
+            vec3 noise = texture(g_Texture1, v_TexCoordNoise.xy).rgb;
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            albedo.rgb = mix(albedo.rgb, noise, g_NoiseAlpha);
+            gl_FragColor = albedo;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/filmgrain",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("constexpr sampler repeatSampler(address::repeat, filter::linear)"))
+        #expect(result.mslSource.contains("g_Texture1.sample(repeatSampler, v_TexCoordNoise.xy)"))
+        // The framebuffer must stay on the clamp sampler.
+        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler, v_TexCoord.xy)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Non-noise textures keep the clamp linearSampler")
+    func nonNoiseTexturesKeepClampSampler() throws {
+        // Only samplers annotated as noise/tiled get repeat — a plain mask/framebuffer
+        // sampler must stay on linearSampler so this fix can't wrap unrelated effects.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1; // {"material":"opacity_mask"}
+        in vec4 v_TexCoord;
+        void main() {
+            float m = texture(g_Texture1, v_TexCoord.xy).r;
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy) * m;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/genericmask",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.xy)"))
+        #expect(!result.mslSource.contains("g_Texture1.sample(repeatSampler"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_equalScaleFactor reconstructs the aspect factor, not screen UV")
+    func reconstructsEqualScaleFactorVarying() throws {
+        // multistage_wave.vert: v_equalScaleFactor = (max(1,resx/resy), max(1,resy/resx)),
+        // an aspect-correction constant. Defaulting to in.uv stretched the wave field.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Texture0Resolution;
+        in vec4 v_TexCoord;
+        in vec2 v_equalScaleFactor;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy * v_equalScaleFactor);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/3206438810/effects/multistage_wave",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("max(1.0, wpe_safe_ratio(g_Texture0Resolution.x, g_Texture0Resolution.y))"))
+        #expect(!result.mslSource.contains("v_equalScaleFactor = in.uv"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_Pulse reconstructs the time/audio pulse scalar, not in.uv.x")
+    func reconstructsPulseVarying() throws {
+        // pulse.vert: non-audio v_Pulse is a time-driven smoothstep sine pulse; it used to
+        // fall through to in.uv.x (a horizontal ramp instead of a uniform full-screen pulse).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float g_Time;
+        uniform vec2 g_PulseThresholds;
+        uniform float g_PulseSpeed;
+        uniform float g_PulsePhase;
+        uniform float g_PulseAmount;
+        in vec4 v_TexCoord;
+        in float v_Pulse;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            gl_FragColor = albedo * v_Pulse;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/pulse",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_pulse_response(g_Time, g_PulseThresholds, g_PulseSpeed, g_PulsePhase, g_PulseAmount)"))
+        #expect(!result.mslSource.contains("v_Pulse = in.uv.x"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_ParallaxOffset reconstructs from g_ParallaxPosition (neutral at rest), not screen UV")
+    func reconstructsParallaxOffsetVarying() throws {
+        // depthparallax.vert: pointer-projected offset; the full form needs an excluded mat
+        // uniform, so we use the vert's own simplified `= g_ParallaxPosition` (0.5 at rest).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_ParallaxPosition;
+        in vec4 v_TexCoord;
+        in vec2 v_ParallaxOffset;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + (v_ParallaxOffset - 0.5) * 0.1);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/depthparallax",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("float2 v_ParallaxOffset = g_ParallaxPosition;"))
+        #expect(!result.mslSource.contains("v_ParallaxOffset = in.uv"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("ivec/bvec uniforms unpack all components, not just .x")
+    func unpacksIntAndBoolVectorUniforms() throws {
+        // ivec2/3/4 and bvec2/3/4 had no case in the unpack switch → fell to the scalar
+        // `= u.vals[i].x` default, which drops .yzw (or fails to compile int2 = float).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform ivec2 g_Grid;
+        uniform ivec3 g_Triple;
+        uniform ivec4 g_Quad;
+        uniform bvec2 g_Flags;
+        in vec2 v_TexCoord;
+        void main() {
+            vec2 t = v_TexCoord + vec2(float(g_Grid.x + g_Grid.y), float(g_Triple.z + g_Quad.w));
+            if (g_Flags.y) { t += 0.001; }
+            gl_FragColor = texture(g_Texture0, t);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "ivecbvec",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("int2 g_Grid = int2(u.vals[0].xy)"))
+        #expect(result.mslSource.contains("int3 g_Triple = int3(u.vals[1].xyz)"))
+        #expect(result.mslSource.contains("bool2 g_Flags = u.vals[3].xy > float2(0.5)"))
+        // The scalar-broadcast default must NOT be used for these vector types.
+        #expect(!result.mslSource.contains("int2 g_Grid = u.vals[0].x"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("multistage_wave v_DirectionN reconstructs from g_SpinCenter deltas, not screen UV")
+    func reconstructsMultistageWaveDirections() throws {
+        // multistage_wave.vert: v_DirectionN = normalize(g_SpinCenter(N+1) - g_SpinCenterN);
+        // vec4 variant (GLOBAL_ROTATION) also carries the g_DirectionOffset-rotated dir in .zw.
+        // These used to fall through to in.uv, warping the wave field across the screen.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_SpinCenter1;
+        uniform vec2 g_SpinCenter2;
+        uniform vec2 g_SpinCenter3;
+        uniform float g_DirectionOffset;
+        in vec4 v_TexCoord;
+        in vec2 v_Direction1;
+        in vec4 v_Direction2;
+        void main() {
+            vec2 d = v_Direction1 + v_Direction2.xy + v_Direction2.zw;
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + d * 0.001);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/3206438810/effects/multistage_wave",
+            preprocessedSource: source,
+            comboValues: ["GLOBAL_ROTATION": 1]
+        )
+        #expect(result.mslSource.contains("float2 v_Direction1 = wpe_safe_normalize(g_SpinCenter2 - g_SpinCenter1)"))
+        #expect(result.mslSource.contains("wpe_rotate_vec2(wpe_safe_normalize(g_SpinCenter3 - g_SpinCenter2), g_DirectionOffset)"))
+        #expect(!result.mslSource.contains("v_Direction1 = in.uv"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_DirectionN vec4 does not rotate .zw without the GLOBAL_ROTATION combo")
+    func multistageDirectionVec4WithoutGlobalRotation() throws {
+        // The vec4 .zw rotation is gated on GLOBAL_ROTATION, not merely g_DirectionOffset's
+        // presence — without the combo, .zw mirrors the raw direction (no stray rotation).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_SpinCenter1;
+        uniform vec2 g_SpinCenter2;
+        uniform float g_DirectionOffset;
+        in vec2 v_TexCoord;
+        in vec4 v_Direction1;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord + v_Direction1.zw * 0.001);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/3206438810/effects/multistage_wave",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("float4 v_Direction1 = float4(wpe_safe_normalize(g_SpinCenter2 - g_SpinCenter1), wpe_safe_normalize(g_SpinCenter2 - g_SpinCenter1))"))
+        // No rotation applied to the direction (the prelude still *defines* wpe_rotate_vec2).
+        #expect(!result.mslSource.contains("wpe_rotate_vec2(wpe_safe_normalize"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_AudioPulse stays 0.0 when no audio spectrum uniforms are present")
+    func audioPulseFallsBackToZeroWithoutAudio() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        in float v_AudioPulse;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * (1.0 + v_AudioPulse);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/shake",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("float v_AudioPulse = 0.0;"))
+        #expect(!result.mslSource.contains("v_AudioPulse = in.uv.x"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("v_AudioPulse reconstructs the audio response when spectrum uniforms exist")
+    func reconstructsAudioPulseVarying() throws {
+        // v_AudioPulse was hard-coded to 0.0 (silent-correct but never audio-reactive).
+        // Reconstruct CreateAudioResponse when the spectrum uniforms are present.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float g_AudioSpectrum16Left[16];
+        uniform float g_AudioSpectrum16Right[16];
+        uniform float g_AudioFrequencyMin;
+        uniform float g_AudioFrequencyMax;
+        uniform float g_AudioPower;
+        uniform vec2 g_AudioBounds;
+        uniform float g_AudioMultiply;
+        in vec2 v_TexCoord;
+        in float v_AudioPulse;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * (1.0 + v_AudioPulse);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/shake",
+            preprocessedSource: source,
+            comboValues: ["AUDIOPROCESSING": 3]
+        )
+        #expect(result.mslSource.contains("wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, 3,"))
+        #expect(!result.mslSource.contains("v_AudioPulse = in.uv.x"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("A used varying with no reconstruction rule emits a diagnostic marker (not silent)")
+    func emitsDiagnosticForUnreconstructedVarying() throws {
+        // An unknown varying the fragment actually uses, falling to the screen-UV default,
+        // gets a WPE-DIAGNOSTIC comment so the gap is visible in scene-debug MSL dumps.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        in vec2 v_MysteryOffset;
+        in vec2 v_UnusedThing;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord + v_MysteryOffset * 0.01);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/unknown",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_MysteryOffset'"))
+        // A declared-but-unused varying must NOT trigger the diagnostic.
+        #expect(!result.mslSource.contains("v_UnusedThing'"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("shake preserves v_TexCoord.zw (flow-map UV) instead of downgrading to .xy")
+    func preservesShakeFlowTexCoordZW() throws {
+        // effects/shake samples its flow map (per-pixel displacement direction) at
+        // v_TexCoord.zw — a resolution-scaled UV that v_TexCoord reconstructs correctly via
+        // wpe_texcoord_with_resolution. The .zw→.xy downgrade read the flow field from the
+        // wrong coords, turning the glitch/body motion into a diagonal smear (3265584934).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform sampler2D g_Texture2;
+        uniform vec4 g_Texture1Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            float flowPhase = texture(g_Texture2, v_TexCoord.zw).r;
+            vec2 flowColors = texture(g_Texture1, v_TexCoord.zw).rg;
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + flowColors * flowPhase * 0.01);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2125458920/effects/shake",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+        // The flow map must still sample at .zw, not be downgraded to .xy.
+        #expect(result.mslSource.contains("g_Texture2.sample(linearSampler, v_TexCoord.zw)"))
+        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.zw)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("non-shake/non-water effects still downgrade v_TexCoord.zw to .xy (historical)")
+    func nonWhitelistedEffectDowngradesTexCoordZW() throws {
+        // The .zw preservation is scoped — an effect we haven't vouched for keeps the
+        // historical .xy downgrade so this fix doesn't silently change other shaders.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture1Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            vec2 mask = texture(g_Texture1, v_TexCoord.zw).rg;
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + mask * 0.01);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/someotherglitch",
+            preprocessedSource: source
+        )
+        #expect(!result.mslSource.contains("v_TexCoord.zw"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
     func translatesTextureLodFragment() throws {
         // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.

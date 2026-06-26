@@ -16,10 +16,6 @@ protocol WallpaperRuntimeSession: AnyObject {
     func updateFrame(to frame: CGRect)
     func cleanup()
 
-    /// Suspend during `NSWorkspaceWillSleep` — pauses playback while remembering enough state for `resume()` to restore it.
-    func suspend()
-    /// Resume after `NSWorkspaceDidWake`.
-    func resume()
     /// User-triggered retry from the error banner.
     func retry() async
 
@@ -29,14 +25,6 @@ protocol WallpaperRuntimeSession: AnyObject {
 
 extension WallpaperRuntimeSession {
     var runtimeError: WallpaperRuntimeError? { nil }
-
-    func suspend() {
-        applyPerformanceProfile(.suspended)
-    }
-
-    func resume() {
-        applyPerformanceProfile(.quality)
-    }
 
     func retry() async {}
 
@@ -204,14 +192,6 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         }
     }
 
-    func suspend() {
-        applyPerformanceProfile(.suspended)
-    }
-
-    func resume() {
-        applyPerformanceProfile(.quality)
-    }
-
     func retry() async {
         guard let oldPlayer = player, let url = oldPlayer.videoURL else { return }
         let frame = oldPlayer.currentWindowFrame
@@ -261,11 +241,15 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
 }
 
 @MainActor
-final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfigApplying {
+final class AmbientWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackControllable, HTMLWallpaperConfigApplying {
     private var window: NSWindow?
     private weak var performanceTarget: (any WallpaperPerformanceConfigurable)?
     private var currentProfile: WallpaperPerformanceProfile = .quality
-    private var profileBeforeSuspend: WallpaperPerformanceProfile?
+    /// Durable user play/pause intent, mirrored on `VideoWallpaperSession`. The
+    /// effective running state is `userIntendsToPlay && currentProfile == .quality`,
+    /// so a manual pause survives policy refreshes and a policy suspend never
+    /// clears the user's intent.
+    private(set) var userIntendsToPlay = true
     private var isVisible = true
     let wallpaperType: WallpaperType
     private(set) var runtimeError: WallpaperRuntimeError? {
@@ -293,7 +277,7 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfi
             activity = .error
         } else if !isVisible {
             activity = .off
-        } else if currentProfile == .suspended {
+        } else if currentProfile == .suspended || !userIntendsToPlay {
             activity = .paused
         } else {
             activity = .active
@@ -301,7 +285,7 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfi
         return WallpaperSessionSummary(
             wallpaperType: wallpaperType,
             activity: activity,
-            supportsPlaybackControl: false,
+            supportsPlaybackControl: true,
             subtitle: runtimeError.map { PIISanitizer.scrub($0.userMessage) }
         )
     }
@@ -321,30 +305,40 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfi
     func show() {
         isVisible = true
         window?.orderBack(nil)
-        performanceTarget?.applyPerformanceProfile(currentProfile)
+        // Route through the session so the effective profile honours
+        // `userIntendsToPlay` — a manually paused HTML wallpaper must not resume
+        // just because it became visible again.
+        applyPerformanceProfile(currentProfile)
     }
 
     func hide() {
         isVisible = false
         window?.orderOut(nil)
-        performanceTarget?.applyPerformanceProfile(.suspended)
+        // `isVisible == false` folds to `.suspended` inside applyPerformanceProfile.
+        applyPerformanceProfile(currentProfile)
+    }
+
+    var isPlaying: Bool {
+        isVisible && userIntendsToPlay && currentProfile == .quality
+    }
+
+    func play() {
+        userIntendsToPlay = true
+        applyPerformanceProfile(currentProfile)
+    }
+
+    func pause() {
+        userIntendsToPlay = false
+        applyPerformanceProfile(currentProfile)
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
-        performanceTarget?.applyPerformanceProfile(isVisible ? profile : .suspended)
-    }
-
-    func suspend() {
-        guard profileBeforeSuspend == nil else { return }
-        profileBeforeSuspend = currentProfile
-        applyPerformanceProfile(.suspended)
-    }
-
-    func resume() {
-        guard let profileBeforeSuspend else { return }
-        self.profileBeforeSuspend = nil
-        applyPerformanceProfile(profileBeforeSuspend)
+        // Effective render state folds the policy profile with the user's intent
+        // and visibility: the target runs only when all three say "go".
+        let effective: WallpaperPerformanceProfile =
+            (isVisible && userIntendsToPlay && profile == .quality) ? .quality : .suspended
+        performanceTarget?.applyPerformanceProfile(effective)
     }
 
     func retry() async {

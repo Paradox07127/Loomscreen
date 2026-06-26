@@ -160,6 +160,26 @@ final class WPEMetalRenderExecutor {
             : UserDefaults.standard.bool(forKey: "WPEMetalSubregionComposeOutput")
     }
 
+    static let staticLayerCacheDefaultsKey = "WPEMetalStaticLayerCacheEnabled"
+    static let staticLayerCacheBudgetMiBDefaultsKey = "WPEMetalStaticLayerCacheBudgetMiB"
+
+    /// Opt-in exact composite cache for static WPE layers. Default OFF so the
+    /// existing render path stays byte-identical unless explicitly enabled
+    /// (`defaults write … WPEMetalStaticLayerCacheEnabled -bool YES`).
+    static var isStaticLayerCacheEnabled: Bool {
+        UserDefaults.standard.object(forKey: staticLayerCacheDefaultsKey) == nil
+            ? false
+            : UserDefaults.standard.bool(forKey: staticLayerCacheDefaultsKey)
+    }
+
+    /// VRAM budget for cached composites (MiB; default 256). Over budget → LRU
+    /// eviction, and the evicted layer falls back to re-rendering (slower, never wrong).
+    static var staticLayerCacheBudgetBytes: Int {
+        let raw = UserDefaults.standard.object(forKey: staticLayerCacheBudgetMiBDefaultsKey)
+        let mib = (raw as? NSNumber)?.intValue ?? 256
+        return max(0, mib) * 1_048_576
+    }
+
     /// Mirrors the slot-0 precedence used by
     /// `WPEMetalSceneRenderer.requiredTextureReferences(for:)`: prefer the
     /// per-pass binding override, then the pass's `textures[0]`, then the
@@ -217,6 +237,11 @@ final class WPEMetalRenderExecutor {
     private var loggedClipActivation: Set<String> = []
     private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
     private var msdfNeutralWhiteTexture: MTLTexture?
+    private lazy var staticLayerCompositeCache = WPEMetalStaticLayerCompositeCache(
+        budgetBytes: WPEMetalRenderExecutor.staticLayerCacheBudgetBytes
+    )
+    private var staticLayerCacheSceneSize: CGSize?
+    private var loggedStaticLayerCacheHits: Set<String> = []
 
     /// Scene-output ring: per-frame outputs are recycled instead of freshly
     /// allocated every `render()` (~32 MB alloc/free per frame at 4K). A slot
@@ -367,6 +392,7 @@ final class WPEMetalRenderExecutor {
     func releaseTransientResources() {
         targetPool.releaseAll()
         previousFrameHistory = nil
+        invalidateStaticLayerCache()
         // Clip-role detection + activation diagnostics are keyed by objectID, which a reload can reuse
         // for a different puppet/material/animation, so drop them when the graph is rebuilt.
         puppetClipPairsCache.removeAll()
@@ -376,6 +402,14 @@ final class WPEMetalRenderExecutor {
         outputTexturePool.removeAll()
         recentOutputTextureIDs.removeAll()
         bootstrapPreviousTextureCache.removeAll()
+    }
+
+    /// Drops every cached static-layer composite. Called on scene reload /
+    /// pipeline rebuild / sceneSize change so a new scene never reads stale pixels.
+    func invalidateStaticLayerCache() {
+        staticLayerCompositeCache.removeAll()
+        staticLayerCacheSceneSize = nil
+        loggedStaticLayerCacheHits.removeAll(keepingCapacity: false)
     }
 
     // MARK: - FBO memory diagnostic (read-only)
@@ -742,6 +776,7 @@ final class WPEMetalRenderExecutor {
         pipeline: WPEPreparedRenderPipeline,
         size: CGSize,
         textures: [String: MTLTexture],
+        dynamicTextureNames: Set<String> = [],
         runtimeUniforms: WPEMetalRuntimeUniforms = .zero,
         cameraUniforms: WPEMetalCameraUniforms = .identity,
         sceneID: String? = nil,
@@ -768,6 +803,16 @@ final class WPEMetalRenderExecutor {
         #endif
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
+        let staticLayerCacheEnabled = Self.isStaticLayerCacheEnabled && !Self.bypassEffectsForDebug
+        staticLayerCompositeCache.updateBudget(Self.staticLayerCacheBudgetBytes)
+        if staticLayerCacheEnabled {
+            if staticLayerCacheSceneSize != size {
+                invalidateStaticLayerCache()
+                staticLayerCacheSceneSize = size
+            }
+        } else if staticLayerCacheSceneSize != nil {
+            invalidateStaticLayerCache()
+        }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -858,6 +903,38 @@ final class WPEMetalRenderExecutor {
         var aliasPassCounter = 0
         for layer in preparedPipeline.layers {
             try flushParticles(before: layer.graphLayer.sortIndex)
+            // Static-layer cache: a provably-static layer's composites are
+            // rendered once and reused. On a hit we seed frameState with every
+            // cached composite so the layer's `.scene` copy (and any downstream
+            // consumer) resolves them, then skip its compose/effect passes.
+            let staticCachePlan = staticLayerCacheEnabled
+                ? WPEMetalStaticLayerClassifier.cachePlan(
+                    for: layer,
+                    dynamicTextureNames: dynamicTextureNames
+                )
+                : nil
+            let cachedStaticLayer = staticCachePlan.flatMap { plan in
+                staticLayerCompositeCache.cachedLayer(
+                    for: layer.graphLayer.objectID,
+                    requiredTargets: Set(plan.cachedTargets.keys)
+                )
+            }
+            if let cachedStaticLayer {
+                for (name, texture) in cachedStaticLayer.texturesByTarget {
+                    frameState.seedPreviousTexture(texture, targetID: .named(name))
+                    frameState.markInitialized(texture)
+                }
+                if loggedStaticLayerCacheHits.insert(layer.graphLayer.objectID).inserted {
+                    Logger.info(
+                        "[WPE.static-layer-cache] skip composite layer=\(layer.graphLayer.objectID) targets=\(cachedStaticLayer.texturesByTarget.count) bytes=\(cachedStaticLayer.bytes)",
+                        category: .wpeRender
+                    )
+                }
+            }
+            // Accumulates first-frame snapshots for a cache miss until all of the
+            // plan's targets are captured, then inserts them as one layer entry.
+            var pendingStaticSnapshots: [String: MTLTexture] = [:]
+            var pendingStaticBytes = 0
             // Attached children (face/hair on a body-split rig) follow the parent puppet's animated
             // anchor bone; `graphLayer` carries the followed transform, falling back to the static
             // layer when there is no resolved attachment. Skinning is validated/cached once per frame.
@@ -919,10 +996,12 @@ final class WPEMetalRenderExecutor {
                 didEncode = true
                 continue
             }
-            for pass in layer.passes {
+            for (layerPassIndex, pass) in layer.passes.enumerated() {
                 // Advance the alias index for EVERY pass (defer fires endPass at
                 // iteration exit, including the hidden-pass `continue` below), so
-                // makeAliasable only happens AFTER this pass is encoded.
+                // makeAliasable only happens AFTER this pass is encoded. The
+                // static-layer skip below keeps this lockstep: it `continue`s
+                // AFTER the index advances + defer is armed.
                 let passAliasIndex = aliasPassCounter
                 aliasPassCounter += 1
                 defer { targetPool.endPass(passIndex: passAliasIndex) }
@@ -939,6 +1018,18 @@ final class WPEMetalRenderExecutor {
                         break
                     }
                 }
+                // Cache hit: composites are already in `frameState` (seeded above),
+                // so skip the compose/effect passes and run only the `.scene` copy
+                // (which applies parallax from the cached texture).
+                if cachedStaticLayer != nil {
+                    switch pass.pass.target {
+                    case .scene:
+                        break
+                    case .layerComposite, .fbo:
+                        didEncode = true
+                        continue
+                    }
+                }
                 try encode(
                     pass: pass,
                     layer: graphLayer,
@@ -950,6 +1041,20 @@ final class WPEMetalRenderExecutor {
                     frameState: &frameState
                 )
                 didEncode = true
+                // First-time miss: snapshot each composite into a persistent
+                // texture right after its last producer pass; once every planned
+                // target is captured, commit them to the cache as one layer entry.
+                if let staticCachePlan, cachedStaticLayer == nil {
+                    captureStaticLayerSnapshots(
+                        at: layerPassIndex,
+                        plan: staticCachePlan,
+                        layer: graphLayer,
+                        commandBuffer: commandBuffer,
+                        frameState: &frameState,
+                        snapshots: &pendingStaticSnapshots,
+                        bytes: &pendingStaticBytes
+                    )
+                }
                 #if DEBUG
                 if case .scene = pass.pass.target {
                     captureScenePassIfDumping(dumpScenePasses, label: pass.pass.id, output: output, commandBuffer: commandBuffer)
@@ -1014,6 +1119,78 @@ final class WPEMetalRenderExecutor {
             namedTextures: [:]
         )
         return output
+    }
+
+    /// Snapshots every composite whose last producer is `passIndex` into a
+    /// persistent texture, redirects `frameState` so this frame already reads the
+    /// snapshot (identical pixels), and — once all of the plan's targets are
+    /// captured — commits them to the cache as one layer entry. If the layer's
+    /// total exceeds the budget, the partial snapshots are discarded and the
+    /// layer keeps re-rendering (slower, never wrong).
+    private func captureStaticLayerSnapshots(
+        at passIndex: Int,
+        plan: WPEMetalStaticLayerCachePlan,
+        layer: WPERenderLayer,
+        commandBuffer: MTLCommandBuffer,
+        frameState: inout WPEMetalFrameState,
+        snapshots: inout [String: MTLTexture],
+        bytes: inout Int
+    ) {
+        for (targetName, producerIndex) in plan.cachedTargets where producerIndex == passIndex {
+            guard snapshots[targetName] == nil,
+                  let source = frameState.latestNamedTextures[targetName] else { continue }
+            do {
+                let cached = try targetPool.persistentTexture(
+                    matching: source,
+                    label: "WPE static layer cache \(layer.objectID) \(targetName)"
+                )
+                try copyTexture(source, to: cached, commandBuffer: commandBuffer)
+                frameState.seedPreviousTexture(cached, targetID: .named(targetName))
+                frameState.markInitialized(cached)
+                snapshots[targetName] = cached
+                bytes += Self.staticLayerCacheBytes(for: source)
+            } catch {
+                Logger.warning(
+                    "[WPE.static-layer-cache] snapshot failed layer=\(layer.objectID) target=\(targetName): \(error)",
+                    category: .wpeRender
+                )
+            }
+        }
+
+        // Commit only once every planned target is captured this frame.
+        guard snapshots.count == plan.cachedTargets.count else { return }
+        guard staticLayerCompositeCache.canAdmit(bytes: bytes) else {
+            Logger.info(
+                "[WPE.static-layer-cache] skip cache layer=\(layer.objectID) bytes=\(bytes) over budget",
+                category: .wpeRender
+            )
+            return
+        }
+        let evicted = staticLayerCompositeCache.insert(
+            layerID: layer.objectID,
+            texturesByTarget: snapshots,
+            bytes: bytes
+        )
+        Logger.info(
+            "[WPE.static-layer-cache] cached layer=\(layer.objectID) targets=\(snapshots.count) passes=\(plan.compositePassCount) bytes=\(bytes)",
+            category: .wpeRender
+        )
+        for layerID in evicted where layerID != layer.objectID {
+            loggedStaticLayerCacheHits.remove(layerID)
+            Logger.info("[WPE.static-layer-cache] evicted layer=\(layerID)", category: .wpeRender)
+        }
+    }
+
+    private static func staticLayerCacheBytes(for texture: MTLTexture) -> Int {
+        texture.width * texture.height * staticLayerCacheBytesPerPixel(for: texture.pixelFormat)
+    }
+
+    private static func staticLayerCacheBytesPerPixel(for pixelFormat: MTLPixelFormat) -> Int {
+        switch pixelFormat {
+        case .rgba16Float: return 8
+        case .r8Unorm: return 1
+        default: return 4
+        }
     }
 
     /// Encode one particle system on top of `output`, in its own render pass
@@ -1352,13 +1529,13 @@ final class WPEMetalRenderExecutor {
                 continue
             }
             switch u.glslType {
-            case "vec2":
+            case "vec2", "ivec2", "bvec2":
                 let v = Self.vectorValue(value, count: 2)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
-            case "vec3":
+            case "vec3", "ivec3", "bvec3":
                 let v = Self.vectorValue(value, count: 3)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
-            case "vec4":
+            case "vec4", "ivec4", "bvec4":
                 let v = Self.vectorValue(value, count: 4)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
             default:
@@ -4035,13 +4212,13 @@ final class WPEMetalRenderExecutor {
             switch u.glslType {
             case "float", "int", "bool":
                 slots[u.slot].x = Self.scalarValue(value, default: 0)
-            case "vec2":
+            case "vec2", "ivec2", "bvec2":
                 let v = Self.vectorValue(value, count: 2)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
-            case "vec3":
+            case "vec3", "ivec3", "bvec3":
                 let v = Self.vectorValue(value, count: 3)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
-            case "vec4":
+            case "vec4", "ivec4", "bvec4":
                 let v = Self.vectorValue(value, count: 4)
                 slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
             case "mat2":

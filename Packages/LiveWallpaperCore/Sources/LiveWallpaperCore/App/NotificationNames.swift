@@ -7,6 +7,11 @@ extension Notification.Name {
     /// System memory usage exceeded the warning threshold.
     public static let systemMemoryWarning = Notification.Name("SystemMemoryWarning")
 
+    /// System memory usage dropped back below the warning threshold. Paired
+    /// with `systemMemoryWarning` so memory pressure can drive an
+    /// auto-recovering performance-policy state instead of a one-shot pause.
+    public static let systemMemoryNormal = Notification.Name("SystemMemoryNormal")
+
     /// The screen list was refreshed (connect/disconnect/parameter change).
     public static let screensRefreshed = Notification.Name("ScreensRefreshed")
 

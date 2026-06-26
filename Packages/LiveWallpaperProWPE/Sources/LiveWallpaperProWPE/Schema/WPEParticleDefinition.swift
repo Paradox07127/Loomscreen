@@ -286,6 +286,14 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let velocityMax: SIMD3<Double>
     public let colorMin: SIMD3<Double>
     public let colorMax: SIMD3<Double>
+    /// Whether the particle authored an explicit `color`/`colorrandom`
+    /// initializer. When false, the particle has no authored base colour, so the
+    /// `colorchange` operator must NOT recolour it. (The `colorn` instance
+    /// override still applies — it sets the colour directly, and for wildfire its
+    /// `0.24,0.16,0.27` is exactly what dims the smoke to a faint haze.)
+    /// Regression guard: 3460973721's wildfire is a white `r8` smoke with no colour
+    /// initializer; applying its `colorchange`(橙→纯红) ramped the faint smoke to red.
+    public let hasColorInitializer: Bool
     /// Per-particle base alpha sampled on spawn (alpharandom). The
     /// fade-in/out envelope multiplies this value at draw time.
     public let alphaMin: Double
@@ -412,7 +420,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         sequenceMultiplier: Double = 1,
         animationMode: WPEParticleAnimationMode = .sequence,
         controlPoints: [WPEParticleControlPoint] = [],
-        attractors: [WPEParticleControlPointAttractor] = []
+        attractors: [WPEParticleControlPointAttractor] = [],
+        hasColorInitializer: Bool = false
     ) {
         self.materialRelativePath = materialRelativePath
         // Prefer explicit child references; fall back to bare paths (origin 0)
@@ -438,6 +447,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.velocityMax = velocityMax
         self.colorMin = colorMin
         self.colorMax = colorMax
+        self.hasColorInitializer = hasColorInitializer
         self.alphaMin = alphaMin
         self.alphaMax = alphaMax
         self.rotationMin = rotationMin
@@ -513,6 +523,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             dispersalMax: dispersalMax,
             velocityMin: velocityMin * speedScale,
             velocityMax: velocityMax * speedScale,
+            // `colorn` instance override always applies — it's the author setting
+            // the particle's colour directly (wildfire's `0.24,0.16,0.27` dims the
+            // white smoke to a faint haze; dust's `0.84,0.74,0.69` warms it). Only
+            // `colorchange` is gated (below), since that's what ramped it to red.
             colorMin: instanceOverride.color ?? colorMin,
             colorMax: instanceOverride.color ?? colorMax,
             fadeInSeconds: fadeInSeconds,
@@ -544,7 +558,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
-            attractors: attractors
+            attractors: attractors,
+            hasColorInitializer: hasColorInitializer
         )
     }
 
@@ -602,7 +617,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
-            attractors: attractors
+            attractors: attractors,
+            hasColorInitializer: hasColorInitializer
         )
     }
 
@@ -702,6 +718,7 @@ public enum WPEParticleDefinitionParser {
         var velocityMax = def.velocityMax
         var colorMin = def.colorMin
         var colorMax = def.colorMax
+        var hasColorInitializer = false
         var alphaMin: Double = def.alphaMin
         var alphaMax: Double = def.alphaMax
         var rotationMin: SIMD3<Double> = def.rotationMin
@@ -746,10 +763,12 @@ public enum WPEParticleDefinitionParser {
                 case "colorrandom":
                     colorMin = WPEValueParser.vector3(entry["min"]) ?? colorMin
                     colorMax = WPEValueParser.vector3(entry["max"]) ?? colorMax
+                    hasColorInitializer = true
                 case "color":
                     if let v = WPEValueParser.vector3(entry["value"]) {
                         colorMin = v; colorMax = v
                     }
+                    hasColorInitializer = true
                 case "alpharandom":
                     alphaMin = WPEValueParser.double(entry["min"]) ?? alphaMin
                     alphaMax = WPEValueParser.double(entry["max"]) ?? alphaMax
@@ -956,7 +975,8 @@ public enum WPEParticleDefinitionParser {
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
-            attractors: attractors
+            attractors: attractors,
+            hasColorInitializer: hasColorInitializer
         )
     }
 

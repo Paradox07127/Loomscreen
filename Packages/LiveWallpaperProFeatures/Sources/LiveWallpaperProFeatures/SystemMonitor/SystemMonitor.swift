@@ -203,6 +203,13 @@ public final class SystemMonitor {
                     object: nil,
                     userInfo: ["memoryUsage": systemMemoryUsage]
                 )
+            } else {
+                Logger.notice("System memory usage recovered: \(Int(systemMemoryUsage * 100))%", category: .memory)
+                NotificationCenter.default.post(
+                    name: .systemMemoryNormal,
+                    object: nil,
+                    userInfo: ["memoryUsage": systemMemoryUsage]
+                )
             }
         }
     }

@@ -54,7 +54,22 @@ enum WPESceneDocumentParser {
         let general = parseGeneral(generalDict, diagnostics: &diagnostics)
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
-        let objectTransforms = resolvedObjectTransforms(rawObjects)
+        // Script-driven `origin` resolves to the CURRENT user-property values
+        // (the baked `value` is stale once the user tweaks the bound sliders).
+        // Computed before transform combination so each object's parent offset
+        // still applies to the fresh local origin.
+        let scriptResolvedOrigins = resolveScriptOrigins(
+            rawObjects,
+            canvasWidth: general.orthogonalProjection.width,
+            canvasHeight: general.orthogonalProjection.height
+        )
+        let objectTransforms = resolvedObjectTransforms(
+            rawObjects,
+            scriptOrigins: scriptResolvedOrigins
+        )
+        // Effective visibility folds each object's own `visible` with its ancestor
+        // groups', so a child of a condition-hidden group is hidden too.
+        let objectVisibility = resolvedObjectVisibility(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
@@ -69,22 +84,39 @@ enum WPESceneDocumentParser {
                 objectPaintOrder[entryID] = index
             }
             let transform = entryID.flatMap { objectTransforms[$0] }
-                ?? localTransform(in: entry)
+                ?? localTransform(in: entry, scriptOrigins: scriptResolvedOrigins)
+            let effectiveVisible = entryID.flatMap { objectVisibility[$0] }
             if resolution.isAmbiguous {
                 let declared = resolution.candidates.map(\.rawValue).joined(separator: ", ")
                 diagnostics.append(.init(severity: .warning, message: "Ambiguous object \(objectName) declares \(declared)"))
             }
 
             if resolution.primary == .image,
-               let object = parseImageObject(entry, transform: transform, diagnostics: &diagnostics) {
+               let object = parseImageObject(
+                   entry,
+                   transform: transform,
+                   scriptOrigins: scriptResolvedOrigins,
+                   effectiveVisible: effectiveVisible,
+                   diagnostics: &diagnostics
+               ) {
                 imageObjects.append(object)
             }
             if resolution.primary == .particle,
-               let object = parseParticleObject(entry, transform: transform, diagnostics: &diagnostics) {
+               let object = parseParticleObject(
+                   entry,
+                   transform: transform,
+                   effectiveVisible: effectiveVisible,
+                   diagnostics: &diagnostics
+               ) {
                 particleObjects.append(object)
             }
             if resolution.primary == .text,
-               let object = parseTextObject(entry, transform: transform, diagnostics: &diagnostics) {
+               let object = parseTextObject(
+                   entry,
+                   transform: transform,
+                   effectiveVisible: effectiveVisible,
+                   diagnostics: &diagnostics
+               ) {
                 textObjects.append(object)
             }
             if resolution.primary == .sound, let object = parseSoundObject(entry, diagnostics: &diagnostics) {
@@ -301,7 +333,10 @@ enum WPESceneDocumentParser {
         return nil
     }
 
-    private static func resolvedObjectTransforms(_ rawObjects: [[String: Any]]) -> [String: SceneObjectTransform] {
+    private static func resolvedObjectTransforms(
+        _ rawObjects: [[String: Any]],
+        scriptOrigins: [String: SIMD3<Double>] = [:]
+    ) -> [String: SceneObjectTransform] {
         var objectsByID: [String: [String: Any]] = [:]
         for object in rawObjects {
             guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
@@ -313,7 +348,7 @@ enum WPESceneDocumentParser {
         func resolve(id: String, stack: Set<String>) -> SceneObjectTransform {
             if let cached = memo[id] { return cached }
             guard let object = objectsByID[id] else { return .identity }
-            let local = localTransform(in: object)
+            let local = localTransform(in: object, scriptOrigins: scriptOrigins)
             guard let parent = parentID(in: object),
                   parent != id,
                   objectsByID[parent] != nil,
@@ -358,12 +393,136 @@ enum WPESceneDocumentParser {
         return raw
     }
 
-    private static func localTransform(in dict: [String: Any]) -> SceneObjectTransform {
-        SceneObjectTransform(
-            origin: parseVector3(resolveBoundTransformValue(dict["origin"])) ?? SIMD3<Double>(0, 0, 0),
+    private static func localTransform(
+        in dict: [String: Any],
+        scriptOrigins: [String: SIMD3<Double>] = [:]
+    ) -> SceneObjectTransform {
+        // A script-resolved origin (computed from current user values) replaces the
+        // stale baked `value` at the LOCAL level, so parent combination is unchanged.
+        let origin: SIMD3<Double>
+        if let id = objectID(in: dict), let scripted = scriptOrigins[id] {
+            origin = scripted
+        } else {
+            origin = parseVector3(resolveBoundTransformValue(dict["origin"])) ?? SIMD3<Double>(0, 0, 0)
+        }
+        return SceneObjectTransform(
+            origin: origin,
             scale: parseScale(dict["scale"]),
             angles: parseVector3(resolveBoundTransformValue(dict["angles"])) ?? SIMD3<Double>(0, 0, 0)
         )
+    }
+
+    /// Effective visibility per object id = the object's own `visible` AND every
+    /// ancestor's. WPE hides a whole component by toggling a parent GROUP's
+    /// `visible` (often a condition bound to a user combo, e.g. week1's
+    /// 横/竖/关闭), but groups aren't renderable objects — their children carry
+    /// their own `visible`. Without folding the ancestor chain in, a child whose
+    /// own `visible` is true still renders even though its group is hidden, so
+    /// both the horizontal and vertical variant show at once. Mirrors the image
+    /// graph's `hasHiddenAncestor`, but covers group containers and text too.
+    private static func resolvedObjectVisibility(
+        _ rawObjects: [[String: Any]]
+    ) -> [String: Bool] {
+        var objectsByID: [String: [String: Any]] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
+            objectsByID[id] = object
+        }
+
+        var memo: [String: Bool] = [:]
+
+        func resolve(id: String, stack: Set<String>) -> Bool {
+            if let cached = memo[id] { return cached }
+            guard let object = objectsByID[id] else { return true }
+            let own = parseBool(object["visible"]) ?? true
+            guard own else { memo[id] = false; return false }
+            guard let parent = parentID(in: object),
+                  parent != id,
+                  objectsByID[parent] != nil,
+                  !stack.contains(parent) else {
+                memo[id] = own
+                return own
+            }
+            let effective = own && resolve(id: parent, stack: stack.union([id]))
+            memo[id] = effective
+            return effective
+        }
+
+        for id in objectsByID.keys {
+            _ = resolve(id: id, stack: [])
+        }
+        return memo
+    }
+
+    /// Evaluates static `origin` scripts once per document, returning the resolved
+    /// LOCAL origin keyed by object id. Objects without an origin script — or whose
+    /// script is dynamic (audio/time/random) — are absent, keeping their baked value.
+    private static func resolveScriptOrigins(
+        _ rawObjects: [[String: Any]],
+        canvasWidth: Double,
+        canvasHeight: Double
+    ) -> [String: SIMD3<Double>] {
+        var pending: [(id: String, script: String, properties: [String: WPESceneScriptPropertyValue], seed: SIMD3<Double>)] = []
+        for object in rawObjects {
+            guard let id = objectID(in: object),
+                  let origin = object["origin"] as? [String: Any],
+                  let script = origin["script"] as? String, !script.isEmpty,
+                  WPETransformScriptEvaluator.isStaticallyResolvable(script) else { continue }
+            let properties = scriptPropertyValues(origin["scriptproperties"])
+            let seed = parseVector3(resolveBoundTransformValue(origin["value"])) ?? SIMD3<Double>(0, 0, 0)
+            pending.append((id, script, properties, seed))
+        }
+        guard !pending.isEmpty else { return [:] }
+
+        let evaluator = WPETransformScriptEvaluator(canvasWidth: canvasWidth, canvasHeight: canvasHeight)
+        var resolved: [String: SIMD3<Double>] = [:]
+        resolved.reserveCapacity(pending.count)
+        for item in pending {
+            if let origin = evaluator.resolveVec3(
+                script: item.script,
+                properties: item.properties,
+                seed: item.seed
+            ) {
+                resolved[item.id] = origin
+            }
+        }
+        return resolved
+    }
+
+    /// Reads a resolved `scriptproperties` dict into typed values. User-property
+    /// envelopes were already collapsed to literals before parsing; the
+    /// `{ "value": X }` fallback covers any un-overridden binding. Numbers, bools
+    /// (checkboxes), and strings (combos/text) are all preserved so a layout
+    /// script can branch on any of them.
+    private static func scriptPropertyValues(_ raw: Any?) -> [String: WPESceneScriptPropertyValue] {
+        guard let dict = raw as? [String: Any] else { return [:] }
+        var properties: [String: WPESceneScriptPropertyValue] = [:]
+        for (key, value) in dict {
+            if let resolved = scriptPropertyValue(value) {
+                properties[key] = resolved
+            }
+        }
+        return properties
+    }
+
+    private static func scriptPropertyValue(_ raw: Any?) -> WPESceneScriptPropertyValue? {
+        if let dict = raw as? [String: Any], let inner = dict["value"] {
+            return scriptPropertyValue(inner)
+        }
+        if let number = raw as? NSNumber {
+            // CFBoolean is an NSNumber subtype; JSON true/false must stay a bool
+            // rather than collapse to 1/0 so checkbox-driven branches still work.
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            return .number(number.doubleValue)
+        }
+        if let string = raw as? String {
+            // Prefer a numeric reading of a "0.5"-style string; else keep the text.
+            if let number = parseDouble(string) { return .number(number) }
+            return .string(string)
+        }
+        return nil
     }
 
     /// WPE may store scale as a vector ("0.5 0.5 0.5"), a {user,value} property
@@ -425,11 +584,13 @@ enum WPESceneDocumentParser {
     private static func parseTextObject(
         _ dict: [String: Any],
         transform: SceneObjectTransform,
+        effectiveVisible: Bool? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
         let text: String?
         var textScript: String? = nil
+        var textScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         switch raw {
         case let value as String:
             text = value
@@ -437,6 +598,10 @@ enum WPESceneDocumentParser {
             text = (nested["value"] as? String) ?? (nested["text"] as? String)
             if let script = nested["script"] as? String, !script.isEmpty {
                 textScript = script
+                // The scene's per-object scriptProperty overrides (already
+                // envelope-resolved to literals) so the script renders with the
+                // scene's settings, not just its own declared defaults.
+                textScriptProperties = scriptPropertyValues(nested["scriptproperties"])
             }
         default:
             text = nil
@@ -463,7 +628,7 @@ enum WPESceneDocumentParser {
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let origin = transform.origin
         let scale = transform.scale
-        let visible = parseBool(dict["visible"]) ?? true
+        let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
         let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
@@ -490,6 +655,7 @@ enum WPESceneDocumentParser {
             name: name,
             text: text,
             textScript: textScript,
+            scriptProperties: textScriptProperties,
             fontRelativePath: font,
             pointSize: max(1, pointSize),
             color: color,
@@ -645,6 +811,7 @@ enum WPESceneDocumentParser {
     private static func parseParticleObject(
         _ dict: [String: Any],
         transform: SceneObjectTransform,
+        effectiveVisible: Bool? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneParticleObject? {
         guard let path = dict["particle"] as? String, !path.isEmpty else {
@@ -666,7 +833,7 @@ enum WPESceneDocumentParser {
         let origin = transform.origin
         let scale = transform.scale
         let angles = transform.angles
-        let visible = parseBool(dict["visible"]) ?? true
+        let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
@@ -821,6 +988,8 @@ enum WPESceneDocumentParser {
     private static func parseImageObject(
         _ dict: [String: Any],
         transform: SceneObjectTransform,
+        scriptOrigins: [String: SIMD3<Double>] = [:],
+        effectiveVisible: Bool? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
         guard let imagePath = dict["image"] as? String, !imagePath.isEmpty else {
@@ -843,10 +1012,10 @@ enum WPESceneDocumentParser {
         let origin = transform.origin
         let scale = transform.scale
         let angles = transform.angles
-        let local = localTransform(in: dict)
+        let local = localTransform(in: dict, scriptOrigins: scriptOrigins)
         let parentObjectID = parentID(in: dict)
         let attachment = nonEmptyString(dict["attachment"]) ?? nonEmptyString(dict["anchor"])
-        let visible = parseBool(dict["visible"]) ?? true
+        let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let brightness = parseDouble(dict["brightness"]) ?? 1.0

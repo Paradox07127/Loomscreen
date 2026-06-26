@@ -3,6 +3,32 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
+extension WallpaperPolicyInputs {
+    /// Test factory with "nothing suspends" defaults so each test only sets the
+    /// signal under exercise.
+    static func test(
+        powerSource: PowerMonitor.PowerSource = .external,
+        isHiddenByFullScreen: Bool = false,
+        isWindowOccluding: Bool = false,
+        isApplicationRuleActive: Bool = false,
+        thermalState: ProcessInfo.ThermalState = .nominal,
+        isGameModeActive: Bool = false,
+        isUserAbsent: Bool = false,
+        isUnderMemoryPressure: Bool = false
+    ) -> WallpaperPolicyInputs {
+        WallpaperPolicyInputs(
+            powerSource: powerSource,
+            isHiddenByFullScreen: isHiddenByFullScreen,
+            isWindowOccluding: isWindowOccluding,
+            isApplicationRuleActive: isApplicationRuleActive,
+            thermalState: thermalState,
+            isGameModeActive: isGameModeActive,
+            isUserAbsent: isUserAbsent,
+            isUnderMemoryPressure: isUnderMemoryPressure
+        )
+    }
+}
+
 @Suite("WallpaperPolicyEngine thermal state")
 struct WallpaperPolicyEngineThermalTests {
 
@@ -25,13 +51,12 @@ struct WallpaperPolicyEngineThermalTests {
             for powerSource in powerSources {
                 for isHiddenByFullScreen in fullscreenStates {
                     let profile = WallpaperPolicyEngine.performanceProfile(
-                        globalSettings: settings,
-                        powerSource: powerSource,
-                        isHiddenByFullScreen: isHiddenByFullScreen,
-                        isWindowOccluding: false,
-                        isApplicationRuleActive: false,
-                        thermalState: thermalExpectation.state,
-                        isGameModeActive: false
+                        inputs: .test(
+                            powerSource: powerSource,
+                            isHiddenByFullScreen: isHiddenByFullScreen,
+                            thermalState: thermalExpectation.state
+                        ),
+                        settings: settings
                     )
 
                     let expectedProfile: WallpaperPerformanceProfile =
@@ -60,13 +85,13 @@ struct WallpaperPolicyEngineThermalTests {
             for powerSource in powerSources {
                 for isHiddenByFullScreen in fullscreenStates {
                     let profile = WallpaperPolicyEngine.performanceProfile(
-                        globalSettings: settings,
-                        powerSource: powerSource,
-                        isHiddenByFullScreen: isHiddenByFullScreen,
-                        isWindowOccluding: false,
-                        isApplicationRuleActive: false,
-                        thermalState: thermalState,
-                        isGameModeActive: true
+                        inputs: .test(
+                            powerSource: powerSource,
+                            isHiddenByFullScreen: isHiddenByFullScreen,
+                            thermalState: thermalState,
+                            isGameModeActive: true
+                        ),
+                        settings: settings
                     )
 
                     #expect(
@@ -78,26 +103,29 @@ struct WallpaperPolicyEngineThermalTests {
         }
     }
 
-    @Test("pauseInGameMode=false neutralises GameModeDetector at the call site")
+    @Test("pauseInGameMode=false neutralises an active game-mode signal in the engine")
     func disabledGameModeSettingDoesNotSuspend() {
-        // The setting is enforced at the ScreenManager / PlaybackCoordinator
-        // call site (it ANDs `pauseInGameMode` with `GameModeDetector.isActive`),
-        // so when the user disables it the policy engine never sees
-        // `isGameModeActive: true`. Verify the policy engine itself does NOT
-        // treat the setting as an extra knob — it only reacts to the AND'd
-        // boolean that callers pass in.
+        // The engine owns the setting gating now: even with a live game-mode
+        // signal, `pauseInGameMode: false` must not suspend.
         let settings = GlobalSettings(pauseOnFullScreen: false, pauseInGameMode: false)
 
         let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .external,
-            isHiddenByFullScreen: false,
-            isWindowOccluding: false,
-            isApplicationRuleActive: false,
-            thermalState: .nominal,
-            isGameModeActive: false   // caller already AND'd with the setting
+            inputs: .test(isGameModeActive: true),
+            settings: settings
         )
 
         #expect(profile == .quality)
+    }
+
+    @Test("Memory pressure suspends regardless of other signals")
+    func memoryPressureSuspends() {
+        let settings = GlobalSettings(pauseOnFullScreen: false, pauseInGameMode: false)
+
+        let profile = WallpaperPolicyEngine.performanceProfile(
+            inputs: .test(isUnderMemoryPressure: true),
+            settings: settings
+        )
+
+        #expect(profile == .suspended)
     }
 }

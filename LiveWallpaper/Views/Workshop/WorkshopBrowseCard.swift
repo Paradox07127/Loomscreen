@@ -183,12 +183,18 @@ struct WorkshopBrowseCard: View {
                 if let type = contentType {
                     TypeBadge(type.displayName, systemImage: Self.typeSymbol(for: type))
                 }
-                Spacer(minLength: 0)
-                if !metaTrailing.isEmpty {
-                    Text(verbatim: metaTrailing)
-                        .font(DesignTokens.Typography.badge)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                Spacer(minLength: 4)
+                if let subs = subscribersLabel {
+                    HStack(spacing: 2) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text(verbatim: subs)
+                            .font(DesignTokens.Typography.badge)
+                    }
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityHidden(true)
                 }
             }
 
@@ -268,11 +274,14 @@ struct WorkshopBrowseCard: View {
         return nil
     }
 
-    /// Subscriber count moved to the detail inspector (issue #4) — the card's
-    /// trailing slot now carries only the download size, with the resolution
-    /// surfaced as a thumbnail badge instead.
-    private var metaTrailing: String {
-        formattedSize ?? ""
+    /// Subscriber count (the headline popularity signal, and the key Steam's
+    /// "Most Subscribed" sort ranks by), shown in the footer. Nil when absent or
+    /// zero. VoiceOver still names it via `accessibilityLabelText`, so the visible
+    /// badge is `accessibilityHidden`. The download size was moved off the narrow
+    /// card to the detail sheet so the type pill never has to wrap.
+    private var subscribersLabel: String? {
+        guard let subs = item.subscriptionCount, subs > 0 else { return nil }
+        return formatSubs(subs)
     }
 
     /// Short resolution label derived from the item's resolution tag (e.g.

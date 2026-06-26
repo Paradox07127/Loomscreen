@@ -159,6 +159,17 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         }
     }
 
+    /// RG88 is sampled as LUMINANCE_ALPHA (R,R,R,G) for particle glow sprites — but the
+    /// shake effect stores its flow masks as RG88 too, with R = x-displacement and G =
+    /// y-displacement. Swizzling those collapses `.g` onto `.r`, destroying the y-flow so
+    /// the whole composited frame is displaced (full-screen tearing / criss-cross lines,
+    /// not the masked-region motion). Flow/data masks live under `masks/` (`shake_mask_*`);
+    /// glow sprites never do, so the path name is the reliable discriminator.
+    static func rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: Bool, label: String) -> Bool {
+        guard isLuminanceAlpha else { return false }
+        return !label.lowercased().contains("mask")
+    }
+
     private static func makeTextureSynchronously(
         from payload: WPETexTexturePayload,
         label: String,
@@ -181,11 +192,10 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         )
         descriptor.usage = [.shaderRead]
         descriptor.storageMode = .shared
-        // Every RG88 in the WPE corpus is a LUMINANCE_ALPHA particle glow.
-        // Raw `.rg8Unorm` samples as (R, G, 0, 1) — opaque — giving the "red
-        // square light" / red-line fog artifacts. Swizzle so sampling yields
-        // (R, R, R, G): R luminance broadcast, G as the alpha falloff.
-        if payload.info.isRG88LuminanceAlpha {
+        // RG88 particle glow sprites sample as LUMINANCE_ALPHA → (R, R, R, G): R
+        // luminance broadcast, G alpha falloff (raw `.rg8Unorm` samples (R, G, 0, 1),
+        // rendering opaque — the "red square light" / red-line fog artifacts).
+        if Self.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: payload.info.isRG88LuminanceAlpha, label: label) {
             descriptor.swizzle = MTLTextureSwizzleChannels(red: .red, green: .red, blue: .red, alpha: .green)
         }
 

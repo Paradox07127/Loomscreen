@@ -486,9 +486,12 @@ final class WPEParticleSystem {
             if blendMode == .additive {
                 spriteSize = min(spriteSize, sceneTransform.sceneHeight)
             }
-            // `colorchange`: lifetime-fraction RGB multiplier on the tint.
+            // `colorchange`: lifetime-fraction RGB multiplier on the tint — only
+            // for particles that authored a colour initializer. A texture-coloured
+            // particle with no base colour (wildfire's white r8 smoke) must keep
+            // its texture colour, not get ramped to the operator's hue → red.
             var rgb = particle.color
-            if let colorChange = definition.colorChange {
+            if definition.hasColorInitializer, let colorChange = definition.colorChange {
                 let c = colorChange.color(lifetimeFraction: Double(lifetimeFraction))
                 rgb *= SIMD3<Float>(Float(c.x), Float(c.y), Float(c.z))
             }
@@ -522,6 +525,23 @@ final class WPEParticleSystem {
     }
 
     var liveInstanceCount: Int { aliveCount }
+
+    /// True when control point 0 follows the cursor (particles spawn at the
+    /// pointer). These are the "mouse-generated" particles that must stop and
+    /// clear when Follow Cursor is turned off.
+    var tracksPointer: Bool { emitterTracksPointer }
+
+    /// Kill every live particle immediately and drop the in-flight emission
+    /// backlog. Called when Follow Cursor is disabled so pointer-spawned
+    /// particles vanish at once instead of aging out — and so a paused/static
+    /// frame can't keep showing them.
+    func clearLiveParticles() {
+        for index in 0..<capacity {
+            particles[index].age = .greatestFiniteMagnitude
+        }
+        aliveCount = 0
+        spawnAccumulator = 0
+    }
 
     /// Representative live particle in render-frame coordinates, used as the
     /// event-follow anchor for child systems. The youngest alive particle is
@@ -737,10 +757,15 @@ final class WPEParticleSystem {
             // the inherited column/object offset; only scatter this emitter's
             // local dispersal around it (re-adding originOffset would double it).
             position = followPosition + sceneTransform.applyModelDirection(dispersal)
-        } else if emitterTracksPointer, let p = pointerCentered {
+        } else if emitterTracksPointer {
             // Pointer-locked emitter (control point 0 tracks the cursor): spawn
             // at the cursor instead of the scene-object origin, keeping the
-            // emitter's local shape (rotation/scale) intact.
+            // emitter's local shape (rotation/scale) intact. With Follow Cursor
+            // off (`pointerCentered == nil`) it must NOT fall through to the
+            // static scene origin — that kept emitting cursor particles piled at
+            // one fixed point (the "stuck residual" after disabling follow, which
+            // also reappeared on reload because the emitter never actually stopped).
+            guard let p = pointerCentered else { return false }
             position = SIMD3<Float>(p.x, p.y, 0) + sceneTransform.applyModelDirection(localPoint)
         } else {
             position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)

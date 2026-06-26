@@ -42,13 +42,8 @@ struct ApplicationPerformanceRuleTests {
     func policyEngineORsRule() {
         let settings = GlobalSettings() // defaults: nothing else would suspend here
         let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .external,
-            isHiddenByFullScreen: false,
-            isWindowOccluding: false,
-            isApplicationRuleActive: true,
-            thermalState: .nominal,
-            isGameModeActive: false
+            inputs: .test(isApplicationRuleActive: true),
+            settings: settings
         )
         #expect(profile == .suspended)
     }

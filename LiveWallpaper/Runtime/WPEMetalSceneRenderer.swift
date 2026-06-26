@@ -499,6 +499,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         renderGraph = graph
         renderPipeline = pipeline
+        executor.invalidateStaticLayerCache()
         hasAnimatedShaderPasses = Self.pipelineHasAnimatedPasses(pipeline)
         // Seed incremental-apply state. The graph builder already baked each
         // layer's authored `visible` into the pipeline, so these baselines
@@ -672,11 +673,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     return
                 }
                 // Apply the latest mute/volume (may have changed during prepare),
-                // THEN start playback, THEN publish.
+                // publish the runtime, THEN start playback only if the scene is
+                // still meant to run. A performance policy may have suspended us
+                // during the off-main prepare window — in that case the runtime
+                // stays prepared-but-silent and the next `.quality`/`resume()`
+                // starts it (otherwise audio would leak on a suspended wallpaper).
                 runtime.setMuted(self.pendingAudioMuted)
                 runtime.setMasterVolume(self.pendingAudioVolume)
-                runtime.play()
                 self.soundRuntime = runtime
+                if self.currentProfile == .quality {
+                    if !runtime.play() {
+                        Logger.warning("Deferred scene audio failed to start (engine.start)", category: .wpeRender)
+                    }
+                }
                 if WPESceneLoadTiming.isEnabled {
                     Logger.notice(
                         "[load-timing] scene=\(workshopID) deferred-audio=\(String(format: "%.1f", ms))ms (off main, after first present)",
@@ -1148,6 +1157,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             pipeline: truncated,
             size: sceneRenderSize,
             textures: texturesForCurrentFrame(time: uniforms.time),
+            dynamicTextureNames: Set(dynamicTextureSources.keys),
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms,
             sceneID: descriptor.workshopID
@@ -1331,6 +1341,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             pipeline: pipeline,
             size: sceneRenderSize,
             textures: currentTextures,
+            dynamicTextureNames: Set(dynamicTextureSources.keys),
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms,
             sceneID: descriptor.workshopID,
@@ -1465,7 +1476,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         textScriptInstances.removeAll(keepingCapacity: false)
         for object in textObjects {
             guard let script = object.textScript else { continue }
-            if let instance = try? WPESceneScriptInstance(script: script, initialValue: object.text) {
+            if let instance = try? WPESceneScriptInstance(
+                script: script,
+                initialValue: object.text,
+                scriptProperties: object.scriptProperties
+            ) {
                 textScriptInstances[object.id] = instance
             }
         }
@@ -1898,6 +1913,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     func setMouseInteractionEnabled(_ enabled: Bool) {
         mouseInteractionEnabled = enabled
+        if !enabled {
+            // Follow Cursor off: the pointer-spawned particle emitters stop (their
+            // spawn is gated on a live pointer), so also clear whatever they already
+            // emitted — otherwise those particles linger at the cursor's last spot
+            // (and reappear on reload) instead of being prohibited outright.
+            for system in particleSystems where system.tracksPointer {
+                system.clearLiveParticles()
+            }
+            // Re-present so the cleared state shows at once even if the scene is paused.
+            mtkView.setNeedsDisplay(mtkView.bounds)
+        }
         refreshLiveness()
     }
 
@@ -2012,10 +2038,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             mtkView.isPaused = !needsContinuousFrames
             mtkView.enableSetNeedsDisplay = !needsContinuousFrames
             mtkView.preferredFramesPerSecond = userPreferredFPS
+            // Restart scene audio that a prior `.suspended` paused. No-op when
+            // audio never started (deferred startup) or is already running.
+            soundRuntime?.resume()
         case .suspended:
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
             mtkView.releaseDrawables()
+            // Pause the audio engine + FFT tap so a suspended wallpaper costs no
+            // audio CPU; the decoded PCM stays resident for an instant resume.
+            soundRuntime?.pause()
             executor.releaseTransientResources()
         }
     }

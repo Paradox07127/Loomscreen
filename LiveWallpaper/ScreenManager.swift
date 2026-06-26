@@ -141,6 +141,11 @@ final class ScreenManager {
     /// pause/resume overlay.
     @ObservationIgnored private var userAbsenceReasons: Set<UserAbsenceReason> = []
     private var isUserAbsent: Bool { !userAbsenceReasons.isEmpty }
+    /// System memory pressure, folded into the performance policy so a
+    /// low-memory condition suspends every wallpaper type and **auto-resumes**
+    /// once memory recovers — unlike the old `handleLowMemory` path, which
+    /// cleared video play-intent and never restored it.
+    @ObservationIgnored private var isUnderMemoryPressure = false
     /// Coordinates per-screen playback configuration mutations + transition
     /// tokens. Lazy because it captures `self` for the effect-application and
     /// refresh-rate-lookup callbacks; the stored properties used by those
@@ -148,9 +153,10 @@ final class ScreenManager {
     /// initialised by the time the lazy var is touched.
     @ObservationIgnored private lazy var playbackCoordinator = PlaybackCoordinator(
         configurationStore: configurationStore,
-        powerMonitor: powerMonitor,
-        fullScreenDetector: fullScreenDetector,
         playableVideoLoader: playableVideoLoader,
+        applyPolicy: { [weak self] screen in
+            self?.applyPerformancePolicy(to: screen)
+        },
         applyVideoEffects: { [weak self] screen, config in
             self?.effectsCoordinator.applyVideoEffects(for: screen, config: config)
         },
@@ -175,9 +181,6 @@ final class ScreenManager {
         originReconciler: originReconciler,
         isGloballyEnabled: { [weak self] in
             self?.wallpapersGloballyEnabled ?? true
-        },
-        isUserAbsent: { [weak self] in
-            self?.isUserAbsent ?? false
         }
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
@@ -368,7 +371,6 @@ final class ScreenManager {
                     category: .powerMonitor
                 )
                 self.refreshPerformancePolicyForAllScreens()
-                self.updatePlaybackState()
             }
             .store(in: &cleanupTasks)
 
@@ -386,7 +388,6 @@ final class ScreenManager {
                     category: .powerMonitor
                 )
                 self.refreshPerformancePolicyForAllScreens()
-                self.updatePlaybackState()
             }
             .store(in: &cleanupTasks)
 
@@ -398,7 +399,6 @@ final class ScreenManager {
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.refreshPerformancePolicyForAllScreens()
-                self.updatePlaybackState()
             }
             .store(in: &cleanupTasks)
 
@@ -416,7 +416,6 @@ final class ScreenManager {
             guard SettingsManager.shared.loadGlobalSettings()
                 .applicationPerformanceRules.contains(where: { $0.trigger == .running }) else { return }
             self.refreshPerformancePolicyForAllScreens()
-            self.updatePlaybackState()
         }
         .store(in: &cleanupTasks)
 
@@ -489,7 +488,6 @@ final class ScreenManager {
             : (userAbsenceReasons.remove(reason) != nil)
         guard changed else { return }
         refreshPerformancePolicyForAllScreens()
-        markWallpaperSessionStateChanged()
     }
 
     private func handleScreenParameterChange() {
@@ -529,8 +527,16 @@ final class ScreenManager {
         SystemMonitor.shared.startMonitoring()
 
         NotificationCenter.default.publisher(for: .systemMemoryWarning)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.handleLowMemory()
+                self?.setMemoryPressure(true)
+            }
+            .store(in: &cleanupTasks)
+
+        NotificationCenter.default.publisher(for: .systemMemoryNormal)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.setMemoryPressure(false)
             }
             .store(in: &cleanupTasks)
     }
@@ -563,7 +569,6 @@ final class ScreenManager {
     /// the policy reads the detector live.
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
         refreshPerformancePolicyForAllScreens()
-        updatePlaybackState()
     }
 
     // MARK: - Screen Management
@@ -986,6 +991,20 @@ final class ScreenManager {
         updatePlaybackState()
     }
 
+    /// Per-screen play/pause toggle. Video sessions also post a playback-state
+    /// notification that triggers a commit, but scene/HTML sessions only mutate
+    /// `userIntendsToPlay`, so this commits the derived session state itself to
+    /// refresh the menu-bar / inspector UI immediately.
+    func togglePlayback(for screen: Screen) {
+        guard let playback = screen.playbackController else { return }
+        if playback.userIntendsToPlay {
+            playback.pause()
+        } else {
+            playback.play()
+        }
+        updatePlaybackState()
+    }
+
     /// Master render gate. Toggles whether wallpaper pipelines exist at all:
     /// disabling tears every session down to free its memory, enabling rebuilds
     /// them from persisted configuration (see `applyGlobalRenderGate`). The flag
@@ -1048,32 +1067,37 @@ final class ScreenManager {
     /// video, profile for ambient) across all screens.
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         refreshPerformancePolicyForAllScreens()
-        updatePlaybackState()
     }
 
+    /// Single source of truth for resolving + applying the performance policy to
+    /// one screen. Every raw signal is gathered here (via `policyInputs`), so no
+    /// other type re-assembles the rule inputs — `PlaybackCoordinator` calls back
+    /// into this instead of duplicating the gathering.
     @discardableResult
-    private func applyPerformancePolicy(
-        to screen: Screen,
-        globalSettings: GlobalSettings,
-        powerSource: PowerMonitor.PowerSource,
-        isHiddenByFullScreen: Bool,
-        isWindowOccluding: Bool,
-        isApplicationRuleActive: Bool,
-        thermalState: ProcessInfo.ThermalState,
-        isGameModeActive: Bool
-    ) -> WallpaperPerformanceProfile {
+    func applyPerformancePolicy(to screen: Screen) -> WallpaperPerformanceProfile {
+        let settings = SettingsManager.shared.loadGlobalSettings()
         let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: globalSettings,
-            powerSource: powerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen,
-            isWindowOccluding: isWindowOccluding,
-            isApplicationRuleActive: isApplicationRuleActive,
-            thermalState: thermalState,
-            isGameModeActive: isGameModeActive,
-            isUserAbsent: isUserAbsent
+            inputs: policyInputs(for: screen, applicationRuleActive: currentApplicationRuleActive(settings)),
+            settings: settings
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
         return profile
+    }
+
+    /// Snapshots the current *raw* system state for `screen`. The `GlobalSettings`
+    /// gating lives in `WallpaperPolicyEngine`, so detector/state readings are
+    /// passed through ungated.
+    private func policyInputs(for screen: Screen, applicationRuleActive: Bool) -> WallpaperPolicyInputs {
+        WallpaperPolicyInputs(
+            powerSource: powerMonitor.currentPowerSource,
+            isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id),
+            isWindowOccluding: fullScreenDetector.isDesktopOccluded(for: screen.id),
+            isApplicationRuleActive: applicationRuleActive,
+            thermalState: ProcessInfo.processInfo.thermalState,
+            isGameModeActive: GameModeDetector.isActive,
+            isUserAbsent: isUserAbsent,
+            isUnderMemoryPressure: isUnderMemoryPressure
+        )
     }
 
     private func currentApplicationRuleActive(_ globalSettings: GlobalSettings) -> Bool {
@@ -1081,29 +1105,19 @@ final class ScreenManager {
     }
 
     private func refreshPerformancePolicyForAllScreens() {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let powerSource = powerMonitor.currentPowerSource
-        let thermalState = ProcessInfo.processInfo.thermalState
-        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
-        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
-
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        let applicationRuleActive = currentApplicationRuleActive(settings)
         for screen in screens {
-            let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
-                fullScreenDetector.isDesktopHidden(for: screen.id)
-            let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
-                fullScreenDetector.isDesktopOccluded(for: screen.id)
-
-            applyPerformancePolicy(
-                to: screen,
-                globalSettings: globalSettings,
-                powerSource: powerSource,
-                isHiddenByFullScreen: isHiddenByFullScreen,
-                isWindowOccluding: isWindowOccluding,
-                isApplicationRuleActive: isApplicationRuleActive,
-                thermalState: thermalState,
-                isGameModeActive: isGameModeActive
+            let profile = WallpaperPolicyEngine.performanceProfile(
+                inputs: policyInputs(for: screen, applicationRuleActive: applicationRuleActive),
+                settings: settings
             )
+            screen.runtimeSession?.applyPerformanceProfile(profile)
         }
+        // A policy refresh always commits the derived session state, so observers
+        // can't leave the SwiftUI layer out of sync with the render loops by
+        // forgetting a trailing updatePlaybackState() call.
+        commitWallpaperSessionState()
     }
 
     /// Hold a `.userInitiated` activity assertion whenever ≥1 wallpaper session
@@ -1138,26 +1152,21 @@ final class ScreenManager {
 
     func handleGlobalSettingsChanged() {
         updateFullScreenFallbackPolling()
-        handleFullScreenChange(fullScreenDetector.hiddenScreens)
-        handlePowerStateChange(powerMonitor.currentPowerSource)
+        refreshPerformancePolicyForAllScreens()
     }
     
     // MARK: - Memory Management
-    private func handleLowMemory() {
-        Logger.notice("Low memory condition detected, optimizing resource usage", category: .memory)
-
-        for screen in screens {
-            guard let playback = screen.playbackController, playback.isPlaying else { continue }
-            let isActive = NSScreen.screens.contains { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == screen.id }
-
-            if !isActive {
-                // Route through the session so intent is cleared: low-memory
-                // pause is deliberate and must not auto-resume on the next
-                // policy refresh (matches the prior direct-pause behavior).
-                Logger.debug("Pausing background video on screen \(screen.id) to conserve memory", category: .memory)
-                playback.pause()
-            }
-        }
+    /// Folds memory pressure into the unified performance policy. Suspends every
+    /// wallpaper type while pressure holds and auto-resumes when it clears,
+    /// without ever touching the user's play/pause intent.
+    private func setMemoryPressure(_ active: Bool) {
+        guard isUnderMemoryPressure != active else { return }
+        isUnderMemoryPressure = active
+        Logger.notice(
+            active ? "Memory pressure: suspending wallpapers" : "Memory pressure cleared: restoring wallpapers",
+            category: .memory
+        )
+        refreshPerformancePolicyForAllScreens()
     }
     
     // MARK: - System Events
@@ -1165,7 +1174,6 @@ final class ScreenManager {
         Logger.info("System sleep detected", category: .lifecycle)
         userAbsenceReasons.insert(.systemSleep)
         refreshPerformancePolicyForAllScreens()
-        markWallpaperSessionStateChanged()
     }
 
     private func handleSystemWake() {
@@ -1174,7 +1182,6 @@ final class ScreenManager {
         powerMonitor.refreshPowerStatus()
         userAbsenceReasons.remove(.systemSleep)
         refreshPerformancePolicyForAllScreens()
-        markWallpaperSessionStateChanged()
     }
 
     private func captureDesktopSnapshotsForLockIfNeeded() {
@@ -1611,19 +1618,7 @@ final class ScreenManager {
                 audio.setAudioMuted(configuration.muted)
                 audio.setAudioVolume(configuration.videoVolume)
             }
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            applyPerformancePolicy(
-                to: screen,
-                globalSettings: globalSettings,
-                powerSource: powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                    fullScreenDetector.isDesktopHidden(for: screen.id),
-                isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
-                    fullScreenDetector.isDesktopOccluded(for: screen.id),
-                isApplicationRuleActive: currentApplicationRuleActive(globalSettings),
-                thermalState: ProcessInfo.processInfo.thermalState,
-                isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
-            )
+            applyPerformancePolicy(to: screen)
             Logger.info("Set scene wallpaper (workshop \(descriptor.workshopID)) for screen \(screen.id)", category: .screenManager)
             notifyWallpaperSessionChanged()
             #else
@@ -1637,19 +1632,7 @@ final class ScreenManager {
         observeRuntimeErrors(for: session)
         screen.installRuntimeSession(session)
         refreshAppNapAssertion()
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        applyPerformancePolicy(
-            to: screen,
-            globalSettings: globalSettings,
-            powerSource: powerMonitor.currentPowerSource,
-            isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                fullScreenDetector.isDesktopHidden(for: screen.id),
-            isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
-                fullScreenDetector.isDesktopOccluded(for: screen.id),
-            isApplicationRuleActive: currentApplicationRuleActive(globalSettings),
-            thermalState: ProcessInfo.processInfo.thermalState,
-            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
-        )
+        applyPerformancePolicy(to: screen)
         notifyWallpaperSessionChanged()
     }
 

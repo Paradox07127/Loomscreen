@@ -119,6 +119,28 @@ final class WPEMetalRenderTargetPool {
         releaseAliasState()
     }
 
+    /// Allocates a persistent texture outside the per-frame alias plan. A static
+    /// layer composite retained across frames must NOT come from the alias heap,
+    /// whose textures are made reusable at frame boundaries — it gets its own
+    /// discrete allocation snapshotted once.
+    func persistentTexture(matching source: MTLTexture, label: String) throws -> MTLTexture {
+        try validateTextureDimensions(targetName: label, width: source.width, height: source.height)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: source.pixelFormat,
+            width: source.width,
+            height: source.height,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .private
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        texture.label = label
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
+        return texture
+    }
+
     /// Called once at the start of each `render()`. The prior frame's aliasable
     /// textures are dropped so this frame allocates fresh from the heap; the
     /// single serial command queue guarantees the prior frame's GPU work has

@@ -123,6 +123,18 @@ struct WPEShaderTranspiler {
         }
         _ = !varyings.isEmpty || activeSource.contains("v_TexCoord") || activeSource.contains("gl_FragCoord")
 
+        // Noise/detail textures (e.g. `util/noise`) are tiled: WPE samples them with
+        // wrap/repeat at coords far outside [0,1]. Our single `linearSampler` is
+        // clamp_to_edge, so without a repeat sampler those coords clamp to the texture
+        // edge — collapsing filmgrain's tiled noise into a scrolling edge-smear cross-hatch.
+        // Mark samplers the shader annotates as noise so their reads use `repeatSampler`;
+        // the framebuffer / masks keep clamp (they're sampled in range, where it's a no-op).
+        let repeatSamplers = Set(
+            sortedSamplers
+                .filter { ($0.comment?.lowercased().contains("noise")) == true }
+                .map(\.name)
+        )
+
         let body = bodyLines.joined(separator: "\n")
         guard let mainRange = Self.locateMain(in: body) else {
             throw WPEShaderCompilerError.translationFailed(
@@ -142,14 +154,16 @@ struct WPEShaderTranspiler {
             preMain + "\n" + postMain,
             varyingTypesByName: varyingTypesByName,
             preserveTexCoordZW: preserveTexCoordZW,
-            premultipliedInputSlots: premultipliedInputSlots
+            premultipliedInputSlots: premultipliedInputSlots,
+            repeatSamplers: repeatSamplers
         )
         let translatedMain = translateMain(
             mainBody,
             varyingTypesByName: varyingTypesByName,
             preserveTexCoordZW: preserveTexCoordZW,
             premultipliedInputSlots: premultipliedInputSlots,
-            premultiplyOutput: premultipliedOutput
+            premultiplyOutput: premultipliedOutput,
+            repeatSamplers: repeatSamplers
         )
         let helperResources = rewriteHelperResourceAccess(
             helpers: translatedHelpers,
@@ -651,7 +665,8 @@ struct WPEShaderTranspiler {
         varyingTypesByName: [String: String] = [:],
         preserveTexCoordZW: Bool = false,
         premultipliedInputSlots: Set<Int> = [],
-        premultiplyOutput: Bool = false
+        premultiplyOutput: Bool = false,
+        repeatSamplers: Set<String> = []
     ) -> String {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
@@ -661,7 +676,8 @@ struct WPEShaderTranspiler {
             rewriteProgramScopeConsts: false,
             varyingTypesByName: varyingTypesByName,
             preserveTexCoordZW: preserveTexCoordZW,
-            premultipliedInputSlots: premultipliedInputSlots
+            premultipliedInputSlots: premultipliedInputSlots,
+            repeatSamplers: repeatSamplers
         )
 
         let usesGLOut = inner.contains("gl_FragColor")
@@ -695,7 +711,8 @@ struct WPEShaderTranspiler {
         rewriteProgramScopeConsts: Bool = true,
         varyingTypesByName: [String: String] = [:],
         preserveTexCoordZW: Bool = false,
-        premultipliedInputSlots: Set<Int> = []
+        premultipliedInputSlots: Set<Int> = [],
+        repeatSamplers: Set<String> = []
     ) -> String {
         var s = source
 
@@ -721,8 +738,8 @@ struct WPEShaderTranspiler {
             s = rewriteProgramScopeConstDeclarations(s)
         }
         s = rewriteReservedIdentifiers(s)
-        s = rewriteTextureLodCalls(s, premultipliedInputSlots: premultipliedInputSlots)
-        s = rewriteTextureCalls(s, premultipliedInputSlots: premultipliedInputSlots)
+        s = rewriteTextureLodCalls(s, premultipliedInputSlots: premultipliedInputSlots, repeatSamplers: repeatSamplers)
+        s = rewriteTextureCalls(s, premultipliedInputSlots: premultipliedInputSlots, repeatSamplers: repeatSamplers)
         s = rewriteTexCoordTextureSampleUVFallback(s)
         s = rewriteTextureSampleNarrowing(s)
         s = rewriteVector4TextureSampleLocalsInSampleCoordinates(s)
@@ -1113,15 +1130,18 @@ struct WPEShaderTranspiler {
         return source
     }
 
-    /// waterwaves + waterflow synthesize a `v_TexCoord.zw` that matches their source
-    /// `.vert` (mask-UV resolution scaling). Restrict `.zw` preservation to those so other
-    /// float4-`v_TexCoord` effects keep their historical behavior.
+    /// These effects synthesize a `v_TexCoord.zw` that matches `wpe_texcoord_with_resolution`
+    /// (resolution-scaled mask/flow UV) in their source `.vert`, so the reconstructed `.zw`
+    /// is correct and must be preserved. `shake` samples its flow map (the per-pixel
+    /// displacement direction) at `.zw`; downgrading it to `.xy` read the flow field from
+    /// the wrong coordinates and turned the glitch/motion into a diagonal smear. Other
+    /// float4-`v_TexCoord` effects whose `.zw` we can't yet vouch for keep historical `.xy`.
     private static func shouldPreserveTexCoordZW(shaderName: String) -> Bool {
         let normalized = shaderName
             .lowercased()
             .replacingOccurrences(of: ".frag", with: "")
             .replacingOccurrences(of: ".vert", with: "")
-        for family in ["waterwaves", "waterflow"] {
+        for family in ["waterwaves", "waterflow", "shake"] {
             if normalized == "effect_\(family)"
                 || normalized == "effects/\(family)"
                 || normalized.hasSuffix("/effects/\(family)") {
@@ -1378,7 +1398,8 @@ struct WPEShaderTranspiler {
     /// `texture(` pass never sees `textureLod`.
     private static func rewriteTextureLodCalls(
         _ source: String,
-        premultipliedInputSlots: Set<Int> = []
+        premultipliedInputSlots: Set<Int> = [],
+        repeatSamplers: Set<String> = []
     ) -> String {
         var result = ""
         result.reserveCapacity(source.count)
@@ -1420,13 +1441,16 @@ struct WPEShaderTranspiler {
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         let uv = rewriteTextureLodCalls(
                             String(source[source.index(after: firstComma)..<lodComma]),
-                            premultipliedInputSlots: premultipliedInputSlots
+                            premultipliedInputSlots: premultipliedInputSlots,
+                            repeatSamplers: repeatSamplers
                         ).trimmingCharacters(in: .whitespacesAndNewlines)
                         let lod = rewriteTextureLodCalls(
                             String(source[source.index(after: lodComma)..<cursor]),
-                            premultipliedInputSlots: premultipliedInputSlots
+                            premultipliedInputSlots: premultipliedInputSlots,
+                            repeatSamplers: repeatSamplers
                         ).trimmingCharacters(in: .whitespacesAndNewlines)
-                        var sample = "\(sampler).sample(linearSampler, \(uv), level(\(lod)))"
+                        let samplerState = repeatSamplers.contains(sampler) ? "repeatSampler" : "linearSampler"
+                        var sample = "\(sampler).sample(\(samplerState), \(uv), level(\(lod)))"
                         if shouldUnpremultiplySample(sampler: sampler, premultipliedInputSlots: premultipliedInputSlots) {
                             sample = "wpe_unpremultiply_sample(\(sample))"
                         }
@@ -1445,7 +1469,8 @@ struct WPEShaderTranspiler {
     /// Rewrite `texture(<sampler>, <uv>)` calls (already canonicalised by the preprocessor) into Metal `<sampler>.sample(linearSampler, uv)` form.
     private static func rewriteTextureCalls(
         _ source: String,
-        premultipliedInputSlots: Set<Int> = []
+        premultipliedInputSlots: Set<Int> = [],
+        repeatSamplers: Set<String> = []
     ) -> String {
         var result = ""
         result.reserveCapacity(source.count)
@@ -1479,7 +1504,8 @@ struct WPEShaderTranspiler {
                         let argStart = source.index(index, offsetBy: needle.count)
                         let sampler = source[argStart..<comma].trimmingCharacters(in: .whitespacesAndNewlines)
                         let uv = source[source.index(after: comma)..<cursor].trimmingCharacters(in: .whitespacesAndNewlines)
-                        var sample = "\(sampler).sample(linearSampler, \(uv))"
+                        let samplerState = repeatSamplers.contains(sampler) ? "repeatSampler" : "linearSampler"
+                        var sample = "\(sampler).sample(\(samplerState), \(uv))"
                         if shouldUnpremultiplySample(sampler: sampler, premultipliedInputSlots: premultipliedInputSlots) {
                             sample = "wpe_unpremultiply_sample(\(sample))"
                         }
@@ -1958,6 +1984,7 @@ struct WPEShaderTranspiler {
         }
 
         out.append("[[maybe_unused]] constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
+        out.append("[[maybe_unused]] constexpr sampler repeatSampler(address::repeat, filter::linear);")
         out.append("inline float min(int lhs, float rhs) { return metal::min(float(lhs), rhs); }")
         out.append("inline float min(float lhs, int rhs) { return metal::min(lhs, float(rhs)); }")
         out.append("inline float max(int lhs, float rhs) { return metal::max(float(lhs), rhs); }")
@@ -2055,8 +2082,20 @@ struct WPEShaderTranspiler {
                 out.append("    [[maybe_unused]] float4 \(u.name) = u.vals[\(slotCursor)];")
             case "int":
                 out.append("    [[maybe_unused]] int \(u.name) = int(u.vals[\(slotCursor)].x);")
+            case "ivec2":
+                out.append("    [[maybe_unused]] int2 \(u.name) = int2(u.vals[\(slotCursor)].xy);")
+            case "ivec3":
+                out.append("    [[maybe_unused]] int3 \(u.name) = int3(u.vals[\(slotCursor)].xyz);")
+            case "ivec4":
+                out.append("    [[maybe_unused]] int4 \(u.name) = int4(u.vals[\(slotCursor)]);")
             case "bool":
                 out.append("    [[maybe_unused]] bool \(u.name) = u.vals[\(slotCursor)].x > 0.5;")
+            case "bvec2":
+                out.append("    [[maybe_unused]] bool2 \(u.name) = u.vals[\(slotCursor)].xy > float2(0.5);")
+            case "bvec3":
+                out.append("    [[maybe_unused]] bool3 \(u.name) = u.vals[\(slotCursor)].xyz > float3(0.5);")
+            case "bvec4":
+                out.append("    [[maybe_unused]] bool4 \(u.name) = u.vals[\(slotCursor)] > float4(0.5);")
             case "mat2":
                 out.append("    [[maybe_unused]] float2x2 \(u.name) = float2x2(u.vals[\(slotCursor)].xy, u.vals[\(slotCursor + 1)].xy);")
             case "mat3":
@@ -2070,6 +2109,13 @@ struct WPEShaderTranspiler {
         }
 
         let uniformNames = Set(uniforms.map(\.name))
+        // Screen-UV fallbacks produced when no reconstruction rule matched a varying.
+        // A non-v_TexCoord varying that the fragment actually uses but lands here renders
+        // incorrectly (a 0→1 UV ramp standing in for vertex-computed data) — emit a marker
+        // in the generated MSL so the gap is visible in scene-debug dumps instead of silent.
+        let uvFallbackInitializers: Set<String> = [
+            "in.uv", "in.uv.x", "float4(in.uv, in.uv)", "float3(in.uv, 0.0)",
+        ]
         for varying in varyings {
             if varying.name == "uv" { continue }
             let initializer = varyingInitializer(
@@ -2078,6 +2124,11 @@ struct WPEShaderTranspiler {
                 availableUniforms: uniformNames,
                 comboValues: comboValues
             )
+            if varying.name != "v_TexCoord",
+               uvFallbackInitializers.contains(initializer),
+               warningCleanMainBody.range(of: "\\b\(NSRegularExpression.escapedPattern(for: varying.name))\\b", options: .regularExpression) != nil {
+                out.append("    // WPE-DIAGNOSTIC: varying '\(varying.name)' has no reconstruction rule and fell back to a screen-UV default; this likely renders incorrectly.")
+            }
             if let arrayLength = varying.arrayLength {
                 let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
@@ -2201,6 +2252,10 @@ struct WPEShaderTranspiler {
                 float s = sin(angle);
                 return float2(c * v.x - s * v.y, s * v.x + c * v.y);
             }
+            inline float2 wpe_safe_normalize(float2 v) {
+                float len = length(v);
+                return len > 1e-8 ? v / len : float2(0.0, 1.0);
+            }
             inline float2 wpe_scroll_vector(float scrollX, float scrollY, float time) {
                 float2 scroll = float2(scrollX, scrollY);
                 return sign(scroll) * pow(abs(scroll), float2(2.0)) * time;
@@ -2251,8 +2306,55 @@ struct WPEShaderTranspiler {
             inline float3 wpe_foliage_params(float2 uv, float direction, float strength) {
                 return float3(wpe_rotate_vec2(uv, direction), strength * strength * 0.005);
             }
+            // filmgrain.vert's v_TexCoordNoise: two noise lookups scrolled by frac(time)
+            // and tiled by g_NoiseScale (aspect-corrected on x). Distinct from the foliage
+            // variant above — without it the varying fell back to raw uv, sampling the
+            // 256² noise once across the whole frame (smooth blotches soft-light blended
+            // over everything = a static "retro filter") instead of fine animated grain.
+            inline float4 wpe_filmgrain_texcoord_noise(float2 uv, float time, float scale, float4 texture0Resolution) {
+                float t = fract(time);
+                float aspect = wpe_safe_ratio(texture0Resolution.z, texture0Resolution.w);
+                float4 coords = float4((uv + t) * scale, (uv - t * 2.5) * scale * 0.52);
+                return coords * float4(aspect, 1.0, aspect, 1.0);
+            }
             inline float2 wpe_bounds_vector(float2 bounds) {
                 return float2(bounds.x, 1.0 / max(bounds.y - bounds.x, 0.000001));
+            }
+            // pulse.vert's non-audio `v_Pulse`: a time-driven sine gated through
+            // g_PulseThresholds, scaled by g_PulseAmount (0 at rest, pulses over time).
+            // Without it the float varying defaulted to `in.uv.x` — a left-to-right
+            // brightness/alpha ramp instead of a uniform full-screen pulse.
+            inline float wpe_pulse_response(float time, float2 thresholds, float speed, float phase, float amount) {
+                float wave = sin(time * speed + (phase - 0.25) * 6.28318530717958647692) * 0.5 + 0.5;
+                return smoothstep(thresholds.x, thresholds.y, wave) * amount;
+            }
+            // Vertex-stage `v_AudioShift` (WPE common.h CreateAudioResponse): the
+            // FFT bins in [freqMin, freqMax] are averaged, smoothstepped against
+            // g_AudioBounds, raised to g_AudioPower and scaled by g_AudioMultiply.
+            // `mode` is the AUDIOPROCESSING combo (1=left, 2=right, 3=both). Returns
+            // 0 when silent — matching WPE, where the effect rests until audio plays.
+            // The fragment-only transpile has no vertex stage, so without this the
+            // varying defaulted to `in.uv.x`, smearing the whole frame (chromatic
+            // aberration / hue_shift glitch across the screen even with no audio).
+            inline float wpe_audio_response16(
+                thread const float (&left)[16],
+                thread const float (&right)[16],
+                int mode, float freqMin, float freqMax,
+                float2 bounds, float power, float multiply
+            ) {
+                int lo = clamp(int(freqMin), 0, 15);
+                int hi = clamp(int(freqMax), 0, 15);
+                float response = 0.0;
+                for (int a = lo; a <= hi; ++a) {
+                    if (mode == 2) { response += right[a]; }
+                    else if (mode == 3) { response += left[a] + right[a]; }
+                    else { response += left[a]; }
+                }
+                float denom = max(freqMax - freqMin + 1.0, 1.0);
+                if (mode == 3) { denom *= 2.0; }
+                response /= denom;
+                response = smoothstep(bounds.x, bounds.y, response);
+                return clamp(pow(response, power), 0.0, 1.0) * multiply;
             }
             inline float4 wpe_waterflow_cycles(float time, float speed) {
                 float t = time * speed;
@@ -2323,6 +2425,25 @@ struct WPEShaderTranspiler {
         availableUniforms: Set<String>,
         comboValues: [String: Int] = [:]
     ) -> String {
+        // multistage_wave: v_DirectionN = normalize(g_SpinCenter(N+1) - g_SpinCenterN),
+        // declared vec4 (.zw = the direction rotated by g_DirectionOffset) under
+        // GLOBAL_ROTATION, else vec2. Gated on the per-node g_SpinCenter uniforms so it
+        // never intercepts the dualwaves `v_Direction2` case below (which has none).
+        if ["float2", "float4"].contains(varying.metalType),
+           varying.name.hasPrefix("v_Direction"),
+           let nodeIndex = Int(varying.name.dropFirst("v_Direction".count)),
+           nodeIndex >= 1, nodeIndex <= 10,
+           hasUniforms("g_SpinCenter\(nodeIndex)", "g_SpinCenter\(nodeIndex + 1)", in: availableUniforms) {
+            let raw = "wpe_safe_normalize(g_SpinCenter\(nodeIndex + 1) - g_SpinCenter\(nodeIndex))"
+            if varying.metalType == "float4" {
+                // .zw carries the g_DirectionOffset-rotated direction only under GLOBAL_ROTATION.
+                let rotated = comboValues["GLOBAL_ROTATION"] == 1 && availableUniforms.contains("g_DirectionOffset")
+                    ? "wpe_rotate_vec2(\(raw), g_DirectionOffset)"
+                    : raw
+                return "float4(\(raw), \(rotated))"
+            }
+            return raw
+        }
         switch varying.name {
         case "v_TexCoord":
             if varying.metalType == "float2" {
@@ -2394,6 +2515,7 @@ struct WPEShaderTranspiler {
                 return "wpe_iris_texcoord(g_Time, g_Speed, g_PhaseOffset, g_Rough, g_NoiseAmount, g_Scale)"
             }
         case "v_TexCoordNoise":
+            // foliage variant: tiled noise rotated by g_Direction (needs g_Ratio too).
             if varying.metalType == "float4",
                hasUniforms(
                 "g_NoiseScale",
@@ -2404,10 +2526,53 @@ struct WPEShaderTranspiler {
                ) {
                 return "wpe_foliage_texcoord_noise(in.uv, g_NoiseScale, g_Ratio, g_Direction, g_Texture0Resolution)"
             }
+            // filmgrain variant: two frac(time)-scrolled, g_NoiseScale-tiled lookups.
+            // No g_Ratio/g_Direction, so it can't reuse the foliage helper; without this
+            // it fell through to raw uv and stretched the noise once across the frame.
+            if varying.metalType == "float4",
+               hasUniforms("g_NoiseScale", "g_Time", "g_Texture0Resolution", in: availableUniforms) {
+                return "wpe_filmgrain_texcoord_noise(in.uv, g_Time, g_NoiseScale, g_Texture0Resolution)"
+            }
         case "v_Params":
             if varying.metalType == "float3",
                hasUniforms("g_Direction", "g_Strength", in: availableUniforms) {
                 return "wpe_foliage_params(in.uv, g_Direction, g_Strength)"
+            }
+        case "v_equalScaleFactor":
+            // multistage_wave.vert: aspect-correction factor (≥1 per axis), NOT screen UV.
+            // Defaulting to in.uv stretched the wave field horizontally across the frame.
+            if varying.metalType == "float2",
+               availableUniforms.contains("g_Texture0Resolution") {
+                return "float2(max(1.0, wpe_safe_ratio(g_Texture0Resolution.x, g_Texture0Resolution.y)), max(1.0, wpe_safe_ratio(g_Texture0Resolution.y, g_Texture0Resolution.x)))"
+            }
+        case "v_Pulse":
+            // pulse.vert: AUDIOPROCESSING → CreateAudioResponse (0 when silent); else a
+            // time-driven sine pulse. The float varying used to default to in.uv.x — a
+            // left-to-right ramp instead of a uniform full-screen pulse.
+            if varying.metalType == "float" {
+                let mode = comboValues["AUDIOPROCESSING"] ?? 0
+                if mode != 0,
+                   hasUniforms(
+                    "g_AudioSpectrum16Left", "g_AudioSpectrum16Right",
+                    "g_AudioFrequencyMin", "g_AudioFrequencyMax",
+                    "g_AudioBounds", "g_AudioPower", "g_AudioMultiply",
+                    in: availableUniforms
+                   ) {
+                    return "wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, \(mode), g_AudioFrequencyMin, g_AudioFrequencyMax, g_AudioBounds, g_AudioPower, g_AudioMultiply)"
+                }
+                if hasUniforms("g_Time", "g_PulseThresholds", "g_PulseSpeed", "g_PulsePhase", "g_PulseAmount", in: availableUniforms) {
+                    return "wpe_pulse_response(g_Time, g_PulseThresholds, g_PulseSpeed, g_PulsePhase, g_PulseAmount)"
+                }
+                return "0.0"
+            }
+        case "v_ParallaxOffset":
+            // depthparallax.vert: pointer-projected offset, ·0.5+0.5. The full form needs
+            // g_EffectTextureProjectionMatrixInverse (a mat uniform excluded from fragment
+            // injection), so use the vert's own simplified equivalent (= g_ParallaxPosition):
+            // neutral (0.5) when the pointer is centered, instead of the in.uv ramp that
+            // warped the parallax sample across the screen.
+            if varying.metalType == "float2" {
+                return availableUniforms.contains("g_ParallaxPosition") ? "g_ParallaxPosition" : "float2(0.5)"
             }
         case "v_Bounds":
             if varying.metalType == "float2",
@@ -2428,8 +2593,40 @@ struct WPEShaderTranspiler {
                hasUniforms("g_Time", "g_FlowSpeed", "g_PhaseFeather", in: availableUniforms) {
                 return "wpe_waterflow_blend(g_Time, g_FlowSpeed, g_PhaseFeather)"
             }
+        case "v_AudioShift":
+            // Audio-reactive scalar computed in the vertex stage (CreateAudioResponse).
+            // Reconstruct it from the spectrum + audio uniforms so it rests at 0 when
+            // silent instead of falling through to the `in.uv.x` float default, which
+            // smeared chromatic_aberration / hue_shift across the whole frame.
+            if varying.metalType == "float",
+               hasUniforms(
+                "g_AudioSpectrum16Left",
+                "g_AudioSpectrum16Right",
+                "g_AudioFrequencyMin",
+                "g_AudioFrequencyMax",
+                "g_AudioBounds",
+                "g_AudioPower",
+                "g_AudioMultiply",
+                in: availableUniforms
+               ) {
+                let mode = comboValues["AUDIOPROCESSING"] ?? 1
+                return "wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, \(mode), g_AudioFrequencyMin, g_AudioFrequencyMax, g_AudioBounds, g_AudioPower, g_AudioMultiply)"
+            }
+            return "0.0"
         case "v_AudioPulse":
+            // Audio-reactive pulse (CreateAudioResponse): 0 when silent, like v_AudioShift.
+            // Reconstruct the real response when the spectrum uniforms are present so the
+            // effect reacts to audio instead of staying flat; falls back to 0 otherwise.
             if varying.metalType == "float" {
+                let mode = comboValues["AUDIOPROCESSING"] ?? 1
+                if hasUniforms(
+                    "g_AudioSpectrum16Left", "g_AudioSpectrum16Right",
+                    "g_AudioFrequencyMin", "g_AudioFrequencyMax",
+                    "g_AudioBounds", "g_AudioPower", "g_AudioMultiply",
+                    in: availableUniforms
+                ) {
+                    return "wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, \(mode), g_AudioFrequencyMin, g_AudioFrequencyMax, g_AudioBounds, g_AudioPower, g_AudioMultiply)"
+                }
                 return "0.0"
             }
         default:
@@ -2631,6 +2828,9 @@ struct WPEUniformDecl: Equatable {
         case "ivec2": return "int2"
         case "ivec3": return "int3"
         case "ivec4": return "int4"
+        case "bvec2": return "bool2"
+        case "bvec3": return "bool3"
+        case "bvec4": return "bool4"
         case "bool": return "bool"
         case "int": return "int"
         case "float": return "float"

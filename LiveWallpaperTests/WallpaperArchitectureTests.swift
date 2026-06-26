@@ -791,13 +791,8 @@ struct WallpaperPolicyEngineTests {
         let settings = GlobalSettings(globalPauseOnBattery: false)
 
         let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .battery(level: 80),
-            isHiddenByFullScreen: false,
-            isWindowOccluding: false,
-            isApplicationRuleActive: false,
-            thermalState: .nominal,
-            isGameModeActive: false
+            inputs: .test(powerSource: .battery(level: 80)),
+            settings: settings
         )
 
         #expect(profile == .quality)
@@ -812,13 +807,8 @@ struct WallpaperPolicyEngineTests {
         let settings = GlobalSettings(pauseOnFullScreen: true)
 
         let profile = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .external,
-            isHiddenByFullScreen: true,
-            isWindowOccluding: false,
-            isApplicationRuleActive: false,
-            thermalState: .nominal,
-            isGameModeActive: false
+            inputs: .test(isHiddenByFullScreen: true),
+            settings: settings
         )
 
         #expect(profile == .suspended)
@@ -833,24 +823,12 @@ struct WallpaperPolicyEngineTests {
         let settings = GlobalSettings()
 
         let active = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .external,
-            isHiddenByFullScreen: false,
-            isWindowOccluding: false,
-            isApplicationRuleActive: false,
-            thermalState: .nominal,
-            isGameModeActive: false,
-            isUserAbsent: false
+            inputs: .test(isUserAbsent: false),
+            settings: settings
         )
         let absent = WallpaperPolicyEngine.performanceProfile(
-            globalSettings: settings,
-            powerSource: .external,
-            isHiddenByFullScreen: false,
-            isWindowOccluding: false,
-            isApplicationRuleActive: false,
-            thermalState: .nominal,
-            isGameModeActive: false,
-            isUserAbsent: true
+            inputs: .test(isUserAbsent: true),
+            settings: settings
         )
 
         #expect(active == .quality)
@@ -868,22 +846,26 @@ struct WallpaperPolicyEngineTests {
             game: Bool = false,
             thermal: ProcessInfo.ThermalState = .nominal,
             powerSource: PowerMonitor.PowerSource = .external,
-            userAbsent: Bool = false
+            userAbsent: Bool = false,
+            memoryPressure: Bool = false
         ) -> WallpaperPerformanceProfile {
             WallpaperPolicyEngine.performanceProfile(
-                globalSettings: GlobalSettings(
+                inputs: .test(
+                    powerSource: powerSource,
+                    isHiddenByFullScreen: hidden,
+                    isWindowOccluding: occluding,
+                    isApplicationRuleActive: appRule,
+                    thermalState: thermal,
+                    isGameModeActive: game,
+                    isUserAbsent: userAbsent,
+                    isUnderMemoryPressure: memoryPressure
+                ),
+                settings: GlobalSettings(
                     globalPauseOnBattery: true,
                     pauseOnFullScreen: true,
                     pauseInGameMode: true,
                     pauseOnWindowOcclusion: true
-                ),
-                powerSource: powerSource,
-                isHiddenByFullScreen: hidden,
-                isWindowOccluding: occluding,
-                isApplicationRuleActive: appRule,
-                thermalState: thermal,
-                isGameModeActive: game,
-                isUserAbsent: userAbsent
+                )
             )
         }
 
@@ -896,6 +878,7 @@ struct WallpaperPolicyEngineTests {
         #expect(profile(thermal: .critical) == .suspended)
         #expect(profile(powerSource: .battery(level: 50)) == .suspended)
         #expect(profile(userAbsent: true) == .suspended)
+        #expect(profile(memoryPressure: true) == .suspended)
     }
 
     @Test("Global pause on battery pauses video playback")

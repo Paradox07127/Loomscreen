@@ -434,8 +434,10 @@ struct MenuBarContent: View {
     }
 
     private func togglePlayback(for screen: Screen) {
-        guard let playback = screen.playbackController else { return }
-        PlaybackToggle.toggle(playback)
+        // Route through ScreenManager so scene/HTML toggles commit the derived
+        // session state (video relies on a player notification; non-video
+        // sessions don't post one).
+        screenManager.togglePlayback(for: screen)
     }
 
     private func invokeManageWindow() {

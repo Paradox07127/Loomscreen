@@ -210,6 +210,47 @@ struct WPEParticleSystemTests {
         #expect(system.liveInstanceCount == 8)
     }
 
+    @Test("Pointer-tracking emitter stops + clears when Follow Cursor is off")
+    func pointerEmitterStopsWhenFollowDisabled() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil,
+            maxCount: 16,
+            rate: 1000,
+            startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 4, sizeMax: 4,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.1,
+            controlPoints: [WPEParticleControlPoint(id: 0, offset: SIMD3(0, 0, 0), pointerLocked: true)]
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        #expect(system.tracksPointer)
+
+        // Cursor live → the emitter spawns (at the cursor).
+        system.pointerCentered = SIMD2<Float>(10, 20)
+        system.tick(now: 0)
+        system.tick(now: 1.0)
+        #expect(system.liveInstanceCount > 0)
+
+        // Follow Cursor off: clear removes the residual immediately, and the gate
+        // keeps the emitter from re-spawning at the static scene origin.
+        system.clearLiveParticles()
+        #expect(system.liveInstanceCount == 0)
+        system.pointerCentered = nil
+        system.tick(now: 2.0)
+        system.tick(now: 3.0)
+        #expect(system.liveInstanceCount == 0)
+
+        // Re-enabling the cursor resumes emission.
+        system.pointerCentered = SIMD2<Float>(30, 40)
+        system.tick(now: 4.0)
+        #expect(system.liveInstanceCount > 0)
+    }
+
     @Test("Particle system allocates GPU buffer of expected size")
     func allocatesGPUBuffer() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -946,7 +987,8 @@ struct WPEParticleSystemTests {
             colorChange: WPEParticleColorChange(
                 startTime: 0, endTime: 1,
                 startColor: SIMD3(1, 1, 1), endColor: SIMD3(1, 0, 0)
-            )
+            ),
+            hasColorInitializer: true
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
         let pointer = system.instanceBuffer.contents()
@@ -1016,7 +1058,8 @@ struct WPEParticleSystemTests {
             colorChange: WPEParticleColorChange(
                 startTime: 0, endTime: 1,
                 startColor: SIMD3(0.5, 0.5, 0.5), endColor: SIMD3(0.5, 0.5, 0.5)
-            )
+            ),
+            hasColorInitializer: true
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
         let pointer = system.instanceBuffer.contents()
@@ -1027,6 +1070,62 @@ struct WPEParticleSystemTests {
         // 128/255 ≈ 0.502 (colorrandom, normalized once at spawn) × 0.5
         // (colorchange 0…1 multiplier) ≈ 0.251 — guards against re-normalizing.
         #expect(abs(written.x - 0.251) < 0.02)
+    }
+
+    @Test("colorchange does NOT recolour a particle with no colour initializer (white r8 smoke stays white)")
+    func colorChangeSkippedWithoutColorInitializer() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Wildfire (scene 3460973721): white r8 smoke, NO color/colorrandom
+        // initializer, but ships a colorchange operator (橙→纯红). The colour
+        // must stay the texture's white — colorchange must not ramp it to red.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            colorChange: WPEParticleColorChange(
+                startTime: 0, endTime: 0.6,
+                startColor: SIMD3(1, 0.749, 0), endColor: SIMD3(1, 0, 0)
+            )
+            // hasColorInitializer defaults false → colorchange must be skipped
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        let pointer = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)
+        system.tick(now: 0)
+        for step in 1...8 { system.tick(now: Double(step) * 0.1) }
+        let c = pointer[0].color
+        #expect(c.x > 0.9, "red stays ~white")
+        #expect(c.y > 0.9, "green NOT ramped down — stays ~white")
+        #expect(c.z > 0.9, "blue NOT zeroed — stays ~white")
+    }
+
+    @Test("colorn instance-override applies (dims) even without a colour initializer")
+    func colornOverrideAppliesWithoutColorInitializer() throws {
+        // wildfire-like: no colour initializer. colorn (暗紫) STILL applies and
+        // dims the default white smoke to a faint haze — that dimming is exactly
+        // why WPE's wildfire is barely visible. Only `colorchange` is gated off.
+        let base = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1, startDelay: 0,
+            lifetimeMin: 1, lifetimeMax: 1,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let override = WPESceneParticleInstanceOverride(color: SIMD3(61, 41, 69)) // colorn 暗紫 ×255
+        let applied = base.applying(instanceOverride: override)
+        // colorn 暗紫 dims the default white (keeps wildfire faint, not pure white)
+        #expect(applied.colorMin == SIMD3(61, 41, 69))
+        #expect(applied.colorMax == SIMD3(61, 41, 69))
     }
 
     @Test("oscillateposition mask transforms into render space with object rotation")

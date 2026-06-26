@@ -22,11 +22,15 @@ public struct TypeBadge: View {
             Text(verbatim: title.uppercased(with: .current))
                 .font(DesignTokens.Typography.badge)
                 .tracking(0.5)
+                .lineLimit(1)
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .adaptiveGlassSurface(.capsule, tint: tint)
+        // A type pill is a single short word ("SCENE" / "VIDEO" / "WEB"); never
+        // let a crowded row wrap or compress it — keep its intrinsic width.
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: title))
     }

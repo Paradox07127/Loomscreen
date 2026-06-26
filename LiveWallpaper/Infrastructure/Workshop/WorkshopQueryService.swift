@@ -617,7 +617,12 @@ actor WorkshopQueryService {
             previewImageURL: previewURL,
             fileSizeBytes: payload.file_size?.value,
             timeUpdated: payload.time_updated?.dateValue,
-            subscriptionCount: payload.subscriptions?.value ?? payload.lifetime_subscriptions?.value,
+            // Prefer lifetime (total unique) subscriptions — that's the key Steam's
+            // "Most Subscribed" sort (query_type=9, RankedByTotalUniqueSubscriptions)
+            // actually ranks by. Showing `subscriptions` (current) instead made a
+            // high-lifetime / low-current item look mis-sorted ("low subs above high").
+            // Fall back to current when lifetime is absent.
+            subscriptionCount: payload.lifetime_subscriptions?.value ?? payload.subscriptions?.value,
             voteScore: Self.clampedScore(payload.vote_data?.score?.value ?? payload.score?.value),
             tags: tags,
             visibility: SteamWorkshopMetadata.Visibility(rawCode: payload.visibility?.value),

@@ -7,12 +7,17 @@ import LiveWallpaperVideoWeb
 /// `ScreenManager` through the shared `WallpaperRuntimeSession` protocol so
 /// the rest of the runtime stack does not need a scene-specific code path.
 @MainActor
-final class SceneWallpaperSession: WallpaperRuntimeSession {
+final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackControllable {
     let wallpaperType: WallpaperType = .scene
 
     private var window: NSWindow?
     private var renderer: WPEMetalSceneRenderer?
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    /// Durable user play/pause intent, mirrored on `VideoWallpaperSession`. The
+    /// effective render state is `userIntendsToPlay && currentProfile == .quality`,
+    /// so a manual pause survives policy refreshes and a policy suspend never
+    /// clears the user's intent.
+    private(set) var userIntendsToPlay = true
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
@@ -37,7 +42,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
             activity = .error
         } else if !isVisible {
             activity = .off
-        } else if currentProfile == .suspended {
+        } else if currentProfile == .suspended || !userIntendsToPlay {
             activity = .paused
         } else {
             activity = .active
@@ -45,9 +50,23 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         return WallpaperSessionSummary(
             wallpaperType: .scene,
             activity: activity,
-            supportsPlaybackControl: false,
+            supportsPlaybackControl: true,
             subtitle: loadError?.errorDescription.map(PIISanitizer.scrub)
         )
+    }
+
+    var isPlaying: Bool {
+        isVisible && userIntendsToPlay && currentProfile == .quality
+    }
+
+    func play() {
+        userIntendsToPlay = true
+        applyPerformanceProfile(currentProfile)
+    }
+
+    func pause() {
+        userIntendsToPlay = false
+        applyPerformanceProfile(currentProfile)
     }
 
     var videoPlayer: WallpaperVideoPlayer? { nil }
@@ -90,18 +109,26 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func show() {
         isVisible = true
         window?.orderBack(nil)
-        renderer?.applyPerformanceProfile(currentProfile)
+        // Route through the session so the effective profile honours
+        // `userIntendsToPlay` — a manually paused scene must not resume just
+        // because it became visible again (space switch / display wake).
+        applyPerformanceProfile(currentProfile)
     }
 
     func hide() {
         isVisible = false
         window?.orderOut(nil)
-        renderer?.applyPerformanceProfile(.suspended)
+        // `isVisible == false` folds to `.suspended` inside applyPerformanceProfile.
+        applyPerformanceProfile(currentProfile)
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
-        renderer?.applyPerformanceProfile(isVisible ? profile : .suspended)
+        // Effective render state folds the policy profile with the user's intent
+        // and visibility: the renderer runs only when all three say "go".
+        let effective: WallpaperPerformanceProfile =
+            (isVisible && userIntendsToPlay && profile == .quality) ? .quality : .suspended
+        renderer?.applyPerformanceProfile(effective)
     }
 
     /// Per-screen cursor-reactivity toggle (camera parallax + pointer shaders).

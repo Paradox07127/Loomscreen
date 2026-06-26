@@ -37,6 +37,14 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private let maximumTextureDimension2D: Int
     private let frameStartTimes: [TimeInterval]
     private let totalDuration: TimeInterval
+    /// Off-main queue that runs the (pure) LZ4 inflate for upcoming frames so the
+    /// render thread finds them already decoded — eliminating the synchronous
+    /// decode that otherwise stutters at the loop seam. `.userInitiated` so the
+    /// render thread doesn't outrun a `.utility`-starved prefetch under load.
+    private let prefetchQueue = DispatchQueue(
+        label: "com.livewallpaper.wpe.lazy-tex-prefetch",
+        qos: .userInitiated
+    )
 
     private var workingTexture: MTLTexture?
     private var workingTextureWidth = 0
@@ -44,12 +52,40 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private var lastUploadedFrameIndex = -1
     private var decodedImageCache: [Int: Data] = [:]
     private var decodedImageOrder: [Int] = []
+    /// Source images being inflated on `prefetchQueue`, keyed by imageID so a
+    /// scheduled inflate can be cancelled (dedup + bounded backlog + drop on
+    /// invalidate / when the image leaves the look-ahead window).
+    private var prefetchWorkItems: [Int: DispatchWorkItem] = [:]
+    /// Images whose decode threw — never re-scheduled, so a corrupt frame can't
+    /// spin up a background inflate every render tick.
+    private var prefetchFailedImageIDs: Set<Int> = []
+    /// The images the most recent schedule wants warm; a completion outside this
+    /// set is stale (playback moved on) and is dropped so it can't LRU-evict the
+    /// current/next image.
+    private var prefetchWantedImageIDs: Set<Int> = []
+    /// Bumped by `invalidate()` so a prefetch that completes after a reload is
+    /// dropped instead of repopulating a cleared cache.
+    private var prefetchGeneration = 0
+    private var lastScheduledFrameIndex = -1
     private var lastErrorDescription: String?
 
-    /// Keep this many recently-decompressed images warm so the typical
-    /// "3 sub-rects per source image" pattern (TEXS frame 0/1/2 all
-    /// reference imageID=0) avoids re-running LZ4 every animation frame.
-    private static let decompressedImageCacheCapacity = 2
+#if DEBUG
+    var debugPrefetchDecodeDelay: TimeInterval = 0
+    private(set) var debugSynchronousDecodedImageIDs: [Int] = []
+    var debugDecodedImageCacheIDs: Set<Int> { Set(decodedImageCache.keys) }
+    var debugPrefetchInFlightImageIDs: Set<Int> { Set(prefetchWorkItems.keys) }
+    var debugPrefetchFailedImageIDs: Set<Int> { prefetchFailedImageIDs }
+#endif
+
+    /// How many DISTINCT upcoming source images to keep warm (wrap-aware). Scanned
+    /// by image, not frame, so a multi-sub-rect atlas is prefetched with enough
+    /// lead time while the current atlas is still being reused.
+    private static let decodedImagePrefetchLookahead = 2
+    /// Bounds the decoded-image cache to the current image + the prefetch window
+    /// + one slack slot, so a just-prefetched image isn't evicted before use.
+    /// An upper bound, not a target — the common "3 sub-rects per source image"
+    /// pattern keeps far fewer distinct images resident.
+    private static let decompressedImageCacheCapacity = 4
 
     init(
         payload: WPETexStreamingPayload,
@@ -68,7 +104,10 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         } catch {
             throw Failure.unsupportedFormat(payload.info.textureFormatCode)
         }
-        self.alphaChannelPriorityRG88 = payload.info.isRG88LuminanceAlpha
+        self.alphaChannelPriorityRG88 = WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(
+            isLuminanceAlpha: payload.info.isRG88LuminanceAlpha,
+            label: label
+        )
         self.frames = payload.frames
         self.compressedImages = payload.compressedImages
         self.frameRate = payload.frameRate > 0 ? payload.frameRate : WPETexAnimationTrack.defaultFrameRate
@@ -91,6 +130,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
 
     func texture(at time: TimeInterval) -> MTLTexture? {
         let index = frameIndex(at: time)
+        defer { scheduleDecodedImagePrefetch(after: index) }
         if index == lastUploadedFrameIndex {
             return workingTexture
         }
@@ -166,6 +206,12 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         lastUploadedFrameIndex = -1
         decodedImageCache.removeAll(keepingCapacity: false)
         decodedImageOrder.removeAll(keepingCapacity: false)
+        prefetchGeneration &+= 1
+        for item in prefetchWorkItems.values { item.cancel() }
+        prefetchWorkItems.removeAll(keepingCapacity: false)
+        prefetchFailedImageIDs.removeAll(keepingCapacity: false)
+        prefetchWantedImageIDs.removeAll(keepingCapacity: false)
+        lastScheduledFrameIndex = -1
     }
 
     // MARK: - Decode + crop
@@ -182,19 +228,120 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
             throw Failure.missingMipmap(imageID)
         }
 
+        // The render thread reached this image before its prefetch finished:
+        // cancel the in-flight job so it can't redundantly inflate or post a
+        // late completion, then decode synchronously (the rare fallback).
+        cancelPrefetch(for: imageID)
         let decoded: Data
-        if mipmap.isCompressed {
-            decoded = try inflate(mipmap)
-        } else if mipmap.compressedBytes.count >= mipmap.decompressedByteCount {
-            decoded = mipmap.compressedBytes.prefix(mipmap.decompressedByteCount)
-        } else {
-            throw Failure.truncatedImageBytes
+        do {
+            decoded = try Self.decodedBytes(from: mipmap)
+        } catch {
+            prefetchFailedImageIDs.insert(imageID)
+            throw error
+        }
+#if DEBUG
+        debugSynchronousDecodedImageIDs.append(imageID)
+#endif
+        storeDecodedImage(decoded, for: imageID)
+        return decoded
+    }
+
+    /// Keeps the next `decodedImagePrefetchLookahead` DISTINCT source images warm
+    /// on `prefetchQueue` (wrapping to frame 0 near the loop end). Idempotent per
+    /// frame index; cancels any in-flight job whose image left the window; skips
+    /// images already cached, in flight, or known-failed. The render thread then
+    /// hits the cache instead of decoding synchronously — no loop-seam stutter.
+    private func scheduleDecodedImagePrefetch(after frameIndex: Int) {
+        guard frameIndex != lastScheduledFrameIndex else { return }
+        lastScheduledFrameIndex = frameIndex
+
+        let wanted = prefetchImageIDs(after: frameIndex)
+        prefetchWantedImageIDs = Set(wanted)
+
+        // Cancel jobs for images that have fallen out of the look-ahead window —
+        // bounds the in-flight backlog to the window even under a slow queue.
+        // (Collect first; don't mutate `prefetchWorkItems` while iterating it.)
+        let staleImageIDs = prefetchWorkItems.keys.filter { !prefetchWantedImageIDs.contains($0) }
+        for imageID in staleImageIDs {
+            prefetchWorkItems.removeValue(forKey: imageID)?.cancel()
         }
 
+        for imageID in wanted {
+            guard decodedImageCache[imageID] == nil,
+                  prefetchWorkItems[imageID] == nil,
+                  !prefetchFailedImageIDs.contains(imageID),
+                  compressedImages.indices.contains(imageID),
+                  let mipmap = compressedImages[imageID].payloads.first else { continue }
+
+            let generation = prefetchGeneration
+#if DEBUG
+            let delay = debugPrefetchDecodeDelay
+#endif
+            // `@Sendable` so the work item is NON-isolated: a plain closure made
+            // inside this @MainActor method would inherit MainActor isolation and
+            // trip an executor assertion when run on `prefetchQueue`.
+            let item = DispatchWorkItem { @Sendable [weak self] in
+#if DEBUG
+                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+#endif
+                let decoded = try? Self.decodedBytes(from: mipmap)
+                Task { @MainActor in
+                    self?.completePrefetchedImage(decoded, imageID: imageID, generation: generation)
+                }
+            }
+            prefetchWorkItems[imageID] = item
+            prefetchQueue.async(execute: item)
+        }
+    }
+
+    /// The next `decodedImagePrefetchLookahead` DISTINCT image IDs after
+    /// `frameIndex` that aren't already cached, scanning at most one full loop.
+    private func prefetchImageIDs(after frameIndex: Int) -> [Int] {
+        guard !frames.isEmpty, Self.decodedImagePrefetchLookahead > 0 else { return [] }
+
+        var imageIDs: [Int] = []
+        var seen: Set<Int> = []
+        for offset in 1...frames.count {
+            let rawIndex = frameIndex + offset
+            let targetIndex: Int
+            if rawIndex < frames.count {
+                targetIndex = rawIndex
+            } else if loop {
+                targetIndex = rawIndex % frames.count
+            } else {
+                break
+            }
+            let imageID = frames[targetIndex].imageID
+            guard seen.insert(imageID).inserted, decodedImageCache[imageID] == nil else { continue }
+            imageIDs.append(imageID)
+            if imageIDs.count == Self.decodedImagePrefetchLookahead { break }
+        }
+        return imageIDs
+    }
+
+    private func cancelPrefetch(for imageID: Int) {
+        prefetchWorkItems.removeValue(forKey: imageID)?.cancel()
+    }
+
+    private func completePrefetchedImage(_ decoded: Data?, imageID: Int, generation: Int) {
+        guard generation == prefetchGeneration else { return }
+        prefetchWorkItems.removeValue(forKey: imageID)
+        // A failed decode is recorded so it is never re-scheduled (no per-tick
+        // background respin on a corrupt image).
+        guard let decoded else {
+            prefetchFailedImageIDs.insert(imageID)
+            return
+        }
+        // Drop a stale result (playback moved past this image) so it can't
+        // LRU-evict the current/next image we actually need.
+        guard prefetchWantedImageIDs.contains(imageID), decodedImageCache[imageID] == nil else { return }
+        storeDecodedImage(decoded, for: imageID)
+    }
+
+    private func storeDecodedImage(_ decoded: Data, for imageID: Int) {
         decodedImageCache[imageID] = decoded
-        decodedImageOrder.append(imageID)
+        touchDecodedImage(imageID)
         evictIfNeeded()
-        return decoded
     }
 
     private func touchDecodedImage(_ imageID: Int) {
@@ -210,7 +357,17 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         }
     }
 
-    private func inflate(_ mipmap: WPETexCompressedMipmap) throws -> Data {
+    private nonisolated static func decodedBytes(from mipmap: WPETexCompressedMipmap) throws -> Data {
+        if mipmap.isCompressed {
+            return try inflate(mipmap)
+        }
+        guard mipmap.compressedBytes.count >= mipmap.decompressedByteCount else {
+            throw Failure.truncatedImageBytes
+        }
+        return mipmap.compressedBytes.prefix(mipmap.decompressedByteCount)
+    }
+
+    private nonisolated static func inflate(_ mipmap: WPETexCompressedMipmap) throws -> Data {
         let outputCount = mipmap.decompressedByteCount
         guard outputCount > 0 else { throw Failure.decompressionFailed(mipmap.index) }
         var output = Data(count: outputCount)
