@@ -3,25 +3,16 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Vertical detail content for a single Workshop item, shown in the trailing
-/// detail panel of the Browse grid (a `ResizableInspectorSplit`). A square
-/// auto-playing hero on top, then title + rating, the download / open / copy
-/// actions, metadata, tags, and the description. "Download" runs SteamCMD via
-/// the configured Doctor and imports into the local library; "Open in Steam"
-/// and the copy actions are always live.
 struct WorkshopInspectorContent: View {
     let item: WorkshopQueryItem
     let doctor: SteamCMDDoctorService
-    /// Scope the Browse grid to this item's creator (SteamID64 + persona name) —
-    /// the author-link path. nil disables the link (plain author text).
+    /// nil disables the author link (plain author text).
     var onBrowseCreator: ((String, String?) -> Void)? = nil
-    /// Scope the Browse grid to a clicked tag. nil → tags render as plain labels.
+    /// nil → tags render as plain labels.
     var onSelectTag: ((String) -> Void)? = nil
 
     @Environment(\.openURL) private var openURL
     @Environment(ScreenManager.self) private var screenManager
-    /// The installed-library entry for this item, if it's already downloaded —
-    /// drives the Download → Apply swap.
     @State private var installedEntry: WPEHistoryEntry?
 
     @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
@@ -29,9 +20,7 @@ struct WorkshopInspectorContent: View {
     @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
     @State private var matureRevealed = false
     @State private var showingAgeConfirm = false
-    /// Drives the multi-display target popover under the single Apply button.
     @State private var showingApplyPopover = false
-    /// Collapsed vs. expanded state for a long description.
     @State private var descriptionExpanded = false
 
     /// Blur the hero until clicked, mirroring the grid card's spoiler gate so
@@ -123,7 +112,6 @@ struct WorkshopInspectorContent: View {
             }
     }
 
-    /// Reveal a blurred Mature hero — gated by a one-time 18+ confirmation.
     private func requestReveal() {
         if matureConfirmed {
             matureRevealed = true
@@ -134,7 +122,6 @@ struct WorkshopInspectorContent: View {
 
     // MARK: - Author
 
-    /// Star rating on the left, author right-aligned on the same line.
     @ViewBuilder
     private var authorRatingRow: some View {
         let hasAuthor = !(item.creatorPersonaName ?? "").isEmpty
@@ -208,9 +195,6 @@ struct WorkshopInspectorContent: View {
 
     // MARK: - Actions
 
-    /// Primary control (Download → progress → Apply) fills the row; Copy ID and
-    /// Open-in-Steam sit as borderless icons right-aligned on the same line —
-    /// mirrors the Installed inspector's Apply row.
     private var actionsColumn: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             downloadControl
@@ -219,8 +203,6 @@ struct WorkshopInspectorContent: View {
         }
     }
 
-    /// Borderless icon button (no background frame, generous hit area) — keeps
-    /// the title as tooltip + VoiceOver label.
     private func secondaryActionButton(
         _ titleKey: LocalizedStringKey,
         systemImage: String,
@@ -246,8 +228,6 @@ struct WorkshopInspectorContent: View {
         case .importing:
             indeterminateDownloadControl("Importing…")
         default:
-            // Once it's in the library (just downloaded OR previously installed)
-            // the control becomes Apply; otherwise it's Download / Retry.
             if let installedEntry {
                 applyControl(for: installedEntry)
             } else {
@@ -271,8 +251,6 @@ struct WorkshopInspectorContent: View {
                    : "Set up SteamCMD in Settings → Workshop → SteamCMD Doctor to enable downloads."))
     }
 
-    /// Prominent blue Apply — targets the open display(s), mirroring the
-    /// Installed library. Shown once the item is in the local library.
     @ViewBuilder
     private func applyControl(for entry: WPEHistoryEntry) -> some View {
         let screens = screenManager.screens
@@ -283,8 +261,7 @@ struct WorkshopInspectorContent: View {
                 .disabled(true)
                 .help(Text("Open a display first, then apply"))
         } else if screens.count == 1, let only = screens.first {
-            // Single display: name it in the label so the action is unambiguous
-            // ("Apply to Studio Display") — no picker needed.
+            // Name the single display in the label so the action is unambiguous; no picker needed.
             Button { apply(entry, to: only) } label: {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -292,9 +269,6 @@ struct WorkshopInspectorContent: View {
             .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
         } else {
-            // One Apply button; tapping floats a popover to pick a display or all.
-            // (Single-display applies directly above; there's no standalone
-            // "Apply to All" button.)
             Button { showingApplyPopover = true } label: { applyLabel }
                 .adaptiveGlassButton(.prominent)
                 .controlSize(.regular)
@@ -313,8 +287,7 @@ struct WorkshopInspectorContent: View {
         Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
     }
 
-    /// Displays currently running this item — drives the active checkmark in the
-    /// Apply popover.
+    /// Displays currently running this item — drives the active checkmark in the Apply popover.
     private var activeScreenIDs: Set<CGDirectDisplayID> {
         Set(screenManager.screens
             .filter { screenManager.getConfiguration(for: $0)?.wpeOrigin?.workshopID == String(item.id) }
@@ -360,10 +333,9 @@ struct WorkshopInspectorContent: View {
                     Spacer(minLength: 0)
                     cancelDownloadButton
                 }
-                // Indeterminate linear bar: steamcmd usually streams no percentage
-                // for workshop items, so this animates to read as "active" and
-                // matches the determinate bar's shape — the control no longer jumps
-                // between a circular spinner and a bar when a percentage does arrive.
+                // steamcmd usually streams no percentage for workshop items; an indeterminate
+                // linear bar (not a spinner) matches the determinate bar's shape so the control
+                // doesn't jump when a percentage does arrive.
                 ProgressView()
                     .progressViewStyle(.linear)
                     .accessibilityLabel(Text(title))
@@ -483,8 +455,6 @@ struct WorkshopInspectorContent: View {
         }
     }
 
-    /// A tag pill. Tappable (accent-tinted) when `onSelectTag` is wired — clicking
-    /// scopes the grid to that tag; otherwise a plain secondary label.
     @ViewBuilder
     private func tagChip(_ tag: String) -> some View {
         if let onSelectTag {
@@ -561,10 +531,8 @@ struct WorkshopInspectorContent: View {
     }()
 }
 
-/// Shared display-target chooser for the Apply popover (online + installed
-/// inspectors): "All Displays" plus one row per display, the active one(s)
-/// checkmarked. Picking a row fires the matching callback; the caller dismisses
-/// the popover.
+/// Shared display-target chooser for the Apply popover (online + installed inspectors).
+/// The caller dismisses the popover after a row fires its callback.
 struct WorkshopApplyTargetPicker: View {
     let screens: [Screen]
     let activeScreenIDs: Set<CGDirectDisplayID>
@@ -605,10 +573,9 @@ struct WorkshopApplyTargetPicker: View {
     }
 }
 
-/// Description block shared by the online + Installed inspectors. One tap target
-/// (the whole block) toggles expand/collapse. Collapsing animates a real height
-/// change with a bottom fade-out — the text is laid out full-size and cropped,
-/// so the height interpolates smoothly instead of snapping at a line boundary.
+/// Description block shared by the online + Installed inspectors. Collapsing animates a real
+/// height change with a bottom fade — the text is laid out full-size and cropped, so the
+/// height interpolates smoothly instead of snapping at a line boundary.
 struct CollapsibleDescription: View {
     let text: String
     @Binding var isExpanded: Bool
@@ -616,8 +583,8 @@ struct CollapsibleDescription: View {
     /// ~6 lines of body copy before we crop + fade.
     private let collapsedHeight: CGFloat = 116
 
-    /// Full intrinsic height of the text, measured live. `max()` keeps it stable
-    /// even while the visible frame is cropped (the crop never shrinks it).
+    /// Measured live; `max()` keeps it stable even while the visible frame is cropped
+    /// (the crop never shrinks the intrinsic height).
     @State private var fullHeight: CGFloat = 0
 
     private var isExpandable: Bool { fullHeight > collapsedHeight + 1 }

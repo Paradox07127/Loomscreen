@@ -43,9 +43,8 @@ final class GlobalShortcutManager {
 
         let settings = SettingsManager.shared.loadGlobalSettings()
         guard settings.globalShortcutsEnabled else {
-            // Master switch is off — leave Carbon clean and bail. The
-            // event handler stays installed so we can re-register
-            // instantly when the user flips the switch back on.
+            // Master switch off: leave Carbon clean but keep the event handler
+            // installed so we can re-register instantly when re-enabled.
             return
         }
 
@@ -93,11 +92,9 @@ final class GlobalShortcutManager {
 
     private func observePreferenceChanges() {
         guard preferenceObserver == nil else { return }
-        // Use `Task { @MainActor ... }` rather than
-        // `MainActor.assumeIsolated`: the observer block is technically
-        // executed on the queue passed at register time, but the actor
-        // contract is what matters for our @MainActor methods. The Task
-        // hop is also free here — registration is cold-path.
+        // `Task { @MainActor }` rather than `MainActor.assumeIsolated`: the
+        // observer runs on the register-time queue, so we need the hop to honor
+        // the @MainActor contract. Free here since registration is cold-path.
         preferenceObserver = NotificationCenter.default.addObserver(
             forName: .globalShortcutsDidChange,
             object: nil,
@@ -131,7 +128,6 @@ final class GlobalShortcutManager {
 
     // MARK: - Event Handler
 
-    /// Returns true when the handler is installed and the registration pipeline can proceed.
     private func installEventHandlerIfNeeded() -> Bool {
         guard eventHandler == nil else { return true }
 
@@ -180,11 +176,8 @@ final class GlobalShortcutManager {
 
     private func dispatchHotKey(signatureID: Int) {
         guard let action = GlobalShortcutAction.action(forSignatureID: signatureID) else { return }
-        // Carbon delivers events via the Application event target before
-        // they hop onto the MainActor. If the master switch was flipped
-        // off between the press and this dispatch, swallow the event so
-        // late-arriving keys don't fire after the user disabled the
-        // surface.
+        // Swallow keys that arrive after the master switch was flipped off
+        // between the Carbon press and this MainActor hop.
         guard SettingsManager.shared.loadGlobalSettings().globalShortcutsEnabled else { return }
         guard let manager = screenManager else { return }
         switch action {

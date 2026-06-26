@@ -2,15 +2,12 @@ import AppKit
 import SwiftUI
 
 /// Vertical handle on the inspector's leading edge for click-drag width
-/// resizing. Visually disappears when idle to keep the inspector reading
-/// quiet, but leaves a 1pt hairline divider so users can still see "there's
-/// an edge here." The full capsule + material affordance fades in on hover
-/// or while dragging — mirroring Xcode / Final Cut's inspector divider.
+/// resizing. Idle = 1pt hairline only; the full capsule affordance fades in
+/// on hover/drag.
 ///
-/// `NSCursor.resizeLeftRight` is pushed while the cursor sits inside the
-/// 28pt hit area regardless of visual state — that's the primary discovery
-/// signal. `onDisappear` pops the cursor if the view leaves while still
-/// hovered to avoid stranding it on the stack.
+/// `NSCursor.resizeLeftRight` is pushed while the cursor sits inside the 28pt
+/// hit area regardless of visual state. `onDisappear` pops the cursor if the
+/// view leaves while still hovered to avoid stranding it on the stack.
 struct InspectorResizeHandle: View {
     static let hitAreaWidth: CGFloat = 28
 
@@ -42,16 +39,14 @@ struct InspectorResizeHandle: View {
             Color.clear
                 .contentShape(Rectangle())
 
-            // Idle: 1pt hairline that signals "edge here" without dominating.
             Rectangle()
                 .fill(Color.primary.opacity(0.15))
                 .frame(width: 1, height: handleHeight * hairlineHeightRatio)
                 .opacity(isActive ? 0 : 1)
 
-            // Hover / drag: full capsule affordance with material + stroke.
-            // Once the drag is armed to close (pulled into the sliver zone), it
-            // switches to an accent capsule and grows so "let go to close" reads
-            // clearly — distinct from an ordinary resize.
+            // When armed to close (pulled into the sliver zone) the capsule
+            // switches to accent + grows so "let go to close" reads distinct
+            // from an ordinary resize.
             Capsule()
                 .fill(isClosingArmed ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.regularMaterial))
                 .overlay(
@@ -121,8 +116,7 @@ struct InspectorResizeHandle: View {
         isHovering || isDragging
     }
 
-    /// Whether releasing at `candidate` should collapse the panel rather than
-    /// commit a width. Only ever true when the parent wired up drag-to-close.
+    /// Only ever true when the parent wired up drag-to-close.
     private func armed(for candidate: CGFloat) -> Bool {
         guard let closeThreshold, onRequestClose != nil else { return false }
         return candidate < closeThreshold

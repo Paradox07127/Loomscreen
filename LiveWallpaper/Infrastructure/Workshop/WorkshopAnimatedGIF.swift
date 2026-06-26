@@ -57,7 +57,6 @@ struct WorkshopAnimatedGIF: @unchecked Sendable {
 
 extension WorkshopAnimatedGIF {
 
-    /// Decodes `data` into a static or animated asset, enforcing every cap.
     /// Returns `nil` on decode failure or any budget violation.
     static func make(from data: Data) -> WorkshopPreviewAsset? {
         guard data.count <= maxBytes,
@@ -111,7 +110,7 @@ extension WorkshopAnimatedGIF {
         return totalPixels * 4 <= UInt64(maxDecodedPixelBytes)
     }
 
-    /// Pixel dimensions straight from the source metadata — cheap, no decode.
+    /// From source metadata — cheap, no full decode.
     static func imageDimensions(from source: CGImageSource, index: Int) -> (width: Int, height: Int)? {
         guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any],
               let width = (props[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue,

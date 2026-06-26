@@ -87,9 +87,8 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         return (bitmap: bitmap, metrics: metrics)
     }
 
-    /// Resolves the square cell size, rejecting non-finite or overflowing font
-    /// sizes (so `Int(ceil(...))` never traps) and any cell larger than the
-    /// atlas page can hold.
+    /// Rejects non-finite or overflowing font sizes (so `Int(ceil(...))` never
+    /// traps) and any cell larger than the atlas page can hold.
     private func cellSizing(font: CTFont, maxCellSide: Int?) -> (padding: Int, cellSide: Int)? {
         let padding = max(parameters.padding, 0)
         let limit = max(maxCellSide ?? Int.max, 1)

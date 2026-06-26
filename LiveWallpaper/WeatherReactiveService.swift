@@ -12,7 +12,6 @@ final class WeatherReactiveService {
     private(set) var currentEffectAdjustments: WeatherEffectAdjustments = .neutral
     private(set) var locationStatus: LocationStatus = .notDetermined
     private(set) var lastError: String?
-    /// Human-readable description of the active source (e.g. "Manual: Tokyo").
     /// `nil` until at least one resolve completes. Drives the status badge.
     private(set) var activeLocationLabel: String?
 
@@ -58,10 +57,8 @@ final class WeatherReactiveService {
     /// Separate from `updateTask` so an explicit `refresh()` can supersede
     /// the in-flight fetch without tearing down the hourly poll cycle.
     @ObservationIgnored nonisolated(unsafe) private var fetchTask: Task<Void, Never>?
-    /// `nonisolated(unsafe)` because Swift 6 cannot prove the deinit (which
-    /// runs on whichever queue performs the final release) accesses this
-    /// property safely. We only mutate it from MainActor code, so there's
-    /// no actual race — the unsafe escape hatch is the canonical pattern.
+    /// `nonisolated(unsafe)`: only mutated from MainActor code, but deinit
+    /// (released on an arbitrary queue) also touches it, which Swift 6 can't prove safe.
     @ObservationIgnored nonisolated(unsafe) private var preferenceObserver: NSObjectProtocol?
 
     // MARK: - Open-Meteo Response Model

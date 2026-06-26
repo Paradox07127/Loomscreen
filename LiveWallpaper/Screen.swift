@@ -104,16 +104,6 @@ class Screen: Identifiable, Hashable {
         old?.cleanup()
     }
 
-    /// Swap to `newSession` WITHOUT cleaning up the previous session.
-    @discardableResult
-    func stageRuntimeSessionForTransition(_ session: any WallpaperRuntimeSession) -> (any WallpaperRuntimeSession)? {
-        guard !isSameSession(runtimeSession, session) else { return nil }
-        let old = runtimeSession
-        handleRuntimeSessionTransition(from: old, to: session)
-        runtimeSession = session
-        return old
-    }
-
     func adoptRuntimeSession(from existingScreen: Screen) {
         let new = existingScreen.runtimeSession
         guard !isSameSession(runtimeSession, new) else { return }
@@ -125,7 +115,6 @@ class Screen: Identifiable, Hashable {
         runtimeSession?.updateFrame(to: frame)
     }
 
-    /// Tear down and release the active wallpaper session for this screen.
     func resetRuntimeSession() {
         let old = runtimeSession
         guard old != nil else { return }

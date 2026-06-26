@@ -1,15 +1,8 @@
 import SwiftUI
 
-/// Inspector-header popover. Single-purpose: bookmark the current
-/// wallpaper (or manage the existing bookmark if it's already saved).
-/// The full library list lives in the sidebar-routed Bookmarks page —
-/// duplicating that list here just bloated the surface and turned the
-/// quick-save flow into a scrollable picker.
-///
-/// Three states, one compact form:
-/// 1. No active wallpaper → guidance message only
-/// 2. Active wallpaper, not yet bookmarked → name field + Save button
-/// 3. Already bookmarked → name field pre-filled + Update / Remove
+/// Inspector-header popover for quick-saving the current wallpaper. The full
+/// library list deliberately lives only on the sidebar Bookmarks page —
+/// duplicating it here turned the quick-save flow into a scrollable picker.
 struct BookmarksPopover: View {
     let screen: Screen
     /// Content the inspector is currently showing — passed in so a video

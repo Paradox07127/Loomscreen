@@ -3,18 +3,11 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 
-/// Shared playback / privacy controls that sit above the type-specific
-/// inspector panel (video / HTML / shader / scene). The component is the
-/// resolution of plan U-L1: keep "Mute" / "Frame Rate" / "Sync to Lock Screen"
-/// in a positionally stable spot regardless of `wallpaperType`, so users
-/// don't hunt for the same toggle after a content-type switch. HTML-only
-/// privacy controls live in `ContentSecurityInspector` so the playback
-/// section's mental model stays uniform across types.
-///
-/// Bindings flow back to the parent (`ScreenDetailView`) for in-memory state,
-/// and changes are committed to `ScreenManager` here so persistence happens
-/// at the source of the user gesture instead of leaking through every parent
-/// `onChange`.
+/// Playback controls kept in a positionally stable spot regardless of
+/// `wallpaperType`, so users don't hunt for the same toggle after a
+/// content-type switch. Changes commit to `ScreenManager` here so persistence
+/// happens at the source of the gesture instead of leaking through every
+/// parent `onChange`.
 struct CommonPlaybackInspector: View {
     var screen: Screen
     var wallpaperType: WallpaperType
@@ -28,36 +21,26 @@ struct CommonPlaybackInspector: View {
     @Binding var videoDisplayMode: VideoDisplayMode
     @Binding var frameRateLimit: FrameRateLimit
     @Binding var syncToLockScreen: Bool
-    /// Scene-only cursor-reactivity toggle. Bound from the draft; only the
-    /// scene row reads it.
     @Binding var sceneMouseInteractionEnabled: Bool
-    /// Scene-only click-capture toggle (real mouse interaction; steals desktop
-    /// clicks while on).
+    /// Click-capture toggle: real mouse interaction; steals desktop clicks while on.
     @Binding var sceneClickCaptureEnabled: Bool
-    /// Scene-only fit mode: how the scene texture fills a non-16:9 display.
-    /// Reuses the shared `fitMode` field via the draft; only the scene row reads
-    /// it. Applies through `ScreenManager.updateSceneFitMode`.
+    /// Reuses the shared `fitMode` field via the draft. Applies through `ScreenManager.updateSceneFitMode`.
     @Binding var sceneFitMode: VideoFitMode
 
-    /// One-shot "you understand this steals desktop clicks" acknowledgement so
-    /// the first enable shows a confirmation; later toggles are silent.
+    /// One-shot acknowledgement: first enable shows a confirmation, later toggles are silent.
     @AppStorage("Scene.ClickCapture.Acknowledged") private var clickCaptureAcknowledged = false
     @State private var showClickCaptureConfirm = false
-    /// Optional binding present only when `wallpaperType == .html`. Drives
-    /// the audio path so HTML's `WKWebView` actually mutes its media
-    /// elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
+    /// Present only for `.html`. Routes the audio path so the `WKWebView` mutes
+    /// its media elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
     var htmlConfig: Binding<HTMLConfig>?
-    /// Current colour space override. When `.forceSDR`, the Rec.709
-    /// composition takes ownership of `AVPlayerItem.videoComposition`, so
-    /// the frame-rate cap (which writes the same slot) is dimmed and
-    /// ignored — the picker reflects that disabled state.
+    /// When `.forceSDR`, the Rec.709 composition owns `AVPlayerItem.videoComposition`,
+    /// so the frame-rate cap (same slot) is dimmed and ignored.
     var videoColorSpace: VideoColorSpace = .auto
 
     @AppStorage("Inspector.PlaybackExpanded") private var isPlaybackExpanded = true
     @State private var lockScreenExtracted = false
-    /// Monotonic counter that lets a late "clear ✓" Task drop itself when a
-    /// newer toggle gesture has already taken over the visual feedback —
-    /// same pattern as `ScheduleSection.conflictHighlightGeneration`.
+    /// Lets a late "clear ✓" Task drop itself when a newer toggle gesture took over
+    /// the feedback — same pattern as `ScheduleSection.conflictHighlightGeneration`.
     @State private var lockScreenFeedbackGeneration = 0
 
     var body: some View {
@@ -126,15 +109,13 @@ struct CommonPlaybackInspector: View {
         screenManager.screens.count > 1
     }
 
-    /// Cursor-reactivity is a scene-only concept (camera parallax / pointer
-    /// shaders) — video / HTML / shader wallpapers don't sample the pointer here.
+    /// Scene-only: only scenes sample the pointer here (parallax / pointer shaders).
     private var showsMouseInteractionRow: Bool {
         wallpaperType == .scene
     }
 
-    /// Scene-only: how the rendered scene texture is fitted onto the display.
-    /// Video has its own fit control in the preview area; HTML/shader don't map
-    /// a fixed-aspect texture onto the screen here.
+    /// Scene-only: video has its own fit control in the preview area; HTML/shader
+    /// don't map a fixed-aspect texture onto the screen.
     private var showsFitModeRow: Bool {
         wallpaperType == .scene
     }
@@ -306,9 +287,6 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    /// Real click capture. Enabling raises the wallpaper above desktop icons and
-    /// intercepts clicks (steals desktop clicks) so an interactive scene can
-    /// respond — gated behind a one-time confirmation.
     private var clickInteractionRow: some View {
         SettingRow(
             icon: "cursorarrow.click",
@@ -370,10 +348,9 @@ struct CommonPlaybackInspector: View {
 
     // MARK: - Bindings
 
-    /// Routes the audio toggle to the correct backing store: video sessions
-    /// use `AVPlayer.muted` via `ScreenManager.updateMuted`, HTML sessions
-    /// flip `HTMLConfig.muteAudio` so the WKWebView's media elements mute.
-    /// Without this split the HTML mute toggle was a visual no-op.
+    /// Routes the audio toggle to the correct store: video uses `AVPlayer.muted`,
+    /// HTML flips `HTMLConfig.muteAudio`. Without this split the HTML mute toggle
+    /// was a visual no-op.
     private var audioMutedBinding: Binding<Bool> {
         if let htmlConfig {
             return htmlConfigBinding(htmlConfig, keyPath: \.muteAudio)
@@ -497,7 +474,8 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    /// Threads `HTMLConfig` keypath writes back through the parent `Binding` AND `ScreenManager.updateHTMLConfig` so persistence and runtime apply happen in one place.
+    /// Writes through the parent `Binding` AND `ScreenManager.updateHTMLConfig`
+    /// so persistence and runtime apply happen in one place.
     private func htmlConfigBinding<Value: Equatable>(
         _ htmlConfig: Binding<HTMLConfig>,
         keyPath: WritableKeyPath<HTMLConfig, Value>
@@ -515,11 +493,8 @@ struct CommonPlaybackInspector: View {
     }
 }
 
-/// HTML-only privacy + origin-trust controls. Lives directly under the
-/// playback section in the inspector column so all "what is the WKWebView
-/// allowed to do" decisions sit together — ephemeral data, tracker blocking,
-/// and (for remote URLs) the per-origin script execution grant moved here
-/// from the source banner column.
+/// HTML-only privacy + origin-trust controls, grouped so all "what is the
+/// WKWebView allowed to do" decisions sit together.
 struct ContentSecurityInspector: View {
     var screen: Screen
     var source: HTMLSource?
@@ -626,10 +601,9 @@ struct ContentSecurityInspector: View {
     @ViewBuilder
     private func originTrustRow(for origin: TrustedHTMLOrigin) -> some View {
         let isTrusted = trustStore.originSet.contains(origin)
-        // `LocalizedStringKey(origin.displayName)` is used here intentionally
-        // for the subtitle: when no translation exists (host names never have
-        // one) it falls back to the raw host string — the literal user data
-        // we want to show. The xcstrings extractor will simply skip it.
+        // `LocalizedStringKey(origin.displayName)` subtitle is intentional: with
+        // no translation it falls back to the raw host string (the literal user
+        // data we want); the xcstrings extractor skips it.
         SettingRow(
             icon: isTrusted ? "checkmark.shield.fill" : "exclamationmark.shield",
             iconColor: isTrusted ? DesignTokens.Colors.Status.active : DesignTokens.Colors.Status.warning,
@@ -657,8 +631,7 @@ struct ContentSecurityInspector: View {
     @ViewBuilder
     private func trustRowAction(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> some View {
         if trustStore.isBuiltInTrusted(origin) {
-            // Built-in trust (e.g. youtube-nocookie.com) — can't be revoked,
-            // show a static "Built-in" badge instead of a Revoke button.
+            // Built-in trust (e.g. youtube-nocookie.com) can't be revoked — static badge, no Revoke button.
             Text("Built-in")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)

@@ -2,10 +2,6 @@ import AppKit
 import Foundation
 import LiveWallpaperCore
 
-/// Pure value type assembled by `BugReporter` and consumed by `ReportBugSheet`.
-/// Holds the GitHub-bound diagnostic markdown plus the file URL of the
-/// rotating runtime log so the sheet can offer "Show Log in Finder".
-///
 /// `Identifiable` so SwiftUI's `.sheet(item:)` can present the report; the
 /// id changes on every fresh `makeReport(...)` call so re-opening the sheet
 /// re-renders even if the diagnostic content happens to be byte-identical.
@@ -17,12 +13,9 @@ struct BugReport: Identifiable, Sendable {
     let logFileExists: Bool
 }
 
-/// Builds the data the bug-report sheet needs without doing any UI work.
-/// Kept side-effect-free so it can be unit-tested and called from any actor.
 enum BugReporter {
-    /// `Paradox07127/Loomscreen` — the public open-source repo. Hardcoded
-    /// rather than read from a build setting because the issue URL must
-    /// survive even if `Bundle` lookups fail.
+    /// Hardcoded rather than read from a build setting because the issue URL
+    /// must survive even if `Bundle` lookups fail.
     private static let issueTemplateURL = URL(
         string: "https://github.com/Paradox07127/Loomscreen/issues/new?template=bug_report.yml"
     )!

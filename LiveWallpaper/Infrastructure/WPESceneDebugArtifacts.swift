@@ -4,16 +4,14 @@ import Foundation
 import LiveWallpaperCore
 import Metal
 
-/// Per-scene debug session that mirrors every shader compile + pipeline build
-/// failure to disk under `~/Library/.../Application Support/LiveWallpaper/scene-debug/<timestamp-id>/`,
-/// so a maintainer can reproduce the crash with the exact preprocessed source
-/// the compiler saw (original/processed GLSL, translated MSL, error text,
-/// scene-info, scene.log mirror, optional first-frame.png).
+/// Per-scene debug session that mirrors shader compile + pipeline build failures
+/// to disk under `Application Support/LiveWallpaper/scene-debug/<timestamp-id>/`,
+/// so a maintainer can reproduce the crash with the exact preprocessed source the
+/// compiler saw (original/processed GLSL, translated MSL, error text, first-frame.png).
 ///
-/// Opt-in in all builds: gated by the `WPESceneDebugArtifactsEnabled`
-/// UserDefaults flag (Developer Mode → Developer Tools). Off by default so a
-/// normal launch never pays for shader dumps / first-frame read-back / per-pass
-/// binding diagnostics; the corpus harness and trace tests flip it on explicitly.
+/// Gated by the `WPESceneDebugArtifactsEnabled` UserDefaults flag, off by default so
+/// a normal launch never pays for dumps / read-back / binding diagnostics; the corpus
+/// harness and trace tests flip it on explicitly.
 ///
 /// `@unchecked Sendable`: `session` is guarded by `sessionLock`; I/O via `writeQueue`.
 final class WPESceneDebugArtifacts: @unchecked Sendable {
@@ -34,9 +32,9 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private var waterWavesPathValue = "Inactive"
     private var waterWavesPathStamp: TimeInterval = 0
 
-    /// Live indicator of which code path the waterwaves effect is currently taking
-    /// ("Builtin" / "Transpiled" / "Inactive"). Goes stale to "Inactive" ~1s after the
-    /// last waterwaves dispatch so it reflects the *current* scene. Read by Developer Tools.
+    /// Which code path the waterwaves effect is currently taking ("Builtin" /
+    /// "Transpiled" / "Inactive"). Goes stale to "Inactive" ~1s after the last
+    /// waterwaves dispatch so it reflects the *current* scene.
     var waterWavesPath: String {
         waterWavesPathLock.lock()
         defer { waterWavesPathLock.unlock() }
@@ -64,8 +62,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private let testingEnabledOverrideLock = NSLock()
     private var testingEnabledOverride: Bool?
 
-    /// Test-only: force `isEnabled` on/off independent of UserDefaults, so trace/diagnostics
-    /// tests don't depend on the developer's `WPESceneDebugArtifactsEnabled` setting. Pass nil to clear.
+    /// Forces `isEnabled` independent of UserDefaults so trace tests don't depend on
+    /// the developer's `WPESceneDebugArtifactsEnabled` setting. Pass nil to clear.
     func setEnabledForTesting(_ enabled: Bool?) {
         testingEnabledOverrideLock.lock()
         testingEnabledOverride = enabled
@@ -73,9 +71,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     }
     #endif
 
-    /// Caps on the scene-debug directory so builds with dumps enabled don't
-    /// accumulate unbounded PNG/MSL artifacts. The oldest session folders
-    /// are pruned first when either bound is exceeded; the newest is always kept.
+    /// Caps so dump-enabled builds don't accumulate unbounded PNG/MSL artifacts.
+    /// Oldest folders pruned first when either bound is exceeded; newest always kept.
     private let maxSessionFolders = 40
     private let maxTotalBytes: UInt64 = 512 * 1024 * 1024  // 512 MiB
     private let isoFormatter: ISO8601DateFormatter = {
@@ -84,8 +81,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         return f
     }()
 
-    /// Disabled in tests by default; the corpus harness flips it on
-    /// explicitly when it wants per-scene dumps.
+    /// Disabled by default; the corpus harness flips it on for per-scene dumps.
     var isEnabled: Bool {
         #if DEBUG
         testingEnabledOverrideLock.lock()
@@ -121,8 +117,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         }
     }
 
-    /// Opens a fresh session folder for the given workshop ID. Closes any
-    /// prior session implicitly. No-op when `isEnabled == false`.
+    /// Closes any prior session implicitly. No-op when `isEnabled == false`.
     @discardableResult
     func beginSession(workshopID: String, descriptor: String) -> URL? {
         guard isEnabled else { return nil }
@@ -169,10 +164,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         return folder
     }
 
-    /// Prune oldest session folders so the scene-debug root stays under both the
-    /// folder-count and total-byte caps. Runs async on the write queue so it
-    /// never blocks scene load. Best-effort — failures are ignored, and the
-    /// single newest session is always retained.
+    /// Async on the write queue so it never blocks scene load. Best-effort —
+    /// failures ignored, and the single newest session is always retained.
     private func pruneOldSessions(under root: URL) {
         let maxFolders = maxSessionFolders
         let maxBytes = maxTotalBytes
@@ -220,7 +213,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         return total
     }
 
-    /// Drop the current session reference. Files stay on disk.
+    /// Drops the session reference; files stay on disk.
     func endSession() {
         sessionLock.lock()
         let workshopID = session?.workshopID
@@ -254,8 +247,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         }
     }
 
-    /// Trace the resolved Metal texture for a fragment slot. This remains
-    /// lightweight and bounded because DEBUG builds may record it every frame.
+    /// Kept lightweight and bounded because DEBUG builds may record it every frame.
     func recordTextureBinding(
         passID: String,
         shader: String,
@@ -295,8 +287,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         recordLayerPlacements(pipeline)
     }
 
-    /// One-shot per-scene dump of every layer's resolved placement plus each puppet's MDAT anchors,
-    /// so a body-split rig's parent/child mis-placement can be diagnosed numerically (read-only).
+    /// Dumps layer placements + puppet MDAT anchors so a body-split rig's
+    /// parent/child mis-placement can be diagnosed numerically.
     func recordLayerPlacements(_ pipeline: WPEPreparedRenderPipeline) {
         guard isEnabled else { return }
         func fmt(_ v: SIMD3<Double>) -> String { String(format: "(%.1f,%.1f,%.1f)", v.x, v.y, v.z) }
@@ -369,7 +361,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         return current
     }
 
-    /// Dump a failed shader compile or pipeline build.
     func recordShaderFailure(
         shaderName: String,
         originalVertex: String?,
@@ -430,8 +421,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         appendLog("[shader fail] '\(shaderName)' → shaders/\(folderName)/  \(firstLine(of: errorText))", level: .error)
     }
 
-    /// Record a pipeline state build failure (color/depth/blend descriptor
-    /// could not be turned into an `MTLRenderPipelineState`).
     func recordPipelineFailure(
         fragmentName: String,
         blendMode: String,
@@ -463,9 +452,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         appendLog("[pipeline fail] '\(fragmentName)' blend=\(blendMode) → pipelines/\(filename)", level: .error)
     }
 
-    /// Persist the first rendered frame (or last-known snapshot) so the
-    /// orientation / tile-split / blank-screen bugs that don't trigger a
-    /// shader error are visible without re-running the scene.
+    /// Persists the first frame so orientation / tile-split / blank-screen bugs
+    /// that don't trigger a shader error are visible without re-running the scene.
     func recordFirstFrame(image: NSImage) {
         guard isEnabled else { return }
         sessionLock.lock()
@@ -498,8 +486,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         }
     }
 
-    /// Drop a simple text payload (named-FBO miss list, texture diagnostics,
-    /// etc.) into the current session folder.
     func recordNote(name: String, contents: String) {
         guard isEnabled else { return }
         sessionLock.lock()
@@ -509,8 +495,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         write(contents, to: folderURL.appendingPathComponent(safeFileName(name)))
     }
 
-    /// Drop a text payload once per active debug session — for successful shader dumps
-    /// that would otherwise be rewritten every rendered frame.
+    /// Writes once per session — for successful shader dumps that would
+    /// otherwise be rewritten every rendered frame.
     func recordNoteOnce(name: String, contents: String) {
         guard isEnabled else { return }
         let safeName = safeFileName(name)
@@ -529,14 +515,10 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         write(contents, to: folderURL.appendingPathComponent(safeName))
     }
 
-    /// P3 dump for raw `.tex` metadata: TEXI image-dimension + unkInt0 and
-    /// TEXB v4 conditional-mip fields the decoder records but the runtime
-    /// doesn't act on. Lets corpus regressions cross-reference padded
-    /// atlas sizes / v4 conditions against the published engine without
-    /// re-reading the .tex container by hand.
-    ///
-    /// Writes one `tex-meta-<name>.txt` per call into the active session
-    /// folder when debug artifacts are enabled; no-op otherwise.
+    /// Dumps raw `.tex` metadata: TEXI image-dimension + unkInt0 and TEXB v4
+    /// conditional-mip fields the decoder records but the runtime doesn't act on.
+    /// Lets corpus regressions cross-reference padded atlas sizes / v4 conditions
+    /// against the published engine without re-reading the .tex container by hand.
     func dumpRawTexMetadata(name: String, info: WPETexInfo, bitmap: WPETexBitmapBlock) {
         guard isEnabled else { return }
         var lines: [String] = []

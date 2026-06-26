@@ -26,12 +26,10 @@ struct WPEMSDFGlyphGeneratorTests {
         #expect(bitmap.width == bitmap.height)
         #expect(bitmap.width > 0)
         #expect(bitmap.pixels.count == bitmap.width * bitmap.height)
-        // The top-left corner is inside the transparent padding → outside the
-        // glyph → median below 0.5.
+        // Top-left corner sits in the transparent padding → outside → median < 0.5.
         #expect(median(bitmap[0, 0]) < 0.5)
-        // At least one texel sits inside the filled glyph → median above 0.5.
         #expect(bitmap.pixels.contains { median($0) > 0.5 })
-        // Alpha is always opaque and every channel is finite (no NaN distances).
+        // No NaN distances.
         #expect(bitmap.pixels.allSatisfy { $0.w == 1 && $0.x.isFinite && $0.y.isFinite && $0.z.isFinite })
     }
 

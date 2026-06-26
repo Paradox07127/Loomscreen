@@ -43,7 +43,6 @@ public struct BookmarkPlaybackSettings: Codable, Equatable, Sendable {
         self.setAsLockScreen = setAsLockScreen
     }
 
-    /// Snapshot every relevant field from a screen's current configuration.
     public static func snapshot(of config: ScreenConfiguration) -> BookmarkPlaybackSettings {
         BookmarkPlaybackSettings(
             playbackSpeed: config.playbackSpeed,

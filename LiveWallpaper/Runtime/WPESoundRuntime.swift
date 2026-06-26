@@ -7,19 +7,9 @@ import Foundation
 /// `AVAudioEngine`, taps the main mixer output, and computes a 64-bin
 /// FFT spectrum that the Metal renderer reads each frame to feed
 /// audio-reactive shader uniforms (`g_AudioSpectrum*`).
-///
-/// Lifecycle:
-///   - `start()` resolves each sound file relative to the scene cache,
-///     attaches a player node + buffer per file, configures looping
-///     playback at the per-object volume, and installs the FFT tap.
-///   - `currentSpectrum` returns the latest 64-bin power spectrum
-///     (normalized 0…1, low frequency → high). Defaults to silence
-///     before the engine produces samples.
-///   - `stop()` halts the engine and removes the tap.
 final class WPESoundRuntime: @unchecked Sendable {
-    /// FFT window size (must be a power of two). 2048 samples at
-    /// 44.1 kHz → ≈47 ms latency between FFT updates which is well
-    /// below the 60 fps render cadence.
+    /// Must be a power of two. 2048 samples at 44.1 kHz → ≈47 ms latency
+    /// between FFT updates, well below the 60 fps render cadence.
     static let fftSize = 2048
     static let binCount = 64
 
@@ -54,9 +44,9 @@ final class WPESoundRuntime: @unchecked Sendable {
         self.imagBuffer = [Float](repeating: 0, count: Self.fftSize / 2)
     }
 
-    /// Convenience: `prepare` + `play` in one call (used by tests). The renderer
-    /// splits the two so the expensive `prepare` runs off the main actor and
-    /// `play` only happens once the scene is confirmed current.
+    /// `prepare` + `play` in one call. The renderer splits the two so the
+    /// expensive `prepare` runs off the main actor and `play` only happens
+    /// once the scene is confirmed current.
     @discardableResult
     func start(sounds: [WPESceneSoundObject]) -> Int {
         let attached = prepare(sounds: sounds)
@@ -247,7 +237,8 @@ final class WPESoundRuntime: @unchecked Sendable {
         }
     }
 
-    /// Compress the half-spectrum into 64 perceptual bins by averaging adjacent values, then normalize to 0…1 on a log scale so the range matches what audio-reactive shaders expect.
+    /// Normalizes to 0…1 on a log scale so the range matches what
+    /// audio-reactive shaders expect.
     private func publishSpectrum(magnitudes: [Float]) {
         let inputBins = magnitudes.count
         let groupSize = max(1, inputBins / Self.binCount)

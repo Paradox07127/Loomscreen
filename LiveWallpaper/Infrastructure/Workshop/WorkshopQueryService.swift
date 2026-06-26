@@ -20,16 +20,6 @@ enum WorkshopSortMode: String, Sendable, Equatable, CaseIterable {
         }
     }
 
-    var displayName: String {
-        switch self {
-        case .topRated: return "Top Rated"
-        case .newest: return "Newest"
-        case .trending: return "Trending"
-        case .mostSubscribed: return "Most Subscribed"
-        case .search: return "Search"
-        }
-    }
-
     var requiresDays: Bool { self == .trending }
 }
 
@@ -129,7 +119,7 @@ struct WorkshopQueryItem: Identifiable, Sendable, Equatable {
     let creatorID: String?
     var creatorPersonaName: String?
     /// Already filtered through `WorkshopCDNHostAllowList`. Load via
-    /// `WorkshopPreviewImageLoader` (the existing v1 loader).
+    /// `WorkshopPreviewImageLoader`.
     let previewImageURL: URL?
     let fileSizeBytes: UInt64?
     let timeUpdated: Date?
@@ -344,8 +334,8 @@ actor WorkshopQueryService {
         return page
     }
 
-    /// Prefixes the canonical request key with a short hash of the API key so
-    /// cache entries are isolated per Steam account.
+    /// Hashes the API key into the cache-key prefix so cache entries are
+    /// isolated per Steam account.
     private static func namespacedCacheKey(_ base: String, apiKey: String) -> String {
         let namespace = SHA256.hash(data: Data(apiKey.utf8)).prefix(8)
             .map { String(format: "%02x", $0) }.joined()
@@ -407,10 +397,8 @@ actor WorkshopQueryService {
         throw WorkshopQueryError.responseParseFailure
     }
 
-    /// Best-effort: resolve each item's creator SteamID64 to a display name via
-    /// one batched GetPlayerSummaries call. Failures leave the name unset (the
-    /// UI just omits the author line). Runs before the page is cached, so the
-    /// names ride along with the cached page.
+    /// Best-effort: failures leave the name unset (UI omits the author line).
+    /// Runs before the page is cached, so names ride along with the cached page.
     private func resolveCreatorNames(in page: WorkshopQueryPage, apiKey: String) async -> WorkshopQueryPage {
         let ids = Array(Set(page.items.compactMap { $0.creatorID })).filter { !$0.isEmpty }
         guard !ids.isEmpty else { return page }
@@ -426,8 +414,7 @@ actor WorkshopQueryService {
     }
 
     private func fetchPersonaNames(ids: [String], apiKey: String) async -> [String: String] {
-        // GetPlayerSummaries accepts up to 100 SteamID64s per call; one page is
-        // well under that.
+        // GetPlayerSummaries caps at 100 SteamID64s per call.
         let batch = Array(ids.prefix(100))
         var components = URLComponents(string: "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/")!
         components.queryItems = [
@@ -458,8 +445,7 @@ actor WorkshopQueryService {
     }
 
     private func buildQueryURL(for request: WorkshopQueryRequest, apiKey: String) throws -> URL {
-        // Creator-scoped browse uses a different endpoint that lists one user's
-        // published files (sort / search / tag filters don't apply there).
+        // Creator-scoped browse uses GetUserFiles; sort/search/tag filters don't apply there.
         if let creatorSteamID = request.creatorSteamID {
             return try buildUserFilesURL(for: request, steamID: creatorSteamID, apiKey: apiKey)
         }
@@ -498,9 +484,8 @@ actor WorkshopQueryService {
         return url
     }
 
-    /// Lists a single creator's published Wallpaper Engine files. The response
-    /// shape matches `QueryFiles` (`response.publishedfiledetails` + `total`), so
-    /// the same `decodeQueryPage` path handles it.
+    /// Response shape matches `QueryFiles` (`response.publishedfiledetails` +
+    /// `total`), so `decodeQueryPage` handles both.
     private func buildUserFilesURL(for request: WorkshopQueryRequest, steamID: String, apiKey: String) throws -> URL {
         var components = URLComponents(url: Self.getUserFilesEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [
@@ -654,7 +639,7 @@ actor WorkshopQueryService {
         value ? "true" : "false"
     }
 
-    /// Request URL with the `key` query value scrubbed, for safe logging.
+    /// Scrubs the `key` query value so URLs are safe to log.
     private static func redactedURLString(_ url: URL) -> String {
         guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.path }
         comps.queryItems = comps.queryItems?.map {
@@ -779,8 +764,7 @@ private struct ValveErrorEnvelope: Decodable {
     }
 }
 
-// Suffix `WQ` to avoid colliding with similarly-named lossy decoders elsewhere
-// in the codebase if they get added later.
+// `WQ` suffix avoids colliding with similarly-named lossy decoders elsewhere.
 
 private struct LossyStringWQ: Decodable {
     let value: String

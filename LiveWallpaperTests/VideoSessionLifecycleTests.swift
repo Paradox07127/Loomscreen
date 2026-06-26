@@ -98,16 +98,13 @@ struct VideoSessionLifecycleTests {
         let session = VideoWallpaperSession(player: player)
         defer { session.cleanup() }
 
-        // Fresh session intends to play.
         #expect(session.userIntendsToPlay)
 
-        // Policy suspend/restore must not touch intent.
         session.applyPerformanceProfile(.suspended)
         #expect(session.userIntendsToPlay)
         session.applyPerformanceProfile(.quality)
         #expect(session.userIntendsToPlay)
 
-        // Manual pause clears intent.
         session.pause()
         #expect(!session.userIntendsToPlay)
 
@@ -117,7 +114,6 @@ struct VideoSessionLifecycleTests {
         session.applyPerformanceProfile(.quality)
         #expect(!session.userIntendsToPlay)
 
-        // Manual play restores intent.
         session.play()
         #expect(session.userIntendsToPlay)
     }

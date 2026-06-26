@@ -42,12 +42,10 @@ struct ScreenConfigurationCompatTests {
         )
         config.sceneMouseInteractionEnabled = false
 
-        // Round-trip preserves the explicit value.
         let encoded = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: encoded)
         #expect(decoded.sceneMouseInteractionEnabled == false)
 
-        // A legacy blob with no such key defaults to true (cursor-reactive).
         var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         dict.removeValue(forKey: "sceneMouseInteractionEnabled")
         let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
@@ -68,7 +66,6 @@ struct ScreenConfigurationCompatTests {
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: encoded)
         #expect(decoded.sceneClickCaptureEnabled == true)
 
-        // A legacy blob with no such key defaults to false (no click capture).
         var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         dict.removeValue(forKey: "sceneClickCaptureEnabled")
         let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)

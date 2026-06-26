@@ -2,11 +2,9 @@ import CryptoKit
 import Foundation
 import LiveWallpaperCore
 
-/// Stable bucket key for Wallpaper Engine web project settings.
-///
-/// The active HTML source is the source of truth because both the inspector
-/// and the WKWebView runtime can see it. Workshop metadata is only a fallback
-/// for callers that have origin data but no source yet.
+/// Active HTML source is the source of truth (both inspector and WKWebView
+/// runtime can see it); workshop origin metadata is only a fallback for callers
+/// that have origin data but no source yet.
 enum WallpaperEngineProjectIdentity {
     static func key(source: HTMLSource?, origin: WPEOrigin? = nil) -> String? {
         if case .folder(let bookmarkData, let indexFileName) = source {

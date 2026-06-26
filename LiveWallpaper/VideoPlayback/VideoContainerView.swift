@@ -4,12 +4,10 @@ import LiveWallpaperCore
 
 // MARK: - PlayerHostView
 
-/// NSView whose backing layer is an AVPlayerLayer.
 final class PlayerHostView: NSView {
 
-    /// Last-applied user color-space preference. Kept so window movement /
-    /// re-attach paths re-derive the right `CGColorSpace` without forcing
-    /// callers to re-thread the preference each time.
+    /// Kept so window movement / re-attach paths re-derive the right
+    /// `CGColorSpace` without forcing callers to re-thread the preference.
     private var colorSpacePreference: VideoColorSpace = .auto
 
     override func makeBackingLayer() -> CALayer {
@@ -41,7 +39,6 @@ final class PlayerHostView: NSView {
         playerLayer?.videoGravity = gravity
     }
 
-    /// Forwards an HDR / EDR preference to the underlying `AVPlayerLayer`.
     func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
         guard let playerLayer else { return }
         if #available(macOS 26, *) {
@@ -51,14 +48,10 @@ final class PlayerHostView: NSView {
         }
     }
 
-    /// Pin the underlying `AVPlayerLayer` to a specific `CGColorSpace`.
     /// `.auto` clears the override so AVFoundation's default colour path
     /// takes over; the other cases force a specific gamut so users can
     /// debug colour mismatches between displays or commit to wide-gamut
     /// output even on a content stream whose metadata says otherwise.
-    ///
-    /// `.rec2020HDR` also enables EDR output — HDR primaries without EDR
-    /// would tone-map back to SDR for no benefit.
     func setColorSpacePreference(_ preference: VideoColorSpace) {
         colorSpacePreference = preference
         guard let playerLayer else { return }

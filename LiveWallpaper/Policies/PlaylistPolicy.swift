@@ -1,13 +1,11 @@
 import Foundation
 
 enum PlaylistPolicy {
-    /// Combined playlist formed by `[primary] + additional`.
     static func combinedPlaylist(primary: Data, additional: [Data]?) -> [Data]? {
         let full = [primary] + (additional ?? [])
         return full.count > 1 ? full : nil
     }
 
-    /// Compute the next cursor position.
     static func nextCursor(
         currentCursor: Int,
         playlistCount: Int,
@@ -28,7 +26,6 @@ enum PlaylistPolicy {
         return (normalized + 1) % playlistCount
     }
 
-    /// Symmetric counterpart of `nextCursor` for the Previous button.
     static func previousCursor(
         currentCursor: Int,
         playlistCount: Int,
@@ -58,7 +55,6 @@ enum PlaylistPolicy {
         return now.timeIntervalSince(lastRotation) >= Double(rotationMinutes) * 60.0
     }
 
-    /// Map the active bookmark to its index in a re-ordered playlist.
     static func resolveCursor(activeBookmark: Data?, in combined: [Data]) -> Int {
         guard let activeBookmark else { return 0 }
         return combined.firstIndex(of: activeBookmark) ?? 0

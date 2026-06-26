@@ -2,10 +2,9 @@
 import AppKit
 import Foundation
 
-/// Composable predicate deciding whether an animated thumbnail may decode.
-/// Grid previews play on hover; detail surfaces auto-play. Background pausing is
-/// owned by the coordinator's app-resign observer — this app hosts SwiftUI in
-/// AppKit windows, so SwiftUI `scenePhase` is unreliable here and is NOT gated on.
+/// Background pausing is owned by the coordinator's app-resign observer — this
+/// app hosts SwiftUI in AppKit windows, so SwiftUI `scenePhase` is unreliable
+/// here and is NOT gated on.
 struct ThumbnailPlaybackGate: Equatable {
     enum Trigger: Equatable { case hover, auto }
 
@@ -30,17 +29,14 @@ struct ThumbnailPlaybackGate: Equatable {
     }
 }
 
-/// Bounds the number of GIF/APNG previews animating at once. Clients register
-/// when they begin playback and the coordinator evicts the least-recently-used
-/// client past a hard cap, calling its `freeze` closure so it falls back to its
-/// poster frame. With hover-to-play as the default, the cap is rarely
-/// approached (the mouse hovers one card at a time); it remains a defensive
-/// limit for `.autoPlay` callers and pathological grids.
+/// Bounds the number of GIF/APNG previews animating at once via an LRU cap,
+/// freezing evicted clients to their poster frame. With hover-to-play as the
+/// default the cap is rarely approached; it remains a defensive limit for
+/// `.autoPlay` callers and pathological grids.
 ///
 /// Also freezes every client when the app resigns active. Resumption is
 /// gate-driven (`ThumbnailPlaybackGate`): on reactivation a tile replays only
-/// if its gate is satisfied again (visible + still hovered / focused), so
-/// backgrounded windows stay quiet until the app is frontmost.
+/// if its gate is satisfied again, so backgrounded windows stay quiet.
 @MainActor
 final class GIFPlaybackCoordinator {
     static let shared = GIFPlaybackCoordinator()
@@ -51,9 +47,6 @@ final class GIFPlaybackCoordinator {
     private var lruOrder: [UUID] = []
     private var freezers: [UUID: () -> Void] = [:]
 
-    /// Production code uses `shared`; an internal initializer exists so tests
-    /// can exercise the LRU policy on an isolated instance.
-    ///
     /// The resign-active observer is intentionally never removed: `shared`
     /// lives for the whole process, and the block captures `self` weakly so a
     /// deallocated test instance simply no-ops. (Swift 6 also forbids touching
@@ -68,8 +61,8 @@ final class GIFPlaybackCoordinator {
         }
     }
 
-    /// Registers `id` as actively playing. Evicts the LRU client if the cap is
-    /// exceeded (never the caller, which is moved to most-recent first).
+    /// Evicts the LRU client if the cap is exceeded — never the caller, which
+    /// is moved to most-recent first.
     func requestPlayback(id: UUID, freeze: @escaping () -> Void) {
         freezers[id] = freeze
         touch(id: id)

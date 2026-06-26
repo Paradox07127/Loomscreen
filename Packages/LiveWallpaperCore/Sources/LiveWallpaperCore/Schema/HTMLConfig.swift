@@ -50,13 +50,13 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// CSS `transform: scale()` factor applied to `<body>`. `1.0` is identity.
     public var transformScale: Double = 1.0
 
-    /// CSS `transform: translate(Xpx, Ypx)` X offset in CSS pixels.
+    /// CSS `transform: translate()` X offset in CSS pixels.
     public var transformTranslateX: Double = 0
 
-    /// CSS `transform: translate(Xpx, Ypx)` Y offset in CSS pixels.
+    /// CSS `transform: translate()` Y offset in CSS pixels.
     public var transformTranslateY: Double = 0
 
-    /// CSS `transform: rotate(Rdeg)` rotation in degrees. Positive = clockwise.
+    /// CSS `transform: rotate()` in degrees. Positive = clockwise.
     public var transformRotationDegrees: Double = 0
 
     /// Sets `pageZoom = 1/backingScaleFactor` so `window.innerWidth` reports
@@ -75,10 +75,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// the stored value; the toggle is honored only for `userLocal` content.
     public var useEphemeralStorage: Bool = false
 
-    /// Origin of the HTML payload. Untrusted (`.workshopImport`) origins are
-    /// forced through `nonPersistent()` data stores so two Workshop wallpapers
-    /// sharing the `livewallpaper://wallpaper` host cannot read each other's
-    /// `localStorage` / `IndexedDB` / cookies. See [HTMLWallpaperView.apply].
+    /// Origin of the HTML payload; gates ephemeral-storage forcing (see
+    /// `HTMLOriginKind`). See [HTMLWallpaperView.apply].
     public var originKind: HTMLOriginKind = .userLocal
 
     /// Whether the runtime must force `WKWebsiteDataStore.nonPersistent()` for
@@ -129,8 +127,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
 
     public static let `default` = HTMLConfig()
 
-    /// Bounds for `audioVolume`. Defined on the type so UI sliders and
-    /// migration both read the same source.
+    /// Bounds for `audioVolume`.
     public static let minAudioVolume: Double = 0
     public static let maxAudioVolume: Double = 1
 

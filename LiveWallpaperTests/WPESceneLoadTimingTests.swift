@@ -17,7 +17,7 @@ struct WPESceneLoadTimingTests {
             ("graph.build", t(10)),
             ("graph.build.done", t(40)),
             ("pipeline.build", t(40)),
-            ("pipeline.pass", t(50)),   // per-pass sub-event: no `.done`, excluded
+            ("pipeline.pass", t(50)),   // sub-event with no `.done`: excluded from summary
             ("pipeline.pass", t(60)),
             ("pipeline.build.done", t(440)),
             ("render.firstFrame", t(440)),

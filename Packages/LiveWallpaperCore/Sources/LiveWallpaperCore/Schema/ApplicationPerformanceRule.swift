@@ -6,7 +6,6 @@ import Foundation
 /// nothing and a populated one only does a small bundle-ID comparison when an
 /// app actually activates, launches, or quits.
 public struct ApplicationPerformanceRule: Codable, Equatable, Sendable, Identifiable {
-    /// When the wallpaper should yield to this app.
     public enum Trigger: String, Codable, Sendable {
         /// Pause only while the app is the frontmost (active) application.
         case frontmost

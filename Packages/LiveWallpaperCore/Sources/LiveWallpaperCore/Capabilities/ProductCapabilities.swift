@@ -95,7 +95,6 @@ public struct ProductCapabilities: Sendable, Equatable {
         ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
     }
 
-    /// Whether the runtime is permitted to ever render a wallpaper of `type`.
     public func canRender(_ type: WallpaperType) -> Bool {
         switch type {
         case .video:       return enabledFeatures.contains(.video)
@@ -105,8 +104,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         }
     }
 
-    /// Filtered list of types to expose in the picker. Lite UI uses this
-    /// directly instead of `WallpaperType.allCases`.
+    /// Lite UI uses this instead of `WallpaperType.allCases`.
     public var selectableWallpaperTypes: [WallpaperType] {
         WallpaperType.allCases.filter { canRender($0) }
     }

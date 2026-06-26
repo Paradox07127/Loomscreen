@@ -267,7 +267,6 @@ struct SceneResourceResolverTests {
         ])
     }
 
-    /// Writes a 4×4 opaque PNG.
     private func writePNG(at url: URL) throws {
         guard let context = CGContext(
             data: nil,

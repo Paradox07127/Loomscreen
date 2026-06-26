@@ -118,7 +118,6 @@ public final class SystemMonitor {
 
     // MARK: - Update Loop
 
-    /// Captures a full system snapshot off-MainActor and reapplies the derived values back on MainActor with diff guards.
     private func sampleAndApply() async {
         resourceUpdateCount += 1
         let updateCount = resourceUpdateCount
@@ -145,7 +144,7 @@ public final class SystemMonitor {
         applySample(sample)
     }
 
-    /// Reapplies a sample on MainActor with diff guards so views observing individual properties (cpuUsage, gpuUsage, …) re-evaluate only when the value materially changed.
+    /// Diff guards so views observing individual properties re-evaluate only when the value materially changed.
     private func applySample(_ sample: SystemSample) {
         if abs(cpuUsage - sample.cpuUsage) > Self.percentMaterialEpsilon {
             cpuUsage = sample.cpuUsage

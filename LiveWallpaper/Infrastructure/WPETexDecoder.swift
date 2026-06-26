@@ -4,13 +4,11 @@ import Compression
 import Foundation
 import ImageIO
 
-/// Stateless `.tex` decoder. Parses `TEXVxxxx` containers emitted by the
-/// Wallpaper Engine publish pipeline and returns either the largest mipmap
-/// of the first frame as a `CGImage` or a precise `WPETexDecodeError` so
-/// the UI can surface the exact reason a layer failed (unsupported format
-/// vs. truncated bytes vs. unknown container version).
+/// Stateless `.tex` decoder for `TEXVxxxx` containers. Errors are precise
+/// (unsupported format vs. truncated bytes vs. unknown version) so the UI
+/// can surface the exact reason a layer failed.
 ///
-/// Format coverage in Phase 2.1:
+/// Format coverage:
 ///   - CPU: RGBA8888, R8, RG88
 ///   - ImageIO-backed TEXB payloads: PNG/JPEG/etc. (`FreeImage` formats)
 ///   - Reject precisely: DXT1/3/5, BC7, RGBA1010102, animation/sequence frames
@@ -405,7 +403,6 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Parses the optional `TEXS` block.
     private func parseFrameInfoBlock(
         versionedMagic: String,
         reader: inout WPETexByteReader
@@ -703,20 +700,17 @@ struct WPETexDecoder: Sendable {
         return image
     }
 
-    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped
-    /// inside a WPE `.tex` file) into a synthetic `WPETexTexturePayload`
-    /// shaped like raw RGBA8888 so the existing Metal upload path can
-    /// consume it without branching on encoded-vs-raw at every call site.
+    /// Wraps a TEXB-encoded (PNG/JPEG) payload into a synthetic
+    /// RGBA8888-shaped `WPETexTexturePayload` so the Metal upload path
+    /// need not branch on encoded-vs-raw at every call site.
     ///
-    /// P1: animated encoded payloads (PNG/JPEG atlas + TEXS schedule, 3
-    /// samples in the 431960 corpus) used to throw `.unsupportedAnimation`
-    /// here, blocking playback entirely. The new branch decodes each
-    /// source atlas once via ImageIO (deduped by imageID, mirroring raw
-    /// `.tex`'s `mipmapsByImageID` cache) and feeds every TEXS frame
-    /// into the same `WPETexAnimationTrack` pipeline. The eager loader
-    /// then shares one MTLTexture per imageID across frames, matching
-    /// the particle renderer's expectation that `source.texture(at:)`
-    /// returns an atlas-sized surface for its own sprite-sheet UV math.
+    /// Animated encoded payloads (PNG/JPEG atlas + TEXS schedule, 3 samples
+    /// in the 431960 corpus) used to throw `.unsupportedAnimation` here.
+    /// Now each source atlas is decoded once via ImageIO (deduped by
+    /// imageID, mirroring raw `.tex`'s `mipmapsByImageID` cache) so the
+    /// eager loader shares one MTLTexture per imageID across frames — the
+    /// particle renderer expects `source.texture(at:)` to return an
+    /// atlas-sized surface for its sprite-sheet UV math.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
         if parsed.hasAnimationFrames {
             return try bridgeEncodedAnimatedImagePayload(parsed)
@@ -956,7 +950,6 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Reconciles `payload` against `expectedByteCount`.
     private func inflateIfNeeded(
         payload: Data,
         expectedByteCount: Int?,
@@ -1024,9 +1017,4 @@ struct WPETexDecoder: Sendable {
     }
 }
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
 #endif

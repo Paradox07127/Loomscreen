@@ -104,7 +104,7 @@ public enum HTMLTrust: Equatable, Sendable {
     /// Remote URL whose origin is NOT in TrustedHostStore.
     case untrustedRemote(origin: TrustedHTMLOrigin)
 
-    /// Pure verdict — origin membership decided by caller.
+    /// Origin membership decided by caller.
     public static func evaluate(source: HTMLSource, trustedOrigins: Set<TrustedHTMLOrigin>) -> HTMLTrust {
         switch source {
         case .file, .folder, .inline:

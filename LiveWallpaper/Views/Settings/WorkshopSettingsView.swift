@@ -4,9 +4,6 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// "Steam Workshop" Settings tab — sibling of "General", "Shortcuts",
-/// "Cache", "Backup", "About". Privacy disclosures + entry points to the
-/// v2 Doctor and the v3 Web-API-key + browse-cache flows.
 struct WorkshopSettingsView: View {
     @Environment(SteamCMDDoctorService.self) private var doctorService
     @Environment(WorkshopServices.self) private var workshopServices
@@ -209,10 +206,9 @@ struct WorkshopSettingsView: View {
                 Text("Scene rendering")
             }
         }
-        // Use the shared settings chrome (every other tab does) — it hides the
-        // grouped Form's default system background via .scrollContentBackground
-        // and insets via .contentMargins, so this tab no longer shows a
-        // different-colored inset panel.
+        // Shared settings chrome hides the Form's default system background
+        // (.scrollContentBackground) + insets (.contentMargins) so this tab
+        // doesn't show a different-colored inset panel than other tabs.
         .settingsFormChrome()
         .sheet(isPresented: $showingDoctor) {
             WorkshopDoctorView()

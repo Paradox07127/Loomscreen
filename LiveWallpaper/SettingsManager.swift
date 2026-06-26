@@ -96,7 +96,8 @@ final class SettingsManager {
         loadConfigurations().first { $0.screenID == screenID }
     }
 
-    /// Updates the in-memory cache synchronously so MainActor readers (bindings, `getConfiguration`, etc.) observe the new value before this function returns.
+    /// Updates the in-memory cache synchronously so MainActor readers observe
+    /// the new value before this function returns; disk write is queued async.
     private func persistConfigurations(_ configs: [ScreenConfiguration]) {
         configurationWriteGeneration &+= 1
         let generation = configurationWriteGeneration
@@ -118,7 +119,6 @@ final class SettingsManager {
         }
     }
 
-    /// Awaits in-flight configuration writes.
     func flushPendingConfigurationWrites() async {
         configurationWriteGeneration &+= 1
         let generation = configurationWriteGeneration
@@ -228,7 +228,7 @@ final class SettingsManager {
 
     // MARK: - Workshop Library Root Bookmark
 
-    /// Persists the security-scoped bookmark to the user-chosen Workshop library root (e.g. `~/Documents/Live Wallpapers/431960/`).
+    /// Workshop library root is the user-chosen folder, e.g. `~/Documents/Live Wallpapers/431960/`.
     func saveWorkshopLibraryRootBookmark(_ bookmark: Data) {
         UserDefaults.standard.set(bookmark, forKey: Keys.workshopLibraryRootBookmark)
         NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
@@ -238,14 +238,8 @@ final class SettingsManager {
         UserDefaults.standard.data(forKey: Keys.workshopLibraryRootBookmark)
     }
 
-    func clearWorkshopLibraryRootBookmark() {
-        UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
-        NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
-    }
-
     // MARK: - Wallpaper Engine Assets Root Bookmark
 
-    /// Persists the security-scoped bookmark to the Wallpaper Engine install root.
     func saveWPEEngineAssetsBookmark(_ bookmark: Data) {
         UserDefaults.standard.set(bookmark, forKey: Keys.wpeEngineAssetsRootBookmark)
         NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
@@ -363,7 +357,6 @@ final class SettingsManager {
 
     // MARK: - Legacy Migration
 
-    /// Seeds the new file-backed stores from any pre-existing `UserDefaults` blobs.
     private func migrateLegacyUserDefaultsIfNeeded() {
         let storedVersion = UserDefaults.standard.integer(forKey: Keys.configMigrationVersion)
         guard storedVersion < Self.currentMigrationVersion else { return }

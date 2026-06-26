@@ -5,8 +5,7 @@ import Metal
 
 #if DEBUG
 
-/// JSON-serialisable summary of one corpus playback run. Phase A.3 output —
-/// drives the DEBUG developer-tools view and is the artifact maintainers
+/// JSON-serialisable summary of one corpus playback run. The artifact maintainers
 /// share when triaging which subset of the workshop corpus fails to load.
 struct WPECorpusPlaybackReport: Codable, Sendable {
     let generatedAt: Date
@@ -97,10 +96,7 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
 }
 
 /// Headless driver that runs `WPEMetalSceneRenderer.load()` against every
-/// imported scene workshop project and aggregates the outcome using the
-/// Metal scene renderer.
-/// Phase A.3: turns "57 unknown scenes" into "P pass / F fail / T timeout"
-/// with per-scene resolution diagnostics so Phase B has a target list.
+/// imported scene workshop project and aggregates the outcome.
 ///
 /// The harness owns the renderer lifetime per scene — it builds the same
 /// `VideoWallpaperWindow` + renderer combo `AmbientWallpaperSessionBuilder`
@@ -428,7 +424,7 @@ final class WPECorpusPlaybackHarness {
             .appendingPathComponent("431960", isDirectory: true)
     }
 
-    /// Re-derive the cache URL from the descriptor's `cacheRelativePath`, matching the contract `AmbientWallpaperSessionBuilder` enforces.
+    /// Must match the cache-URL contract `AmbientWallpaperSessionBuilder` enforces.
     private func applicationSupportCacheURL(for descriptor: SceneDescriptor) -> URL {
         let support = (try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -448,7 +444,6 @@ final class WPECorpusPlaybackHarness {
         headless.window.close()
     }
 
-    /// Races `renderer.load()` against a wall-clock timeout.
     private func loadWithTimeout(renderer: WPEMetalSceneRenderer, seconds: Double) async throws {
         let nanoseconds = Self.timeoutNanoseconds(for: seconds)
         let state = TimeoutRaceState()

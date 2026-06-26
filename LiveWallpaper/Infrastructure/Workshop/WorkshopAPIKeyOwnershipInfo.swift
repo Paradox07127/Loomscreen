@@ -7,15 +7,6 @@ import Foundation
 /// across `SteamWebAPIKeyEntrySheet`, `WorkshopSettingsView`, and
 /// `WorkshopOnboardingSheet` so translations stay aligned.
 enum WorkshopAPIKeyOwnershipInfo {
-    /// Where the user registers / revokes their own key.
-    static let registerURL = URL(string: "https://steamcommunity.com/dev/apikey")!
-    /// Steam Web API Terms of Use (quota + acceptable use).
-    static let touURL = URL(string: "https://steamcommunity.com/dev/apiterms")!
-    /// Why some accounts are blocked from the key form.
-    static let limitedAccountURL = URL(string: "https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A")!
-    /// The required 2FA on the Steam account.
-    static let steamGuardURL = URL(string: "https://help.steampowered.com/en/wizard/HelpWithSteamGuardCode")!
-
     static let prerequisitesLine = String(
         localized: "Prerequisites: a Steam account with Mobile Steam Guard and at least $5 of Steam Store spend (non-limited).",
         comment: "Reminder shown above the API-key entry field. Explains Valve's eligibility gate."

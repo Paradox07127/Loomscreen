@@ -38,13 +38,12 @@ struct WPETexByteReader {
         return Int32(littleEndian: value)
     }
 
-    /// Phase 2E: reads a little-endian IEEE-754 single-precision float used by `TEXS` blocks for per-frame timing and atlas UVs.
+    /// Little-endian IEEE-754 float used by `TEXS` blocks for per-frame timing and atlas UVs.
     mutating func readFloat32(blockName: String = "?") throws -> Float {
         let bits = try readUInt32(blockName: blockName)
         return Float(bitPattern: bits)
     }
 
-    /// Reads a NUL-terminated 8-byte ASCII magic.
     mutating func readMagic() throws -> String {
         try ensure(byteCount: 9, blockName: "magic")
         let raw = data.subdata(in: cursor..<(cursor + 9))
@@ -62,11 +61,6 @@ struct WPETexByteReader {
         let slice = data.subdata(in: cursor..<(cursor + count))
         cursor += count
         return slice
-    }
-
-    mutating func skip(_ count: Int, blockName: String = "?") throws {
-        try ensure(byteCount: count, blockName: blockName)
-        cursor += count
     }
 
     /// Reads a NUL-terminated ASCII run, advancing past the terminator.

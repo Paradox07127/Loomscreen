@@ -1,13 +1,8 @@
 import SwiftUI
 
-/// Secondary control row anchored beneath `DetailHeaderBar` on library pages
-/// (Bookmarks / Aerials / Workshop). Owns the canonical Apple-style filter
-/// idiom: glass-capsule search on the leading edge, an optional caller-supplied
-/// chip / picker slot, and a monospaced result counter on the trailing edge.
-///
-/// Pages stay structurally identical — the only per-page divergence is what
-/// goes into the `filters` view-builder slot (Bookmarks: type chips when the
-/// library is large; Workshop: Type + Sort pickers; Aerials: nothing).
+/// Secondary control row beneath `DetailHeaderBar` on library pages. The only
+/// per-page divergence is the `filters` view-builder slot (Bookmarks: type
+/// chips when the library is large; Workshop: Type + Sort pickers; Aerials: none).
 public struct LibraryFilterBar<Filters: View>: View {
     @Binding private var searchText: String
     private let searchPrompt: LocalizedStringKey
@@ -40,9 +35,8 @@ public struct LibraryFilterBar<Filters: View>: View {
 
             Spacer(minLength: DesignTokens.LibraryFilterBar.contentSpacing)
 
-            // Only surface the counter when filtering actually narrowed the
-            // result set — an unfiltered "12" sitting on the right just
-            // duplicates the header's own count.
+            // Only surface the counter when filtering narrowed the set; an
+            // unfiltered count just duplicates the header's own count.
             if let resultCount, let totalCount, resultCount != totalCount {
                 resultCounter(resultCount, totalCount)
             }
@@ -102,8 +96,6 @@ public struct LibraryFilterBar<Filters: View>: View {
 }
 
 extension LibraryFilterBar where Filters == EmptyView {
-    /// Convenience initializer for library pages that have nothing to put in
-    /// the chip slot — the search field + counter alone.
     public init(
         searchText: Binding<String>,
         searchPrompt: LocalizedStringKey = "Search…",

@@ -2,16 +2,11 @@ import LiveWallpaperCore
 import SwiftUI
 import AVKit
 
-/// Floating capsule shown on the video preview card. Surfaces "what is this
-/// asset" glance information (format / resolution / FPS / file size) so the
-/// user doesn't have to dig into Finder or QuickTime to identify a file.
-///
 /// Metadata is loaded from `AVURLAsset(url:)` rather than the live player so
 /// the overlay can render across the active / poster / unloaded states —
 /// playing the preview isn't a prerequisite for showing the badges.
 struct VideoInformationOverlay: View {
     let videoURL: URL?
-    /// Optional: present only while the preview is actively playing.
     /// Used solely as a load-trigger identity so toggling preview off and on
     /// doesn't refire a redundant metadata load for the same URL.
     let player: AVPlayer?
@@ -72,7 +67,6 @@ struct VideoInformationOverlay: View {
         .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
     }
 
-    /// Identity key for `.task(id:)`.
     private func loadIdentity(for url: URL) -> String {
         url.absoluteString
     }

@@ -2,7 +2,6 @@
 import CoreImage
 import Foundation
 
-/// Immutable snapshot of filter parameters, safe to share across threads.
 struct FilterParameters: Sendable {
     let blurRadius: Double
     let saturation: Double
@@ -21,8 +20,6 @@ struct FilterParameters: Sendable {
     }
 }
 
-/// Builds and manages a CIFilter pipeline applied to video playback.
-/// Filters and CIContext are cached to avoid per-frame allocation.
 @MainActor
 final class VideoEffectsManager {
 

@@ -49,9 +49,6 @@ struct SemanticVersionTests {
 @MainActor
 struct UpdateCheckerTests {
     private var defaultsSuite: UserDefaults {
-        // Always read/write through the standard suite the production class
-        // uses, but scope our fixture keys with a UUID so two parallel test
-        // suites never clobber each other.
         UserDefaults.standard
     }
 
@@ -359,7 +356,6 @@ struct UpdateCheckerTests {
 
         await checker.checkNow(force: false)
 
-        // No request was made, status stays at the initial idle.
         #expect(checker.status == .idle)
         #expect(transport.fetchCount == 0)
     }

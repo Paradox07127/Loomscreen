@@ -2,10 +2,8 @@ import SwiftUI
 
 /// 3-bar audio-style equalizer indicator for the currently-playing row.
 ///
-/// Driven by `TimelineView(.animation)` with a 50 ms minimum interval (≈20 fps)
-/// so the per-row CPU cost stays predictable. When `isPlaying == false` the
-/// timeline pauses; when `reduceMotion` is on the bars render at static
-/// mid-heights with no time-dependent geometry.
+/// 50 ms minimum interval (≈20 fps) keeps per-row CPU cost predictable. The
+/// timeline pauses when not playing; reduceMotion renders static mid-heights.
 struct EQPulseBar: View {
     let isPlaying: Bool
     var tint: Color = .accentColor
@@ -51,8 +49,7 @@ struct EQPulseBar: View {
         .frame(width: 3)
     }
 
-    /// Smooth oscillation between `minHeight` and `maxHeight` with a per-bar
-    /// phase offset so the three columns animate out of sync.
+    /// Per-bar `phase` offset so the three columns animate out of sync.
     private func heightFactor(at time: TimeInterval, phase: Double) -> CGFloat {
         let period = 0.6
         let normalized = (time.truncatingRemainder(dividingBy: period)) / period

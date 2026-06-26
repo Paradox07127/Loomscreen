@@ -6,15 +6,13 @@ struct WPEMultiRootResourceResolver: Sendable {
     private let primary: SceneResourceResolver
     private let dependencyMounts: [String: SceneResourceResolver]
     /// App-bundled clean-room equivalents of the small WPE framework files
-    /// (~68 KB across 15 files under `wpe-builtins/`). Tried before the
-    /// optional engine-assets resolver so most scenes work zero-config on
-    /// macOS, where WPE isn't installable. `nil` only when the bundle
-    /// subtree is unreachable (some unit-test contexts).
+    /// (under `wpe-builtins/`). Tried before the optional engine-assets resolver
+    /// so most scenes work zero-config on macOS, where WPE isn't installable.
+    /// `nil` only when the bundle subtree is unreachable (some unit-test contexts).
     private let builtinResolver: SceneResourceResolver?
-    /// Optional read-only fallback rooted at `<engineRoot>/assets/`. Tried
-    /// only after the primary AND built-in resolvers miss — so it covers
-    /// the rare scene that references files outside our built-in inventory
-    /// without ever shadowing a project's own files.
+    /// Optional read-only fallback rooted at `<engineRoot>/assets/`. Tried only
+    /// after the primary AND built-in resolvers miss, so it never shadows a
+    /// project's own files.
     private let engineAssetsResolver: SceneResourceResolver?
     private let tracer: WPEResolutionTracer?
 
@@ -56,10 +54,8 @@ struct WPEMultiRootResourceResolver: Sendable {
         self.tracer = tracer
     }
 
-    /// Builds a per-dependency resolver: a directory mount reads its on-disk
-    /// root; a package mount reads entries in place from `scene.pkg` via a
-    /// package provider (no extraction). A package that can't be opened is
-    /// dropped, so its references resolve as missing rather than crashing.
+    /// A package mount that can't be opened is dropped, so its references
+    /// resolve as missing rather than crashing.
     private static func makeMountResolvers(_ dependencyMounts: [WPEAssetMount]) -> [String: SceneResourceResolver] {
         var mounts: [String: SceneResourceResolver] = [:]
         for mount in dependencyMounts {
@@ -75,8 +71,8 @@ struct WPEMultiRootResourceResolver: Sendable {
         return mounts
     }
 
-    /// Existence probe across the same cascade, without staging or reading
-    /// bytes — used by shader-include resolution to pick the right candidate.
+    /// Existence probe across the cascade, without staging or reading bytes —
+    /// used by shader-include resolution to pick the right candidate.
     func exists(relativePath: String) -> Bool {
         if let dependency = dependencyReference(relativePath) {
             return dependencyMounts[dependency.workshopID]?.exists(relativePath: dependency.childPath) ?? false
@@ -87,9 +83,6 @@ struct WPEMultiRootResourceResolver: Sendable {
         return false
     }
 
-    /// Reads raw bytes for a concrete asset path, following the same
-    /// primary → built-in → engine-assets (or dependency mount) cascade as the
-    /// image/URL resolvers.
     func data(relativePath: String) throws -> Data {
         if let dependency = dependencyReference(relativePath) {
             return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
@@ -145,7 +138,8 @@ struct WPEMultiRootResourceResolver: Sendable {
         }
     }
 
-    /// Tries the primary resolver first; on `.fileMissing` falls through to the app-bundled built-ins, then to the optional engine-assets resolver.
+    /// Tries primary first; on `.fileMissing` falls through to app-bundled
+    /// built-ins, then to the optional engine-assets resolver.
     private func resolveWithFallbacks<T>(
         relativePath: String,
         _ resolve: (SceneResourceResolver, String) throws -> T

@@ -77,15 +77,14 @@ struct WPEVideoTextureDiskCacheTests {
         let (cache, root) = makeCache()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // Simulate the pre-refactor scratch layout: flat UUID-named .mp4s
-        // dropped straight in the root with no bucket (the source of the leak).
+        // Pre-refactor scratch layout: flat UUID-named .mp4s in the root with
+        // no bucket — the source of the leak.
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let legacy = (0..<3).map { _ in root.appendingPathComponent("\(UUID().uuidString).mp4") }
         for url in legacy {
             try Data(repeating: 1, count: 2048).write(to: url)
         }
 
-        // A real, currently-installed bucket must survive the same sweep.
         let keep = try await cache.store(Data(repeating: 2, count: 2048), workshopID: "111")
         await cache.release(keep)
 
@@ -106,7 +105,6 @@ struct WPEVideoTextureDiskCacheTests {
         let keep = try await cache.store(Data(repeating: 1, count: 1024), workshopID: "111")
         let drop = try await cache.store(Data(repeating: 2, count: 1024), workshopID: "222")
         let unattributed = try await cache.store(Data(repeating: 3, count: 1024), workshopID: "")
-        // Release leases so GC is free to reclaim the unreferenced files.
         await cache.release(keep)
         await cache.release(drop)
         await cache.release(unattributed)
@@ -124,13 +122,12 @@ struct WPEVideoTextureDiskCacheTests {
         let (cache, root) = makeCache()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // Leased and unreferenced — still must survive because it's live.
+        // Leased and unreferenced — must survive because it's live.
         let live = try await cache.store(Data(repeating: 5, count: 1024), workshopID: "999")
         let freedWhileLeased = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(freedWhileLeased == 0)
         #expect(FileManager.default.fileExists(atPath: live.path))
 
-        // Once released, the same GC reclaims it.
         await cache.release(live)
         _ = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(FileManager.default.fileExists(atPath: live.path) == false)
@@ -147,12 +144,11 @@ struct WPEVideoTextureDiskCacheTests {
         let second = try await cache.store(data, workshopID: "111")
         #expect(first == second)
 
-        // One source tears down — the file must survive for the other.
+        // One holder releasing must not reclaim the shared file.
         await cache.release(first)
         _ = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(FileManager.default.fileExists(atPath: first.path))
 
-        // Last holder releases — now it's reclaimable.
         await cache.release(second)
         _ = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(FileManager.default.fileExists(atPath: first.path) == false)

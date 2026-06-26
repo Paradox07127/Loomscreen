@@ -1,16 +1,11 @@
 import SwiftUI
 
-/// Custom Liquid Glass loading indicator. Used by the scene detail card while
-/// the renderer is decoding image layers. Two stacked rotating arcs keep
-/// the motion gentle so it doesn't compete with the underlying GIF preview
-/// that fades through during the loading phase.
+/// Two stacked rotating arcs kept gentle so the motion doesn't compete with
+/// the underlying GIF preview that fades through during the loading phase.
 public struct LiquidGlassSpinner: View {
     public var size: CGFloat = 44
     public var lineWidth: CGFloat = 4
     public var tint: Color = .white
-    /// Optional caption rendered just below the spinner ring. Used by
-    /// Phase 2.1's per-layer progress (e.g. "Decoding 3/12 textures…")
-    /// without forcing every caller to wrap the spinner in a VStack.
     public var progressText: String?
 
     @State private var animate = false

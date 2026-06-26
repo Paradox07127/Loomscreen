@@ -25,7 +25,6 @@ struct WPEAssetMount: Equatable, Sendable {
         self.backing = .package(packageURL.standardizedFileURL.resolvingSymlinksInPath())
     }
 
-    /// Directory root for a directory-backed mount; `nil` for a package mount.
     var rootURL: URL? {
         if case .directory(let url) = backing { return url }
         return nil

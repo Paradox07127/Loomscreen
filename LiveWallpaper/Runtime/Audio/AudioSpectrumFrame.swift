@@ -22,8 +22,8 @@ struct AudioSpectrumFrame: Equatable, Sendable {
     let right: [Float]
     let timestampNanos: UInt64
 
-    /// Sanitizing initializer: clamps each channel to exactly `binCount` finite
-    /// `0...1` values. Used off the hot path (e.g. `snapshot()` copy-out, tests).
+    /// Sanitizing init: clamps each channel to exactly `binCount` finite `0...1`
+    /// values. Used off the hot path (`snapshot()` copy-out, tests).
     init(left: [Float], right: [Float], timestampNanos: UInt64) {
         self.left = Self.normalizedBins(left)
         self.right = Self.normalizedBins(right)

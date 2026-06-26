@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Unified error-alert presentation. Replaces the repeated
-/// `.alert(...) Binding(get:set:)` boilerplate that previously sat on every
-/// settings / cache / library / scene-import surface. Pairs with
+/// Unified error-alert presentation. Pairs with
 /// `DestructiveActionPolicy.confirmDestructive` so the codebase has exactly
 /// one error-display modifier and one destructive-confirm modifier.
 extension View {

@@ -61,8 +61,6 @@ struct ProductCapabilitiesTests {
         #expect(lite.isEnabled(.appleAerials))
         #expect(lite.isEnabled(.scheduleAutomation))
         #expect(lite.isEnabled(.systemMonitor))
-        // Pro-only features (Metal shaders, WPE scene wallpapers, developer
-        // tools) must stay off in Lite.
         #expect(!lite.isEnabled(.scene))
         #expect(!lite.isEnabled(.metalShader))
         #expect(!lite.isEnabled(.developerTools))

@@ -1,15 +1,9 @@
 import SwiftUI
 
-/// Unified confirmation flow for destructive actions.
-///
-/// Replaces ad-hoc inline destruction (`onDelete`, `Button { delete() }`) with a
-/// single Liquid Glass confirmation that follows macOS 26 Tahoe HIG:
-/// - Destructive button on top, Cancel on bottom
-/// - Cancel keeps default focus (Esc / ⌘. dismisses)
-/// - Subtitle carries action target + side-effect + recovery path
-///
-/// Attach with `.confirmDestructive($action, perform:)` and trigger by writing
-/// a `DestructiveAction` value into the binding.
+/// Unified destructive-action confirmation following macOS 26 Tahoe HIG:
+/// destructive button on top, Cancel on bottom keeping default focus; subtitle
+/// carries action target + side-effect + recovery path. Attach with
+/// `.confirmDestructive($action)`.
 public enum DestructiveAction: Identifiable, Equatable {
     case removePlaylistItem(isLast: Bool, displayName: String)
     case clearScene(sceneName: String, displayName: String)
@@ -157,7 +151,6 @@ public enum DestructiveAction: Identifiable, Equatable {
     }
 }
 
-/// Bundles a `DestructiveAction` with the closure to invoke on confirmation.
 public struct PendingDestructive: Identifiable {
     public let id = UUID()
     public let action: DestructiveAction
@@ -170,7 +163,6 @@ public struct PendingDestructive: Identifiable {
 }
 
 extension View {
-    /// Presents the native macOS confirmation alert when `pending` becomes non-nil.
     public func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
         modifier(DestructiveConfirmationModifier(pending: pending))
     }

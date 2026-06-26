@@ -30,7 +30,6 @@ struct WallpaperEngineCacheDeleteTests {
 
         #expect(removed)
         #expect(!FileManager.default.fileExists(atPath: itemDir.path))
-        // The cache root itself is untouched — only the per-id subtree goes.
         #expect(FileManager.default.fileExists(atPath: root.path))
     }
 

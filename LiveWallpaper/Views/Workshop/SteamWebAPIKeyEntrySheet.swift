@@ -3,10 +3,9 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Modal sheet for first-time Steam Web API key setup. Live-validates the
-/// 32-hex shape, probes Valve's `GetSupportedAPIList`, and stores the key
-/// in the Workshop Keychain slot — `WhenUnlockedThisDeviceOnly`, no iCloud
-/// sync — on save.
+/// Validates the 32-hex shape, probes Valve's `GetSupportedAPIList`, and stores
+/// the key in the Workshop Keychain slot (`WhenUnlockedThisDeviceOnly`, no
+/// iCloud sync).
 struct SteamWebAPIKeyEntrySheet: View {
     let services: WorkshopServices
     let onSaved: () -> Void

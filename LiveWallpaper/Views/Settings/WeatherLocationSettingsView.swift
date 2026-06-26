@@ -2,18 +2,6 @@ import SwiftUI
 import MapKit
 import AppKit
 
-/// Weather location UI primitives shared by `GeneralSettingsView`'s
-/// inline `weatherSection`. The dedicated Settings tab that used to
-/// host these was removed because the surface is small enough to live
-/// next to the other GlobalSettings rows.
-///
-/// `ManualLocationPicker` renders the "type a city" affordance — a
-/// full-width TextField with an inline completion list backed by
-/// `MKLocalSearchCompleter` + `MKLocalSearch`. `LocationCompleterModel`
-/// wraps the AppKit-flavoured completer for SwiftUI consumption and
-/// coalesces typing bursts so the upstream MapKit call doesn't fire on
-/// every keystroke.
-
 struct ManualLocationPicker: View {
     let currentSelection: WeatherLocationPreference.ManualLocation?
     let onCommit: (WeatherLocationPreference.ManualLocation?) -> Void
@@ -42,9 +30,7 @@ struct ManualLocationPicker: View {
                 }
             }
 
-            // Full-width input — the placeholder doubles as the prompt
-            // so we do not need a separate labelled row that would
-            // squash the TextField into a narrow strip.
+            // Placeholder doubles as the prompt; a separate labelled row would squash the field.
             TextField(text: $query) {
                 Text("City, region, or place")
             }
@@ -132,9 +118,7 @@ struct ManualLocationPicker: View {
     }
 }
 
-/// Wraps `MKLocalSearchCompleter` for SwiftUI consumption. Cities + points
-/// of interest only — the completer can suggest streets / addresses too,
-/// but for weather we only care about geographic regions.
+/// For weather we only care about geographic regions, not arbitrary street addresses.
 @MainActor
 final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
     @Published var results: [MKLocalSearchCompletion] = []

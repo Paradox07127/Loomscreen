@@ -1,13 +1,11 @@
 #if !LITE_BUILD
 import Foundation
 
-/// CPU pixel-decode paths for the uncompressed `.tex` formats. Block-
-/// compressed (BC) formats live in `WPETexMetalTranscoder`. Each function
-/// returns a `DecodedRGBAImage` with `kCGImageAlphaLast` byte order so the
-/// caller can hand it straight to `CGImage` / `SKTexture(cgImage:)`.
+/// CPU pixel-decode paths for the uncompressed `.tex` formats; BC formats
+/// live in `WPETexMetalTranscoder`. Output is `kCGImageAlphaLast` byte order
+/// so the caller can hand it straight to `CGImage` / `SKTexture(cgImage:)`.
 enum WPETexPixelDecoder {
 
-    /// Validates the input length and returns the bytes verbatim — WPE's `RGBA8888` is already in the in-memory layout we want.
     static func decodeRGBA8888(
         _ bytes: Data,
         width: Int,
@@ -24,7 +22,6 @@ enum WPETexPixelDecoder {
         return DecodedRGBAImage(width: width, height: height, pixels: bytes)
     }
 
-    /// Single-channel red expanded into RGBA(r,r,r,255).
     static func decodeR8(
         _ bytes: Data,
         width: Int,
@@ -55,19 +52,16 @@ enum WPETexPixelDecoder {
         return DecodedRGBAImage(width: width, height: height, pixels: rgba)
     }
 
-    /// Two-channel red+green expanded into RGBA(r,g,0,255).
     /// WPE stores two distinct things in `RG88`:
-    ///   - **Normal maps / data textures** (default): R and G are independent
-    ///     channels (e.g. normal.xy). Keep (R, G, 0, 255) so shaders reading
-    ///     `.xy` (waterripple's `DecompressNormal`) stay correct.
-    ///   - **Grayscale + alpha glows** (`alphaChannelPriority`, the TEXI
-    ///     `0x80000` flag): a legacy LUMINANCE_ALPHA texture — R is luminance,
-    ///     G is alpha (the shape/falloff). It must expand to (R, R, R, G),
-    ///     exactly how GL samples LUMINANCE_ALPHA. Light shafts / beams
-    ///     (light_shafts_0/3, beam_1) are this kind; decoding them as
-    ///     (R, G, 0, 255) forced alpha to 1.0, so additive sprites stacked at
-    ///     one point saturated the whole quad into a solid block — the
-    ///     "red square light" artifact (scene 3426865175).
+    ///   - Normal maps / data textures (default): R and G independent (e.g.
+    ///     normal.xy). Keep (R, G, 0, 255) so shaders reading `.xy`
+    ///     (waterripple's `DecompressNormal`) stay correct.
+    ///   - Grayscale + alpha glows (`alphaChannelPriority`, TEXI `0x80000`):
+    ///     legacy LUMINANCE_ALPHA — R is luminance, G is alpha. Must expand to
+    ///     (R, R, R, G) as GL samples LUMINANCE_ALPHA. Light shafts/beams are
+    ///     this kind; decoding as (R, G, 0, 255) forced alpha to 1.0, so
+    ///     additive sprites stacked at one point saturated the quad into a
+    ///     solid block — the "red square light" artifact (scene 3426865175).
     static func decodeRG88(
         _ bytes: Data,
         width: Int,

@@ -21,7 +21,6 @@ struct ApplicationPerformanceRuleTests {
         #expect(ApplicationPerformanceRuleEngine.shouldPause(
             frontmostBundleID: "com.apple.dt.Xcode", runningBundleIDs: [], rules: [rule]
         ))
-        // Running but not frontmost → no pause for a .frontmost rule.
         #expect(!ApplicationPerformanceRuleEngine.shouldPause(
             frontmostBundleID: "com.apple.Safari", runningBundleIDs: ["com.apple.dt.Xcode"], rules: [rule]
         ))
@@ -40,7 +39,7 @@ struct ApplicationPerformanceRuleTests {
 
     @Test("An active app rule forces the suspended profile")
     func policyEngineORsRule() {
-        let settings = GlobalSettings() // defaults: nothing else would suspend here
+        let settings = GlobalSettings()
         let profile = WallpaperPolicyEngine.performanceProfile(
             inputs: .test(isApplicationRuleActive: true),
             settings: settings

@@ -257,7 +257,6 @@ extension AppleAerialsLibrary {
         }
     }
 
-    /// Builds a bounded scan plan for recognized Apple wallpaper layouts.
     nonisolated static func scanPlan(for selectedDirectory: URL, fileManager: FileManager = .default) -> ScanPlan? {
         let last = selectedDirectory.lastPathComponent
 

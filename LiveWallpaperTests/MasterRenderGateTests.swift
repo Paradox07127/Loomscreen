@@ -67,7 +67,6 @@ struct MasterRenderGateTests {
                 return
             }
 
-            // Core fix: rendering never started, so no session/renderer memory.
             #expect(liveScreen.runtimeSession == nil, "Gate off must not build a live session")
 
             // Soft-lock guard: the configured screen is reported as `.off`, so

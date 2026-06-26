@@ -7,25 +7,12 @@ import Foundation
 /// idempotent — every entry point guards with a `window.__lw*Installed__`
 /// sentinel so re-installation after a navigation or hot-config apply
 /// doesn't double-wrap getters / setters.
-///
-/// Lifecycle helpers exposed on `window`:
-/// - `__lwUpdateAudio__(volume, muted)` — pushed by `applyRuntimeState`.
-/// - `__lwUpdateTransform__(scale, tx, ty, rotation)` — same.
-/// - `__lwSuspend__()` / `__lwResume__()` — page-side pause (visibility,
-///   RAF, CSS animations, Web Audio). Called from native when the
-///   performance profile flips to `.suspended` / `.quality`.
-/// - `__lwSetRafThrottle__(ratio)` — installs an integer-ratio `requestAnimationFrame`
-///   throttle (`1` = uncapped, `2` = half rate). Driven by thermal state.
-/// - `__lwSuspendAudioContexts__()` / `__lwResumeAudioContexts__()` —
-///   hooks into the audio controller's tracked `AudioContext` array so
-///   `__lwSuspend__` can pause Web Audio graphs without re-introspecting
-///   the page.
 enum HTMLWallpaperRuntimeScript {
 
     // MARK: - Number formatting
 
-    /// Format a `Double` for JS literal embedding with stable decimal output
-    /// (no locale-driven comma separators, no exponent notation).
+    /// Format a `Double` for JS literal embedding: en_US_POSIX avoids
+    /// locale comma separators and exponent notation.
     static func jsNumber(_ value: Double) -> String {
         guard value.isFinite else { return "0" }
         return String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value)
@@ -33,24 +20,17 @@ enum HTMLWallpaperRuntimeScript {
 
     // MARK: - Audio controller
 
-    /// Bootstraps the master audio controller. Sets up:
-    ///   1. MutationObserver — applies the current volume/mute to any `<audio>`
-    ///      or `<video>` element added later. Without this, dynamically-created
-    ///      media (the common case for game-style wallpapers) escapes the mute.
-    ///   2. `HTMLMediaElement.prototype.play` patch — enforces volume right
-    ///      before playback starts, in case the page set its own `volume`
-    ///      between creation and play.
-    ///   3. `new Audio()` patch — for standalone `Audio()` objects that never
-    ///      get appended to the DOM (the MutationObserver can't see them).
-    ///   4. `BaseAudioContext.destination` getter override — intercepts Web
-    ///      Audio API graphs and routes them through a per-context `GainNode`
-    ///      so audio synthesized via Web Audio respects the user's volume
-    ///      slider. This is the only way to cover game audio engines that
-    ///      bypass `<audio>` elements entirely.
-    ///
-    /// Exposes `window.__lwUpdateAudio__(volume, muted)` for runtime updates,
-    /// plus `__lwSuspendAudioContexts__/__lwResumeAudioContexts__` for the
-    /// lifecycle controller to pause Web Audio without iterating contexts itself.
+    /// Bootstraps the master audio controller. Four overlapping patches are
+    /// needed because each covers media the others miss:
+    ///   1. MutationObserver — dynamically-created `<audio>`/`<video>` (the
+    ///      common case for game-style wallpapers) would otherwise escape mute.
+    ///   2. `HTMLMediaElement.prototype.play` — re-enforces volume in case the
+    ///      page set its own between creation and play.
+    ///   3. `new Audio()` — standalone objects never appended to the DOM are
+    ///      invisible to the MutationObserver.
+    ///   4. `BaseAudioContext.destination` getter — routes Web Audio graphs
+    ///      through a per-context `GainNode`; the only way to cover game audio
+    ///      engines that bypass `<audio>` elements entirely.
     static func masterAudioController(initialVolume: Double, initialMuted: Bool) -> String {
         let volumeLiteral = jsNumber(initialVolume)
         let mutedLiteral = initialMuted ? "true" : "false"
@@ -189,7 +169,6 @@ enum HTMLWallpaperRuntimeScript {
                 }
             };
 
-            // Lifecycle hooks the suspend / resume controller calls into.
             window.__lwSuspendAudioContexts__ = function () {
                 for (var i = 0; i < __lwAudioContexts__.length; i++) {
                     var ctx = __lwAudioContexts__[i];
@@ -222,12 +201,9 @@ enum HTMLWallpaperRuntimeScript {
 
     // MARK: - Transform controller
 
-    /// Applies a `transform: translate() rotate() scale()` chain to the
-    /// document body via an injected `<style>` block. Skips touching the
-    /// DOM when all four values are identity — avoids fighting layouts in
-    /// pages that pin their own `body` transform.
-    ///
-    /// Exposes `window.__lwUpdateTransform__(scale, tx, ty, rotation)`.
+    /// Applies a `transform` chain to the body via an injected `<style>`.
+    /// Skips the DOM entirely when all values are identity — avoids fighting
+    /// layouts in pages that pin their own `body` transform.
     static func transformController(
         scale: Double,
         translateX: Double,
@@ -281,12 +257,10 @@ enum HTMLWallpaperRuntimeScript {
     // MARK: - GPU canvas MSAA / backing-store upgrader
 
     /// Forces `antialias: true` on GPU canvas contexts created by the page.
-    /// WPE Spine workshop boilerplates routinely request a GPU context without
-    /// an explicit `antialias` field — on WebKit this lands as MSAA-off,
-    /// leaving harsh polygon-edge aliasing on Spine character meshes. Patching
-    /// `getContext` at `documentStart` lets us flip the default without
-    /// modifying any wallpaper code. No-op for 2D / bitmaprenderer contexts;
-    /// idempotent across page navigations.
+    /// WPE Spine boilerplates request a GPU context without an explicit
+    /// `antialias` field — on WebKit this lands as MSAA-off, leaving harsh
+    /// polygon-edge aliasing on Spine character meshes. Patching `getContext`
+    /// at `documentStart` flips the default without modifying wallpaper code.
     static func gpuCanvasMSAAForcer() -> String {
         return """
         (function () {
@@ -494,31 +468,23 @@ enum HTMLWallpaperRuntimeScript {
 
     // MARK: - Lifecycle controller (P0 — JS真正挂起)
 
-    /// Installs `window.__lwSuspend__()` / `window.__lwResume__()` plus
-    /// `window.__lwSetRafThrottle__(ratio)`. The runtime calls these in
-    /// addition to the native `setAllMediaPlaybackSuspended` API so the
-    /// page-side render loop, CSS animations, and Web Audio graphs actually
-    /// stop instead of continuing to consume CPU/GPU while the wallpaper
-    /// is occluded or thermal-throttled.
+    /// Installs `window.__lwSuspend__/__lwResume__/__lwSetRafThrottle__`.
+    /// Called alongside native `setAllMediaPlaybackSuspended` so the page-side
+    /// render loop, CSS animations, and Web Audio actually stop instead of
+    /// burning CPU/GPU while the wallpaper is occluded or thermal-throttled.
     ///
-    /// Approach:
-    /// - `document.hidden` / `document.visibilityState` getters are
-    ///   re-defined and a `visibilitychange` event is dispatched so
-    ///   well-behaved pages (Three.js, Pixi.js defaults, anything that
-    ///   reads the Page Visibility API) self-throttle.
-    /// - `requestAnimationFrame` is replaced with a no-op during suspend,
-    ///   then restored. This catches pages that don't read
-    ///   `document.hidden`.
-    /// - `html { animation-play-state: paused }` and matching `-webkit-`
-    ///   are pushed via an inline style attribute on `<html>`. Page CSS
-    ///   that uses `!important` on its own `animation-play-state` still
-    ///   wins; everyday animations don't and freeze cleanly.
-    /// - `__lwSuspendAudioContexts__()` (provided by `masterAudioController`)
-    ///   pauses every tracked `AudioContext`.
+    /// Layered because no single mechanism covers every page:
+    /// - Redefined `document.hidden` / `visibilityState` getters + a
+    ///   `visibilitychange` event self-throttle Page-Visibility-aware pages
+    ///   (Three.js, Pixi.js defaults).
+    /// - No-op `requestAnimationFrame` during suspend catches pages that
+    ///   ignore `document.hidden`.
+    /// - `animation-play-state: paused` via an injected `<html>`-class style.
+    ///   Page CSS using its own `!important` still wins; everyday animations
+    ///   freeze cleanly.
     ///
-    /// `aggressiveSuspend` opts into releasing GPU canvas contexts on suspend
-    /// and restoring them on resume. Disabled by default — many pages do not
-    /// handle context restore and stay black after the round-trip.
+    /// `aggressiveSuspend` also releases/restores GPU canvas contexts. Off by
+    /// default — many pages don't handle context restore and stay black.
     static func lifecycleController(aggressiveSuspend: Bool) -> String {
         let aggressive = aggressiveSuspend ? "true" : "false"
         return """

@@ -3,13 +3,11 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 /// First-time-only sheet shown before the paste sheet opens. Mirrors the
-/// onboarding mockup (`docs/mockups/workshop-ui.html`). Holds the user's
-/// "don't show again" preference under `@AppStorage`.
+/// onboarding mockup (`docs/mockups/workshop-ui.html`).
 struct WorkshopOnboardingSheet: View {
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var hasShown: Bool = false
     @Environment(\.dismiss) private var dismiss
-    /// Continuation handler — called when the user finishes the onboarding
-    /// (so `WallpaperSections` can open the paste sheet immediately).
+    /// Called on finish so the caller can open the paste sheet immediately.
     var onGetStarted: () -> Void
 
     var body: some View {

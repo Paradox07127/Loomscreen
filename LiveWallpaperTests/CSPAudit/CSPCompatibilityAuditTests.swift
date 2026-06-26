@@ -25,7 +25,7 @@ struct CSPCompatibilityAuditTests {
     /// Skip projects above this size — Steam CDN backed wallpapers can be
     /// >3 GB and the audit doesn't need fully-rendered output to capture
     /// CSP violations.
-    static let maxProjectBytes: Int64 = 200 * 1024 * 1024  // 200 MiB
+    static let maxProjectBytes: Int64 = 200 * 1024 * 1024
 
     @Test("v2 (ship config) passes the ≥95 % zero-violation threshold")
     func assertV2PassRate() async throws {
@@ -117,7 +117,6 @@ enum CSPAuditCorpus {
             let entry = (json["file"] as? String) ?? "index.html"
             let title = (json["title"] as? String) ?? subdir.lastPathComponent
 
-            // Size gate.
             let size = (try? folderSize(subdir)) ?? 0
             if size > maxBytes { continue }
 
@@ -212,7 +211,6 @@ struct CSPAuditReport: Sendable {
         }
     }
 
-    /// Stdout-pretty summary table.
     func formatTable() -> String {
         var lines: [String] = []
         lines.append("CSP audit summary (corpus = \(corpus.count) projects)")
@@ -234,7 +232,6 @@ struct CSPAuditReport: Sendable {
                                 row.projectsTouchingStorage))
         }
         lines.append("")
-        // Per-violator detail
         for candidate in candidates {
             let offenders = (matrix[candidate] ?? []).filter { !$0.cspViolations.isEmpty }
             guard !offenders.isEmpty else { continue }
@@ -256,7 +253,6 @@ struct CSPAuditReport: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// JSON dump under `~/Library/Logs/Loomscreen/csp-audit-<ts>.json`.
     /// Best-effort — failures are swallowed; the table already went to stdout.
     func writeJSONReport() throws {
         let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")

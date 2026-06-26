@@ -11,7 +11,7 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     /// Fragment-only compiler contract: vertex execution always stays on the
     /// built-in fullscreen quad. Model/vertex-domain shaders are never compiled
     /// here — they surface a `.translationFailed`/`.mslLibraryFailed` diagnostic
-    /// and fall back (WebGL) rather than crashing Metal.
+    /// rather than crashing Metal.
     static let fixedVertexFunctionName = "wpe_fullscreen_vertex"
 
     init(device: MTLDevice) {

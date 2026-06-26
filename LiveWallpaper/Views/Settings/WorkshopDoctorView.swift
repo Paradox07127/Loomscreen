@@ -407,8 +407,7 @@ private struct BinaryPickerRow: View {
         Task {
             let found = await onAutoDetect()
             isDetecting = false
-            // Fall back to the manual picker when nothing was found, so the
-            // user lands one click from selecting it themselves.
+            // Fall back to the manual picker when nothing was found.
             if !found { pickFile() }
         }
     }

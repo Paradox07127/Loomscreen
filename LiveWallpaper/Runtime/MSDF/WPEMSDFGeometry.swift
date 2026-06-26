@@ -353,8 +353,7 @@ struct WPEMSDFShape {
         }
     }
 
-    /// Per-channel signed pseudo-distances for one pixel (msdfgen semantics):
-    /// pick each channel's nearest same-color edge, take that edge's signed
+    /// msdfgen semantics: per channel pick the nearest same-color edge's signed
     /// pseudo-distance, then correct the overall sign against the winding number
     /// so glyph fill can never invert regardless of contour orientation.
     func signedDistances(at point: WPEMSDFPoint) -> (r: Double, g: Double, b: Double) {

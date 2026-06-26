@@ -5,36 +5,24 @@ import Metal
 import MetalKit
 
 /// Offscreen single-frame renderer for the shader picker grid. Renders the
-/// fragment shader once into a small `MTLTexture`, reads back to an
-/// `NSImage`, and caches the result so the picker grid never repaints from
-/// the GPU after the first appearance.
+/// fragment shader once into a small `MTLTexture` and caches the `NSImage` so
+/// the grid never repaints from the GPU after first appearance.
 ///
 /// Two key choices:
 /// 1. Time is fixed at `1.5s` rather than 0 — most procedural shaders look
 ///    flat / monochromatic at t=0; 1.5s is enough warmup for each preset
 ///    to look visually distinct without drifting into mid-cycle noise.
-/// 2. No MSAA on thumbnails — the destination texture is BGRA8Unorm with
-///    `rasterSampleCount = 1`. The thumbnail is shown at 88×60pt where
-///    supersampling buys nothing.
-///
-/// Concurrency: `cachedThumbnail(...)` runs on MainActor (sync NSCache
-/// lookup). `renderThumbnail(...)` is async and offloads compile +
-/// readback to a `Task.detached`, then publishes the result back to
-/// MainActor for SwiftUI to observe.
+/// 2. No MSAA on thumbnails — shown at 88×60pt where supersampling buys nothing.
 @MainActor
 final class ShaderThumbnailRenderer {
     static let shared = ShaderThumbnailRenderer()
 
-    /// Logical card size used by the picker grid.
     static let cardSize = CGSize(width: 88, height: 60)
 
-    /// Result cache: one `NSImage` per (source, backing-store size) pair.
-    /// NSCache is thread-safe so the render helper can read/write from any
-    /// thread; the MainActor view just reads it.
+    /// One `NSImage` per (source, backing-store size). NSCache is thread-safe
+    /// so the render helper can write from any thread.
     private let imageCache = NSCache<NSString, NSImage>()
 
-    /// Shared render helper that owns the Metal device + pipeline cache.
-    /// Lives off MainActor so render work doesn't block UI.
     @ObservationIgnored
     private let helper = ThumbnailRenderHelper()
 
@@ -44,16 +32,13 @@ final class ShaderThumbnailRenderer {
 
     // MARK: - Public API
 
-    /// Returns a cached thumbnail if present. Cheap; safe to call from
-    /// SwiftUI `body`.
+    /// Cheap; safe to call from SwiftUI `body`.
     func cachedThumbnail(for source: ShaderSource, pointSize: CGSize, scale: CGFloat) -> NSImage? {
         let (pixelWidth, pixelHeight) = pixelDimensions(pointSize: pointSize, scale: scale)
         return imageCache.object(forKey: cacheKey(for: source, pixelWidth: pixelWidth, pixelHeight: pixelHeight) as NSString)
     }
 
-    /// Renders a thumbnail off-main. Returns the cached image when one
-    /// exists, otherwise schedules a background render and yields the
-    /// resulting `NSImage` (or `nil` on compile / Metal failure).
+    /// Renders off-main; returns `nil` on compile / Metal failure.
     func renderThumbnail(for source: ShaderSource, pointSize: CGSize, scale: CGFloat) async -> NSImage? {
         if let cached = cachedThumbnail(for: source, pointSize: pointSize, scale: scale) {
             return cached
@@ -86,8 +71,8 @@ final class ShaderThumbnailRenderer {
         return image
     }
 
-    /// Drop every cached entry for the given source. Called when a custom
-    /// shader is re-imported or deleted so the next request re-renders.
+    /// Called when a custom shader is re-imported or deleted so the next
+    /// request re-renders.
     func invalidate(_ source: ShaderSource) {
         helper.invalidate(source)
         imageCache.removeAllObjects()
@@ -200,7 +185,6 @@ fileprivate final class ThumbnailRenderHelper: @unchecked Sendable {
 
         lock.lock()
         if let cached = pipelineCache[key] {
-            // Move to MRU end of the LRU list.
             pipelineOrder.removeAll { $0 == key }
             pipelineOrder.append(key)
             lock.unlock()

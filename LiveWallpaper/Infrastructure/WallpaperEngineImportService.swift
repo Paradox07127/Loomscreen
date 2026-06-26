@@ -69,12 +69,10 @@ final class WallpaperEngineImportService {
         return await importUnpackagedVideo(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
     }
 
-    /// Package-aware video import: the video plays in place from `scene.pkg`
-    /// via a resource loader windowed into the entry's byte range (no
-    /// extraction, no resting copy). The video entry is staged to a temp file
-    /// once for a playability probe and reclaimed when the provider deinits.
-    /// Rejected as unsupported when the package can't be opened or the entry is
-    /// missing from it.
+    /// Plays the video in place from `scene.pkg` via a resource loader windowed
+    /// into the entry's byte range (no extraction, no resting copy). The entry is
+    /// staged to a temp file once for a playability probe, reclaimed when the
+    /// provider deinits.
     private func importPackagedVideo(
         project: WallpaperEngineProject,
         pkgURL: URL,
@@ -85,8 +83,7 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Missing video entry \(project.entryFile) in package")
         }
 
-        // One-time probe on a staged copy of just the video entry; the
-        // provider's staging dir is removed on deinit (after this scope), so
+        // Provider's staging dir is removed on deinit (after this scope), so
         // nothing persists. Playback reads the entry windowed, in place.
         do {
             let stagedURL = try provider.stagedURL(atRelativePath: project.entryFile)
@@ -95,7 +92,6 @@ final class WallpaperEngineImportService {
             return .rejected(reason: describe(error))
         }
 
-        // Zero-cache: drop any stale prior extraction for this id.
         await purgeStaleCache(workshopID: project.workshopID)
 
         guard let videoBookmark = makeBookmark(pkgURL) else {
@@ -185,12 +181,10 @@ final class WallpaperEngineImportService {
         return .ready(content, origin: origin)
     }
 
-    /// Package-aware web import: serves the web payload in place from `scene.pkg`
-    /// via the render-time scheme handler (which serves loose files first, then
-    /// falls back to package entries for what the folder doesn't have loose, e.g.
-    /// the index + bundle). No extraction, so no second on-disk copy in
-    /// `wpe-cache`. Rejected as unsupported when the package can't be opened or
-    /// its index entry is missing from it.
+    /// Serves the web payload in place from `scene.pkg` via the render-time
+    /// scheme handler (which serves loose files first, then falls back to package
+    /// entries for what the folder lacks loose, e.g. the index + bundle). No
+    /// extraction, so no second on-disk copy in `wpe-cache`.
     private func importPackagedWeb(
         project: WallpaperEngineProject,
         folderURL: URL,
@@ -199,8 +193,8 @@ final class WallpaperEngineImportService {
     ) async -> ImportResult {
         if let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
            provider.exists(atRelativePath: project.entryFile) {
-            // Zero-cache: drop any stale prior extraction for this id so the
-            // source `.pkg` is never shadowed by a redundant, reclaimable copy.
+            // Drop any stale prior extraction so the source `.pkg` is never
+            // shadowed by a redundant, reclaimable copy.
             await purgeStaleCache(workshopID: project.workshopID)
 
             guard let folderBookmark = makeBookmark(folderURL) else {
@@ -228,16 +222,10 @@ final class WallpaperEngineImportService {
     }
 
 
-    /// Marks an HTML wallpaper's `HTMLConfig` as Workshop-sourced when the
-    /// source folder lives under a SteamCMD-managed
-    /// `steamapps/workshop/content/431960/<id>/` tree.
-    ///
-    /// Path-based detection is deliberately conservative: it relies on the
-    /// canonical SteamCMD layout and Wallpaper Engine app ID (`431960`).
-    /// Any folder whose canonical path does NOT match the suffix
-    /// `/steamapps/workshop/content/431960/<numeric>/` (with the optional
-    /// trailing slash) is treated as `userLocal` — including projects copied
-    /// out to a user-managed library directory.
+    /// `.workshopImport` only when the folder lives under a SteamCMD-managed
+    /// `steamapps/workshop/content/431960/<id>/` tree (431960 = Wallpaper Engine
+    /// app ID). Deliberately conservative: any path not matching that suffix —
+    /// including projects copied out to a user-managed library — is `.userLocal`.
     static func originKind(forSourceFolder folderURL: URL) -> HTMLOriginKind {
         let canonical = folderURL.standardizedFileURL.resolvingSymlinksInPath().path
         let components = canonical.split(separator: "/", omittingEmptySubsequences: true)
@@ -288,10 +276,9 @@ final class WallpaperEngineImportService {
 
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
-            // Read the packaged scene in place from scene.pkg — no extraction,
-            // so no second on-disk copy in wpe-cache. A package that can't be
-            // opened/parsed is unsupported (extraction used the same parser, so
-            // it could never have recovered what in-place reading can't).
+            // A package that can't be opened/parsed is unsupported — extraction
+            // used the same parser, so it could never have recovered what
+            // in-place reading can't.
             if let packageResult = await finishScenePackageBackedImport(
                 project: project,
                 pkgURL: pkgURL,
@@ -313,9 +300,8 @@ final class WallpaperEngineImportService {
             ))
         }
 
-        // Read the unpacked folder scene in place from the source — no mirror
-        // copy in wpe-cache. If in-place reading fails it's unsupported (a
-        // mirror copies the same files, so it couldn't have recovered either).
+        // If in-place reading fails it's unsupported — a mirror copies the same
+        // files, so it couldn't have recovered either.
         if let directoryResult = await finishSceneSourceDirectoryImport(
             project: project,
             folderURL: folderURL,
@@ -326,9 +312,8 @@ final class WallpaperEngineImportService {
         return .rejected(reason: "Scene \(project.entryFile) could not be read from the source folder")
     }
 
-    /// Imports a packaged scene to read in place from `scene.pkg` (no
-    /// extraction). Returns `nil` when the package can't be opened/parsed for
-    /// in-place use, in which case the caller rejects it as unsupported.
+    /// Returns `nil` when the package can't be opened/parsed for in-place use,
+    /// in which case the caller rejects it as unsupported.
     private func finishScenePackageBackedImport(
         project: WallpaperEngineProject,
         pkgURL: URL,
@@ -346,10 +331,9 @@ final class WallpaperEngineImportService {
             return nil
         }
 
-        // Zero-cache: assets and project.json are read in place from the source,
-        // so nothing is kept in wpe-cache. Remove any stale prior extraction for
-        // this id — frees its disk and ensures the source `.pkg` is never treated
-        // as a redundant, reclaimable copy (no completion manifest survives).
+        // Remove any stale prior extraction — frees disk and ensures the source
+        // `.pkg` is never treated as a redundant, reclaimable copy (no completion
+        // manifest survives).
         await purgeStaleCache(workshopID: project.workshopID)
 
         let dependencyMounts = WPEDependencyMountResolver().mounts(
@@ -391,9 +375,8 @@ final class WallpaperEngineImportService {
         return .ready(.scene(descriptor), origin: origin)
     }
 
-    /// Imports an unpacked folder scene to read in place from its source folder
-    /// (no mirror copy). Returns `nil` when the entry can't be read/parsed, in
-    /// which case the caller rejects it as unsupported.
+    /// Returns `nil` when the entry can't be read/parsed, in which case the
+    /// caller rejects it as unsupported.
     private func finishSceneSourceDirectoryImport(
         project: WallpaperEngineProject,
         folderURL: URL,
@@ -410,8 +393,6 @@ final class WallpaperEngineImportService {
             return nil
         }
 
-        // Zero-cache: assets and project.json are read in place from the folder.
-        // Remove any stale prior mirror/extraction for this id.
         await purgeStaleCache(workshopID: project.workshopID)
 
         let dependencyMounts = WPEDependencyMountResolver().mounts(
@@ -453,9 +434,9 @@ final class WallpaperEngineImportService {
         return .ready(.scene(descriptor), origin: origin)
     }
 
-    /// Removes any stale extraction/mirror for an in-place import. Best-effort:
-    /// a failure leaves the (now-unreferenced) old cache on disk but the runtime
-    /// still reads from source — logged so a lingering cache is diagnosable.
+    /// Best-effort: a failure leaves the now-unreferenced old cache on disk but
+    /// the runtime still reads from source — logged so a lingering cache is
+    /// diagnosable.
     private func purgeStaleCache(workshopID: String) async {
         do {
             try await cache.purge(workshopID: workshopID)
@@ -571,10 +552,9 @@ struct WPECachedContentResolver {
         switch origin.resourceLocation {
         case .cache:
             // Cache retirement: rebuild a legacy `.cache` import in place from
-            // its source (video/web via the source folder, scene via the
-            // source-backed scene path inside `cacheContent`). A wallpaper whose
-            // source folder is gone can no longer be rebuilt — the cache was its
-            // only copy; accepted as part of retiring the extraction cache.
+            // its source. A wallpaper whose source folder is gone can no longer
+            // be rebuilt — the cache was its only copy; accepted as part of
+            // retiring the extraction cache.
             return sourceFolderContent(for: origin) ?? cacheContent(for: origin)
         case .sourceFolder:
             return sourceFolderContent(for: origin)
@@ -584,9 +564,9 @@ struct WPECachedContentResolver {
     }
 
     /// Rebuilds content for `.sourceFolder` items — unpackaged video/web
-    /// downloads that reference their files in place (e.g. inside the SteamCMD
-    /// workdir) rather than our managed cache. Without this, freshly-downloaded
-    /// unpackaged wallpapers couldn't be bookmarked. Scene needs the cache.
+    /// downloads that reference their files in place rather than our managed
+    /// cache. Without this, freshly-downloaded unpackaged wallpapers couldn't be
+    /// bookmarked. Scene needs the cache.
     private func sourceFolderContent(for origin: WPEOrigin) -> WallpaperContent? {
         guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return nil }
         var isStale = false
@@ -607,8 +587,6 @@ struct WPECachedContentResolver {
 
         switch origin.originalType {
         case .video:
-            // Loose video file → play directly; in-place packaged video →
-            // bookmark the package and carry the entry name for windowed playback.
             if looseEntryExists, let entryURL = looseEntryURL, let bookmark = makeBookmark(entryURL) {
                 return .video(bookmarkData: bookmark)
             }
@@ -630,7 +608,6 @@ struct WPECachedContentResolver {
         }
     }
 
-    /// True when `scene.pkg` at `pkgURL` contains an entry for `relativePath`.
     private static func packageContainsEntry(_ pkgURL: URL, relativePath: String) -> Bool {
         guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL) else { return false }
         return provider.exists(atRelativePath: relativePath)
@@ -656,11 +633,9 @@ struct WPECachedContentResolver {
         let entryURLCandidate = resourceURL(root: cacheURL, relativePath: entryFile)
         let entryExistsInCache = entryURLCandidate.map { fileManager.fileExists(atPath: $0.path) } ?? false
 
-        // Source-backed scene: scene.json lives in the source folder or source
-        // `scene.pkg`. Prefer rebuilding in place from the source so a stale
-        // cache entry never shadows it (the extraction cache is being retired);
-        // only fall through to a cache-backed descriptor when the source can no
-        // longer be read.
+        // Prefer rebuilding in place from the source so a stale cache entry never
+        // shadows it (extraction cache is being retired); fall through to a
+        // cache-backed descriptor only when the source can no longer be read.
         if origin.originalType == .scene,
            let sourceBacked = sourceBackedSceneContent(
                for: origin,
@@ -738,9 +713,9 @@ struct WPECachedContentResolver {
         }
     }
 
-    /// Rebuilds an in-place scene descriptor from its source folder or source
-    /// `scene.pkg` (favorites/history reconstruction for zero-cache scenes whose
-    /// cache is empty). Returns `nil` if the source can't be opened.
+    /// Favorites/history reconstruction for zero-cache scenes whose cache is
+    /// empty — rebuilds from the source folder or source `scene.pkg`. Returns
+    /// `nil` if the source can't be opened.
     private func sourceBackedSceneContent(
         for origin: WPEOrigin,
         cacheRelativePath: String,
@@ -823,7 +798,9 @@ struct WPECachedContentResolver {
     }
 }
 
-/// Enumerates regular-file entries under a scene cache root so `WPEScenePreflight` can probe for custom shader payloads (`.vert`, `.frag`) without having to walk the directory itself.
+/// Enumerates regular-file entries under a scene cache root so
+/// `WPEScenePreflight` can probe for custom shader payloads (`.vert`, `.frag`)
+/// without walking the directory itself.
 private func scenePackageEntryNames(
     in rootURL: URL,
     fileManager: FileManager,

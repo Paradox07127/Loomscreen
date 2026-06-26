@@ -1,8 +1,6 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Renders a 36×36 rounded thumbnail for a playlist bookmark.
-///
 /// First-frame poster delegated to `WallpaperThumbnailService` (already
 /// in-flight-deduplicated + NSCache-backed). Until the image resolves the
 /// view shows a film placeholder so the layout doesn't reflow on load.

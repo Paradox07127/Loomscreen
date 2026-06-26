@@ -129,8 +129,8 @@ struct WPEShaderPreprocessorTests {
 
         #expect(result.source.contains("void main"))
         #expect(result.source.contains("g_Color4"))
-        #expect(result.source.contains("helper"))           // included body survived too
-        #expect(!result.source.contains("\r"))              // endings normalized to LF
+        #expect(result.source.contains("helper"))
+        #expect(!result.source.contains("\r"))
     }
 
     @Test("Throws when include cannot be resolved")

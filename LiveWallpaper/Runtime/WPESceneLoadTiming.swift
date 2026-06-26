@@ -44,8 +44,7 @@ final class WPESceneLoadTiming {
         }
     }
 
-    /// Pure summary builder (no logging) so the format is unit-testable with an
-    /// injected clock. Returns nil when there is nothing to report.
+    /// Returns nil when there is nothing to report.
     static func summarize(workshopID: String, marks: [(stage: String, time: DispatchTime)]) -> String? {
         guard let first = marks.first?.time, let last = marks.last?.time, marks.count > 1 else {
             return nil

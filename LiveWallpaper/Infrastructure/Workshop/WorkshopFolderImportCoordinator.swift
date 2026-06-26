@@ -4,13 +4,12 @@ import Foundation
 import Observation
 import os
 
-/// Drives "Import from folder…" on the Installed tab. Picks a folder, discovers
-/// every Wallpaper Engine project inside it (a single project folder, or a
-/// library root full of numbered project folders), mirrors each into the
-/// app-managed library via `WallpaperEngineImportService`, and records a
-/// `WPEHistoryEntry` so it appears in Installed — the same managed-library path
-/// a SteamCMD download takes, minus applying to a screen. App-lifetime singleton
-/// so a long import survives view churn.
+/// Drives "Import from folder…" on the Installed tab — the same managed-library
+/// path a SteamCMD download takes, minus applying to a screen. Discovers every
+/// WPE project under the chosen folder (a single project folder, or a library
+/// root of numbered project folders), mirrors each via
+/// `WallpaperEngineImportService`, and records a `WPEHistoryEntry`. App-lifetime
+/// singleton so a long import survives view churn.
 @MainActor
 @Observable
 final class WorkshopFolderImportCoordinator {
@@ -31,8 +30,7 @@ final class WorkshopFolderImportCoordinator {
         self.fileManager = fileManager
     }
 
-    /// Presents the folder picker, then imports asynchronously. No-op while a
-    /// previous import is still running.
+    /// No-op while a previous import is still running.
     func presentImportPanel() {
         guard !isImporting else { return }
         NSApp.activate(ignoringOtherApps: true)
@@ -76,13 +74,11 @@ final class WorkshopFolderImportCoordinator {
         emitSummary(folder: folder, imported: imported, skipped: projectFolders.count - imported)
     }
 
-    /// Reconciles the managed library with what is already on disk: imports
-    /// every project that isn't already recorded, from BOTH the app-managed
-    /// SteamCMD download tree AND the user-configured "Workshop library folder"
-    /// — so the Installed tab reflects existing downloads by default, including
-    /// items the user downloaded with their own SteamCMD / the Steam client to a
-    /// folder they granted access to. Silent unless it actually adds something;
-    /// re-runs are cheap (a directory scan + a set check).
+    /// Imports every not-yet-recorded project from BOTH the app-managed SteamCMD
+    /// download tree AND the user-configured "Workshop library folder" — so the
+    /// Installed tab reflects downloads made with the user's own SteamCMD / Steam
+    /// client too. Silent unless it adds something; re-runs are cheap (directory
+    /// scan + set check).
     func ingestExistingDownloads(using doctor: SteamCMDDoctorService) async {
         guard !isIngesting, !isImporting else { return }
         isIngesting = true
@@ -121,8 +117,6 @@ final class WorkshopFolderImportCoordinator {
         )
     }
 
-    /// Imports every not-yet-recorded WPE project discovered under the user's
-    /// configured Workshop library folder. Returns the number newly added.
     private func importNewProjects(fromWorkshopLibrary rootBookmark: Data, known: Set<String>) async -> Int {
         guard case .success(let initialRoot) = SecurityScopedBookmarkResolver.shared.resolve(
             rootBookmark,
@@ -170,7 +164,6 @@ final class WorkshopFolderImportCoordinator {
         return added
     }
 
-    /// Imports one project folder into the managed library and records it.
     /// Returns true when a `WPEHistoryEntry` was recorded.
     private func importOne(_ projectFolder: URL) async -> Bool {
         do {
@@ -215,9 +208,8 @@ final class WorkshopFolderImportCoordinator {
         )
     }
 
-    /// A single project folder (has `project.json`) imports as itself; otherwise
-    /// the chosen folder is treated as a library root and its immediate
-    /// subfolders that contain a `project.json` are imported.
+    /// A folder with `project.json` imports as itself; otherwise it is treated as
+    /// a library root and its immediate `project.json`-bearing subfolders import.
     private func discoverProjectFolders(in root: URL) -> [URL] {
         if fileManager.fileExists(atPath: root.appendingPathComponent("project.json").path) {
             return [root]

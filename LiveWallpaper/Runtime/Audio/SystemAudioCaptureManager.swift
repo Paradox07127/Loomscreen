@@ -43,7 +43,6 @@ final class SystemAudioCaptureManager {
 
     private init() {}
 
-    /// Master switch, mirrors `GlobalSettings.audioResponseEnabled`.
     func setEnabled(_ enabled: Bool) {
         guard isEnabled != enabled else { return }
         isEnabled = enabled

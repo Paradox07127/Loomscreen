@@ -1,11 +1,9 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Prepared, renderer-facing WPE pipeline.
-///
-/// This sits between the JSON render graph and the Metal executor: graph
-/// passes are preserved exactly, while shader-backed passes carry expanded
-/// GLSL sources with combo defines and includes resolved.
+/// Sits between the JSON render graph and the Metal executor: graph passes are
+/// preserved exactly, while shader-backed passes carry expanded GLSL sources
+/// with combo defines and includes resolved.
 struct WPEPreparedRenderPipeline: Equatable, Sendable {
     let layers: [WPEPreparedRenderLayer]
 }
@@ -46,10 +44,8 @@ struct WPEShaderProgram: Equatable, Sendable {
 }
 
 extension WPEPreparedRenderPipeline {
-    /// Returns a copy of the pipeline with each layer's `visible` flag replaced
-    /// by `visibility[objectID]` when present (falling back to the layer's own
-    /// value). Used to apply a live scene-visibility toggle without rebuilding
-    /// the pipeline; the executor reads `graphLayer.visible` to gate the scene draw.
+    /// Applies a live scene-visibility toggle without rebuilding the pipeline;
+    /// the executor reads `graphLayer.visible` to gate the scene draw.
     func applyingLayerVisibility(_ visibility: [String: Bool]) -> WPEPreparedRenderPipeline {
         guard !visibility.isEmpty else { return self }
         return WPEPreparedRenderPipeline(
@@ -65,10 +61,9 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
-    /// Returns a copy with each layer's alpha overridden by `alpha[objectID]`
-    /// (clearing any authored alpha animation so the override isn't re-collapsed
-    /// per frame). Drives script-controlled layer fades (e.g. a video intro
-    /// fading out). Only the overridden layers are rebuilt; others pass through.
+    /// Overrides each layer's alpha by `alpha[objectID]`, clearing any authored
+    /// alpha animation so the override isn't re-collapsed per frame. Drives
+    /// script-controlled layer fades (e.g. a video intro fading out).
     func applyingLayerAlpha(_ alpha: [String: Double]) -> WPEPreparedRenderPipeline {
         guard !alpha.isEmpty else { return self }
         return WPEPreparedRenderPipeline(
@@ -85,7 +80,6 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
-    /// Returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms
@@ -107,11 +101,10 @@ extension WPEPreparedRenderPipeline {
                             values[key] = value
                         }
                         // Per-object 2.8 transform uniforms (g_ModelMatrix /
-                        // g_NormalModelMatrix). Object-scoped, so merged from the
-                        // resolved layer geometry here rather than per-frame.
-                        // Identity geometry → identity matrices, and undeclared
-                        // uniforms are dropped at packing, so 2D scenes are
-                        // unaffected.
+                        // g_NormalModelMatrix): object-scoped, so merged from the
+                        // resolved layer geometry here. Identity geometry → identity
+                        // matrices, and undeclared uniforms are dropped at packing,
+                        // so 2D scenes are unaffected.
                         let geometry = resolvedGraphLayer.geometry
                         for (key, value) in WPEMetalObjectUniforms.uniformValues(
                             origin: geometry.origin,

@@ -3,10 +3,10 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Every combo the font material can emit. `MSDF=1` exercises the
-/// `ScreenPxRange`/`ddx`/`ddy`/`CAST2` path that the CoreText fallback was
-/// masking; `MSDF=0` is the raster control. File scope so the `@MainActor`
-/// suite's parameterized `arguments:` (evaluated nonisolated) can read it.
+/// `MSDF=1` exercises the `ScreenPxRange`/`ddx`/`ddy`/`CAST2` path that the
+/// CoreText fallback was masking; `MSDF=0` is the raster control. File scope so
+/// the `@MainActor` suite's parameterized `arguments:` (evaluated nonisolated)
+/// can read it.
 private let msdfFontCombos: [[String: Int]] = [
     ["MSDF": 0, "COLORFONT": 0],
     ["MSDF": 0, "COLORFONT": 1],
@@ -166,9 +166,9 @@ struct WPEMSDFFontFragCompileTests {
     }
     """
 
-    /// The subset of `common_fragment.h` font.frag actually pulls in. Only
-    /// `ConvertSampleR8` is referenced, but the full header is included verbatim
-    /// so the include-resolution + branch-stripping path matches the device.
+    /// Only `ConvertSampleR8` is referenced, but the full header is included
+    /// verbatim so the include-resolution + branch-stripping path matches the
+    /// device.
     private static let commonFragmentH = """
     #define FORMAT_RGBA8888 0
     #define FORMAT_RGB888 1
@@ -194,10 +194,6 @@ struct WPEMSDFFontFragCompileTests {
     }
     """
 
-    /// Mirrors `WPEMSDFTextRenderer.shaderRequest` + `WPESwiftShaderCompiler`,
-    /// including the WPE builtin-macro prelude the renderer prepends (shared via
-    /// `WPEShaderBuiltinMacros`, so the test can't drift from the runtime path).
-    ///
     /// The shipped install ships font.frag/common_fragment.h with **CRLF** line
     /// endings, so the fixtures are fed as CRLF — exercising both gates at once:
     /// the preprocessor's newline normalization (without it the whole file

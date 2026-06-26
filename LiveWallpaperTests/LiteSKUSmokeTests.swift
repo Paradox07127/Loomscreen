@@ -3,11 +3,10 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 0/6/8 lock: a `ScreenManager` built with `FeatureCatalog(.lite)`
-/// must construct cleanly without exercising Pro-only subsystems. The actual
-/// surface area still lives in the monolithic target until the SPM split
-/// lands (Phase 1+); these tests pin the capability boundary so the future
-/// move only requires file relocation, not behavioural surgery.
+/// Phase 0/6/8 lock: a `ScreenManager` built with `FeatureCatalog(.lite)` must
+/// construct cleanly without exercising Pro-only subsystems. Surface area still
+/// lives in the monolithic target until the SPM split lands (Phase 1+); these
+/// tests pin the capability boundary so the move is file relocation, not surgery.
 @Suite("Lite SKU smoke tests") @MainActor
 struct LiteSKUSmokeTests {
 

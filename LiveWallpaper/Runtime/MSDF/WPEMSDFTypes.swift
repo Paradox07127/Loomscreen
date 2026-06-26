@@ -7,10 +7,10 @@ struct WPEMSDFParameters {
     var pixelRange: Double = 4
     var padding: Int = 4
     var angleThreshold: Double = 3.0
-    /// Max atlas cell side (pixels). MSDF is resolution-independent, so glyphs
-    /// are rasterized at this fixed modest size and scaled up by the shader —
-    /// generating at the on-screen point size (e.g. 200px) would cost ~18× more
-    /// pixels and stall the main thread.
+    /// Max atlas cell side (pixels). MSDF is resolution-independent, so glyphs are
+    /// rasterized at this fixed size and scaled up by the shader — generating at the
+    /// on-screen point size (e.g. 200px) would cost ~18× more pixels and stall the
+    /// main thread.
     var generationCellCap: Int = 64
 }
 
@@ -29,10 +29,6 @@ enum WPEMSDFEdgeColor: UInt8, CaseIterable {
     func contains(_ channel: WPEMSDFEdgeColor) -> Bool {
         rawValue & channel.rawValue != 0
     }
-
-    var hasRed: Bool { rawValue & WPEMSDFEdgeColor.red.rawValue != 0 }
-    var hasGreen: Bool { rawValue & WPEMSDFEdgeColor.green.rawValue != 0 }
-    var hasBlue: Bool { rawValue & WPEMSDFEdgeColor.blue.rawValue != 0 }
 }
 
 struct WPEMSDFBitmap {

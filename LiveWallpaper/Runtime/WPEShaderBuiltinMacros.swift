@@ -1,20 +1,16 @@
 #if !LITE_BUILD
 import Foundation
 
-/// WPE shader-dialect builtin macros, shared by the generic pipeline builder's
-/// prelude (`WPERenderPipelineBuilder.shaderPrelude`) and the GPU MSDF text
-/// path (`WPEMSDFTextRenderer.shaderRequest`) so both resolve the same WPE
-/// intrinsics — `CAST2`/`CAST3`/`CAST4`, `ddx`/`ddy`, `saturate`, `lerp`, …
+/// WPE shader-dialect builtin macros, shared by `WPERenderPipelineBuilder.shaderPrelude`
+/// and the GPU MSDF text path (`WPEMSDFTextRenderer.shaderRequest`) so both resolve the
+/// same WPE intrinsics.
 ///
-/// Stage-agnostic: no `#version`, no `out`-declaration, no combo `#define`s —
-/// each caller adds those. Without these macros any shader that uses them fails
-/// MSL compilation outright. The shipped `font.frag` hits this through its
-/// file-scope `ScreenPxRange` (`CAST2(...)` + `ddx`/`ddy`), which compiles for
-/// *no* combo until the prelude is present — so MSDF text silently falls back
+/// Stage-agnostic: no `#version`, no `out`-declaration, no combo `#define`s — each caller
+/// adds those. Without these macros any shader that uses them fails MSL compilation: the
+/// shipped `font.frag` (file-scope `ScreenPxRange` uses `CAST2(...)` + `ddx`/`ddy`)
+/// compiles for *no* combo until the prelude is present, so MSDF text silently falls back
 /// to the CoreText overlay.
 enum WPEShaderBuiltinMacros {
-    /// The macro lines, in declaration order. `WPERenderPipelineBuilder` splices
-    /// these into its stage prelude; the MSDF path joins + prepends them.
     static let glslPreludeLines: [String] = [
         "#define GLSL 1",
         "#define wpe_common_included 1",
@@ -51,7 +47,6 @@ enum WPEShaderBuiltinMacros {
         "#endif"
     ]
 
-    /// Newline-joined block ready to prepend to a GLSL fragment/vertex body.
     static var glslPrelude: String { glslPreludeLines.joined(separator: "\n") }
 }
 #endif

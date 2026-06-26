@@ -2,11 +2,10 @@
 import AppKit
 import Foundation
 
-/// Fetches Workshop preview images under the metadata service's CDN allow-list
-/// invariants. Unlike `SwiftUI.AsyncImage`, it re-runs the host allow-list on
-/// every redirect, requires an `image/*` content type, caps the transfer at
-/// 8 MiB, and uses an ephemeral cookieless session. The in-memory cache lives
-/// for the app's lifetime (Steam CDN assets are immutable).
+/// Fetches Workshop preview images under the CDN allow-list invariants. Unlike
+/// `SwiftUI.AsyncImage`, it re-runs the host allow-list on every redirect,
+/// requires an `image/*` content type, caps the transfer, and uses an ephemeral
+/// cookieless session. Cache lives for the app's lifetime (CDN assets immutable).
 @MainActor
 final class WorkshopPreviewImageLoader {
 
@@ -34,7 +33,6 @@ final class WorkshopPreviewImageLoader {
         self.session = URLSession(configuration: config, delegate: RedirectGuardDelegate(), delegateQueue: nil)
     }
 
-    /// Returns the cached image, or kicks off (and awaits) a fetch.
     /// Returns `nil` if any allow-list / content-type / size check fails —
     /// callers fall back to a placeholder.
     func load(_ url: URL) async -> NSImage? {
@@ -47,10 +45,9 @@ final class WorkshopPreviewImageLoader {
         return image
     }
 
-    /// Like `load`, but returns a decoded preview asset that distinguishes a
-    /// still image from a bounded animation so callers can drive frame-stepped
-    /// (hover-to-play) playback. Shares the same allow-list / content-type /
-    /// byte-cap fetch path as `load`.
+    /// Like `load`, but returns a decoded asset distinguishing a still image
+    /// from a bounded animation so callers can drive frame-stepped
+    /// (hover-to-play) playback.
     func loadAsset(_ url: URL) async -> WorkshopPreviewAsset? {
         if let cached = assetCache[url] { return cached }
         if let task = assetInflight[url] { return await task.value }
@@ -80,8 +77,8 @@ final class WorkshopPreviewImageLoader {
     }
 
     /// Streams the body so an oversized response is aborted mid-flight rather
-    /// than buffered whole. Re-runs the allow-list (defense in depth), follows
-    /// it to the canonical URL, and requires a 200 + `image/*` content type.
+    /// than buffered whole. Re-runs the allow-list (defense in depth) and
+    /// requires a 200 + `image/*` content type.
     private nonisolated static func fetchData(_ url: URL, session: URLSession) async -> Data? {
         guard case .allowed(let canonicalURL) = WorkshopCDNHostAllowList.evaluate(url.absoluteString) else {
             return nil

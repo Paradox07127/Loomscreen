@@ -1,8 +1,7 @@
 import Foundation
 
-/// What a shader wallpaper is sourcing its fragment math from. Sum type so
-/// builtin presets and user-imported shaders flow through the same path
-/// without forcing every call site to switch between two separate fields.
+/// Sum type so builtin presets and user-imported shaders flow through the
+/// same path without forcing call sites to switch between two fields.
 ///
 /// `Codable` is backward-compatible: an older config blob storing a bare
 /// `MetalShaderPreset` rawValue (e.g. `"Waves"`) at the `metalShader.preset`
@@ -29,9 +28,8 @@ public enum ShaderSource: Equatable, Sendable, Hashable {
 }
 
 extension ShaderSource {
-    /// Builtin shorthands so call sites and tests can keep writing the
-    /// preset case directly — `.metalShader(.aurora)` resolves to
-    /// `.metalShader(.builtin(.aurora))` via Swift's type inference.
+    /// Builtin shorthands so call sites and tests can keep writing the preset
+    /// case directly — `.metalShader(.aurora)` resolves via type inference.
     public static let waves: ShaderSource    = .builtin(.waves)
     public static let plasma: ShaderSource   = .builtin(.plasma)
     public static let gradient: ShaderSource = .builtin(.gradient)
@@ -46,10 +44,9 @@ extension ShaderSource: Codable {
     }
 
     public init(from decoder: Decoder) throws {
-        // Legacy path: bare `MetalShaderPreset` rawValue at this position.
-        // Earlier `WallpaperContent` encoded the preset directly as a single
-        // string value at `metalShader._0`, so a config from before this
-        // change still decodes through the single-value-container fallback.
+        // Legacy path: earlier `WallpaperContent` encoded the preset directly
+        // as a single string at `metalShader._0`, so pre-change configs decode
+        // through this single-value-container fallback.
         if let single = try? decoder.singleValueContainer().decode(MetalShaderPreset.self) {
             self = .builtin(single)
             return

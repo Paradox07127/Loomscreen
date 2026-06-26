@@ -55,13 +55,12 @@ public struct AtomicFileStore<Value: Codable> {
         self.category = category
     }
 
-    /// True if a primary or backup payload exists on disk. Used by the
-    /// migration path to decide whether to seed from `UserDefaults`.
+    /// Used by the migration path to decide whether to seed from `UserDefaults`.
     public var hasPersistedValue: Bool {
         fileExists(fileURL) || fileExists(backupURL)
     }
 
-    /// Reads the current payload, transparently falling back to the backup file when the primary is missing or corrupt.
+    /// Falls back to the backup file when the primary is missing or corrupt.
     public func read() -> Value? {
         if let value = decode(from: fileURL) {
             return value
@@ -117,7 +116,7 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// Writes raw bytes — used by migration paths that already have a JSON blob in `UserDefaults` and want to seed the file store without a decode/encode round-trip.
+    /// Used by migration paths that already have a JSON blob in `UserDefaults` and want to seed the file store without a decode/encode round-trip.
     public func writeRaw(_ data: Data) throws {
         do {
             try ensureDirectoryExists()
@@ -187,7 +186,6 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// 1.
     private func writeAtomically(_ data: Data) throws {
         let lockFD = try acquireLock()
         defer { releaseLock(lockFD) }
@@ -256,11 +254,10 @@ public struct AtomicFileStore<Value: Codable> {
     }
 }
 
-/// Conditional Sendable: the store's collaborators (encoder, decoder,
-/// fileManager) are effectively immutable in our use, so a value-typed copy
-/// can safely cross actor boundaries — but only when the payload itself is
-/// safe to share. Narrower than blanket `@unchecked Sendable` because we
-/// don't want to grant Sendable to stores of non-Sendable payloads.
+/// Conditional Sendable: collaborators (encoder, decoder, fileManager) are
+/// effectively immutable here, so a value-typed copy can cross actor boundaries
+/// — but only when the payload is Sendable. Narrower than blanket `@unchecked
+/// Sendable` so stores of non-Sendable payloads don't get Sendable for free.
 extension AtomicFileStore: @unchecked Sendable where Value: Sendable {}
 
 // MARK: - Shared encoder configuration

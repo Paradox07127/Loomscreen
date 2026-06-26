@@ -24,10 +24,8 @@ struct WPEMSDFTextLayout {
         generator: WPEMSDFGlyphGenerator
     ) -> WPEMSDFTextMesh? {
         guard !object.text.isEmpty else { return nil }
-        // The MSDF path lays out a SINGLE line. Hard line breaks or text that
-        // would wrap under maxWidth are laid out differently by the CoreText
-        // framesetter fallback, so defer those whole objects to CoreText instead
-        // of compressing/mispositioning them (correctness over coverage).
+        // MSDF lays out a SINGLE line; defer multi-line / wrapping objects to the
+        // CoreText framesetter instead of mispositioning them.
         if object.text.contains(where: \.isNewline) { return nil }
         let attributed = attributedString(for: object, font: font)
         let line = CTLineCreateWithAttributedString(attributed)
@@ -62,9 +60,8 @@ struct WPEMSDFTextLayout {
             naturalHeight: naturalHeight,
             innerHeight: innerHeight
         )
-        // Per-UTF16-unit whitespace flags using grapheme-level Character.isWhitespace
-        // (expanded across each character's UTF-16 units) so a glyph's source can
-        // be classified in O(1) by its CTRun string index.
+        // Per-UTF16-unit whitespace flags (grapheme-level isWhitespace expanded
+        // across UTF-16 units) so a glyph is classified in O(1) by its string index.
         var whitespaceByUTF16: [Bool] = []
         whitespaceByUTF16.reserveCapacity(object.text.utf16.count)
         for character in object.text {
@@ -106,10 +103,10 @@ struct WPEMSDFTextLayout {
                     isComplete = false
                     continue
                 case .skip:
-                    // Whitespace has no outline by design → advance, draw nothing.
-                    // A NON-whitespace glyph with no MSDF outline (emoji / color /
-                    // unsupported) must NOT be silently dropped — fall the whole
-                    // object back to CoreText so it renders correctly.
+                    // Whitespace has no outline → advance, draw nothing. A
+                    // non-whitespace glyph with no MSDF outline (emoji/color/
+                    // unsupported) must NOT be dropped — fall the whole object
+                    // back to CoreText so it renders correctly.
                     if Self.isWhitespace(stringIndices[index], flags: whitespaceByUTF16) { continue }
                     return nil
                 }
@@ -198,8 +195,8 @@ struct WPEMSDFTextLayout {
         return unitsPerEm / fontSize
     }
 
-    /// The font CoreText actually used for this run (may be a substituted
-    /// fallback font when the scene font lacks a glyph).
+    /// The font CoreText actually used for this run (may be a substituted fallback
+    /// when the scene font lacks a glyph; glyph IDs are relative to it).
     private static func runFont(_ run: CTRun) -> CTFont? {
         let attributes = CTRunGetAttributes(run) as NSDictionary
         guard let value = attributes[kCTFontAttributeName as String] else { return nil }
@@ -211,9 +208,6 @@ struct WPEMSDFTextLayout {
         return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
     }
 
-    /// Whether the source character at the glyph's UTF-16 offset is whitespace
-    /// (so a missing outline is expected and the glyph can be safely advanced
-    /// past). Backed by grapheme-level `Character.isWhitespace`.
     private static func isWhitespace(_ utf16Offset: CFIndex, flags: [Bool]) -> Bool {
         utf16Offset >= 0 && utf16Offset < flags.count && flags[utf16Offset]
     }

@@ -3,10 +3,9 @@ import Foundation
 
 /// Renderer-neutral IR for Wallpaper Engine scene execution.
 ///
-/// The graph deliberately models WPE's material/effect/pass/FBO structure
-/// instead of individual named effects. Metal execution can consume this IR
-/// without knowing whether a pass came from blur, shake, water ripple, or a
-/// workshop-specific effect.
+/// Deliberately models WPE's material/effect/pass/FBO structure rather than named
+/// effects, so Metal execution can consume a pass without knowing it came from
+/// blur, shake, water ripple, or a workshop-specific effect.
 public struct WPERenderGraph: Equatable, Sendable {
     public let layers: [WPERenderLayer]
 

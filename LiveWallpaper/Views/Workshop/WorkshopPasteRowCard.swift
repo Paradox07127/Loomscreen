@@ -3,10 +3,6 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// One row inside the Workshop paste queue. Renders skeleton during the
-/// initial fetch, the populated preview card on success, and the colored
-/// error strip + per-error CTA on failure (matching the mockup at
-/// `docs/mockups/workshop-ui.html`).
 struct WorkshopPasteRowCard: View {
     let row: WorkshopPasteQueueModel.Row
     let onRetry: () -> Void
@@ -270,8 +266,7 @@ private struct WorkshopRowErrorStrip: View {
         case .itemBanned, .itemNotFound, .responseParseFailure, .schemaMismatch:
             return DesignTokens.Colors.Status.danger
         case .rateLimited:
-            // Transient — orange (per plan & mockup) signals "auto-retrying"
-            // distinctly from yellow ("user action recommended").
+            // Orange signals "auto-retrying", distinct from yellow ("user action recommended").
             return DesignTokens.Colors.Status.warning
         case .invalidInput, .itemPrivate, .timeout, .networkUnreachable,
              .unauthorized, .http:
@@ -335,9 +330,8 @@ private struct WorkshopRowErrorStrip: View {
 
 // MARK: - Formatters
 
-/// SwiftUI wrapper around [`WorkshopPreviewImageLoader`]. Renders a spinner
-/// while the fetch is in flight and a system icon when the loader rejects
-/// the URL (allow-list miss, wrong content-type, oversize, etc.).
+/// Shows a fallback icon when `WorkshopPreviewImageLoader` rejects the URL
+/// (allow-list miss, wrong content-type, oversize, etc.).
 private struct WorkshopPreviewImage: View {
     let url: URL
     @State private var image: NSImage?

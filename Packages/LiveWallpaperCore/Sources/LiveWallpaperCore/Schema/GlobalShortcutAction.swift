@@ -90,7 +90,7 @@ public struct GlobalShortcutBinding: Codable, Equatable, Hashable, Sendable {
         return symbols + GlobalShortcutBinding.keyName(for: keyCode)
     }
 
-    /// Maps a small set of common keys to friendly names; falls back to `Key \(code)` for unmapped codes so debug rendering still works.
+    /// Falls back to `Key \(code)` for unmapped codes so debug rendering still works.
     public static func keyName(for keyCode: UInt32) -> String {
         switch keyCode {
         case 49: return "Space"

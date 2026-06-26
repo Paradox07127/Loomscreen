@@ -74,7 +74,6 @@ struct WPESceneCapabilityClassifier: Sendable {
         return .degraded
     }
 
-    /// Coarse existence probe — does this relative path resolve to a file somewhere in the mount chain?
     private func isReachable(
         _ relativePath: String,
         through resolver: WPEMultiRootResourceResolver

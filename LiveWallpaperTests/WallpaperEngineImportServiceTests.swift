@@ -80,18 +80,16 @@ struct WallpaperEngineImportServiceTests {
         }
         #expect(indexFileName == "index.html")
         #expect(config.physicalPixelLayout)
-        // Package-aware: served in place from the source folder, no cache copy.
+        // Served in place from the source folder, no cache copy.
         #expect(origin.cacheRelativePath == nil)
         #expect(origin.resourceLocation == .sourceFolder)
         #expect(origin.entryFile == "index.html")
-        // Nothing was extracted into wpe-cache for this id.
         let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
     }
 
     @Test("WallpaperContent.video round-trips packageEntryName and decodes legacy payloads")
     func videoContentPackageEntryRoundTrips() throws {
-        // New packaged-video payload survives a Codable round trip.
         let packaged = WallpaperContent.video(bookmarkData: Data([0xAA, 0xBB]), packageEntryName: "video.mp4")
         let encoded = try JSONEncoder().encode(packaged)
         let decoded = try JSONDecoder().decode(WallpaperContent.self, from: encoded)
@@ -113,19 +111,17 @@ struct WallpaperEngineImportServiceTests {
         config.savedVideoBookmarkData = pkgBookmark
         config.savedVideoPackageEntryName = "video.mp4"
 
-        // A bookmark refresh keeps the entry on the active wallpaper (else the
-        // next apply would treat the scene.pkg as a plain video file).
+        // A bookmark refresh must keep the entry, else the next apply treats the
+        // scene.pkg as a plain video file.
         let refreshed = config.withUpdatedActiveBookmark(Data([0x03, 0x04]))
         #expect(refreshed.activeWallpaper.packageVideoEntryName == "video.mp4")
 
-        // Swap to HTML, then restore the saved primary video → entry survives.
         var swapped = refreshed
         swapped.activeWallpaper = .html(source: .inline("<html></html>"), config: .default)
         let restored = swapped.activateSavedVideoWallpaper()
         #expect(restored)
         #expect(swapped.activeWallpaper.packageVideoEntryName == "video.mp4")
 
-        // Codable round trip preserves both the active and saved package entry.
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: JSONEncoder().encode(config))
         #expect(decoded.savedVideoPackageEntryName == "video.mp4")
         #expect(decoded.activeWallpaper.packageVideoEntryName == "video.mp4")
@@ -185,7 +181,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.cacheRelativePath == nil)
         #expect(origin.resourceLocation == .sourceFolder)
         #expect(origin.entryFile == "video.mp4")
-        // Nothing extracted into wpe-cache for this id.
         let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
         // Cache idempotency / fingerprint-invalidation stay covered directly by
@@ -296,8 +291,8 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.assetStorage == .packageSource(fileName: "scene.pkg"))
         #expect(descriptor.capabilityTier == .imageOnly)
 
-        // Zero-cache: the package is read in place, so NOTHING is written to
-        // wpe-cache for this id (assets and project.json both stay at the source).
+        // Read in place, so nothing is written to wpe-cache (assets and
+        // project.json both stay at the source).
         let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }

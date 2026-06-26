@@ -2,15 +2,12 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Owns HTML wallpaper management: the 4 public setters
-/// (`setHTMLWallpaper` variants + `updateHTMLConfig`) plus the
-/// multi-instance audio-leader / trust-evaluation policy. Carved out of
-/// `ScreenManager` so the manager doesn't have to host both video and
-/// HTML-specific session logic.
+/// Owns HTML wallpaper management: the public setters plus the multi-instance
+/// audio-leader / trust-evaluation policy. Carved out of `ScreenManager` so it
+/// doesn't have to host both video and HTML-specific session logic.
 ///
-/// Pure orchestration: borrows refs to the store + screensProvider and
-/// takes callbacks for the side-effects ScreenManager still owns
-/// (saveConfiguration, restoreWallpaperSession, notifyWallpaperSessionChanged).
+/// Pure orchestration: borrows refs to the store + screensProvider and takes
+/// callbacks for the side-effects ScreenManager still owns.
 @MainActor
 final class HTMLWallpaperCoordinator {
     private let configurationStore: WallpaperConfigurationStore
@@ -38,7 +35,6 @@ final class HTMLWallpaperCoordinator {
 
     // MARK: - Multi-instance diagnostics
 
-    /// Maps each currently-active HTML source signature to the screens that run it.
     func sourceMultiplicity() -> [String: [CGDirectDisplayID]] {
         var map: [String: [CGDirectDisplayID]] = [:]
         for screen in screensProvider() {
@@ -50,7 +46,6 @@ final class HTMLWallpaperCoordinator {
         return map
     }
 
-    /// Screens (other than `excluding`) currently running the same HTML source.
     func screensRunningSameSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
         let signature = source.diagnosticSignature
         return screensProvider().filter { other in
@@ -63,12 +58,12 @@ final class HTMLWallpaperCoordinator {
         }
     }
 
-    /// True when no other screen is already playing this HTML source — the caller becomes the audio leader.
+    /// The caller becomes audio leader when no other screen plays this source.
     func isAudioLeader(source: HTMLSource, excluding screenID: CGDirectDisplayID) -> Bool {
         screensRunningSameSource(as: source, excluding: screenID).isEmpty
     }
 
-    /// Audio-leader policy + trust evaluation merged into the effective HTMLConfig used by the runtime session.
+    /// Merges audio-leader muting + trust evaluation into the effective config.
     func runtimeConfig(source: HTMLSource, config: HTMLConfig, for screen: Screen) -> HTMLConfig {
         var effectiveConfig = config
 
@@ -140,7 +135,6 @@ final class HTMLWallpaperCoordinator {
         restoreWallpaperSession(screen, configuration, false)
     }
 
-    /// Swaps HTML source while keeping existing HTML settings.
     func setWallpaperPreservingConfig(source: HTMLSource, for screen: Screen) {
         let preserved = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.htmlConfig ?? .default
         setWallpaper(source: source, config: preserved, for: screen)
@@ -151,7 +145,6 @@ final class HTMLWallpaperCoordinator {
         setWallpaper(source: source, for: screen)
     }
 
-    /// Updates the HTML runtime config — mute, JS toggle, mouse, ephemeral storage, tracker blocker.
     func updateConfig(_ config: HTMLConfig, for screen: Screen) {
         guard var existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               case .html(let source, let previousConfig) = existing.activeWallpaper else { return }

@@ -2,11 +2,9 @@
 import AppKit
 import SwiftUI
 
-/// Scene detail card for Wallpaper Engine projects. Drives the loading /
-/// playing / paused / error state machine on top of the renderer view the
-/// wallpaper session already mounted into the desktop window. The inspector
-/// reuses the same renderer instance so the preview seen here is
-/// byte-identical to the live wallpaper.
+/// Scene detail card for Wallpaper Engine projects. Reuses the renderer instance
+/// the wallpaper session already mounted into the desktop window, so the preview
+/// seen here is byte-identical to the live wallpaper.
 @MainActor
 struct WPESceneDetailView: View {
     let origin: WPEOrigin
@@ -17,10 +15,8 @@ struct WPESceneDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.featureCatalog) private var featureCatalog
     @State private var state: SceneRenderState = .idle
-    /// Presents the full diagnostic log in a resizable glass terminal window.
-    /// Opened from the metadata info button (any state) or the error banner's
-    /// "Log" button — the verbose renderer log never lives inline on the card,
-    /// so the card stays compact and the layout barely shifts on error.
+    /// The verbose renderer log never lives inline on the card, so the card
+    /// stays compact and the layout barely shifts on error.
     @State private var showLogSheet = false
 
     var body: some View {
@@ -79,18 +75,15 @@ struct WPESceneDetailView: View {
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
         .frame(maxWidth: .infinity)
-        // Bounded (not greedy `maxHeight: .infinity`): the card now lives inside
-        // a ScrollView so the whole detail can scroll at small window heights.
-        // An unbounded preview would expand without limit under the scroll's
-        // infinite height proposal.
+        // Bounded (not `maxHeight: .infinity`): the card lives inside a ScrollView,
+        // so an unbounded preview would expand without limit under its infinite
+        // height proposal.
         .frame(height: 300)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    /// Lightweight gradient strip pinned to the bottom of the (now unmasked)
-    /// preview GIF. Surfaces a glanceable error code without hiding the artwork
-    /// — the friendly summary lives in `errorBanner` below, the full log in the
-    /// diagnostic window.
+    /// Surfaces a glanceable error code without hiding the artwork — the friendly
+    /// summary lives in `errorBanner`, the full log in the diagnostic window.
     private func previewErrorStrip(reason: FallbackReason) -> some View {
         HStack(spacing: 6) {
             Image(systemName: severityIcon(for: reason))
@@ -164,9 +157,6 @@ struct WPESceneDetailView: View {
 
     // MARK: - Error banner
 
-    /// Compact, glass-tinted failure summary shown only on `.error`. The verbose
-    /// renderer log stays out of the card (it lives in the log window opened via
-    /// the "Log" button), so failing a scene barely shifts the layout.
     @ViewBuilder
     private var errorBanner: some View {
         if case .error(let reason) = state {
@@ -211,9 +201,7 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Aggregated, PII-scrubbed diagnostic text for the resizable log window:
-    /// capability tier + error code (when failed) + the renderer's first-failure
-    /// description + (DEBUG) the resource-resolution summary and misses.
+    /// PII-scrubbed diagnostic text for the log window.
     private var fullDiagnosticText: String {
         var lines: [String] = ["Capability: \(descriptor.capabilityTier.localizedLabel)"]
         if case .error(let reason) = state {
@@ -260,8 +248,6 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Short, glanceable machine code shown on the preview strip and copied
-    /// alongside the raw log.
     private func errorCode(for reason: FallbackReason) -> String {
         switch reason {
         case .unsupportedType:         return "WPE_UNSUPPORTED_TYPE"
@@ -276,8 +262,6 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Severity tint for the log window's chrome — red/orange on failure, a
-    /// neutral accent otherwise.
     private var currentSeverityTint: Color {
         if case .error(let reason) = state {
             return severityColor(for: reason)
@@ -285,11 +269,9 @@ struct WPESceneDetailView: View {
         return .accentColor
     }
 
-    /// The project's own preview GIF (Workshop scenes always ship one), filling
-    /// the card with aspect-fill crop. This replaces the former first-frame
-    /// Metal snapshot — the live `MTKView` already drives the desktop wallpaper,
-    /// so the inspector no longer pays for a synchronous GPU read-back just to
-    /// show a thumbnail.
+    /// Uses the project's own preview GIF rather than a first-frame Metal snapshot:
+    /// the live `MTKView` already drives the wallpaper, so the inspector avoids a
+    /// synchronous GPU read-back just to show a thumbnail.
     private var fallbackBackground: some View {
         WPEPreviewView(
             imageURL: previewURL,
@@ -338,11 +320,8 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Workshop ID. For a numeric Steam item it's an actionable link: when the
-    /// in-app Workshop pane is available it offers both "Find in Workshop"
-    /// (jumps to Browse Online scoped to this item) and "Open Steam Page";
-    /// otherwise it's a plain web link. Locally-imported projects whose ID isn't
-    /// a Steam item render as plain text.
+    /// Actionable only for a numeric Steam item; locally-imported projects whose
+    /// ID isn't a Steam item render as plain text.
     @ViewBuilder
     private var workshopIDLabel: some View {
         if isSteamWorkshopID, let url = steamWorkshopURL {
@@ -379,14 +358,11 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// The bare "Workshop ID 12345" caption, shared by every rendering branch.
     private var workshopIDText: Text {
         Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID. The placeholder is the Workshop ID.")
             .font(.caption)
     }
 
-    /// Plain web link to the Steam Workshop page (used when the in-app Workshop
-    /// pane isn't available in this build).
     private func workshopIDWebLink(_ url: URL) -> some View {
         Button {
             NSWorkspace.shared.open(url)
@@ -477,17 +453,14 @@ struct WPESceneDetailView: View {
     private func refreshState() async {
         let next = derivedState()
         guard next != state else { return }
-        // Drive the assignment through an animation so the error console's
-        // insertion/removal slides instead of snapping the layout — the 0.4s
-        // poll only re-animates when the state actually changes (guard above).
+        // Animate so the error console's insertion/removal slides instead of
+        // snapping the layout; the guard keeps the 0.4s poll from re-animating
+        // when nothing changed.
         withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
             state = next
         }
     }
 
-    /// Pure state derivation (plus the live renderer's Reduce-Motion side
-    /// effect). Returns the state the card *should* be in for the current
-    /// session, leaving the animated assignment to `refreshState()`.
     private func derivedState() -> SceneRenderState {
         guard let session else { return .error(.unsupportedType) }
         if let error = session.loadError {
@@ -513,14 +486,12 @@ struct WPESceneDetailView: View {
         case .resourceFailed(let diagnostic):
             return Self.fallbackReason(for: diagnostic)
         case .metalRendererUnsupported(let reason):
-            // Metal renderer gaps are hard load failures.
-            // Treat like a generic scene parse failure so the inspector still
+            // Map hard renderer gaps onto a parse failure so the inspector still
             // shows a meaningful diagnostic.
             return .sceneParseFailed(reason)
         }
     }
 
-    /// Maps the most-specific per-layer failure into the corresponding FallbackReason.
     static func fallbackReason(for diagnostic: SceneLoadDiagnostic) -> FallbackReason {
         switch diagnostic {
         case .texture(_, let error):
@@ -598,10 +569,6 @@ struct WPESceneDetailView: View {
 
 // MARK: - Diagnostic log window
 
-/// Resizable glass-terminal window for the complete diagnostic log. Glass base,
-/// a severity-tinted header, and per-line syntax colouring (errors red, warnings
-/// orange, misses yellow, successes green) over a selectable monospaced body —
-/// matching the app's liquid-glass language without dropping into a plain sheet.
 @MainActor
 private struct DiagnosticLogSheet: View {
     let title: String
@@ -610,9 +577,8 @@ private struct DiagnosticLogSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var didCopy = false
-    /// Colourised log, built once when the window appears. Caching avoids
-    /// rebuilding the whole AttributedString on every body refresh (e.g. the
-    /// `didCopy` toggle) — important for long logs.
+    /// Cached so the whole AttributedString isn't rebuilt on every body refresh
+    /// (e.g. the `didCopy` toggle) — matters for long logs.
     @State private var rendered: AttributedString?
 
     var body: some View {
@@ -668,9 +634,8 @@ private struct DiagnosticLogSheet: View {
         .background(Color.black.opacity(0.8))
     }
 
-    /// Builds one selectable `AttributedString` (so copy/selection still spans
-    /// the whole log) with each line tinted by its severity keyword. Computed
-    /// once per window via `rendered`.
+    /// One `AttributedString` rather than per-line views, so copy/selection still
+    /// spans the whole log.
     private static func colourise(_ log: String) -> AttributedString {
         let lines = log.components(separatedBy: "\n")
         var result = AttributedString()
@@ -726,9 +691,7 @@ enum SceneRenderState: Equatable {
     case ready
     case error(FallbackReason)
 
-    /// Convenience for "loading without specific progress text" — keeps
-    /// the dozens of existing call sites that just wrote `.loading`
-    /// pinned to a single source of truth.
+    /// Keeps the call sites that just wrote `.loading` pinned to one definition.
     static var loading: SceneRenderState { .loading(progress: nil) }
 
     var isLoading: Bool {

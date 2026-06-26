@@ -89,10 +89,7 @@ struct ScreenDetailInspectorPanel: View {
 
                     #if !LITE_BUILD
                     // Scene custom settings live in this persistent right sidebar
-                    // (same place as HTML's), so they're always to the side and
-                    // collapse natively with the inspector — never stacked below
-                    // the preview. Shown only when the scene exposes interactive
-                    // controls.
+                    // (like HTML's) rather than stacked below the preview.
                     if draft.selectedWallpaperType == .scene,
                        let schema = wpeSceneCustomSettingsSchema,
                        schema.properties.contains(where: {
@@ -172,10 +169,9 @@ struct ScreenDetailInspectorPanel: View {
         wpeSceneCustomSettingsSchema = outcome.schema
     }
 
-    /// Stable identifier driving WPE project schema reloads. The inspector
-    /// panel is always mounted while HTML properties are visible, unlike the
-    /// card itself, so the async read cannot deadlock behind an initially empty
-    /// card body.
+    /// Drives schema reloads from the panel rather than the card: the panel is
+    /// always mounted while HTML properties are visible, so the async read can't
+    /// deadlock behind an initially empty card body.
     private var wpeProjectCustomSettingsLoadKey: String {
         guard let projectKey = wpeProjectCustomSettingsProjectKey else {
             return "hidden"

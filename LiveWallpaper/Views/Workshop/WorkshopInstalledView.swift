@@ -5,19 +5,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The pane's "Installed" tab, backed by the app-managed Wallpaper Engine
-/// library (the WPE import history + cache). Everything imported via
-/// paste-preview, a SteamCMD download, or "Import from folder…" lands here
-/// automatically. Layout mirrors the Bookmarks / Aerials shell: a
-/// `LibraryFilterBar` (search + type + sort) over an adaptive gallery, with a
-/// per-card Apply control targeting the open displays. Rendered headerless —
+/// library (WPE import history + cache). Rendered headerless —
 /// `WorkshopPaneView` owns the chrome.
 struct WorkshopInstalledView: View {
     /// Tapping a tag in the detail inspector bubbles up here so the pane can
     /// switch to Browse Online and scope the grid to that tag. nil = tags are
     /// shown but inert (e.g. if ever embedded without a Browse tab).
     var onBrowseTag: ((String) -> Void)? = nil
-    /// Builds the pane header to host inside the split's main column. nil
-    /// renders no header and contributes no toolbar items (keeps the view
+    /// nil renders no header and contributes no toolbar items (keeps the view
     /// embeddable like Browse).
     var paneHeader: (() -> AnyView)? = nil
 
@@ -27,29 +22,23 @@ struct WorkshopInstalledView: View {
     @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
     @State private var searchText: String = ""
-    /// Multi-select type filter (client-side, no API). Mirrors the online ribbon:
-    /// all chips selected by default; deselect to hide a kind, Option-click a
-    /// chip to isolate it. All-or-none selected == no filter.
+    /// All-or-none selected == no filter; deselect to hide a kind, Option-click
+    /// a chip to isolate it.
     @State private var selectedTypes: Set<WPELibraryTypeKind> = Set(WPELibraryTypeKind.allCases)
-    /// Origin + storage filters live in the downward-expanding Filters panel
-    /// (same pattern as the online ribbon). All-or-none selected == no filter.
+    /// All-or-none selected == no filter.
     @State private var selectedSources: Set<InstalledSource> = Set(InstalledSource.allCases)
     @State private var selectedStorage: Set<InstalledStorageKind> = Set(InstalledStorageKind.allCases)
     @State private var showFilters = false
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
-    /// Set when the user asks to delete an entry — drives the confirmation
-    /// dialog before any real file removal.
     @State private var pendingDelete: WPEHistoryEntry?
-    /// Card tapped → open the trailing detail inspector (apply happens from
-    /// inside it, or by dragging a card onto a display). Mirrors online Browse.
     @State private var selectedEntry: WPEHistoryEntry?
     /// User collapsed the detail panel via the header toggle while keeping the
     /// card selected. Reset whenever a new card is picked so selecting always
     /// reveals the panel.
     @State private var inspectorHidden = false
-    /// Drives the drag-to-apply screen bar — set true when a card drag starts,
-    /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
+    /// Drives the drag-to-apply screen bar — true while a card drag is in
+    /// flight, cleared on drop / mouse-up / Escape.
     @State private var isDraggingEntry = false
     @State private var localDragEndMonitor: Any?
     @State private var globalDragEndMonitor: Any?
@@ -57,25 +46,21 @@ struct WorkshopInstalledView: View {
     /// badge), derived from `cachedRemoteUpdateEpochs` vs each entry's import time.
     @State private var updatedWorkshopIDs: Set<String> = []
     /// Cached remote `timeUpdated` (epoch seconds) per workshop id, persisted so
-    /// the badge survives relaunches and re-derives correctly after a re-download.
+    /// the badge survives relaunches and re-derives after a re-download.
     @State private var cachedRemoteUpdateEpochs: [String: Double] = [:]
     @State private var isCheckingForUpdates = false
     @AppStorage("loomscreen.workshop.updateCheck.epoch.v1") private var lastUpdateCheckEpoch: Double = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Persisted detail-panel width + the transient width during a drag-resize.
     /// Shares the screen-detail inspector's width tokens so the panel reads as
     /// the same sidebar across the app.
     @AppStorage("Workshop.Installed.InspectorWidth") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
 
-    // Match the online Browse grid density (square tiles, ~192px source).
+    // 184…220 matches the online Browse grid density (square tiles, ~192px source).
     private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
 
     var body: some View {
-        // Same resizable, full-height, click-to-reveal side panel as the
-        // screen-detail inspector — selecting a card glides it open and only
-        // compresses the grid (never the sidebar / toolbar).
         ResizableInspectorSplit(
             isMounted: true,
             isVisible: isInspectorVisible,
@@ -85,17 +70,13 @@ struct WorkshopInstalledView: View {
             liveWidth: $liveInspectorWidth,
             minWidth: DesignTokens.Inspector.minWidth,
             maxWidth: DesignTokens.Inspector.maxWidth,
-            // Dragging the handle past the panel's minimum collapses it — the
-            // direct-manipulation mirror of the toolbar toggle.
+            // Dragging the handle past the panel's minimum collapses it.
             onClose: { inspectorHidden = true },
             main: { mainColumn },
             inspector: { width in installedInspectorColumn(width: width) }
         )
             .background(DesignTokens.Colors.pageBackground)
-            // Detail-panel toggle in the window toolbar's trailing corner — the
-            // same native borderless `sidebar.right` button as the screen-detail
-            // inspector. Only contributed when hosted in the tabbed pane and
-            // only while a card is selected.
+            // Only contributed when hosted in the tabbed pane and a card is selected.
             .toolbar {
                 if paneHeader != nil, selectedEntry != nil {
                     ToolbarItem(placement: .primaryAction) {
@@ -144,8 +125,6 @@ struct WorkshopInstalledView: View {
             }
     }
 
-    /// Detail panel for the selected library entry (placeholder when nothing is
-    /// selected; only visible when the split reveals it). Built at full width.
     private func installedInspectorColumn(width: CGFloat) -> some View {
         Group {
             if let entry = selectedEntry {
@@ -192,13 +171,10 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Main column
 
-    /// The detail panel shows when a card is selected and the user hasn't
-    /// collapsed it with the header toggle.
     private var isInspectorVisible: Bool { selectedEntry != nil && !inspectorHidden }
 
-    /// Header (hosted here so the panel runs full-height alongside it) + the
-    /// library grid. The split compresses this whole column when the panel opens.
-    /// The header is absent when embedded without the tabbed pane chrome.
+    /// Header hosted here so the panel runs full-height alongside it; absent
+    /// when embedded without the tabbed pane chrome.
     private var mainColumn: some View {
         VStack(spacing: 0) {
             if let paneHeader {
@@ -223,9 +199,6 @@ struct WorkshopInstalledView: View {
                     resultCount: visibleEntries.count,
                     totalCount: entries.count
                 ) {
-                    // Type chips on the left; Sort pinned to the right edge —
-                    // mirrors the online ribbon. The full-width HStack lets the
-                    // inner Spacer push Sort flush right.
                     HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
                         filtersToggle
 
@@ -261,10 +234,8 @@ struct WorkshopInstalledView: View {
     @ViewBuilder
     private var gallery: some View {
         if visibleEntries.isEmpty {
-            // Filtered to nothing (e.g. the "Unsupported" chip when you have no
-            // such items). Show a plain empty area rather than a full illustrated
-            // page — the filter bar above stays put, so flipping back to "All"
-            // (or clearing the search) is the obvious, in-place way back.
+            // Filtered to nothing: plain empty area (not the illustrated empty
+            // state) so the filter bar above stays put as the in-place way back.
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -288,9 +259,8 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            // Toggle: clicking the open card again closes the
-                            // inspector; picking a new card always reveals the
-                            // (possibly collapsed) panel.
+                            // Clicking the open card again closes the inspector;
+                            // a new card always reveals the (possibly collapsed) panel.
                             onTap: {
                                 if selectedEntry?.id == entry.id {
                                     selectedEntry = nil
@@ -301,9 +271,8 @@ struct WorkshopInstalledView: View {
                             },
                             onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
-                            // Only offer "Add" when the item's content can actually
-                            // be rebuilt into a bookmark; "Remove" stays available
-                            // for anything already bookmarked.
+                            // Only offer "Add" when the content can be rebuilt into a
+                            // bookmark; "Remove" stays available for anything bookmarked.
                             onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil,
                             hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
                             onUpdate: doctor.isDownloadReady ? { updateEntry(entry) } : nil
@@ -313,10 +282,9 @@ struct WorkshopInstalledView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                // Tap the gaps between cards / the side margins to close the
-                // inspector — placed at content level so in-grid gaps land here
-                // (a ScrollView-level background missed them). Behind the cards
-                // (Buttons keep their taps); clicking another card still switches.
+                // Tap the gaps/margins to close the inspector. Placed at content
+                // level so in-grid gaps land here (a ScrollView-level background
+                // missed them); behind the cards so Buttons keep their taps.
                 .background(
                     Color.clear
                         .contentShape(Rectangle())
@@ -441,8 +409,7 @@ struct WorkshopInstalledView: View {
         }
     }
 
-    /// Default-all-selected model (mirrors online): all (or none) selected means
-    /// no filter; deselecting some hides those kinds.
+    /// All (or none) selected means no filter; deselecting some hides those kinds.
     private func typeMatches(_ entry: WPEHistoryEntry) -> Bool {
         if selectedTypes.isEmpty || selectedTypes.count == WPELibraryTypeKind.allCases.count {
             return true
@@ -580,8 +547,8 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Actions
 
-    /// "In use" means the entry's project is the active wallpaper on *any* open
-    /// display — there is no single target screen in this multi-display library.
+    /// "In use" == the entry's project is the active wallpaper on *any* open
+    /// display (no single target screen in this multi-display library).
     private func isActive(_ entry: WPEHistoryEntry) -> Bool {
         screenManager.screens.contains { screen in
             screenManager.getConfiguration(for: screen)?.wpeOrigin?.workshopID == entry.origin.workshopID
@@ -630,18 +597,15 @@ struct WorkshopInstalledView: View {
         }
     }
 
-    /// Re-download the item from Steam to pick up the newer Workshop version
-    /// (the "Update available" path). Reuses the same SteamCMD download + import
-    /// flow as a fresh download; on success the fresher `importedAt` clears the
-    /// badge via `reconcileUpdateFlags`.
+    /// Re-download from Steam to pick up the newer Workshop version. On success
+    /// the fresher `importedAt` clears the badge via `reconcileUpdateFlags`.
     private func updateEntry(_ entry: WPEHistoryEntry) {
         guard let id = UInt64(entry.origin.workshopID) else { return }
         WorkshopDownloadCoordinator.shared.download(itemID: id, title: entry.origin.title, using: doctor)
     }
 
     /// Keep the open inspector pointed at the latest entry for its item after a
-    /// library change (e.g. an Update re-import). Closes the inspector if the
-    /// item is gone (deleted).
+    /// library change (e.g. an Update re-import); closes it if the item is gone.
     private func refreshSelectedEntry() {
         guard let current = selectedEntry else { return }
         selectedEntry = entries.first { $0.origin.workshopID == current.origin.workshopID }
@@ -654,16 +618,15 @@ struct WorkshopInstalledView: View {
         entry.origin.resourceLocation == .cache
     }
 
-    /// Real, confirmed deletion. Always removes the library entry + any bookmark.
-    /// For cache-backed items it ALSO permanently deletes our managed copy
-    /// (`…/wpe-cache/<id>/`) plus the SteamCMD download that seeded it — a
-    /// path-validated delete that can never escape the managed roots. We delete
-    /// rather than Trash because, under App Sandbox, trashing a container file
-    /// only reaches the invisible per-container `.Trash` and never frees space.
-    /// User-imported source folders are never touched.
+    /// Always removes the library entry + any bookmark. For cache-backed items
+    /// it ALSO permanently deletes our managed copy (`…/wpe-cache/<id>/`) plus
+    /// the SteamCMD download that seeded it — a path-validated delete that can
+    /// never escape the managed roots. We delete rather than Trash because under
+    /// App Sandbox, trashing a container file only reaches the invisible
+    /// per-container `.Trash` and never frees space. User-imported source
+    /// folders are never touched.
     private func performDelete(_ entry: WPEHistoryEntry) {
         errorMessage = nil
-        // Close the detail inspector if it's showing the item being removed.
         if selectedEntry?.id == entry.id { selectedEntry = nil }
         let origin = entry.origin
         let workshopID = origin.workshopID
@@ -682,19 +645,17 @@ struct WorkshopInstalledView: View {
                     comment: "Workshop delete: history removed but cache files couldn't be deleted."
                 )
             }
-            // Also free the SteamCMD download that seeded this cache copy —
-            // otherwise its bytes linger on disk. Best-effort; the delete
-            // tombstone recorded in `removeWorkshop` already prevents the
-            // auto-scan from resurrecting it on its own.
+            // Free the SteamCMD download that seeded this cache copy, else its
+            // bytes linger. Best-effort; the delete tombstone in `removeWorkshop`
+            // already stops the auto-scan from resurrecting it.
             Task { await doctor.deleteDownloadedItemFolders(workshopID: workshopID) }
         }
         reload()
     }
 
-    /// Favorite ("收藏") a downloaded item as a real `WallpaperBookmark` — the
-    /// unified save mechanism (no separate "like" store). Only downloaded items
-    /// can be bookmarked because a bookmark is an applyable wallpaper, so we
-    /// rebuild the local content from the cached import via `WPECachedContentResolver`.
+    /// Favorite a downloaded item as a real `WallpaperBookmark` (no separate
+    /// "like" store). A bookmark is an applyable wallpaper, so we rebuild the
+    /// local content from the cached import via `WPECachedContentResolver`.
     private func toggleBookmark(_ entry: WPEHistoryEntry) {
         errorMessage = nil
         let workshopID = entry.origin.workshopID
@@ -714,9 +675,8 @@ struct WorkshopInstalledView: View {
         )
     }
 
-    /// A bookmark is an applyable wallpaper, so only items whose content the
-    /// `WPECachedContentResolver` can rebuild (cache-backed, supported type) can
-    /// be added. Mirrors the resolver's preconditions cheaply (no disk I/O).
+    /// Only items whose content `WPECachedContentResolver` can rebuild can be
+    /// bookmarked. Mirrors the resolver's preconditions cheaply (no disk I/O).
     private func canAddBookmark(_ entry: WPEHistoryEntry) -> Bool {
         let origin = entry.origin
         guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
@@ -740,9 +700,8 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Drag-to-apply screen bar
 
-    /// Floats in only while a card is being dragged (not persistent), listing the
-    /// open displays as drop targets — drop a wallpaper onto one to apply it there.
-    /// (Click-to-apply per display lives in the inspector's Apply popover.)
+    /// Floats in only while a card is being dragged, listing the open displays
+    /// as drop targets. (Click-to-apply lives in the inspector's Apply popover.)
     private var screenDropBar: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
             Text("Drop onto a display to apply")
@@ -795,7 +754,7 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
-        // Make the whole target (tile + name + gaps) a forgiving drop region.
+        // Whole target (tile + name + gaps) is a forgiving drop region.
         .contentShape(Rectangle())
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
@@ -889,8 +848,8 @@ struct WorkshopInstalledView: View {
     }
 
     /// Derive the visible "Update" set from cached remote timestamps vs each
-    /// entry's current import time — so a re-download (newer `importedAt`) clears
-    /// the badge immediately, without waiting for the next daily fetch.
+    /// entry's import time, so a re-download (newer `importedAt`) clears the
+    /// badge immediately without waiting for the next daily fetch.
     private func reconcileUpdateFlags() {
         updatedWorkshopIDs = Set(entries.compactMap { entry in
             guard let remoteEpoch = cachedRemoteUpdateEpochs[entry.origin.workshopID],
@@ -899,10 +858,10 @@ struct WorkshopInstalledView: View {
         })
     }
 
-    /// Once per day, fetch each installed item's current Workshop metadata and
-    /// cache its remote `timeUpdated`. Runs inside `.task` so it's cancelled when
-    /// the tab goes away; single-flight; preserves prior cache on transient
-    /// failures and stops early on rate-limit (never erases known badges).
+    /// Once per day, cache each installed item's remote `timeUpdated`. Runs in
+    /// `.task` so it cancels when the tab goes away; single-flight; preserves
+    /// prior cache on transient failures and stops early on rate-limit so we
+    /// never erase known badges.
     private func checkForUpdatesIfNeeded() async {
         guard !isCheckingForUpdates else { return }
         guard Date().timeIntervalSince1970 - lastUpdateCheckEpoch >= 86_400 else { return }
@@ -940,9 +899,8 @@ struct WorkshopInstalledView: View {
 
 // MARK: - Filters
 
-/// Concrete library type kinds for the multi-select chip row (no `.all` case —
-/// all or none selected means "all"). `.unsupported` collects the project types
-/// macOS can't run.
+/// Library type kinds for the chip row. No `.all` case — all-or-none selected
+/// means "all". `.unsupported` collects the project types macOS can't run.
 private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
     case video, web, scene, unsupported
 
@@ -957,17 +915,6 @@ private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
         }
     }
 
-    var helpText: Text {
-        switch self {
-        case .video: return Text("Show only video wallpapers")
-        case .web: return Text("Show only web / HTML wallpapers")
-        case .scene: return Text("Show only scene wallpapers")
-        case .unsupported:
-            // Explains issue #9's "when does unsupported appear?".
-            return Text("Windows-only items — a Windows .exe application wallpaper, or a project type macOS can't recognize. These can't run here.")
-        }
-    }
-
     func matches(_ entry: WPEHistoryEntry) -> Bool {
         switch self {
         case .video: return entry.origin.originalType == .video
@@ -978,9 +925,8 @@ private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
     }
 }
 
-/// Origin filter: does the item carry a real Steam Workshop ID, or was it
-/// imported from a local folder? (We can't reliably tell "SteamCMD download vs
-/// manual import" — that isn't recorded — so this keys off the workshop ID.)
+/// Origin filter. Keys off the workshop ID because we don't record "SteamCMD
+/// download vs manual import", so we can only tell real Workshop ID vs local.
 private enum InstalledSource: String, CaseIterable, Identifiable {
     case steamWorkshop, local
 
@@ -999,9 +945,9 @@ private enum InstalledSource: String, CaseIterable, Identifiable {
     }
 }
 
-/// Storage filter: is the item an app-managed copy (extracted into our cache —
-/// the usual shape for SteamCMD-downloaded scenes) or a link to the user's own
-/// folder (manual imports + unpackaged downloads)?
+/// Storage filter: app-managed cache copy (the usual shape for SteamCMD-
+/// downloaded scenes) vs a link to the user's own folder (manual imports +
+/// unpackaged downloads).
 private enum InstalledStorageKind: String, CaseIterable, Identifiable {
     case managed, linked
 
@@ -1036,10 +982,8 @@ private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
 
 // MARK: - Installed detail inspector
 
-/// Trailing detail inspector for an installed item (mirrors the online Browse
-/// inspector). Click a card to open it; apply happens HERE (per-display via the
-/// mini-map, or "All"), alongside bookmark / Show in Finder / Remove. Dragging a
-/// card onto a display remains the quick per-screen path.
+/// Trailing detail inspector for an installed item. Apply happens here
+/// (per-display via the mini-map, or "All"); drag-onto-display is the quick path.
 private struct WPEInstalledInspectorContent: View {
     let entry: WPEHistoryEntry
     let screens: [Screen]
@@ -1047,7 +991,6 @@ private struct WPEInstalledInspectorContent: View {
     let isBookmarked: Bool
     let canBookmark: Bool
     let hasUpdate: Bool
-    /// SteamCMD is wired up, so the Update (re-download) button can run.
     let canUpdate: Bool
     let onApply: (Screen) -> Void
     let onApplyToAll: () -> Void
@@ -1059,17 +1002,14 @@ private struct WPEInstalledInspectorContent: View {
     let onSelectTag: ((String) -> Void)?
 
     @Environment(\.openURL) private var openURL
-    /// Drives the multi-display target popover under the single Apply button.
     @State private var showingApplyPopover = false
-    /// Original WPE metadata read straight from the item's local `project.json`
-    /// (description / tags / content rating) — no Steam API call. nil until the
-    /// off-main read completes; reloaded whenever the inspected entry changes.
+    /// WPE metadata read from the item's local `project.json` — no Steam API.
+    /// nil until the off-main read completes; reloaded when the entry changes.
     @State private var localInfo: WPELocalProjectInfo?
-    /// Collapsed vs. expanded state for a long description.
     @State private var descriptionExpanded = false
 
-    /// Shared singleton (also drives the online Browse download UI) — reading it
-    /// here makes this view observe the re-download's phase + progress.
+    /// Shared singleton — reading it here makes this view observe the
+    /// re-download's phase + progress.
     private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
     private var itemID: UInt64? { UInt64(entry.origin.workshopID) }
     private var updatePhase: WorkshopDownloadCoordinator.DownloadPhase {
@@ -1132,9 +1072,8 @@ private struct WPEInstalledInspectorContent: View {
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
 
-    /// Size on disk · date added on the left; bookmark + open-on-Steam as
-    /// borderless icons on the right. All local (no API). Size appears once the
-    /// off-main folder scan lands; the date is always available.
+    /// All local (no API). Size appears once the off-main folder scan lands;
+    /// the date is always available.
     private var metaRow: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             Group {
@@ -1173,8 +1112,6 @@ private struct WPEInstalledInspectorContent: View {
         }
     }
 
-    /// Borderless icon button — no background frame, generous hit area, keeps
-    /// the title as tooltip + VoiceOver label.
     private func plainIconButton(
         _ titleKey: LocalizedStringKey,
         systemImage: String,
@@ -1287,9 +1224,6 @@ private struct WPEInstalledInspectorContent: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Apply (fills) on the left; Show in Finder + Remove as borderless icons
-    /// right-aligned on the same row. The trash is red to flag the destructive
-    /// action.
     private var applySection: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             applyControl
@@ -1309,7 +1243,6 @@ private struct WPEInstalledInspectorContent: View {
             .disabled(true)
             .help(Text("Open a display first, then apply"))
         } else if screens.count == 1, let only = screens.first {
-            // Single display: name it in the label ("Apply to Studio Display").
             Button { onApply(only) } label: {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -1317,8 +1250,6 @@ private struct WPEInstalledInspectorContent: View {
             .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
         } else {
-            // One Apply button → a popover to pick a display or all (same
-            // pattern as the online inspector). Drag-to-apply is still there.
             Button { showingApplyPopover = true } label: {
                 Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
@@ -1335,8 +1266,6 @@ private struct WPEInstalledInspectorContent: View {
         }
     }
 
-    /// Original WPE info pulled from the local `project.json` (no API): the
-    /// description and tags. Hidden entirely until the read lands / when absent.
     @ViewBuilder
     private var infoSection: some View {
         if let info = localInfo, info.hasContent {
@@ -1369,8 +1298,7 @@ private struct WPEInstalledInspectorContent: View {
         }
     }
 
-    /// Tappable accent chip when `onSelectTag` is wired (jumps to Browse Online
-    /// scoped to the tag); otherwise a plain, inert secondary pill.
+    /// Tappable accent chip when `onSelectTag` is wired; otherwise inert.
     @ViewBuilder
     private func tagChip(_ tag: String) -> some View {
         if let onSelectTag {
@@ -1422,14 +1350,12 @@ private struct WPEInstalledInspectorContent: View {
 
 // MARK: - Local project.json metadata (no Steam API)
 
-/// The original Wallpaper Engine fields we surface in the Installed inspector,
-/// read directly from the item's bundled `project.json`. Purely local — opening
-/// a downloaded item never spends a Steam Web API request to show its details.
+/// WPE fields surfaced in the Installed inspector, read from the item's bundled
+/// `project.json`. Purely local — never spends a Steam Web API request.
 private struct WPELocalProjectInfo: Sendable, Equatable {
     var cleanedDescription: String?
     var tags: [String]
     var contentRating: String?
-    /// On-disk footprint of the item's folder (recursive sum of file sizes).
     var sizeBytes: Int64?
 
     var hasContent: Bool {
@@ -1437,8 +1363,8 @@ private struct WPELocalProjectInfo: Sendable, Equatable {
     }
 }
 
-/// Only the display fields — `WallpaperEngineProject` deliberately ignores these
-/// (it's the runtime import model); here we just want text to show.
+/// Display-only fields; `WallpaperEngineProject` (the runtime import model)
+/// deliberately ignores these.
 private struct WPEProjectDisplayManifest: Decodable {
     let description: String?
     let tags: [String]?
@@ -1446,8 +1372,8 @@ private struct WPEProjectDisplayManifest: Decodable {
 }
 
 /// Resolve the item's security-scoped folder and decode its `project.json` off
-/// the main actor. Returns nil for items without a manifest (e.g. loose video /
-/// web imports), so the inspector simply omits the info block.
+/// the main actor. nil for items without a manifest (e.g. loose video / web
+/// imports).
 private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELocalProjectInfo? {
     let bookmark = entry.origin.sourceFolderBookmark
     return await Task.detached(priority: .utility) {
@@ -1461,8 +1387,7 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
-        // Footprint is independent of the manifest text fields, so compute it
-        // either way.
+        // Independent of the manifest text fields, so compute it either way.
         let size = directorySize(of: folder)
 
         let manifestURL = folder.appendingPathComponent("project.json")
@@ -1483,8 +1408,8 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
     }.value
 }
 
-/// Recursively sum the byte size of every regular file under `folder`. Reads
-/// only file metadata (no content), so it's cheap even for large scenes.
+/// Recursively sum every regular file under `folder`. Reads only file metadata
+/// (no content), so it's cheap even for large scenes.
 private func directorySize(of folder: URL) -> Int64 {
     let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileSizeKey]
     guard let enumerator = FileManager.default.enumerator(

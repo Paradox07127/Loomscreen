@@ -1,24 +1,12 @@
 import CoreGraphics
 import Foundation
 
-/// Centralises the write side of `ScreenConfiguration` persistence:
+/// Centralises the write side of `ScreenConfiguration` persistence (save /
+/// remove / prune, each posting `.wallpaperConfigurationDidChange`).
 ///
-///   `save(_:)` → prime display-name cache → `store.save(_)` →
-///                post `.wallpaperConfigurationDidChange`
-///   `remove(for:)` → `store.remove(for:)` →
-///                post `.wallpaperConfigurationDidChange`
-///   `pruneInvalidConfigurations()` → store-side prune →
-///                tear down runtime session per removed screen via callback →
-///                broadcast `notifyWallpaperSessionChanged`
-///
-/// Borrows refs to the configuration store and the bookmark display-name
-/// cache (both live as long as `ScreenManager`). Two callbacks bridge back
-/// to runtime concerns that aren't part of persistence proper.
-///
-/// Reads stay on the store directly — call sites elsewhere in `ScreenManager`
-/// and the existing `PlaybackCoordinator` / `WPEImportCoordinator` continue
-/// to use `configurationStore.get(for:)` / `.loadAll()` / `.allScreenIDs()`
-/// because reads have no side effects to centralise.
+/// Reads stay on the store directly — call sites elsewhere keep using
+/// `configurationStore.get(for:)` / `.loadAll()` / `.allScreenIDs()` because
+/// reads have no side effects to centralise.
 @MainActor
 final class WallpaperPersistenceCoordinator {
     private let store: WallpaperConfigurationStore
@@ -38,20 +26,17 @@ final class WallpaperPersistenceCoordinator {
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
     }
 
-    /// Canonical write path.
     func save(_ configuration: ScreenConfiguration) {
         primeDisplayNames(from: configuration)
         store.save(configuration)
         postChange(for: configuration.screenID)
     }
 
-    /// Canonical delete path.
     func remove(for screenID: CGDirectDisplayID) {
         store.remove(for: screenID)
         postChange(for: screenID)
     }
 
-    /// Bulk-prime the display-name cache for a configuration without rewriting the store.
     func primeDisplayNames(from configuration: ScreenConfiguration) {
         bookmarkDisplayNameCache.prime(bookmarks: Self.videoBookmarks(in: configuration))
     }
@@ -81,7 +66,6 @@ final class WallpaperPersistenceCoordinator {
         }
     }
 
-    /// All video-bookmark `Data` values referenced by a configuration.
     private static func videoBookmarks(in configuration: ScreenConfiguration) -> [Data] {
         var result: [Data] = []
         var seen: Set<Data> = []

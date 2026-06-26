@@ -17,22 +17,14 @@ struct GeneralSettingsView: View {
     @State private var applicationRules: [ApplicationPerformanceRule]
     @State private var showAppExceptions = false
     @State private var showInDock: Bool
-    /// Slider value held in MB for UI ergonomics — converted to bytes when
-    /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
-    /// because SwiftUI's `Slider` is a `Double` ramp; the step ensures it
-    /// always lands on a `% 32 == 0` MB boundary so the label reads cleanly.
+    /// In MB (converted to bytes on persist). `Double` for SwiftUI `Slider`;
+    /// the step snaps to a `% 32 == 0` MB boundary so the label reads cleanly.
     @State private var videoCacheBudgetMB: Double
-    /// Pro-only runtime opt-in for the Developer Tools sidebar entry and
-    /// `WKWebView.isInspectable` on HTML wallpapers. Hidden in Lite via
-    /// `#if !LITE_BUILD` + capability gate so the row never renders.
+    /// Hidden in Lite via `#if !LITE_BUILD` + capability gate so the row never renders.
     @State private var developerModeEnabled: Bool
 
-    /// Pro-only master switch for audio-reactive wallpapers (system-audio
-    /// loopback capture). Default off — privacy-sensitive opt-in.
+    /// Default off — privacy-sensitive opt-in.
     @State private var audioResponseEnabled: Bool
-    /// Weather-reactive location source + manual city. Lives on General
-    /// (rather than a dedicated tab) because the surface is tiny and
-    /// only relevant to users who run weather-reactive particle effects.
     @State private var weatherLocation: WeatherLocationPreference
 
     @State private var pendingDestructive: PendingDestructive?
@@ -40,8 +32,7 @@ struct GeneralSettingsView: View {
 
     @State private var loginItemAlert: LoginItemFailure?
 
-    /// Pending import bundle: shown in a confirmation alert before applying
-    /// so users can back out after seeing what's inside.
+    /// Held so the user confirms in an alert before the import is applied (staged confirm-then-apply).
     @State private var pendingImportBundle: ConfigurationBundle?
     @State private var pendingImportSource: URL?
     @State private var importFeedback: String?
@@ -188,7 +179,6 @@ struct GeneralSettingsView: View {
 
     // MARK: - Import / Export Action Handlers
 
-    /// Builds the document snapshot from the current SettingsManager state and asks SwiftUI to present its native export sheet.
     private func beginExport() {
         do {
             exportDocument = try ConfigurationDocument.snapshot()
@@ -198,7 +188,6 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Triggers the `.fileImporter` sheet.
     private func beginImport() {
         isPresentingImporter = true
     }
@@ -264,7 +253,7 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Renders the post-import summary using individual `String(localized:)` format strings so each restored section gets its own pluralization rule via xcstrings (no manual "(s)" suffixes, no concatenation).
+    /// Individual `String(localized:)` per section so each gets its own xcstrings pluralization rule (no manual "(s)", no concatenation).
     private func importFeedbackMessage(for summary: ConfigurationPorter.ApplySummary) -> String {
         guard !summary.isEmpty else {
             return String(
@@ -398,27 +387,20 @@ struct GeneralSettingsView: View {
 
             advancedSection
 
-            // Standalone Reset button — placed loose in the Form so the
-            // grouped Section background doesn't render around it. The
-            // destructive label + alert confirmation already carry the
-            // "this is permanent" weight without needing a card frame.
+            // Loose in the Form (not a Section) so the grouped card background doesn't render around it.
             resetDefaultsRow
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         }
-        // Presented from the Performance → App Exceptions row. Attached to the
-        // Form (not the Section) because `.sheet` on a `Section` inside a Form
-        // doesn't reliably present on macOS — that's why "Edit…" appeared to do
-        // nothing before.
+        // Attached to the Form, not the Section: `.sheet` on a `Section` inside a
+        // Form doesn't reliably present on macOS (made "Edit…" appear to do nothing).
         .sheet(isPresented: $showAppExceptions) {
             AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
         }
     }
 
-    /// Pro-only opt-in surface for diagnostic features. Compiled out of Lite
-    /// (`#if !LITE_BUILD`) and only rendered when the runtime capability is
-    /// also present so accidental enabling in a misconfigured SKU is
-    /// impossible.
+    /// Double-gated (compile-out via `#if !LITE_BUILD` + runtime capability) so
+    /// it can't accidentally enable in a misconfigured SKU.
     @ViewBuilder
     private var advancedSection: some View {
         #if !LITE_BUILD
@@ -461,9 +443,8 @@ struct GeneralSettingsView: View {
         #endif
     }
 
-    /// Pro-only master switch for audio-reactive wallpapers. Flipping it drives
-    /// the shared `SystemAudioCaptureManager` directly so the tap starts/stops
-    /// live, and persists `audioResponseEnabled` for the next launch.
+    /// Flipping it drives `SystemAudioCaptureManager` directly so the tap
+    /// starts/stops live, in addition to persisting for next launch.
     @ViewBuilder
     private var audioResponseSection: some View {
         #if !LITE_BUILD
@@ -493,14 +474,9 @@ struct GeneralSettingsView: View {
 
     // MARK: - General Sections
 
-    /// Per-screen RAM budget for the in-memory video cache. Driving the
-    /// budget from a slider rather than a 3-mode picker lets each user dial
-    /// in their own RAM-vs-disk-reads trade-off instead of taking whichever
-    /// preset we picked.
-    ///
-    /// 0 = streaming only (no caching). The "total" line under the slider
-    /// makes the multi-screen multiplier explicit so users see the full
-    /// memory implication before letting go of the thumb.
+    /// Per-screen RAM budget for the in-memory video cache. Slider (not a
+    /// 3-mode picker) so each user picks their own RAM-vs-disk-reads trade-off.
+    /// 0 = streaming only; the "total" line makes the multi-screen multiplier explicit.
     @ViewBuilder
     private var performanceSection: some View {
         Section {
@@ -558,9 +534,7 @@ struct GeneralSettingsView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     // Without fixedSize the SettingRow's flexible title column
-                    // (maxWidth: .infinity, layoutPriority 1) starves the button
-                    // of width and clips its label to an empty border — pin it to
-                    // its intrinsic size like the Backup-tab buttons.
+                    // (maxWidth: .infinity, layoutPriority 1) starves the button and clips its label to an empty border.
                     .fixedSize()
                     .accessibilityLabel(Text("Edit application exceptions"))
             }
@@ -572,12 +546,6 @@ struct GeneralSettingsView: View {
                 subtitle: "Preload video loops into memory to reduce disk reads",
                 info: "Caching keeps each looping video in RAM so it doesn't re-read your disk every cycle — saving SSD wear and power. Drag to Off to stream straight from disk and use the least memory. The value below is the budget per screen (and the total across all displays)."
             ) {
-                // Slider sits in the SettingRow's trailing slot so the
-                // header, the affordance, and the current value all read as
-                // a single row group — matching the way macOS System
-                // Settings inlines a slider next to its labeled title.
-                // The value text stays right-aligned directly under the
-                // slider to keep the rightmost edge visually anchored.
                 VStack(alignment: .trailing, spacing: 4) {
                     Slider(
                         value: Binding(
@@ -617,10 +585,8 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Compact one-line representation of the current cache budget, in the
-    /// form `150 MB · 300 MB total` (per-screen · total across all screens).
-    /// Off-state collapses to a single `"Streaming only"` token so we never
-    /// surface a misleading "0 MB total" when the user disabled caching.
+    /// `150 MB · 300 MB total` (per-screen · total). Off collapses to
+    /// "Streaming only" to avoid a misleading "0 MB total".
     private var videoCacheValueLabel: String {
         guard videoCacheBudgetMB > 0 else { return "Streaming only" }
 
@@ -633,17 +599,11 @@ struct GeneralSettingsView: View {
         return "\(perScreenMB) MB · \(totalMB) MB total"
     }
 
-    /// Weather-reactive location source. Inlined here so the user does
-    /// not need to hunt across tabs for a tiny picker. Persists straight
-    /// into `GlobalSettings.weatherLocation` and broadcasts the change
-    /// notification through the same coordinator path used by every
-    /// other GlobalSettings field.
+    /// Inlined here (not its own tab) so the user doesn't hunt across tabs for a tiny picker.
     @ViewBuilder
     private var weatherSection: some View {
         Section {
-            // Standard SettingRow (icon + title + subtitle + trailing control)
-            // so the weather source reads like every other setting instead of
-            // an anonymous segmented pill that breaks the form's visual rhythm.
+            // Standard SettingRow rather than an anonymous segmented pill that breaks the form's visual rhythm.
             SettingRow(
                 icon: "cloud.sun",
                 iconColor: .cyan,
@@ -723,8 +683,6 @@ struct GeneralSettingsView: View {
     private var aboutHero: some View {
         VStack(spacing: 14) {
             ZStack {
-                // Soft accent halo behind the icon — gives the hero presence
-                // without the AI-slop "drop shadow on a flat icon" look.
                 Circle()
                     .fill(Color.accentColor.opacity(0.12))
                     .frame(width: 128, height: 128)
@@ -804,11 +762,9 @@ struct GeneralSettingsView: View {
                     systemImage: "sparkles",
                     accent: .purple,
                     action: {
-                        // `NSApplication.shared.delegate` is `SwiftUI.AppDelegate`
-                        // (an internal wrapper around `@NSApplicationDelegateAdaptor`),
-                        // so casting to our own `AppDelegate` fails. Route the
-                        // request via NotificationCenter instead — AppDelegate
-                        // observes `.showOnboarding` and triggers the window.
+                        // Can't cast `NSApplication.shared.delegate` to our AppDelegate:
+                        // it's SwiftUI's internal wrapper around `@NSApplicationDelegateAdaptor`.
+                        // AppDelegate observes `.showOnboarding` instead.
                         NotificationCenter.default.post(name: .showOnboarding, object: nil)
                     }
                 )
@@ -817,9 +773,6 @@ struct GeneralSettingsView: View {
         .frame(maxWidth: 360)
     }
 
-    /// Tile-style call-to-action. Uses a low-key surface so the four CTAs read
-    /// as a related group rather than four shouting buttons. Apple's About
-    /// pages keep this region quiet; the hero block does the talking.
     @ViewBuilder
     private func aboutTile(
         title: LocalizedStringKey,
@@ -863,8 +816,6 @@ struct GeneralSettingsView: View {
         .disabled(action == nil && url == nil)
     }
 
-    /// Author / copyright / license at the very bottom — small, restrained,
-    /// selectable. Placeholders need to be replaced before shipping.
     private var aboutFooter: some View {
         VStack(spacing: 4) {
             Text("Made by Paradox07127")

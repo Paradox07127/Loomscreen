@@ -4124,7 +4124,7 @@ final class WPEMetalRenderExecutor {
     }
 
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {
-        textureReferences(for: pass).contains { reference in
+        func reads(_ reference: WPETextureReference) -> Bool {
             switch (reference, targetID) {
             case (.previous, _):
                 return true
@@ -4134,6 +4134,10 @@ final class WPEMetalRenderExecutor {
                 return false
             }
         }
+        return reads(pass.pass.source)
+            || pass.pass.textures.values.contains(where: reads)
+            || pass.pass.binds.values.contains(where: reads)
+            || pass.textureBindings.values.contains(where: reads)
     }
 
     private func textureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {

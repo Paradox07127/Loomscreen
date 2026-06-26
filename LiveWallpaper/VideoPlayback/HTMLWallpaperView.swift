@@ -29,10 +29,6 @@ final class HTMLWebView: WKWebView {
     }
 }
 
-// `HTMLWallpaperRuntimeScript` lives in `HTMLWallpaperRuntimeScript.swift`.
-// Keep `HTMLWallpaperView.swift` focused on the WKWebView host + lifecycle.
-
-
 /// WKWebView-backed HTML wallpaper host.
 @MainActor
 final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
@@ -72,10 +68,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var wallpaperEnginePropertySchemaFolder: URL?
     /// Current project-key bucket for WPE web user property overrides.
     private var wallpaperEngineProjectKey: String?
-    /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
     private var lastSource: HTMLSource?
-    /// Counts consecutive navigation failures since the last successful load.
-    /// Capped by `HTMLConfig.maxRetries`; used to drive exponential backoff.
+    /// Capped by `HTMLConfig.maxRetries`; drives exponential backoff.
     private var consecutiveFailureCount: Int = 0
     private var pendingRetryTask: Task<Void, Never>?
     /// Repeating reload driver. `nil` when `refreshIntervalSeconds == 0` or
@@ -198,11 +192,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     #if !LITE_BUILD
-    /// Subscribes to `.developerModeDidChange` so a Settings toggle is
-    /// reflected in this wallpaper's WKWebView without rebuilding the
-    /// session. WebKit supports flipping `isInspectable` on a live view,
-    /// so the user sees the change immediately (Web Inspector becomes
-    /// available or vanishes from the right-click menu).
+    /// Flips `isInspectable` on the live view without rebuilding the session
+    /// (WebKit allows it), so a Settings toggle takes effect immediately.
     private func startObservingDeveloperMode() {
         developerModeObserver = NotificationCenter.default.addObserver(
             forName: .developerModeDidChange,
@@ -228,10 +219,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         #endif
     }
 
-    /// Public entry point so callers (notification handler, future
-    /// programmatic toggles) can flip Web Inspector availability on the
-    /// active web view without going through a full HTML rebuild. Lite
-    /// pins the value to `false` regardless of the requested state.
+    /// Lite pins the value to `false` regardless of the requested state.
     func applyDeveloperMode(_ enabled: Bool) {
         if #available(macOS 13.3, *) {
             #if !LITE_BUILD
@@ -242,9 +230,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// Re-installs all user scripts on the WKWebView. Called from `apply(_:)`
-    /// when a script-relevant toggle changes (custom CSS, browsing mode, JS
-    /// gate, ephemeral storage, physical-pixel layout, CSP, aggressiveSuspend).
     /// Idempotent: every injected script guards with a `window.__lw…Installed__`
     /// sentinel so re-installation on the same page is a no-op.
     private func installBaselineUserScripts(for config: HTMLConfig?) {
@@ -267,9 +252,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// Composes the single user script injected at `.atDocumentStart`.
-    /// Split out from `installBaselineUserScripts` to keep that method
-    /// focused on the WKWebView wiring; this function only assembles JS.
     private func makeBaselineScript(for config: HTMLConfig?) -> String {
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
@@ -579,11 +561,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Auto-Refresh
 
-    /// Restarts the auto-refresh timer when the interval changes. A non-zero
-    /// `seconds` value spins up a repeating MainActor task that calls
-    /// `reloadCurrentSource()`; `0` tears the timer down. The task is owned
-    /// by `refreshTimerTask` and cancelled on cleanup / suspend.
-    ///
     /// Each tick adds ±10% jitter to the wait duration so multiple screens
     /// configured with the same refresh interval don't reload in lockstep —
     /// useful for dashboard-style wallpapers that hit a single API.
@@ -719,7 +696,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         installBaselineUserScripts(for: lastAppliedConfig)
     }
 
-    /// Re-applies the most recent `HTMLSource`.
     func reloadCurrentSource() {
         guard let lastSource else { return }
         loadSource(lastSource, resetFailureCount: false)
@@ -887,10 +863,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Snapshot Overlay
 
-    /// Async-captures the current WKWebView contents and shows them in the
-    /// `snapshotOverlay`. The webView is then hidden so WebKit can stop
-    /// updating the compositor surface. Generation-counted to discard
-    /// stale captures that arrive after a resume.
+    /// Hides the webView behind the snapshot so WebKit can stop updating the
+    /// compositor surface. Generation-counted to discard stale captures that
+    /// arrive after a resume.
     private func captureSuspendSnapshot() {
         snapshotGeneration &+= 1
         let generation = snapshotGeneration
@@ -1325,7 +1300,6 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         }
     }
 
-    /// Captures unhandled JS exceptions + console messages from the page.
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
         if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
             Logger.warning("HTML wallpaper response: HTTP \(response.statusCode) for \(response.url?.absoluteString ?? "?")", category: .screenManager)
@@ -1357,7 +1331,7 @@ extension HTMLWallpaperView: WKUIDelegate {
 
 // MARK: - JS literal helper
 
-/// 把任意 Swift 字符串转成可直接嵌入 JS 源码的字符串字面量（含外层引号）。
+/// 返回可直接嵌入 JS 源码的字符串字面量（含外层引号）。
 private func jsStringLiteral(_ value: String) -> String {
     if let data = try? JSONEncoder().encode(value),
        let literal = String(data: data, encoding: .utf8) {

@@ -3,7 +3,6 @@ import SwiftUI
 import AppKit
 import os
 
-/// MenuBarExtra window content.
 struct MenuBarContent: View {
     private static let signposter = OSSignposter(
         subsystem: Bundle.main.bundleIdentifier ?? "com.taijia.LiveWallpaper",
@@ -178,10 +177,9 @@ struct MenuBarContent: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    /// Short status label intended for `performanceItem`'s value
-    /// column. `ProcessInfo.ThermalState` has no numeric percent, so we
-    /// surface a short word — the label + tint do most of the signaling, so
-    /// localised values that don't quite fit truncate gracefully.
+    /// `ProcessInfo.ThermalState` has no numeric percent, so surface a short
+    /// word; the label + tint carry the signal, so over-wide localised values
+    /// truncate gracefully.
     private func thermalShortLabel(for state: ProcessInfo.ThermalState) -> String {
         switch state {
         case .nominal:  return String(localized: "OK", defaultValue: "OK", comment: "Menu bar TEMP status: thermal state nominal. Keep short — ideally ≤4 Latin characters or equivalent width.")
@@ -202,22 +200,17 @@ struct MenuBarContent: View {
         }
     }
 
-    /// Three-tier severity gradient for usage gauges:
-    /// `< 50%` healthy green, `50-80%` warning orange, `>= 80%` critical red.
-    /// Mirrors the standard system-monitor convention (Activity Monitor,
-    /// iStat Menus) so the user can read load at a glance without parsing
-    /// the number.
+    /// Thresholds mirror the standard system-monitor convention (Activity
+    /// Monitor, iStat Menus) so load reads at a glance without parsing the number.
     private func usageColor(for percent: Double) -> Color {
         if percent >= 80 { return DesignTokens.Colors.Status.danger }
         if percent >= 50 { return DesignTokens.Colors.Status.warning }
         return DesignTokens.Colors.Status.active
     }
 
-    /// One usage readout: a small severity dot + label + value. The semantic
-    /// colour lives only in the dot so the value can stay high-contrast
-    /// `.primary` — coloured text on the menu's pale glass washed out badly
-    /// (green/orange on near-white is well under the 4.5:1 readable ratio).
-    /// The dot carries the at-a-glance load signal; the digits stay legible.
+    /// Semantic colour lives only in the dot so the value can stay high-contrast
+    /// `.primary` — coloured text on the menu's pale glass falls well under the
+    /// 4.5:1 readable ratio (green/orange on near-white).
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
         HStack(spacing: 5) {
             Circle()

@@ -45,7 +45,7 @@ struct WPEMetalTextureLoaderTests {
         // (R,G,0,1) — opaque. The swizzle must remap it to (R,R,R,G) so the
         // glow keeps its G-channel alpha falloff.
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32]) // 2x2 RG88 = 8 bytes
+        let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
         let payload = WPETexTexturePayload(
             info: WPETexInfo(
                 containerVersion: 5,
@@ -288,7 +288,6 @@ struct WPEMetalTextureLoaderTests {
         let frame1 = try #require(source.texture(at: 0.05))
         let frame2 = try #require(source.texture(at: 0.09))
 
-        // All textures stay the atlas size — no per-frame cropping.
         #expect(frame0.width == 4)
         #expect(frame0.height == 4)
         #expect(frame1.width == 4)

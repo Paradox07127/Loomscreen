@@ -184,10 +184,9 @@ enum WPESceneDocumentParser {
         )
     }
 
-    /// Scans the raw (pre-resolution) JSON and records, for each user-property
-    /// key, the concrete render targets it drives plus whether changing it can
-    /// be applied incrementally. Only `image`/`text` visibility is incremental
-    /// today; everything else is conservatively classified `.reload`.
+    /// Records, per user-property key, the render targets it drives and whether
+    /// it can be applied incrementally. Only `image`/`text` visibility is
+    /// incremental today; everything else is conservatively `.reload`.
     private static func extractUserPropertyBindings(in json: Any) -> [String: [WPEScenePropertyBinding]] {
         guard let root = json as? [String: Any],
               let rawObjects = root["objects"] as? [[String: Any]] else {
@@ -580,7 +579,6 @@ enum WPESceneDocumentParser {
         )
     }
 
-    /// Phase 2D-N: text objects shape per the corpus.
     private static func parseTextObject(
         _ dict: [String: Any],
         transform: SceneObjectTransform,

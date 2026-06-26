@@ -108,8 +108,7 @@ enum WPEMetalStaticLayerClassifier {
     }
 }
 
-/// Pure LRU bookkeeping for the cache's VRAM budget. Separated from the texture
-/// store so the eviction policy is unit-testable without a Metal device.
+/// LRU bookkeeping for the cache's VRAM budget, separated from the texture store.
 struct WPEMetalStaticLayerCacheLRU: Equatable, Sendable {
     struct Entry: Equatable, Sendable {
         let bytes: Int

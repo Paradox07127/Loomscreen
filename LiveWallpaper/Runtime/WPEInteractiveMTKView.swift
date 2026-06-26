@@ -5,24 +5,21 @@ import simd
 
 /// `MTKView` subclass that captures real mouse events for clickable WPE scenes.
 ///
-/// The scene renderer normally only reads the *global* cursor position (for
-/// parallax / `g_PointerPosition`) and never needs the window to capture
-/// events. Click interaction is different: it requires the wallpaper window to
-/// stop ignoring mouse events (which steals desktop clicks), and the events
-/// must reach the renderer. This view latches the captured pointer/button state
-/// so the renderer can fold it into the per-frame uniforms.
+/// Parallax (`g_PointerPosition`) only needs the *global* cursor position and
+/// works independently via the renderer's global pointer sampler. Click
+/// interaction is different: the wallpaper window must stop ignoring mouse
+/// events (which steals desktop clicks), and the events must reach the renderer.
+/// This view latches the captured pointer/button state for the per-frame uniforms.
 ///
 /// All capture is gated on `clickCaptureEnabled`; when off, events fall through
 /// to `super` (and the hosting window keeps `ignoresMouseEvents = true`, so they
-/// never arrive anyway). Parallax keeps working independently via the renderer's
-/// global pointer sampler — this view only adds the *click* layer.
+/// never arrive anyway).
 @MainActor
 final class WPEInteractiveMTKView: MTKView {
     /// Flipped by the renderer from the per-screen "Interactive" toggle. Only
     /// while true does this view consume mouse events.
     var clickCaptureEnabled = false
 
-    /// Latched pointer/button state, sampled by the renderer each frame.
     private(set) var pointerFrame: WPEPointerFrame = .neutral
 
     override var acceptsFirstResponder: Bool { clickCaptureEnabled }

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Centralized error type for user-facing errors.
 public enum AppError: LocalizedError, Equatable {
     case fileAccessDenied(String)
     case videoNotPlayable(String)

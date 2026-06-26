@@ -41,7 +41,6 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
 
     public var wallpaperType: WallpaperType { content.wallpaperType }
 
-    /// Tells the row what icon and color to paint.
     public var iconName: String {
         switch content {
         case .video: return "play.rectangle"

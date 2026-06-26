@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Standard illustrated empty state used across the app: icon + title + message
-/// + up to two actions. Replaces inline empty/error placeholders that drifted
-/// across `EmptyStateGuideView`, `WPEFallbackCard`, `ScreenDetailPlaceholderViews`,
-/// and `WorkshopGalleryView`.
+/// Standard illustrated empty state: icon + title + message + up to two actions.
 public struct IllustratedEmptyState: View {
     public let symbol: String
     public let title: LocalizedStringKey

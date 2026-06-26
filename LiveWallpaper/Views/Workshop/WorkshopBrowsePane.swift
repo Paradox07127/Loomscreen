@@ -3,16 +3,13 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 /// The "Browse Online" tab content, carved out of `WorkshopBrowseView` so it
-/// can be embedded headerless inside `WorkshopPaneView`. Owns the filter
-/// ribbon, the skeleton / populated / empty / error states, the load-more
-/// footer, the rate-limit countdown banner, and the per-item detail sheet.
+/// can be embedded headerless inside `WorkshopPaneView`.
 struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
     let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
-    /// Builds the pane header to host inside the split's main column. nil when
-    /// embedded without the tabbed pane chrome (e.g. the standalone Browse
-    /// sheet), which then renders no header and contributes no toolbar items.
+    /// nil when embedded without the tabbed pane chrome (e.g. the standalone
+    /// Browse sheet), which then renders no header and contributes no toolbar items.
     var paneHeader: (() -> AnyView)? = nil
 
     @Environment(WorkshopServices.self) private var services
@@ -22,7 +19,6 @@ struct WorkshopBrowsePane: View {
     /// reveals the panel.
     @State private var inspectorHidden = false
     @State private var rateLimitRemaining: TimeInterval = 0
-    /// Editable page-number field in the pager (jump-to-page).
     @State private var pageJumpText: String = "1"
     /// Workshop ids already in the local library, for the "In Library" badge.
     @State private var installedWorkshopIDs: Set<String> = []
@@ -50,10 +46,8 @@ struct WorkshopBrowsePane: View {
     }
 
     var body: some View {
-        // Same resizable, full-height, click-to-reveal side panel as the
-        // screen-detail inspector — selecting a card glides it open, clicking
-        // away glides it shut, and it only compresses the grid (never the
-        // sidebar / toolbar). `isMounted` stays true so the collapse animates.
+        // `isMounted` stays true so the collapse animates (never compresses the
+        // sidebar/toolbar, only the grid).
         ResizableInspectorSplit(
             isMounted: true,
             isVisible: isInspectorVisible,
@@ -70,11 +64,8 @@ struct WorkshopBrowsePane: View {
             inspector: { width in inspectorColumn(width: width) }
         )
         .background(DesignTokens.Colors.pageBackground)
-        // Detail-panel toggle in the window toolbar's trailing corner — the
-        // same native borderless `sidebar.right` button as the screen-detail
-        // inspector. Only contributed when hosted in the tabbed pane (the
-        // standalone Browse sheet has no window toolbar) and only while a card
-        // is selected, so it never appears with nothing to toggle.
+        // Only contributed when hosted in the tabbed pane (the standalone Browse
+        // sheet has no window toolbar) and only while a card is selected.
         .toolbar {
             if paneHeader != nil, selectedItem != nil {
                 ToolbarItem(placement: .primaryAction) {
@@ -120,13 +111,10 @@ struct WorkshopBrowsePane: View {
         }
     }
 
-    /// The detail panel shows when a card is selected and the user hasn't
-    /// collapsed it with the header toggle.
     private var isInspectorVisible: Bool { selectedItem != nil && !inspectorHidden }
 
-    /// Header (hosted here so the panel runs full-height alongside it) + the
-    /// grid. The split compresses this whole column when the panel opens. The
-    /// header is absent when embedded without the tabbed pane chrome.
+    /// Header hosted here so the panel runs full-height alongside it; absent when
+    /// embedded without the tabbed pane chrome.
     private var mainColumn: some View {
         VStack(spacing: 0) {
             if let paneHeader {
@@ -137,8 +125,6 @@ struct WorkshopBrowsePane: View {
         }
     }
 
-    /// Filter ribbon (or scope banner) + the grid/skeleton/empty/error states.
-    /// This is the main column the detail panel compresses.
     private var gridColumn: some View {
         VStack(spacing: 0) {
             if let creator = viewModel.creatorFilter {
@@ -164,8 +150,6 @@ struct WorkshopBrowsePane: View {
         }
     }
 
-    /// Detail panel for the selected item (placeholder when nothing is selected;
-    /// only visible when the split reveals it). Built at the split's full width.
     private func inspectorColumn(width: CGFloat) -> some View {
         Group {
             if let selectedItem {
@@ -212,8 +196,8 @@ struct WorkshopBrowsePane: View {
                     Color.clear.frame(height: 0).id(Self.gridTopAnchor)
 
                     if viewModel.displayedItems.isEmpty {
-                        // The page loaded, but the All / New / Installed scope hid
-                        // every item on it — explain rather than show a blank grid.
+                        // Page loaded but the All/New/Installed scope hid every
+                        // item on it — explain rather than show a blank grid.
                         scopeEmptyNote
                     } else {
                         LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
@@ -223,9 +207,9 @@ struct WorkshopBrowsePane: View {
                                     isInLibrary: installedWorkshopIDs.contains(String(item.id)),
                                     isSelected: selectedItem?.id == item.id
                                 ) {
-                                    // Toggle: clicking the open card again closes
-                                    // the inspector; picking a new card always
-                                    // reveals the (possibly collapsed) panel.
+                                    // Clicking the open card closes the inspector;
+                                    // picking a new card reveals the (possibly
+                                    // collapsed) panel.
                                     if selectedItem?.id == item.id {
                                         selectedItem = nil
                                     } else {
@@ -243,21 +227,18 @@ struct WorkshopBrowsePane: View {
                     paginationBar
                 }
                 .frame(maxWidth: .infinity)
-                // Tap any empty area — the gaps between cards, the side margins,
-                // below the grid — to close the inspector. This sits BEHIND the
-                // cards (Buttons intercept their own taps) and fills the content,
-                // so in-grid gaps land here too (a ScrollView-level background
-                // missed them). Clicking another card still switches via toggle.
+                // Tap any empty area to close the inspector. Sits BEHIND the cards
+                // (Buttons intercept their own taps) and fills the content, so
+                // in-grid gaps land here too (a ScrollView-level background missed them).
                 .background(
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { selectedItem = nil }
                 )
             }
-            // Opening the inspector narrows the grid and reflows the rows, which
-            // can push the selected tile off-screen — re-center it so it stays
-            // visible next to the detail panel. The brief delay lets the
-            // inspector's width animation settle before we measure.
+            // Opening the inspector reflows rows and can push the selected tile
+            // off-screen — re-center it. The delay lets the inspector's width
+            // animation settle before we measure.
             .onChange(of: selectedItem?.id) { _, id in
                 guard let id else { return }
                 Task { @MainActor in
@@ -292,8 +273,7 @@ struct WorkshopBrowsePane: View {
                 .controlSize(.small)
                 .disabled(!viewModel.canGoPrevPage)
 
-                // Editable page number → jump directly to any page (Steam's
-                // `page` parameter). Total shown when Steam reports a count.
+                // Editable page number → jump via Steam's `page` parameter.
                 HStack(spacing: 4) {
                     if viewModel.isPaging { ProgressView().controlSize(.small) }
                     Text("Page")
@@ -363,10 +343,8 @@ struct WorkshopBrowsePane: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            // Spell out the eligibility gate + where to get the key right here,
-            // so the empty state teaches the prerequisites instead of dead-ending
-            // at a single button. Same copy/links as the entry sheet (one shared,
-            // already-localized source) so nothing new needs translating.
+            // Same copy/links as the entry sheet (one shared, already-localized
+            // source) so nothing new needs translating.
             Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -466,8 +444,6 @@ struct WorkshopBrowsePane: View {
         .padding(DesignTokens.Spacing.xl)
     }
 
-    /// Replaces the filter ribbon while the grid is scoped to one creator —
-    /// the creator's name plus a one-tap exit. Filters don't apply here.
     private func creatorFilterBanner(_ creator: WorkshopBrowseViewModel.CreatorFilter) -> some View {
         scopeBanner(
             icon: "person.crop.circle",
@@ -477,8 +453,6 @@ struct WorkshopBrowsePane: View {
         )
     }
 
-    /// Replaces the filter ribbon while the grid is scoped to one tag — the tag
-    /// name plus a one-tap exit. Reached by clicking a tag in the inspector.
     private func tagFilterBanner(_ tag: String) -> some View {
         scopeBanner(
             icon: "tag",
@@ -487,11 +461,9 @@ struct WorkshopBrowsePane: View {
         )
     }
 
-    /// Compact tinted strip shown in place of the filter ribbon while the grid
-    /// is scoped to one creator or tag. Reads as a distinct "you are here"
-    /// banner — accent tint, scope icon + label, and a leading "Back" exit.
-    /// Filters are intentionally absent (the scoped Steam query can't honor
-    /// them), so the banner is the whole top row.
+    /// Shown in place of the filter ribbon while the grid is scoped to one
+    /// creator or tag. Filters are intentionally absent (the scoped Steam query
+    /// can't honor them), so the banner is the whole top row.
     private func scopeBanner(icon: String, label: Text, clear: @escaping () async -> Void) -> some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             Button {
@@ -566,8 +538,7 @@ struct WorkshopBrowsePane: View {
     // MARK: - Helpers
 
     private var hasActiveFilters: Bool {
-        // Filters don't apply in creator- or tag-scoped mode, so never offer
-        // "Clear filters" there.
+        // Filters don't apply in creator- or tag-scoped mode.
         guard viewModel.creatorFilter == nil, viewModel.pinnedTag == nil else { return false }
         return !viewModel.searchInput.isEmpty
             || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
@@ -613,8 +584,8 @@ struct WorkshopBrowsePane: View {
         installedWorkshopIDs = Set(
             SettingsManager.shared.loadGlobalSettings().recentWPEImports.map { $0.origin.workshopID }
         )
-        // Hand the set to the view-model so the All / New / Installed scope and
-        // the grid's `displayedItems` stay in sync with the local library.
+        // Keeps the All/New/Installed scope and the grid's `displayedItems` in
+        // sync with the local library.
         viewModel.installedWorkshopIDs = installedWorkshopIDs
     }
 
@@ -647,16 +618,16 @@ struct WorkshopBrowsePane: View {
     }
 }
 
-/// Shimmering placeholder card matching `WorkshopBrowseCard`'s footprint, shown
-/// during the first page load (zero layout shift when results arrive).
+/// Shimmering placeholder matching `WorkshopBrowseCard`'s footprint — zero
+/// layout shift when results arrive.
 private struct WorkshopSkeletonCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WorkshopShimmer()
                 .aspectRatio(1, contentMode: .fit)
 
-            // Mirror WorkshopBrowseCard's textInfo footprint (2-line title +
-            // type / meta row) so there is no layout shift on load.
+            // Mirror WorkshopBrowseCard's textInfo footprint so there is no
+            // layout shift on load.
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 WorkshopShimmer().frame(height: 13).frame(maxWidth: .infinity)
                 WorkshopShimmer().frame(width: 120, height: 13)

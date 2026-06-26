@@ -2,15 +2,10 @@ import AppKit
 import Foundation
 import LiveWallpaperCore
 
-/// Lightweight, allocation-cheap snapshot of host system + runtime state we
-/// can show to the user in the "Report a Bug" sheet and paste into a GitHub
-/// issue. Deliberately omits anything that could identify the machine or
-/// expose user content: no hostname, no usernames, no file paths, no folder
-/// names. Display info is dimensions-only, not display names.
-///
-/// Build the snapshot at the moment the user opens the report sheet — it is
-/// cheap (no IO besides one `Bundle` read and a couple `sysctlbyname` calls)
-/// and stale values would defeat the purpose.
+/// Snapshot of host system + runtime state for the "Report a Bug" sheet.
+/// Deliberately omits anything that could identify the machine or expose user
+/// content: no hostname, no usernames, no file paths, no folder names. Display
+/// info is dimensions-only. Build it at sheet-open — stale values defeat the purpose.
 struct SystemSnapshot: Sendable {
     let appVersion: String
     let appBuild: String
@@ -74,10 +69,8 @@ struct SystemSnapshot: Sendable {
         Bundle.main.object(forInfoDictionaryKey: key) as? String
     }
 
-    /// Returns the macOS build number (e.g. "24C101") via `sw_vers -buildVersion`
-    /// equivalent. `operatingSystemVersionString` already contains it but the
-    /// format is "Version 15.2 (Build 24C101)" — we split it out so the
-    /// snapshot has a separately addressable build column.
+    /// Splits the build out of `operatingSystemVersionString`, whose format is
+    /// "Version 15.2 (Build 24C101)", into a separately addressable column.
     private static func extractMacOSBuild() -> String? {
         let raw = ProcessInfo.processInfo.operatingSystemVersionString
         guard let openParen = raw.range(of: "(Build "),

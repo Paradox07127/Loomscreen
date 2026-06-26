@@ -1,10 +1,8 @@
 import Foundation
 
 // MARK: - Centralized Notification Names
-// All custom notification names in one place to avoid raw string duplication.
 
 extension Notification.Name {
-    /// System memory usage exceeded the warning threshold.
     public static let systemMemoryWarning = Notification.Name("SystemMemoryWarning")
 
     /// System memory usage dropped back below the warning threshold. Paired
@@ -12,13 +10,10 @@ extension Notification.Name {
     /// auto-recovering performance-policy state instead of a one-shot pause.
     public static let systemMemoryNormal = Notification.Name("SystemMemoryNormal")
 
-    /// The screen list was refreshed (connect/disconnect/parameter change).
     public static let screensRefreshed = Notification.Name("ScreensRefreshed")
 
-    /// Request the settings UI to navigate to a specific screen.
     public static let selectScreenInSettings = Notification.Name("SelectScreenInSettings")
 
-    /// Request the settings UI to navigate to the app preferences page.
     public static let openGeneralSettings = Notification.Name("OpenGeneralSettings")
 
     /// Request the AppDelegate to (re-)open the onboarding flow. Posted by

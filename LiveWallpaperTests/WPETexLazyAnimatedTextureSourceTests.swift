@@ -58,10 +58,8 @@ struct WPETexLazyAnimatedTextureSourceTests {
             device: device,
             label: "lazy-reuse"
         )
-        _ = source.texture(at: 0.0)  // image 0 → cache
-        _ = source.texture(at: 0.11) // image 0 sub-rect 2 → cache hit
-        // No assertions for cache internals — just exercising the path
-        // ensures the upload/decode chain stays consistent.
+        _ = source.texture(at: 0.0)
+        _ = source.texture(at: 0.11)
         let frame = try #require(source.texture(at: 0.0))
         #expect(frame.width == 2)
     }
@@ -164,13 +162,13 @@ struct WPETexLazyAnimatedTextureSourceTests {
             label: "lazy-prefetch-next"
         )
 
-        _ = try #require(source.texture(at: 0.0))   // frame 0 → image 0 (sync)
+        _ = try #require(source.texture(at: 0.0))
         #expect(source.debugSynchronousDecodedImageIDs == [0])
 
         // image 1 (the upcoming frame's source) is decoded on the prefetch queue.
         #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(1) })
 
-        _ = try #require(source.texture(at: 0.21))   // frame 2 → image 1 (cache hit)
+        _ = try #require(source.texture(at: 0.21))   // cache hit, no extra sync decode
         #expect(source.debugSynchronousDecodedImageIDs == [0])
     }
 
@@ -183,7 +181,7 @@ struct WPETexLazyAnimatedTextureSourceTests {
             label: "lazy-prefetch-wrap"
         )
 
-        _ = try #require(source.texture(at: 0.31))   // last frame (3) → image 1
+        _ = try #require(source.texture(at: 0.31))
         #expect(source.debugSynchronousDecodedImageIDs == [1])
         // Prefetch wraps past the end and warms frame 0's image before the seam.
         #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(0) })
@@ -221,7 +219,7 @@ struct WPETexLazyAnimatedTextureSourceTests {
             label: "lazy-prefetch-fail"
         )
 
-        _ = try #require(source.texture(at: 0.0))   // frame 0 → image 0 ok; prefetch image 1 (corrupt)
+        _ = try #require(source.texture(at: 0.0))   // image 0 ok; prefetches corrupt image 1
         #expect(await waitUntil { source.debugPrefetchFailedImageIDs.contains(1) })
 
         // Advancing to a new frame re-runs scheduling; the failed image must NOT
@@ -314,8 +312,6 @@ struct WPETexLazyAnimatedTextureSourceTests {
     }
 #endif
 
-    /// Mirror of the helper in `WPETexDecoderTests`; kept private here
-    /// so the lazy-source tests are self-contained.
     private func lz4RawCompress(_ data: Data) throws -> Data {
         let dstCapacity = data.count + 64
         var dst = Data(count: dstCapacity)

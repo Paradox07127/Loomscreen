@@ -69,7 +69,6 @@ public final class ResourceUtilities {
         return ["html", "htm"].contains(url.pathExtension.lowercased())
     }
 
-    /// Creates a persistent video bookmark.
     public static func createVideoBookmark(
         for url: URL,
         applicationSupportRootURL: URL? = nil,
@@ -102,7 +101,6 @@ public final class ResourceUtilities {
         return localBookmark
     }
 
-    /// Attempts one scoped bookmark write and logs the underlying NSError.
     private static func tryBookmark(
         _ url: URL,
         options: URL.BookmarkCreationOptions,

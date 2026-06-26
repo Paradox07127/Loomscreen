@@ -1,14 +1,11 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Scans a user-granted Steam Workshop root (e.g. `~/Documents/Live Wallpapers/431960/`)
-/// and returns metadata for every valid Wallpaper Engine project found inside.
-/// Used by the Workshop Library Gallery for bulk-discovery + selective import.
+/// Scans a Steam Workshop root for valid Wallpaper Engine projects.
 ///
-/// Off-main: heavy directory enumeration + per-project JSON decoding runs on
-/// a detached cooperative task so very large libraries don't hang the UI.
-/// Caller (which is @MainActor) is responsible for resolving the persisted
-/// bookmark + already-imported set first, since both depend on the
+/// Off-main: enumeration + per-project JSON decoding runs on a detached task so
+/// large libraries don't hang the UI. Caller (@MainActor) must resolve the
+/// persisted bookmark + already-imported set first, since both depend on the
 /// `@MainActor`-isolated `SettingsManager`.
 ///
 /// `@unchecked Sendable`: `FileManager.default` is documented thread-safe for
@@ -17,11 +14,9 @@ import Foundation
 final class WallpaperEngineLibraryScanner: @unchecked Sendable {
 
     enum ScanError: Error, Equatable, Sendable {
-        case rootBookmarkMissing
         case rootInaccessible(String)
     }
 
-    /// Snapshot of one project discovered under the workshop root.
     /// Carries the shared `libraryRootBookmarkData` so the gallery can
     /// re-acquire security scope for each child URL after the scan returns —
     /// `scan()`'s own `startAccessingSecurityScopedResource` lifetime ends
@@ -48,7 +43,6 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         self.fileManager = fileManager
     }
 
-    /// Off-main scan.
     func scan(
         rootBookmarkData: Data,
         alreadyImportedWorkshopIDs: Set<String>
@@ -62,12 +56,11 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         }.value
     }
 
-    /// Off-main scan of a plain directory URL with no security-scoped bookmark —
-    /// for in-container roots the app already has full access to, e.g. steamcmd's
-    /// sandbox-redirected download tree (`Application Support/Steam/steamapps/
-    /// workshop/content/431960`). Discovered projects carry empty bookmark data;
-    /// the headless corpus harness reads their `folderURL` directly and never
-    /// resolves a bookmark for them.
+    /// No-bookmark variant for in-container roots the app already has full access
+    /// to, e.g. steamcmd's sandbox-redirected download tree (`Application Support/
+    /// Steam/steamapps/workshop/content/431960`). Discovered projects carry empty
+    /// bookmark data; the headless corpus harness reads their `folderURL` directly
+    /// and never resolves a bookmark for them.
     func scan(
         rootURL: URL,
         alreadyImportedWorkshopIDs: Set<String>

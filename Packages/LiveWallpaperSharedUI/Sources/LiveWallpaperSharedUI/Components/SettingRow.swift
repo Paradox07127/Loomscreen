@@ -1,14 +1,10 @@
 import SwiftUI
 
-/// Inspector row pairing an icon-prefixed title with a trailing control,
-/// using the native `LabeledContent` layout so spacing and alignment match
-/// macOS System Settings out of the box.
+/// Inspector row pairing an icon-prefixed title with a trailing control.
 ///
-/// `info` adds an ⓘ glyph next to the title that surfaces a per-option
-/// explanation: hover triggers the system tooltip, click reveals a popover
-/// with the same text. Use `info` for "what does this do" explanations and
-/// keep `subtitle` for live state ("Browsing data is cleared on each
-/// session") so the two roles don't bleed into each other.
+/// Use `info` for "what does this do" explanations and keep `subtitle` for
+/// live state ("Browsing data is cleared on each session") so the two roles
+/// don't bleed into each other.
 public struct SettingRow<Content: View>: View {
     let icon: String
     let iconColor: Color
@@ -36,8 +32,7 @@ public struct SettingRow<Content: View>: View {
     /// Verbatim variant for already-resolved runtime/author strings (e.g. a
     /// Wallpaper Engine property display name) that must NOT be re-looked-up in
     /// the localization catalog. Distinct `verbatim*` labels avoid overload
-    /// ambiguity with the `LocalizedStringKey` initializer at string-literal
-    /// call sites.
+    /// ambiguity with the `LocalizedStringKey` initializer at string-literal call sites.
     public init(
         icon: String,
         iconColor: Color = .accentColor,
@@ -94,10 +89,9 @@ public struct SettingRow<Content: View>: View {
     }
 }
 
-/// ⓘ glyph that exposes the same explanation through hover (system tooltip)
-/// and click (popover) so the affordance is discoverable but not noisy. Public
-/// so inspector rows that don't use `SettingRow` (e.g. compact slider grids)
-/// can adopt the same pattern.
+/// ⓘ glyph that exposes the same explanation through hover (tooltip) and
+/// click (popover). Public so inspector rows that don't use `SettingRow`
+/// (e.g. compact slider grids) can adopt the same pattern.
 public struct InfoTooltipButton: View {
     let text: Text
     @State private var isPresentingPopover = false

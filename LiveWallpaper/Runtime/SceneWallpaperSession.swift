@@ -26,9 +26,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     /// handle of a newer one that replaced it while the older was draining.
     private var loadGeneration = 0
     private(set) var loadError: SceneRenderingError?
-    /// Latest per-layer progress message reported by the renderer.
-    /// Phase 2.1 surfaces this via `WPESceneDetailView` so the user sees
-    /// "Decoding 7/12 textures…" instead of an opaque spinner.
     private(set) var loadProgress: String?
 
     init(window: NSWindow, renderer: WPEMetalSceneRenderer) {
@@ -72,31 +69,21 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     var videoPlayer: WallpaperVideoPlayer? { nil }
     var wallpaperWindow: NSWindow? { window }
 
-    /// Hand the renderer out so views outside the session (e.g. the scene
-    /// detail's diagnostics) can read its state without reaching through
-    /// `wallpaperWindow.contentView`.
     var sceneRenderer: WPEMetalSceneRenderer? { renderer }
 
-    /// Property-key → render-target bindings the Metal renderer exposes.
     var scenePropertyBindings: [String: [WPEScenePropertyBinding]] {
         renderer?.scenePropertyBindings ?? [:]
     }
 
-    /// Attempts to apply a property change in place. Returns `false` when a
-    /// full reload is needed.
+    /// Returns `false` when a full reload is needed.
     func applyScenePropertyPatch(_ patch: WPEScenePropertyPatch) -> Bool {
         renderer?.applyScenePropertyPatch(patch) ?? false
     }
 
-    /// Returns the renderer when it owns its own frame-rate clock and
-    /// can re-target it from the inspector's frame-rate picker.
     var frameRateController: (any WallpaperFrameRateConfigurable)? {
         renderer
     }
 
-    /// Returns the renderer when it has a scene-owned audio engine
-    /// (`WPESoundRuntime`) responsive to inspector mute/volume changes.
-    /// Nil for renderers without sound objects.
     var audioController: (any WallpaperAudioConfigurable)? {
         renderer
     }
@@ -143,9 +130,8 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         renderer?.setClickCaptureEnabled(enabled)
     }
 
-    /// Per-screen scene fit mode. Maps the shared `VideoFitMode` onto the
-    /// renderer-local present transform (the renderer has no AVFoundation
-    /// dependency).
+    /// Maps the shared `VideoFitMode` onto the renderer-local present transform
+    /// (the renderer has no AVFoundation dependency).
     func setSceneFitMode(_ mode: VideoFitMode) {
         let present: WPEPresentFitMode
         switch mode {
@@ -165,7 +151,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         window = nil
     }
 
-    /// Loads the scene renderer.
     func startLoadIfNeeded() {
         guard !didStartLoad, let renderer else { return }
         didStartLoad = true
@@ -184,7 +169,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     // (50ms warm-up) gives the Metal renderer enough lead time to present
     // its first frame before the wallpaper window is brought to screen.
 
-    /// Tears the controller's scene down and re-runs `load()`.
     func reload() async {
         guard let renderer else {
             loadError = .cacheRootMissing
@@ -237,9 +221,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         }
     }
 
-    /// Runs the Metal renderer's `load()` and records the outcome. Any failure
-    /// (including `SceneRenderingError.metalRendererUnsupported`) surfaces as
-    /// `loadError`.
     private func runLoad(_ renderer: WPEMetalSceneRenderer) async {
         do {
             try await renderer.load()

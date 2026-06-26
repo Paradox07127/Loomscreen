@@ -68,7 +68,6 @@ struct WPETexMetalTranscoderTests {
             )
             Issue.record("Expected unsupportedFormat for rgba8888")
         } catch WPETexDecodeError.unsupportedFormat {
-            // ok
         } catch {
             Issue.record("Expected unsupportedFormat, got \(error)")
         }

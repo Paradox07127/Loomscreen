@@ -2,10 +2,8 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Sheet shell for the online Workshop browser, entered from Settings. The
-/// actual grid / filters / states live in the reusable `WorkshopBrowsePane`
-/// (shared with the in-app `WorkshopPaneView`); this wrapper only adds the
-/// modal frame, a title row, and a Done button.
+/// Modal shell around the reusable `WorkshopBrowsePane` (shared with the in-app
+/// `WorkshopPaneView`); adds only the frame, title row, and Done button.
 struct WorkshopBrowseView: View {
     let services: WorkshopServices
     let doctor: SteamCMDDoctorService

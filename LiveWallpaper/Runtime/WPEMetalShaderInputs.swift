@@ -3,12 +3,6 @@ import Foundation
 import Metal
 import simd
 
-/// Stateless helpers that compute fragment uniforms and resolve texture
-/// references for the WPE Metal render pipeline. Carved out of
-/// `WPEMetalRenderExecutor` so the executor doesn't have to own pure shader
-/// input math, and so `WPEMetalShaderDispatcher` calls these directly
-/// without routing through an executor reference. Everything in here is
-/// `static` and reads only from its parameters.
 enum WPEMetalShaderInputs {
     /// WPE scene JSON authors `g_Color` in sRGB perceptual space ("0.5 0.5 0.5" → mid-gray on screen).
     static func colorVector(for pass: WPEPreparedRenderPass) -> SIMD4<Float> {
@@ -23,7 +17,6 @@ enum WPEMetalShaderInputs {
         )
     }
 
-    /// Resolves a `WPETextureReference` against the live frame state plus the caller-provided textures dictionary.
     static func resolve(
         reference: WPETextureReference,
         textures: [String: MTLTexture],
@@ -74,12 +67,9 @@ enum WPEMetalShaderInputs {
         }
     }
 
-    /// Best-effort fuzzy lookup when an `.fbo(name)` reference misses the
-    /// exact `latestNamedTextures` key. WPE pass authoring is loose about
-    /// `_rt_` prefixes and case; rather than fail the whole scene, try a
-    /// short list of common transformations and accept the first hit.
-    /// Returns `nil` when no fuzzy candidate matches (caller then logs the
-    /// available keys and throws).
+    /// Fuzzy fallback when an `.fbo(name)` misses the exact `latestNamedTextures`
+    /// key: WPE pass authoring is loose about `_rt_` prefixes and case, so try a
+    /// few common transformations rather than failing the whole scene.
     static func resolveAliasedNamedTexture(
         name: String,
         frameState: WPEMetalFrameState
@@ -117,12 +107,11 @@ enum WPEMetalShaderInputs {
         }
     }
 
-    /// Maps the WPE shader name onto one of the executor's built-in fragment functions.
     static func normalizedBuiltinShaderName(_ shaderName: String) -> String {
         WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
     }
 
-    /// Phase 2D-C: scalar-uniform lookup that walks `pass.uniformValues` first (runtime-merged values from Phase 2B) then `pass.pass.constants` (authored material defaults).
+    /// Looks up `pass.uniformValues` (runtime-merged) first, then `pass.pass.constants` (authored defaults).
     static func floatScalar(
         named name: String,
         in pass: WPEPreparedRenderPass,

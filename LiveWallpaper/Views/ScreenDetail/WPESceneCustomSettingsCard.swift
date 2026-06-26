@@ -3,24 +3,15 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Pro-only inspector card that mirrors Wallpaper Engine's right-hand
-/// property panel for an imported `.scene` workshop project.
-///
-/// Companion to the HTML project settings card.
-/// The two diverge on three points:
+/// Companion to the HTML project settings card, diverging on three points:
 ///   - storage: scene overrides live on `SceneDescriptor.propertyOverrides`
 ///     rather than `HTMLConfig.wallpaperEngineProjectPropertiesByProject`
-///     because there's no parent HTMLConfig in the `.scene(...)`
-///     wallpaper case;
+///     because there's no parent HTMLConfig in the `.scene(...)` case;
 ///   - the apply path goes through `ScreenManager.updateSceneDescriptor`
 ///     instead of `updateHTMLConfig`;
 ///   - `schemecolor` is *included* in the schema (the scene renderer
 ///     consumes it via Phase B uniform injection; the HTML inspector
 ///     hides it because CSS already paints it).
-///
-/// All widget rendering (bool/slider/combo/color/textinput/group/text)
-/// matches the HTML card pixel-for-pixel so the two inspectors feel
-/// like one feature wearing two coats.
 struct WPESceneCustomSettingsCard: View {
     var screen: Screen
     var schema: WallpaperEngineProjectPropertySchema
@@ -28,9 +19,8 @@ struct WPESceneCustomSettingsCard: View {
 
     @Environment(ScreenManager.self) private var screenManager
     @AppStorage("Inspector.WPESceneCustomSettingsExpanded") private var isExpanded = true
-    /// Per-property debounce tasks coalescing rapid slider drags into a single
-    /// apply (~150ms after the last change) so continuous dragging doesn't fire
-    /// an apply/reload every frame.
+    /// Coalesces rapid slider drags into a single apply (~150ms after the last
+    /// change) so continuous dragging doesn't fire an apply/reload every frame.
     @State private var sliderDebounceTasks: [String: Task<Void, Never>] = [:]
 
     var body: some View {
@@ -82,9 +72,9 @@ struct WPESceneCustomSettingsCard: View {
     /// Settings the card actually renders: visible, interactive, and not an
     /// embedded ad/donation/external-link block. Real WPE projects pad
     /// `properties` with macOS-unsupported file/directory pickers, decorative
-    /// section headers (`group`/`text`), and — most aggressively — promo blocks
-    /// the engine never binds to the render graph. Centralised so the row list
-    /// and the Reset-button state stay in lock-step.
+    /// section headers (`group`/`text`), and promo blocks the engine never binds
+    /// to the render graph. Centralised so the row list and the Reset-button
+    /// state stay in lock-step.
     private func interactiveProperties(
         values: [String: WallpaperEngineProjectPropertyValue]
     ) -> [WallpaperEngineProjectPropertySchema.Property] {

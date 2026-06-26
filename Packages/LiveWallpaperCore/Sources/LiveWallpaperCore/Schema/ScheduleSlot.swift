@@ -22,10 +22,8 @@ public struct ScheduleSlot: Codable, Equatable, Identifiable, Sendable {
     }
 
     /// Fresh template every access — a `static let` would freeze the four
-    /// UUIDs at app launch and hand them to every screen that calls
-    /// `enableSchedule()`, so two displays would share identical slot IDs.
-    /// `ForEach` then can't distinguish their rows, and per-row `@State`
-    /// (e.g. `videoName` in `ScheduleSlotRow`) leaks across screen swaps.
+    /// UUIDs at launch, so two displays share identical slot IDs, `ForEach`
+    /// can't distinguish rows, and per-row `@State` leaks across screen swaps.
     public static var defaultSlots: [ScheduleSlot] {
         [
             ScheduleSlot(startHour: 6, endHour: 12, label: "Morning"),
@@ -49,13 +47,11 @@ public struct ScheduleSlot: Codable, Equatable, Identifiable, Sendable {
         startHour > endHour
     }
 
-    /// Slot decomposed into clipped `[start, end)` half-open ranges within
-    /// the visible 0–24 timeline. A non-wrapping slot returns one segment;
-    /// a wrapping slot returns one or two (`[start, 24)` + `[0, end)` when
-    /// both halves have non-zero width); zero-length returns none. Single
-    /// source of truth for timeline rendering and offline tests; empty
-    /// halves (e.g. slot `1 → 0` whose second half would be `[0, 0)`) are
-    /// filtered so consumers never need to skip them.
+    /// Slot decomposed into clipped `[start, end)` half-open ranges within the
+    /// visible 0–24 timeline. Non-wrapping → one segment; wrapping → one or two
+    /// (`[start, 24)` + `[0, end)`); zero-length → none. Empty halves (e.g. slot
+    /// `1 → 0` whose second half would be `[0, 0)`) are filtered so consumers
+    /// never need to skip them.
     public func timelineSegments() -> [TimelineSegment] {
         if startHour == endHour { return [] }
         if startHour < endHour {

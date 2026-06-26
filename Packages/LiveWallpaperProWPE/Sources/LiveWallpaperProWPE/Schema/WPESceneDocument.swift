@@ -45,9 +45,8 @@ public struct WPESceneDocument: Equatable, Sendable {
     }
 }
 
-/// One link between a user-defined project property and a concrete render
-/// target. `action` decides whether changing the property can be patched in
-/// place (`.incremental`) or requires a full pipeline reload (`.reload`).
+/// `action` decides whether changing the property can be patched in place
+/// (`.incremental`) or requires a full pipeline reload (`.reload`).
 ///
 /// `condition` carries the expected literal for *condition-form* bindings —
 /// `{"user":{"name":K,"condition":"2"},"value":...}` (WPE style selectors).
@@ -103,9 +102,8 @@ public enum WPEScenePropertyBindingAction: String, Equatable, Sendable {
     case reload
 }
 
-/// A diff between two snapshots of effective property values, paired with the
-/// scene's binding table. Consumers ask `requiresReload` first; if false they
-/// apply `incrementalBindings` live.
+/// Consumers ask `requiresReload` first; if false they apply
+/// `incrementalBindings` live.
 public struct WPEScenePropertyPatch: Equatable, Sendable {
     public let bindingsByProperty: [String: [WPEScenePropertyBinding]]
     public let oldValues: [String: WallpaperEngineProjectPropertyValue]
@@ -768,8 +766,8 @@ public struct WPESceneAnimationLayer: Equatable, Sendable, Identifiable {
     public let visible: Bool
     public let blend: Double
     public let animation: Int
-    /// When true this layer is composed ADDITIVELY on top of the base (non-additive) layer —
-    /// e.g. a blink/face layer over an idle-sway base. Drives multi-layer palette blending.
+    /// Composed ADDITIVELY on top of the base (non-additive) layer — e.g. a
+    /// blink/face layer over an idle-sway base. Drives multi-layer palette blending.
     public let additive: Bool
 
     public init(id: Int, rate: Double, visible: Bool, blend: Double, animation: Int, additive: Bool = false) {

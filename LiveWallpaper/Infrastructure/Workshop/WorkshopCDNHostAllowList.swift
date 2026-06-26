@@ -29,7 +29,6 @@ enum WorkshopCDNHostAllowList {
         case malformedURL
     }
 
-    /// Validates a candidate URL string against the allow-list.
     static func evaluate(_ candidate: String) -> Outcome {
         guard let components = URLComponents(string: candidate) else {
             return .rejected(reason: .malformedURL)
@@ -62,7 +61,6 @@ enum WorkshopCDNHostAllowList {
             return .rejected(reason: .hostNotAllowed)
         }
 
-        // Build a canonical URL with lowercased host.
         var canonical = components
         canonical.host = host
         guard let canonicalURL = canonical.url else {

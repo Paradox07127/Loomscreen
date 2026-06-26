@@ -61,8 +61,6 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         self.propertyOverrides = propertyOverrides
     }
 
-    /// Returns a copy of the descriptor with the named property override
-    /// set to the supplied value (or cleared when `value == nil`).
     public func updating(
         property key: String,
         to value: WallpaperEngineProjectPropertyValue?
@@ -86,7 +84,6 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         )
     }
 
-    /// Returns a copy with every override cleared.
     public func clearingPropertyOverrides() -> SceneDescriptor {
         SceneDescriptor(
             workshopID: workshopID,

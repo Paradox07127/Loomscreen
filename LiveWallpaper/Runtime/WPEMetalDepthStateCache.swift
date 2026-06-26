@@ -3,13 +3,8 @@ import CoreGraphics
 import Foundation
 import Metal
 
-/// Owns Metal depth-related state for one `WPEMetalRenderExecutor` lifetime:
-/// the `MTLDepthStencilState` cache, depth-texture allocation, and the
-/// (depth-test, depth-write) string-to-compare-function mapping.
-///
-/// Carved out of `WPEMetalRenderExecutor` so the executor doesn't have to
-/// own depth-stencil construction details. The per-frame depth texture
-/// dictionary stays on `WPEMetalFrameState` (it is frame-local), but its
+/// Owns Metal depth state for one `WPEMetalRenderExecutor` lifetime. The
+/// per-frame depth texture dictionary stays on `WPEMetalFrameState`, but its
 /// allocation goes through here so descriptor + storage mode stay aligned
 /// with the rest of the pipeline.
 final class WPEMetalDepthStateCache {

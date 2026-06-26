@@ -1,9 +1,6 @@
 #if !LITE_BUILD
 import SwiftUI
 
-/// One row in either the HTML or scene project-custom-settings card.
-/// Icon + title (+ optional subtitle) on the leading edge, a caller-
-/// supplied control on the trailing edge.
 struct WPEProjectSettingRow<Content: View>: View {
     /// Author-supplied subtitles (from `project.json`) render verbatim;
     /// app-supplied subtitles flow through the localization catalog.
@@ -81,9 +78,8 @@ struct WPEProjectSettingRow<Content: View>: View {
     }
 }
 
-/// Renders `property.type == .group` (header) or `.text` (body copy).
-/// Both are author-supplied strings already routed through the
-/// `project.json` localization map at parse time.
+/// Author-supplied strings (`.group` header / `.text` body) already routed
+/// through the `project.json` localization map at parse time.
 struct WPEProjectTextBlock: View {
     let text: String
     let isHeader: Bool
@@ -98,8 +94,6 @@ struct WPEProjectTextBlock: View {
     }
 }
 
-/// Inline notice rendered above the property list when a related app
-/// toggle (e.g. JavaScript / Mouse Input on the HTML inspector) is off.
 struct WPEProjectNotice: View {
     let icon: String
     /// App-supplied LocalizedStringKey — gate notices live in source

@@ -4,16 +4,14 @@ import LiveWallpaperProWPE
 import Metal
 import simd
 
-/// Per-instance attributes the GPU vertex stage reads from. Layout MUST
-/// match `WPEParticleInstance` in `WPEMetalBuiltins.metal` exactly.
+/// Layout MUST match `WPEParticleInstance` in `WPEMetalBuiltins.metal` exactly.
 struct WPEParticleInstance {
     var positionAndSize: SIMD4<Float>   // x, y in centered scene pixels ; z = signed sprite X scale; w = size
     var color: SIMD4<Float>             // rgb 0…1, a = current alpha (base × fade envelope)
     var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z = spriteFrameIndex; w = signed sprite Y scale
 }
 
-/// One-shot world-space placement applied to a `WPEParticleSystem` at
-/// load time.
+/// One-shot world-space placement applied to a `WPEParticleSystem` at load time.
 ///
 /// **Coordinate convention: WPE author space is Y-up, bottom-left
 /// origin throughout — NO Y-flip anywhere.** Scene-object `origin`,
@@ -36,7 +34,6 @@ struct WPEParticleInstance {
 /// the other (this oscillated P4→P6→P7). The flip is the bug, not the
 /// fix.
 struct WPEParticleSceneTransform {
-    /// Scene-object origin in the centered render frame.
     var renderOrigin: SIMD3<Float>
     var objectScale: SIMD3<Float>
     var objectAngleZ: Float
@@ -76,18 +73,16 @@ struct WPEParticleSceneTransform {
         )
     }
 
-    /// Same rotation + scale chain, no translation — for velocity,
-    /// gravity, and other free vectors. NO Y-flip is applied (nor needed):
-    /// WPE author space is Y-up and our render frame is Y-up, so authored
-    /// velocities are used as-is.
+    /// Rotation + scale chain, no translation — for velocity, gravity, and
+    /// other free vectors. NO Y-flip (author space and render frame are both
+    /// Y-up).
     ///
-    /// Oracle-tested (saber 3526278753): flipping velocity Y makes the
-    /// leaves RISE (sim vy goes +78 instead of -74), whereas WPE's decoded
-    /// particle velocity (TEXCOORD1) and ours are both NEGATIVE = falling.
-    /// So the older "velocity already had its Y flipped at spawn" note was
-    /// wrong; the correct convention is no-flip, confirmed against ground
-    /// truth. See `turbulenceNoise` for the one remaining Y discrepancy
-    /// (which is a turbulence-model gap, not an axis-convention bug).
+    /// Oracle-tested (saber 3526278753): flipping velocity Y makes the leaves
+    /// RISE (sim vy +78 instead of -74), whereas WPE's decoded velocity
+    /// (TEXCOORD1) and ours are both NEGATIVE = falling. The older "velocity
+    /// already had its Y flipped at spawn" note was wrong. See `turbulenceNoise`
+    /// for the one remaining Y discrepancy (a turbulence-model gap, not an axis
+    /// bug).
     func applyModelDirection(_ v: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(v.x * objectScale.x, v.y * objectScale.y, v.z * objectScale.z)
         let cosA = cos(-objectAngleZ)
@@ -102,11 +97,9 @@ struct WPEParticleSceneTransform {
     func worldSizeMultiplier() -> Float {
         // WPE's CParticle model matrix is `T·R·S(scale)`, so the scene object's
         // scale DOES enlarge each billboard sprite (verified vs the 3426865175
-        // preview: the 7.8× light-shaft renders large, and 落花/leaves track
-        // their object scale). Use the 2D (x,y) scale magnitude; sprites are
-        // square so average the axes. The additive-saturation risk from a
-        // hugely-scaled emitter is handled by a blend-aware size cap at spawn
-        // (translucent fog stays uncapped), not by disabling the coupling.
+        // preview). 2D (x,y) magnitude, averaged since sprites are square.
+        // Additive-saturation risk from a hugely-scaled emitter is handled by a
+        // blend-aware size cap at spawn, not by disabling the coupling.
         let s = (abs(objectScale.x) + abs(objectScale.y)) * 0.5
         return max(0, s)
     }

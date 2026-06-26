@@ -180,12 +180,11 @@ struct WPEResolutionDiagnosticsTests {
             builtinRootURL: builtins
         )
 
-        // Step 1 — the speculative lazy-streaming probe declines single-frame
-        // static with `unsupportedAnimation` (the renderer swallows this).
+        // Speculative lazy-streaming probe declines single-frame static with
+        // `unsupportedAnimation` (the renderer swallows this); eager path resolves it.
         #expect(throws: SceneResourceResolver.ResolveError.texture(.unsupportedAnimation)) {
             _ = try resolver.resolveStreamingTexturePayload(relativePath: texPath)
         }
-        // Step 2 — the eager static path resolves it at full size.
         let payload = try resolver.resolveTexturePayload(relativePath: texPath)
         #expect(payload.largestMipmap?.width == 32)
         #expect(payload.largestMipmap?.height == 32)

@@ -2,11 +2,10 @@
 import Foundation
 import Metal
 
-/// Phase 2E: shared interface for renderer-side texture sources whose
-/// content evolves over time. Animated `.tex` (multi-frame sprite sheets)
-/// and `.tex`-embedded MP4 video both expose their current frame through
-/// `texture(at:)`, take advice from `applyPerformanceProfile(_:)` on
-/// pause/resume, and release decode resources on `invalidate()`.
+/// Shared interface for renderer-side texture sources whose content evolves
+/// over time. Animated `.tex` (multi-frame sprite sheets) and `.tex`-embedded
+/// MP4 video both implement it: current frame via `texture(at:)`, pause/resume
+/// via `applyPerformanceProfile(_:)`, decode-resource release via `invalidate()`.
 @MainActor
 protocol WPEDynamicTextureSource: AnyObject {
     func texture(at time: TimeInterval) -> MTLTexture?

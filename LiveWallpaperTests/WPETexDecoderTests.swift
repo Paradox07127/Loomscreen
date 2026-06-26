@@ -218,7 +218,6 @@ struct WPETexDecoderTests {
         #expect(track.frames.count == 2)
         #expect(track.frames[0].subRect == CGRect(x: 0, y: 0, width: 2, height: 2))
         #expect(track.frames[1].subRect == CGRect(x: 2, y: 0, width: 2, height: 2))
-        // All frames share the same atlas RGBA bytes.
         #expect(track.frames[0].mipmaps.first?.bytes == track.frames[1].mipmaps.first?.bytes)
     }
 
@@ -580,7 +579,6 @@ struct WPETexDecoderTests {
         return buffer
     }
 
-    /// Compresses `data` using LZ4 raw.
     private func lz4RawCompress(_ data: Data) throws -> Data {
         let dstCapacity = data.count + 64
         var dst = Data(count: dstCapacity)

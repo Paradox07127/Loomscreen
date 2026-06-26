@@ -14,8 +14,7 @@ struct ScreenDetailHeader: View {
     let onApplyToAll: () -> Void
     let onSelectVideo: () -> Void
     let onClearWallpaper: () -> Void
-    /// Scene-only: pick a Wallpaper Engine project folder and apply it. `nil`
-    /// where scenes aren't available (Lite), which also hides the button.
+    /// `nil` where scenes aren't available (Lite), which also hides the button.
     var onApplyScene: (() -> Void)? = nil
 
     var body: some View {
@@ -62,9 +61,8 @@ struct ScreenDetailHeader: View {
                 HStack(spacing: 8) {
                     applyToAllButton
 
-                    // Bookmark is an "add the current project" action, so only
-                    // offer it when this type actually has bookmarkable content —
-                    // no empty bookmark icon on a display with nothing configured.
+                    // Offer the bookmark action only when this type has
+                    // bookmarkable content — no empty icon on an unconfigured display.
                     if inspectorContent != nil {
                         Button {
                             showBookmarks = true
@@ -172,10 +170,9 @@ struct ScreenDetailHeader: View {
         }
     }
 
-    /// Bookmarkable content for the inspector tab currently in view — not
-    /// the committed `activeWallpaper`. Switching the inspector to a tab
-    /// that has no content (e.g. HTML tab when no source has been set yet)
-    /// returns nil, so the bookmark icon doesn't bleed state across types.
+    /// Bookmarkable content for the inspector tab currently in view — not the
+    /// committed `activeWallpaper`. A tab with no content (e.g. HTML before a
+    /// source is set) returns nil so the bookmark icon doesn't bleed across types.
     private var inspectorContent: WallpaperContent? {
         let config = screenManager.getConfiguration(for: screen)
         switch draft.selectedWallpaperType {
@@ -200,9 +197,6 @@ struct ScreenDetailHeader: View {
         }
     }
 
-    /// True when the inspector's current tab content matches an existing
-    /// bookmark. Drives the bookmark.fill ↔ bookmark icon swap and the
-    /// .prominent ↔ .regular glass-button chrome toggle.
     private var isCurrentBookmarked: Bool {
         guard let content = inspectorContent else { return false }
         return BookmarkStore.shared.equivalentBookmark(content: content) != nil

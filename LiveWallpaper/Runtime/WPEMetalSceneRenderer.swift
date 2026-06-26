@@ -2766,12 +2766,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before every render call.
     private func texturesForCurrentFrame(time: TimeInterval) -> [String: MTLTexture] {
-        var textures = loadedTextures
+        let shouldLogHeartbeat = time - lastHeartbeatTime >= 10.0 || lastHeartbeatTime < 0
         var dynamicFrameLog: [String] = []
         for (path, source) in dynamicTextureSources {
             if let texture = source.texture(at: time) {
-                textures[path] = texture
                 loadedTextures[path] = texture
+                guard shouldLogHeartbeat else { continue }
                 if let animated = source as? WPETexAnimatedTextureSource {
                     dynamicFrameLog.append("\(path)#\(animated.frameIndex(at: time))")
                 } else if let lazy = source as? WPETexLazyAnimatedTextureSource {
@@ -2783,14 +2783,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         // Heartbeat throttled to 10s so it confirms liveness without spamming
         // the log every second. (Was 1s — see Log filtering guidance.)
-        if time - lastHeartbeatTime >= 10.0 || lastHeartbeatTime < 0 {
+        if shouldLogHeartbeat {
             lastHeartbeatTime = time
             let scene = "\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))"
             let output = outputTexture.map { "\($0.width)x\($0.height)" } ?? "nil"
             let dyn = dynamicFrameLog.isEmpty ? "none" : dynamicFrameLog.joined(separator: " ")
             debugStage("heartbeat", "t=\(String(format: "%.2f", time))s scene=\(scene) output=\(output) dynamic=\(dyn)")
         }
-        return textures
+        return loadedTextures
     }
 
     private func releaseDynamicTextureSources() {

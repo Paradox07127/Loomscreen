@@ -1,15 +1,11 @@
 import Foundation
 
-/// Per-texture sprite-sheet description sourced from the WPE-shipped
-/// `<texture>.tex-json` sibling file. WPE packs an animated particle
-/// sprite (a leaf flipping through 30 hand-drawn poses, a fog blob
-/// breathing through 64 alpha masks, …) as a single atlas with a
-/// `spritesheetsequences` block describing how to slice it.
+/// Per-texture sprite-sheet description from the WPE-shipped `<texture>.tex-json`
+/// sibling: an animated particle atlas plus its `spritesheetsequences` slicing.
 ///
-/// We also stash the texture's pixel format here because `r8` atlases
-/// store the sprite as a single-channel alpha mask — the fragment
-/// shader must treat the sample as an opacity multiplier and pull the
-/// RGB colour from the per-particle tint, not from the texture.
+/// `isAlphaMask` (true for `r8` atlases) is load-bearing: r8 stores the sprite as
+/// a single-channel alpha mask, so the fragment shader must treat the sample as an
+/// opacity multiplier and pull RGB from the per-particle tint, not the texture.
 public struct WPEParticleSpriteSheet: Sendable, Equatable {
     public let cols: Int
     public let rows: Int
@@ -47,10 +43,9 @@ public struct WPEParticleSpriteSheet: Sendable, Equatable {
     }
 }
 
-/// Parses the `.tex-json` sidecar shipped with every WPE particle
-/// atlas. Returns `nil` if the file is missing, malformed, or has no
-/// `spritesheetsequences` entry — the caller should then assume the
-/// texture is a single-frame static sprite.
+/// Parses the `.tex-json` sidecar. Returns `nil` if missing, malformed, or lacking
+/// a `spritesheetsequences` entry — the caller then treats the texture as a
+/// single-frame static sprite.
 ///
 /// Example payload (leaves7.tex-json):
 /// ```json

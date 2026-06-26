@@ -2,17 +2,12 @@
 import AppKit
 import Metal
 
-/// Background readback helper that converts the Metal renderer's offscreen
-/// `MTLTexture` into an `NSImage` for `WPESceneDetailView`. Phase 2A's
-/// renderer left the Metal backend without a thumbnail; the detail view
-/// then fell into `.previewUnavailable`. Phase 2B Task 5 wires this
-/// snapshotter through `WPEMetalSceneRenderer.previewSnapshot`.
-///
-/// The readback runs on a dedicated utility-QoS queue so a 4K mip-chain
-/// readback never blocks the main thread on a multi-display setup; the
-/// snapshotter is `@unchecked Sendable` because every closure it owns is
-/// either pure or hops onto the main actor explicitly via the calling
-/// renderer.
+/// Reads back the renderer's offscreen `MTLTexture` into an `NSImage` for
+/// `WPESceneDetailView` (without it the detail view falls into
+/// `.previewUnavailable`). Runs on a dedicated utility-QoS queue so a 4K
+/// mip-chain readback never blocks the main thread on multi-display setups;
+/// `@unchecked Sendable` because every owned closure is pure or hops onto the
+/// main actor explicitly.
 final class WPEMetalTextureSnapshotter: @unchecked Sendable {
     static let shared = WPEMetalTextureSnapshotter()
 
@@ -22,7 +17,6 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         self.queue = DispatchQueue(label: label, qos: .utility)
     }
 
-    /// Synchronous readback.
     func snapshot(from texture: MTLTexture) -> NSImage? {
         Self.makeImage(from: texture)
     }
@@ -103,10 +97,6 @@ struct WPEMetalTextureVisualStats: Codable, Equatable, Sendable, CustomStringCon
     let nonBlackPixelCount: Int
     let nonTransparentPixelCount: Int
     let nonBlackBounds: WPEMetalTextureVisualBounds?
-
-    var isAllBlack: Bool {
-        nonBlackPixelCount == 0
-    }
 
     var nonBlackCoversFullFrame: Bool {
         nonBlackBounds?.coversFullFrame(width: width, height: height) ?? false

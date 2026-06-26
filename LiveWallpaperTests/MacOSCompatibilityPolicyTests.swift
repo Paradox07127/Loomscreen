@@ -83,7 +83,7 @@ struct MacOSCompatibilityPolicyTests {
             .joined(separator: "\n")
     }
 
-    /// Walks a single line, skipping over string literals, and returns the index of the first `//` that begins a real line comment (not one nested inside a `"…"`).
+    /// Returns the first `//` that begins a real line comment, skipping `//` nested inside `"…"` string literals.
     private func lineCommentStart(in line: Substring) -> Substring.Index? {
         var inString = false
         var escaped = false

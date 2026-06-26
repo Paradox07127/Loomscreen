@@ -1,11 +1,8 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// A detail layout that pairs a main column with a full-height inspector panel
-/// on the trailing edge, resolving widths against the live container width.
-///
-/// This is the shared mechanism behind the screen-detail properties panel and
-/// the Workshop detail panels. Showing/hiding or resizing the inspector only
+/// Pairs a main column with a trailing full-height inspector, resolving widths
+/// against the live container width. Showing/hiding or resizing only
 /// redistributes the detail's own width, so it never pushes a larger minimum
 /// onto a surrounding split view — which is what used to steal width from the
 /// sidebar and overflow the toolbar into `»`.
@@ -22,7 +19,6 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     /// Keep the (potentially heavy) inspector subtree built. Typically "the
     /// content has an inspector" / "something is selected".
     let isMounted: Bool
-    /// Whether the inspector is currently revealed (animates width 0 ↔ full).
     let isVisible: Bool
     /// The value the width glide is keyed on. Pass the *user-intent* flag
     /// (toggle / selection), NOT `isVisible`, so programmatic mount changes
@@ -30,7 +26,6 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     let animationTrigger: AnyHashable
     let reduceMotion: Bool
 
-    /// Persisted inspector width.
     @Binding var storedWidth: Double
     /// Transient width during a drag (nil when not dragging).
     @Binding var liveWidth: Double?

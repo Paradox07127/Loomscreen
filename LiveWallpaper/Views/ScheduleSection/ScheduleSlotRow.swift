@@ -3,19 +3,9 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 
-/// Apple Music-style schedule row (mirrors `PlaylistRow`'s 50pt cadence).
-///
-/// Layout:
-/// ```
-/// │ ● / EQ   [thumb]   Morning  6 AM — 12 PM        filename.mp4    [⋯] │
-/// ```
-///
-/// - Leading slot: 8pt dot for inactive rows, `EQPulseBar` for the
-///   currently active slot — visual parity with the playlist's
-///   now-playing indicator.
-/// - Time range is a button → opens `ScheduleTimeEditorPopover`.
-/// - Trailing `⋯` Menu (hover-only) hosts video pick / clear / remove;
-///   pulls "From Playlist" candidates from the screen's combined list.
+/// Schedule row mirroring `PlaylistRow`'s 50pt cadence. The active slot
+/// shows an `EQPulseBar` for visual parity with the playlist's
+/// now-playing indicator.
 struct ScheduleSlotRow: View {
     @Binding var slot: ScheduleSlot
     let accent: Color

@@ -1,10 +1,8 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import SwiftUI
 
-/// Bottom-trailing toast announcing a finished Workshop action (a SteamCMD
-/// download or a local folder import — success or the failure reason). Observes
-/// the shared `WorkshopToastCenter`, so it fires even after the detail sheet or
-/// panel that started the action has been dismissed.
+/// Observes the shared `WorkshopToastCenter` so it fires even after the detail
+/// sheet or panel that started the action has been dismissed.
 struct WorkshopDownloadToastHost: View {
     private let center = WorkshopToastCenter.shared
     @State private var shown: WorkshopToastEvent?
@@ -17,8 +15,7 @@ struct WorkshopDownloadToastHost: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: shown?.token)
-        // Reading `lastEvent` here ties this host to the @Observable center
-        // so each new terminal outcome re-fires the toast.
+        // Reading `lastEvent` ties this host to the @Observable center so each new outcome re-fires.
         .onChange(of: center.lastEvent?.token) { _, _ in
             if let event = center.lastEvent { shown = event }
         }

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Liquid-glass uppercase type pill ("SCENE" / "VIDEO" / "WEB") shared by
-/// content cards and inspectors. Optional leading glyph and tint.
+/// Liquid-glass uppercase type pill ("SCENE" / "VIDEO" / "WEB").
 public struct TypeBadge: View {
     private let title: String
     private let systemImage: String?
@@ -28,8 +27,7 @@ public struct TypeBadge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .adaptiveGlassSurface(.capsule, tint: tint)
-        // A type pill is a single short word ("SCENE" / "VIDEO" / "WEB"); never
-        // let a crowded row wrap or compress it — keep its intrinsic width.
+        // Keep intrinsic width so a crowded row never wraps or compresses it.
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: title))

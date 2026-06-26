@@ -36,7 +36,6 @@ struct WPEMetalObjectUniformsTests {
             angles: SIMD3<Double>(0, 0, 0)
         )
         let model = try! #require(values["g_ModelMatrix"]?.vectorValue)
-        // Model diagonal = scale.
         #expect(model[0] == 2 && model[5] == 4 && model[10] == 1)
 
         let normal = try! #require(values["g_NormalModelMatrix"]?.vectorValue)

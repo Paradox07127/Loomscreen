@@ -70,12 +70,8 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Single source of truth for the three overlapping booleans the rest of
-    /// the view used to compute inline (`shouldShowGuideEmptyState`,
-    /// `showsInspector`, `showsHeaderWallpaperActions`). Each was reading the
-    /// same store / runtime state and re-deriving partially overlapping
-    /// conclusions; the dependencies were hard to audit. Collapsing them
-    /// into one computed struct keeps the rules in one place.
+    /// Collapses three booleans that were computed inline from overlapping
+    /// store/runtime state into one place so the rules stay auditable.
     private struct DerivedViewState {
         var showsGuideEmptyState: Bool
         var showsInspector: Bool
@@ -103,11 +99,10 @@ struct ScreenDetailView: View {
             case .html:
                 return true
             case .scene:
-                // Mount the panel once a real scene config is loaded so the
-                // WPE Project Custom Settings card can surface
-                // author-defined properties (schemecolor, sliders, etc.).
-                // CommonPlaybackInspector + InspectorPanel already gate
-                // their video-only rows internally.
+                // Mount once a real scene config loads so the WPE Project
+                // Custom Settings card can surface author-defined properties
+                // (schemecolor, sliders). Inspector rows gate video-only
+                // content internally.
                 return config?.wallpaperType == .scene
             case .metalShader:
                 return false
@@ -122,17 +117,13 @@ struct ScreenDetailView: View {
     }
 
     private var shouldShowGuideEmptyState: Bool { derivedState.showsGuideEmptyState }
-    /// The current content actually exposes an inspector worth showing.
     private var inspectorApplicable: Bool { derivedState.showsInspector }
-    /// Final visibility = applicable AND the user hasn't collapsed the panel
-    /// from the toolbar toggle.
+    /// Final visibility = applicable AND the user hasn't collapsed the panel.
     private var showsInspector: Bool { inspectorApplicable && inspectorUserVisible }
     private var showsHeaderWallpaperActions: Bool { derivedState.showsHeaderWallpaperActions }
 
-    /// User-facing pickerable error states. Each case carries enough context
-    /// to render a meaningful retry / re-pick action instead of a generic
-    /// "OK" dismissal — telling someone "Failed to bookmark" without offering
-    /// a way out is a dead end.
+    /// Each case carries enough context to render a meaningful retry / re-pick
+    /// action instead of a dead-end "OK" dismissal.
     private enum DropFailure: Identifiable {
         case invalidDropType(suggestion: WallpaperType)
         case videoFormatUnsupported
@@ -188,7 +179,6 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
-    /// User-driven show/hide for the properties panel (toolbar toggle).
     /// Persisted so a collapsed inspector stays collapsed across launches.
     @AppStorage("Inspector.Visible") private var inspectorUserVisible = true
 
@@ -215,14 +205,12 @@ struct ScreenDetailView: View {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
             }
-            // Inspector toggle as a top-level toolbar button — the trailing-edge
-            // mirror of the leading sidebar toggle, same native borderless style.
-            // It only appears/disappears when the content gains/loses an
-            // inspector, so flipping visibility never moves it.
+            // Gated on `inspectorApplicable` (not visibility) so the button
+            // never moves when the user just flips the panel open/closed.
             if inspectorApplicable {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        // No withAnimation here: a toolbar button lives in the
+                        // No withAnimation: a toolbar button lives in the
                         // separate NSToolbar host, so its transaction doesn't
                         // reach the GeometryReader content. The width glide is
                         // driven by `.animation(value:)` on the layout instead.
@@ -264,8 +252,6 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Header + runtime banner + preview, stacked vertically. The split sizes
-    /// this to the remaining width once the inspector takes its slice.
     private var mainColumn: some View {
         VStack(spacing: 0) {
             screenHeader
@@ -312,8 +298,7 @@ struct ScreenDetailView: View {
         )
     }
 
-    /// Scene-only header action: choose a Wallpaper Engine project folder and
-    /// apply it. `nil` in Lite (no scene support / no folder picker).
+    /// `nil` in Lite (no scene support / no folder picker).
     private var applySceneAction: (() -> Void)? {
         #if !LITE_BUILD
         return {
@@ -524,7 +509,6 @@ struct ScreenDetailView: View {
         handleSelectedFile(url: url)
     }
 
-    /// Routes the banner's "Re-pick" button to the picker matching the current session type.
     private func rePickRuntimeSource() {
         let activeType = screen.runtimeSession?.wallpaperType ?? draft.selectedWallpaperType
         switch activeType {
@@ -648,12 +632,10 @@ struct ScreenDetailView: View {
 
     // MARK: - Empty State Guide
 
-    /// Video card opens the existing file picker.
     private func triggerVideoGuideAction() {
         showFilePicker()
     }
 
-    /// HTML / Shader / Scene cards flip the selected type so that type's empty state takes over.
     private func triggerHTMLGuideAction() {
         draft.selectedWallpaperType = .html
     }

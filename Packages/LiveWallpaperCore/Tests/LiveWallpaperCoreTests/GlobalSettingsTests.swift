@@ -7,9 +7,8 @@ struct GlobalSettingsTests {
 
     @Test("Legacy JSON without globalShortcutsEnabled decodes to true")
     func legacyDecodeDefaultsToTrue() throws {
-        // A snapshot from before the flag existed. Decoding must not throw
-        // and must default the missing key to true so users upgrading from
-        // an older build keep their hot keys working.
+        // Snapshot from before the flag existed: missing key must default to
+        // true so users upgrading from an older build keep their hot keys.
         let legacyJSON = """
         {
           "globalPauseOnBattery": false,
@@ -46,9 +45,8 @@ struct GlobalSettingsTests {
 
     @Test("Import bundle preserves the imported globalShortcutsEnabled value")
     func importPreservesDisabledFlag() throws {
-        // Real user preference (unlike developerModeEnabled which we
-        // scrub for diagnostic safety). A backup taken with the surface
-        // disabled must restore disabled on the importing machine.
+        // Real user preference (unlike developerModeEnabled, which we scrub):
+        // a backup with the surface disabled must restore disabled.
         var snapshot = GlobalSettings()
         snapshot.globalShortcutsEnabled = false
 

@@ -12,10 +12,9 @@ import CoreLocation
 /// is touched at all.
 @MainActor
 protocol WeatherLocationProviding: AnyObject {
-    /// Pull the latest known location preference and resolve it.
     func resolveCoordinate() async -> WeatherLocationResolution
 
-    /// Triggers a CoreLocation authorisation prompt if the user has chosen `.coreLocation` and we haven't asked yet.
+    /// Prompts for CoreLocation authorisation only if `.coreLocation` is chosen and not yet asked.
     func requestCoreLocationAuthorizationIfNeeded()
 }
 
@@ -25,9 +24,7 @@ protocol WeatherLocationProviding: AnyObject {
 struct WeatherLocationResolution: Equatable {
     /// Successful coordinate, or `nil` if every source in the chain failed.
     var coordinate: CLLocationCoordinate2D?
-    /// What actually produced (or attempted to produce) the coordinate.
     var resolvedSource: WeatherLocationPreference.Source?
-    /// Human-readable label for the source — used by the status badge.
     var displayName: String?
     var error: String?
 
@@ -35,7 +32,7 @@ struct WeatherLocationResolution: Equatable {
         coordinate: nil, resolvedSource: nil, displayName: nil, error: nil
     )
 
-    /// Required so the type can be `Equatable` (CLLocationCoordinate2D isn't Equatable by default).
+    /// Manual `==`: CLLocationCoordinate2D isn't Equatable by default.
     static func == (lhs: WeatherLocationResolution, rhs: WeatherLocationResolution) -> Bool {
         lhs.resolvedSource == rhs.resolvedSource &&
         lhs.displayName == rhs.displayName &&

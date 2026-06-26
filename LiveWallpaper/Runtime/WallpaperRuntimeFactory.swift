@@ -4,7 +4,6 @@ import Foundation
 /// `.unsupported(.productDoesNotSupportType(...))` for `.scene` / `.metalShader`
 /// without touching the WPE / Metal stack; Pro returns a fully wired session.
 enum WallpaperRuntimeBuildResult {
-    /// Successful build — caller installs the session on the `Screen`.
     case session(any WallpaperRuntimeSession)
     /// Type is allowed by the schema but the running SKU cannot render it.
     /// Distinct from `.invalid` so the UI can show a "Pro feature" hint
@@ -12,7 +11,6 @@ enum WallpaperRuntimeBuildResult {
     case unsupported(UnsupportedWallpaperReason)
     /// Definition was syntactically valid but the underlying resource is
     /// missing or broken (empty bookmark, malformed scene descriptor, ...).
-    /// The caller leaves the slot empty.
     case invalid
 }
 
@@ -27,14 +25,12 @@ enum UnsupportedWallpaperReason: Sendable, Equatable {
 }
 
 /// Pluggable strategy for materialising a `WallpaperRuntimeSession` from a
-/// validated `WallpaperSessionDefinition`. Phase 0 declares the seam; Lite
-/// and Pro provide concrete implementations once the package split lands
-/// (Lite: VideoWeb only; Pro: VideoWeb ∪ ProFeatures ∪ ProWPE).
+/// validated `WallpaperSessionDefinition` (Lite: VideoWeb only; Pro: VideoWeb
+/// ∪ ProFeatures ∪ ProWPE).
 ///
-/// The factory does not own the `Screen`'s window or runtime references —
-/// it constructs the session value and hands it back to the caller, which
-/// stays in charge of lifecycle (`releaseRuntimeSession`, transition
-/// tokens, etc.).
+/// The factory does not own the `Screen`'s window or runtime references — it
+/// constructs the session value and hands it back to the caller, which stays
+/// in charge of lifecycle (`releaseRuntimeSession`, transition tokens, etc.).
 @MainActor
 protocol WallpaperRuntimeFactory: AnyObject {
     func makeSession(

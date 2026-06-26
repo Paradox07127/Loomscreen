@@ -34,7 +34,6 @@ struct WPEDirectorySceneAssetProvider: WPESceneAssetProvider {
         guard isRegularFile(url) else {
             throw WPESceneAssetProviderError.fileMissing(relativePath)
         }
-        // The project file itself satisfies the consumer — no copy.
         return url
     }
 

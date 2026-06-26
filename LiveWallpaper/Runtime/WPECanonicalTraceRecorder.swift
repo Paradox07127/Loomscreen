@@ -7,18 +7,17 @@ import simd
 /// DEBUG-only accumulator that mirrors the Windows RenderDoc oracle into the
 /// shared `wpe.trace.v1` schema from the Mac Metal path.
 ///
-/// The recorder is fed from the existing scene-debug hooks (not `.gputrace`):
-/// the Swift render path still carries semantic names for passes, materials,
-/// samplers, uniforms, texture fallbacks, and render targets — exactly what the
-/// divergence engine needs to align against the Windows ground truth.
+/// Fed from the scene-debug hooks (not `.gputrace`): the Swift render path
+/// carries semantic names for passes, materials, samplers, uniforms, texture
+/// fallbacks, and render targets — what the divergence engine needs to align
+/// against the Windows ground truth.
 ///
 /// One `mac/trace.json` is written per scene load: passes accumulate during the
 /// first rendered frame, then `finishFrame` serialises once and latches so the
 /// live render loop never re-accumulates.
 ///
-/// `@unchecked Sendable`: all mutable state (scene/frameComplete/passes/resources)
-/// is guarded by `lock`, so the shared singleton is safe to touch from the render
-/// thread and the end-of-frame flush. Mirrors `WPESceneDebugArtifacts`.
+/// `@unchecked Sendable`: all mutable state is guarded by `lock`, so the shared
+/// singleton is safe to touch from the render thread and the end-of-frame flush.
 final class WPECanonicalTraceRecorder: @unchecked Sendable {
     static let shared = WPECanonicalTraceRecorder()
 
@@ -174,9 +173,9 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         passes.append(passRecord)
     }
 
-    /// Record one built-in puppet mesh draw as a pass so Mac traces can be aligned
-    /// against Windows RenderDoc captures bone-by-bone. These draws bypass the custom
-    /// shader recorder and are otherwise invisible to the canonical pass stream.
+    /// Record one built-in puppet mesh draw so Mac traces can be aligned against
+    /// Windows captures bone-by-bone. These draws bypass the custom-shader recorder
+    /// and are otherwise invisible to the canonical pass stream.
     func recordPuppetPass(
         pass: WPEPreparedRenderPass,
         stage: String,
@@ -836,9 +835,7 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         return sha256Hex(data)
     }
 
-    /// JSON-safe value: `NSNull` when `nil`, otherwise the wrapped value.
     private func jsonOrNull<T>(_ value: T?) -> Any { value ?? NSNull() }
-    private static func jsonOrNull<T>(_ value: T?) -> Any { value ?? NSNull() }
 
     private struct SceneContext {
         let workshopID: String

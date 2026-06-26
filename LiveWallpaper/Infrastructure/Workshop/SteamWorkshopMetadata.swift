@@ -10,9 +10,8 @@ struct SteamWorkshopMetadata: Equatable, Sendable {
     let publishedFileID: UInt64
     let title: String
     let shortDescription: String
-    /// Display name of the creator account. Optional — paste flow doesn't
-    /// require an API key, so we can't make the supplemental
-    /// `ISteamUser/GetPlayerSummaries/v2` call to look this up reliably.
+    /// Optional — paste flow has no API key, so the supplemental
+    /// `ISteamUser/GetPlayerSummaries/v2` lookup can't run.
     let creatorPersonaName: String?
     let previewImageURL: URL?
     let fileSizeBytes: UInt64?
@@ -21,12 +20,10 @@ struct SteamWorkshopMetadata: Equatable, Sendable {
     let visibility: Visibility
     let isBanned: Bool
     let appID: UInt32
-    /// Steam Community URL the user can open in their browser.
     let steamCommunityURL: URL
 
-    /// Steam's documented visibility enum on `GetPublishedFileDetails`.
-    /// `0` public, `1` friends-only, `2` private. We fall back to `.unknown`
-    /// when the value isn't one of the documented constants.
+    /// Steam's documented visibility enum on `GetPublishedFileDetails`:
+    /// `0` public, `1` friends-only, `2` private; anything else → `.unknown`.
     enum Visibility: String, Equatable, Sendable {
         case `public`
         case friendsOnly
@@ -85,7 +82,6 @@ final class SteamWorkshopMetadataService {
     private let session: URLSession
     private let now: @Sendable () -> Date
 
-    /// Endpoint URL. Exposed for unit tests / network-stub override.
     static let endpoint = URL(string: "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/")!
 
     init(session: URLSession = SteamWorkshopMetadataService.defaultSession(),
@@ -94,9 +90,8 @@ final class SteamWorkshopMetadataService {
         self.now = now
     }
 
-    /// Fetches the metadata for one `publishedfileid`. The returned error is
-    /// already mapped onto `SteamWorkshopMetadataError` — no leaking
-    /// URLError / decoding errors to the UI.
+    /// Errors are pre-mapped onto `SteamWorkshopMetadataError` — no raw
+    /// URLError / decoding errors leak to the UI.
     func fetch(publishedFileID id: UInt64) async -> Result<SteamWorkshopMetadata, SteamWorkshopMetadataError> {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"

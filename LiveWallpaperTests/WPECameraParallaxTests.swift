@@ -23,8 +23,6 @@ struct WPECameraParallaxTests {
         ]
     }
 
-    /// Parses a scene whose single image object carries `parallaxDepth: raw` and
-    /// returns that object's parsed per-axis depth.
     private func parsedImageDepth(_ raw: Any) throws -> SIMD2<Double> {
         let doc = try parse([
             "camera": ["center": "0 0 0"],

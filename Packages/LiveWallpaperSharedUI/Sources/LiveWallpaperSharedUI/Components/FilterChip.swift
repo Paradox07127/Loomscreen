@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// Translucent pill used inside `LibraryFilterBar` (or any toolbar-style
-/// horizontal control row) to expose a small enumerated filter. The selected
-/// state stays subtle to match Apple Music / News chip rows — brightened
-/// surface + slightly stronger border, never a hard accent fill.
+/// Translucent filter pill for toolbar-style control rows. Selected state stays
+/// subtle to match Apple Music / News chip rows — brightened surface + slightly
+/// stronger border, never a hard accent fill.
 public struct FilterChip: View {
     private let title: Text
     private let isSelected: Bool

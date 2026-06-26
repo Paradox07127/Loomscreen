@@ -4,12 +4,9 @@ import LiveWallpaperSharedUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Onboarding Step 2 — source chooser. Surfaces the two main wallpaper
-/// sources (Video + Web/HTML). Shader and Wallpaper Engine are deliberately
-/// not surfaced here: shader isn't the product's main story and WPE is held
-/// back until the importer is more reliable. The picker is SKU-agnostic
-/// today; SKU-conditional UI can be re-introduced via `OnboardingPathPolicy`
-/// when those features are ready to promote.
+/// Surfaces only Video + Web/HTML. Shader and Wallpaper Engine are deliberately
+/// withheld: shader isn't the main story and WPE waits until the importer is
+/// reliable. SKU-conditional UI can return via `OnboardingPathPolicy`.
 struct OnboardingPickerView: View {
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -300,7 +297,6 @@ private extension OnboardingPickerView.SourceDraft {
 }
 
 private extension HTMLSource {
-    /// Best-effort one-liner for the confirm summary card.
     var summaryDescription: String {
         switch self {
         case .url(let url):
@@ -317,9 +313,8 @@ private extension HTMLSource {
     }
 }
 
-/// Horizontal row card — icon left, text right. Bigger tap target than a
-/// grid cell because there are only 2 of these and we want to fill the
-/// onboarding window's width naturally.
+/// Row layout (not a grid) so the 2 cards fill the onboarding window's width
+/// with a bigger tap target.
 private struct ActionRowCard: View {
     let icon: String
     let tint: Color

@@ -8,14 +8,12 @@ import Foundation
 /// it streams the package index and reads only the JSON entries it needs to
 /// classify object kinds and shader names.
 struct WPECorpusScanner {
-    /// Filesystem root containing one subfolder per workshop project.
     let rootURL: URL
 
     init(rootURL: URL) {
         self.rootURL = rootURL
     }
 
-    /// Walks the corpus and produces a deterministic feature report.
     func scan() async throws -> WPECorpusReport {
         let projectURLs = try Self.enumerateProjectFolders(under: rootURL)
         var builder = ReportBuilder()
@@ -230,29 +228,17 @@ struct WPECorpusScanner {
 
 // MARK: - Report
 
-/// Aggregated counts produced by `WPECorpusScanner.scan()`. Field names
-/// intentionally mirror the assertions in the project's plan file so the
-/// gate test reads naturally. Equatable for snapshot tests.
+/// Field names intentionally mirror the assertions in the project's plan file
+/// so the gate test reads naturally.
 struct WPECorpusReport: Equatable, Sendable {
-    /// Project type → count.
     let projectCounts: [WPEType: Int]
-    /// Number of scene projects shipping a `scene.pkg` (vs unpacked).
     let scenePackageCount: Int
-    /// File extension → count across every entry inside every scene package.
     /// Keys include the leading dot (`.tex`, `.vert`).
     let entryExtensionCounts: [String: Int]
-    /// Per-object-kind tally summed over every scene's `scene.json`.
     let objectKindCounts: [WPESceneObjectKind: Int]
-    /// Number of scene packages containing at least one `.vert` or `.frag`.
     let scenesWithShaderSources: Int
-    /// Per-feature scene count: how many scene packages declare each flag.
     let sceneFeatureCounts: [WPESceneFeatureFlag: Int]
-    /// Top shader names referenced from material/effect JSONs, sorted by
-    /// descending occurrence. Truncated to a reasonable cap.
     let topShaderNames: [(name: String, count: Int)]
-    /// Per-folder errors encountered during scanning. Empty in the happy
-    /// path; populated when project.json is malformed or an entry fails to
-    /// decode.
     let scanErrors: [String]
 
     static func == (lhs: WPECorpusReport, rhs: WPECorpusReport) -> Bool {
@@ -275,8 +261,6 @@ struct WPESceneFeatureSet: Equatable, Sendable {
     private(set) var flags: Set<WPESceneFeatureFlag> = []
 
     mutating func insert(_ flag: WPESceneFeatureFlag) { flags.insert(flag) }
-    func contains(_ flag: WPESceneFeatureFlag) -> Bool { flags.contains(flag) }
-    var isEmpty: Bool { flags.isEmpty }
 }
 
 private struct ReportBuilder {

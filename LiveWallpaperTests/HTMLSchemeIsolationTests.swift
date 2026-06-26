@@ -219,7 +219,6 @@ struct FolderURLSchemeHandlerIsolationTests {
         try Self.makePackageData(entries: [
             ("index.html", Data("<html></html>".utf8))
         ]).write(to: pkgURL)
-        // project.json is loose on disk, NOT inside the package.
         let looseBytes = Data("{\"loose\":true}".utf8)
         try looseBytes.write(to: folder.appendingPathComponent("project.json"))
 

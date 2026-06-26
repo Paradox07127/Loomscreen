@@ -25,12 +25,10 @@ final class WallpaperThumbnailService {
         return c
     }()
 
-    /// In-flight task dedup: re-entering for the same key returns the
-    /// same task instead of spawning a parallel snapshot.
+    /// Dedup: re-entering for the same key returns the same task, not a parallel snapshot.
     private var inFlight: [String: Task<NSImage?, Never>] = [:]
 
-    /// Active offscreen webviews held strong by the service until snapshot
-    /// completion. WKWebView fails silently if released mid-load.
+    /// Held strong until snapshot completion — WKWebView fails silently if released mid-load.
     private var pendingWebViews: [String: PendingHTMLSnapshot] = [:]
 
     private init() {}
@@ -39,7 +37,6 @@ final class WallpaperThumbnailService {
         cache.object(forKey: key as NSString)
     }
 
-    /// Returns a poster for the given video URL.
     func videoPosterImage(for url: URL, cacheKey: String) async -> NSImage? {
         if let cached = cachedThumbnail(forKey: cacheKey) { return cached }
         if let inFlight = inFlight[cacheKey] { return await inFlight.value }
@@ -72,14 +69,12 @@ final class WallpaperThumbnailService {
         return result
     }
 
-    /// Rough byte cost of a decoded `CGImage` — width × height × 4 bytes
-    /// (RGBA). Drives `NSCache.totalCostLimit` so the cache stays bounded
-    /// in MB, not just object count.
+    /// width × height × 4 (RGBA) — drives `NSCache.totalCostLimit` so the cache
+    /// stays bounded in MB, not just object count.
     private static func estimatedCost(of image: CGImage) -> Int {
         image.width * image.height * 4
     }
 
-    /// Returns a snapshot of the rendered HTML source.
     func htmlSnapshotImage(
         for url: URL,
         cacheKey: String,
@@ -105,7 +100,6 @@ final class WallpaperThumbnailService {
         return result
     }
 
-    /// Drops cached entries matching the prefix.
     func invalidate(cacheKey: String) {
         cache.removeObject(forKey: cacheKey as NSString)
     }
@@ -169,9 +163,7 @@ final class WallpaperThumbnailService {
         return nil
     }
 
-    /// Cost estimate for an `NSImage` snapshot: width × height × 4
-    /// (RGBA). Mirrors the `CGImage` variant above for the WebKit
-    /// snapshot path, where we only see the `NSImage` representation.
+    /// width × height × 4 (RGBA) — the WebKit snapshot path only exposes an `NSImage`.
     private static func estimatedCost(of image: NSImage) -> Int {
         let pixels = image.representations
             .compactMap { $0 as? NSBitmapImageRep }
@@ -182,9 +174,7 @@ final class WallpaperThumbnailService {
     }
 }
 
-/// Holds a `WKWebView` alive for the duration of an offscreen snapshot
-/// and bridges its `didFinish` / `didFail` callbacks to an async
-/// awaiter via a continuation.
+/// Bridges `WKWebView` `didFinish`/`didFail` callbacks to an async awaiter via a continuation.
 @MainActor
 private final class PendingHTMLSnapshot: NSObject, WKNavigationDelegate {
     let webView: WKWebView

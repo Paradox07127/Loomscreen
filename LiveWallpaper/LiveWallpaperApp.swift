@@ -48,12 +48,11 @@ struct AppStartupPlan: Equatable {
         )
         #else
         // Direct-distribution Pro: layer `.workshopOnline` onto the Pro catalog.
-        // The conditional lives in the app target because Xcode does not
-        // propagate `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target
-        // down into local SwiftPM packages — the registration cannot happen
-        // inside `ProductCapabilities.pro` even though that is where it
-        // logically belongs. MAS / non-direct-distribution Pro builds simply
-        // omit the `DIRECT_DISTRIBUTION` flag and the capability stays out.
+        // The conditional lives here (not in `ProductCapabilities.pro` where it
+        // logically belongs) because Xcode does not propagate
+        // `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target into local
+        // SwiftPM packages. MAS / non-direct-distribution Pro builds omit the
+        // `DIRECT_DISTRIBUTION` flag and the capability stays out.
         #if DIRECT_DISTRIBUTION
         let proCapabilities = ProductCapabilities.pro.withWorkshopOnline()
         #else
@@ -82,7 +81,6 @@ enum SettingsWindowMetrics {
     static let minimumContentSize = CGSize(width: 1160, height: 540)
 }
 
-/// App delegate owns startup and the hand-managed settings/onboarding windows.
 @MainActor
 @Observable
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -234,7 +232,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Dock Visibility
 
-    /// Reads the persisted preference and applies the matching activation policy.
     private func applyDockVisibility() {
         let showInDock = SettingsManager.shared.loadGlobalSettings().showInDock
         let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
@@ -304,7 +301,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Settings window prewarmed", category: .ui)
     }
 
-    /// Opens settings, optionally selecting a display from the menu bar.
     func showSettings(
         initialScreenID: CGDirectDisplayID? = nil,
         initialAddWallpaperPromptKind: String? = nil,
@@ -478,12 +474,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate: NSWindowDelegate {
-    /// Intercept the settings window close so the window — and the warmed
-    /// NavigationSplitView / NSSplitViewController state inside it — is just
-    /// hidden, not actually closed. The full close+reopen cycle re-pays
-    /// the sidebar-bridge materialization cost on the next reveal even
-    /// when the NSWindowController is retained, so we redirect close
-    /// requests to `orderOut(nil)`. The onboarding window keeps the
+    /// Redirect the settings-window close to `orderOut(nil)` so the warmed
+    /// NavigationSplitView / NSSplitViewController state survives — a full
+    /// close+reopen re-pays the sidebar-bridge materialization cost on the next
+    /// reveal even when the NSWindowController is retained. Onboarding keeps the
     /// regular close-and-release semantics.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender == settingsWindowController?.window {

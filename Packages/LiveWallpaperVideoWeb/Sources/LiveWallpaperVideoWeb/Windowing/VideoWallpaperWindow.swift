@@ -87,7 +87,7 @@ extension VideoWallpaperWindow {
         applyMouseInteractionPolicy()
     }
 
-    /// Switches the window's color space when an HDR video is loaded so the composited output preserves the wider gamut.
+    /// Display-P3 color space so the composited HDR output keeps its wider gamut.
     public func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
         colorSpace = enabled ? NSColorSpace.displayP3 : nil
     }

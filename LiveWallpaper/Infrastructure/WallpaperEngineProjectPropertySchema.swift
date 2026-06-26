@@ -307,9 +307,9 @@ private struct Localization: Equatable {
 
     func displayText(for raw: String) -> String {
         let cleaned = Self.clean(raw)
-        // A localization hit is the author's chosen string — return it verbatim.
-        // Only resolve (known-key map / identifier prettify) on a miss, which is
-        // where raw WPE keys like `ui_browse_properties_scheme_color` would leak.
+        // A localization hit is the author's chosen string — return verbatim.
+        // Resolve (known-key map / identifier prettify) only on a miss, where raw
+        // WPE keys like `ui_browse_properties_scheme_color` would otherwise leak.
         if let localized = selected[cleaned] ?? fallback[cleaned] {
             return Self.clean(localized)
         }
@@ -478,11 +478,9 @@ private enum ConditionEvaluator {
         values: [String: WallpaperEngineProjectPropertyValue]
     ) -> Bool {
         var clause = rawClause.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Strip every leading `!` so JS-style truthy coercion (`!!flag`) and
-        // longer negation chains evaluate correctly — without the loop,
-        // `!!flag` would lose only one `!` and then look up the literal
-        // string "!flag" as a (missing) key, flipping to `true` regardless
-        // of the actual value.
+        // Strip every leading `!` so JS-style negation chains (`!!flag`) work.
+        // Without the loop, `!!flag` keeps one `!` and looks up the literal key
+        // "!flag" (missing) → flips to `true` regardless of the actual value.
         var negationCount = 0
         while clause.hasPrefix("!") {
             clause.removeFirst()

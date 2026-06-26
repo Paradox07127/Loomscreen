@@ -4,8 +4,7 @@ import LiveWallpaperCore
 struct ColorAdjustmentsView: View {
     @Binding var effectConfig: VideoEffectConfig
     /// Per-screen colourspace override. Lives next to the SDR effect sliders
-    /// because users mentally group "make the colours look right" together;
-    /// the picker covers system-level output, the sliders adjust the image.
+    /// because users mentally group "make the colours look right" together.
     @Binding var videoColorSpace: VideoColorSpace
     var screen: Screen
     var screenManager: ScreenManager

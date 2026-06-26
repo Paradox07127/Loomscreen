@@ -22,9 +22,7 @@ public final class Logger {
 
         public static let subsystem = "com.livewallpaper"
 
-        /// Backing `os.Logger` for this category, lazily created and cached.
-        /// `os.Logger` is a thin wrapper but caching avoids the per-call
-        /// subsystem string interning.
+        /// Cached to avoid per-call subsystem string interning.
         fileprivate var logger: os.Logger {
             LoggerCache.shared.logger(for: self)
         }

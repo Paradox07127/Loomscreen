@@ -150,9 +150,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        // Video convenience init: explicit `.fps60` default keeps the
-        // native pass-through behaviour even when callers don't pass a
-        // value (also matches `FrameRateLimit.naturalDefault(for: .video)`).
+        // Explicit `.fps60` default keeps native pass-through even when callers
+        // pass nothing (matches `FrameRateLimit.naturalDefault(for: .video)`).
         frameRateLimit: FrameRateLimit = .fps60,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -186,8 +185,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        // Type-pivot convenience init: `nil` defers to the per-type
-        // natural default (resolved against `wallpaperType` parameter).
+        // `nil` defers to the per-type natural default (resolved against the
+        // `wallpaperType` parameter).
         frameRateLimit: FrameRateLimit? = nil,
         wallpaperType: WallpaperType,
         particleEffect: ParticleEffect = .none,
@@ -301,7 +300,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper.htmlConfig
     }
 
-    /// Textual HTML payload, if the source is URL or inline HTML.
     public var htmlContent: String? {
         guard let source = activeWallpaper.htmlSource else { return nil }
         switch source {
@@ -525,7 +523,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         return true
     }
 
-    /// Restore the previously applied HTML source after a type swap.
     @discardableResult
     public mutating func activateSavedHTMLWallpaper() -> Bool {
         guard let source = savedHTMLSource else { return false }
@@ -535,7 +532,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         return true
     }
 
-    /// Swap primary video while preserving per-screen settings + saved HTML.
     /// `packageEntryName` is non-nil for an in-place packaged video (bookmark →
     /// `scene.pkg`); `nil` for a loose video file.
     public mutating func replacePrimaryVideo(bookmarkData: Data, packageEntryName: String? = nil) {
@@ -568,7 +564,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    /// Refreshes the bookmark currently driving playback.
     public func withUpdatedActiveBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
         var copy = self
         let oldActive = copy.activeWallpaper.activeVideoBookmarkData

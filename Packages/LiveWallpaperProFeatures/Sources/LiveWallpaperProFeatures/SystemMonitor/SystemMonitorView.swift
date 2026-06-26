@@ -150,11 +150,9 @@ public struct SystemMonitorView: View {
 
 // MARK: - MiniGaugeCard
 
-/// Compact 270° ring gauge for the dashboard grid.
 /// `icon + value` sit centered slightly above the geometric middle so the
-/// static `title` can drop into the ring's empty bottom 90° gap. No element
-/// ever shares vertical space with another — the previous offset-stack
-/// overlap is structurally impossible now, and the card stays 54pt tall.
+/// static `title` can drop into the ring's empty bottom 90° gap, so no element
+/// ever shares vertical space with another (avoids the old offset-stack overlap).
 struct MiniGaugeCard: View {
     let title: String
     let value: Double

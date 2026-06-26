@@ -39,13 +39,11 @@ struct WPEMetalRenderTargetKey: Hashable {
 }
 
 /// Persistent FBO/layer-composite allocation pool used by
-/// `WPEMetalRenderExecutor`. Allocations live across `render(...)` calls
-/// (so per-frame work avoids reallocating large textures) and are released
-/// on `applyPerformanceProfile(.suspended)`, `reload()`, and `cleanup()`.
+/// `WPEMetalRenderExecutor`. Allocations live across `render(...)` calls and are
+/// released on `applyPerformanceProfile(.suspended)`, `reload()`, `cleanup()`.
 ///
-/// `MTLHeap` is preferred when `device.heapTextureSizeAndAlign(descriptor:)`
-/// reports a non-zero size; otherwise the pool falls back to discrete
-/// `device.makeTexture(descriptor:)` allocation. The heap reference is held
+/// `MTLHeap` is preferred when `heapTextureSizeAndAlign` reports non-zero;
+/// otherwise falls back to discrete `makeTexture`. The heap reference is held
 /// next to the texture so the heap is not deallocated while the texture is
 /// still in the pool.
 final class WPEMetalRenderTargetPool {
@@ -71,9 +69,9 @@ final class WPEMetalRenderTargetPool {
     }
 
     static let fboAliasingDefaultsKey = "WPEMetalFBOAliasingEnabled"
-    /// Default ON (placement-heap FBO aliasing, on-device validated). The manual
-    /// override still wins: `defaults write … WPEMetalFBOAliasingEnabled -bool NO`
-    /// forces the discrete-per-target path back on.
+    /// Default ON (on-device validated). Manual override wins:
+    /// `defaults write … WPEMetalFBOAliasingEnabled -bool NO` forces the
+    /// discrete-per-target path back on.
     static var isFBOAliasingEnabled: Bool {
         UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
     }
@@ -119,10 +117,9 @@ final class WPEMetalRenderTargetPool {
         releaseAliasState()
     }
 
-    /// Allocates a persistent texture outside the per-frame alias plan. A static
-    /// layer composite retained across frames must NOT come from the alias heap,
-    /// whose textures are made reusable at frame boundaries — it gets its own
-    /// discrete allocation snapshotted once.
+    /// Persistent texture outside the per-frame alias plan: a static layer
+    /// composite retained across frames must NOT come from the alias heap (whose
+    /// textures are made reusable at frame boundaries) — it gets a discrete one.
     func persistentTexture(matching source: MTLTexture, label: String) throws -> MTLTexture {
         try validateTextureDimensions(targetName: label, width: source.width, height: source.height)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -141,10 +138,9 @@ final class WPEMetalRenderTargetPool {
         return texture
     }
 
-    /// Called once at the start of each `render()`. The prior frame's aliasable
-    /// textures are dropped so this frame allocates fresh from the heap; the
-    /// single serial command queue guarantees the prior frame's GPU work has
-    /// finished before this frame reuses the memory.
+    /// Start of each `render()`. Drops the prior frame's aliasable textures so
+    /// this frame allocates fresh; the single serial command queue guarantees the
+    /// prior frame's GPU work finished before this frame reuses the memory.
     func beginAliasFrame() {
         guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
         for entry in aliasFrameTextures.values {
@@ -153,9 +149,9 @@ final class WPEMetalRenderTargetPool {
         aliasFrameTextures.removeAll(keepingCapacity: true)
     }
 
-    /// Called after each pass is encoded. Any aliased target whose last use is
-    /// this pass is made aliasable so a later target can reuse its heap memory.
-    /// The driver (tracked automatic heap) inserts the read-before-write barrier.
+    /// After each pass: any aliased target whose last use is this pass is made
+    /// aliasable so a later target can reuse its heap memory. The driver (tracked
+    /// automatic heap) inserts the read-before-write barrier.
     func endPass(passIndex: Int) {
         guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
         for (key, entry) in aliasFrameTextures where entry.lastPass == passIndex {
@@ -164,9 +160,9 @@ final class WPEMetalRenderTargetPool {
         }
     }
 
-    /// Read-only twin of the `texture(...)` keying — computes the slot key a
-    /// target would resolve to WITHOUT allocating anything. Used by the
-    /// `WPEMetalFBOMemoryReport` diagnostic to account FBO memory statically.
+    /// Read-only twin of `texture(...)` keying: the slot key a target resolves to
+    /// WITHOUT allocating. Used by `WPEMetalFBOMemoryReport` to account FBO memory
+    /// statically.
     func diagnosticKey(
         for target: WPERenderTarget,
         layer: WPERenderLayer,
@@ -222,8 +218,8 @@ final class WPEMetalRenderTargetPool {
         )
 
         // Aliased primary: heap-backed, shared with non-overlapping targets.
-        // Ping-pong secondaries (textureToAvoid != nil) and non-planned keys
-        // fall through to the discrete per-key path below.
+        // Ping-pong secondaries (textureToAvoid != nil) and non-planned keys fall
+        // through to the discrete per-key path below.
         if Self.isFBOAliasingEnabled, textureToAvoid == nil, let lastPass = aliasLastPassByKey[key] {
             return try aliasTexture(for: key, lastPass: lastPass)
         }
@@ -350,9 +346,8 @@ final class WPEMetalRenderTargetPool {
             aliasFrameTextures[key] = (texture, lastPass)
             return texture
         }
-        // Heap exhausted / unavailable: fall back to a discrete persistent
-        // allocation so a planning shortfall degrades to today's behavior, never
-        // a render failure.
+        // Heap exhausted/unavailable: discrete fallback so a planning shortfall
+        // degrades gracefully, never a render failure.
         let slot = slots[key] ?? Slot()
         slots[key] = slot
         if slot.primary == nil {

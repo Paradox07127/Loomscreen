@@ -31,9 +31,7 @@ final class WallpaperVideoPlayer {
     /// place (windowed resource loader, no extraction). Read by the runtime
     /// session when it rebuilds the player on `retry()`.
     private(set) var packageEntryName: String?
-    /// Whether audio tracks are disabled at the AVPlayerItem level.
     private(set) var isMuted: Bool = true
-    /// User-controlled output level applied when audio is not muted.
     private(set) var audioVolume: Double = 1.0
     private(set) var shouldAutoplayWhenReady = true
     private(set) var requestedFrameRateLimit: Float = 0
@@ -70,7 +68,6 @@ final class WallpaperVideoPlayer {
     /// engaged. `AVAssetResourceLoader.setDelegate(_:queue:)` only keeps a
     /// weak reference, so we have to own it here.
     private var inMemoryAssetLoader: InMemoryVideoAssetLoader?
-    /// Mirrored onto looper items and future template clones.
     private var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
@@ -362,7 +359,6 @@ final class WallpaperVideoPlayer {
         return size.intValue
     }
 
-    /// Per-screen cache budget driven by `GlobalSettings.videoCacheMaxBytesPerScreen`.
     /// File size is the only real constraint: once a file fits the budget,
     /// mmap-backed playback works regardless of duration. Users who don't
     /// want a long low-bitrate clip in RAM should lower the budget slider.
@@ -608,7 +604,6 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    /// Toggle audio between disabled tracks and normal system output.
     func setMuted(_ muted: Bool) {
         guard isMuted != muted else { return }
         isMuted = muted
@@ -650,9 +645,6 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    /// Caps `AVPlayerItem.preferredMaximumResolution` at the wallpaper
-    /// surface's physical framebuffer pixels.
-    ///
     /// AVFoundation never lets us pick the decoder backend (hardware vs.
     /// software) directly — that decision lives in VideoToolbox. What we
     /// CAN do is stop the decoder from chewing through 8K data when the
@@ -702,18 +694,10 @@ final class WallpaperVideoPlayer {
         videoView?.fitMode = mode
     }
 
-    /// Pins the underlying `AVPlayerLayer` to the user-selected colourspace.
-    /// `.auto` keeps the system default (which already does the right thing
-    /// for ~95% of users); the explicit cases let users debug colour drift
-    /// or force wide-gamut output even when source metadata says SDR.
-    ///
     /// `.forceSDR` installs a Rec.709 `AVVideoComposition` so HDR sources
     /// tone-map to standard dynamic range — composition-based, so it is
     /// mutually exclusive with `setFrameRateLimit` (re-applying either
     /// replaces the active composition).
-    ///
-    /// Calling this is cheap and idempotent — `PlayerHostView` skips the
-    /// `playerLayer.colorspace` assignment when the preference hasn't moved.
     func setVideoColorSpace(_ preference: VideoColorSpace) {
         let previousPreference = lastColorSpacePreference
         lastColorSpacePreference = preference

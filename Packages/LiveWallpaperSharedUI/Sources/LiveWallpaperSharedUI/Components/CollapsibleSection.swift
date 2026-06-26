@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// macOS-style collapsible section with a tappable header. An optional
-/// `trailingAccessory` slot renders a sibling control (e.g. a Reset icon
-/// button) between the label area and the chevron — kept outside the
-/// expand `Button` so its taps don't fight collapse/expand.
+/// Collapsible section with a tappable header. The `trailingAccessory` slot (e.g. a
+/// Reset button) is kept outside the expand `Button` so its taps don't fight collapse/expand.
 public struct CollapsibleSection<Content: View, TrailingAccessory: View>: View {
     let title: LocalizedStringKey
     let systemImage: String

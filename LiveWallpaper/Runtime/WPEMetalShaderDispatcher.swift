@@ -2,10 +2,8 @@
 import Foundation
 import Metal
 
-/// Dispatches a prepared pass onto the right Metal pipeline state and
-/// fragment uniforms. Extracted so the dispatch logic can stay readable
-/// while sharing access to the executor's pipeline cache; pure shader-input
-/// math and texture resolution live in `WPEMetalShaderInputs`.
+/// Dispatches a prepared pass onto a Metal pipeline state. Shares the executor's
+/// pipeline cache; shader-input math and texture resolution live in `WPEMetalShaderInputs`.
 struct WPEMetalShaderDispatcher {
     let executor: WPEMetalRenderExecutor
 
@@ -736,9 +734,8 @@ struct WPEMetalShaderDispatcher {
         depthPixelFormat: MTLPixelFormat
     ) throws {
         let result = try executor.compileCustomShader(for: pass)
-        // Dev-only: dump every transpiled layer's MSL + uniform/sampler interface
-        // so it can be cross-checked against the Windows RenderDoc oracle
-        // (tools/wpe-oracle shader-interface.md). No-op unless scene-debug is on.
+        // Dump transpiled MSL + uniform/sampler interface for cross-check against the
+        // Windows RenderDoc oracle (tools/wpe-oracle shader-interface.md). Scene-debug only.
         if WPESceneDebugArtifacts.shared.isEnabled {
             WPESceneDebugArtifacts.shared.recordNoteOnce(
                 name: "msl-\(pass.pass.id)-\(pass.pass.shader).metal",
@@ -762,8 +759,7 @@ struct WPEMetalShaderDispatcher {
         let isWaveLikePass = Self.isWaveLikePass(pass)
         let isWaterWavesPass = Self.isWaterWavesPass(pass)
         // The transpiler is fragment-only: it always uses wpe_fullscreen_vertex and
-        // synthesizes v_TexCoord / v_Direction in the fragment (it does NOT run the
-        // scene .vert). Record which path waterwaves takes live + whether the mask is bound.
+        // synthesizes v_TexCoord / v_Direction in the fragment (it does NOT run the scene .vert).
         if isWaterWavesPass {
             WPESceneDebugArtifacts.shared.setWaterWavesPath("Transpiled")
         }
@@ -865,9 +861,6 @@ struct WPEMetalShaderDispatcher {
         )
         #endif
 
-        // Phase A: log the GPU-bound uniforms for waterwaves passes so the live values
-        // (g_Time/g_Speed/g_Scale/g_Direction/g_Strength/g_Texture1Resolution) can be
-        // inspected on-device, plus dump the translated MSL once.
         if isWaterWavesPass && WPEWaterWavesTrace.isEnabled {
             Self.traceWaterWavesPass(
                 pass: pass,
@@ -878,9 +871,8 @@ struct WPEMetalShaderDispatcher {
             )
         }
 
-        // Phase B: when the Developer Tools "Waterwaves debug" picker is on, visualize the
-        // effect on the REAL (transpiled) path by drawing the builtin debug fragment with the
-        // packed uniforms, instead of the transpiled shader. Off in production.
+        // When the Developer Tools "Waterwaves debug" picker is on, draw the builtin debug
+        // fragment (with the packed uniforms) instead of the transpiled shader. Off in production.
         let waterWavesDebugMode = isWaterWavesPass ? WPEWaterWavesDebugMode.current : .off
         if waterWavesDebugMode != .off {
             try dispatchWaterWavesDebugOverlay(

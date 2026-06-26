@@ -34,7 +34,6 @@ final class WPESceneScriptInstance {
     /// class doc. Bounded by the number of hostile scripts ever loaded.
     private static var quarantine: [Engine] = []
 
-    /// `script` is the JS source captured from `text: { script: ...
     /// Budgets: setup covers the whole module body + `init()` (allow real
     /// work); per-frame `update()` is expected to be microseconds, so an
     /// overrun only ever means a runaway loop. Tests inject smaller values.
@@ -50,7 +49,7 @@ final class WPESceneScriptInstance {
         self.engine = Engine()
         var prepared = Self.preprocess(script: script)
         // Normalize `let/const scriptProperties` → `var` only when injecting, so
-        // the scene's overrides reach a reassignable global. No-op otherwise.
+        // the scene's overrides reach a reassignable global.
         if !scriptProperties.isEmpty {
             prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
         }
@@ -75,7 +74,6 @@ final class WPESceneScriptInstance {
         }
     }
 
-    /// Tick the script's `update(value)` and return the latest value as a String.
     func tickString() -> String {
         guard hasUpdateFunction, !isPoisoned else { return lastValue }
         guard let outcome = engine.tick(lastValue: lastValue, budget: tickBudget) else {
@@ -155,7 +153,7 @@ final class WPESceneScriptInstance {
             let _ = context.evaluateScript(script)
 
             // Overlay the scene's per-object scriptProperty overrides onto the
-            // script's declared defaults, so the text renders with the scene's
+            // script's declared defaults, so text renders with the scene's
             // configuration (e.g. dayFormat/showDay) instead of bare defaults.
             if !scriptProperties.isEmpty {
                 wpeInstallScriptProperties(
@@ -353,7 +351,6 @@ final class WPELayerScriptInstance {
     private let hasUpdateFunction: Bool
     private let tickBudget: TimeInterval
     private var isPoisoned = false
-    /// Output produced by `init()` at setup (apply once when the layer loads).
     let initialOutput: WPELayerScriptOutput
 
     private static var quarantine: [LayerEngine] = []
@@ -620,7 +617,6 @@ final class WPELayerScriptInstance {
 }
 
 extension WPESceneScriptPropertyValue {
-    /// The bridged value to assign onto the JS `scriptProperties` object.
     var jsBridged: Any {
         switch self {
         case .number(let value): return value

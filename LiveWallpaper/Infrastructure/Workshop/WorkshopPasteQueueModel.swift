@@ -6,10 +6,7 @@ import Observation
 
 /// Drives [WorkshopPasteSheet]. Owns the parsed-row state machine described
 /// in `docs/2026-05-28-steam-workshop-integration-plan.md` ("State machine
-/// per `WorkshopPasteRowCard`"). The state machine in v1 is bounded:
-///
-/// `parsing → fetchingMetadata → ready` and several terminal `failed(...)`
-/// states. Download / import states are reserved for Phase 3.
+/// per `WorkshopPasteRowCard`").
 @MainActor
 @Observable
 final class WorkshopPasteQueueModel {
@@ -22,9 +19,8 @@ final class WorkshopPasteQueueModel {
         var metadata: SteamWorkshopMetadata?
         var error: SteamWorkshopMetadataError?
 
-        /// URL to open in Steam, regardless of fetch outcome. Always
-        /// constructed from the validated id when we have one; falls back to
-        /// a search URL using the raw input otherwise.
+        /// URL to open in Steam, regardless of fetch outcome — constructed
+        /// from the validated id alone.
         var steamURL: URL? {
             if let id = publishedFileID {
                 return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")
@@ -42,8 +38,6 @@ final class WorkshopPasteQueueModel {
 
     private(set) var rawInput: String = ""
     private(set) var rows: [Row] = []
-    /// Counter for showing a "12 added, 3 duplicates, 1 invalid" summary
-    /// after the user clicks "Add to queue".
     private(set) var lastIngestionSummary: IngestionSummary?
 
     struct IngestionSummary: Equatable, Sendable {
@@ -59,11 +53,10 @@ final class WorkshopPasteQueueModel {
         self.metadataService = metadataService
     }
 
-    // Note: no `deinit` cancellation here. The fetch tasks capture
-    // `[weak self]` and become no-ops once `self` is released; Swift's
-    // strict-concurrency rules don't let a nonisolated `deinit` touch
-    // main-actor state. `removeAll()` is the caller-driven escape hatch
-    // when a sheet wants to shed in-flight work before disappearing.
+    // No `deinit` cancellation: fetch tasks capture `[weak self]` and no-op
+    // once released, and a nonisolated `deinit` can't touch main-actor state
+    // under strict concurrency. `removeAll()` is the caller-driven escape
+    // hatch to shed in-flight work before a sheet disappears.
 
     // MARK: - Public API
 
@@ -71,9 +64,7 @@ final class WorkshopPasteQueueModel {
         rawInput = value
     }
 
-    /// Parses the textbox blob, dedupes against the existing queue, and kicks
-    /// off metadata fetches for the new rows. Existing rows are not
-    /// disturbed.
+    /// Dedupes against the existing queue; existing rows are not disturbed.
     func ingestFromRawInput() {
         let parsed = WorkshopURLParser.parseAll(rawInput)
         var added = 0
@@ -117,8 +108,7 @@ final class WorkshopPasteQueueModel {
         lastIngestionSummary = IngestionSummary(added: added, duplicates: duplicates, invalid: invalid)
     }
 
-    /// Re-runs the metadata fetch for one row. Idempotent: cancels any
-    /// existing in-flight task for the same row first.
+    /// Idempotent: cancels any existing in-flight task for the same row first.
     func retry(rowID: UUID) {
         guard let index = rows.firstIndex(where: { $0.id == rowID }),
               let id = rows[index].publishedFileID else { return }
@@ -138,9 +128,8 @@ final class WorkshopPasteQueueModel {
         rows.removeAll()
     }
 
-    /// Opens every row that has a known Steam URL via `NSWorkspace`. This is
-    /// the v1 batch action that lets the user kick off downloads in the real
-    /// Steam client until Phase 3 lands.
+    /// v1 batch action: kick off downloads in the real Steam client (no
+    /// in-app download yet).
     func openAllInSteam() {
         for row in rows {
             guard let url = row.steamURL else { continue }

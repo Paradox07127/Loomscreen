@@ -1,8 +1,6 @@
 import Foundation
 
 public enum WallpaperContent: Equatable, Sendable {
-    /// A video wallpaper.
-    ///
     /// - `bookmarkData` resolves to a plain video file when `packageEntryName`
     ///   is `nil` (loose / legacy imports), or to a `scene.pkg` when it is set
     ///   (in-place packaged video). For the package case the player serves the
@@ -12,7 +10,6 @@ public enum WallpaperContent: Equatable, Sendable {
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
 
-    /// Convenience constructor for the common loose-file video (no package entry).
     public static func video(bookmarkData: Data) -> WallpaperContent {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)
     }
@@ -57,9 +54,8 @@ public enum WallpaperContent: Equatable, Sendable {
         return source
     }
 
-    /// Convenience for the existing UI surface that only cares about the
-    /// builtin preset (e.g. the icon-grid selector). Returns `nil` when a
-    /// custom shader is active.
+    /// Returns `nil` when a custom shader is active (for UI surfaces that only
+    /// care about the builtin preset, e.g. the icon-grid selector).
     public var shaderPreset: MetalShaderPreset? {
         shaderSource?.builtinPreset
     }

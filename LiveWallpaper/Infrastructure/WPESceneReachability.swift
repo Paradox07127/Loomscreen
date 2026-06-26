@@ -37,13 +37,13 @@ enum WPESceneReachability {
         return ids.filter { !$0.isEmpty }
     }
 
-    /// Ids whose live **descriptor** (applied config or saved bookmark) reads in
-    /// place from a packed `scene.pkg` — their source archive is a runtime
-    /// dependency and must never be reclaimed. Recent-history-only items are not
-    /// covered here (history stores `WPEOrigin`, not the descriptor's storage);
-    /// those rely on import-time `purgeStaleCache` removing the legacy cache so
-    /// the id never reaches the reclaimer's completed-cache set. A residual
-    /// failed-purge edge is tracked as a follow-up (persist storage in history).
+    /// Ids whose live **descriptor** reads in place from a packed `scene.pkg` —
+    /// their source archive is a runtime dependency and must never be reclaimed.
+    /// Recent-history-only items aren't covered (history stores `WPEOrigin`, not
+    /// the descriptor's storage); those rely on import-time `purgeStaleCache`
+    /// removing the legacy cache so the id never reaches the reclaimer's
+    /// completed-cache set. A residual failed-purge edge is a tracked follow-up
+    /// (persist storage in history).
     static func packageBackedWorkshopIDs() -> Set<String> {
         var ids: Set<String> = []
         func add(_ descriptor: SceneDescriptor?) {

@@ -11,9 +11,7 @@ public enum AdaptiveGlassProminence: Sendable {
     case prominent
 }
 
-/// Border shape for `adaptiveGlassButton`. `capsule` is the default (labeled
-/// buttons); `circle` is for single-glyph icon buttons, which read as a clean
-/// equal-size cluster and match the macOS 26 Liquid Glass icon-control look.
+/// `circle` is for single-glyph icon buttons, matching the macOS 26 Liquid Glass icon-control look.
 public enum AdaptiveGlassButtonShape: Sendable {
     case capsule
     case circle
@@ -55,22 +53,17 @@ public extension View {
         modifier(AdaptiveGlassButtonModifier(prominence: prominence, shape: shape))
     }
 
-    /// Liquid-glass chrome for a small badge floating over a thumbnail/preview
-    /// (Playing, Experimental, Update, resolution, In Library …). macOS 26 uses
-    /// native `glassEffect` with a legibility-preserving tint so white/coloured
-    /// glyphs survive bright previews; older systems fall back to a tinted scrim
-    /// with a specular top edge. Reduce Transparency forces an opaque fill.
-    ///
-    /// Capsule-shaped and zero-padding-adding, so it never changes a badge's
-    /// footprint — only its backing.
+    /// Liquid-glass chrome for a small badge floating over a thumbnail/preview. The
+    /// legibility-preserving tint keeps white/coloured glyphs readable over bright
+    /// previews; Reduce Transparency forces an opaque fill. Adds zero padding so it
+    /// never changes a badge's footprint — only its backing.
     func thumbnailBadgeGlass(tint: Color = .black, opacity: Double = 0.6) -> some View {
         modifier(ThumbnailBadgeGlassModifier(tint: tint, opacity: opacity))
     }
 
-    /// Dark-tinted interactive glass circle for a single-glyph control that
-    /// floats over artwork (e.g. the hero close button): native Liquid Glass
-    /// on macOS 26 (the dark tint keeps a white glyph legible over bright
-    /// previews and firms up on hover), with a black-fill circle fallback.
+    /// Dark-tinted interactive glass circle for a single-glyph control over artwork
+    /// (e.g. the hero close button). The dark tint keeps a white glyph legible over
+    /// bright previews and firms up on hover.
     func floatingGlyphGlass(hovered: Bool) -> some View {
         modifier(FloatingGlyphGlassModifier(hovered: hovered))
     }
@@ -190,11 +183,9 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
         }
     }
 
-    /// Thin contrast stroke layered on top of the native Liquid Glass on macOS 26+.
-    /// Liquid Glass's intrinsic edge highlight is subtle; for interactive surfaces
-    /// (buttons, tappable plates) we add a faint 0.5pt outline so users with low
-    /// vision can locate hit areas. Non-interactive surfaces (decorative shells)
-    /// stay unmodified to preserve the native refraction feel.
+    /// Native Liquid Glass's intrinsic edge highlight is subtle; interactive surfaces
+    /// get a faint 0.5pt outline so low-vision users can locate hit areas. Non-interactive
+    /// surfaces stay unmodified to preserve the native refraction feel.
     @available(macOS 26.0, *)
     @ViewBuilder
     private func interactiveOutline<S: InsettableShape>(_ shape: S) -> some View {

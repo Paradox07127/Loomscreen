@@ -66,7 +66,7 @@ struct WPERenderPipelineBuilder: Sendable {
             let data = try resolver.data(relativePath: puppetPath)
             model = try WPEMdlParser.parse(data: data)
         } catch {
-            // Missing / corrupt .mdl → degrade to the flat material image (unchanged).
+            // Missing / corrupt .mdl → degrade to the flat material image.
             return nil
         }
         // Only the modern pre-assembled puppet generations (MDLV0021/0023) ship MDLV
@@ -166,10 +166,9 @@ private struct WPEShaderSourceLoader: Sendable {
             do {
                 return try sourceProgram(shaderName: shaderName, pass: pass)
             } catch WPERenderPipelineError.shaderMissing {
-                // Some corpus effects are satisfied only by our Metal-side
-                // built-ins. Preserve the old copy degradation when the
-                // workshop does not ship shader source, but do not mask
-                // invalid source/include errors.
+                // Some corpus effects are satisfied only by Metal-side built-ins.
+                // Fall back to the copy program when the workshop ships no source,
+                // but only on shaderMissing so invalid source/include errors surface.
             }
         }
 
@@ -525,9 +524,8 @@ private struct WPEShaderSourceLoader: Sendable {
         return refs
     }
 
-    // Identifiers inside `defined(X)` / `defined X` are existence
-    // checks, not value reads. Remove them before scanning for
-    // identifiers that need auto-defines.
+    // Identifiers inside `defined(X)` / `defined X` are existence checks, not
+    // value reads, so strip them before scanning for identifiers to auto-define.
     private static func stripDefinedOperator(in expression: String) -> String {
         var result = expression
         result = result.replacingOccurrences(
@@ -936,9 +934,8 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func shaderPrelude(comboValues: [String: Int], stage: WPEShaderStage) -> String {
-        // Builtin WPE macros (CAST2/ddx/ddy/saturate/…) live in a shared
-        // constant so the GPU MSDF text path resolves the exact same intrinsics
-        // — see `WPEShaderBuiltinMacros`.
+        // Builtin WPE macros (CAST2/ddx/ddy/saturate/…) live in `WPEShaderBuiltinMacros`
+        // so the GPU MSDF text path resolves the exact same intrinsics.
         var lines = ["// LiveWallpaper WPE shader prelude"]
         lines.append(contentsOf: WPEShaderBuiltinMacros.glslPreludeLines)
         switch stage {
@@ -1002,13 +999,8 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_blur.h":
-            // Stock WPE `blur*a` separable-Gaussian helpers. WPE's
-            // shipped `common_blur.h` ships these with a fixed
-            // `g_Texture0` sampler bind because every blur pass in the
-            // editor pipes the previous frame into slot 0; mirror the
-            // same convention. Weights match the Sigg/Hadwiger 2005
-            // formulation that WPE's `blur_precise_gaussian.frag`
-            // expects.
+            // Stock WPE `blur*a` separable-Gaussian helpers. Weights match the
+            // Sigg/Hadwiger 2005 formulation `blur_precise_gaussian.frag` expects.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLUR_H
             #define LIVEWALLPAPER_WPE_COMMON_BLUR_H
@@ -1046,10 +1038,8 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_vertex.h":
-            // Workshop authors `#include` this header but rarely depend
-            // on its content; WPE's stock file exposes a handful of
-            // vertex-shader convenience macros. A guarded empty stub is
-            // enough to satisfy resolution without polluting the prelude.
+            // Workshop authors `#include` this but rarely depend on its content,
+            // so a guarded empty stub satisfies resolution without polluting the prelude.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_VERTEX_H
             #define LIVEWALLPAPER_WPE_COMMON_VERTEX_H
@@ -1057,11 +1047,9 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_fragment.h":
-            // WPE 2.8 `font.frag` (and several workshop text/format shaders)
-            // call `ConvertSampleR8` from this header to read R8/alpha glyph
-            // coverage. Our prior stub only emitted include guards, so the
-            // 2.8 font shader failed to translate. Mirror WPE's GLSL path
-            // (`HLSL_SM30` is never set in our pipeline → `.r`).
+            // WPE 2.8 `font.frag` (+ workshop text shaders) call `ConvertSampleR8`
+            // to read R8/alpha glyph coverage; an empty stub broke their translate.
+            // Mirror WPE's GLSL path (`HLSL_SM30` never set in our pipeline → `.r`).
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
             #define LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H

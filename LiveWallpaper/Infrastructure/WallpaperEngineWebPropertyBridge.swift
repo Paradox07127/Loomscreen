@@ -29,19 +29,10 @@ enum WallpaperEngineWebPropertyBridge {
             return nil
         }
 
-        // Two-stage delivery so we never lose a payload to startup-timing
-        // races:
-        //   1. If `wallpaperPropertyListener` already exists, push the
-        //      payload immediately (the common case for pages that set up
-        //      the listener at the top of their bundle).
-        //   2. Install an `Object.defineProperty` hook on `window` so the
-        //      payload is delivered the moment the page assigns the
-        //      listener. This collapses the worst-case wait from a hard
-        //      120-RAF poll (≈ 2–4s) to a single property-set callback.
-        //   3. A short RAF poll (60 frames ≈ 1s) remains as a fallback for
-        //      pages whose listener is created by mutating an *existing*
-        //      object property — `defineProperty` cannot intercept that
-        //      mutation without re-wrapping every assignment.
+        // Three-stage delivery so we never lose a payload to startup-timing races.
+        // Stage 2's defineProperty hook collapses the worst-case wait from a 120-RAF
+        // poll (≈2–4s) to a single property-set callback; Stage 3's poll covers pages
+        // that mutate an already-defined property, which defineProperty cannot intercept.
         return """
         (function () {
             var properties = \(json);
@@ -86,32 +77,6 @@ enum WallpaperEngineWebPropertyBridge {
                 }
             }
             pollFallback();
-        })();
-        """
-    }
-
-    static func applyScript(
-        forFolder folderURL: URL,
-        overrides: [String: WallpaperEngineProjectPropertyValue]
-    ) -> String? {
-        guard let schema = parseSchema(forFolder: folderURL) else { return nil }
-        return applyScript(schema: schema, overrides: overrides)
-    }
-
-    static func applyScript(
-        schema: WallpaperEngineProjectPropertySchema,
-        overrides: [String: WallpaperEngineProjectPropertyValue]
-    ) -> String? {
-        guard let json = propertiesJSON(schema: schema, overrides: overrides) else {
-            return nil
-        }
-
-        return """
-        (function () {
-            var listener = window.wallpaperPropertyListener;
-            if (listener && typeof listener.applyUserProperties === 'function') {
-                listener.applyUserProperties(\(json));
-            }
         })();
         """
     }

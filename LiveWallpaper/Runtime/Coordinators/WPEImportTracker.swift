@@ -9,14 +9,11 @@ import Observation
 ///     an in-flight one when the user double-clicks history entries on the
 ///     same display)
 ///
-/// Carved out of `ScreenManager` so the import orchestration can stay readable
-/// and the two dictionaries don't have to live as ad-hoc state on the manager.
-/// Marked `@Observable` so SwiftUI views reading the error through
-/// `ScreenManager.wpeImportError(for:)` re-render when a record/clear happens
-/// — the original dict was on `@Observable ScreenManager` and we must keep
-/// that invalidation flow. The generation counter stays
-/// `@ObservationIgnored` because it is internal concurrency bookkeeping and
-/// no UI reads it.
+/// `@Observable` so SwiftUI views reading the error via
+/// `ScreenManager.wpeImportError(for:)` re-render on record/clear — preserves
+/// the invalidation flow from when the dict lived on `@Observable ScreenManager`.
+/// The generation counter is `@ObservationIgnored` (internal concurrency
+/// bookkeeping, no UI reads it).
 @MainActor
 @Observable
 final class WPEImportTracker {
@@ -36,7 +33,6 @@ final class WPEImportTracker {
         lastErrors.removeValue(forKey: screenID)
     }
 
-    /// Returns the new generation.
     func bumpGeneration(for screenID: CGDirectDisplayID) -> Int {
         let next = (generations[screenID] ?? 0) &+ 1
         generations[screenID] = next

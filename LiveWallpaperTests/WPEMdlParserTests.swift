@@ -62,7 +62,6 @@ struct WPEPuppetAnimationEvaluatorTests {
 
     @Test("Additive layer composes its delta on top of the base (blink-style Y-scale)")
     func additiveLayerComposesOnBase() {
-        // Base layer: bone 0 static at the bind pose.
         let base = animation(frameCount: 2, mode: "loop", channels: [channel([
             (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
             (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
@@ -78,7 +77,6 @@ struct WPEPuppetAnimationEvaluatorTests {
             WPEPuppetAnimationLayer(animation: base, rate: 1, additive: false, blend: 1),
             WPEPuppetAnimationLayer(animation: blink, rate: 1, additive: true, blend: 1)
         ]
-        // Frame 0: both layers at bind → identity (no-regression guard).
         let atBind = WPEPuppetAnimationEvaluator.palette(layers: layers, bones: [], at: 0)
         #expect(atBind.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
         // Frame 1: base unchanged + additive Sy 0.5 → a vertex at y=2 skins to y=1.
@@ -502,8 +500,6 @@ struct WPEMdlParserTests {
         return data
     }
 
-    /// Appends a 1-animation MDLA0006 section: 2 channels, frameCount 1 (2 keyframes each),
-    /// translations 1..12 so callers can assert exact channel/keyframe ordering.
     private func appendMDLA0006Section(to data: inout Data) {
         func appendKey(_ t: SIMD3<Float>, _ r: SIMD3<Float>, _ s: SIMD3<Float>) {
             for value in [t.x, t.y, t.z, r.x, r.y, r.z, s.x, s.y, s.z] {
@@ -518,7 +514,7 @@ struct WPEMdlParserTests {
         data.appendLE(UInt32.max)        // sectionEnd -> clamps to data count
         data.appendLE(UInt32(1))         // animationCount
         data.appendLE(UInt32(267))       // id
-        data.appendLE(UInt32(0))         // reserved
+        data.appendLE(UInt32(0))
         data.appendCString("动画 1")
         data.appendCString("loop")
         data.appendLE(Float(30))

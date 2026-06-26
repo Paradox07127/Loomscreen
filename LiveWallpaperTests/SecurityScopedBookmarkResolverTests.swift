@@ -136,7 +136,6 @@ private enum FakeError: Error {
     case refreshFailed
 }
 
-/// Thread-safe accumulator for test save-side-effect assertions.
 private final class SaveCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var saved: [Data] = []

@@ -3,9 +3,7 @@ import Foundation
 import Metal
 
 /// Caches `MTLRenderPipelineState` keyed by (fragment, blend, color format,
-/// depth format) so identical pipelines can be reused across passes and
-/// frames. Owns the library + device handles so the executor doesn't have
-/// to expose them. Carved out of `WPEMetalRenderExecutor`.
+/// depth format) so identical pipelines can be reused across passes and frames.
 final class WPEMetalPipelineCache {
     private let device: MTLDevice
     private let library: MTLLibrary
@@ -95,9 +93,7 @@ final class WPEMetalPipelineCache {
         case "disabled", "premultiplieddisabled":
             attachment.isBlendingEnabled = false
 
-        // Premultiplied-alpha render-target blend modes (emitted by
-        // WPERenderGraphBuilder for the layer-FBO / effect-chain / composite
-        // passes). Sources already store premultiplied RGB, so srcRGB=.one.
+        // Sources already store premultiplied RGB, so srcRGB=.one.
         case "premultiplied", "premultipliednormal", "premultipliedtranslucent", "premultipliednormalmapped":
             attachment.isBlendingEnabled = true
             attachment.rgbBlendOperation = .add

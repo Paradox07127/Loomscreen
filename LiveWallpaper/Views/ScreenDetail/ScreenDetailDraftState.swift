@@ -29,10 +29,9 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     var particleDensity: Double
     var selectedFrameRateLimit: FrameRateLimit
     /// Scene-only "Mouse Interaction" toggle (cursor-driven parallax / pointer
-    /// shaders). Mirrors `ScreenConfiguration.sceneMouseInteractionEnabled`.
+    /// shaders).
     var sceneMouseInteractionEnabled: Bool
-    /// Scene-only "Interactive" toggle (real click capture). Mirrors
-    /// `ScreenConfiguration.sceneClickCaptureEnabled`.
+    /// Scene-only "Interactive" toggle (real click capture).
     var sceneClickCaptureEnabled: Bool
     var hasPreviewSource: Bool
     /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand

@@ -101,9 +101,7 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
-/// Outcome of a single Workshop download. `Imported` is whatever the caller's
-/// import handler returns (kept generic so the Doctor stays unaware of the
-/// library / import types).
+/// `Imported` is generic so the Doctor stays unaware of the library / import types.
 enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
     case imported(Imported)
     case notConfigured(reason: String)
@@ -222,16 +220,12 @@ final class SteamCMDDoctorService {
         await runProbe(.binaryIdentity)
     }
 
-    /// "Find it for me": scans the well-known SteamCMD install locations
+    /// Scans the conventional, non-TCC-protected SteamCMD install locations
     /// (Homebrew cask, Valve tarball) and binds the first that resolves to a
-    /// valid Mach-O. The app isn't sandboxed, so a discovered path can be bound
-    /// without going through the file picker. Returns `true` if one was bound.
-    /// Scans the conventional, non-TCC-protected SteamCMD install locations and
-    /// binds the first that resolves to a valid Mach-O. Targeted `stat`s only —
-    /// no directory walking, no shell, no Desktop/Documents/Downloads access,
-    /// nothing leaves the device. Anything outside these spots is left to the
-    /// user's explicit "Select…" pick. The app isn't sandboxed, so a discovered
-    /// path can be bound without the file picker.
+    /// valid Mach-O. Targeted `stat`s only — no directory walking, no shell, no
+    /// Desktop/Documents/Downloads access, nothing leaves the device. Anything
+    /// outside these spots is left to the user's explicit "Select…" pick. The app
+    /// isn't sandboxed, so a discovered path can be bound without the file picker.
     @discardableResult
     func autoDetectBinary() async -> Bool {
         for candidate in SteamCMDBinaryResolver.autoDetectCandidates() {
@@ -246,9 +240,8 @@ final class SteamCMDDoctorService {
         return false
     }
 
-    /// One-shot "just works" setup, run when the Doctor opens: auto-detect the
-    /// SteamCMD binary and pick a sensible working directory when the user
-    /// hasn't set them yet. Never overrides an existing binding.
+    /// Auto-detects the binary and picks a working directory when unset. Never
+    /// overrides an existing binding.
     func autoConfigureIfNeeded() async {
         if binaryBookmarkData == nil {
             await autoDetectBinary()
@@ -256,15 +249,12 @@ final class SteamCMDDoctorService {
         await autoConfigureWorkdirIfNeeded()
     }
 
-    /// Brings the download gate up to date without a manual Doctor visit. The
-    /// probe verdicts are in-memory and reset every launch, so even a fully
-    /// configured install shows a greyed-out Download button until the
-    /// cached-login probe re-runs. When the binary + workdir + a valid username
-    /// are already bound, run that probe once (it's read-only: it checks
-    /// SteamCMD's *existing* cached session, never prompts for or stores a
-    /// password). Safe to call on every Workshop-pane appearance — it re-checks
-    /// while not green (so a fresh Terminal sign-in is picked up) and skips once
-    /// green or while a probe is already in flight.
+    /// Probe verdicts are in-memory and reset every launch, so a fully configured
+    /// install still greys out Download until the cached-login probe re-runs. This
+    /// runs that probe (read-only: checks SteamCMD's *existing* cached session,
+    /// never prompts for or stores a password). Safe per Workshop-pane appearance:
+    /// re-checks while not green (picks up a fresh Terminal sign-in), skips once
+    /// green or while a probe is in flight.
     func autoConfirmDownloadReadinessIfNeeded() async {
         await autoConfigureIfNeeded()
         guard binaryBookmarkData != nil,
@@ -276,10 +266,9 @@ final class SteamCMDDoctorService {
         await runProbe(.cachedLogin)
     }
 
-    /// Picks the working directory without asking: reuse the shared Steam
-    /// library when the GUI client is already set up (no separate SteamCMD
-    /// sign-in), otherwise an app-managed folder under Application Support.
-    /// The "Change location" disclosure still lets advanced users override.
+    /// Reuses the shared Steam library when the GUI client is already set up (so
+    /// no separate SteamCMD sign-in is needed), else an app-managed folder under
+    /// Application Support.
     private func autoConfigureWorkdirIfNeeded() async {
         guard workdirBookmarkData == nil else { return }
         let sharedSteam = fileManager.homeDirectoryForCurrentUser
@@ -294,8 +283,7 @@ final class SteamCMDDoctorService {
         try? await bindWorkdir(appManagedWorkdir, isSharedSteamLibrary: false)
     }
 
-    /// Default SteamCMD working directory under Application Support, used when
-    /// no shared Steam library is present.
+    /// Fallback SteamCMD working directory when no shared Steam library is present.
     var appManagedWorkdir: URL {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
@@ -350,11 +338,9 @@ final class SteamCMDDoctorService {
         }
     }
 
-    /// Surface the Rosetta-install command to the user. Spawning
-    /// `softwareupdate --install-rosetta` directly requires the privileged
-    /// helper entitlement we don't ship yet, so this method writes the exact
-    /// command to the clipboard + opens Terminal.app and lets the user run it
-    /// under explicit consent.
+    /// Spawning `softwareupdate --install-rosetta` directly needs the privileged
+    /// helper entitlement we don't ship yet, so write the command to the clipboard
+    /// + open Terminal.app and let the user run it under explicit consent.
     func installRosetta() async {
         let command = "/usr/sbin/softwareupdate --install-rosetta --agree-to-license"
         let pasteboard = NSPasteboard.general
@@ -683,10 +669,9 @@ final class SteamCMDDoctorService {
     /// task cancellation (the runner terminates SteamCMD's process group).
     static let downloadTimeout: TimeInterval = 1200
 
-    /// The button gate: a download can only succeed once the binary + workdir
-    /// + username are bound and a cached Steam login is present (otherwise
-    /// SteamCMD would prompt for a password, which `@NoPromptForPassword`
-    /// refuses). Reads `probes`, so SwiftUI re-evaluates as the Doctor changes.
+    /// A cached Steam login is required because otherwise SteamCMD prompts for a
+    /// password, which `@NoPromptForPassword` refuses. Reads `probes` so SwiftUI
+    /// re-evaluates as the Doctor changes.
     var isDownloadReady: Bool {
         binaryBookmarkData != nil
             && workdirBookmarkData != nil
@@ -694,11 +679,9 @@ final class SteamCMDDoctorService {
             && isGreen(.cachedLogin)
     }
 
-    /// Downloads `itemID` via SteamCMD into the bound workdir and, while the
-    /// workdir security scope is still held, hands the resolved content folder
-    /// to `onContentReady` (the import step) — the downloaded files live under
-    /// the scoped workdir, so the import must read + bookmark them before the
-    /// scope closes.
+    /// Hands the downloaded content folder to `onContentReady` while the workdir
+    /// security scope is still held: the files live under the scoped workdir, so
+    /// the import must read + bookmark them before the scope closes.
     func downloadWorkshopItem<Imported: Sendable>(
         _ itemID: UInt64,
         onProgress: SteamCMDProgressHandler? = nil,
@@ -759,12 +742,10 @@ final class SteamCMDDoctorService {
         }
     }
 
-    /// Walks the bound workdir's Workshop download tree
-    /// (`steamapps/workshop/content/431960/<id>/`) and hands each project folder
-    /// to `body` while the workdir's security scope is held. Lets the managed
-    /// library ingest items SteamCMD wrote outside the in-app download button
-    /// (a manual `steamcmd` run, a prior launch, a download whose import didn't
-    /// record). No-op when no workdir is bound.
+    /// Hands each `steamapps/workshop/content/431960/<id>/` project folder to
+    /// `body` while the workdir's security scope is held. Lets the library ingest
+    /// items SteamCMD wrote outside the in-app download button (a manual `steamcmd`
+    /// run, a prior launch, a download whose import didn't record).
     func enumerateDownloadedItemFolders(_ body: @MainActor (URL) async -> Void) async {
         var seen = Set<String>()
 
@@ -802,8 +783,8 @@ final class SteamCMDDoctorService {
     }
 
     /// Calls `body` for each immediate `project.json`-bearing subfolder of
-    /// `contentRoot` whose id isn't already in `seen`. Returns the ids it visited
-    /// so the caller can fold them into its dedup set.
+    /// `contentRoot` whose id isn't in `seen`. Returns the visited ids for the
+    /// caller's dedup set.
     private func enumerateProjectFolders(
         in contentRoot: URL,
         skipping seen: Set<String>,
@@ -829,17 +810,14 @@ final class SteamCMDDoctorService {
         return visited
     }
 
-    /// Permanently deletes any app-managed SteamCMD download folder(s) for
-    /// `workshopID` to reclaim disk space. The Trash is unusable here: under
-    /// App Sandbox `trashItem` on the container-internal Steam dir lands in the
-    /// container's hidden `.Trash`, invisible in Finder and not space-freeing —
-    /// so "move to Trash" looked like nothing happened. Scans the same two roots
-    /// as `enumerateDownloadedItemFolders` — the sandbox-redirected container
-    /// Steam dir and the bound workdir — so deleting an item also frees the
+    /// Permanently deletes (not Trash) the app-managed SteamCMD download
+    /// folder(s) for `workshopID`. Under App Sandbox `trashItem` on the
+    /// container-internal Steam dir lands in the container's hidden `.Trash` —
+    /// invisible in Finder and not space-freeing. Scans the same two roots as
+    /// `enumerateDownloadedItemFolders` so deleting an item also frees the
     /// download that seeded its cache copy (otherwise the bytes linger and,
-    /// absent a delete tombstone, the auto-scan re-imports it). Returns the
-    /// number of folders deleted; a no-op for ids never downloaded here (e.g.
-    /// external folder imports).
+    /// absent a delete tombstone, the auto-scan re-imports it). Returns the count
+    /// deleted.
     @discardableResult
     func deleteDownloadedItemFolders(workshopID: String) async -> Int {
         guard WPEPathSafety.isSafeWorkshopID(workshopID) else { return 0 }
@@ -872,10 +850,9 @@ final class SteamCMDDoctorService {
         return deleted
     }
 
-    /// Permanently removes `<base>/steamapps/workshop/content/431960/<workshopID>`
-    /// only when it exists and resolves (symlinks included) to a directory still
-    /// contained in the content root — never a sibling, parent, or
-    /// symlink-escaped target.
+    /// Removes `<base>/steamapps/workshop/content/431960/<workshopID>` only when it
+    /// resolves (symlinks included) to a directory still inside the content root —
+    /// never a sibling, parent, or symlink-escaped target.
     private func deleteItemFolder(workshopID: String, under base: URL) -> Bool {
         // Anchor the whole chain: the resolved content root must stay inside the
         // resolved trusted base, so a symlinked `steamapps`/`workshop`/`content`/
@@ -901,8 +878,7 @@ final class SteamCMDDoctorService {
     }
 
     /// Extracts the quoted destination from SteamCMD's
-    /// `Success. Downloaded item <id> to "<path>"` line. Pure (no filesystem),
-    /// so it is unit-testable without a real download.
+    /// `Success. Downloaded item <id> to "<path>"` line.
     nonisolated static func capturedDownloadPath(stdout: String, itemID: UInt64) -> String? {
         firstCapture(in: stdout, pattern: #"Success\. Downloaded item \#(itemID) to "([^"]+)""#)
     }
@@ -940,11 +916,10 @@ final class SteamCMDDoctorService {
 
     nonisolated static func runCodesignCheck(binary: URL) async -> CodesignResult {
         let runner = SteamCMDProcessRunner()
-        // `--verify --strict` validates signature *integrity* — a tampered
-        // binary fails here even if it can still display its metadata. It
-        // drives `signatureValid`. `-dv --verbose=4` only displays the
-        // TeamIdentifier + Hardened Runtime flags, so we run both and read the
-        // identity fields from the display pass.
+        // Two passes: `--verify --strict` validates signature *integrity* (a
+        // tampered binary fails even if its metadata still displays) and drives
+        // `signatureValid`; `-dv --verbose=4` only displays TeamIdentifier +
+        // Hardened Runtime, read from the display pass.
         let verify = await runner.run(
             binary: URL(fileURLWithPath: "/usr/bin/codesign"),
             args: ["--verify", "--strict", binary.path(percentEncoded: false)],
@@ -971,14 +946,14 @@ final class SteamCMDDoctorService {
         )
     }
 
-    /// In-memory record of the last SHA-256 verified as an intact Valve build.
-    /// Transient — re-verified each launch and whenever the SHA changes.
+    /// Last SHA-256 verified as an intact Valve build. Transient — re-verified
+    /// each launch and whenever the SHA changes.
     @ObservationIgnored private var verifiedBinarySHA256: String?
 
-    /// Gate for every path that *executes* the user-selected SteamCMD. Returns
-    /// true only for an intact, Valve-signed build. Caches the verified SHA-256
-    /// so one "Run all" doesn't re-spawn codesign per executing probe; a
-    /// self-updated binary (changed SHA) is re-verified.
+    /// Gate for every path that *executes* the user-selected SteamCMD — true only
+    /// for an intact, Valve-signed build. Caches the verified SHA-256 so one
+    /// "Run all" doesn't re-spawn codesign per executing probe; a self-updated
+    /// binary (changed SHA) is re-verified.
     private func ensureTrustedBinary(_ binary: URL) async -> Bool {
         let currentSHA = try? Self.streamingSHA256Hex(of: binary)
         if let currentSHA, currentSHA == verifiedBinarySHA256 { return true }

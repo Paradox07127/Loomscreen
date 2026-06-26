@@ -1,23 +1,20 @@
 import Foundation
 
-/// Per-screen color management preference applied to the video wallpaper's
-/// `AVPlayerLayer`. `auto` leaves the layer untouched so AVFoundation's
-/// system-default color path (including any automatic EDR upgrade for HDR
-/// content) keeps working unchanged.
-///
-/// The non-auto cases set `CALayer.colorspace` to force the output through a
-/// specific `CGColorSpace`. `rec2020HDR` additionally enables the layer's
-/// extended dynamic range output so HDR transfer curves are preserved
-/// instead of being tone-mapped to SDR.
+/// Per-screen color management for the video wallpaper's `AVPlayerLayer`.
+/// `auto` leaves the layer untouched so AVFoundation's system-default color
+/// path (including automatic EDR upgrade for HDR) keeps working unchanged.
+/// Non-auto cases set `CALayer.colorspace` to force a specific `CGColorSpace`;
+/// `rec2020HDR` additionally enables extended dynamic range so HDR transfer
+/// curves are preserved instead of tone-mapped to SDR.
 public enum VideoColorSpace: String, Codable, CaseIterable, Identifiable, Sendable {
     case auto
     case sRGB
     case displayP3
     case rec2020HDR
-    /// Forces an HDR video stream through a Rec.709 `AVVideoComposition` so
-    /// it renders as SDR. The escape hatch when an HDR source looks washed
-    /// out or oversaturated on an SDR-only external display.
-    /// Note: composition-based — mutually exclusive with the frame-rate cap
+    /// Forces an HDR stream through a Rec.709 `AVVideoComposition` so it
+    /// renders as SDR (escape hatch for HDR sources that look washed out on
+    /// SDR-only external displays).
+    /// Composition-based — mutually exclusive with the frame-rate cap
     /// (re-applying either replaces the active composition).
     case forceSDR
 

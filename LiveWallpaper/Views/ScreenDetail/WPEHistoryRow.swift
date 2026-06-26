@@ -199,8 +199,8 @@ struct WPEHistoryRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([folder])
     }
 
-    /// Actionable pre-apply compatibility badge. Plain scenes carry none — only
-    /// hard blockers ("Won't run") and missing dependencies ("Needs deps").
+    /// Plain scenes carry no badge — only hard blockers ("Won't run") and
+    /// missing dependencies ("Needs deps").
     private var compatibilityBadge: (titleKey: LocalizedStringKey, tint: Color, accessibility: Text)? {
         switch entry.origin.originalType {
         case .video, .web, .unknown:
@@ -220,7 +220,7 @@ struct WPEHistoryRow: View {
 }
 
 extension WPEType {
-    /// SF Symbol for this project type, shared by cards, inspectors, and drag previews.
+    /// Shared by cards, inspectors, and drag previews.
     var symbolName: String {
         switch self {
         case .video: return "play.rectangle.fill"

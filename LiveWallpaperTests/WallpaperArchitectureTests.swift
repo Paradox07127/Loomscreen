@@ -458,7 +458,7 @@ struct HTMLFolderURLSchemeTests {
         #expect(task.receivedData.reduce(0) { $0 + $1.count } == payload.count)
     }
 
-    /// Builds a `livewallpaper://wallpaper/index.html?n=<nonce>` URL using the handler's current session nonce — used as a `mainDocumentURL` stand-in so subresource requests skip the top-level nonce gate.
+    /// Carries the handler's current session nonce so subresource requests skip the top-level nonce gate.
     private func makeTopLevelURL(handler: FolderURLSchemeHandler) -> URL {
         let nonce = handler.currentSessionNonce ?? ""
         return URL(string: "livewallpaper://wallpaper/index.html?n=\(nonce)")!

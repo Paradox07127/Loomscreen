@@ -2,9 +2,7 @@
 import SwiftUI
 import AppKit
 
-/// Settings panel section for browsing and pruning the Wallpaper Engine
-/// extracted-package cache. Stats are computed off the actor so the UI never
-/// blocks on filesystem walks; destructive operations always confirm first.
+/// Stats are computed off the actor so the UI never blocks on filesystem walks.
 @MainActor
 struct WPECacheManagementView: View {
     @State private var stats: WPECacheStats?
@@ -20,10 +18,9 @@ struct WPECacheManagementView: View {
     /// already unpacked into the cache — reclaimable without losing wallpapers.
     @State private var reclaimableArchiveBytes: Int64 = 0
     @State private var lastReclaimedBytes: UInt64?
-    /// Reachable scene ids (applied / bookmarked / recent / deps), refreshed
-    /// alongside stats. Drives the keep-set for "Clear Unused" so its button
-    /// state, confirmation count, and action all agree — and so it's computed
-    /// once per refresh rather than per render.
+    /// Reachable scene ids (applied / bookmarked / recent / deps). Single keep-set
+    /// shared by the "Clear Unused" button state, confirmation count, and action,
+    /// computed once per refresh rather than per render.
     @State private var reachableIDs: Set<String> = []
 
     private let cache: WallpaperEngineCache
@@ -124,7 +121,7 @@ struct WPECacheManagementView: View {
         .errorAlert("Cache Error", message: $errorMessage)
     }
 
-    /// Surfaces the `wpe-tex-video` folder's *actual* on-disk footprint (the
+    /// Surfaces the `wpe-tex-video` folder's actual on-disk footprint (the
     /// `du`-equivalent), which previously went uncounted in Settings.
     @ViewBuilder
     private var videoCacheSection: some View {
@@ -180,10 +177,9 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Surfaces redundant SteamCMD download archives (`.pkg`) whose payload is
-    /// already unpacked into the cache. Reclaiming moves them to the Trash
-    /// (recoverable) without touching any wallpaper — the runtime renders from
-    /// the cache copy. Pro/direct-distribution only (Lite has no SteamCMD).
+    /// Reclaiming the redundant `.pkg` moves it to the Trash (recoverable) without
+    /// touching any wallpaper — the runtime renders from the unpacked cache copy.
+    /// Pro/direct-distribution only (Lite has no SteamCMD).
     @ViewBuilder
     private var reclaimArchivesSection: some View {
         #if DIRECT_DISTRIBUTION
@@ -261,10 +257,8 @@ struct WPECacheManagementView: View {
         let title = displayTitle(for: entry.workshopID)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                // Workshop names can be 60+ chars; without explicit
-                // truncation a single long entry forces every row in the
-                // list to expand to the longest title's width and wraps,
-                // breaking the dense table feel.
+                // Workshop names can be 60+ chars; without explicit truncation one
+                // long entry forces every row to the longest title's width and wraps.
                 Text(verbatim: title)
                     .font(DesignTokens.Typography.body)
                     .lineLimit(1)
@@ -312,8 +306,6 @@ struct WPECacheManagementView: View {
     }
 
     #if DIRECT_DISTRIBUTION
-    /// Trashes the redundant source `.pkg` of every already-cached item, then
-    /// refreshes so the reclaimable figure drops to zero.
     private func reclaimArchives() async {
         let cachedIDs = await cache.listCompletedWorkshopIDs()
             .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
@@ -355,9 +347,8 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Entries old enough to count as "unused" that are also unreachable
-    /// (not applied / bookmarked / recent). Single definition shared by the
-    /// button's disabled state, the confirmation count, and the purge itself.
+    /// Entries old enough to count as "unused" that are also unreachable. Single
+    /// definition shared by the button's disabled state, confirmation count, and purge.
     private func unusedCandidates(olderThanDays days: Int) -> [WPECacheStats.Entry] {
         let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
         return (stats?.entries ?? []).filter {
@@ -373,7 +364,6 @@ struct WPECacheManagementView: View {
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
-    /// Surface the unified Liquid Glass confirmation so users see exactly which entries (count + total size) are about to be removed before bulk purging.
     private func confirmPurgeOlderThan(days: Int) {
         let candidates = unusedCandidates(olderThanDays: days)
         let totalBytes = candidates.reduce(UInt64(0)) { $0 + $1.sizeBytes }
@@ -385,7 +375,6 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Bulk-clear confirmation showing the current cache footprint so users can see what they're freeing.
     private func confirmClearAll() {
         let entries = stats?.entries ?? []
         let totalBytes = entries.reduce(UInt64(0)) { $0 + $1.sizeBytes }
@@ -397,7 +386,6 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Single-entry purge confirmation that resolves the workshop ID to its display title so the destructive sheet matches what's visible in the list.
     private func confirmPurge(entry: WPECacheStats.Entry) {
         let workshopID = entry.workshopID
         pendingDestructive = PendingDestructive(
@@ -426,9 +414,8 @@ struct WPECacheManagementView: View {
         return "\(size) · used \(relative)"
     }
 
-    // Backed by shared instances — these formatters are otherwise rebuilt on
-    // every access (per cache row, per refresh), which is a measurable allocation
-    // cost in a list that updates often.
+    // Shared instances: otherwise rebuilt per cache row / per refresh, a measurable
+    // allocation cost in a list that updates often.
     private var byteFormatter: ByteCountFormatter { Self.sharedByteFormatter }
     private var relativeFormatter: RelativeDateTimeFormatter { Self.sharedRelativeFormatter }
 

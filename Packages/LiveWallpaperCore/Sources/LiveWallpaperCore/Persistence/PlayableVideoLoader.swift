@@ -2,7 +2,6 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
-/// Validates and probes video assets prior to handing them to the player.
 public protocol PlayableVideoLoading: Sendable {
     func validatePlayableVideo(at url: URL) async throws
     func detectFormat(at url: URL) async throws -> VideoFormatInfo
@@ -44,7 +43,6 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
         }
     }
 
-    /// Probe codec, HDR transfer function, resolution, and frame rate from the first video track.
     public static func detectFormat(at url: URL) async throws -> VideoFormatInfo {
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
@@ -56,8 +54,7 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
         return try await detectFormat(asset: AVURLAsset(url: url))
     }
 
-    /// Probes format info from an already-constructed asset (see
-    /// `validatePlayableVideo(asset:)` for why packaged videos need this).
+    /// See `validatePlayableVideo(asset:)` for why packaged videos need this.
     public static func detectFormat(asset: AVURLAsset) async throws -> VideoFormatInfo {
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard let track = videoTracks.first else {
@@ -97,7 +94,6 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
 }
 
 private extension FourCharCode {
-    /// Convert a CoreMedia FourCharCode (e.g. 'apch') into a 4-letter Swift String.
     var fourCharString: String {
         let bytes: [UInt8] = [
             UInt8((self >> 24) & 0xff),

@@ -2,37 +2,26 @@
 import Foundation
 import Metal
 
-/// BC1/2/3/7 → RGBA8 transcode using Apple's GPU. macOS 14+ Apple Silicon
-/// devices ship native BC sampler support, so the cheapest path is:
+/// BC1/2/3/7 → RGBA8 transcode using Apple's GPU (sample BC into an
+/// `rgba8Unorm` render target, read back).
 ///
-/// 1. Upload the BC blocks into a sampler-only `MTLTexture`.
-/// 2. Render a fullscreen quad that samples that texture into an
-///    `rgba8Unorm` render target.
-/// 3. Read the decoded pixels back from the render target.
+/// Not `MTLBlitCommandEncoder.copy`: blit is a bit-for-bit copy, so it
+/// reinterprets BC block bytes as RGBA pixels (green-tinted noise) instead
+/// of decompressing. Decompression must go through a sampling shader.
 ///
-/// **Why not `MTLBlitCommandEncoder.copy`?** Blit is a bit-for-bit copy.
-/// Copying a BC texture into an `rgba8Unorm` destination doesn't
-/// decompress — it reinterprets BC block bytes as RGBA pixels, producing
-/// the classic green-tinted noise pattern. The decompression has to go
-/// through a sampling shader.
-///
-/// The Metal texture loader uses this fallback when native BC upload is
-/// unavailable for a decoded `.tex`, avoiding the magenta placeholder path.
+/// Loader fallback when native BC upload is unavailable, avoiding the
+/// magenta placeholder path.
 enum WPETexMetalTranscoder {
 
     private static let device: MTLDevice? = MTLCreateSystemDefaultDevice()
 
-    /// Lazily initialised render pipeline that samples a BC texture and
-    /// writes an unmodified RGBA8 pixel. Cached on first use; reused for
-    /// every transcode. `nonisolated(unsafe)` because Metal pipeline
-    /// objects are thread-safe and this enum has no concurrent writers
-    /// beyond the lazy first-init guarded by `pipelineLock`.
+    /// `nonisolated(unsafe)`: Metal pipeline objects are thread-safe and the
+    /// only writers are the lazy first-init guarded by `pipelineLock`.
     nonisolated(unsafe) private static var pipelineState: MTLRenderPipelineState?
     nonisolated(unsafe) private static var commandQueue: MTLCommandQueue?
     nonisolated(unsafe) private static var samplerState: MTLSamplerState?
     private static let pipelineLock = NSLock()
 
-    /// Reports whether the GPU transcoder can handle the given format.
     static func isAvailable(for format: WPETexFormat) -> Bool {
         guard let device, device.supportsBCTextureCompression else { return false }
         return mtlPixelFormat(for: format) != nil
@@ -202,9 +191,7 @@ enum WPETexMetalTranscoder {
         return DecodeResources(queue: queue, pipeline: pipeline, sampler: sampler)
     }
 
-    /// Fullscreen-quad pass: vertex emits clip-space corners + UV, fragment
-    /// samples the BC source and writes RGBA8. UV flips Y so the readback
-    /// matches the BC texel order (BC row 0 = top of the image).
+    /// UV flips Y so the readback matches BC texel order (BC row 0 = top).
     private static let shaderSource = """
     #include <metal_stdlib>
     using namespace metal;

@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// Leading-column dual indicator: a row number that cross-fades into a drag
-/// handle as soon as the user hovers or grabs the row.
-///
-/// Hidden when the row is playing — `EQPulseBar` takes over the leading slot
-/// in that case.
+/// Leading-column row number that cross-fades into a drag handle on hover/grab.
+/// Not shown while playing — `EQPulseBar` takes over the leading slot then.
 struct RowNumberHandle: View {
     let index: Int
     let showHandle: Bool

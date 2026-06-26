@@ -57,8 +57,8 @@ struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
         case arch
     }
 
-    /// Encoded form. Pretty-printed because the user will paste this into a
-    /// GitHub issue — readability beats minimum bytes.
+    /// Pretty-printed because the user pastes this into a GitHub issue —
+    /// readability beats minimum bytes.
     func encodedJSON() -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -69,9 +69,8 @@ struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
         return string
     }
 
-    /// Copies the JSON to the user's general pasteboard. Returns `true` on
-    /// success — callers surface the toast only when the copy actually
-    /// happened so a clipboard-permission denial doesn't lie to the user.
+    /// Returns `true` on success — callers surface the toast only when the copy
+    /// actually happened so a clipboard-permission denial doesn't lie to the user.
     @MainActor
     @discardableResult
     func copyToPasteboard(_ pasteboard: NSPasteboard = .general) -> Bool {
@@ -105,8 +104,7 @@ struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
 }
 
 /// Redacts secrets and personal-identifying values from any text we are
-/// about to surface to the user or write to disk. Drives both the
-/// diagnostic payload and the future SteamCMD stdout export.
+/// about to surface to the user or write to disk.
 enum WorkshopDiagnosticRedactor {
 
     static func redact(_ raw: String) -> String {

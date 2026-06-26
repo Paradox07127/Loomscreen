@@ -57,7 +57,6 @@ struct WPEPuppetMesh: Equatable, Sendable {
 struct WPEPuppetVertex: Equatable, Sendable {
     /// Object-local target geometry. Do not derive this from `uv`: puppet textures can be atlases.
     let position: SIMD3<Float>
-    /// Source texture sampling coordinate inside the material atlas.
     let uv: SIMD2<Float>
     let skinBlendIndices: SIMD4<Int32>
     let skinBlendWeights: SIMD4<Float>
@@ -105,7 +104,7 @@ struct WPEPuppetMeshPart: Equatable, Sendable {
 struct WPEPuppetAnimation: Equatable, Sendable {
     let id: Int
     let name: String
-    /// Playback mode string from the file (e.g. "loop").
+    /// Playback mode from the file; "loop" drives the wrap in `sampledFrameIndex`.
     let mode: String
     let fps: Float
     let frameCount: Int
@@ -139,8 +138,8 @@ struct WPEPuppetAnimationLayer: Equatable, Sendable {
     let blend: Float
 }
 
-/// Result of evaluating a puppet's animation layers: the skinning `palette` plus the diagnostics
-/// the render gate needs to decide whether skinning is safe to enable for this puppet.
+/// Skinning `palette` plus the diagnostics the render gate uses to decide whether skinning is
+/// safe to enable for this puppet.
 struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
     enum TransformSpace: String, Equatable, Sendable {
         case parentLocal
@@ -160,15 +159,13 @@ struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
 }
 
 /// Evaluates puppet animation layers into a per-bone skinning palette indexed by skin-blend (bone)
-/// index. The MDLS raw matrices are used as the inverse-bind ground truth, and each animation's
-/// channel space is auto-detected: MDLA0006 files (e.g. Kal'tsit's body/hair) store WORLD-absolute
-/// frame-0 transforms, while older/corpus variants may be parent-local and are composed down the
-/// hierarchy. `palette[boneIndex] = worldCurrent · worldBind⁻¹`. The first non-additive layer is the
-/// base pose; additive layers add their per-bone delta-from-bind on top in TRS space (translation/
-/// euler added, scale multiplied), weighted by `blend`. Frame 0 of every layer is the bind pose, so
-/// the palette is identity there (the regression guard against P0's static draw).
+/// index. MDLS raw matrices are the inverse-bind ground truth; MDLS raw + MDLA channels are always
+/// parent-local and composed down the hierarchy. `palette[boneIndex] = worldCurrent · worldBind⁻¹`.
+/// The first non-additive layer is the base pose; additive layers add their per-bone
+/// delta-from-bind on top in TRS space (translation/euler added, scale multiplied), weighted by
+/// `blend`. Frame 0 of every layer is the bind pose, so the palette is identity there (regression
+/// guard against the P0 static draw).
 enum WPEPuppetAnimationEvaluator {
-    /// Single-animation convenience: one non-additive layer at full rate/blend.
     static func palette(
         for animation: WPEPuppetAnimation,
         bones: [WPEPuppetBone] = [],
@@ -239,8 +236,8 @@ enum WPEPuppetAnimationEvaluator {
             )
         }
 
-        // Combined parent-LOCAL transform for a base channel: the base pose, plus each additive
-        // layer's delta-from-its-own-bind applied in TRS space. `bind == true` yields the rest pose.
+        // Combined parent-LOCAL transform for a base channel: base pose plus each additive layer's
+        // delta-from-its-own-bind in TRS space. `bind == true` yields the rest pose.
         func localMatrix(_ channelPosition: Int, bind: Bool) -> simd_float4x4 {
             let channel = baseChannels[channelPosition]
             guard let bindKey = channel.keyframes.first else { return matrix_identity_float4x4 }
@@ -682,8 +679,8 @@ enum WPEMdlParser {
             ? try parseVersion21Parts(vertexCount: Int(vertexCount), reader: &reader)
             : []
 
-        // The clip section (optional) immediately follows the part table. Read it from a COPY so
-        // the main reader is untouched — MDLS/MDLA are located by tag search regardless.
+        // Optional clip section follows the part table. Read from a COPY so the main reader is
+        // untouched — MDLS/MDLA are located by tag search regardless.
         let clipMaskName = version >= 21 ? parseClipMaskName(reader: reader) : nil
 
         return WPEPuppetMesh(

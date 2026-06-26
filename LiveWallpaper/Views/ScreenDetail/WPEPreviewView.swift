@@ -3,24 +3,20 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-/// Whether the preview auto-plays or only plays while hovered. `.autoPlay` is
-/// the back-compatible default; grid / list call sites pass `.hoverToPlay`.
+/// `.autoPlay` is the back-compatible default; grid / list call sites pass `.hoverToPlay`.
 enum WPEPreviewPlaybackMode {
     case autoPlay
     case hoverToPlay
 }
 
-/// Square (1:1) aspect-fill preview tile for a Wallpaper Engine project.
 /// CALayer-backed with manual `CGImageSource` frame stepping — NSImageView
 /// can't pair its built-in `.animates` with aspect-fill scaling.
 struct WPEPreviewView: View {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
     let playbackMode: WPEPreviewPlaybackMode
-    /// Aspect ratio the tile is constrained to. `1` (the default) yields the
-    /// square gallery / history tile every existing call site expects; pass
-    /// `nil` to let the preview fill the parent's bounds (used by the 16:9
-    /// inspector preview cards) and crop with aspect-fill.
+    /// `1` (default) yields the square gallery / history tile; `nil` lets the
+    /// preview fill the parent's bounds (16:9 inspector cards) and aspect-fill crop.
     let aspectRatio: CGFloat?
 
     @State private var loadAttempt: Int = 0
@@ -40,8 +36,6 @@ struct WPEPreviewView: View {
         self.aspectRatio = aspectRatio
     }
 
-    /// In `.autoPlay` the animation always runs; in `.hoverToPlay` it runs only
-    /// while hovered. Reduce Motion forces the poster frame in every mode.
     private var shouldAnimate: Bool {
         guard !reduceMotion else { return false }
         switch playbackMode {
@@ -86,11 +80,9 @@ struct WPEPreviewView: View {
         }
     }
 
-    /// Non-blocking corner chip so the failed-load state is visible without
-    /// hiding whatever fragment of the preview did manage to render. Modeled
-    /// as a tap-gesture'd view (not a `Button`) because the parent grid cell
-    /// is itself a `Button` and AppKit-bridged buttons nested inside another
-    /// SwiftUI button race for hit-tests + confuse VoiceOver focus.
+    /// Tap-gesture'd view, not a `Button`: the parent grid cell is itself a
+    /// `Button`, and AppKit-bridged buttons nested inside another SwiftUI button
+    /// race for hit-tests + confuse VoiceOver focus.
     @ViewBuilder
     private var retryBadge: some View {
         HStack(spacing: 4) {
@@ -129,12 +121,10 @@ struct WPEPreviewView: View {
     }
 }
 
-/// Applies a fixed aspect ratio when one is provided, otherwise leaves the
-/// content free to fill its parent. The ratio is constant per call site, so
-/// the `if`/`else` branch never flips at runtime and the CALayer-backed image
-/// view keeps a stable identity. (Passing `nil` straight to
-/// `.aspectRatio(_:contentMode:)` would instead fall back to the view's
-/// intrinsic ratio — which this preview deliberately doesn't define.)
+/// The ratio is constant per call site, so the `if`/`else` never flips at
+/// runtime and the CALayer-backed image view keeps a stable identity. Passing
+/// `nil` straight to `.aspectRatio(_:contentMode:)` would instead fall back to
+/// the view's intrinsic ratio — which this preview deliberately doesn't define.
 private struct OptionalAspectRatio: ViewModifier {
     let ratio: CGFloat?
 
@@ -157,9 +147,8 @@ private struct OptionalAspectRatio: ViewModifier {
 /// thumbnail off disk N times per scroll was the root cause of the audit
 /// P0-D main-thread stall. `NSCache` evicts under memory pressure on its own.
 private enum WPEPreviewDataCache {
-    // NSCache is thread-safe internally; the unsafe annotation here just
-    // suppresses the Swift 6 Sendable diagnostic since NSCache isn't formally
-    // marked Sendable.
+    // NSCache is thread-safe internally; `nonisolated(unsafe)` just suppresses
+    // the Swift 6 Sendable diagnostic since NSCache isn't formally Sendable.
     nonisolated(unsafe) static let shared: NSCache<NSURL, NSData> = {
         let cache = NSCache<NSURL, NSData>()
         cache.countLimit = 256
@@ -206,12 +195,10 @@ private struct AspectFillImage: NSViewRepresentable {
 
         if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
             let ok = nsView.setImage(data: cached as Data)
-            // Defer the binding callback to the next runloop tick — this
-            // updateNSView runs inside SwiftUI's view-update pass, so a
-            // synchronous `onLoadResult(ok)` would mutate the parent's
-            // `loadFailed` @State while the parent is still rendering and
-            // trip "Modifying state during view update" undefined-behavior
-            // warnings. The async path below is already deferred via Task.
+            // Defer the binding callback: this runs inside SwiftUI's view-update
+            // pass, so a synchronous `onLoadResult(ok)` would mutate the parent's
+            // `loadFailed` @State mid-render and trip "Modifying state during view
+            // update". The async path below is already deferred via Task.
             let resultHandler = onLoadResult
             Task { @MainActor in resultHandler(ok) }
             return
@@ -235,7 +222,6 @@ private struct AspectFillImage: NSViewRepresentable {
         coordinator.inflightTask = task
     }
 
-    /// Reads the image off the main thread.
     private static func loadData(url: URL, bookmarkData: Data?) async -> Data? {
         await Task.detached(priority: .userInitiated) {
             var scopedURL: URL?
@@ -272,20 +258,17 @@ private struct AspectFillImage: NSViewRepresentable {
     }
 }
 
-/// CALayer-backed image view with aspect-fill semantics + manual GIF/APNG
-/// frame stepping. We use this instead of `NSImageView` because the latter
-/// only offers fit-style scaling — we need fill-with-crop ("Apple Photos
-/// thumbnail mode") so square 512×512 WPE previews don't render with
-/// horizontal letterbox bars.
+/// Used instead of `NSImageView` because the latter only offers fit-style
+/// scaling — we need fill-with-crop so square 512×512 WPE previews don't render
+/// with horizontal letterbox bars.
 private final class AspectFillAnimatedImageView: NSView {
     private var imageSource: CGImageSource?
     private var frameCount: Int = 0
     private var currentFrameIndex: Int = 0
     private var frameDelays: [TimeInterval] = []
     private var animationTimer: Timer?
-    /// Whether playback is currently desired. Toggled by `setAnimating` so a
-    /// hover-driven host can freeze the loop on the poster frame without
-    /// reloading the image. Defaults to `true` for auto-play callers.
+    /// Toggled by `setAnimating` so a hover-driven host can freeze the loop on
+    /// the poster frame without reloading the image.
     private var wantsAnimation = true
 
     override init(frame frameRect: NSRect) {
@@ -306,9 +289,9 @@ private final class AspectFillAnimatedImageView: NSView {
     override var intrinsicContentSize: NSSize { .zero }
 
     // No deinit-side timer invalidation: every Timer is captured weakly
-    // (closures use `[weak self]`), and `setImage` / `clearImage` invalidate
-    // the prior timer before scheduling new work or tearing down. Swift 6
-    // disallows touching non-Sendable Timer from a nonisolated deinit anyway.
+    // (`[weak self]`), and `setImage` / `clearImage` invalidate the prior timer
+    // first. Swift 6 disallows touching non-Sendable Timer from a nonisolated
+    // deinit anyway.
 
     /// Returns `true` on success, `false` on decode failure.
     @discardableResult

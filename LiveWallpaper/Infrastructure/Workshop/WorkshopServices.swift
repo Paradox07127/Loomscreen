@@ -2,11 +2,9 @@
 import Foundation
 import Observation
 
-/// Bundles the Workshop online actors (Keychain, query service, disk cache)
-/// behind a single `@Observable` host so SwiftUI views can inject them via
-/// `@Environment(WorkshopServices.self)`. Actors themselves aren't
-/// `@Observable`, so the container also mirrors the `hasWebAPIKey` flag for
-/// UI bindings to read synchronously.
+/// Bundles the Workshop online actors behind one `@Observable` host for
+/// `@Environment(WorkshopServices.self)`. Actors aren't `@Observable`, so the
+/// container mirrors `hasWebAPIKey` for UI bindings to read synchronously.
 @MainActor
 @Observable
 final class WorkshopServices {

@@ -51,11 +51,8 @@ private final class AerialThumbnailCache {
     }
 }
 
-/// Card for a single Apple Aerial asset — mirrors `BookmarksLibraryView`'s
-/// `BookmarkTile`: 16:9 thumbnail with its own stroke + hover lift, and a
-/// metadata row beneath the tile carrying the title, category, and a small
-/// apply control on the trailing edge. Aerials are managed by macOS so there
-/// is no rename / delete affordance; tapping the tile is a no-op.
+/// Aerials are managed by macOS, so there is no rename / delete affordance and
+/// tapping the tile is a no-op.
 struct AerialThumbnailCard: View {
     let asset: AerialAsset
     let screens: [Screen]

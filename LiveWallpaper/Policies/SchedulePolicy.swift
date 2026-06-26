@@ -12,7 +12,6 @@ enum SchedulePolicy {
         return slots.first { $0.containsHour(normalizedHour) }
     }
 
-    /// Decide whether to apply a slot, restore primary, or do nothing.
     static func decision(for configuration: ScreenConfiguration, hour: Int) -> Decision {
         guard configuration.wallpaperMode == .schedule,
               let slots = configuration.scheduleSlots, !slots.isEmpty else {
@@ -41,7 +40,6 @@ enum SchedulePolicy {
 
     // MARK: - Conflict Detection
 
-    /// IDs of slots overlapping the given slot (excluding itself).
     static func conflicts(slot: ScheduleSlot, against others: [ScheduleSlot]) -> Set<UUID> {
         let ours = hourRanges(for: slot)
         guard !ours.isEmpty else { return [] }

@@ -69,7 +69,7 @@ protocol WallpaperResourceCleanable: AnyObject {
 
 @MainActor
 protocol HTMLWallpaperConfigApplying: AnyObject {
-    /// Applies a config to a live HTML renderer without replacing the window.
+    /// Reconfigures a live HTML renderer without replacing the window.
     func applyHTMLConfig(_ config: HTMLConfig) -> Bool
 }
 

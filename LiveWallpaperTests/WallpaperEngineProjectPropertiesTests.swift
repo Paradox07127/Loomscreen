@@ -126,11 +126,11 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(promo["bgsource"] == false)
 
         // Ads / donations / external links — hide.
-        #expect(promo["koflink"] == true)        // <a href> donation link
-        #expect(promo["qr"] == true)             // embedded <img> QR code
-        #expect(promo["bbyy"] == true)           // 赞助 donation keyword
-        #expect(promo["ahrefhttpskoficomabcdefghijklmnopqrstuvwxyz"] == true) // HTML-derived key
-        #expect(promo["sociallinks"] == true)    // link inside an option label
+        #expect(promo["koflink"] == true)
+        #expect(promo["qr"] == true)
+        #expect(promo["bbyy"] == true)
+        #expect(promo["ahrefhttpskoficomabcdefghijklmnopqrstuvwxyz"] == true)
+        #expect(promo["sociallinks"] == true)
     }
 
     @Test("HTMLConfig persists Wallpaper Engine project property overrides")

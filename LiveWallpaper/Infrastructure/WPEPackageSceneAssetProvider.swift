@@ -2,25 +2,21 @@
 import Foundation
 
 /// Reads scene assets in place from a packed `scene.pkg`, the way Wallpaper
-/// Engine treats its mounted pak archives: parse the table of contents once,
-/// then seek + read individual entries on demand. No extraction, so a packed
-/// project never spawns a second on-disk copy.
+/// Engine treats its mounted pak archives: parse the TOC once, then seek + read
+/// individual entries on demand. No extraction, so a packed project never spawns
+/// a second on-disk copy.
 ///
 /// Holds one `FileHandle` for the provider's lifetime; `NSLock` serializes the
 /// seek/read pair so concurrent asset loads can't interleave the file offset.
 ///
 /// Memory: small/medium entries are read straight into RAM, but a large entry
-/// (the 200–700 MB animated `.tex` containers) is instead streamed to a
-/// per-provider temporary file and returned memory-mapped (`.mappedIfSafe`), so
-/// the low-RSS paging profile of the old extracted-cache path is preserved
-/// rather than fully materializing the entry in resident memory. The same
-/// staged file backs `stagedURL` consumers (AVFoundation video/audio, fonts).
-/// The staging directory's lifetime equals the scene session — removed on
-/// `deinit`, so staged files never outlive the wallpaper that needed them.
-/// `deinit` does not run on crash / force-quit / wallpaper-agent kill, so a
-/// launch-time sweep (`sweepStaleStagingDirectoriesAtLaunch`) backstops
-/// abnormal termination by reclaiming any staging directory a prior session
-/// orphaned. Each directory is per-session, so none should ever survive a launch.
+/// (the 200–700 MB animated `.tex` containers) is streamed to a per-provider
+/// temp file and returned memory-mapped (`.mappedIfSafe`), preserving the low-RSS
+/// paging profile of the old extracted-cache path. The same staged file backs
+/// `stagedURL` consumers (AVFoundation video/audio, fonts). The staging directory
+/// is removed on `deinit`, but `deinit` does not run on crash / force-quit /
+/// agent kill, so a launch-time sweep (`sweepStaleStagingDirectoriesAtLaunch`)
+/// reclaims any per-session directory a prior session orphaned.
 final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Sendable {
     /// Entries larger than this are staged + memory-mapped instead of read into
     /// RAM, matching the historical `.mappedIfSafe` behavior for big `.tex`.
@@ -33,8 +29,6 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
     private let package: WallpaperEnginePackage
     private let handle: FileHandle
     private let lock = NSLock()
-    /// Per-provider staging directory (lazily created); removed on deinit, with
-    /// the launch sweep reclaiming it after abnormal termination.
     private let stagingRoot: URL
     private var stagedPaths: [String: URL] = [:]
 
@@ -58,16 +52,12 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
 
     // MARK: - Stale staging-dir sweep
 
-    /// Pure filter over a temp-directory listing: returns the entry names that
-    /// are our per-session staging directories. Split out from
-    /// `sweepStaleStagingDirectories` so it is unit-testable without I/O.
     static func staleStagingDirectoryNames(in entries: [String]) -> [String] {
         entries.filter { $0.hasPrefix(stagingDirectoryNamePrefix) }
     }
 
-    /// Removes every stale staging entry found directly under `directory` and
-    /// returns how many it reclaimed. Best-effort: anything that can't be listed
-    /// or removed is skipped rather than throwing.
+    /// Best-effort: anything that can't be listed or removed is skipped rather
+    /// than throwing. Returns how many it reclaimed.
     @discardableResult
     static func sweepStaleStagingDirectories(
         in directory: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
@@ -86,10 +76,9 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
         return removed
     }
 
-    /// Launch-time backstop for staging directories orphaned by abnormal
-    /// termination (crash / force-quit / agent kill), where `deinit` never ran.
-    /// Runs off the main thread. Call once, early in startup, before any
-    /// provider is created so it can never race a live provider's staging dir.
+    /// Backstop for directories orphaned by abnormal termination, where `deinit`
+    /// never ran. Call once, early in startup, before any provider is created so
+    /// it can never race a live provider's staging dir.
     static func sweepStaleStagingDirectoriesAtLaunch() {
         DispatchQueue.global(qos: .utility).async {
             let removed = sweepStaleStagingDirectories()

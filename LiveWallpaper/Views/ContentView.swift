@@ -10,18 +10,15 @@ struct ContentView: View {
     @Environment(\.featureCatalog) private var featureCatalog
     @State private var selectedNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
-    /// Sidebar visibility binding. Exists so the view can drive a one-shot
-    /// prewarm cycle that emulates the user-discovered "drag the sidebar
-    /// closed, then drag it open" gesture, which warms up the underlying
-    /// NSSplitView state so the first user-driven sidebar toggle no longer
-    /// stalls mid-animation.
+    /// Drives a one-shot prewarm cycle that emulates the user-discovered "drag
+    /// the sidebar closed, then open" gesture, warming NSSplitView state so the
+    /// first real sidebar toggle no longer stalls mid-animation.
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var didPrewarmSidebar = false
     @State private var isReloading = false
-    /// Cached `GlobalSettings.developerModeEnabled` mirror. Lifted to
-    /// `ContentView` so both `Sidebar` and `DetailContent` see the same
-    /// value — without this, a stale `.developerTools` selection could
-    /// mount the detail view even with the toggle off.
+    /// Lifted to `ContentView` so `Sidebar` and `DetailContent` see the same
+    /// value — otherwise a stale `.developerTools` selection could mount the
+    /// detail view with the toggle off.
     @State private var developerModeEnabled: Bool = ContentView.loadDeveloperModeEnabled()
     private let initialAddWallpaperPromptKind: String?
 
@@ -30,9 +27,8 @@ struct ContentView: View {
         self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
-    /// Reads the persisted Developer Mode flag in Pro. Pinned to `false`
-    /// in Lite so a settings import can never auto-light the Developer
-    /// Tools surface inside the lightweight runtime.
+    /// Pinned to `false` in Lite so a settings import can never auto-light the
+    /// Developer Tools surface inside the lightweight runtime.
     private static func loadDeveloperModeEnabled() -> Bool {
         #if !LITE_BUILD
         return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
@@ -81,9 +77,6 @@ struct ContentView: View {
         }
     }
 
-    /// Sidebar wrapper that captures the listeners shared between the
-    /// `selectScreenInSettings` / `promptAddWallpaper` notifications and,
-    /// in direct-distribution Pro, the Workshop entry button.
     @ViewBuilder
     private var sidebar: some View {
         Sidebar(
@@ -137,10 +130,9 @@ struct ContentView: View {
         }
     }
 
-    /// Mimics the user-discovered "drag the sidebar closed then drag it open"
-    /// warmup, but programmatically and animation-suppressed so there is no
-    /// visible flash. Fires once per ContentView lifetime; the cached
-    /// NSWindowController preserves the warmed state across window close.
+    /// Programmatic, animation-suppressed version of the close-then-open warmup
+    /// so there is no visible flash. Fires once per ContentView lifetime; the
+    /// cached NSWindowController preserves the warmed state across window close.
     private func prewarmSidebarIfNeeded() {
         guard !didPrewarmSidebar else { return }
         didPrewarmSidebar = true
@@ -175,10 +167,8 @@ struct ContentView: View {
         }
     }
 
-    /// Re-reads Developer Mode from disk and falls the selection back to
-    /// `.general` if the user just disabled the toggle while sitting on
-    /// the Developer Tools page. Centralised so the notification handler
-    /// and any startup re-entry use the same logic.
+    /// Re-reads Developer Mode and falls the selection back to `.general` if the
+    /// user just disabled the toggle while sitting on the Developer Tools page.
     private func refreshDeveloperModeStateAndSelection() {
         developerModeEnabled = ContentView.loadDeveloperModeEnabled()
         #if !LITE_BUILD
@@ -201,7 +191,7 @@ struct ContentView: View {
         }
     }
 
-    /// Receives `.promptAddWallpaper` notifications from a re-used settings window (one already mounted).
+    /// Handles `.promptAddWallpaper` from an already-mounted settings window.
     private func handleAddWallpaperPrompt(notification: Notification) {
         guard let kind = notification.userInfo?["kind"] as? String else { return }
         handleAddWallpaperPrompt(kind: kind)
@@ -214,7 +204,6 @@ struct ContentView: View {
         handleAddWallpaperPrompt(kind: kind)
     }
 
-    /// Routes a menu-bar quick-add request to the appropriate picker.
     private func handleAddWallpaperPrompt(kind: String) {
         guard let target = preferredAddWallpaperTarget() else { return }
         selectedNavigation = .screen(target.id)
@@ -235,7 +224,6 @@ struct ContentView: View {
         handleAddWallpaperPrompt(kind: "video")
     }
 
-    /// Click feedback for the toolbar reload button. The underlying
     /// `reloadAllScreens()` is fire-and-forget; the symbol effect is a
     /// click-affordance only, not a real progress signal.
     private func invokeReload() {
@@ -324,8 +312,8 @@ enum Navigation: Hashable {
 // MARK: - Sidebar View
 struct Sidebar: View {
     @Binding var selection: Navigation?
-    /// Owned by `ContentView` so the sidebar entry stays in lock-step
-    /// with `DetailContent`'s runtime gate.
+    /// Owned by `ContentView` so the sidebar entry stays in lock-step with
+    /// `DetailContent`'s runtime gate.
     let developerModeEnabled: Bool
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
@@ -363,9 +351,6 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                // The Workshop pane (Installed + Browse Online) manages every
-                // imported project and is the single Workshop surface. It only
-                // exists in the direct-distribution Pro build.
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
                 if featureCatalog.isEnabled(.wpeImport) {
                     NavigationLink(value: Navigation.workshop) {
@@ -390,9 +375,8 @@ struct Sidebar: View {
 
         }
         .listStyle(.sidebar)
-        // Pin Usage to the bottom of the sidebar (like the mockup's
-        // `margin-top:auto`) instead of letting it flow as the last section —
-        // the gauges stay anchored at the floor with the nav list scrolling above.
+        // Pin Usage to the sidebar floor instead of flowing as the last section,
+        // so the gauges stay anchored while the nav list scrolls above.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if featureCatalog.isEnabled(.systemMonitor) {
                 VStack(spacing: 0) {
@@ -405,8 +389,6 @@ struct Sidebar: View {
                     .padding(.top, 8)
                     .padding(.bottom, 10)
                 }
-                // Transparent — the sidebar's own material shows through; no
-                // extra layer over the gauges.
             }
         }
         .navigationSplitViewColumnWidth(
@@ -416,10 +398,9 @@ struct Sidebar: View {
         )
     }
 
-    /// Snapshot of how many displays are currently in `.active` activity.
-    /// Reads via `wallpaperSummary(_:)` so the read tracks the same
-    /// `wallpaperSessionState` observation channel as `ScreenRow`, keeping
-    /// the Usage chip in lock-step with the sidebar status icons.
+    /// Reads via `wallpaperSummary(_:)` so it tracks the same
+    /// `wallpaperSessionState` observation channel as `ScreenRow`, keeping the
+    /// Usage chip in lock-step with the sidebar status icons.
     private var activeWallpaperDisplayCount: Int {
         screenManager.screens.reduce(0) { acc, screen in
             acc + (screenManager.wallpaperSummary(for: screen).activity == .active ? 1 : 0)
@@ -498,12 +479,11 @@ struct ScreenRow: View {
         }
     }
 
-    /// The row icon doubles as the live-status light — it carries the same
-    /// red-amber-green semantics the trailing dot used to, so a single glyph
-    /// shows both *what* the wallpaper is (symbol) and *how it's doing*
-    /// (color). When nothing is actually on the desktop — master switch
-    /// `.off` or nothing assigned (`.inactive`) — the icon stays neutral gray
-    /// so a stopped display never reads as "live."
+    /// The row icon doubles as the live-status light, so a single glyph shows
+    /// both *what* the wallpaper is (symbol) and *how it's doing* (color). When
+    /// nothing is on the desktop — master switch `.off` or nothing assigned
+    /// (`.inactive`) — it stays neutral gray so a stopped display never reads
+    /// as "live."
     private func iconColor(for summary: WallpaperSessionSummary) -> Color {
         switch summary.activity {
         case .active:   return DesignTokens.Colors.Status.active
@@ -533,9 +513,8 @@ struct ScreenRow: View {
 // MARK: - Detail Content
 struct DetailContent: View {
     @Binding var selection: Navigation?
-    /// Runtime gate for Developer Tools detail mount. Owned by
-    /// `ContentView` so a stale or restored `.developerTools` selection
-    /// can't bring the diagnostic surface back without the toggle.
+    /// Owned by `ContentView` so a stale or restored `.developerTools`
+    /// selection can't bring the diagnostic surface back without the toggle.
     let canShowDeveloperTools: Bool
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog

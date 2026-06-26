@@ -119,10 +119,8 @@ struct HTMLSourceSection: View {
         }
     }
 
-    /// Reads a URL/host string off the system pasteboard and offers it as the
-    /// next URL input. Commits immediately when the pasted value already
-    /// parses as a valid `HTMLSource.url`; otherwise just populates the field
-    /// so the user can edit before clicking Use.
+    /// Commits immediately when the pasted value already parses as a valid
+    /// `HTMLSource.url`; otherwise just populates the field for the user to edit.
     private func pasteFromClipboard() {
         guard let raw = NSPasteboard.general.string(forType: .string) else { return }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -295,11 +293,9 @@ struct HTMLSourceSection: View {
         screenManager.setHTMLWallpaper(source: parsed, config: config, for: screen)
     }
 
-    /// Single panel that accepts either a `.html` file or a folder. When the
-    /// user picks a file we delegate to `htmlSourceFromPickedFile` so the
-    /// bookmark can be promoted to the parent folder (granting sibling JS /
-    /// CSS / image access); a folder selection falls through to the index
-    /// inference path. Either way the resulting `HTMLSource` is committed.
+    /// Picking a file delegates to `htmlSourceFromPickedFile` so the bookmark is
+    /// promoted to the parent folder (granting sibling JS/CSS/image access);
+    /// folders fall through to index inference.
     private func pickLocal() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -356,10 +352,8 @@ struct HTMLSourceSection: View {
     }
 }
 
-/// HTML-side analog of the Video inspector groups. Lives in the right-hand
-/// inspector column directly under `ContentSecurityInspector`; toggle-style
-/// behavior settings stay visually separate from the continuous geometry
-/// controls in `HTMLTransformInspector`.
+/// Toggle-style behavior settings, kept visually separate from the continuous
+/// geometry controls in `HTMLTransformInspector`. Lives under `ContentSecurityInspector`.
 struct HTMLOptionsInspector: View {
     var screen: Screen
     @Binding var config: HTMLConfig
@@ -438,9 +432,8 @@ struct HTMLOptionsInspector: View {
         }
     }
 
-    /// Refresh interval picker. `0` (Off) is the default — most wallpaper
-    /// content is animation/canvas-driven and doesn't benefit from a reload.
-    /// The presets cover the common dashboard / weather-page cases.
+    /// `0` (Off) is the default — most wallpaper content is animation/canvas-driven
+    /// and doesn't benefit from a reload.
     private var autoRefreshRow: some View {
         SettingRow(
             icon: "arrow.clockwise",
@@ -465,11 +458,9 @@ struct HTMLOptionsInspector: View {
         }
     }
 
-    /// Custom CSS row — the editor opens in a popover so the inspector list
-    /// stays compact while still giving the user a comfortable multi-line
-    /// editing surface. Subtitle + filled icon signal the active state.
-    /// `.fixedSize()` keeps the `Edit…` label readable when the title +
-    /// subtitle column squeezes the trailing button area.
+    /// Editor opens in a popover to keep the inspector list compact.
+    /// `.fixedSize()` keeps the `Edit…` label readable when the title + subtitle
+    /// column squeezes the trailing button area.
     private var customCSSRow: some View {
         let isActive = !(config.customCSS ?? "").isEmpty
         return SettingRow(
@@ -570,9 +561,8 @@ struct HTMLOptionsInspector: View {
     }
 }
 
-/// Transform inspector — Scale / Translate / Rotation. Reset lives in the
-/// CollapsibleSection trailing accessory so a destructive action stays
-/// reachable from any scroll position without crowding the value rows.
+/// Reset lives in the CollapsibleSection trailing accessory so the destructive
+/// action stays reachable from any scroll position without crowding the value rows.
 struct HTMLTransformInspector: View {
     var screen: Screen
     @Binding var config: HTMLConfig
@@ -643,11 +633,9 @@ struct HTMLTransformInspector: View {
         }
     }
 
-    /// Two stacked sliders — X and Y in CSS pixels — sharing one row so
-    /// translate stays a single conceptual control. The slider uses an
-    /// epsilon-guarded binding (drags emit many near-duplicate values); the
-    /// text field bypasses the epsilon so typing `100` over a current `99.6`
-    /// commits cleanly instead of snapping back.
+    /// Slider uses an epsilon-guarded binding (drags emit many near-duplicate
+    /// values); the text field bypasses the epsilon so typing `100` over a
+    /// current `99.6` commits cleanly instead of snapping back.
     private var translateRow: some View {
         SettingRow(
             icon: "arrow.up.and.down.and.arrow.left.and.right",
@@ -722,9 +710,8 @@ struct HTMLTransformInspector: View {
         }
     }
 
-    /// Rotation in degrees. `±180` covers everything; we keep the slider
-    /// continuous so animation-style "tilt the canvas" use cases feel
-    /// responsive instead of stepped.
+    /// `±180` covers everything; slider stays continuous (not stepped) so
+    /// "tilt the canvas" use cases feel responsive.
     private var rotationRow: some View {
         SettingRow(
             icon: "rotate.right",

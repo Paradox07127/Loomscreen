@@ -2,7 +2,6 @@ import CoreGraphics
 import Testing
 @testable import LiveWallpaperVideoWeb
 
-/// Phase 2b smoke tests — first real content types in the VideoWeb package.
 @Suite("LiveWallpaperVideoWeb basic content")
 struct VideoWebBasicContentTests {
 

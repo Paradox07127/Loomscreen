@@ -126,10 +126,9 @@ final class WPEMSDFTextRenderer {
             Self.readInclude(path: path, resolver: resolver)
         }
         // Prepend the WPE builtin macro prelude (CAST2/ddx/ddy/saturate/…). The
-        // generic pipeline builder injects this for every other shader; the MSDF
-        // text path builds its request directly, so without it the shipped
-        // font.frag fails to compile (its file-scope ScreenPxRange uses CAST2 +
-        // ddx/ddy) for every combo and text silently reverts to CoreText.
+        // generic pipeline builder injects it for every other shader; this path
+        // builds its request directly, so without it font.frag fails to compile
+        // (file-scope ScreenPxRange uses CAST2 + ddx/ddy) and text reverts to CoreText.
         let preludedFragment = WPEShaderBuiltinMacros.glslPrelude + "\n" + fontFragmentSource
         return try processor.process(
             shaderName: "font",
@@ -144,9 +143,8 @@ final class WPEMSDFTextRenderer {
         font(for: object, size: effectiveFontSize(for: object))
     }
 
-    /// The scene's font (custom file or HelveticaNeue fallback) at an explicit
-    /// size. Used both for the final glyph font and for box measurement, so
-    /// box-fit is computed with the SAME typeface that will be rendered.
+    /// Used both for the final glyph font and for box measurement, so box-fit is
+    /// computed with the SAME typeface that will be rendered.
     private func font(for object: WPESceneTextObject, size: CGFloat) -> CTFont {
         if let path = object.fontRelativePath {
             registerFontIfNeeded(path)

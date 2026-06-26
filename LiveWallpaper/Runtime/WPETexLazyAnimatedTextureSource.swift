@@ -37,10 +37,10 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private let maximumTextureDimension2D: Int
     private let frameStartTimes: [TimeInterval]
     private let totalDuration: TimeInterval
-    /// Off-main queue that runs the (pure) LZ4 inflate for upcoming frames so the
-    /// render thread finds them already decoded — eliminating the synchronous
-    /// decode that otherwise stutters at the loop seam. `.userInitiated` so the
-    /// render thread doesn't outrun a `.utility`-starved prefetch under load.
+    /// Off-main queue for LZ4 inflate of upcoming frames so the render thread finds
+    /// them decoded — kills the synchronous decode that stutters at the loop seam.
+    /// `.userInitiated` so the render thread doesn't outrun a `.utility`-starved
+    /// prefetch under load.
     private let prefetchQueue = DispatchQueue(
         label: "com.livewallpaper.wpe.lazy-tex-prefetch",
         qos: .userInitiated

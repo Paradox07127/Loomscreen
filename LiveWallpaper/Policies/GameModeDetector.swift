@@ -25,13 +25,7 @@ import Foundation
 /// Plus `ProcessInfo.isLowPowerModeEnabled` as an explicit "yield GPU" request.
 /// Full-screen is intentionally NOT required (a windowed game still yields);
 /// `pauseOnFullScreen` covers full-screen overlap of non-games independently.
-///
-/// The classifier is split into pure, injectable functions so the
-/// game-vs-non-game decision is unit-testable without a live game; `isActive`
-/// is the thin `NSWorkspace` / `ProcessInfo` adapter.
 enum GameModeDetector {
-    /// Snapshot of the frontmost app, decoupled from `NSWorkspace` so the
-    /// classifier below is a pure function.
     struct FrontmostApp: Equatable, Sendable {
         var bundleID: String?
         var bundlePath: String?
@@ -48,14 +42,13 @@ enum GameModeDetector {
         )
     }
 
-    /// Pure decision: Low Power Mode, or the frontmost app looks like a game.
     static func evaluate(lowPowerMode: Bool, frontmost: FrontmostApp?) -> Bool {
         if lowPowerMode { return true }
         guard let frontmost else { return false }
         return isGame(frontmost)
     }
 
-    /// Pure game classifier — see the three signals in the type doc.
+    /// See the three signals in the type doc.
     static func isGame(_ app: FrontmostApp) -> Bool {
         if let path = app.executablePath ?? app.bundlePath, isGameInstallPath(path) {
             return true
@@ -75,7 +68,6 @@ enum GameModeDetector {
         return gameInstallPathMarkers.contains { lower.contains($0) }
     }
 
-    /// True for a `public.app-category.*games` category string.
     static func isGameCategory(_ category: String?) -> Bool {
         guard let category, category.hasPrefix("public.app-category.") else { return false }
         return category.contains("games")

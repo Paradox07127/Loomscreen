@@ -43,8 +43,7 @@ public enum WPEValueParser {
         return result
     }
 
-    /// Resolves the uniform name of a structured `constantshadervalues` array
-    /// entry (`name` / `uniform` / `material`, first non-empty wins).
+    /// `constantshadervalues` array entry uniform name: `name` / `uniform` / `material`, first non-empty wins.
     public static func shaderConstantEntryName(in dict: [String: Any]) -> String? {
         for key in ["name", "uniform", "material"] {
             if let string = dict[key] as? String {

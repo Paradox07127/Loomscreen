@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Pill-style segmented picker that mirrors the Single / Playlist / Schedule
-/// control on the video panel, so the HTML source kind switcher shares the
-/// same visual rhythm with the rest of the screen-detail surface.
+/// Mirrors the video panel's Single / Playlist / Schedule pill control so the
+/// screen-detail surface stays visually consistent.
 struct HTMLSourceKindPicker: View {
     @Binding var selection: HTMLSourceKind
 

@@ -1,13 +1,12 @@
 import Foundation
 
-/// Persisted source for an HTML wallpaper.
 public enum HTMLSource: Codable, Equatable, Sendable {
     case file(bookmarkData: Data)
     case folder(bookmarkData: Data, indexFileName: String)
     case url(URL)
     case inline(String)
 
-    /// Heuristic constructor used when migrating legacy persisted data (`WallpaperContent.html(String)`).
+    /// Migrates legacy persisted data (`WallpaperContent.html(String)`).
     public init(legacyString: String) {
         let trimmed = legacyString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -56,11 +55,9 @@ public enum HTMLSource: Codable, Equatable, Sendable {
         self = .inline(trimmed)
     }
 
-    /// Returns a wallpaper-friendly variant of the input URL. Currently
-    /// rewrites YouTube watch / short links to `youtube-nocookie.com/embed`;
-    /// every other URL passes through unchanged. Kept as a single entry point
-    /// so future per-host rewrites (Vimeo, Twitch live, etc.) hang off the
-    /// same call site.
+    /// Rewrites YouTube watch / short links to `youtube-nocookie.com/embed`;
+    /// other URLs pass through. Single entry point so future per-host rewrites
+    /// (Vimeo, Twitch live, etc.) hang off the same call site.
     public static func normalizingForWallpaper(_ url: URL) -> URL {
         if let videoID = youTubeVideoID(from: url) {
             return youTubeEmbedURL(forID: videoID) ?? url
@@ -179,7 +176,6 @@ public enum HTMLSource: Codable, Equatable, Sendable {
         }
     }
 
-    /// SF Symbol used to represent this source in inspector and menu bar.
     public var iconName: String {
         switch self {
         case .file: return "doc.richtext"
@@ -198,8 +194,7 @@ public enum HTMLSource: Codable, Equatable, Sendable {
         return false
     }
 
-    /// True for user-selected HTML sources that should be restored when the
-    /// user switches back from video/shader modes.
+    /// HTML sources are restored when the user switches back from video/shader modes.
     public var isRestorableHTMLSource: Bool {
         true
     }

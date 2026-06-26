@@ -3,10 +3,9 @@ import CoreGraphics
 import Metal
 import MetalKit
 
-// `@unchecked Sendable` so the loader can be captured by the parallel
-// texture-resolve lane in `WPEMetalSceneRenderer.loadTextures`: `device` is a
-// thread-safe Metal object, `capabilities` is a value type, and `uploadQueue`
-// is itself `@unchecked Sendable`. Nothing here is mutated after init.
+// `@unchecked Sendable` so the parallel texture-resolve lane in
+// `WPEMetalSceneRenderer.loadTextures` can capture the loader: all stored
+// properties are thread-safe and nothing is mutated after init.
 struct WPEMetalTextureLoader: @unchecked Sendable {
     private let device: MTLDevice
     private let capabilities: WPEMetalTextureCapabilities
@@ -57,8 +56,6 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         try WPETexLazyAnimatedTextureSource(payload: payload, device: device, label: label)
     }
 
-    /// Builds a per-TEXS-frame schedule against the source atlases.
-    ///
     /// **Invariant**: one MTLTexture per unique `imageID` (the whole atlas),
     /// not per-frame sub-rect. The particle renderer's sprite-grid math
     /// (`parseParticleSpriteSheet`) divides atlas pixel dims by `.tex-json`
@@ -114,24 +111,6 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
             frameRate: animation.frameRate,
             loop: animation.loop
         )
-    }
-
-    func makeTexture(from image: DecodedRGBAImage, label: String) async throws -> MTLTexture {
-        let payload = WPETexTexturePayload(
-            info: WPETexInfo(
-                containerVersion: 0,
-                infoVersion: 0,
-                width: image.width,
-                height: image.height,
-                textureFormatCode: WPETexFormat.rgba8888.rawValue,
-                format: .rgba8888,
-                mipmapCount: 1,
-                flags: 0
-            ),
-            mipmaps: [WPETexTextureMipmap(index: 0, width: image.width, height: image.height, bytes: image.pixels)],
-            hasAnimationFrames: false
-        )
-        return try await makeTexture(from: payload, label: label)
     }
 
     func makeTexture(from cgImage: CGImage, label: String) async throws -> MTLTexture {

@@ -2,18 +2,12 @@
 import CoreGraphics
 import Foundation
 
-/// Owns the Wallpaper Engine import flow: folder prepare → outcome decision
-/// → apply / unsupported / rejected branches → history-cache fallback. Sits
-/// on top of the existing `WPEImportTracker` (per-screen error + generation
-/// dicts) and the `WallpaperEngineImportService` / `WPECachedContentResolver`
-/// service pair, so the heavy orchestration doesn't have to live in
-/// `ScreenManager`.
+/// Owns the Wallpaper Engine import flow on top of `WPEImportTracker` and the
+/// `WallpaperEngineImportService` / `WPECachedContentResolver` pair.
 ///
-/// The two side effects that touch broader `ScreenManager` state —
-/// persisting a configuration and restoring the runtime wallpaper session
-/// for a screen — come in as callbacks so the coordinator can stay focused
-/// on the import semantics without reaching into Combine / notification
-/// lifetimes owned by the manager.
+/// `saveConfiguration` / `restoreWallpaperSession` come in as callbacks so the
+/// coordinator stays out of the Combine / notification lifetimes owned by
+/// `ScreenManager`.
 @MainActor
 final class WPEImportCoordinator {
     enum PreparationOutcome: Sendable, Equatable {

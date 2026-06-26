@@ -21,17 +21,14 @@ struct WPESceneDocumentParserTests {
         ]
         let data = try JSONSerialization.data(withJSONObject: payload)
 
-        // Override xme=false → the bound `visible` flips to hidden.
         let hidden = try WPESceneDocumentParser.parse(data: data, userValues: ["xme": .bool(false)])
         #expect(hidden.imageObjects.first?.visible == false)
 
-        // The binding table records xme → image-object visibility (incremental).
         let visibleBinding = try #require(hidden.propertyBindings["xme"]?.first)
         #expect(visibleBinding.target == .imageObject(id: "64"))
         #expect(visibleBinding.kind == .visible)
         #expect(visibleBinding.action == .incremental)
 
-        // A diff that only flips xme is incremental, not a reload.
         let patch = WPEScenePropertyPatch(
             bindingsByProperty: hidden.propertyBindings,
             oldValues: ["xme": .bool(true)],
@@ -44,7 +41,6 @@ struct WPESceneDocumentParserTests {
         let shownDefault = try WPESceneDocumentParser.parse(data: data, userValues: [:])
         #expect(shownDefault.imageObjects.first?.visible == true)
 
-        // Legacy parse(data:) keeps working (no user values).
         let legacy = try WPESceneDocumentParser.parse(data: data)
         #expect(legacy.imageObjects.first?.visible == true)
     }
@@ -411,8 +407,8 @@ struct WPESceneDocumentParserTests {
         let data = try JSONSerialization.data(withJSONObject: payload, options: [])
         let document = try WPESceneDocumentParser.parse(data: data)
         let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
-        #expect(byID["269"]?.visible == true)   // 斜 shown
-        #expect(byID["488"]?.visible == false)  // 底 hidden by the style selection
+        #expect(byID["269"]?.visible == true)
+        #expect(byID["488"]?.visible == false)
     }
 
     /// Builds scene 3461168300's two-layer style selector: `newproperty14`

@@ -19,7 +19,6 @@ struct ConfigurationDocument: FileDocument {
         self.encodedPayload = encodedPayload
     }
 
-    /// MainActor-bound factory: snapshots the current configuration and encodes it for the exporter sheet.
     @MainActor
     static func snapshot() throws -> ConfigurationDocument {
         let bundle = ConfigurationPorter.currentBundle()

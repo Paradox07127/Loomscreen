@@ -3,9 +3,8 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Inline panel used by Doctor probes and Phase 3 download failures. Shows
-/// a monospaced redacted preview of a shell command + Copy-to-clipboard +
-/// Open-Terminal actions. Never auto-executes.
+/// Used by Doctor probes and Phase 3 download failures. Offers a redacted
+/// command preview plus Copy and Open-Terminal actions; never auto-executes.
 struct TerminalCommandPanel: View {
     let command: String
     let redactedPreview: Bool

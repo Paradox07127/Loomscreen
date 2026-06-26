@@ -1,8 +1,6 @@
 #if !LITE_BUILD
 import SwiftUI
 
-/// Top-level Scene tab content. Drives the Wallpaper Engine project flow:
-/// folder picker → prepare/apply service → history grid → unsupported placeholder.
 @MainActor
 struct WPESceneSection: View {
     let screen: Screen
@@ -175,18 +173,13 @@ struct WPESceneSection: View {
         return true
     }
 
-    /// When the active wallpaper for this screen is a scene, render the
-    /// detail card directly so the user sees the live preview + state machine
-    /// instead of having to dig back to the imports grid.
     @ViewBuilder
     private var activeSceneCard: some View {
         if let configuration = screenManager.getConfiguration(for: screen),
            case .scene(let descriptor) = configuration.activeWallpaper,
            let origin = configuration.wpeOrigin {
             let session = screen.runtimeSession as? SceneWallpaperSession
-            // Focused preview + diagnostics. Custom settings live in the app's
-            // right inspector sidebar; Apply / Workshop live in the screen header
-            // and the sidebar, so the card itself stays chrome-free.
+            // Card stays chrome-free: settings live in the right inspector; Apply / Workshop live in the screen header + sidebar.
             ScrollView {
                 WPESceneDetailView(
                     origin: origin,
@@ -218,9 +211,6 @@ struct WPESceneSection: View {
     }
 
     #if DIRECT_DISTRIBUTION
-    /// Accent link that jumps to the Workshop tab — the single surface that
-    /// owns search / filter / management of the full library. The per-display
-    /// grid stays a lightweight quick-apply list.
     @ViewBuilder
     private func browseWorkshopButton(_ title: LocalizedStringKey) -> some View {
         Button {
@@ -249,7 +239,7 @@ struct WPESceneSection: View {
         recentImports = SettingsManager.shared.loadGlobalSettings().recentWPEImports
     }
 
-    /// Plan §A4/A5: when a `scene` / `application` / `unknown` check lands for THIS screen, auto-promote the user into the unsupported placeholder card so they see the preview + tip without having to dig through the grid.
+    /// Plan §A4/A5: when an unsupported check lands for THIS screen, auto-promote into the placeholder card so the user sees the preview + tip without digging through the grid.
     private func selectUnsupportedImportIfNeeded(from notification: Notification) {
         guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
               screenID == screen.id,

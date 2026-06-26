@@ -7,14 +7,9 @@ import Foundation
 /// `#include "header.h"` against the scene's `shaders/` directory, applies
 /// WPE→canonical-GLSL macro fixups, and bakes combo `#define`s into the
 /// preamble so translation only has to deal with vanilla GLSL.
-///
-/// Every transformation here is portable and easy to test, which is exactly
-/// what we want — by the time translation runs, all WPE-specific quirks
-/// have been resolved.
 struct WPEShaderPreprocessor {
 
-    /// Files looked up via `#include`. Keyed by relative include path,
-    /// e.g. `"common.h"`. Provided by the scene's pipeline builder.
+    /// Files looked up via `#include`, keyed by relative include path (e.g. `"common.h"`).
     typealias IncludeResolver = (_ path: String, _ requestedBy: String) -> String?
 
     let includeResolver: IncludeResolver
@@ -115,9 +110,8 @@ struct WPEShaderPreprocessor {
         )
     }
 
-    /// Collapse CRLF and lone-CR line endings to LF so every downstream
-    /// line-based pass splits consistently regardless of the shader's authoring
-    /// platform.
+    /// Collapse CRLF and lone-CR to LF so the line-based passes split
+    /// consistently regardless of the shader's authoring platform.
     static func normalizeNewlines(_ source: String) -> String {
         source
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -206,7 +200,6 @@ struct WPEShaderPreprocessor {
 
     // MARK: - Macro fixups
 
-    /// Apply WPE→canonical-GLSL macro substitutions.
     private func applyMacroFixups(source: String, stage: Stage) -> String {
         var s = source
 

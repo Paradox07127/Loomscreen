@@ -3,21 +3,18 @@ import CoreGraphics
 
 /// Async-loaded media metadata for a playlist row.
 ///
-/// Loaded lazily by `PlaylistMetadataService` from the underlying video file.
-/// The view falls back to the parent folder name as the subtitle until the
-/// first real load completes — that way the row never shows an empty subtitle
-/// even on cold start.
+/// The view falls back to `folder` as the subtitle until the first real load
+/// completes, so the row never shows an empty subtitle on cold start.
 struct PlaylistRowMetadata: Equatable, Sendable {
     var resolution: CGSize?
     var duration: TimeInterval?
-    /// Parent directory name — always available once the bookmark resolves.
+    /// Always available once the bookmark resolves.
     var folder: String?
 
     static let empty = PlaylistRowMetadata(resolution: nil, duration: nil, folder: nil)
 
-    /// Subtitle composed Apple Music-style: `1080p · 0:30 · Wallpapers`.
-    /// Parts collapse gracefully: any missing or empty-formatted field is
-    /// omitted, separators stay tight.
+    /// Apple Music-style, e.g. `1080p · 0:30 · Wallpapers`. Missing or
+    /// empty-formatted fields are omitted so separators stay tight.
     var subtitle: String {
         var parts: [String] = []
         if let resolution {

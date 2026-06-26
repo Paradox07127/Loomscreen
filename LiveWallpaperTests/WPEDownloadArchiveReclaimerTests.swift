@@ -9,7 +9,6 @@ import Testing
 /// shares the same `sourceArchiveURL` resolver but moves files to the Trash.
 @Suite("WPE download archive reclaim selection")
 struct WPEDownloadArchiveReclaimerTests {
-    /// Builds `<root>/<id>/scene.pkg` of `bytes` length and returns the root.
     private func makeContentRoot(_ items: [(id: String, bytes: Int)]) throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("reclaim-\(UUID().uuidString)/431960", isDirectory: true)

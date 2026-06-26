@@ -16,9 +16,8 @@ enum WPEBuiltinFrameworkAssets {
         withExtension: "bundle"
     )
 
-    /// Authoritative inventory of every file the bundle ships. Tests iterate
-    /// this list to verify the subtree shipped intact; append new files here
-    /// when adding to `LiveWallpaper/Resources/wpe-builtins/`.
+    /// Authoritative inventory; tests verify the subtree shipped intact.
+    /// Append new files here when adding to `LiveWallpaper/Resources/wpe-builtins/`.
     static let expectedFiles: [String] = [
         "materials/effects/refractnormal.png",
         "materials/effects/waterflowphase.png",

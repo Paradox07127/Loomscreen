@@ -326,7 +326,6 @@ private struct TempCacheEnvironment {
     }
 }
 
-/// Builder for a minimal `PKGV0022` archive used across cache tests.
 fileprivate enum SyntheticPackage {
     struct Entry {
         let name: String

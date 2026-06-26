@@ -90,11 +90,7 @@ final class ScreenManager {
     /// only when the diff is real — at most one observation invalidation
     /// per session change.
     private(set) var wallpaperSessionState = WallpaperSessionState()
-    /// Backwards-compatible view onto the snapshot's version counter. The
-    /// underlying property is `wallpaperSessionState`, so reading this
-    /// publisher still observes one canonical signal.
     var wallpaperSessionStateVersion: UInt64 { wallpaperSessionState.version }
-    /// Backwards-compatible view onto the snapshot's summary cache.
     var wallpaperSessionSummaryCache: WallpaperSessionSummaryCache { wallpaperSessionState.summaryCache }
     #if !LITE_BUILD
     /// Per-screen WPE import bookkeeping (last error + generation counter).
@@ -510,7 +506,6 @@ final class ScreenManager {
 
     }
 
-    /// Updates all wallpaper window frames to match their screen positions.
     private func updateAllWindowFrames() {
         for screen in screens {
             if let nsScreen = displayRegistry.findNSScreen(for: screen.id) {
@@ -685,7 +680,7 @@ final class ScreenManager {
         clearWallpaperForScreen(screen)
     }
 
-    /// Tears down the live runtime session for a screen without touching persistence.
+    /// Tears down the live runtime session without touching persistence.
     private func releaseRuntimeSession(_ screen: Screen) {
         bumpTransition(for: screen.id)
         effectsCoordinator.cancelInflight(for: screen.id)
@@ -805,14 +800,6 @@ final class ScreenManager {
     }
 
     // MARK: - Icon Management
-    var playbackStatePublisher: AnyPublisher<Bool, Never> {
-        playbackStateSubject.eraseToAnyPublisher()
-    }
-    
-    var isAnyScreenPlaying: Bool {
-        playbackStateSubject.value
-    }
-
     var wallpaperSessionSummaries: [WallpaperSessionSummary] {
         screens.map { wallpaperSummary(for: $0) }
     }
@@ -860,7 +847,6 @@ final class ScreenManager {
         return config.activeWallpaper.wallpaperType
     }
 
-    /// Currently surfaced error for a screen's runtime session (or `nil`).
     func runtimeError(for screen: Screen) -> WallpaperRuntimeError? {
         _ = wallpaperSessionStateVersion
         return transientRuntimeErrors[screen.id] ?? screen.runtimeSession?.runtimeError
@@ -930,7 +916,7 @@ final class ScreenManager {
         persistence.primeDisplayNames(from: configuration)
     }
 
-    /// Builds the next session-state snapshot from current screen state and commits it iff something actually changed.
+    /// Builds the next session-state snapshot and commits it iff something actually changed.
     private func commitWallpaperSessionState(includePollingRefresh: Bool = false) {
         var next = wallpaperSessionState
         next.summaryCache = WallpaperSessionSummaryCache(
@@ -1213,7 +1199,6 @@ final class ScreenManager {
     #if !LITE_BUILD
     // MARK: - Wallpaper Engine Import
 
-    /// Returns the most recent WPE import error for the given screen, or `nil`.
     func wpeImportError(for screen: Screen) -> AppError? {
         wpeImportTracker.error(for: screen.id)
     }
@@ -1224,10 +1209,6 @@ final class ScreenManager {
 
     typealias WPEProjectPreparationOutcome = WPEImportCoordinator.PreparationOutcome
     typealias WPEProjectApplyOutcome = WPEImportCoordinator.ApplyOutcome
-
-    func prepareWallpaperEngineProject(at folderURL: URL) async -> WPEProjectPreparationOutcome {
-        await wpeImportCoordinator.prepareProject(at: folderURL)
-    }
 
     @discardableResult
     func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async -> WPEProjectApplyOutcome {
@@ -1422,14 +1403,6 @@ final class ScreenManager {
         notifyWallpaperSessionChanged()
     }
     
-    /// Rebuilds display registry and runtime sessions from persisted config.
-    func hardRefresh() {
-        Logger.notice("Hard refresh: rebuilding display registry + runtime sessions", category: .screenManager)
-        refreshRateCache.removeAll()
-        refreshScreens(preserveRuntimeSessions: false)
-        reloadAllScreens()
-    }
-
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
 
@@ -1637,10 +1610,6 @@ final class ScreenManager {
     }
 
     // MARK: - HTML Wallpaper (delegates to HTMLWallpaperCoordinator)
-
-    func htmlSourceMultiplicity() -> [String: [CGDirectDisplayID]] {
-        htmlCoordinator.sourceMultiplicity()
-    }
 
     func screensRunningSameHTMLSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
         htmlCoordinator.screensRunningSameSource(as: source, excluding: excluding)

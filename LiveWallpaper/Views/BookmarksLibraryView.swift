@@ -1,11 +1,6 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Sidebar-routed full-page browser for saved wallpaper bookmarks.
-///
-/// Layout follows the unified library shell: identity-only `DetailHeaderBar`,
-/// `LibraryFilterBar` underneath (search capsule + optional type chips when
-/// the library is large), then a dense Apple Music / Photos style gallery.
 struct BookmarksLibraryView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var store = BookmarkStore.shared
@@ -229,7 +224,6 @@ private struct BookmarkTile: View {
     }
 
     private var accessibilityLabel: Text {
-        // %1$@ bookmark label, %2$@ localized wallpaper type.
         Text("\(bookmark.label), \(Text(bookmark.wallpaperType.titleKey)) wallpaper bookmark",
              comment: "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / HTML / Shader / Scene).")
     }
@@ -266,11 +260,9 @@ private struct BookmarkTile: View {
         }
     }
 
-    /// Small icon-only chip in the top-leading corner, only shown when a real
-    /// thumbnail is loaded — the SF Symbol fallback already conveys the type
-    /// when there's no thumbnail, so the badge would be redundant noise there.
-    /// Forced-dark `ultraThinMaterial` mirrors the Photos / Apple TV metadata
-    /// chip language so the badge sits on the artwork without competing with it.
+    /// Only shown when a real thumbnail is loaded — the SF Symbol fallback
+    /// already conveys the type, so the badge would be redundant there.
+    /// Forced-dark `ultraThinMaterial` keeps it readable on the artwork.
     private var typeBadge: some View {
         VStack {
             HStack {
@@ -400,10 +392,8 @@ private struct BookmarkTile: View {
 
     // MARK: Thumbnail loader
 
-    /// Run via `.task(id: bookmark.id)` — SwiftUI cancels this when the bookmark
-    /// id changes or the tile leaves the viewport, freeing the thumbnail decode
-    /// work + security-scoped bookmark resolve when the user fast-scrolls the
-    /// gallery.
+    /// Run via `.task(id: bookmark.id)` so SwiftUI cancels the decode +
+    /// security-scoped resolve when the tile leaves the viewport on fast-scroll.
     @MainActor
     private func loadThumbnail() async {
         thumbnail = nil

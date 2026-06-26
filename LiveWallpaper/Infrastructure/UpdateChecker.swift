@@ -107,9 +107,8 @@ final class UpdateChecker {
             let releases = try await transport.fetchReleases(from: Self.releasesAPI)
             status = evaluate(releases: releases)
         } catch {
-            // Log details privately; surface a generic user-facing string so
-            // a hostile response can't smuggle implementation details into
-            // the UI.
+            // Generic user-facing string so a hostile response can't smuggle
+            // implementation details into the UI.
             logger.error("Update check failed: \(String(describing: error), privacy: .private)")
             status = .failed(reason: "Unable to check for updates right now.")
         }

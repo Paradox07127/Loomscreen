@@ -53,10 +53,9 @@ final class WPEMSDFAtlas {
         }
 
         func reset() {
-            // Keep the MTLTexture across eviction: only the packing state is
-            // reset. New glyphs overwrite their own sub-rects; stale pixels are
-            // never sampled (their entries are removed and glyphs carry padding).
-            // Avoids reallocating + re-registering a 1024² texture under LRU churn.
+            // Keep the MTLTexture across eviction (only reset packing state): stale
+            // pixels are never sampled and reallocating a 1024² texture under LRU
+            // churn is wasteful.
             skyline = [SkylineNode(x: 0, y: 0, width: size)]
             keys.removeAll(keepingCapacity: true)
             lastUsed = 0
@@ -149,9 +148,8 @@ final class WPEMSDFAtlas {
         let metrics: WPEMSDFGlyphMetrics
     }
 
-    /// Wraps the (non-Sendable) CTFont + generator so the background generation
-    /// task can capture them across the @Sendable boundary safely (the inputs
-    /// are only read, and the generator is immutable).
+    /// @unchecked Sendable: CTFont + generator are non-Sendable but only read
+    /// across the @Sendable boundary, and the generator is immutable.
     private struct GlyphGenerationRequest: @unchecked Sendable {
         let key: WPEMSDFGlyphKey
         let generator: WPEMSDFGlyphGenerator
@@ -159,14 +157,12 @@ final class WPEMSDFAtlas {
         let maxCellSide: Int
     }
 
-    /// Outcome of a non-blocking glyph request.
     enum GlyphRequest {
-        /// Glyph is ready in the atlas — draw a quad.
         case ready(WPEMSDFAtlasEntry)
-        /// Generation is in flight — caller should fall back this frame and retry.
+        /// Generation in flight — caller falls back this frame and retries.
         case pending
-        /// Glyph has no drawable outline (whitespace) or permanently failed —
-        /// advance past it but draw nothing, and never schedule it again.
+        /// No drawable outline (whitespace) or permanent failure — advance past it
+        /// drawing nothing, and never schedule it again.
         case skip
     }
 
@@ -176,13 +172,11 @@ final class WPEMSDFAtlas {
     private var pages: [Page] = []
     private var entries: [WPEMSDFGlyphKey: WPEMSDFAtlasEntry] = [:]
     private var pending: Set<WPEMSDFGlyphKey> = []
-    /// Glyphs with no outline (whitespace / unsupported) or that exhausted their
-    /// store retries. Returned as `.skip` so they are never re-scheduled (fixes
-    /// per-frame background-task churn) and never drawn as a bogus 0.5 quad.
+    /// Glyphs with no outline or exhausted store retries. Returned as `.skip` to
+    /// avoid per-frame background-task churn and drawing a bogus 0.5 quad.
     private var skipped: Set<WPEMSDFGlyphKey> = []
-    /// Transient store-failure (e.g. texture allocation) retry counts; a glyph is
-    /// only moved to `skipped` after exhausting these, so a temporary failure can
-    /// recover instead of being permanently dropped.
+    /// Transient store-failure (e.g. texture allocation) retry counts; only moved
+    /// to `skipped` after exhausting these so a temporary failure can recover.
     private var storeFailures: [WPEMSDFGlyphKey: Int] = [:]
     private var clock: UInt64 = 0
 
@@ -216,9 +210,8 @@ final class WPEMSDFAtlas {
         return nil
     }
 
-    /// Non-blocking request: returns `.ready` if cached, `.skip` for known
-    /// no-outline/failed glyphs, otherwise schedules deduplicated background
-    /// generation and returns `.pending` so the caller falls back this frame.
+    /// Non-blocking: cache hit returns `.ready`, otherwise schedules deduplicated
+    /// background generation and returns `.pending`.
     func requestEntry(
         for key: WPEMSDFGlyphKey,
         generator: WPEMSDFGlyphGenerator,
@@ -254,8 +247,8 @@ final class WPEMSDFAtlas {
     private func completeGeneration(_ generated: GeneratedGlyph?, for key: WPEMSDFGlyphKey) {
         defer { pending.remove(key) }
         guard entries[key] == nil else { return }
-        // No outline (whitespace / unsupported glyph) is a PERMANENT skip — never
-        // re-schedule it and never draw it as a 0.5 box.
+        // No outline (whitespace / unsupported) is a PERMANENT skip — never
+        // re-schedule, never draw as a 0.5 box.
         guard let generated else {
             skipped.insert(key)
             return
@@ -264,7 +257,7 @@ final class WPEMSDFAtlas {
             storeFailures[key] = nil
             return
         }
-        // Store failed (transient, e.g. texture allocation under pressure): retry
+        // Transient store failure (e.g. texture allocation under pressure): retry
         // a bounded number of times, then give up so we don't regenerate forever.
         let failures = (storeFailures[key] ?? 0) + 1
         if failures >= 3 {

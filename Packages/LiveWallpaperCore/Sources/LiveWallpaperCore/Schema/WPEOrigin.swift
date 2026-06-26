@@ -113,7 +113,6 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         originalType.localizedDisplayName
     }
 
-    /// Pure-data default resolver — only inspects `originalType` and the presence of `cacheRelativePath`.
     public static func defaultResourceLocation(
         originalType: WPEType,
         cacheRelativePath: String?

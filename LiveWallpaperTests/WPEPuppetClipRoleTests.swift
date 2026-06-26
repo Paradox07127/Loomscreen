@@ -31,8 +31,6 @@ struct WPEPuppetClipRoleTests {
         [base, base + 1, base + 2, base, base + 2, base + 3]
     }
 
-    /// One channel that scales Y from 1 (bind) down to `closedScaleY` on `closedFrame` (default: mid-clip)
-    /// and stays 1 elsewhere.
     private func channel(bone: Int, closedScaleY: Float, frameCount: Int, closedFrame: Int? = nil) -> WPEPuppetAnimChannel {
         let closed = closedFrame ?? frameCount / 2
         let keyframes = (0..<frameCount).map { frame -> WPEPuppetAnimKey in

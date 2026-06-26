@@ -1,25 +1,18 @@
 import Foundation
 
-/// Mirrors `Logger` output above a configurable threshold into a rotated text
-/// file at `~/Library/Logs/LiveWallpaper/runtime.log`. The goal is so that a
-/// maintainer can `tail -f` (or scroll back through) the most recent
-/// app-level warnings and errors without having to set up a `log stream`
-/// filter in Console.app ahead of time.
-///
-/// info/debug stay on `os_log` only — the file is intentionally scoped to
-/// warning+ so it stays small and signal-dense.
+/// Mirrors `Logger` output above a threshold into a rotated text file at
+/// `~/Library/Logs/LiveWallpaper/runtime.log`, so a maintainer can `tail -f`
+/// recent warnings/errors without setting up a Console.app `log stream` filter.
+/// info/debug stay on `os_log` only — scoped to warning+ to stay small and signal-dense.
 public final class LogFileSink: @unchecked Sendable {
     public static let shared = LogFileSink()
 
-    /// Public for the startup banner so users can easily find the log path.
     /// `nil` only if the Logs directory could not be created. Under the
-    /// app sandbox this resolves to the container — see `tailCommandHint`
-    /// for a copy-pastable `tail -f` line.
+    /// app sandbox this resolves to the container — see `tailCommandHint`.
     public private(set) var fileURL: URL?
 
-    /// One-liner shell command users can paste to follow the log. Includes
-    /// the resolved container path so sandbox redirection isn't a surprise.
-    /// `nil` when no log file is available.
+    /// Pasteable `tail -f` line with the resolved container path so sandbox
+    /// redirection isn't a surprise. `nil` when no log file is available.
     public var tailCommandHint: String? {
         guard let url = fileURL else { return nil }
         let quoted = url.path.contains(" ") ? "\"\(url.path)\"" : url.path
@@ -37,7 +30,7 @@ public final class LogFileSink: @unchecked Sendable {
         fileURL = Self.prepareLogFileURL()
     }
 
-    /// Threshold below which messages are skipped (only the file mirror; the underlying `os.Logger` always receives the call).
+    /// Gates only the file mirror; the underlying `os.Logger` always receives the call.
     private func shouldRecord(_ level: Logger.Level) -> Bool {
         switch level {
         case .warning, .error, .fault, .notice:
@@ -111,13 +104,10 @@ public final class LogFileSink: @unchecked Sendable {
         }
     }
 
-    /// Tail recent WARNING/ERROR/FAULT lines for the bug-report sheet, taking
-    /// the write lock so we never observe a partially-flushed entry from a
-    /// concurrent `record(...)` and never race with rotation. Reads at most
-    /// `maxReadBytes` from the file tail and returns up to `maxLines` lines.
-    /// Each returned line is truncated to `maxLineLength` so a single
-    /// pathological stack-trace can't blow past GitHub's issue-URL body
-    /// ceiling when concatenated downstream.
+    /// Tail recent WARNING/ERROR/FAULT lines for the bug-report sheet. Takes the
+    /// write lock to avoid observing a partial flush from concurrent `record(...)`
+    /// or racing with rotation. Lines truncated to `maxLineLength` so a pathological
+    /// stack-trace can't blow past GitHub's issue-URL body ceiling downstream.
     public func recentDiagnosticLines(
         maxLines: Int = 5,
         maxReadBytes: UInt64 = 256 * 1024,

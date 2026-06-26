@@ -23,9 +23,7 @@ import Foundation
 /// player — `AVAssetResourceLoader.setDelegate(_:queue:)` only holds a
 /// weak ref.
 final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
-    /// Custom URL scheme used to route AVFoundation through the delegate.
-    /// Picked to be obviously non-network so any logs or fs_usage entries
-    /// are easy to recognise.
+    /// Obviously non-network scheme so any logs or fs_usage entries are easy to recognise.
     static let scheme = "lwmem"
 
     private let data: Data
@@ -36,7 +34,6 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
     private let windowStart: Int
     private let windowLength: Int
 
-    /// Build a `Data` + MIME pair from a local file URL (whole-file window).
     static func load(from url: URL) throws -> (loader: InMemoryVideoAssetLoader, customURL: URL) {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let mime = mimeType(forPathExtension: url.pathExtension)
@@ -49,9 +46,8 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
         return (loader, customURL(forLastComponent: url.lastPathComponent))
     }
 
-    /// Build a loader windowed into a `scene.pkg` entry — the in-place packaged
-    /// video path. Maps the whole package (`mappedIfSafe`, lazy) and exposes
-    /// only the entry's contiguous byte range. No extraction.
+    /// In-place packaged video: maps the whole package lazily and exposes only
+    /// the entry's contiguous byte range. No extraction.
     static func loadPackageEntry(
         packageURL: URL,
         entryName: String
@@ -86,7 +82,7 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
         return (loader, customURL(forLastComponent: (entryName as NSString).lastPathComponent))
     }
 
-    /// Convert a regular file URL into the `lwmem://` form that triggers the resource-loader delegate path.
+    /// `lwmem://` form triggers the resource-loader delegate path.
     static func customURL(for url: URL) -> URL {
         customURL(forLastComponent: url.lastPathComponent)
     }

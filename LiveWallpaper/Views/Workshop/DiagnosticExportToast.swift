@@ -1,17 +1,13 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import SwiftUI
 
-/// Tiny confirmation toast presented after the user clicks "Copy
-/// diagnostic" on a Workshop error state. Mirrors the visual treatment in
-/// the HTML mockup (`docs/mockups/workshop-ui.html`) so the SwiftUI
-/// surface keeps the same chrome users have already seen in the preview.
+/// Confirmation toast after "Copy diagnostic" on a Workshop error state.
+/// Mirrors the chrome in the HTML mockup (`docs/mockups/workshop-ui.html`).
 struct DiagnosticExportToast: View {
     @Binding var isPresented: Bool
-    /// Auto-dismiss interval. Matches the mockup's 3.5 s linger so the user
-    /// has time to read "Copied to clipboard" before it slides away.
+    /// Matches the mockup's 3.5 s linger — long enough to read before it slides away.
     var lingerSeconds: TimeInterval = 3.5
-    /// Override for previews / tests so the timer doesn't drive UI changes
-    /// in a unit-test runner.
+    /// Overridable so the auto-dismiss timer doesn't drive UI in a test runner.
     var clock: ContinuousClock = .continuous
 
     var body: some View {

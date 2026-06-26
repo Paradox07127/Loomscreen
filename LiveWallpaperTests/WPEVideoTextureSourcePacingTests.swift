@@ -61,7 +61,7 @@ struct WPEVideoTextureSourcePacingTests {
     @Test("Playhead advances on the wall clock — not faster (the old AVAssetReader bug)")
     func playheadAdvancesAtRealTime() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // 4s clip so the playhead has a long, monotonic window to land in.
+        // 4s clip gives the playhead a long, monotonic window to land in.
         let videoURL = try await SyntheticVideoFixture.writeMP4(
             durationSeconds: 4.0,
             frameRate: 24
@@ -72,9 +72,7 @@ struct WPEVideoTextureSourcePacingTests {
         defer { source.invalidate() }
         source.applyPerformanceProfile(.quality)
 
-        // Wait for the first frame to confirm the player is actually
-        // playing, then measure how far the playhead advances over a
-        // controlled wall-clock window.
+        // Confirm playback started before measuring the playhead delta.
         try #require(try await pollForTexture(from: source, timeout: 2.0) != nil)
         let startSeconds = source.currentItemPlaybackSeconds
 
@@ -170,7 +168,7 @@ struct WPEVideoTextureSourcePacingTests {
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         defer { source.invalidate() }
 
-        // Drives texture(at:) like the render loop (that's where the wrap-freeze runs).
+        // Drive texture(at:) like the render loop — that's where wrap-freeze runs.
         func pump(_ seconds: TimeInterval) async throws {
             let deadline = Date().addingTimeInterval(seconds)
             while Date() < deadline {

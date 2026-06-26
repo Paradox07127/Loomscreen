@@ -10,7 +10,6 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
 
-    /// Convenience constructor for a loose-file video (no package entry).
     public static func video(bookmarkData: Data) -> WallpaperSessionDefinition {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)
     }

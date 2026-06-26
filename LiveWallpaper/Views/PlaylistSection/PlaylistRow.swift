@@ -3,17 +3,9 @@ import AppKit
 
 /// Apple Music-style playlist row.
 ///
-/// Layout (50pt high):
-/// ```
-/// │ [N]/☰/EQ    [thumb]    Title                     [⋯] │
-/// │                        Subtitle (resolution · duration · folder)
-/// ```
-///
-/// Drag-reorder is attached **only to the leading-handle hit area**
-/// (28×44pt), not the whole row, so the row can host:
-/// - a single-click "play now" gesture in its body, and
-/// - a context menu that the OS forwards on right-click / Ctrl-click,
-/// without those gestures racing the DragGesture.
+/// Drag-reorder is attached **only to the leading-handle hit area** (28×44pt),
+/// not the whole row, so the body's tap "play now" gesture and the context
+/// menu don't race the DragGesture.
 struct PlaylistRow: View {
     let entry: PlaylistEntry
     let index: Int
@@ -22,9 +14,8 @@ struct PlaylistRow: View {
     let onPlayNow: () -> Void
     let onRemove: () -> Void
 
-    /// Parent owns the reorder state machine; the row only attaches the
-    /// gesture to the leading-handle hit area and forwards translation +
-    /// pointer coordinates upward.
+    /// Parent owns the reorder state machine; the row only forwards the
+    /// translation + pointer coordinates upward.
     let onDragChanged: (_ translationY: CGFloat, _ locationY: CGFloat) -> Void
     let onDragEnded: () -> Void
 
@@ -59,9 +50,8 @@ struct PlaylistRow: View {
                     }
                 }
                 .onChange(of: isBeingDragged) { _, dragging in
-                    // While hovering, swap the open-hand pointer for a
-                    // closed-hand one as soon as the user actually starts
-                    // dragging the handle (and back when they let go).
+                    // Swap open-hand ↔ closed-hand cursor when a drag of the
+                    // hovered handle starts/ends.
                     guard isHandleHovering else { return }
                     NSCursor.pop()
                     (dragging ? NSCursor.closedHand : NSCursor.openHand).push()
@@ -110,10 +100,9 @@ struct PlaylistRow: View {
         .contextMenu { rowMenuItems }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
-        // The unnamed `.accessibilityAction { … }` binds VoiceOver's default
-        // "double-tap to activate" gesture; without it the row would have
-        // no primary activation since `.onTapGesture(count: 2)` isn't an
-        // accessibility action.
+        // Unnamed action binds VoiceOver's default "double-tap to activate";
+        // `.onTapGesture(count: 2)` isn't an accessibility action so without
+        // this the row would have no primary activation.
         .accessibilityAction { onPlayNow() }
         .accessibilityAction(named: Text("Set as Primary")) { onSetPrimary() }
         .accessibilityAction(named: Text("Play Now")) { onPlayNow() }
@@ -130,8 +119,8 @@ struct PlaylistRow: View {
         return -1.5
     }
 
-    /// Shared items for both the right-click context menu and the
-    /// trailing ellipsis menu — kept in one place so they can't drift.
+    /// Shared by the right-click context menu and the trailing ellipsis menu
+    /// so the two can't drift.
     @ViewBuilder
     private var rowMenuItems: some View {
         Button("Set as Primary", systemImage: "star.fill", action: onSetPrimary)

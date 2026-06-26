@@ -230,7 +230,6 @@ struct WPEParticleSystemTests {
         let system = try #require(WPEParticleSystem(definition: def, device: device))
         #expect(system.tracksPointer)
 
-        // Cursor live → the emitter spawns (at the cursor).
         system.pointerCentered = SIMD2<Float>(10, 20)
         system.tick(now: 0)
         system.tick(now: 1.0)
@@ -245,7 +244,6 @@ struct WPEParticleSystemTests {
         system.tick(now: 3.0)
         #expect(system.liveInstanceCount == 0)
 
-        // Re-enabling the cursor resumes emission.
         system.pointerCentered = SIMD2<Float>(30, 40)
         system.tick(now: 4.0)
         #expect(system.liveInstanceCount > 0)
@@ -775,9 +773,9 @@ struct WPEParticleSystemTests {
         let x0 = pointer[0].positionAndSize.x
         for step in 2...6 { system.tick(now: Double(step) * 0.05) }
         let x1 = pointer[0].positionAndSize.x
-        #expect(x1 < x0)                                  // repelled away from the cursor
-        #expect(system.lastAttractorAffectedCount >= 1)   // attractor actually fired
-        #expect(system.cursorDebugSummary() != nil)       // reports as cursor-reactive
+        #expect(x1 < x0)
+        #expect(system.lastAttractorAffectedCount >= 1)
+        #expect(system.cursorDebugSummary() != nil)
     }
 
     @Test("Pointer-locked emitter spawns particles at the cursor")

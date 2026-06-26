@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 
-/// Persistence seam for the trusted-origin allowlist.
 @MainActor
 public protocol TrustedHostPersisting {
     func load() -> [String]
@@ -56,7 +55,6 @@ public final class TrustedHostStore {
         return Set(raw.compactMap(TrustedHTMLOrigin.init(persistedValue:)))
     }()
 
-    /// Effective trust set = user-saved origins ∪ built-in embed origins.
     public var originSet: Set<TrustedHTMLOrigin> {
         Set(origins).union(Self.builtInTrustedOrigins)
     }

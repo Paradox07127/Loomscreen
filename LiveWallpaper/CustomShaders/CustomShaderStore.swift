@@ -6,18 +6,15 @@ import Observation
 /// `~/Library/Application Support/<bundle-id>/shaders/<uuid>.json`; one file
 /// per shader avoids partial-write corruption hosing the entire library.
 ///
-/// `@Observable` so SwiftUI's shader picker re-renders when the user
-/// imports / deletes an entry. All disk reads / writes go through
-/// `Task.detached` so the MainActor never blocks on FileManager; the
-/// observable `shaders` array updates on MainActor after each detached
-/// operation completes.
+/// All disk reads / writes go through `Task.detached` so the MainActor never
+/// blocks on FileManager; `shaders` updates on MainActor after each completes.
 @MainActor
 @Observable
 public final class CustomShaderStore {
     public static let shared = CustomShaderStore()
 
-    /// Sorted by `createdAt` ascending — newest entries land at the end of
-    /// the grid so existing positions are stable across imports.
+    /// Sorted by `createdAt` ascending so existing grid positions stay stable
+    /// across imports (newest lands at the end).
     public private(set) var shaders: [CustomShader] = []
 
     @ObservationIgnored private let directory: URL

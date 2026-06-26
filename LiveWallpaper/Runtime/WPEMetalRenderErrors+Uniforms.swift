@@ -160,8 +160,6 @@ struct WPEPresentUniforms {
     var uvOffset: SIMD2<Float>
     var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
 
-    /// Computes the blit transform that fits a `sourceWidth×sourceHeight`
-    /// texture into a `targetWidth×targetHeight` drawable under `fitMode`.
     /// Degenerate sizes fall back to identity (stretch).
     static func make(
         fitMode: WPEPresentFitMode,
@@ -208,9 +206,8 @@ struct WPEPresentUniforms {
     }
 }
 
-// Phase 2D-C: per-effect uniform structs. Field order MUST match the
-// matching MSL struct in `WPEMetalBuiltins.metal` exactly so that
-// `setFragmentBytes(...)` lays out correctly.
+// Per-effect uniform structs. Field order MUST match the matching MSL struct
+// in `WPEMetalBuiltins.metal` exactly so `setFragmentBytes(...)` lays out correctly.
 
 struct WPEColorBalanceUniforms {
     var brightness: Float
@@ -326,7 +323,7 @@ struct WPEShakeUniforms {
     var padding: Float = 0
 }
 
-// Phase 2D-D: layout MUST match `WPEGenericImageUniforms` /
+// Layout MUST match `WPEGenericImageUniforms` /
 // `WPEGenericParticleUniforms` in `WPEMetalBuiltins.metal`.
 
 struct WPEGenericImageUniforms {
@@ -386,8 +383,6 @@ struct WPEGenericParticleUniforms {
     /// reactivity in Phase 4 audio runtime).
     var sizeAndAge: SIMD4<Float>
 }
-
-// Phase 2D-E: native MSL effect uniforms.
 
 struct WPEOpacityUniforms {
     var opacity: Float

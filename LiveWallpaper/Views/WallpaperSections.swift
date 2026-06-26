@@ -3,15 +3,9 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Shader preset gallery — embedded in `ScreenDetailPreviewArea` when the
-/// user picks the shader wallpaper type. Renders 5 builtin presets plus the
-/// user's imported `.lwshader` library; the Import button opens an
-/// `NSOpenPanel` (presented as a sheet, not a modal run loop), validates by
-/// attempting a Metal compile, and either saves the entry or surfaces the
-/// diagnostic in an alert. Picking any card swaps the
-/// `selectedShaderSource` binding and notifies the screen manager. Each
-/// card shows a real first-frame thumbnail rendered off-main with an SF
-/// Symbol placeholder while the GPU work is in flight.
+/// Shader preset gallery embedded in `ScreenDetailPreviewArea`. Import opens
+/// an `NSOpenPanel` as a sheet (not a modal run loop) and validates by
+/// attempting a Metal compile before saving.
 struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderSource: ShaderSource
@@ -24,9 +18,8 @@ struct ShaderWallpaperSection: View {
     @State private var pendingDeletion: CustomShader?
     @State private var thumbnails: [String: NSImage] = [:]
 
-    /// Maximum size of an importable shader source file. 256 KB is well
-    /// over what a hand-written fragment shader needs (most are < 4 KB)
-    /// while bounding malicious / accidentally-pasted-binary files.
+    /// 256 KB is well over what a hand-written fragment shader needs (most are
+    /// < 4 KB) while bounding malicious / accidentally-pasted-binary files.
     private static let maxImportBytes = 256 * 1024
 
     private static let presetColumns = [
@@ -36,11 +29,9 @@ struct ShaderWallpaperSection: View {
     private static let thumbnailCornerRadius: CGFloat = 8
 
     var body: some View {
-        // Frameless scrolling gallery, matching the Scene tab's page frame
-        // (`WPESceneSection.historyList`): no titled card and no in-content
-        // type header — the wallpaper type is already named by the toolbar
-        // picker — and a ScrollView so the preset grid never overflows at
-        // small window heights.
+        // Frameless to match the Scene tab's page frame
+        // (`WPESceneSection.historyList`): no titled card, no in-content type
+        // header (the toolbar picker already names the type).
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 builtinSection
@@ -114,11 +105,9 @@ struct ShaderWallpaperSection: View {
 
     // MARK: - Cards
 
-    /// The shader currently rendering on this screen — drives the card
-    /// "selected" highlight directly from runtime state rather than from
-    /// draft `selectedShaderSource` so the visual only lights up while a
-    /// shader is actually active. Nil when the screen is on video / html
-    /// / scene / nothing.
+    /// Drives the card "selected" highlight from live runtime state rather than
+    /// the draft `selectedShaderSource`, so it only lights up while a shader is
+    /// actually active. Nil when the screen is on video / html / scene / nothing.
     private var activeShaderSource: ShaderSource? {
         screenManager.getConfiguration(for: screen)?.activeWallpaper.shaderSource
     }
@@ -297,9 +286,8 @@ struct ShaderWallpaperSection: View {
 
     // MARK: - Actions
 
-    /// First click on a card: activate that shader. Second click on the
-    /// same active card: stop the shader (falls back to whatever else is
-    /// saved on the screen, or clears entirely if nothing else is saved).
+    /// First click activates; second click on the active card stops the shader
+    /// (falling back to whatever else is saved, or clearing if nothing is).
     private func applyShader(_ source: ShaderSource) {
         if activeShaderSource == source {
             screenManager.clearWallpaperOfType(.metalShader, for: screen)
@@ -337,7 +325,7 @@ struct ShaderWallpaperSection: View {
         let didStart = url.startAccessingSecurityScopedResource()
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-        // Size check first — refuse oversized files before reading.
+        // Refuse oversized files before reading their contents.
         do {
             let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
             if let size = resourceValues.fileSize, size > Self.maxImportBytes {
@@ -364,8 +352,7 @@ struct ShaderWallpaperSection: View {
             return
         }
 
-        // Validate compile off-main so a pathological shader doesn't lock
-        // the UI during import.
+        // Off-main so a pathological shader can't lock the UI during import.
         do {
             try await Task.detached(priority: .userInitiated) {
                 _ = try MetalWallpaperView.compileCustomShader(source: source, on: device)
@@ -401,9 +388,8 @@ struct ShaderWallpaperSection: View {
         }
     }
 
-    /// Content types accepted by the importer. `.lwshader` is our preferred
-    /// extension; `.metal` is allowed so users can drop in stock Apple sample
-    /// files; plain text is the catch-all.
+    /// `.lwshader` is preferred; `.metal` is allowed so users can drop in stock
+    /// Apple sample files; plain text is the catch-all.
     private static let allowedContentTypes: [UTType] = {
         var types: [UTType] = [.plainText, .sourceCode]
         if let lwshader = UTType(filenameExtension: "lwshader") {
@@ -416,8 +402,7 @@ struct ShaderWallpaperSection: View {
     }()
 }
 
-/// Identifiable wrapper so `.alert(item:)` can present compile failures
-/// without needing a separate Bool+String pair.
+/// Identifiable wrapper so `.alert(item:)` can present compile failures.
 private struct ImportErrorAlert: Identifiable {
     let id = UUID()
     let message: String

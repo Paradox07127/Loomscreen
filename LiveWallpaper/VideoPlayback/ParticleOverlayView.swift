@@ -1,7 +1,6 @@
 import AppKit
 import QuartzCore
 
-/// Layer-hosting particle overlay backed by `CAEmitterLayer`.
 final class ParticleOverlayView: NSView {
 
     // MARK: - State
@@ -31,7 +30,6 @@ final class ParticleOverlayView: NSView {
 
     // MARK: - Public API
 
-    /// Switches the active particle effect.
     func setEffect(_ effect: ParticleEffect, density: CGFloat = 1.0) {
         if effect == currentEffect {
             updateDensity(density)
@@ -417,7 +415,6 @@ private enum ParticleTextures {
 
     private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
-    /// Creates a `CGContext` suitable for drawing a particle texture.
     private static func makeContext(width: Int, height: Int) -> CGContext? {
         return CGContext(
             data: nil,
@@ -430,7 +427,6 @@ private enum ParticleTextures {
         )
     }
 
-    /// Soft radial-gradient circle, white-to-transparent.
     static func softCircle(radius: CGFloat, color: CGColor) -> CGImage? {
         let diameter = max(Int(ceil(radius * 2)), 2)
         guard let ctx = makeContext(width: diameter, height: diameter) else { return nil }
@@ -457,7 +453,6 @@ private enum ParticleTextures {
         return ctx.makeImage()
     }
 
-    /// Cherry-blossom petal — a soft teardrop shape with a gentle notch at the tip, drawn with a radial gradient to give subtle depth.
     static func sakuraPetal(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
         let w = max(Int(ceil(width)), 2)
         let h = max(Int(ceil(height)), 2)
@@ -506,7 +501,6 @@ private enum ParticleTextures {
         return ctx.makeImage()
     }
 
-    /// Simple leaf shape — a flattened ellipse with two pointed ends.
     static func leaf(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
         let w = max(Int(ceil(width)), 2)
         let h = max(Int(ceil(height)), 2)

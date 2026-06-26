@@ -6,8 +6,7 @@ import os
 /// Drives "Download" from the Workshop browse UI: runs the SteamCMD download
 /// through the configured Doctor, imports the result into the local library,
 /// and exposes per-item progress for the detail sheet. App-lifetime singleton
-/// (mirrors `GIFPlaybackCoordinator.shared`) so a download survives the sheet
-/// being dismissed; `init` stays internal for test isolation.
+/// so a download survives the sheet being dismissed.
 @MainActor
 @Observable
 final class WorkshopDownloadCoordinator {
@@ -56,11 +55,9 @@ final class WorkshopDownloadCoordinator {
         download(itemID: item.id, title: item.title, using: doctor)
     }
 
-    /// Re-download path for the Installed library's "Update" action — the same
-    /// SteamCMD download + import as a fresh `download(_:)`, keyed only by the
-    /// Workshop id + title (no full `WorkshopQueryItem` needed). The re-import
-    /// overwrites the cache in place and records a fresher `importedAt`, which
-    /// clears the "update available" badge.
+    /// Re-download path for the Installed library's "Update" action. The
+    /// re-import overwrites the cache in place and records a fresher
+    /// `importedAt`, which clears the "update available" badge.
     func download(itemID: UInt64, title: String, using doctor: SteamCMDDoctorService) {
         guard !isBusy(itemID) else { return }
         let attemptID = UUID()
@@ -134,8 +131,8 @@ final class WorkshopDownloadCoordinator {
         }
     }
 
-    /// Records streamed download progress on the main actor. Ignored unless the
-    /// item is still in the `.downloading` phase (import/terminal phases clear it).
+    /// Ignored unless the item is still in the `.downloading` phase
+    /// (import/terminal phases clear it).
     private func recordProgress(
         itemID: UInt64,
         attemptID: UUID,
@@ -173,7 +170,6 @@ final class WorkshopDownloadCoordinator {
         }
     }
 
-    /// Sets the per-item phase and emits a terminal event for the toast.
     private func finish(itemID: UInt64, title: String, phase: DownloadPhase) {
         attempts[itemID] = nil
         clearProgress(itemID)

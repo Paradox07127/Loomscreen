@@ -63,8 +63,6 @@ struct ShortcutsSettingsView: View {
         }
     }
 
-    /// Single-line toggle row. The explanation lives in the section
-    /// footer rather than repeating itself as a subtitle inside the row.
     private var masterEnableSection: some View {
         Section {
             SettingRow(
@@ -96,9 +94,6 @@ struct ShortcutsSettingsView: View {
         )
     }
 
-    /// Compact bullet list replaces the original long-paragraph footer so
-    /// each rule scans independently. Symbols are leading icons rather than
-    /// inline emoji so the type styling stays consistent across the row.
     private var shortcutFooter: some View {
         VStack(alignment: .leading, spacing: 4) {
             shortcutFooterRow(systemImage: "moon.circle", text: "Works even when LiveWallpaper is in the background.")

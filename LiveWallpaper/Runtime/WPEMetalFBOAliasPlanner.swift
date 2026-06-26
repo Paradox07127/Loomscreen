@@ -4,13 +4,10 @@ import Foundation
 /// Computes a memory-aliasing layout for render-target (FBO) textures: assigns
 /// each one an OFFSET in a single shared heap such that targets whose
 /// within-frame lifetimes do NOT overlap may share the same memory, while
-/// targets that ARE alive at the same time never overlap in memory.
-///
-/// This is the algorithmic core of placement-heap FBO aliasing (the lever that
-/// turns "sum of every FBO" into "≈ peak concurrent"). It is pure + value-typed
-/// so the packing is unit-testable in isolation, BEFORE any GPU heap is wired
-/// up. The GPU step (allocating the heap + placing textures + hazard fences)
-/// consumes `Plan.heapSize` and `Placement.offset`.
+/// targets that ARE alive at the same time never overlap. The lever that turns
+/// "sum of every FBO" into "≈ peak concurrent". The GPU step (allocating the
+/// heap + placing textures + hazard fences) consumes `Plan.heapSize` and
+/// `Placement.offset`.
 ///
 /// Algorithm: a classic time-ordered offset allocator. Intervals are placed in
 /// start order (largest first on ties); each is given the lowest offset whose

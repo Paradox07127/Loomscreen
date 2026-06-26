@@ -1,17 +1,12 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Pre-render capability gate for a single scene project. Reads the parsed
-/// `WPESceneDocument` plus project metadata (Windows plugin presence,
-/// whether the package contains custom shader sources) and returns the
-/// tier the runtime should expect, plus the precise feature flags the
-/// scene declared.
+/// Pre-render capability gate for a single scene project.
 ///
-/// Truth-telling: the tier reflects what the SCENE asks for, not what the
-/// renderer currently supports. The dispatch layer is what downgrades
-/// `nativePlayable` to `degradedPlayable` when (e.g.) the shader compiler
-/// hasn't shipped yet — that keeps the contract honest as features land
-/// without re-classifying every scene.
+/// The tier reflects what the SCENE asks for, not what the renderer currently
+/// supports. The dispatch layer downgrades `nativePlayable` to
+/// `degradedPlayable` when a feature hasn't shipped yet, so scenes never need
+/// re-classifying as features land.
 enum WPEScenePreflight {
     static func classify(
         document: WPESceneDocument,

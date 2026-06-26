@@ -5,14 +5,9 @@ import CoreText
 import Foundation
 import Metal
 
-/// CoreText-based text rasterizer. Lays out a `WPESceneTextObject` into
-/// a CGContext and uploads the result as an MTLTexture. The runtime
-/// composites the texture as if it were a regular image layer.
-///
-/// Caching: each rasterization is keyed by `(text, font, size, color,
-/// alpha, horizontalAlign, maxWidth)` so repeated frames with static
-/// text amortize the CoreText layout. The cache is bounded; oldest
-/// entries get evicted when the store grows past `cacheLimit`.
+/// CoreText-based text rasterizer. The runtime composites the texture as if
+/// it were a regular image layer. Cache keyed by everything that affects
+/// layout so static text amortizes the CoreText layout; bounded by `cacheLimit`.
 @MainActor
 final class WPETextRenderer {
     private struct CacheKey: Hashable {
@@ -42,7 +37,6 @@ final class WPETextRenderer {
         self.resolver = resolver
     }
 
-    /// Rasterize `object` to an MTLTexture sized to its measured bounds.
     func rasterize(_ object: WPESceneTextObject) -> (texture: MTLTexture, size: CGSize)? {
         ensureFontRegistered(object.fontRelativePath)
         let fontSize = effectiveFontSize(for: object)
@@ -100,10 +94,9 @@ final class WPETextRenderer {
         unmanagedError?.release()
     }
 
-    /// Effective font size: when the object carries a WPE `boxSize`, scale the
-    /// font so the text fills the box minus `padding` (preserving aspect),
-    /// matching WPE which renders text as an image whose texture is `size`.
-    /// Without a box, fall back to the raw authored `pointSize`.
+    /// When the object carries a WPE `boxSize`, scale the font so the text fills
+    /// the box minus `padding` (preserving aspect), matching WPE which renders
+    /// text as an image whose texture is `size`. Without a box, use raw `pointSize`.
     private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
         let base = CGFloat(max(object.pointSize, 1))
         guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }

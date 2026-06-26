@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// Shared gallery-card chrome: optional Liquid-Glass backing, hairline stroke,
-/// resting/hover shadow, a 1.02× hover lift, and a selected accent ring. Pass
-/// `useGlass` for content cards; library tiles that supply their own backing
-/// leave it off.
+/// Shared gallery-card chrome. Pass `useGlass` for content cards; library tiles
+/// that supply their own backing leave it off.
 public struct GalleryTileChrome: ViewModifier {
     public let isHovering: Bool
     public let isSelected: Bool

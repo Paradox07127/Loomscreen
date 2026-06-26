@@ -77,7 +77,6 @@ struct WPESceneScriptRuntimeTests {
         }
         """
         let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
-        // The registered default (':') must be readable, not undefined.
         #expect(instance.tickString() == ":OK")
     }
 
@@ -242,11 +241,10 @@ struct WPESceneScriptRuntimeTests {
             tickBudget: 0.2
         )
         #expect(instance.tickString() == "armed")
-        // Second tick enters the infinite loop — must return within the
-        // budget instead of hanging the calling thread...
+        // Second tick enters the infinite loop — must return within budget
+        // instead of hanging, then stay frozen (poisoned) without re-touching
+        // the hung JSContext.
         #expect(instance.tickString() == "armed")
-        // ...and the instance stays frozen (poisoned) from then on, without
-        // touching the hung JSContext again.
         #expect(instance.tickString() == "armed")
     }
 
@@ -656,7 +654,6 @@ struct WPESceneScriptRuntimeTests {
         let clock = Clock()
         let instance = try WPELayerScriptInstance(script: script, nowProviderMillis: { clock.now() })
 
-        // init(): layer hidden, video stopped + rewound, alpha seeded to 1.
         #expect(instance.initialOutput.own.visible == false)
         #expect(instance.initialOutput.own.alpha == 1)
         #expect(instance.initialOutput.own.videoCommands.contains(.stop))
@@ -665,14 +662,12 @@ struct WPESceneScriptRuntimeTests {
         // Use a realistic epoch base — the script treats `startTime === 0` as its
         // "not started" sentinel, so a literal 0 would collide with real time.
         let base: Double = 1_000_000
-        // First update: starts playback, layer visible, alpha 1.
         clock.set(base)
         let first = try #require(instance.tick()).own
         #expect(first.videoCommands.contains(.play))
         #expect(first.alpha == 1)
         #expect(first.visible == true)
 
-        // Mid-window (t=5s): still playing, no new commands.
         clock.set(base + 5000)
         let mid = try #require(instance.tick()).own
         #expect(mid.visible == true)
@@ -715,7 +710,6 @@ struct WPESceneScriptRuntimeTests {
         #expect(other.alpha == 0)
         #expect(other.videoCommands.contains(.stop))
         #expect(other.videoCommands.contains(.seek(0)))
-        // The button itself stays visible.
         #expect(instance.initialOutput.own.visible == true)
     }
 }

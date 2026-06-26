@@ -2,10 +2,8 @@
 import Foundation
 import Security
 
-/// Stores the Steam Web API key locally, in the user's Keychain. The slot is
-/// `WhenUnlockedThisDeviceOnly` + `Synchronizable=false` — explicitly **no
-/// iCloud sync**. The actor isolation keeps read/update/delete ordered for
-/// the single-slot value while keeping callers async.
+/// Keychain slot for the Steam Web API key is `WhenUnlockedThisDeviceOnly` +
+/// `Synchronizable=false` — explicitly **no iCloud sync**.
 actor WorkshopKeychainStore {
 
     private static let service = "com.loomscreen.livewallpaper.workshop.webapikey"

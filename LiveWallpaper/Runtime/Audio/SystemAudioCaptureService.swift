@@ -9,20 +9,17 @@ import LiveWallpaperCore
 /// shared `AudioSpectrumBroker` that every audio-reactive surface (Metal scene
 /// uniforms and the HTML `wallpaperRegisterAudioListener`) reads.
 ///
-/// This is the loopback source that mirrors Wallpaper Engine: the visualizer
-/// follows whatever the user is actually playing (Spotify, a game, a browser),
-/// not just the wallpaper's own declared sounds. `WPESoundRuntime` is demoted to
-/// a pure player and no longer supplies the spectrum.
+/// Loopback source that mirrors Wallpaper Engine: the visualizer follows
+/// whatever the user is actually playing, not just the wallpaper's own declared
+/// sounds. `WPESoundRuntime` is demoted to a pure player and no longer supplies
+/// the spectrum.
 ///
-/// Lifecycle (all on the main thread): `start()` builds tap → private aggregate
-/// device → IOProc and begins capture; `stop()` tears down in reverse. The
-/// IOProc block runs on a dedicated serial queue and is allocation-free in
-/// steady state — it deinterleaves into preallocated scratch buffers, runs the
-/// FFT, and publishes via the broker's drop-on-contention `publish`.
+/// Lifecycle is main-thread only; `stop()` tears down in reverse build order.
+/// The IOProc block runs on a dedicated serial queue and is allocation-free in
+/// steady state (preallocated scratch buffers, drop-on-contention `publish`).
 ///
-/// Availability: `AudioHardwareCreateProcessTap` is macOS 14.2+. The product
-/// floor is being raised to 26+, but the guard keeps the file compiling against
-/// the current 14.0 deployment target until that bump lands.
+/// `AudioHardwareCreateProcessTap` is macOS 14.2+; the guard keeps the file
+/// compiling against the 14.0 deployment target until the floor bump lands.
 @available(macOS 14.2, *)
 final class SystemAudioCaptureService: @unchecked Sendable {
     enum CaptureError: Error, CustomStringConvertible {
@@ -52,9 +49,8 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         let broker: AudioSpectrumBroker
         var scratchLeft: [Float] = []
         var scratchRight: [Float] = []
-        /// Time-domain peak |sample| of the most recent callback. Diagnostic
-        /// only (written on ioQueue, read on main) — confirms the tap delivers
-        /// normalized [-1, 1] audio rather than non-normalized data.
+        /// Diagnostic only (written on ioQueue, read on main) — confirms the tap
+        /// delivers normalized [-1, 1] audio rather than non-normalized data.
         var lastInputPeak: Float = 0
 
         init(processor: AudioSpectrumProcessor, broker: AudioSpectrumBroker) {
@@ -74,7 +70,6 @@ final class SystemAudioCaptureService: @unchecked Sendable {
 
     private(set) var isRunning = false
 
-    /// Diagnostic: peak |sample| of the most recent capture callback.
     var lastInputPeak: Float { context?.lastInputPeak ?? 0 }
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -111,7 +106,6 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         }
         tapID = newTapID
 
-        // 2. Resolve the tap's UID + stream format.
         let tapUID: CFString
         do {
             tapUID = try readTapUID(tapID)
@@ -127,7 +121,7 @@ final class SystemAudioCaptureService: @unchecked Sendable {
             throw CaptureError.tapFormatUnavailable(formatStatus)
         }
 
-        // 3. Private aggregate device that auto-starts the sub-tap.
+        // Private aggregate device; `TapAutoStartKey` auto-starts the sub-tap.
         let aggregateUID = UUID().uuidString
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey as String: "LiveWallpaper Audio Capture",
@@ -154,8 +148,7 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         }
         aggregateID = newAggregateID
 
-        // 4. Processor matched to the tap's real sample rate; shared context for
-        //    the IOProc (captured instead of `self`).
+        // Shared context captured by the IOProc instead of `self`.
         let processor = AudioSpectrumProcessor(
             configuration: AudioSpectrumProcessor.Configuration(sampleRate: Float(asbd.mSampleRate))
         )
@@ -247,7 +240,6 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         let timestampNanos = AudioConvertHostTimeToNanos(AudioGetCurrentHostTime())
 
         if isInterleaved || bufferList.count == 1 {
-            // One interleaved (or single mono) buffer.
             let buffer = bufferList[0]
             guard let raw = buffer.mData else { return }
             let channels = max(Int(buffer.mNumberChannels), channelCount, 1)

@@ -970,8 +970,6 @@ struct GlobalSettingsDecoderTests {
 //
 // Regression coverage for the bug where slots wrapping midnight (e.g. 22→6)
 // produced negative segment widths and disappeared from the visualization.
-// `timelineSegments` now lives on `ScheduleSlot` so both Pro (LiveWallpaper)
-// and the package tests can share the single source of truth.
 
 @Suite("ScheduleSlot.timelineSegments()")
 struct ScheduleSlotTimelineSegmentsTests {

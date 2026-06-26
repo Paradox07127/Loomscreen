@@ -10,16 +10,15 @@ enum GIFPlaybackMode {
     case autoPlay
 }
 
-/// A Workshop preview tile that shows a static poster by default and plays the
-/// underlying GIF/APNG only while hovered (`.hoverToPlay`) or immediately for
-/// focused detail surfaces (`.autoPlay`). Matches the macOS Photos / Quick Look
-/// idiom: no grid of 20 simultaneously animating tiles.
+/// Workshop preview tile: static poster by default, plays the GIF/APNG only
+/// while hovered (`.hoverToPlay`) or immediately for detail surfaces
+/// (`.autoPlay`). The hover gate exists so a grid never animates 20 tiles at
+/// once (macOS Photos / Quick Look idiom).
 struct AnimatedGIFThumbnail: View {
     let url: URL?
     var playbackMode: GIFPlaybackMode = .hoverToPlay
-    /// When true the poster is heavily blurred behind a "click to reveal" cover
-    /// and playback is suppressed — the adult-content spoiler gate. Flipping it
-    /// back to false (the parent's reveal) resumes normal hover/auto playback.
+    /// Adult-content spoiler gate: blurs the poster behind a "click to reveal"
+    /// cover and suppresses playback. The parent flipping it false resumes play.
     var isBlurred: Bool = false
     @Binding var isHovered: Bool
 
@@ -84,9 +83,8 @@ struct AnimatedGIFThumbnail: View {
         }
     }
 
-    /// Spoiler scrim shown over a blurred adult thumbnail. The eye glyph + label
-    /// double as the "this is mature content" warning; tapping the tile (handled
-    /// by the parent) reveals it.
+    /// Spoiler scrim over a blurred adult thumbnail; the parent handles the
+    /// reveal tap.
     private var matureCover: some View {
         ZStack {
             Color.black.opacity(0.45)
@@ -160,9 +158,8 @@ struct AnimatedGIFThumbnail: View {
         applyPlaybackGate()
     }
 
-    /// Single source of truth for playback: the gate decides, the controller
-    /// obeys. Grid tiles debounce + auto-stop; focused detail heroes run while
-    /// the gate holds.
+    /// Single source of truth: the gate decides, the controller obeys. Grid
+    /// tiles debounce; detail heroes run while the gate holds.
     private func applyPlaybackGate() {
         guard GIFPlaybackCoordinator.shared.allowsPlayback(playbackGate) else {
             controller.stop()
@@ -172,10 +169,9 @@ struct AnimatedGIFThumbnail: View {
     }
 }
 
-/// Owns the frame-stepping state for one thumbnail. A reference type (rather
-/// than view `@State`) so the playback `Task` and the coordinator's eviction
-/// closure can capture it weakly and mutate it safely from outside the SwiftUI
-/// update pass.
+/// Frame-stepping state for one thumbnail. A reference type (not view `@State`)
+/// so the playback `Task` and the coordinator's eviction closure can capture it
+/// weakly and mutate it from outside the SwiftUI update pass.
 @MainActor
 @Observable
 final class GIFAnimationController {
@@ -187,16 +183,14 @@ final class GIFAnimationController {
     private var playbackTask: Task<Void, Never>?
     private var debounceTask: Task<Void, Never>?
 
-    /// Installs a new asset, resetting any in-flight playback to its poster.
     func setAsset(_ asset: WorkshopPreviewAsset?) {
         stop(resetToPoster: false)
         self.asset = asset
         displayedFrame = asset?.posterFrame
     }
 
-    /// Starts playback for the current animated asset. `debounced` adds a short
-    /// hover delay (250 ms) so a rapid mouse sweep across a grid doesn't thrash
-    /// the decoder; hover-exit during the window cancels before any frame decodes.
+    /// `debounced` adds a 250 ms hover delay so a rapid mouse sweep across a grid
+    /// doesn't thrash the decoder; hover-exit in the window cancels before decode.
     func play(debounced: Bool) {
         guard case .animatedGIF = asset, playbackTask == nil else { return }
         debounceTask?.cancel()
@@ -209,8 +203,8 @@ final class GIFAnimationController {
         }
     }
 
-    /// Stops playback. Restores the poster frame instantly unless suppressed
-    /// (e.g. on disappear, where there is nothing left to show).
+    /// Restores the poster frame unless suppressed (e.g. on disappear, where
+    /// there is nothing left to show).
     func stop(resetToPoster: Bool = true) {
         debounceTask?.cancel()
         debounceTask = nil
@@ -247,8 +241,8 @@ final class GIFAnimationController {
         }
     }
 
-    /// Non-poster frames decode off the main actor — `CGImageSourceCreateImageAtIndex`
-    /// is free-threaded, and this keeps heavy decodes off the render loop.
+    /// Decodes off the main actor: `CGImageSourceCreateImageAtIndex` is
+    /// free-threaded, keeping heavy decodes off the render loop.
     private static func decode(_ gif: WorkshopAnimatedGIF, at index: Int) async -> CGImage? {
         await Task.detached(priority: .userInitiated) {
             gif.frame(at: index)

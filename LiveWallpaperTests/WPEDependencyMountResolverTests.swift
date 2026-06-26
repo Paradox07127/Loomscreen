@@ -63,7 +63,6 @@ struct WPEDependencyMountResolverTests {
         let dependency = workshopRoot.appendingPathComponent("456", isDirectory: true)
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dependency, withIntermediateDirectories: true)
-        // Packaged dependency: assets live inside scene.pkg (project.json loose).
         try Data("{}".utf8).write(to: dependency.appendingPathComponent("project.json"))
         let pkgURL = dependency.appendingPathComponent("scene.pkg")
         try Data("PKGV0022".utf8).write(to: pkgURL)

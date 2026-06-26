@@ -54,7 +54,7 @@ public enum ConfigurationPorter {
     /// seconds on a hostile file.
     public static let maxImportFileSize: Int = 16 * 1024 * 1024
 
-    /// Encodes the bundle to pretty-printed JSON so users who open the file in a text editor see readable content.
+    /// Pretty-printed so the file is readable if a user opens it in a text editor.
     public static func encode(_ bundle: ConfigurationBundle) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -62,7 +62,6 @@ public enum ConfigurationPorter {
         return try encoder.encode(bundle)
     }
 
-    /// Writes a bundle to `destination` atomically.
     @discardableResult
     public static func export(_ bundle: ConfigurationBundle, to destination: URL) throws -> URL {
         let data = try encode(bundle)
@@ -74,7 +73,7 @@ public enum ConfigurationPorter {
         return destination
     }
 
-    /// Decodes (but does NOT apply) a bundle for preview / dialog purposes.
+    /// Decodes but does NOT apply — for preview / dialog purposes.
     public static func decode(from source: URL) throws -> ConfigurationBundle {
         if let size = try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize,
            size > maxImportFileSize {

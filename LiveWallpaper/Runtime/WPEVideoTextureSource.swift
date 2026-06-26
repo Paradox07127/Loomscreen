@@ -11,19 +11,15 @@ import QuartzCore
 /// that MP4 back on the wall clock and hands the renderer the current
 /// frame as a Metal texture.
 ///
-/// Pacing uses `AVPlayer` so frames schedule against the same host clock as
-/// the Metal pipeline. Frames are tapped via a player-level `AVPlayerVideoOutput`
-/// on macOS 15+ (gapless across the looper's item rotations) and an
-/// `AVPlayerItemVideoOutput` on the macOS 14 fallback.
-///
-/// Pixel format prefers `.bgra8Unorm_srgb` to match
-/// `WPEMetalRenderExecutor.outputPixelFormat`, with `.bgra8Unorm` as the
-/// fallback when the GPU rejects the sRGB variant.
+/// Frames are tapped via a player-level `AVPlayerVideoOutput` on macOS 15+
+/// (gapless across the looper's item rotations) and an `AVPlayerItemVideoOutput`
+/// on the macOS 14 fallback. Pixel format prefers `.bgra8Unorm_srgb` to match
+/// `WPEMetalRenderExecutor.outputPixelFormat`, falling back to `.bgra8Unorm`
+/// when the GPU rejects the sRGB variant.
 ///
 /// Lifecycle: the player stays paused after `init`; the renderer's
-/// `applyPerformanceProfile(currentProfile)` (called once textures
-/// finish loading) decides whether to start it, which also respects a
-/// pre-load `.suspended` profile.
+/// `applyPerformanceProfile(currentProfile)` (called once textures finish
+/// loading) decides whether to start it, respecting a pre-load `.suspended`.
 @MainActor
 final class WPEVideoTextureSource {
     private let textureCache: CVMetalTextureCache
@@ -111,10 +107,10 @@ final class WPEVideoTextureSource {
 
         let queuePlayer = AVQueuePlayer()
         queuePlayer.actionAtItemEnd = .none
-        // Let the player briefly ensure the next looped item's frames are ready
-        // before resuming at the loop point, instead of playing through the
-        // handoff with a sparse decode (the "slow-motion" at the wrap). The asset
-        // is RAM-resident, so this wait is effectively instant — no visible pause.
+        // Let the player ensure the next looped item's frames are ready before
+        // resuming at the loop point, instead of playing the handoff with a sparse
+        // decode (the "slow-motion" at the wrap). The asset is RAM-resident, so the
+        // wait is effectively instant — no visible pause.
         queuePlayer.automaticallyWaitsToMinimizeStalling = true
         queuePlayer.preventsDisplaySleepDuringVideoPlayback = false
         queuePlayer.isMuted = true
@@ -150,10 +146,9 @@ final class WPEVideoTextureSource {
 
         // Play-once for a script-controlled source. Rather than mutate the
         // AVPlayerLooper queue (which races the frame tap), detect the natural
-        // loop wrap — the looper restarts a fresh item at ~0 — and freeze: pause
-        // and keep returning the last frame published before the wrap. The
-        // script then fades/hides the layer. Script-initiated seeks (replay) reset
-        // this via `resetScriptPlayback()`.
+        // loop wrap (the looper restarts a fresh item at ~0) and freeze on the
+        // last pre-wrap frame; the script then fades/hides the layer. Reset by a
+        // script-initiated seek via `resetScriptPlayback()`.
         if scriptControlled {
             if scriptHeldAtEnd { return latest?.texture }
             let playhead = playheadSeconds
@@ -195,8 +190,8 @@ final class WPEVideoTextureSource {
         guard !isInvalidated else { return }
         switch profile {
         case .quality:
-            // A script-owned source decides its own playback (e.g. an intro that
-            // plays once); don't force-play it back to life on a policy resume.
+            // A script-owned source decides its own playback (e.g. a play-once
+            // intro); don't force-play it back to life on a policy resume.
             if !scriptControlled { player.play() }
         case .suspended:
             player.pause()
@@ -211,8 +206,7 @@ final class WPEVideoTextureSource {
     private var scriptControlled = false
     /// Last observed playhead, to detect the loop wrap (playhead jumps backward).
     private var scriptLastPlaybackSeconds: TimeInterval = 0
-    /// True once the single play reached its end and the source froze on the last
-    /// frame. Cleared by a script-initiated seek/replay.
+    /// True once the single play reached its end and froze on the last frame.
     private var scriptHeldAtEnd = false
 
     private func enterScriptControlledMode() {
@@ -335,11 +329,10 @@ final class WPEVideoTextureSource {
     /// decoder state.
     private static let bufferHintSeconds: TimeInterval = 2
 
-    /// Pixel-buffer attributes for the BGRA Metal-compatible video output. Typed
-    /// as `[String: any Sendable]` (every value — `OSType`, `Bool`, empty dict —
-    /// is `Sendable`) so the dictionary is itself `Sendable` and the
-    /// strict-concurrency call-site warning on the `AVPlayerItemVideoOutput` init
-    /// goes away; it converts to the API's `[String: Any]` at the call.
+    /// BGRA Metal-compatible video output attributes. Typed as
+    /// `[String: any Sendable]` (every value is `Sendable`) so the dictionary is
+    /// itself `Sendable` and the strict-concurrency warning on the
+    /// `AVPlayerItemVideoOutput` init goes away; converts to `[String: Any]` at the call.
     private static let outputPixelBufferAttributes: [String: any Sendable] = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
         kCVPixelBufferMetalCompatibilityKey as String: true,
@@ -391,8 +384,7 @@ private final class WPEPlayerLevelVideoOutput {
         let specification = AVVideoOutputSpecification(tagCollections: [.monoscopicForVideoOutput()])
         // Pin the output to 32BGRA so `publish(pixelBuffer:)`'s
         // `.bgra8Unorm[_srgb]` texture path is unchanged. `defaultOutputSettings`
-        // applies to every tag collection without an explicit mapping; it is
-        // `NS_SWIFT_SENDABLE`, so the dictionary is typed as `any Sendable`.
+        // applies to every tag collection without an explicit mapping.
         let outputSettings: [String: any Sendable] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferMetalCompatibilityKey as String: true,

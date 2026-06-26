@@ -2,10 +2,6 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Modal sheet that hosts the Workshop URL paste field + queue (Surface 2
-/// from the plan). v1 surfaces metadata fetch + "Open in Steam" — download
-/// actions per row are reserved for Phase 3 once Doctor + SteamCMD plumbing
-/// land.
 struct WorkshopPasteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = WorkshopPasteQueueModel()

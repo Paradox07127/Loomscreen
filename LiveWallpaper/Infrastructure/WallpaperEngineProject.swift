@@ -1,7 +1,6 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Typed model of a Wallpaper Engine `project.json` manifest.
 struct WallpaperEngineProject: Sendable, Equatable {
     let workshopID: String
     let title: String
@@ -58,7 +57,7 @@ struct WallpaperEngineProject: Sendable, Equatable {
         )
     }
 
-    /// Pulls workshop IDs out of the top-level `dependencies` array in `project.json` (the only manifest shape WPE actually emits in practice).
+    /// Top-level `dependencies` array is the only manifest shape WPE actually emits in practice.
     private static func collectDependencyWorkshopIDs(from manifest: DecodedManifest) -> [String] {
         var ids = Set<String>()
         for raw in manifest.dependencies ?? [] {
@@ -69,14 +68,12 @@ struct WallpaperEngineProject: Sendable, Equatable {
         return ids.sorted()
     }
 
-    /// Heuristic check for a Steam Workshop ID.
     private static func looksLikeWorkshopID(_ value: String) -> Bool {
         let digits = value.count
         guard (9...20).contains(digits) else { return false }
         return value.allSatisfy(\.isNumber)
     }
 
-    /// Recursively walks `bin/` looking for any `.dll`.
     private static func detectsWindowsPlugin(in folder: URL) -> Bool {
         let bin = folder.appendingPathComponent("bin", isDirectory: true)
         var isDir: ObjCBool = false
@@ -180,7 +177,6 @@ private extension KeyedDecodingContainer {
         return nil
     }
 
-    /// Decodes a JSON array whose elements may be strings or numeric IDs and returns a flat string list.
     func decodeFlexibleStringArray(forKey key: Key) throws -> [String]? {
         guard contains(key) else { return nil }
         if let strings = try? decode([String].self, forKey: key) {

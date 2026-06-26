@@ -12,11 +12,9 @@ final class InspectorPreviewController {
     private(set) var currentPosition: Double = 0
     private(set) var duration: Double = 1
     private(set) var lastError: String?
-    /// Last URL handed to either `loadPoster(from:)` or
-    /// `startPlaybackPreview(from:)`. Lets the info overlay load asset
-    /// metadata (resolution / FPS / format / size) before — or instead of —
-    /// the player coming up, so the overlay can show even on the poster /
-    /// unloaded states.
+    /// Last URL handed to `loadPoster`/`startPlaybackPreview`. Lets the info
+    /// overlay load asset metadata before — or instead of — the player coming
+    /// up, so it can show on the poster / unloaded states.
     private(set) var assetURL: URL?
 
     @ObservationIgnored private var playerObserver: AnyCancellable?
@@ -30,9 +28,8 @@ final class InspectorPreviewController {
     }
 
     deinit {
-        // `cleanup()` is the normal path; this catches owners that drop the
-        // controller without calling it, which would otherwise leave the
-        // 500 ms position-poll task looping forever.
+        // Backstop for owners that drop the controller without calling
+        // `cleanup()`, else the 500 ms position-poll task loops forever.
         positionTask?.cancel()
         posterTask?.cancel()
     }

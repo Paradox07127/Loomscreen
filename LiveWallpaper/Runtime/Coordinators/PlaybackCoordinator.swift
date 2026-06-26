@@ -3,57 +3,44 @@ import AVFoundation
 import Foundation
 
 /// Owns per-screen playback configuration mutations + the
-/// `PlaybackTransitionRegistry` for async-transition tracking. Slice 4 of
-/// Week 4 Task 4.5 — absorbs `setVideo` + `applyConfiguration` +
-/// `setupVideoPlayback`, completing the playback API surface migration so
-/// ScreenManager only forwards. The remaining ScreenManager-owned hooks
-/// (releaseRuntimeSession, notifyWallpaperSessionChanged) remain as callbacks
-/// because they touch Combine lifetimes + notification surfaces outside this
-/// coordinator's responsibility.
+/// `PlaybackTransitionRegistry` for async-transition tracking. The remaining
+/// ScreenManager-owned hooks (releaseRuntimeSession, notifyWallpaperSessionChanged)
+/// stay as callbacks because they touch Combine lifetimes + notification surfaces
+/// outside this coordinator's responsibility.
 @MainActor
 final class PlaybackCoordinator {
     let transition = PlaybackTransitionRegistry()
 
     private let configurationStore: WallpaperConfigurationStore
     private let playableVideoLoader: any PlayableVideoLoading
-    /// Applies the unified performance policy to a freshly built/replaced
-    /// session. Injected from `ScreenManager` (the single source of truth) so
-    /// this coordinator never re-assembles the policy inputs itself.
+    /// Injected from `ScreenManager` (the single source of truth) so this
+    /// coordinator never re-assembles the policy inputs itself.
     private let applyPolicy: @MainActor (Screen) -> Void
-    /// Hook into ScreenManager-owned effect application — kept as a callback
-    /// because `applyVideoEffects` reaches into Combine lifetimes that aren't
-    /// part of this coordinator's responsibility yet.
+    /// Kept as a callback because `applyVideoEffects` reaches into Combine
+    /// lifetimes that aren't part of this coordinator's responsibility yet.
     private let applyVideoEffects: @MainActor (Screen, ScreenConfiguration) -> Void
     /// Hook for ScreenManager's cached `CGDisplayCopyDisplayMode` lookup —
     /// avoids re-implementing the cache or paying its cost on every setter.
     private let refreshRateLookup: @MainActor (CGDirectDisplayID) -> Int
-    /// Snapshot of the current registered screens; matches
-    /// `ScreenManager.screens` so the coordinator can resolve a live
+    /// Matches `ScreenManager.screens` so the coordinator can resolve a live
     /// reference after async work returns.
     private let screensProvider: @MainActor () -> [Screen]
-    /// Hook into `ScreenManager.markWallpaperSessionStateChanged` — used by
-    /// the deferred autoplay path so the inspector / sidebar refresh after
-    /// the policy decides to start playback.
+    /// `ScreenManager.markWallpaperSessionStateChanged` — used by the deferred
+    /// autoplay path so the inspector / sidebar refresh after the policy decides
+    /// to start playback.
     private let markSessionStateChanged: @MainActor () -> Void
-    /// Tears down a screen's runtime session including video-effects cancel,
-    /// asset-readiness cancel, transition bump, and power-policy cleanup.
-    /// Owned by ScreenManager so the lifecycle stays single-source-of-truth.
+    /// Owned by ScreenManager so the session lifecycle stays single-source-of-truth.
     private let releaseRuntimeSession: @MainActor (Screen) -> Void
-    /// Hook into ScreenManager's full session-changed pipeline (state version
-    /// bump + summary cache refresh + playback state push + full-screen
-    /// fallback re-evaluation).
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
-    /// Hook for async validation / setup failures that happen before a
+    /// For async validation / setup failures that happen before a
     /// `VideoWallpaperSession` exists to publish its own runtime error.
     private let reportRuntimeError: @MainActor (CGDirectDisplayID, WallpaperRuntimeError?) -> Void
-    /// Strategy for keeping `ScreenConfiguration.wpeOrigin` consistent with
-    /// the active wallpaper. Injected so Lite can swap in a no-op variant.
+    /// Injected so Lite can swap in a no-op variant.
     private let originReconciler: any OriginReconciler
-    /// Master render gate. When this returns `false`, video session
-    /// construction is skipped (configuration stays persisted by the caller)
-    /// so the player/decoder is never allocated while wallpapers are globally
-    /// disabled — mirrors the gate `ScreenManager.restoreWallpaperSession`
-    /// applies to scene/HTML sessions.
+    /// Master render gate. When `false`, video session construction is skipped
+    /// (configuration stays persisted by the caller) so the player/decoder is
+    /// never allocated while wallpapers are globally disabled — mirrors the gate
+    /// `ScreenManager.restoreWallpaperSession` applies to scene/HTML sessions.
     private let isGloballyEnabled: @MainActor () -> Bool
 
     init(
@@ -132,8 +119,7 @@ final class PlaybackCoordinator {
         #endif
     }
 
-    /// Scene-only "Mouse Interaction" toggle: persists the per-screen preference
-    /// and pushes it to the live scene session so the change takes effect now.
+    /// Scene-only "Mouse Interaction" toggle: persists + pushes live.
     func updateSceneMouseInteraction(_ enabled: Bool, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               enabled != configuration.sceneMouseInteractionEnabled else { return }
@@ -145,7 +131,7 @@ final class PlaybackCoordinator {
     }
 
     /// Scene-only "Interactive" (click capture) toggle: persists + pushes live.
-    /// Enabling makes the scene window capture clicks (steals desktop clicks).
+    /// Enabling makes the scene window steal desktop clicks.
     func updateSceneClickCapture(_ enabled: Bool, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               enabled != configuration.sceneClickCaptureEnabled else { return }
@@ -156,9 +142,9 @@ final class PlaybackCoordinator {
         #endif
     }
 
-    /// Scene fit mode (how the scene fills a non-16:9 display): persists + pushes
-    /// live. Reuses the shared `fitMode` field; only the apply path differs from
-    /// video (`SceneWallpaperSession` instead of the AV player).
+    /// Scene fit mode: persists + pushes live. Reuses the shared `fitMode` field;
+    /// only the apply path differs from video (`SceneWallpaperSession` instead of
+    /// the AV player).
     func updateSceneFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               fitMode != configuration.fitMode else { return }

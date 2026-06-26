@@ -16,7 +16,6 @@ protocol WPEShaderCompiling: Sendable {
 }
 
 extension WPEShaderCompiling {
-    /// Default entry point: the lazy render path records failures as before.
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
         try compile(request, recordFailure: true)
     }
@@ -108,12 +107,9 @@ struct WPEShaderCompileResult: @unchecked Sendable {
     let fragmentFunctionName: String
     /// Generated MSL source, kept for disk caching and snapshot tests.
     let mslSource: String
-    /// Diagnostics from the underlying compiler (warnings, info). Empty in
-    /// the happy path; surfaced verbatim to make corpus regressions obvious.
     let diagnostics: [String]
-    /// Per-uniform float4 slot assignment matching the layout the
-    /// transpiler emitted. The dispatcher walks this to pack the runtime
-    /// uniform buffer. Empty when the shader took no uniforms.
+    /// Per-uniform float4 slot assignment matching the layout the transpiler
+    /// emitted. The dispatcher walks this to pack the runtime uniform buffer.
     let uniformLayout: [WPEUniformSlot]
     /// Names of the texture samplers the shader expects, ordered by slot.
     let samplerNames: [String]

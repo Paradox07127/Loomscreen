@@ -2,8 +2,6 @@ import SwiftUI
 import AppKit
 
 /// Centralised design tokens for spacing, corners, and visual metrics.
-/// Use these instead of inline magic numbers when building new UI.
-/// Existing call sites may migrate incrementally.
 public enum DesignTokens {
     public enum Colors {
         // Surfaces — automatically adapt to light/dark and Increase Contrast.
@@ -11,17 +9,13 @@ public enum DesignTokens {
         public static let surfaceRaised = Color(nsColor: .controlBackgroundColor)
         public static let surfaceSunken = Color(nsColor: .underPageBackgroundColor)
 
-        // Text hierarchy.
         public static let textPrimary = Color(nsColor: .labelColor)
         public static let textSecondary = Color(nsColor: .secondaryLabelColor)
         public static let textTertiary = Color(nsColor: .tertiaryLabelColor)
 
-        // Lines & accent.
         public static let separator = Color(nsColor: .separatorColor)
         public static let accent = Color(nsColor: .controlAccentColor)
 
-        /// Semantic status colors — the single home for what used to be ad-hoc
-        /// `.orange` / `.yellow` / raw `Color(red:…)` literals scattered in views.
         public enum Status {
             public static let active = Color(nsColor: .systemGreen)
             public static let warning = Color(nsColor: .systemOrange)
@@ -39,38 +33,28 @@ public enum DesignTokens {
         }
     }
 
-    /// Semantic type scale. Prefer Dynamic Type styles so text auto-scales with
-    /// the user's accessibility settings; only `badge` is a fixed size because it
-    /// floats in tight, fixed-geometry chips. Never inline `.font(.system(size:))`.
+    /// Prefer Dynamic Type styles so text auto-scales with accessibility
+    /// settings; only `badge` is fixed-size because it floats in tight,
+    /// fixed-geometry chips. Never inline `.font(.system(size:))`.
     public enum Typography {
-        /// Micro labels: type pills, thumbnail/corner badges, status chips.
-        /// Dynamic Type's smallest style so badges still scale for accessibility.
         public static let badge = Font.system(.caption2).weight(.semibold)
 
-        /// Secondary metadata and helper text.
         public static let caption = Font.caption
         public static let captionEmphasized = Font.caption.weight(.semibold)
 
-        /// Default body copy and form labels.
         public static let body = Font.body
-        /// Emphasized body — card titles and list-row titles (≈13pt semibold).
         public static let bodyEmphasized = Font.body.weight(.semibold)
 
-        /// Group and inspector section headers — a step above `bodyEmphasized`
-        /// (which is also 13pt semibold) so hierarchy stays legible.
+        /// A step above `bodyEmphasized` (also 13pt semibold) so hierarchy stays legible.
         public static let sectionTitle = Font.title3.weight(.semibold)
 
-        /// Page / navigation / sheet titles.
         public static let pageTitle = Font.title2
 
-        /// Empty-state and onboarding display titles.
         public static let hero = Font.largeTitle
 
-        /// Inline numeric readouts (slider values, %, fps, gauges) — caption-sized
-        /// with tabular digits so dense columns stay compact and don't jitter.
+        /// Tabular digits so dense numeric columns stay compact and don't jitter.
         public static let metric = Font.caption.monospacedDigit()
 
-        /// Monospaced code/path/command/ID text (not numeric metrics).
         public static let code = Font.system(.body, design: .monospaced)
     }
 
@@ -99,10 +83,9 @@ public enum DesignTokens {
         public static let horizontalPadding: CGFloat = Spacing.md
         public static let verticalPadding: CGFloat = Spacing.lg
         /// Shared geometry for every inspector "label … [slider][value]" row so
-        /// sliders and their numeric readouts line up across all sections
-        /// (Playback, Environment, Color & Filters, HTML transform, WPE custom
-        /// settings). The readout font (`Typography.metric`) is already
-        /// monospaced, so call sites don't need a separate `.monospacedDigit()`.
+        /// sliders and their numeric readouts line up across all sections. The
+        /// readout font (`Typography.metric`) is already monospaced, so call
+        /// sites don't need a separate `.monospacedDigit()`.
         public static let sliderWidth: CGFloat = 96
         public static let sliderValueWidth: CGFloat = 40
         public static let sliderValueSpacing: CGFloat = 4
@@ -199,7 +182,7 @@ public enum DesignTokens {
         public static let restShadowYOffset: CGFloat = 1
     }
 
-    /// Returns the supplied animation when motion is allowed, otherwise nil so the change applies instantly.
+    /// nil when Reduce Motion is on, so the change applies instantly.
     public static func motion(_ reduceMotion: Bool, _ animation: Animation) -> Animation? {
         reduceMotion ? nil : animation
     }

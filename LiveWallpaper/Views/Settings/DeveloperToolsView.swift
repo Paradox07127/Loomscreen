@@ -3,19 +3,16 @@ import SwiftUI
 import AppKit
 
 /// Pro-only diagnostic surface gated at runtime by the Developer Mode
-/// toggle in Settings → General → Advanced. The sidebar entry is hidden
-/// by default and only appears once the user opts in, so end users never
-/// see this view unless they go looking for it. Streams a
-/// `WPECorpusPlaybackHarness` run, surfaces per-scene outcomes in a table,
-/// and lets the maintainer export the resulting JSON report for triage.
+/// toggle in Settings → General → Advanced — hidden until the user opts in,
+/// so end users never see it unless they go looking.
 struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
 
-    // Corpus Test machinery is DEBUG-only: the `WPECorpusPlaybackHarness` /
-    // `WPECorpusPlaybackReport` types it drives are themselves `#if DEBUG`, so
-    // none of this can compile (or run) in Release. Release Developer Tools
-    // shows only the Diagnostics tab. The GPU-capture list is DEBUG-only too —
-    // the renderer reads `WPEMetalCaptureScene` only under `#if DEBUG`.
+    // Corpus Test machinery is DEBUG-only: `WPECorpusPlaybackHarness` /
+    // `WPECorpusPlaybackReport` are themselves `#if DEBUG`, so none of this
+    // compiles in Release (which shows only the Diagnostics tab). The
+    // GPU-capture list is DEBUG-only too — the renderer reads
+    // `WPEMetalCaptureScene` only under `#if DEBUG`.
     #if DEBUG
     @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: "WPEMetalCaptureScene") ?? []
     @State private var newCaptureID: String = ""
@@ -169,11 +166,8 @@ struct DeveloperToolsView: View {
         resultsTable
     }
 
-    /// Per-scene debug iteration loop. Runs `WPECorpusPlaybackHarness` with
-    /// a single-workshop filter so the maintainer gets one fully-traced
-    /// load — every shader compile failure, FBO miss, first-frame snapshot,
-    /// and pipeline-state error lands under
-    /// `~/Library/Application Support/LiveWallpaper/scene-debug/<ts>-<id>/`.
+    /// Single-workshop-filtered harness run for one fully-traced load. Artifacts
+    /// land under `~/Library/Application Support/LiveWallpaper/scene-debug/<ts>-<id>/`.
     @ViewBuilder
     private var sceneDebugSection: some View {
         GroupBox(label: Text("Single-scene debug").font(.headline)) {
@@ -245,8 +239,8 @@ struct DeveloperToolsView: View {
         var id: String { key }
     }
 
-    /// Diagnostics whose backing behavior is compiled into every build (dump /
-    /// capture / verbose-log paths that work in Release too).
+    /// Diagnostics whose backing behavior is compiled into every build (so they
+    /// work in Release too), unlike the `#if DEBUG`-only flags appended below.
     private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = {
         var flags: [DiagnosticBoolFlag] = [
             .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
@@ -505,8 +499,8 @@ struct DeveloperToolsView: View {
     private func revealDebugArtifacts() {
         guard let root = WPESceneDebugArtifacts.rootURL else { return }
         let fm = FileManager.default
-        // Try to surface the most recent session for the entered workshop
-        // ID; fall back to the parent folder when nothing's there yet.
+        // Surface the most recent session for the entered workshop ID;
+        // fall back to the parent folder when nothing's there yet.
         let trimmed = singleSceneWorkshopID.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty,
            let children = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: []),

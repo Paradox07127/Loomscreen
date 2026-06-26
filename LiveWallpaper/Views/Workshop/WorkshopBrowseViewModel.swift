@@ -2,7 +2,6 @@
 import Foundation
 import Observation
 
-/// Content-type filter mapped to canonical Wallpaper Engine Workshop tags.
 enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
     case all
     case scene
@@ -29,18 +28,15 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Concrete selectable types (excludes `.all`, which was only the old
-    /// single-select "no restriction" sentinel).
+    /// Excludes `.all`, which was only the old single-select "no restriction" sentinel.
     static var selectableCases: [WorkshopContentTypeFilter] { [.scene, .video, .web] }
 
-    /// The single Workshop tag for this type (nil for `.all`).
     var tag: String? { requiredTags.first }
 }
 
-/// One of Wallpaper Engine's three maturity ratings, each an independent
-/// multi-select toggle (verbatim WPE text). Inclusion is expressed by EXCLUDING
-/// the unchecked ratings (`excludedtags`), so e.g. checking only Everyone hides
-/// Questionable + Mature.
+/// WPE's three maturity ratings, independent multi-select toggles. Inclusion is
+/// expressed by EXCLUDING the unchecked ratings (`excludedtags`), so checking
+/// only Everyone hides Questionable + Mature.
 enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
     case everyone
     case questionable
@@ -59,7 +55,6 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
 
     var tag: String { displayName }
 
-    /// Default = all selected (show everything); the user narrows by deselecting.
     static let defaultSelection: Set<WorkshopAgeRatingFilter> = Set(allCases)
 }
 
@@ -72,9 +67,8 @@ extension WorkshopQueryItem {
     }
 }
 
-/// Official Wallpaper Engine Workshop genre tags (exact display strings — Steam
-/// matches tags by exact case). Used in the deselect-to-narrow model: all are
-/// selected by default; deselected genres become `excludedtags`.
+/// Official WPE Workshop genre tags — exact display strings, since Steam matches
+/// tags by exact case. Deselect-to-narrow: deselected genres become `excludedtags`.
 enum WorkshopGenre {
     static let allTags: [String] = [
         "Abstract", "Animal", "Anime", "Cartoon", "CGI", "Cyberpunk", "Fantasy",
@@ -84,9 +78,8 @@ enum WorkshopGenre {
     ]
 }
 
-/// Resolution filter. An item targets a single resolution, so this is a
-/// single-select threshold mapping to one exact Workshop resolution tag (the
-/// core buckets — multi-select would AND to nothing). `.any` applies no tag.
+/// Single-select (an item targets one resolution, so multi-select would AND to
+/// nothing) mapping to one exact Workshop resolution tag. `.any` applies no tag.
 enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     case any
     case standardDefinition
@@ -99,8 +92,7 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Verbatim Wallpaper Engine Workshop labels — no renaming (issue: use the
-    /// original WPE tag text). `.any` is the only localized label.
+    /// Verbatim Wallpaper Engine Workshop labels — no renaming. `.any` is the only localized label.
     var displayName: String {
         switch self {
         case .any: return String(localized: "All", comment: "Workshop resolution filter: no restriction.")
@@ -114,7 +106,6 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Concrete selectable resolutions (excludes `.any`).
     static var selectableCases: [WorkshopResolutionFilter] { allCases.filter { $0 != .any } }
 
     /// Exact Steam Workshop resolution tag, or `nil` for `.any`.
@@ -132,16 +123,12 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// Drives `WorkshopBrowseView`. Holds the request shape, accumulates pages
-/// across the cursor pagination, debounces search input, and surfaces
-/// network / API errors for inline rendering. The view-model owns no
-/// download workflow — it's read-only browsing.
+/// Drives `WorkshopBrowseView`: request shape, paginated browse, debounced
+/// search, inline error surfacing. Read-only — owns no download workflow.
 @MainActor
 @Observable
 final class WorkshopBrowseViewModel {
 
-    /// A creator the grid is currently scoped to (their SteamID64 + resolved
-    /// persona name for the banner).
     struct CreatorFilter: Equatable {
         let steamID: String
         let name: String?
@@ -149,16 +136,14 @@ final class WorkshopBrowseViewModel {
 
     @ObservationIgnored private let services: WorkshopServices
 
-    /// Tags excluded from EVERY query regardless of user filters. Application
-    /// wallpapers cannot run in this runtime, so we never surface them in the
-    /// browse results (server-side exclusion, not a client-side post-filter).
+    /// Excluded from EVERY query: Application wallpapers can't run in this
+    /// runtime, so never surface them (server-side exclusion, not post-filter).
     nonisolated static let alwaysExcludedTags = ["Application"]
 
-    /// Pending search text. Typing schedules a debounced auto-search: once no
-    /// further edits arrive within `Self.searchDebounce`, the query fires on its
-    /// own. Return / the Search control still submit immediately, and the
-    /// debounce only queries when the quiet input actually changes the applied
-    /// request — so explicit submits, clear, and deep-links never double-fire.
+    /// Typing schedules a debounced auto-search (fires after `searchDebounce` of
+    /// quiet); Return / Search submit immediately. The debounce only queries when
+    /// the input actually changes the applied request, so submits/clear/deep-links
+    /// never double-fire.
     var searchInput: String = "" {
         didSet {
             guard searchInput != oldValue else { return }
@@ -166,39 +151,33 @@ final class WorkshopBrowseViewModel {
         }
     }
     var preferredSort: WorkshopSortMode = .topRated
-    // All four filters share one model: a multi-select Set, default = every
-    // option (no filter), and an empty set is treated the same as "all".
-    // Narrowing works by DESELECTING — the deselected options become
-    // `excludedtags`. The selections persist across launches.
+    // All four filters share one model: a multi-select Set defaulting to every
+    // option, with empty == "all". Narrowing DESELECTS → deselected options
+    // become `excludedtags`. Persisted across launches.
     private(set) var selectedTypes: Set<WorkshopContentTypeFilter> = Set(WorkshopContentTypeFilter.selectableCases)
     private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
     private(set) var selectedResolutions: Set<WorkshopResolutionFilter> = Set(WorkshopResolutionFilter.selectableCases)
     private(set) var selectedGenres: Set<String> = Set(WorkshopGenre.allTags)
-    /// Trending window in days (week / month / year …); only used when the sort
-    /// is `.trending`.
+    /// Trending window in days; only used when sort is `.trending`.
     private(set) var trendingDays: Int = 7
     /// When set, the grid shows only this creator's published files (via
-    /// GetUserFiles) and the normal filter ribbon is replaced by a "Works by …"
-    /// banner. Cleared to return to the normal filtered browse.
+    /// GetUserFiles). Mutually exclusive with `pinnedTag`.
     private(set) var creatorFilter: CreatorFilter?
-    /// When set, the grid is scoped to items carrying this exact Workshop tag —
-    /// the detail-inspector "click a tag" path. Mutually exclusive with
-    /// `creatorFilter`; cleared to return to the normal filtered browse.
+    /// When set, the grid is scoped to items carrying this exact Workshop tag
+    /// (detail-inspector tag-click path). Mutually exclusive with `creatorFilter`.
     private(set) var pinnedTag: String?
-    /// Workshop ids already in the local library, pushed in by the pane so the
-    /// grid can scope by install state. Observed → the grid re-derives
-    /// `displayedItems` when the library changes underneath it.
+    /// Pushed in by the pane; observed so the grid re-derives `displayedItems`
+    /// when the library changes underneath it.
     var installedWorkshopIDs: Set<String> = []
-    /// When true, Browse hides items already in the local library (the Installed
-    /// tab is where you revisit those). The preference itself lives in Settings →
-    /// Steam Workshop (`@AppStorage`); the pane pushes the current value in here.
+    /// The preference lives in Settings → Steam Workshop (`@AppStorage`); the
+    /// pane pushes the current value in here.
     var hidesDownloadedInBrowse: Bool = false
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var totalAvailable: Int?
     private(set) var isLoading: Bool = false
-    /// True while jumping to another page — current results stay on screen until
-    /// the new page replaces them, so memory stays bounded.
+    /// True while paging — current results stay on screen until the new page
+    /// replaces them, so memory stays bounded.
     private(set) var isPaging: Bool = false
     private(set) var lastError: WorkshopQueryError?
     /// Set when Steam returns HTTP 429; controls stay disabled until it lapses.
@@ -206,23 +185,19 @@ final class WorkshopBrowseViewModel {
 
     private static let perPage = 50
 
-    /// 1-based current page. Steam's QueryFiles `page` parameter lets us jump to
-    /// any page directly (so we can show "Page N of M" and jump-to-page).
+    /// 1-based. Steam's QueryFiles `page` param lets us jump to any page directly.
     private(set) var pageIndex: Int = 1
 
     var isRateLimited: Bool {
         (rateLimitUntil ?? .distantPast) > Date()
     }
 
-    /// The loaded page's items after optionally hiding already-downloaded ones.
-    /// The grid renders these; `items` stays the raw page so pagination/counts
-    /// are intact.
+    /// Grid renders these; `items` stays the raw page so pagination/counts stay intact.
     var displayedItems: [WorkshopQueryItem] {
         guard hidesDownloadedInBrowse else { return items }
         return items.filter { !installedWorkshopIDs.contains(String($0.id)) }
     }
 
-    /// Total pages from Steam's reported result count, when available.
     var totalPages: Int? {
         guard let total = totalAvailable, total > 0 else { return nil }
         return max(1, (total + Self.perPage - 1) / Self.perPage)
@@ -243,14 +218,12 @@ final class WorkshopBrowseViewModel {
     @ObservationIgnored private var currentRequestToken: UInt64 = 0
     @ObservationIgnored private var autoSearchTask: Task<Void, Never>?
 
-    /// Quiet window after the last keystroke before the auto-search fires.
-    /// Long enough that mid-word states don't burn API quota, short enough
-    /// that results feel live.
+    /// Quiet window after the last keystroke before auto-search fires: long
+    /// enough that mid-word states don't burn API quota, short enough to feel live.
     private static let searchDebounce: Duration = .milliseconds(500)
 
-    /// True when the pending filter/search state differs from what's currently
-    /// displayed — drives the "Search" button's enabled/prominent state. Filter
-    /// edits accumulate here and only hit the network when the user applies them.
+    /// True when pending filter/search state differs from what's displayed —
+    /// drives the Search button's enabled/prominent state.
     var hasPendingChanges: Bool {
         makeRequest(page: 1) != currentRequest
     }
@@ -258,8 +231,8 @@ final class WorkshopBrowseViewModel {
     init(services: WorkshopServices) {
         self.services = services
         self.currentRequest = WorkshopQueryRequest(sort: .topRated)
-        // Restore the user's last filter selection, then seed `currentRequest`
-        // to match it so `hasPendingChanges` is false on launch.
+        // Seed `currentRequest` to match the restored filters so
+        // `hasPendingChanges` is false on launch.
         loadPersistedFilters()
         self.currentRequest = makeRequest(page: 1)
     }
@@ -270,12 +243,10 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Restart the auto-apply countdown after a keystroke or a filter/sort
-    /// edit. Fires `reload()` once the state has been quiet for
-    /// `Self.searchDebounce` AND it would actually change the applied request —
-    /// typing inside a creator/tag scope (where search text is ignored) or
-    /// retyping the submitted query no-ops. Rapid chip toggling keeps
-    /// restarting the window, so a burst of edits still costs one request.
+    /// Restarts the auto-apply countdown; fires `reload()` after `searchDebounce`
+    /// of quiet, but only if it would actually change the applied request (typing
+    /// inside a creator/tag scope, or retyping the submitted query, no-ops). Rapid
+    /// toggling keeps restarting the window, so a burst of edits costs one request.
     private func scheduleAutoApply() {
         autoSearchTask?.cancel()
         autoSearchTask = Task { [weak self] in
@@ -305,9 +276,8 @@ final class WorkshopBrowseViewModel {
     func goToNextPage() async { await goToPage(pageIndex + 1) }
     func goToPrevPage() async { await goToPage(pageIndex - 1) }
 
-    /// Jump directly to a 1-based page. Clamped to `totalPages` when known. The
-    /// page index only commits on a successful fetch, so a failed jump leaves
-    /// the pager consistent.
+    /// Clamped to `totalPages` when known. Page index commits only on a
+    /// successful fetch, so a failed jump leaves the pager consistent.
     func goToPage(_ target: Int) async {
         guard !isRateLimited, !isLoading, !isPaging else { return }
         let upperBound = totalPages ?? Int.max
@@ -322,8 +292,7 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Immediate submit (Return / the search button) — skips the debounce
-    /// window that typing otherwise goes through (`scheduleAutoSearch`).
+    /// Immediate submit (Return / search button) — skips the typing debounce.
     func submitSearch() async {
         guard !isRateLimited else { return }
         await reload()
@@ -335,8 +304,8 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    /// Scope the grid to one creator's published files (the author-link path).
-    /// Leaves the user's normal filter selection untouched so exiting restores it.
+    /// Scope to one creator's published files. Leaves the normal filter
+    /// selection untouched so exiting restores it.
     func browseCreator(steamID: String, name: String?) async {
         guard !isRateLimited else { return }
         let trimmed = steamID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -346,15 +315,13 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    /// Return to the normal filtered browse from a creator-scoped view.
     func clearCreatorFilter() async {
         guard creatorFilter != nil else { return }
         creatorFilter = nil
         await reload()
     }
 
-    /// Scope the grid to items carrying one Workshop tag (the detail-inspector
-    /// tag-click path). Leaves the user's normal filter selection untouched.
+    /// Scope to items carrying one Workshop tag. Leaves the normal filter selection untouched.
     func browseTag(_ tag: String) async {
         guard !isRateLimited else { return }
         let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -364,7 +331,6 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    /// Return to the normal filtered browse from a tag-scoped view.
     func clearPinnedTag() async {
         guard pinnedTag != nil else { return }
         pinnedTag = nil
@@ -372,11 +338,8 @@ final class WorkshopBrowseViewModel {
     }
 
     // Filter mutations below edit state and schedule the shared debounced
-    // auto-apply — none of them query directly. A burst of chip toggles keeps
-    // restarting the quiet window, so five edits still cost one request (the
-    // old explicit-Search batching, without the button).
+    // auto-apply — none query directly, so a burst of chip toggles costs one request.
 
-    /// Combined sort + trending-window update (period folded into the sort menu).
     func updateSortOption(_ sort: WorkshopSortMode, days: Int) {
         preferredSort = sort
         if sort == .trending { trendingDays = days }
@@ -412,8 +375,8 @@ final class WorkshopBrowseViewModel {
         scheduleAutoApply()
     }
 
-    // Option-click "isolate" — collapse a category to just one option (show only
-    // this), or, if it's already the lone selection, restore the full set.
+    // Option-click "isolate" — collapse a category to just one option, or, if
+    // it's already the lone selection, restore the full set.
     func isolateType(_ type: WorkshopContentTypeFilter) {
         selectedTypes = isolated(type, in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases)
         persistFilters()
@@ -473,8 +436,7 @@ final class WorkshopBrowseViewModel {
     private func loadPersistedFilters() {
         let defaults = UserDefaults.standard
         // Absent key → keep the default (all selected). Present (even empty) →
-        // honor the saved selection (an empty set is treated as "all" at query
-        // time anyway).
+        // honor the saved selection (empty set == "all" at query time anyway).
         if let raw = defaults.array(forKey: FilterKey.types) as? [String] {
             selectedTypes = Set(raw.compactMap(WorkshopContentTypeFilter.init(rawValue:)))
                 .intersection(Set(WorkshopContentTypeFilter.selectableCases))
@@ -491,9 +453,9 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Runs the query; returns `true` on a successful page load. `replacingItems`
-    /// swaps the visible set (reload + pagination both replace — there is no
-    /// unbounded append), `paging` selects which loading flag to clear.
+    /// Returns `true` on a successful page load. `replacingItems` swaps the
+    /// visible set (reload + pagination both replace — no unbounded append);
+    /// `paging` selects which loading flag to clear.
     @discardableResult
     private func runFetch(_ request: WorkshopQueryRequest, replacingItems: Bool, paging: Bool) async -> Bool {
         currentRequestToken &+= 1
@@ -536,8 +498,7 @@ final class WorkshopBrowseViewModel {
         return await task.value
     }
 
-    /// Drops items we never surface in the browse grid. Normal browse already
-    /// excludes `Application` server-side (so this is a no-op there); the
+    /// Normal browse already excludes `Application` server-side (no-op here); the
     /// creator-scoped GetUserFiles path can't, so this enforces it client-side.
     private static func displayable(_ items: [WorkshopQueryItem]) -> [WorkshopQueryItem] {
         items.filter { item in
@@ -548,8 +509,8 @@ final class WorkshopBrowseViewModel {
     }
 
     private func makeRequest(page: Int) -> WorkshopQueryRequest {
-        // Creator-scoped browse ignores sort / search / tag filters — it lists
-        // that one creator's published files via GetUserFiles.
+        // Creator-scoped browse ignores sort / search / tag filters — lists one
+        // creator's published files via GetUserFiles.
         if let creatorFilter {
             return WorkshopQueryRequest(
                 sort: .newest,
@@ -560,7 +521,7 @@ final class WorkshopBrowseViewModel {
         }
 
         // Tag-scoped browse: items REQUIRED to carry the clicked tag (sort still
-        // applies); the deselect filters / search are ignored while scoped.
+        // applies); deselect filters / search ignored while scoped.
         if let pinnedTag {
             return WorkshopQueryRequest(
                 sort: preferredSort,
@@ -575,16 +536,14 @@ final class WorkshopBrowseViewModel {
 
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Pure-exclusion model: the user starts with everything selected and
-        // narrows by deselecting; the DESELECTED options become `excludedtags`.
-        // A category that's fully selected OR empty contributes nothing
-        // ("empty == all"). No `requiredtags` are sent.
+        // Pure-exclusion model: DESELECTED options become `excludedtags`. A
+        // category fully selected OR empty contributes nothing ("empty == all").
+        // No `requiredtags` are sent.
         var excluded: [String] = []
         excluded += deselectedTags(in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases) { $0.tag }
         excluded += deselectedTags(in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases) { $0.tag }
         excluded += deselectedTags(in: selectedResolutions, all: WorkshopResolutionFilter.selectableCases) { $0.tag }
         excluded += deselectedGenreTags()
-        // Application wallpapers can't run here — always hide them.
         excluded += Self.alwaysExcludedTags
 
         return WorkshopQueryRequest(
@@ -598,8 +557,7 @@ final class WorkshopBrowseViewModel {
         )
     }
 
-    /// Tags for the deselected options of a category — empty when the category
-    /// is fully selected or fully empty (both mean "no filter").
+    /// Empty when the category is fully selected or fully empty (both = "no filter").
     private func deselectedTags<T: Hashable>(
         in selected: Set<T>,
         all: [T],

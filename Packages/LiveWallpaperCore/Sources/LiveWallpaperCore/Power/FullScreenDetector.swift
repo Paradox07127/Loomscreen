@@ -2,7 +2,6 @@ import AppKit
 import Combine
 import Observation
 
-/// Detects when a full-screen app covers a display.
 @MainActor @Observable
 public final class FullScreenDetector {
 

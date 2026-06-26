@@ -353,9 +353,8 @@ struct WPEProjectCustomSettingsCard: View {
         }
     }
 
-    /// Parses the shared `"r g b"` / hex / `#rrggbb` color literal into
-    /// 3-4 normalized components so both equality and `cgColor(from:)` go
-    /// through the same source of truth.
+    /// Parses `"r g b"` / hex / `#rrggbb` into 3-4 normalized components so
+    /// both equality and `cgColor(from:)` use one source of truth.
     private static func colorComponents(from raw: String) -> [Double] {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let hex = decodeHexColor(trimmed) {

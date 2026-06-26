@@ -2,12 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Editor for the per-app "pause the wallpaper while this app is in use" rules.
-/// Each row picks an app (via a file panel scoped to /Applications) and a trigger
-/// — pause only while it's frontmost, or whenever it's running.
 struct AppExceptionsSheet: View {
     @Binding var rules: [ApplicationPerformanceRule]
-    /// Called whenever the list changes so the parent can persist it.
     let onChange: () -> Void
 
     @Environment(\.dismiss) private var dismiss

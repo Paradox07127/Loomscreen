@@ -104,17 +104,14 @@ final class AudioSpectrumProcessor {
         )
     }
 
-    /// Treats a single channel as both left and right — used by the scene-owned
-    /// audio fallback when system capture is unavailable.
+    /// Used by the scene-owned audio fallback when system capture is unavailable.
     func process(mono: [Float], timestampNanos: UInt64) -> AudioSpectrumFrame {
         process(left: mono, right: mono, timestampNanos: timestampNanos)
     }
 
     // Capture sources convert their AudioBufferList into noninterleaved Float
-    // channels at the capture boundary, then call
-    // process(left:right:timestampNanos:). The conversion lives there because
-    // Core Audio Tap and ScreenCaptureKit expose different buffer layouts and
-    // format metadata (added with the capture backends in a later task).
+    // channels at the capture boundary because Core Audio Tap and
+    // ScreenCaptureKit expose different buffer layouts and format metadata.
 
     private func updateSmoothingIfNeeded(hopSize: Int) {
         let hop = hopSize > 0 ? hopSize : configuration.fftSize

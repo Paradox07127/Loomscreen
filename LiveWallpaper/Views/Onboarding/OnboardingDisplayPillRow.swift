@@ -94,9 +94,8 @@ struct OnboardingDisplayPillRow: View {
     }
 }
 
-/// Glass-capsule chrome for the unselected pill state. Extracted so the
-/// selected state can opt out without conditionally returning a different
-/// outer view (which would break SwiftUI identity for keyboard focus).
+/// Extracted so the selected state can opt out without conditionally returning
+/// a different outer view (which would break SwiftUI identity for keyboard focus).
 private struct UnselectedPillSurface: ViewModifier {
     let isSelected: Bool
 

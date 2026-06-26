@@ -34,7 +34,6 @@ public final class BookmarkStore {
         }
     }
 
-    /// Append a new bookmark and persist immediately.
     @discardableResult
     public func add(
         label: String,
@@ -74,7 +73,6 @@ public final class BookmarkStore {
         bookmarks.removeAll()
     }
 
-    /// Re-reads the persistence layer and replaces the in-memory list.
     public func reload() {
         bookmarks = persistence.load()
     }
@@ -88,12 +86,11 @@ public final class BookmarkStore {
         Logger.info("Bookmark renamed: type \(bookmarks[index].wallpaperType.rawValue)", category: .ui)
     }
 
-    /// True when an equivalent content is already saved (so UI can disable the "Save" button instead of producing duplicates).
+    /// Lets the UI disable "Save" instead of producing duplicates.
     public func contains(_ content: WallpaperContent) -> Bool {
         bookmarks.contains { $0.content == content }
     }
 
-    /// Returns the first existing bookmark whose content (and Workshop origin, when present) points at the same source.
     public func equivalentBookmark(
         content: WallpaperContent,
         wpeOrigin: WPEOrigin? = nil
@@ -127,7 +124,6 @@ public final class BookmarkStore {
         return bookmark.content.sceneDescriptor?.workshopID == workshopID
     }
 
-    /// Friendly fallback label derived from the content itself.
     public static func defaultLabel(for content: WallpaperContent, sourceDisplayName: String? = nil) -> String {
         switch content {
         case .video:

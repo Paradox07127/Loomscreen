@@ -52,8 +52,7 @@ final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
             : Double(frames.count) * fallbackDuration
     }
 
-    /// Convenience init used by existing fixtures and tests that don't
-    /// carry TEXS sub-rect data. Each entry becomes a fixed-cadence
+    /// Sub-rect-less path (fixtures/tests): each entry becomes a fixed-cadence
     /// frame at `1.0 / frameRate`.
     convenience init(frames: [MTLTexture], frameRate: Double, loop: Bool) {
         let safeFrameRate = frameRate > 0 ? frameRate : WPETexAnimationTrack.defaultFrameRate

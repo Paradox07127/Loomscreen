@@ -7,11 +7,8 @@ import Observation
 /// root so the scene renderer can fall through to WPE's bundled framework
 /// assets (`<root>/assets/materials`, `<root>/assets/models`, etc.) when a
 /// project references shared utility files (`materials/util/composelayer.json`,
-/// `models/util/*.json`).
-///
-/// Mirrors `AppleAerialsLibrary` — single observable owner of the bookmark,
-/// caller-driven security-scope start/stop, preserves the bookmark across
-/// transient resolution failures.
+/// `models/util/*.json`). Mirrors `AppleAerialsLibrary`; preserves the
+/// bookmark across transient resolution failures.
 @MainActor
 @Observable
 final class WPEEngineAssetsLibrary {
@@ -73,7 +70,6 @@ final class WPEEngineAssetsLibrary {
         }
     }
 
-    /// Resolves the saved bookmark to a usable URL.
     func resolveAuthorizedRoot() -> URL? {
         resolveAuthorizedRoot(using: Self.resolveDirectoryBookmark)
     }

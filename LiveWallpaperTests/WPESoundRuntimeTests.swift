@@ -105,12 +105,9 @@ struct WPESoundRuntimeTests {
         runtime.setMasterVolume(0.25)
         let attached = runtime.start(sounds: [])
         defer { runtime.stop() }
-        // No sound files, so attached is 0; the assertion is that
-        // start() did not throw or reset the cached mute/volume. There
-        // is no public observable, but if the call sequence regressed
-        // the runtime would crash or panic. This is a smoke test for
-        // ordering correctness; behavioural verification happens at
-        // the integration layer via WPEMetalSceneRenderer.
+        // No public observable; this is an ordering smoke test that start()
+        // doesn't crash or reset the cached mute/volume. Behavioural
+        // verification happens at the integration layer via WPEMetalSceneRenderer.
         #expect(attached == 0)
     }
 
@@ -123,9 +120,8 @@ struct WPESoundRuntimeTests {
         let runtime = WPESoundRuntime(resolver: resolver)
         runtime.setMasterVolume(-1.5)
         runtime.setMasterVolume(2.0)
-        // No crash, no negative volume slipping through. The cached
-        // value is consumed at next start; this asserts the contract
-        // does not throw on out-of-range input.
+        // Cached value is consumed at next start; asserts the contract does
+        // not throw on out-of-range input.
         #expect(true)
     }
 

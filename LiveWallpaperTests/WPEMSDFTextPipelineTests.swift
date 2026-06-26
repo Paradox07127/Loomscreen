@@ -72,8 +72,8 @@ struct WPEMSDFTextPipelineTests {
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
         let object = makeTextObject(text: "Hi")
 
-        // Glyph generation is now async (off-main): the first layout returns nil
-        // while glyphs are scheduled; poll until the background fill completes.
+        // Glyph generation is async (off-main): the first layout returns nil while
+        // glyphs are scheduled; poll until the background fill completes.
         var mesh: WPEMSDFTextMesh?
         for _ in 0..<200 where mesh == nil {
             mesh = layout.layout(
@@ -93,7 +93,6 @@ struct WPEMSDFTextPipelineTests {
         #expect(totalVertices % 6 == 0)
     }
 
-    /// Polls the async layout until it produces a mesh (or a bounded timeout).
     private func awaitMesh(
         _ object: WPESceneTextObject,
         font: CTFont,

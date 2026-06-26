@@ -3,10 +3,9 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Tracks an honest "requests issued from this Mac today" count. Steam does
-/// not return remaining quota, so this is the only count we can truthfully
-/// show — never a "remaining" figure. Backed by `UserDefaults` so the ribbon
-/// (display) and the pane (increment) share one source.
+/// Steam does not return remaining quota, so we can only truthfully show an
+/// "issued from this Mac today" count — never a "remaining" figure. Backed by
+/// `UserDefaults` so the ribbon (display) and the pane (increment) share one source.
 enum WorkshopRequestCounter {
     private static let countKey = "loomscreen.workshop.requestsToday.count"
     private static let dateKey = "loomscreen.workshop.requestsToday.date"
@@ -36,31 +35,25 @@ enum WorkshopRequestCounter {
     }
 }
 
-/// Filter ribbon pinned under the pane header for the Workshop (online) tab.
-/// A glass-capsule search, a Sort menu that folds the Trending period into
-/// itself, and a "Filters" disclosure that expands a panel DOWNWARD (rather
-/// than a popover) holding Type / Maturity / Resolution / Genre chip rows.
-/// Search and filter edits auto-apply through the view-model's shared
-/// debounce — there is no explicit Search/Apply button.
+/// Filter ribbon for the Workshop (online) tab. Search and filter edits
+/// auto-apply through the view-model's shared debounce — there is no explicit
+/// Search/Apply button.
 struct WorkshopBrowseFilterRibbon: View {
     let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
 
     @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
-    /// Measured natural height of the four chip rows, used to size the panel's
-    /// internal scroll exactly to its content up to `maxRowsHeight`.
     @State private var filterRowsHeight: CGFloat = 240
 
-    /// Cap on the chip area. Beyond it the rows scroll internally instead of
+    /// Cap on the chip area; beyond it the rows scroll internally rather than
     /// growing the ribbon unbounded — at narrow widths Genre wraps onto many
-    /// rows, which would otherwise overrun the layout. Below it the panel sizes
-    /// to content (no wasted empty scroll area).
+    /// rows that would otherwise overrun the layout. Below it the panel sizes to content.
     private static let maxRowsHeight: CGFloat = 240
 
     var body: some View {
         // Plain bar (no glass card / no internal divider) so it reads like the
-        // Installed tab's LibraryFilterBar — same horizontal/vertical padding.
+        // Installed tab's LibraryFilterBar.
         VStack(spacing: 0) {
             topRow
                 .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
@@ -83,14 +76,12 @@ struct WorkshopBrowseFilterRibbon: View {
 
             Spacer(minLength: DesignTokens.Spacing.sm)
 
-            // Sort sits on the trailing edge (right-aligned). The key status and
-            // today's request count now live in the pane hero, not in this row.
             sortMenu
         }
     }
 
     /// Sort menu with the Trending window folded in as discrete entries, so
-    /// there's a single control (no separate period picker taking up space).
+    /// there's a single control (no separate period picker).
     private var sortMenu: some View {
         Picker("Sort", selection: Binding(
             get: { currentSortOption },
@@ -143,8 +134,8 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            // The chip rows scroll inside a height-capped box so the ribbon never
-            // grows tall enough to overrun the layout above it.
+            // Height-capped box so the ribbon never grows tall enough to overrun
+            // the layout above it.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     filterRow("Type") {
@@ -213,8 +204,8 @@ struct WorkshopBrowseFilterRibbon: View {
             .onPreferenceChange(FilterRowsHeightKey.self) { filterRowsHeight = $0 }
 
             // Chip edits auto-apply (debounced in the view-model), so the panel
-            // carries no Apply control — only the panel-scoped reset, pinned
-            // below the scroll so it's always reachable.
+            // carries no Apply control — only this reset, pinned below the scroll
+            // so it stays reachable.
             if activeFilterCount > 0 {
                 Button("Clear filters") { viewModel.resetFilters() }
                     .buttonStyle(.borderless)
@@ -245,8 +236,8 @@ struct WorkshopBrowseFilterRibbon: View {
         }
     }
 
-    /// Wrapping chip row — every tag stays visible across as many lines as it
-    /// takes (replaces a horizontal scroll that hid most options off-screen).
+    /// Wrapping chip row (replaces a horizontal scroll that hid most options
+    /// off-screen) — every tag stays visible across as many lines as it takes.
     private func chipFlow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         WorkshopChipFlow(spacing: 6, lineSpacing: 6) {
             content()
@@ -258,8 +249,8 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var searchField: some View {
         HStack(spacing: 7) {
-            // Typing auto-searches after the view-model's debounce; clicking
-            // the glass or pressing Return skips the wait and runs it now.
+            // Typing auto-searches after the view-model's debounce; clicking the
+            // glass or pressing Return skips the wait and runs it now.
             Button {
                 Task { await viewModel.submitSearch() }
             } label: {
@@ -317,8 +308,8 @@ struct WorkshopBrowseFilterRibbon: View {
         !hasWebAPIKey || viewModel.isRateLimited
     }
 
-    /// Number of filter categories currently narrowing results (a proper,
-    /// non-empty subset), surfaced as the Filters badge.
+    /// Count of categories narrowing results — non-empty AND a proper subset
+    /// (selecting all == no filter). Surfaced as the Filters badge.
     private var activeFilterCount: Int {
         var count = 0
         if isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count) { count += 1 }
@@ -389,20 +380,17 @@ struct WorkshopBrowseFilterRibbon: View {
     }
 }
 
-/// Multi-select filter chip in the *deselect-to-hide* model: every option is
-/// selected (shown) by default, and tapping a chip deselects it to exclude that
-/// tag. To make that reverse semantics self-evident WITHOUT a hint line, a
-/// deselected chip reads as "switched off" — dimmed, struck through, faint
-/// border — while a selected chip keeps the solid accent treatment. Scoped to
-/// the Workshop filter panel so it doesn't leak into the shared `FilterChip`.
-/// Shared filter chip — default-selected, deselect-to-hide, Option-click to
-/// isolate. Used by the online ribbon and the Installed type row so both read
-/// identically. Internal (not private) so `WorkshopInstalledView` can reuse it.
+/// Filter chip in the *deselect-to-hide* model: every option is selected (shown)
+/// by default, and tapping a chip deselects it to exclude that tag. To make that
+/// reverse semantics self-evident WITHOUT a hint line, a deselected chip reads as
+/// "switched off" — dimmed, struck through, faint border — while a selected chip
+/// keeps the solid accent treatment. Internal (not private) so the online ribbon
+/// and the Installed type row (`WorkshopInstalledView`) share it and read identically.
 struct WorkshopFilterChip: View {
     let title: Text
     let isSelected: Bool
-    /// Option-click handler: collapse the category to just this option. `nil`
-    /// disables the shortcut (and its hint).
+    /// Option-click: collapse the category to just this option. `nil` disables
+    /// the shortcut (and its hint).
     var onIsolate: (() -> Void)? = nil
     let action: () -> Void
 
@@ -433,9 +421,9 @@ struct WorkshopFilterChip: View {
     }
 }
 
-/// Selected chips get a tinted interactive Liquid Glass capsule (with an accent
-/// ring so selection stays unmistakable); deselected chips keep a quiet flat
-/// fill. Glass replaces only the backing — the chip's footprint is unchanged.
+/// Selected chips get a tinted Liquid Glass capsule with an accent ring (so
+/// selection stays unmistakable); deselected chips keep a quiet flat fill.
+/// Glass replaces only the backing — the chip's footprint is unchanged.
 private struct WorkshopChipBackground: ViewModifier {
     let isSelected: Bool
 
@@ -452,8 +440,8 @@ private struct WorkshopChipBackground: ViewModifier {
     }
 }
 
-/// Carries the chip rows' natural height up so the panel can size its internal
-/// scroll to content (capped at `maxRowsHeight`).
+/// Carries the chip rows' natural height up so the panel sizes its scroll to
+/// content (capped at `maxRowsHeight`).
 private struct FilterRowsHeightKey: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

@@ -1,9 +1,7 @@
 import SwiftUI
 
 /// Inline banner shown above the screen-detail content when the active
-/// wallpaper session reports a `WallpaperRuntimeError`. Renders a title +
-/// truncated path subtitle + up to two recovery actions, themed by severity
-/// (error / warning / info).
+/// wallpaper session reports a `WallpaperRuntimeError`.
 struct RuntimeErrorBanner: View {
     let error: WallpaperRuntimeError
     /// `false` for wallpaper types without a picker (shader / scene); the

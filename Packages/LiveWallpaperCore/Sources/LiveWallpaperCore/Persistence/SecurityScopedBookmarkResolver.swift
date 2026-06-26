@@ -75,7 +75,6 @@ public struct SecurityScopedBookmarkResolver: Sendable {
         }
     }
 
-    /// Injection seam — production uses `.live`; tests construct their own.
     public let resolveData: @Sendable (Data) throws -> (URL, Bool)
     public let refreshData: @Sendable (URL) throws -> Data
 
@@ -147,7 +146,6 @@ public struct SecurityScopedBookmarkResolver: Sendable {
 }
 
 extension SecurityScopedBookmarkResolver {
-    /// Production resolver — wraps Foundation's bookmark APIs directly.
     public static let live = SecurityScopedBookmarkResolver(
         resolveData: { data in
             var isStale = false
@@ -179,7 +177,6 @@ extension SecurityScopedBookmarkResolver {
         }
     )
 
-    /// Shorthand for the live resolver; equivalent to `.live`.
     public static var shared: SecurityScopedBookmarkResolver { .live }
 }
 

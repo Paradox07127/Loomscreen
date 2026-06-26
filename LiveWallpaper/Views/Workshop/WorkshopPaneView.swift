@@ -2,10 +2,9 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Wallpaper-Engine-style unified Workshop pane: one sidebar entry, two tabs.
-/// "Installed" embeds the existing local-library gallery (header suppressed —
-/// this pane owns the chrome); "Browse Online" embeds the online catalog. A
-/// "+" action keeps the paste-by-URL flow one click away.
+/// Unified Workshop pane: one sidebar entry, two tabs. "Installed" embeds the
+/// local-library gallery (its own header suppressed — this pane owns the
+/// chrome); "Browse Online" embeds the online catalog.
 struct WorkshopPaneView: View {
     @Environment(WorkshopServices.self) private var services
     @Environment(SteamCMDDoctorService.self) private var doctor
@@ -17,21 +16,17 @@ struct WorkshopPaneView: View {
     @State private var isShowingPasteSheet = false
     @State private var isShowingOnboarding = false
     @State private var isShowingKeyEntry = false
-    /// Installed-library size, for the header's statistics subtext.
     @State private var installedCount = 0
 
     var body: some View {
         // No scaffold header: each tab hosts the shared `WorkshopPaneHeader`
         // inside its split's main column so the detail panel runs full-height
-        // alongside the header (matching the screen-detail inspector). The
-        // scaffold still supplies the page background + minimum size.
+        // alongside the header. Scaffold still supplies background + min size.
         DetailPageScaffold(showsHeader: false, header: { EmptyView() }) {
             tabBody
         }
-        // Installed / Workshop switcher lives in the window toolbar's principal
-        // slot — the same placement as the screen detail's wallpaper-type
-        // picker — so it stays centered and fixed while the detail panel
-        // opens/closes (the in-column header compresses; the toolbar doesn't).
+        // Switcher lives in the toolbar's principal slot so it stays fixed
+        // while the detail panel opens/closes (the in-column header compresses).
         .toolbar {
             ToolbarItem(placement: .principal) {
                 tabSwitcher
@@ -41,12 +36,10 @@ struct WorkshopPaneView: View {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)
         }
-        // On open: re-confirm SteamCMD readiness so the Download button isn't
-        // greyed out just because this launch hasn't re-run the probes, then
-        // reconcile the library with what's on disk — both the app-managed
-        // SteamCMD download tree and the user-configured Workshop library folder
-        // — so existing downloads show in Installed by default. Readiness runs
-        // first; it binds the workdir the SteamCMD scan needs.
+        // Re-confirm SteamCMD readiness (so the Download button isn't greyed out
+        // just because this launch hasn't re-run the probes), then reconcile the
+        // library with what's on disk. Readiness must run first: it binds the
+        // workdir the SteamCMD scan needs.
         .task {
             await doctor.autoConfirmDownloadReadinessIfNeeded()
             await folderImport.ingestExistingDownloads(using: doctor)
@@ -58,9 +51,8 @@ struct WorkshopPaneView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             refreshInstalledCount()
         }
-        // Fired when the pane is already mounted and a deep link arrives (e.g.
-        // the user is sitting on Workshop and clicks "Find in Workshop" on a
-        // scene). On a cold switch the `.onAppear` above handles it instead.
+        // Fires when the pane is already mounted and a deep link arrives. On a
+        // cold switch the `.onAppear` above handles it instead.
         .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
             consumePendingDeepLink()
         }
@@ -107,9 +99,7 @@ struct WorkshopPaneView: View {
         }
     }
 
-    /// Builds the shared pane header for a tab's split main column. Bound to
-    /// the pane's own state (tab selection, install count, import status) so
-    /// both tabs render an identical header.
+    /// Builds the shared pane header so both tabs render an identical one.
     private func makePaneHeader() -> AnyView {
         AnyView(
             WorkshopPaneHeader(
@@ -140,9 +130,8 @@ struct WorkshopPaneView: View {
         }
     }
 
-    /// From the Installed inspector: switch to Browse Online and scope the grid
-    /// to the tapped tag. Builds the Browse view-model on demand (the Installed
-    /// tab may have never opened Browse yet).
+    /// Switch to Browse Online scoped to the tapped tag, building the Browse
+    /// view-model on demand (the Installed tab may never have opened Browse).
     private func browseByTag(_ tag: String) {
         let viewModel: WorkshopBrowseViewModel
         if let existing = browseViewModel {
@@ -155,9 +144,8 @@ struct WorkshopPaneView: View {
         Task { await viewModel.browseTag(tag) }
     }
 
-    /// Consumes a one-shot deep link (set by the scene detail's "Find in
-    /// Workshop" link): switch to Browse Online and run a search for the target.
-    /// Steam's catalog search can't match a raw numeric Workshop ID, so the
+    /// Consumes a one-shot deep link: switch to Browse Online and search for the
+    /// target. Steam's catalog can't match a raw numeric Workshop ID, so the
     /// caller seeds the item's title as the query — that's what surfaces it.
     private func consumePendingDeepLink() {
         guard let query = WorkshopDeepLink.takePendingSearch() else { return }
@@ -201,15 +189,13 @@ enum WorkshopPaneTab: String, CaseIterable, Identifiable {
 }
 
 /// One-shot hand-off for "open Workshop scoped to this item" deep links. The
-/// scene detail card lives in the detail column and can't reach the (possibly
-/// not-yet-mounted) Workshop pane directly, so it parks a search query here and
-/// posts `.openWorkshopPane`; the pane drains it on appear / receipt. Kept tiny
-/// and MainActor-isolated — it's a navigation baton, not shared state.
+/// scene detail card can't reach the (possibly not-yet-mounted) Workshop pane
+/// directly, so it parks a query here and posts `.openWorkshopPane`; the pane
+/// drains it on appear / receipt. MainActor-isolated navigation baton.
 @MainActor
 enum WorkshopDeepLink {
     private static var pendingSearch: String?
 
-    /// Park a search target (typically the Workshop item's title).
     static func requestSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingSearch = trimmed.isEmpty ? nil : trimmed

@@ -1,14 +1,9 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// First-impression card grid shown on a display that has no saved
-/// configuration. Mirrors the toolbar's segmented control 1:1 — the
-/// Shader and Scene cards are gated by `featureCatalog` so Lite users
-/// see only the wallpaper types their SKU can actually render.
-///
-/// Once any card is clicked the screen leaves this guide:
-/// the Video card opens the file picker; the other three flip the
-/// `selectedWallpaperType` and let the per-type empty state take over.
+/// Card grid for a display with no saved configuration. Shader/Scene cards
+/// are gated by `featureCatalog` so Lite users see only types their SKU can
+/// render. Video opens the file picker; the others flip `selectedWallpaperType`.
 struct EmptyStateGuideView: View {
     let onChooseVideo: () -> Void
     let onChooseHTML: () -> Void
@@ -146,8 +141,6 @@ private struct GuideCard: View {
 
     private var isActive: Bool { isHovering || isFocused }
 
-    // The whole card is the button — no inner action pill; the hover/focus
-    // highlight on the card itself is the affordance. Content is centered.
     var body: some View {
         Button(action: action) {
             VStack(spacing: 10) {

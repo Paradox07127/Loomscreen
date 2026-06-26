@@ -18,12 +18,9 @@ public struct GlobalSettings: Codable, Sendable {
     /// yields the GPU. Off by default; it's a more aggressive sibling of the
     /// full-screen rule.
     public var pauseOnWindowOcclusion: Bool
-    /// When true, the app activation policy is `.regular` so the app shows
-    /// in the Dock and Cmd+Tab list. When false (default), the app remains
-    /// `.accessory` (menu-bar only). Toggled live; no relaunch required.
+    /// `true` → `.regular` activation policy (Dock + Cmd+Tab); `false`
+    /// (default) → `.accessory` (menu-bar only). Toggled live; no relaunch.
     public var showInDock: Bool
-    /// User preferences for the weather location pipeline. See
-    /// `WeatherLocationPreference` for the full source-resolution chain.
     public var weatherLocation: WeatherLocationPreference
     /// Master switch for the global hot-key surface. When false,
     /// `GlobalShortcutManager` unregisters every Carbon hot key and refuses
@@ -33,8 +30,7 @@ public struct GlobalSettings: Codable, Sendable {
     /// pre-existing behavior for installs that predate this flag.
     public var globalShortcutsEnabled: Bool = true
 
-    /// User-customised global keyboard shortcuts. `nil` value means the
-    /// shortcut is unbound; missing key means default binding still applies.
+    /// `nil` value = shortcut unbound; missing key = default binding applies.
     public var globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?]
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
@@ -71,8 +67,6 @@ public struct GlobalSettings: Codable, Sendable {
 
     /// Pro-only runtime opt-in that surfaces the Developer Tools sidebar
     /// entry and enables `WKWebView.isInspectable` on every HTML wallpaper.
-    /// Persisted so the choice survives relaunch; defaults on in DEBUG and off
-    /// in Release via `defaultDeveloperModeEnabled`.
     public var developerModeEnabled: Bool = GlobalSettings.defaultDeveloperModeEnabled
 
     /// Pro-only master switch for audio-reactive wallpapers. When true, the app

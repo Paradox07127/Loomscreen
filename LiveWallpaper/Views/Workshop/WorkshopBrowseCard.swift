@@ -3,25 +3,17 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Grid card for the online browse view. macOS-native gallery idiom: a square
-/// preview tile (matching the ~192px source thumbnails — no 16:9 letterboxing),
-/// an always-on star rating pill in the top-left derived from
-/// `WorkshopQueryItem.voteScore`, and a compact title + type / subscriptions /
-/// size footer. Per-item actions live in the detail sheet (tap / Return) and a
-/// right-click context menu, keeping the tile itself clean.
+/// Grid card for the online browse view. Square preview tile matching the
+/// ~192px source thumbnails (no 16:9 letterboxing). Per-item actions live in
+/// the detail sheet and right-click context menu, not on the tile.
 struct WorkshopBrowseCard: View {
     let item: WorkshopQueryItem
-    /// True when this online item's workshop id is already in the local library
-    /// (downloaded/imported) — surfaced as an "In Library" badge.
     var isInLibrary: Bool = false
-    /// True when this card's detail inspector is currently open (accent ring).
     var isSelected: Bool = false
-    /// Invoked when the card is activated — opens the detail sheet.
     var onSelect: () -> Void = {}
 
     @State private var isHovered = false
-    /// Per-tile reveal of an adult thumbnail. Ephemeral by design — recreated
-    /// tiles (paging, filter change, relaunch) blur again.
+    /// Ephemeral by design — recreated tiles (paging, filter change, relaunch) blur again.
     @State private var matureRevealed = false
     @State private var showingAgeConfirm = false
     @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
@@ -30,18 +22,14 @@ struct WorkshopBrowseCard: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Blur the tile until the user clicks to reveal: enabled in settings, the
-    /// item is Mature-rated, and it hasn't been revealed yet.
     private var shouldBlur: Bool {
         blurMatureThumbnails && item.isMatureRated && !matureRevealed
     }
 
     var body: some View {
-        // A real Button (not a tap gesture) so the tile is keyboard-focusable
-        // and Return/Space activates it. `galleryTileChrome` owns the single
-        // clip + hairline stroke + resting/hover shadow + 1.02× lift for the
-        // whole card, so the call site contributes only the artwork + footer.
-        // A blurred tile's first activation reveals it; a second opens details.
+        // A real Button (not a tap gesture) so the tile is keyboard-focusable and
+        // Return/Space activates it. A blurred tile's first activation reveals it;
+        // a second opens details.
         Button(action: { if shouldBlur { requestReveal() } else { onSelect() } }) {
             VStack(alignment: .leading, spacing: 0) {
                 thumbnailArea
@@ -56,8 +44,7 @@ struct WorkshopBrowseCard: View {
         .onHover { isHovered = $0 }
         .help(item.title)
         .contextMenu { contextMenuItems }
-        // Collapse the rich tile into one labeled element carrying the same
-        // metadata sighted users see; the per-item actions stay on the rotor.
+        // Collapse the rich tile into one labeled element; per-item actions stay on the rotor.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabelText))
         .accessibilityHint(shouldBlur
@@ -82,8 +69,7 @@ struct WorkshopBrowseCard: View {
         }
     }
 
-    /// Reveal a blurred Mature tile — gated by a one-time 18+ confirmation
-    /// (remembered across the app once accepted).
+    /// Gated by a one-time 18+ confirmation (remembered across the app once accepted).
     private func requestReveal() {
         if matureConfirmed {
             matureRevealed = true
@@ -161,9 +147,9 @@ struct WorkshopBrowseCard: View {
         .accessibilityHidden(true)
     }
 
-    /// Deep brand green for the "In Library" badge — dark enough that the white
-    /// glyphs clear WCAG AA contrast even over bright previews (system green is
-    /// too light). Explicit RGB so it stays constant across light/dark mode.
+    /// Dark enough that white glyphs clear WCAG AA contrast even over bright
+    /// previews (system green is too light). Explicit RGB so it stays constant
+    /// across light/dark mode.
     private static let inLibraryGreen = Color(red: 0.08, green: 0.35, blue: 0.15)
 
     // MARK: - Footer
@@ -172,9 +158,7 @@ struct WorkshopBrowseCard: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
                 .font(DesignTokens.Typography.bodyEmphasized)
-                // Always reserve two lines so 1- and 2-line titles produce
-                // equal-height cards (no ragged grid). Long titles truncate;
-                // the card's `.help(item.title)` shows the full text on hover.
+                // Reserve two lines so 1- and 2-line titles produce equal-height cards (no ragged grid).
                 .lineLimit(2, reservesSpace: true)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -258,14 +242,12 @@ struct WorkshopBrowseCard: View {
 
     // MARK: - Derived values
 
-    /// `voteScore` is 0...1; map to a 0...5 star value. Hidden when absent.
+    /// `voteScore` is 0...1; map to a 0...5 star value.
     private var ratingValue: Double? {
         guard let score = item.voteScore, score > 0 else { return nil }
         return min(max(score * 5, 0), 5)
     }
 
-    /// Canonical Wallpaper Engine content type, surfaced as the footer pill via
-    /// its localized display name.
     private var contentType: WorkshopContentTypeFilter? {
         let lowered = Set(item.tags.map { $0.lowercased() })
         if lowered.contains("scene") { return .scene }
@@ -274,19 +256,14 @@ struct WorkshopBrowseCard: View {
         return nil
     }
 
-    /// Subscriber count (the headline popularity signal, and the key Steam's
-    /// "Most Subscribed" sort ranks by), shown in the footer. Nil when absent or
-    /// zero. VoiceOver still names it via `accessibilityLabelText`, so the visible
-    /// badge is `accessibilityHidden`. The download size was moved off the narrow
-    /// card to the detail sheet so the type pill never has to wrap.
+    /// VoiceOver names this via `accessibilityLabelText`, so the visible badge is
+    /// `accessibilityHidden`. Download size was moved off the narrow card to the
+    /// detail sheet so the type pill never has to wrap.
     private var subscribersLabel: String? {
         guard let subs = item.subscriptionCount, subs > 0 else { return nil }
         return formatSubs(subs)
     }
 
-    /// Short resolution label derived from the item's resolution tag (e.g.
-    /// "1080p", "4K", "Ultrawide" → "UW", "Portrait"). Nil when no resolution
-    /// tag is present.
     private var resolutionLabel: String? {
         Self.resolutionShortLabel(for: item.tags)
     }
@@ -347,7 +324,7 @@ struct WorkshopBrowseCard: View {
         return Self.byteFormatter.string(fromByteCount: Int64(min(bytes, UInt64(Int64.max))))
     }
 
-    /// Single source for the restricted/banned badge — reused by VoiceOver.
+    /// Single source for the restricted/banned badge, reused by VoiceOver.
     private var statusInfo: (text: String, tint: Color, symbol: String)? {
         if item.isBanned {
             return (String(localized: "Unavailable", comment: "Workshop item removed or hidden on Steam."), DesignTokens.Colors.Status.danger, "xmark.octagon.fill")

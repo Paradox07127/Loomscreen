@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Reusable glass-capsule button style for detail controls.
 public struct GlassCapsuleButtonStyle: ButtonStyle {
     public var tint: Color = .accentColor
     public var fontSize: CGFloat = 12

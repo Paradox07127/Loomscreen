@@ -3,15 +3,9 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 
-/// Time-of-day wallpaper scheduling, aligned with `PlaylistSection`'s
-/// Apple-Music language (50pt single-line rows, EQPulseBar for the
-/// active slot, hover-only `⋯` menu, `AdaptiveGlass` action chips).
-///
-/// The 24h `ScheduleTimelineEditor` is the primary editing surface —
-/// users can drag slot edges to resize, drag the middle to translate,
-/// and double-tap an empty cell to insert. The row list mirrors the
-/// timeline and additionally offers a wrap-aware `Menu`-picker popover
-/// for keyboard / VoiceOver flows.
+/// Time-of-day wallpaper scheduling. The 24h `ScheduleTimelineEditor` is the
+/// primary editing surface; the row list mirrors it and adds a wrap-aware
+/// picker popover for keyboard / VoiceOver flows.
 struct ScheduleSection: View {
     @Binding var scheduleSlots: [ScheduleSlot]
     var screen: Screen
@@ -24,9 +18,8 @@ struct ScheduleSection: View {
     @State private var pendingDestructive: PendingDestructive?
 
     /// Generation counters protect the 1.5s / 3s delayed-clear `Task`s from
-    /// wiping newer UI state. Without these, a second conflict raised
-    /// shortly after the first would be silently cleared when the first
-    /// timer fires.
+    /// wiping newer UI state: a second conflict raised shortly after the first
+    /// would otherwise be silently cleared when the first timer fires.
     @State private var conflictHighlightGeneration = 0
     @State private var addErrorGeneration = 0
 
@@ -443,10 +436,9 @@ struct ScheduleSection: View {
     }
 }
 
-/// Transparent-fill capsule with red text — mirrors `GlassCapsuleButtonStyle`'s
-/// geometry so the actionBar's destructive button balances Add Slot visually
-/// without competing with it. Hover tints the fill subtly so the click
-/// target is still discoverable when paired with a glass-filled sibling.
+/// Mirrors `GlassCapsuleButtonStyle`'s geometry so this destructive button
+/// balances Add Slot without competing with it; hover tints the fill so the
+/// target stays discoverable next to its glass-filled sibling.
 private struct DisableScheduleButton: View {
     let action: () -> Void
 

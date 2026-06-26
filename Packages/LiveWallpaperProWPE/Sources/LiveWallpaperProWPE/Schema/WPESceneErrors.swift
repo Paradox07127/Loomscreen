@@ -30,10 +30,8 @@ public enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case cacheRootMissing
     case parseFailed(String)
     case resourceFailed(SceneLoadDiagnostic)
-    /// Raised by the Metal renderer when the failure is specifically a
     /// Metal-pipeline gap (shader translator missing, unsupported render
-    /// target, previous-frame effect). This surfaces directly as the scene's
-    /// load error.
+    /// target, previous-frame effect); surfaces directly as the scene's load error.
     case metalRendererUnsupported(reason: String)
 
     public var errorDescription: String? {

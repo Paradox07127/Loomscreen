@@ -2,16 +2,14 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// The shared Workshop pane header — brand mark on the leading edge, the
-/// contextual actions trailing — extracted so each tab can host it *inside*
-/// its `ResizableInspectorSplit` main column. Placing it there (rather than as
-/// a full-width bar above the split) lets the trailing detail panel run
-/// full-height alongside the header, matching the screen-detail inspector.
+/// Shared Workshop pane header, hosted *inside* each tab's
+/// `ResizableInspectorSplit` main column (not as a full-width bar above the
+/// split) so the trailing detail panel runs full-height alongside the header,
+/// matching the screen-detail inspector.
 ///
-/// The Installed / Workshop switcher and the detail-panel toggle do NOT live
-/// here: both sit in the window toolbar (`.principal` / `.primaryAction`),
-/// mirroring the screen detail's type picker + inspector toggle, so they stay
-/// put while this header compresses with the panel.
+/// The Installed / Workshop switcher and detail-panel toggle do NOT live here:
+/// both sit in the window toolbar (`.principal` / `.primaryAction`) so they
+/// stay put while this header compresses with the panel.
 struct WorkshopPaneHeader: View {
     let selectedTab: WorkshopPaneTab
     let installedCount: Int
@@ -32,8 +30,8 @@ struct WorkshopPaneHeader: View {
         .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
     }
 
-    // Bold title + statistics subtext, matching the Bookmarks / Aerials hero
-    // (`DetailHeaderBar`): icon disc, primary semibold title, caption stat line.
+    // Matches the Bookmarks / Aerials hero (`DetailHeaderBar`): icon disc,
+    // semibold title, caption stat line.
     private var brandMark: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             ZStack {
@@ -61,9 +59,8 @@ struct WorkshopPaneHeader: View {
         }
     }
 
-    /// Hero subtitle. On Workshop it prefixes the request count with the API-key
-    /// status seal (the ribbon no longer carries a key chip), so key health and
-    /// today's honest request count read in one place.
+    /// On Workshop, prefixes the request count with the API-key status seal so
+    /// key health and today's request count read in one place.
     private var headerStatView: some View {
         HStack(spacing: 4) {
             if selectedTab == .browseOnline, services.hasWebAPIKey {
@@ -82,8 +79,6 @@ struct WorkshopPaneHeader: View {
             : Text(""))
     }
 
-    /// Context-aware statistics subtext: library size on Installed, key status +
-    /// today's honest request count on Workshop.
     private var headerStat: String {
         switch selectedTab {
         case .installed:

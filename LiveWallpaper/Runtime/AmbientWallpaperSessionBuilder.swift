@@ -47,7 +47,6 @@ enum HTMLWallpaperCompatibilityPolicy {
     }
 }
 
-/// Builds non-video wallpaper sessions backed by a window.
 @MainActor
 final class AmbientWallpaperSessionBuilder {
     func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
@@ -98,7 +97,6 @@ final class AmbientWallpaperSessionBuilder {
     #endif
 
     #if !LITE_BUILD
-    /// Builds a scene wallpaper session.
     func makeSceneSession(
         descriptor: SceneDescriptor,
         origin: WPEOrigin? = nil,

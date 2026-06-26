@@ -94,7 +94,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return package
     }
 
-    /// Streaming variant of `parseIndex(of:)`.
     static func parseIndex(streamingFrom handle: FileHandle) throws -> Self {
         let totalLength: UInt64
         do {
@@ -172,7 +171,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return Self(magic: magic, entries: entries, dataStart: dataStart)
     }
 
-    /// Streaming companion to `extractAll(from:to:)`.
     func extractAll(streamingFrom handle: FileHandle, to rootURL: URL) throws {
         let fileManager = FileManager.default
         let parentURL = rootURL.deletingLastPathComponent()
@@ -316,7 +314,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
     }
 
-    /// Streams a single entry's bytes from the supplied handle.
     func readEntry(_ entry: Entry, from handle: FileHandle) throws -> Data {
         let absoluteStart = dataStart + entry.dataOffset
         do {
@@ -332,17 +329,15 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return data
     }
 
-    /// Convenience: locate an entry by case-insensitive name match (O(1) via the
-    /// prebuilt `nameIndex`).
+    /// Case-insensitive lookup, O(1) via the prebuilt `nameIndex`.
     func entry(named name: String) -> Entry? {
         nameIndex[name.lowercased()]
     }
 
-    /// Normalizes a requested relative path into the same canonical form used
-    /// for stored entry names (drops `.`/empty components; rejects a leading
-    /// `/` or any `..` traversal component), so a package lookup matches what
-    /// `parseIndex` stored. Returns `nil` for an unsafe or empty path. Mirrors
-    /// `canonicalEntryName` but never throws — lookups treat invalid as a miss.
+    /// Normalizes a requested path into the same canonical form `parseIndex`
+    /// stored (drops `.`/empty components; rejects leading `/` or any `..`
+    /// traversal component) so a lookup matches. Mirrors `canonicalEntryName`
+    /// but returns `nil` instead of throwing — lookups treat invalid as a miss.
     static func canonicalLookupName(_ name: String) -> String? {
         guard !name.hasPrefix("/") else { return nil }
         var canonical: [String] = []

@@ -27,11 +27,7 @@ public final class AssetReadinessWork {
 
 /// Tracks per-screen async video transitions so stale completions get
 /// dropped, and owns the per-screen asset-readiness work used by
-/// `applyConfigurationWhenAssetReady`. Extracted from `ScreenManager` as
-/// the first step of Week 4 Task 4.5 PlaybackCoordinator extraction —
-/// the goal is to validate the extraction pattern (handing one piece of
-/// state at a time to a coordinator) on a low-risk surface before tackling
-/// the full playback API surface.
+/// `applyConfigurationWhenAssetReady`. Extracted from `ScreenManager`.
 @MainActor
 public final class PlaybackTransitionRegistry {
     private var generationByScreen: [CGDirectDisplayID: Int] = [:]
@@ -64,7 +60,6 @@ public final class PlaybackTransitionRegistry {
         assetReadinessByScreen[screenID] = nil
     }
 
-    /// Replaces the screen's pending asset-readiness work, cancelling any in-flight work first.
     @discardableResult
     public func setAssetReadiness(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) -> AssetReadinessWork {
         assetReadinessByScreen[screenID]?.cancel()
@@ -72,7 +67,7 @@ public final class PlaybackTransitionRegistry {
         return work
     }
 
-    /// Used when an asset-readiness callback finishes naturally — only removes the slot if the same work instance is still installed (a later transition may have replaced it).
+    /// Only removes the slot if the same work instance is still installed; a later transition may have replaced it.
     public func clearAssetReadinessIfMatch(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) {
         if assetReadinessByScreen[screenID] === work {
             assetReadinessByScreen[screenID] = nil

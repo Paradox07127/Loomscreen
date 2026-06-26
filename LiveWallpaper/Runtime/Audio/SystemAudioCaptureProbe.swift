@@ -27,8 +27,7 @@ enum SystemAudioCaptureProbe {
     private static var timer: Timer?
     private static var ticks = 0
 
-    /// No-op unless the `WPEAudioCaptureProbe` default is set. Called once at
-    /// app launch.
+    /// No-op unless the `WPEAudioCaptureProbe` default is set. Called once at app launch.
     static func runIfRequested() {
         guard UserDefaults.standard.bool(forKey: defaultsKey) else { return }
         guard service == nil else { return }

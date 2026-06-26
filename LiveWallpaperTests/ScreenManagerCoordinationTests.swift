@@ -4,11 +4,6 @@ import Testing
 import WebKit
 @testable import LiveWallpaper
 
-/// Validates the surface that PlaybackCoordinator extraction is meant to
-/// preserve: the per-screen transition registry plus the four configuration
-/// setters that ScreenManager forwards through the coordinator. Pure
-/// unit-level coverage; runtime-session heavy paths live in the dedicated
-/// session-lifecycle suites.
 @Suite("ScreenManager ↔ PlaybackCoordinator coordination")
 @MainActor
 struct ScreenManagerCoordinationTests {
@@ -752,7 +747,6 @@ struct ScreenManagerCoordinationTests {
         url?.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)
     }
 
-    /// Boots a `ScreenManager` with the four protocol fakes, ensures a `ScreenConfiguration` exists for the host's primary screen, and runs the closure.
     private static func runWithSeededConfiguration(
         _ body: (ScreenManager, Screen) async throws -> Void
     ) async throws {
@@ -904,7 +898,6 @@ struct ScreenManagerCoordinationTests {
         return ObjectIdentifier(lhs as AnyObject) == ObjectIdentifier(rhs)
     }
 
-    /// Snapshots notifications observed during `mutation`, asserting exactly one new `.wallpaperConfigurationDidChange` for the given screen.
     private static func expectChange(
         notificationFor screen: Screen,
         _ mutation: () -> Void

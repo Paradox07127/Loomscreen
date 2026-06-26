@@ -50,8 +50,8 @@ struct AudioSpectrumBrokerTests {
         var right = (0..<70).map { Float($0 + 80) / 256 }
         left[2] = .nan
         right[3] = .infinity
-        left[4] = -1      // below range → clamped to 0
-        right[4] = 2      // above range → clamped to 1
+        left[4] = -1
+        right[4] = 2
         let frame = AudioSpectrumFrame(left: left, right: right, timestampNanos: 123)
 
         let payload = frame.wpeWebPayload128

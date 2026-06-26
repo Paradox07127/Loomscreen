@@ -9,31 +9,25 @@ import QuartzCore
 /// per-layer scene-pixel translation scaled by that layer's `parallaxDepth`.
 struct WPECameraParallaxFrame: Equatable, Sendable {
     var smoothed: SIMD2<Float>
-    /// Magnitude multiplier for the per-layer shift (`smoothed × depth × gain`,
-    /// as a fraction of the scene). Carried on the frame so every consumer
-    /// (image layers, particles, text) uses one value. Set per machine with
-    /// `defaults write Taijia.LiveWallpaper WPEParallaxGain <number>`; the
-    /// renderer reads it at load, so reload the wallpaper after changing it.
+    /// Magnitude multiplier for the per-layer shift, carried on the frame so
+    /// every consumer (image layers, particles, text) uses one value. Override
+    /// per machine: `defaults write Taijia.LiveWallpaper WPEParallaxGain <n>`;
+    /// read at load, so reload the wallpaper after changing it.
     var gain: Double = WPECameraParallaxFrame.defaultGain
 
-    /// Default parallax gain. The previous value baked into `pixelOffset` (0.1,
-    /// with a ±0.05 clamp) was an unvalidated carry-over from the old UV-shift
-    /// path — and was never actually exercised, because object `parallaxDepth`
-    /// parsed to 0 until per-axis vector parsing landed. The result was far
-    /// weaker than Wallpaper Engine. Raised here to better match WPE; fine-tune
-    /// per machine with `WPEParallaxGain`.
+    /// The old 0.1 (±0.05 clamp) baked into the UV-shift path was never actually
+    /// exercised — object `parallaxDepth` parsed to 0 until per-axis vector
+    /// parsing landed — and was far weaker than WPE. 0.5 better matches WPE.
     static let defaultGain: Double = 0.5
     /// Safety ceiling so an extreme depth can't fling a layer off-screen — a
     /// fraction of the scene per axis. Generous enough not to clip real scenes.
     static let maxShiftFraction: Float = 0.2
-    /// Upper bound for a `WPEParallaxGain` override; a stray huge value can't
-    /// fling layers around (the per-shift clamp is `maxShiftFraction` anyway).
+    /// Upper bound for a `WPEParallaxGain` override (per-shift clamp is
+    /// `maxShiftFraction` anyway).
     static let maxGain: Double = 20
 
-    /// Normalizes a raw `WPEParallaxGain` override to the usable range. `nil`
-    /// (key absent) or a non-finite value falls back to `defaultGain`; `0` is
-    /// honored (parallax off); negatives clamp to 0; the magnitude is capped at
-    /// `maxGain`.
+    /// `nil` (key absent) or non-finite falls back to `defaultGain`; `0` is
+    /// honored (parallax off); negatives clamp to 0; magnitude capped at `maxGain`.
     static func clampedGain(_ raw: Double?) -> Double {
         guard let raw, raw.isFinite else { return defaultGain }
         return min(max(raw, 0), maxGain)
@@ -41,11 +35,9 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
 
     static let neutral = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0))
 
-    /// Scene-pixel translation for a layer at per-axis `depth`: each axis is
-    /// scaled by its own depth so WPE's per-axis limiting works ("1 0" →
-    /// horizontal only, "0 1" → vertical only), times `gain`, clamped to
-    /// `maxShiftFraction`. X is negated and Y kept so the layer moves with the
-    /// cursor in the renderer's top-left scene space.
+    /// Each axis is scaled by its own depth so WPE's per-axis limiting works
+    /// ("1 0" → horizontal only, "0 1" → vertical only). X is negated and Y kept
+    /// so the layer moves with the cursor in the renderer's top-left scene space.
     func pixelOffset(depth: SIMD2<Double>, sceneSize: CGSize) -> SIMD2<Float> {
         let dx = Float(depth.x)
         let dy = Float(depth.y)
@@ -64,8 +56,7 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
 }
 
 /// Frame-rate-independent exponential smoother for camera parallax. Holds the
-/// smoothed cursor offset across frames; `frame(...)` advances it toward the
-/// (calibrated) cursor target each frame. Neutral when the scene disables
+/// smoothed cursor offset across frames. Neutral when the scene disables
 /// parallax or zeroes amount / mouse-influence.
 struct WPECameraParallaxSmoother: Equatable, Sendable {
     private(set) var smoothed = SIMD2<Float>(0, 0)
@@ -78,8 +69,7 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
 
     /// `time` is monotonic scene-elapsed seconds. WPE defaults (amount 0.5,
     /// mouseInfluence 0.5) → `effectiveGlobal == 1`, preserving the historical
-    /// per-layer depth magnitude. `dt` is clamped so a long suspend doesn't
-    /// snap on resume; the first frame snaps directly to the cursor.
+    /// per-layer depth magnitude.
     mutating func frame(
         settings: WPESceneCameraParallaxSettings,
         pointerPosition: SIMD2<Double>,
@@ -101,9 +91,9 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
         )
         let rawDt = lastTime.map { max(time - $0, 0) }
         lastTime = time
-        // First frame, or a long gap (resume from suspend / idle), snaps to the
-        // cursor instead of a slow catch-up. Otherwise clamp `dt` to a 10 FPS
-        // floor so a single heavy frame can't over-step yet low frame rates stay
+        // First frame or a long gap (resume from suspend/idle) snaps to the
+        // cursor instead of slow catch-up. Otherwise `dt` is clamped to a 10 FPS
+        // floor: one heavy frame can't over-step, yet low frame rates stay
         // frame-rate independent.
         guard let rawDt, rawDt <= 0.5 else {
             smoothed = target

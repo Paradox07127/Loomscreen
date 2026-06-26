@@ -3,15 +3,13 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// Resource resolver for `.scene` content. Reads PNG/JPG via ImageIO and
-/// `.tex` via the Phase 2.1 `WPETexDecoder`. All filesystem access goes through
-/// a `WPESceneAssetProvider`: a directory-backed provider (extracted cache /
-/// folder import) preserves the historical path-safety + `.mappedIfSafe`
-/// behavior; a package-backed provider reads entries in place from `scene.pkg`.
-///
-/// Phase 2.1: `.tex` no longer auto-fails. The decoder routes by container
-/// version + format enum; unsupported BC formats, RGBA1010102, unknown
-/// containers, and animation frames surface as precise errors.
+/// Resource resolver for `.scene` content. Reads PNG/JPG via ImageIO and `.tex`
+/// via `WPETexDecoder`. All filesystem access goes through a
+/// `WPESceneAssetProvider`: a directory-backed provider (extracted cache /
+/// folder import) preserves path-safety + `.mappedIfSafe`; a package-backed
+/// provider reads entries in place from `scene.pkg`. The decoder routes by
+/// container version + format enum; unsupported BC formats, RGBA1010102,
+/// unknown containers, and animation frames surface as precise errors.
 struct SceneResourceResolver: Sendable {
     enum ResolveError: Error, Equatable, Sendable {
         case pathEscape
@@ -49,11 +47,9 @@ struct SceneResourceResolver: Sendable {
         self.decoder = decoder
     }
 
-    /// P3 hook: when scene-debug artifacts are active, parse the `.tex`
-    /// header once more (very cheap — TEXI + TEXB headers only) and
-    /// write the raw TEXI image dims + TEXB v4 fields into the session
-    /// folder. No-op when artifacts are off, so production scene loads
-    /// don't pay the cost.
+    /// When scene-debug artifacts are active, re-parse the `.tex` header (cheap:
+    /// TEXI + TEXB only) and dump raw dims + TEXB v4 fields to the session folder.
+    /// No-op when off, so production loads don't pay the cost.
     private func dumpRawTexMetadataIfActive(payload: Data, targetName: String) {
         guard WPESceneDebugArtifacts.shared.activeSessionFolder != nil else { return }
         guard case .success(let metadata) = decoder.extractRawMetadata(data: payload) else { return }
@@ -64,7 +60,6 @@ struct SceneResourceResolver: Sendable {
         )
     }
 
-    /// Returns a CGImage decoded from the resolved asset.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
@@ -88,7 +83,7 @@ struct SceneResourceResolver: Sendable {
         return image
     }
 
-    /// Returns the raw texture payload for Metal-backed renderers.
+    /// Raw texture payload for Metal-backed renderers.
     func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
@@ -127,7 +122,8 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
-    /// Walks WPE's image-reference chain until it produces a path to a real asset (`.tex` / `.png` / `.jpg` / `.gif`).
+    /// Walks WPE's image-reference chain (material/model JSON) until it reaches a
+    /// real asset path (`.tex` / `.png` / `.jpg` / `.gif`).
     private func resolveImageReference(relativePath: String, depth: Int) throws -> String {
         let lowered = (relativePath as NSString).pathExtension.lowercased()
         if lowered != "json" {
@@ -171,7 +167,6 @@ struct SceneResourceResolver: Sendable {
         throw ResolveError.materialUnresolved(reason: "\(relativePath) has no `material` or `passes[].textures[]`")
     }
 
-    /// Drills into a material descriptor's `passes[0].textures[0]` and returns its bare identifier.
     private func firstTextureName(in dict: [String: Any]) -> String? {
         guard let passes = dict["passes"] as? [[String: Any]] else { return nil }
         for pass in passes {
@@ -219,7 +214,6 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
-    /// Import-time renderability probe for WPE image references.
     func probeRenderableImage(relativePath: String) -> Result<Void, ResolveError> {
         guard !relativePath.isEmpty else { return .failure(.fileMissing) }
         let resolvedPath: String
@@ -244,7 +238,8 @@ struct SceneResourceResolver: Sendable {
         return provider.exists(atRelativePath: resolvedPath) ? .success(()) : .failure(.fileMissing)
     }
 
-    /// File existence probe used by tests + the import service to decide whether a scene's declared image layers are actually shipped.
+    /// Used by tests + the import service to decide whether a scene's declared
+    /// image layers are actually shipped.
     func exists(relativePath: String) -> Bool {
         provider.exists(atRelativePath: relativePath)
     }

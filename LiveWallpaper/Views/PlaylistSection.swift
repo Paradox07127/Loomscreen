@@ -2,10 +2,6 @@ import SwiftUI
 import AppKit
 import LiveWallpaperSharedUI
 
-/// Apple Music-style playlist UI: thumbnail rows with double-line title +
-/// subtitle, hover-only ellipsis, leading number↔handle cross-fade, and
-/// `EQPulseBar` for the now-playing row.
-///
 /// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks
 /// each row's frame. We deliberately avoid SwiftUI's `.draggable` /
 /// `.dropDestination` / `.onDrag` modifiers — every variant we tried on
@@ -15,11 +11,11 @@ import LiveWallpaperSharedUI
 ///
 /// The gesture is attached **only** to the leading-handle hit area on each
 /// row so the row body can still receive double-tap to play and right-click
-/// to open a context menu without those gestures racing.
+/// without those gestures racing.
 ///
-/// Reorder is intentionally side-effect-free: the visible list order is the
-/// only thing that changes. The starred entry keeps its star at its new
-/// position, the currently-playing video keeps playing, no reload.
+/// Reorder is intentionally side-effect-free: only the visible list order
+/// changes — star stays at its new position, playing video keeps playing,
+/// no reload.
 struct PlaylistSection: View {
     @Binding var playlistBookmarks: [Data]
     @Binding var shufflePlaylist: Bool
@@ -32,20 +28,18 @@ struct PlaylistSection: View {
 
     // MARK: Drag-reorder state
     @State private var rowFrames: [PlaylistRowFrame] = []
-    /// Snapshot of `rowFrames` taken at drag start. Used in
+    /// Snapshot of `rowFrames` taken at drag start; used in
     /// `computeInsertionIndex` instead of live `rowFrames` so the dragged
-    /// row's own `.offset` cannot create a feedback loop where its
-    /// shifting frame perturbs the very index used to decide where it
-    /// should drop.
+    /// row's own `.offset` can't create a feedback loop where its shifting
+    /// frame perturbs the index used to decide where it should drop.
     @State private var dragSnapshotFrames: [PlaylistRowFrame]?
     @State private var draggingID: PlaylistEntry.ID?
     @State private var dragOffsetY: CGFloat = 0
     @State private var insertionIndex: Int?
     @State private var rotatePopoverShown = false
 
-    /// Default rotation interval (minutes) when the user enables auto-rotate
-    /// from the `Off` state. 30 mins is a middle-ground that's neither too
-    /// twitchy nor too lazy.
+    /// Default interval (minutes) when enabling auto-rotate from `Off`.
+    /// 30 is a middle-ground — neither too twitchy nor too lazy.
     private static let defaultRotationMinutes = 30
     private static let rotationMinutesRange = 1...1440
 
@@ -376,9 +370,7 @@ struct PlaylistSection: View {
     }
 
     /// Pick the insertion slot whose midpoint sits just below the pointer.
-    /// Uses `dragSnapshotFrames` (a static snapshot captured at drag start)
-    /// to avoid a feedback loop where the dragged row's live offset shifts
-    /// its own frame and perturbs the index computation.
+    /// Uses `dragSnapshotFrames`, not live `rowFrames` — see that field.
     private func computeInsertionIndex(pointerY: CGFloat) -> Int {
         let frames = dragSnapshotFrames ?? rowFrames
         guard !frames.isEmpty else { return 0 }
@@ -391,7 +383,6 @@ struct PlaylistSection: View {
         return sorted.count
     }
 
-    /// Reorder entries locally then sync to ScreenManager.
     private func commitReorder(sourceID: PlaylistEntry.ID, toIndex destination: Int) {
         guard let sourceIndex = entries.firstIndex(where: { $0.id == sourceID }) else { return }
         if destination == sourceIndex || destination == sourceIndex + 1 { return }
@@ -493,7 +484,6 @@ struct PlaylistSection: View {
         }
     }
 
-    /// Set of canonical file paths backing the current playlist.
     private func currentPlaylistResolvedPaths() -> Set<String> {
         guard let config = screenManager.getConfiguration(for: screen) else { return [] }
         let combined = config.combinedPlaylist

@@ -2,18 +2,16 @@
 import Foundation
 import CryptoKit
 
-/// Manages on-disk caches of extracted Wallpaper Engine `scene.pkg` archives
-/// under `~/Library/Application Support/LiveWallpaper/wpe-cache/<workshopID>/`.
+/// Caches extracted `scene.pkg` archives under
+/// `~/Library/Application Support/LiveWallpaper/wpe-cache/<workshopID>/`.
 /// Idempotent: a sibling `manifest.json` records the source pkg's
 /// `(size, mtime)` fingerprint and lets repeated imports skip re-extraction.
 actor WallpaperEngineCache {
     private let rootURL: URL
     private let fileManager: FileManager
 
-    /// The on-disk root where imported Wallpaper Engine projects are extracted
-    /// (`~/Library/Application Support/LiveWallpaper/wpe-cache/`). Exposed so
-    /// non-actor callers (e.g. a "Show in Finder" settings button) can resolve
-    /// it synchronously.
+    /// `nonisolated` so non-actor callers (e.g. a "Show in Finder" settings
+    /// button) can resolve the cache root synchronously.
     nonisolated static var defaultRootURL: URL {
         if let applicationSupport = try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -62,12 +60,11 @@ actor WallpaperEngineCache {
             Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
             throw error
         } catch let error as WPEPackageError {
-            // A bad/absent PKGV header almost always means the SteamCMD download
-            // landed a truncated or placeholder `scene.pkg` (partial download,
-            // entitlement/region issue) rather than a real package. Dump the real
-            // head bytes + size so a recurrence is unambiguous (truncated PKGV vs
-            // an HTML error page vs a genuinely new magic) — a valid scene.pkg
-            // begins with U32 length 8 + "PKGV00NN".
+            // A bad/absent PKGV header almost always means SteamCMD landed a
+            // truncated/placeholder `scene.pkg` (partial download, entitlement/
+            // region issue) rather than a real package. Dump head bytes + size so
+            // a recurrence is unambiguous (truncated PKGV vs HTML error page vs a
+            // new magic) — a valid scene.pkg begins with U32 length 8 + "PKGV00NN".
             Logger.error("WPE extraction failed: \(error) — \(Self.headDescription(of: sourcePkgURL))", category: .screenManager)
             switch error {
             case .invalidMagic, .truncatedHeader:
@@ -81,8 +78,7 @@ actor WallpaperEngineCache {
         }
     }
 
-    /// First 16 bytes (hex + printable ASCII) and size of a candidate package,
-    /// for diagnosing a parse failure: a real `scene.pkg` starts `08 00 00 00
+    /// Diagnostic for a parse failure: a real `scene.pkg` starts `08 00 00 00
     /// "PKGV00NN"`; a partial download is short, an HTML error page starts `3c`
     /// (`<`). Best-effort; never throws.
     private static func headDescription(of url: URL) -> String {
@@ -195,16 +191,13 @@ actor WallpaperEngineCache {
         Logger.info("WPE cache purged workshop \(workshopID)", category: .screenManager)
     }
 
-    /// Permanently removes the per-workshop cache directory to reclaim disk
-    /// space. We can't use the Trash here: under App Sandbox `trashItem` on a
-    /// container-internal path lands in the *container's* hidden `.Trash`
-    /// (`…/Containers/<id>/Data/.Trash/`), which is invisible in Finder and
-    /// never frees space — so a "move to Trash" delete looked like a no-op to
-    /// the user. The target path goes through the exact same `cacheDirectory`
-    /// validation (`WPEPathSafety.isSafeWorkshopID` + containment-within-
-    /// `wpe-cache`), so it can only ever resolve to `…/wpe-cache/<id>/` — never
-    /// a parent, sibling, or arbitrary location. Returns `true` if something
-    /// was deleted.
+    /// Permanently removes (not Trash) the per-workshop cache directory. Under
+    /// App Sandbox `trashItem` on a container-internal path lands in the
+    /// *container's* hidden `.Trash` (`…/Containers/<id>/Data/.Trash/`), which is
+    /// invisible in Finder and never frees space — so a "move to Trash" delete
+    /// looked like a no-op to the user. The target goes through the same
+    /// `cacheDirectory` validation (`isSafeWorkshopID` + containment-within-
+    /// `wpe-cache`), so it can only resolve to `…/wpe-cache/<id>/`.
     @discardableResult
     func deleteFiles(workshopID: String) throws -> Bool {
         let cacheURL = try cacheDirectory(for: workshopID)
@@ -214,7 +207,6 @@ actor WallpaperEngineCache {
         return true
     }
 
-    /// Aggregate stats over every per-workshop subdirectory under the root.
     func stats() -> WPECacheStats {
         guard fileManager.fileExists(atPath: rootURL.path),
               let children = try? fileManager.contentsOfDirectory(
@@ -243,7 +235,6 @@ actor WallpaperEngineCache {
         return WPECacheStats(rootURL: rootURL, totalBytes: totalBytes, entries: entries)
     }
 
-    /// Wipes every per-workshop subdirectory under the root (manifest + payloads).
     @discardableResult
     func purgeAll() -> UInt64 {
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -271,10 +262,9 @@ actor WallpaperEngineCache {
         return freed
     }
 
-    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or
-    /// directory mtime) is older than `cutoff`. `keepingIDs` are never removed —
-    /// the caller passes the reachable set (applied / bookmarked / recent) so a
-    /// scene the user still uses is never treated as "unused" just because its
+    /// `lastUsed` = manifest extractedAt or directory mtime. `keepingIDs` (the
+    /// reachable set: applied / bookmarked / recent) are never removed, so a
+    /// scene the user still uses isn't treated as "unused" just because its
     /// extraction is old.
     @discardableResult
     func purgeOlderThan(_ cutoff: Date, keepingIDs: Set<String> = []) -> UInt64 {
@@ -312,9 +302,8 @@ actor WallpaperEngineCache {
     /// whose id is **not** in `keepIDs` (the reachable set: applied configs,
     /// bookmarks, recent imports, and their dependencies). Also reclaims stale
     /// extraction sidecars (crash leftovers older than `staleSidecarMaxAge`)
-    /// while sparing young ones that may be live. Returns freed bytes. An
-    /// unreferenced scene is also unreachable from the UI, so dropping it loses
-    /// nothing actionable; referenced ids are never touched.
+    /// while sparing young ones that may be live. An unreferenced scene is also
+    /// unreachable from the UI, so dropping it loses nothing actionable.
     @discardableResult
     func collectOrphans(keepIDs: Set<String>) -> UInt64 {
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -551,7 +540,6 @@ enum WPECacheError: Error, Equatable, Sendable {
 }
 
 /// Disk-usage snapshot of the WPE cache, sorted most-recently-used first.
-/// Surfaced to the cache management UI in Settings.
 struct WPECacheStats: Sendable, Equatable {
     struct Entry: Sendable, Equatable, Identifiable {
         let workshopID: String

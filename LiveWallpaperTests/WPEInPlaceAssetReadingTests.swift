@@ -15,7 +15,6 @@ struct WPEInPlaceAssetReadingTests {
         withUnsafeBytes(of: value.littleEndian) { Data($0) }
     }
 
-    /// Builds a minimal valid `scene.pkg` byte stream from `(name, bytes)` pairs.
     private func makePackageData(_ entries: [(name: String, data: Data)]) -> Data {
         var header = Data()
         let magic = "PKGV0001"

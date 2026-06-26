@@ -1,15 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// Owns playlist + schedule automation: per-screen playlist bookmarks /
-/// shuffle / rotation, the schedule slot table, the `applyCursor` /
-/// `performScheduledSwitch` transition machines, and the
-/// `automationCoordinator.start(...)` wiring that drives both from the
-/// shared timer.
-///
-/// Reuses the existing `WallpaperAutomationCoordinator` (low-level
-/// scheduler service) as a borrowed ref; this orchestrator is the
-/// behavior layer on top of it.
+/// Behavior layer for playlist + schedule automation on top of the borrowed
+/// `WallpaperAutomationCoordinator` (low-level scheduler service): per-screen
+/// playlist bookmarks / shuffle / rotation, the schedule slot table, and the
+/// `applyCursor` / `performScheduledSwitch` transition machines.
 @MainActor
 final class WallpaperAutomationOrchestrator {
     private let configurationStore: WallpaperConfigurationStore
@@ -58,7 +53,7 @@ final class WallpaperAutomationOrchestrator {
         saveConfiguration(config)
     }
 
-    /// Promote `bookmark` to primary without reordering the visible list — the star marker travels with the entry's existing position.
+    /// Promotes to primary without reordering the visible list — the star marker stays at the entry's existing position.
     func setPrimaryVideo(bookmark: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.savedVideoBookmarkData != bookmark else { return }
@@ -80,7 +75,7 @@ final class WallpaperAutomationOrchestrator {
         reloadWallpaperForScreen(screen)
     }
 
-    /// Writes the reordered playlist (full visible order) while preserving the active bookmark when only the order changed.
+    /// Preserves the active bookmark when only the order changed (not the primary).
     func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
         guard let primaryIndex = ordered.firstIndex(of: primary) else { return }
         let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
@@ -331,7 +326,6 @@ final class WallpaperAutomationOrchestrator {
 
     // MARK: - Automation start
 
-    /// Wires the shared timer (`WallpaperAutomationCoordinator`) into the per-screen schedule + playlist handlers.
     func startMonitoring() {
         automationCoordinator.start(
             screenProvider: { [weak self] in

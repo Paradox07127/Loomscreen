@@ -2,15 +2,12 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Modal sheet shown when the user clicks "Report a Bug…". Three sections:
-/// explainer, scrollable preview of the diagnostic markdown that will be
-/// pasted into the GitHub issue, and an action row.
+/// Modal sheet shown when the user clicks "Report a Bug…".
 ///
-/// The sheet never sends anything on its own — the user has to click
-/// "Continue in Browser" to actually submit, and the log file stays local
-/// until the user manually attaches it to the issue. This matches Apple's
-/// privacy posture for indie macOS apps (Ice / Rectangle / Stats all do
-/// the same).
+/// The sheet never sends anything on its own — the user must click "Continue
+/// in Browser" to submit, and the log file stays local until they manually
+/// attach it. Matches the privacy posture of indie macOS apps (Ice / Rectangle
+/// / Stats).
 struct ReportBugSheet: View {
     let report: BugReport
     var onDismiss: () -> Void

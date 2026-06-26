@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// SettingsManager-backed `ScreenConfigurationPersisting` adapter.
-/// Stays in the main target — the Core store class lives in
+/// SettingsManager-backed `ScreenConfigurationPersisting` adapter. Stays in the
+/// main target; the Core store class lives in
 /// `LiveWallpaperCore/Persistence/WallpaperConfigurationStore.swift`.
 @MainActor
 struct SettingsManagerScreenConfigurationPersistence: ScreenConfigurationPersisting {
@@ -28,7 +28,6 @@ struct SettingsManagerScreenConfigurationPersistence: ScreenConfigurationPersist
 }
 
 extension WallpaperConfigurationStore {
-    /// Production convenience constructor.
     convenience init() {
         self.init(persistence: SettingsManagerScreenConfigurationPersistence())
     }

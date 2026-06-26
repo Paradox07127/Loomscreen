@@ -59,9 +59,8 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// `contentSecurityPolicy`.
     var cspOverride: ContentSecurityPolicyOverride?
 
-    /// Pair of directives + disposition (enforced vs. Report-Only). Held in
-    /// its own type so callers don't accidentally swap one field but forget
-    /// the other.
+    /// Directives + disposition held together so callers can't swap one field
+    /// but forget the other.
     struct ContentSecurityPolicyOverride: Sendable, Equatable {
         enum Disposition: Sendable, Equatable {
             case enforced
@@ -120,7 +119,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             }
             activeFolderURL = newValue
             // A folder swap invalidates any prior package backend; the caller
-            // re-supplies one via `setPackageBacking(_:)` right after if needed.
+            // re-supplies one via `setPackageBacking(_:)` right after.
             activePackageBacking = nil
             sessionNonce = newValue == nil ? nil : UUID().uuidString
         }
@@ -336,16 +335,12 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         return nil
     }
 
-    /// Diagnostic log for the "file not found" branch. The lightweight version
-    /// only printed `lastPathComponent`, which makes it impossible to tell
-    /// apart "wallpaper truly missing asset" from "our path resolution dropped
-    /// a subfolder". We now log the request path, the resolved fs path, a
-    /// `FileManager.fileExists` confirmation, a peek at the parent directory
-    /// so the actual filename surfaces if it's a near-miss, and a codec hint
-    /// for OGG/Opus (WebKit's media stack is historically flaky on these so
-    /// users sometimes assume the file is "missing" when it's a decoder
-    /// problem — though a decoder failure would not normally reach us as a
-    /// filesystem 404). One log entry per filename per folder session.
+    /// Diagnostic log for the "file not found" branch. Logging only
+    /// `lastPathComponent` can't distinguish a truly-missing asset from our
+    /// path resolution dropping a subfolder, so we also log the request path,
+    /// resolved fs path, an existence check, a parent-dir peek (surfaces a
+    /// near-miss filename), and an OGG/Opus codec hint (users mistake a flaky
+    /// WebKit decoder for a missing file). One entry per filename per session.
     @MainActor
     private func logMissingResource(fileURL: URL, requestURL: URL) {
         guard reportedMissingResources.insert(fileURL.lastPathComponent).inserted else { return }
@@ -392,7 +387,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         entry.cancel()
     }
 
-    /// Cancels every in-flight scheme worker.
     private func cancelAllActiveTasks() {
         let entries = activeTasks
         activeTasks.removeAll()
@@ -520,8 +514,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         }
     }
 
-    /// Total servable length of a byte source: the file's size, or the package
-    /// entry's declared `dataSize`.
     nonisolated private static func totalLength(of source: ByteSource) throws -> Int {
         switch source {
         case .file(let url):
@@ -534,7 +526,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         }
     }
 
-    /// Streams `length` bytes from `offset` within the source to the delivery.
     nonisolated private static func stream(
         _ source: ByteSource,
         to delivery: SchemeTaskDelivery,
@@ -684,7 +675,6 @@ private enum ByteSource: Sendable {
     case file(URL)
     case packageEntry(packageURL: URL, absoluteStart: UInt64, size: UInt64)
 
-    /// A short label for diagnostics.
     var lastComponent: String {
         switch self {
         case .file(let url):

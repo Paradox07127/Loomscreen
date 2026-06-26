@@ -23,8 +23,8 @@ enum SteamCMDBinaryResolver {
         return resolveWrapper(pickedURL)
     }
 
-    /// Best-effort discovery candidates. The picker remains the source of
-    /// truth — Valve's tarball install has no canonical location.
+    /// The picker remains the source of truth — Valve's tarball install has no
+    /// canonical location, so these are only best-effort discovery candidates.
     static func autoDetectCandidates() -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         // Package-manager symlinks (Homebrew on Apple Silicon / Intel, MacPorts).
@@ -33,12 +33,11 @@ enum SteamCMDBinaryResolver {
             URL(fileURLWithPath: "/usr/local/bin/steamcmd"),
             URL(fileURLWithPath: "/opt/local/bin/steamcmd")
         ]
-        // Conventional official-tarball extraction directories (Valve's docs
-        // use ~/steamcmd or ~/Steam). Deliberately limited to non-TCC-protected
-        // spots — we never probe ~/Desktop, ~/Documents, or ~/Downloads, so
-        // auto-detect can't trip a "wants to access your … folder" prompt.
-        // Both the `steamcmd.sh` wrapper and the bootstrapped Mach-O are probed
-        // (the resolver follows either to the real binary).
+        // Valve's docs use ~/steamcmd or ~/Steam. Deliberately limited to
+        // non-TCC-protected spots — never probe ~/Desktop, ~/Documents, or
+        // ~/Downloads, so auto-detect can't trip a "wants to access your …
+        // folder" prompt. Both the wrapper and the bootstrapped Mach-O are
+        // probed (the resolver follows either to the real binary).
         for dir in ["steamcmd", "Steam", "Applications/steamcmd"] {
             let base = home.appendingPathComponent(dir, isDirectory: true)
             candidates.append(base.appendingPathComponent("steamcmd.sh", isDirectory: false))
@@ -192,7 +191,6 @@ enum SteamCMDBinaryError: Error, Equatable, Sendable {
     case fileNotFound
     case notMachO
     case wrapperParseFailed(reason: String)
-    case wrapperPointsToMissing(URL)
     case notExecutable
 }
 #endif

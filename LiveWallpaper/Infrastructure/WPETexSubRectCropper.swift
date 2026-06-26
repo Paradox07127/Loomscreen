@@ -2,15 +2,11 @@
 import CoreGraphics
 import Foundation
 
-/// CPU-side sub-rect cropper shared by the eager (P0/P1) and lazy (Phase 2E)
-/// animated `.tex` paths. Splits the row-by-row vs BC-block-by-block work
-/// so the eager loader and the rotating-texture streaming source produce
-/// pixel-identical crops.
-///
-/// Behaviour mirrors `WPETexLazyAnimatedTextureSource.crop`:
-/// - TEXS frames usually carry integer pixel coords stored as Float; we
-///   snap-to-nearest before clamping so a 2415.9999 coordinate doesn't
-///   drop a row and introduce a 1px seam.
+/// CPU-side sub-rect cropper shared by the eager and lazy animated `.tex`
+/// paths so both produce pixel-identical crops. Mirrors
+/// `WPETexLazyAnimatedTextureSource.crop`:
+/// - TEXS frames carry integer pixel coords stored as Float; snap-to-nearest
+///   before clamping so 2415.9999 doesn't drop a row and introduce a 1px seam.
 /// - BC1/BC2/BC3/BC7 atlases require 4×4 block alignment; non-aligned
 ///   sub-rects throw rather than silently emit a torn output.
 enum WPETexSubRectCropper {
@@ -27,9 +23,6 @@ enum WPETexSubRectCropper {
         case missingFormatMapping
     }
 
-    /// Pixel-domain sub-rect derived from a normalized/raw `CGRect`. Public
-    /// for tests so the snap-to-nearest behaviour can be asserted without
-    /// allocating a Metal device or going through the loader.
     struct PixelRect: Sendable, Equatable {
         let x: Int
         let y: Int
@@ -50,10 +43,8 @@ enum WPETexSubRectCropper {
         return PixelRect(x: x, y: y, width: w, height: h)
     }
 
-    /// Crops `atlasBytes` to `subRect`. A nil `subRect` returns the atlas
-    /// unchanged (eager pass-through for `.tex` files that omit a TEXS
-    /// block — the legacy whole-atlas-as-one-frame behaviour stays correct
-    /// there since there is no per-frame layout to apply).
+    /// A nil `subRect` returns the atlas unchanged — pass-through for `.tex`
+    /// files that omit a TEXS block (no per-frame layout to apply).
     static func crop(
         atlasBytes: Data,
         atlasWidth: Int,

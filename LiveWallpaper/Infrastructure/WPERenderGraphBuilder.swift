@@ -69,9 +69,8 @@ struct WPERenderGraphBuilder: Sendable {
         var originalIndexByID: [String: Int] = [:]
         for (index, object) in document.imageObjects.enumerated() where objectByID[object.id] == nil {
             objectByID[object.id] = object
-            // Use the GLOBAL scene paint index when available so layer tie-breaks
-            // stay consistent with where particles interleave; fall back to the
-            // image-filtered index for documents without paint-order metadata.
+            // Use the GLOBAL scene paint index so layer tie-breaks stay consistent with where
+            // particles interleave; fall back to the image-filtered index when absent.
             originalIndexByID[object.id] = document.objectPaintOrder[object.id] ?? index
         }
 
@@ -81,8 +80,14 @@ struct WPERenderGraphBuilder: Sendable {
         // executor skips the scene draw while `WPERenderLayer.visible` is false.
         let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
         let visibleLayerIDs = Set(document.imageObjects
-            .filter { Self.compositesToScene($0, liveVisibilityIDs: liveVisibilityIDs) }
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
+            .filter {
+                // Composite normally, OR keep a layer whose only reason for being hidden is a
+                // live-toggleable (condition-less) ancestor: it stays in the graph (drawn hidden)
+                // so toggling that ancestor back on re-shows it without a pipeline rebuild.
+                Self.compositesToScene($0, liveVisibilityIDs: liveVisibilityIDs)
+                    || Self.hasLiveToggleableHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs)
+            }
             .map(\.id))
         var layerIDsToBuild = visibleLayerIDs
         var pendingIDs = Array(visibleLayerIDs)
@@ -373,6 +378,24 @@ struct WPERenderGraphBuilder: Sendable {
             // that is hidden AND not live-toggleable (e.g. a resolved style-selector variant)
             // suppresses its subtree.
             if !parent.visible && !liveVisibilityIDs.contains(parent.id) { return true }
+            current = parent.parentObjectID
+        }
+        return false
+    }
+
+    /// True when some ancestor is hidden via a condition-less live visibility toggle
+    /// (`!visible` but in `liveVisibilityIDs`). The subtree stays in the graph — drawn hidden —
+    /// so toggling the ancestor back on at runtime re-shows it without a rebuild.
+    /// `hasHiddenAncestor` already excludes subtrees under a permanently-hidden ancestor.
+    static func hasLiveToggleableHiddenAncestor(
+        _ object: WPESceneImageObject,
+        objectByID: [String: WPESceneImageObject],
+        liveVisibilityIDs: Set<String>
+    ) -> Bool {
+        var seen: Set<String> = []
+        var current = object.parentObjectID
+        while let id = current, seen.insert(id).inserted, let parent = objectByID[id] {
+            if !parent.visible && liveVisibilityIDs.contains(parent.id) { return true }
             current = parent.parentObjectID
         }
         return false
@@ -718,8 +741,8 @@ struct WPERenderGraphBuilder: Sendable {
         }
     }
 
-    /// Clip-mask texture name from the puppet's MDLV clip section, used to wire the
-    /// genericimage4 clip-composite path. Nil for puppets without a clip section.
+    /// Clip-mask name from the puppet's MDLV clip section (wires the genericimage4 clip-composite
+    /// path). Nil for puppets without a clip section.
     private func loadPuppetClipMaskName(path: String) -> String? {
         guard let data = try? resolver.data(relativePath: path),
               let model = try? WPEMdlParser.parse(data: data) else {
@@ -730,8 +753,7 @@ struct WPERenderGraphBuilder: Sendable {
 
     /// For a genericimage4 puppet pass with an MDLV clip mask, injects the clip-mask asset (slot 1)
     /// and the intermediate clip render target (slot 8) so the executor runs the clip composite.
-    /// No-op (byte-identical pass) when the flag is off, the puppet has no clip mask, or the shader
-    /// is not genericimage4.
+    /// No-op when the flag is off, the puppet has no clip mask, or the shader is not genericimage4.
     private func materialPassWithPuppetClipCompositeIfNeeded(
         _ pass: WPEMaterialPass,
         phase: WPERenderPassPhase,
@@ -777,8 +799,7 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     /// The two bundled solid-layer models (`solidlayer.json` and its depth-test
-    /// variant) are both `"solidlayer": true`. Returns the pass's depth-test
-    /// state for a recognized solid-layer model path, or nil otherwise.
+    /// variant) are both `"solidlayer": true`; they differ only in depth-test state.
     private static func builtinSolidLayerDepthTest(forModelPath path: String) -> String? {
         switch path.lowercased() {
         case "models/util/solidlayer.json":

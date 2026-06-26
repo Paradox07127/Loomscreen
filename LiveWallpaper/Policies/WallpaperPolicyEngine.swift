@@ -17,9 +17,7 @@ struct WallpaperPolicyInputs {
     var isUnderMemoryPressure: Bool
 }
 
-/// Converts settings and system state into runtime decisions.
 enum WallpaperPolicyEngine {
-    /// The single decision: collapse every suspend trigger into one profile.
     /// `inputs` carries raw signals; `settings` gates them here so the rule
     /// table lives in exactly one place.
     static func performanceProfile(

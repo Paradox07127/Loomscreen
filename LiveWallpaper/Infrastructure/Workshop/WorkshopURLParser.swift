@@ -24,23 +24,16 @@ enum WorkshopURLParser {
     }
 
     enum InvalidReason: String, Equatable, Sendable {
-        /// The input was empty after trimming.
         case empty
-        /// The input is not a recognized Workshop URL form.
         case unsupportedURL
-        /// The query string had no `id` parameter.
         case missingID
-        /// The `id` value was not a positive `UInt64`.
         case malformedID
-        /// The `id` value overflowed `UInt64`.
         case overflowID
-        /// The host did not match a known Steam endpoint.
         case unknownHost
     }
 
-    /// Splits a pasted blob into individual tokens. Accepts whitespace,
-    /// newlines, commas, and semicolons as separators. Order-preserving and
-    /// duplicate-tolerant; callers handle dedupe.
+    /// Splits a pasted blob into tokens on whitespace/newline/comma/semicolon.
+    /// Order-preserving and duplicate-tolerant; callers handle dedupe.
     static func tokenize(_ blob: String) -> [String] {
         let separators = CharacterSet(charactersIn: ",;\n\r\t ")
         return blob
@@ -49,8 +42,7 @@ enum WorkshopURLParser {
             .filter { !$0.isEmpty }
     }
 
-    /// Parses a single token. Public so the import sheet can preview the
-    /// outcome before staging the row.
+    /// Public so the import sheet can preview the outcome before staging the row.
     static func parse(_ raw: String) -> ParsedItem {
         let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
@@ -62,12 +54,10 @@ enum WorkshopURLParser {
             return parseNumericID(token, original: raw)
         }
 
-        // steam:// URL.
         if token.lowercased().hasPrefix("steam://") {
             return parseSteamURL(token, original: raw)
         }
 
-        // http(s) URL.
         if let scheme = URL(string: token)?.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
             return parseHTTPSURL(token, original: raw)

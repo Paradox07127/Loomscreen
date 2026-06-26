@@ -16,8 +16,6 @@ struct ShaderUniforms {
 /// must match or pipeline-state creation fails at runtime.
 private let kMetalShaderSampleCount: Int = 4
 
-/// Errors surfaced to callers when a custom-shader compile fails. Caller
-/// (the inspector) uses these to drive UI alerts.
 enum CustomShaderCompileError: LocalizedError {
     case metalUnsupported
     case missingMainImage
@@ -44,9 +42,8 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
     private var commandQueue: MTLCommandQueue?
     private var pipelineState: MTLRenderPipelineState?
 
-    /// The default library that ships with the app (Shaders.metal). Holds
-    /// the builtin fragmentShader / vertexShader pair. Cached so the custom
-    /// shader path can rebuild against it without re-loading.
+    /// Shaders.metal — cached so the custom-shader path can rebuild against it
+    /// without re-loading.
     private var defaultLibrary: MTLLibrary?
 
     /// True when the pipeline currently bound to `pipelineState` was built
@@ -207,9 +204,8 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         return compileGeneration
     }
 
-    /// Compile a user shader source against the canonical wrapper template
-    /// and return the resulting library. Useful for the importer's pre-save
-    /// validation step (the inspector calls this before persisting).
+    /// Also used by the importer's pre-save validation step (the inspector
+    /// calls this before persisting).
     nonisolated static func compileCustomShader(source: String, on device: MTLDevice) throws -> MTLLibrary {
         guard source.range(of: #"\bmainImage\b"#, options: .regularExpression) != nil else {
             throw CustomShaderCompileError.missingMainImage

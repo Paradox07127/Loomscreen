@@ -3,22 +3,19 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Inspector-side preview for HTML wallpapers. Mirrors the layout of
-/// `VideoPreviewSection`: a 16:9 card with the latest snapshot, a refresh
-/// button to retake the snapshot, and a fall-through skeleton while loading.
+/// Inspector-side preview for HTML wallpapers. Snapshots come from
+/// `WallpaperThumbnailService` so the inspector and the bookmark grid share the
+/// same render pass + NSCache entry per source.
 ///
-/// Snapshots come from `WallpaperThumbnailService` so the inspector and
-/// the bookmark grid share the same render pass + NSCache entry per source.
-///
-/// Wallpaper Engine *web* projects are different: they ship a `preview.gif`
-/// (or jpg/png) alongside `project.json`, so when `wpePreviewURL` is set we
-/// render that asset directly and skip the expensive WKWebView snapshot pass
-/// entirely. Plain HTML wallpapers (no WPE origin) still capture a first frame.
+/// WPE *web* projects ship a `preview.gif` (or jpg/png) alongside
+/// `project.json`, so when `wpePreviewURL` is set we render that asset directly
+/// and skip the expensive WKWebView snapshot pass. Plain HTML wallpapers (no
+/// WPE origin) still capture a first frame.
 struct HTMLPreviewSection: View {
     let source: HTMLSource?
     let config: HTMLConfig
-    /// Non-nil only for Wallpaper Engine web projects that ship a preview
-    /// asset. Always `nil` in Lite builds (WPE is Pro-only).
+    /// Non-nil only for WPE web projects that ship a preview asset. Always
+    /// `nil` in Lite builds (WPE is Pro-only).
     let wpePreviewURL: URL?
     let wpePreviewBookmark: Data?
 
@@ -38,8 +35,7 @@ struct HTMLPreviewSection: View {
         self.wpePreviewBookmark = wpePreviewBookmark
     }
 
-    /// Whether the card shows the WPE preview asset instead of a WKWebView
-    /// snapshot. When true, the snapshot pipeline and refresh button stand down.
+    /// When true, the snapshot pipeline and refresh button stand down.
     private var showsWPEPreview: Bool { wpePreviewURL != nil }
 
     var body: some View {
@@ -81,8 +77,7 @@ struct HTMLPreviewSection: View {
         }
     }
 
-    /// WPE web project: render the shipped preview GIF/jpg/png, aspect-filling
-    /// the 16:9 card. Guarded for Lite since `WPEPreviewView` is Pro-only — but
+    /// Guarded for Lite since `WPEPreviewView` is Pro-only — but
     /// `wpePreviewURL` is always `nil` there anyway, so this branch never runs.
     @ViewBuilder
     private func wpePreviewCard(url: URL) -> some View {
@@ -158,8 +153,6 @@ struct HTMLPreviewSection: View {
     }
 
     private func startLoadIfNeeded(force: Bool = false) {
-        // WPE web projects render their shipped preview asset — no WKWebView
-        // snapshot needed, which is the whole point of this path.
         guard !showsWPEPreview else { return }
         guard let source, let key = cacheKey else { return }
         if !force, let cached = WallpaperThumbnailService.shared.cachedThumbnail(forKey: key) {
@@ -181,10 +174,9 @@ struct HTMLPreviewSection: View {
     }
 }
 
-/// Helper that resolves an `HTMLSource` into a `(URL, cacheKey)` pair that
-/// `WallpaperThumbnailService` can snapshot. Folder sources point at their
-/// resolved index.html; URL sources use the URL directly. File/folder
-/// bookmark resolution opens a security scope for the duration of the call.
+/// Resolves an `HTMLSource` into a `(URL, cacheKey)` pair that
+/// `WallpaperThumbnailService` can snapshot. File/folder bookmark resolution
+/// opens a security scope for the duration of the call.
 enum HTMLPreviewKey {
     static func key(for source: HTMLSource) -> String {
         switch source {
@@ -255,17 +247,13 @@ enum HTMLPreviewKey {
     }
 }
 
-/// Floating capsule shown on the HTML preview, parallel to
-/// `VideoInformationOverlay`. Surfaces the same kind of "what is this"
-/// glance information that the video overlay does — source kind, source
-/// identifier, and the runtime-mode badges that meaningfully change how
-/// the page is drawn (insecure URL, physical-pixel layout, JavaScript
-/// off).
+/// Floating capsule on the HTML preview: source kind, identifier, and the
+/// runtime-mode badges that meaningfully change how the page is drawn (insecure
+/// URL, physical-pixel layout, JavaScript off).
 ///
 /// Deliberately omits anything that already lives in a banner inside
-/// `HTMLSourceSection` (trust state for remote URLs) or the HTML
-/// Rendering inspector card (viewport / DPR / scale), so the overlay
-/// stays a one-line summary rather than a duplicate diagnostic surface.
+/// `HTMLSourceSection` (trust state for remote URLs) or the HTML Rendering
+/// inspector card (viewport / DPR / scale), to avoid a duplicate diagnostic.
 struct HTMLInformationOverlay: View {
     let source: HTMLSource?
     let config: HTMLConfig

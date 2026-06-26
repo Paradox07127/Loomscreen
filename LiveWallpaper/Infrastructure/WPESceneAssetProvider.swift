@@ -14,19 +14,14 @@ enum WPESceneAssetProviderError: Error, Equatable, Sendable {
 /// extraction; only consumers that genuinely require a file URL (video, audio,
 /// some ImageIO paths) go through `stagedURL`.
 protocol WPESceneAssetProvider: Sendable {
-    /// Reads an asset's full bytes. Directory backends map large files via
-    /// `.mappedIfSafe` so the RSS profile matches the historical extracted-cache
-    /// path; package backends read the entry's slice.
+    /// Directory backends map large files via `.mappedIfSafe` so the RSS profile
+    /// matches the historical extracted-cache path; package backends read the slice.
     func data(atRelativePath relativePath: String) throws -> Data
-    /// A file URL for a consumer that needs one. A directory backend returns the
-    /// project file itself; a package backend stages the entry into the
-    /// provider's session-lifetime temp dir (cleaned on deinit — no per-URL
-    /// release).
+    /// A directory backend returns the project file itself; a package backend stages
+    /// the entry into the provider's session-lifetime temp dir (cleaned on deinit).
     func stagedURL(atRelativePath relativePath: String) throws -> URL
-    /// True when the asset exists and is a readable regular file/entry.
     func exists(atRelativePath relativePath: String) -> Bool
-    /// All relative asset paths the provider can serve (sorted). Diagnostic /
-    /// enumeration use only — not on the hot path.
+    /// Diagnostic / enumeration use only — not on the hot path.
     var entryNames: [String] { get }
 }
 

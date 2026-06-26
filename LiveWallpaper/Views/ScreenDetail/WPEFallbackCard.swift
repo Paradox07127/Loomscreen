@@ -6,31 +6,24 @@ import AppKit
 /// to the inspector so the user gets a specific reason instead of a generic
 /// "unsupported" message.
 enum FallbackReason: Equatable, Sendable {
-    // Scene diagnostics
     case unsupportedType
     case sceneParseFailed(String)
     case sceneShaderUnsupported
     case sceneResourceMissing
-    // Dependency / platform gating
-    /// Project declares Steam Workshop dependencies we couldn't satisfy
-    /// from the local cache. Lists IDs the user must subscribe to in
-    /// Steam before retrying the import.
+    /// IDs the user must subscribe to in Steam before retrying the import.
     case missingDependency(workshopIDs: [String])
-    /// Project ships a Windows `.dll` plugin under `bin/`. Permanent on
-    /// macOS — subscribing more workshop items will not help.
+    /// Windows `.dll` plugin under `bin/`. Permanent on macOS — subscribing
+    /// more workshop items will not help.
     case requiresWindowsPlugin
-    // Texture decoder failures with precise codes so the user sees
-    // "Format 8 (RGBA1010102) not yet supported" instead of a vague
-    // "scene unsupported".
+    // Precise codes so the user sees "Format 8 (RGBA1010102) not yet
+    // supported" instead of a vague "scene unsupported".
     case texContainerUnsupported(magic: String)
     case texUnsupportedFormat(code: Int)
     case texDecodeFailed(detail: String)
 }
 
-/// Renders the explanatory card for any WPE workshop import that cannot be
-/// promoted to a live wallpaper. Replaces the Phase 1.x `WPEUnsupportedCard`
-/// with a reason-aware variant so scene parse failures, missing assets, and
-/// genuinely unsupported types each get their own copy.
+/// Explanatory card for any WPE workshop import that cannot be promoted to a
+/// live wallpaper, with reason-aware copy.
 struct WPEFallbackCard: View {
     let origin: WPEOrigin
     let reason: FallbackReason
@@ -40,7 +33,6 @@ struct WPEFallbackCard: View {
         self.reason = reason
     }
 
-    /// Picks the card-level reason from a freshly imported origin so callers don't have to reach into the new `WPEOrigin` flags themselves.
     static func reason(for origin: WPEOrigin) -> FallbackReason {
         if origin.requiresWindowsPlugin { return .requiresWindowsPlugin }
         if !origin.missingDependencyIDs.isEmpty {
@@ -105,7 +97,6 @@ struct WPEFallbackCard: View {
         .adaptiveGlassSurface(.roundedRectangle(24))
     }
 
-    /// Renders one row per missing workshop ID.
     @ViewBuilder
     private func dependencyList(ids: [String]) -> some View {
         ScrollView {
@@ -271,22 +262,9 @@ struct WPEFallbackCard: View {
     }
 }
 
-/// Compatibility shim — keeps the old name compiling while Phase 2.x consumers
-/// migrate. Defaults the reason to `.unsupportedType` so the historical
-/// behaviour (badge for unsupported workshop types) is unchanged.
-struct WPEUnsupportedCard: View {
-    let origin: WPEOrigin
-
-    var body: some View {
-        WPEFallbackCard(origin: origin, reason: WPEFallbackCard.reason(for: origin))
-    }
-}
-
 extension FallbackReason {
-    /// Apple HIG warning semantics. `.yellow` for "needs attention but
-    /// recoverable", `.orange` for "permanent block, no action will help".
-    /// Keeping the two distinct lets users skim the inspector for the
-    /// difference between "subscribe to fix" vs "macOS can't run this".
+    /// Two distinct tints so users can skim "subscribe to fix" (recoverable)
+    /// vs "macOS can't run this" (permanent block).
     var severityTint: Color {
         switch self {
         case .requiresWindowsPlugin:

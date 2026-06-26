@@ -2,11 +2,9 @@ import Foundation
 import SwiftUI
 import LiveWallpaperCore
 
-/// Time-of-day preset users can apply from the `+ Add Slot ▾` menu.
-///
-/// Each preset suggests a default `(start, end)` matching common waking
-/// rhythms. The label is stored verbatim in `ScheduleSlot.label` so it
-/// rounds-trips through `localizedLabel` and renders in the user's locale.
+/// Time-of-day preset users can apply from the Add Slot menu. The label is
+/// stored verbatim in `ScheduleSlot.label` so it round-trips through
+/// `localizedLabel` and renders in the user's locale.
 enum SchedulePreset: String, Identifiable, CaseIterable {
     case morning
     case midday
@@ -16,9 +14,8 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
 
     var id: String { rawValue }
 
-    /// Canonical `(startHour, endHour)` for the preset. Storage matches
-    /// `ScheduleSlot.containsHour` semantics — `endHour` is exclusive and
-    /// the night preset deliberately wraps midnight.
+    /// Matches `ScheduleSlot.containsHour` semantics — `endHour` is exclusive
+    /// and the night preset deliberately wraps midnight.
     var hours: (start: Int, end: Int) {
         switch self {
         case .morning:   return (6, 12)
@@ -29,9 +26,8 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
         }
     }
 
-    /// English key written to `ScheduleSlot.label`. Resolved at display
-    /// time by `ScheduleSlot.localizedLabel` so every locale renders the
-    /// translated form.
+    /// English key written to `ScheduleSlot.label`, resolved at display time
+    /// by `ScheduleSlot.localizedLabel` so every locale renders translated.
     var labelKey: String {
         switch self {
         case .morning:   return "Morning"
@@ -57,8 +53,6 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
         }
     }
 
-    /// SF Symbol for menu icons. Picked to evoke the time of day without
-    /// requiring a colored asset.
     var systemImage: String {
         switch self {
         case .morning:   return "sun.horizon"
@@ -69,8 +63,7 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
         }
     }
 
-    /// True when this preset's hours would collide with any existing slot.
-    /// Drives "disabled" state on the Add Slot menu so users see at a
+    /// Drives the "disabled" state on the Add Slot menu so users see at a
     /// glance which presets are already filled.
     func conflicts(with existing: [ScheduleSlot]) -> Bool {
         let candidate = ScheduleSlot(startHour: hours.start, endHour: hours.end, label: labelKey)
@@ -81,8 +74,8 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
         ScheduleSlot(startHour: hours.start, endHour: hours.end, label: labelKey)
     }
 
-    /// Best-fit preset for a free hour cursor — used when the user
-    /// double-taps an empty timeline cell to insert.
+    /// Best-fit preset for a free hour cursor — used when inserting into an
+    /// empty timeline cell.
     static func suggestion(forStartHour hour: Int) -> SchedulePreset {
         switch hour {
         case 5..<11:  return .morning
@@ -115,8 +108,8 @@ enum ScheduleTimeFormatter {
         return date.formatted(.dateTime.hour())
     }
 
-    /// Full `"<start> — <end>"` label, suffixing `(next day)` whenever the
-    /// slot wraps midnight so users immediately see the "+1 day" semantic.
+    /// Suffixes `(next day)` whenever the slot wraps midnight so users see the
+    /// "+1 day" semantic.
     static func rangeLabel(startHour: Int, endHour: Int) -> String {
         let start = hourLabel(startHour)
         let end = hourLabel(endHour)

@@ -308,15 +308,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let angularVelocityMax: SIMD3<Double>
     public let fadeInSeconds: Double
     public let fadeOutSeconds: Double
-    /// `alphachange` operator (lifetime-fraction alpha ramp), if present.
     public let alphaChange: WPEParticleAlphaChange?
-    /// `oscillatealpha` operator (sine alpha flicker), if present.
     public let oscillateAlpha: WPEParticleOscillateAlpha?
-    /// `sizechange` operator (lifetime-fraction size ramp), if present.
     public let sizeChange: WPEParticleSizeChange?
-    /// `colorchange` operator (lifetime-fraction RGB ramp), if present.
     public let colorChange: WPEParticleColorChange?
-    /// `oscillateposition` operator (per-particle sine sway), if present.
     public let oscillatePosition: WPEParticleOscillatePosition?
     /// `operator: movement.gravity` (world units / s²) and drag scalar.
     public let gravity: SIMD3<Double>
@@ -340,13 +335,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// runtime can pick a sub-frame index every tick. `1` is the
     /// WPE default; `0` freezes on frame 0.
     public let sequenceMultiplier: Double
-    /// `animationmode` from the particle JSON — whether the sprite sheet
-    /// animates over the lifetime (`.sequence`) or each particle freezes
-    /// on a random frame (`.randomFrame`).
     public let animationMode: WPEParticleAnimationMode
     /// Parsed control points (mouse anchors). `id 0` is the emitter origin.
     public let controlPoints: [WPEParticleControlPoint]
-    /// `controlpointattract` operators (cursor follow/avoid forces).
     public let attractors: [WPEParticleControlPointAttractor]
 
     /// Ordered child particle file paths. Back-compat accessor over
@@ -699,7 +690,6 @@ public enum WPEParticleDefinitionParser {
 
         if let emitters = json["emitter"] as? [[String: Any]], let first = emitters.first {
             rate = WPEValueParser.double(first["rate"]) ?? 0
-            // `instantaneous: N` = one-time burst of N particles at emitter start.
             instantaneousCount = WPEValueParser.double(first["instantaneous"]).map { max(0, Int($0)) } ?? 0
             origin = WPEValueParser.vector3(first["origin"]) ?? SIMD3(0, 0, 0)
             dispersalMin = WPEValueParser.double(first["distancemin"]) ?? 0

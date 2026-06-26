@@ -2,8 +2,6 @@
 import SwiftUI
 import AppKit
 
-/// One-row update status surface for the About panel. Drives `UpdateChecker.shared`
-/// and renders the four state-machine outcomes plus a manual "Check Now" affordance.
 /// Renders ONLY in the Loomscreen Lite build — Pro hides this section entirely
 /// because its update path will be Sparkle, not GitHub Releases.
 struct UpdateBannerView: View {

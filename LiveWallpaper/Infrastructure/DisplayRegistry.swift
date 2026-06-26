@@ -1,6 +1,5 @@
 import AppKit
 
-/// Tracks the current set of connected displays and resolves screen identities.
 @MainActor
 final class DisplayRegistry {
     func currentScreens() -> [Screen] {

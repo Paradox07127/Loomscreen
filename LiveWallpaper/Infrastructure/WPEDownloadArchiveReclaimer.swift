@@ -12,8 +12,7 @@ import Foundation
 /// confirmed present in the cache are touched (never the sole copy), and the
 /// archive is moved to the Trash (recoverable), never unlinked.
 struct WPEDownloadArchiveReclaimer {
-    /// Root of downloaded Workshop items (`…/content/431960/`). Injectable so
-    /// the trash logic is unit-testable against a temp tree.
+    /// Root of downloaded Workshop items (`…/content/431960/`).
     let contentRoot: URL?
     private let fileManager: FileManager
 
@@ -46,7 +45,6 @@ struct WPEDownloadArchiveReclaimer {
         return contentRoot
     }
 
-    /// Total bytes reclaimable for the given already-cached ids.
     func reclaimableBytes(cachedIDs: Set<String>) -> Int64 {
         cachedIDs.reduce(into: Int64(0)) { sum, id in
             if let pkg = sourceArchiveURL(for: id) { sum += fileSize(pkg) }

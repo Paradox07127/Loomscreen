@@ -3,9 +3,6 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Settings sub-view: shows the Workshop browse cache footprint and a
-/// Clear-cache action. Modeled on `WPECacheManagementView`'s grouped form
-/// idiom.
 @MainActor
 struct WorkshopCacheManagementView: View {
     let cache: WorkshopQueryCache

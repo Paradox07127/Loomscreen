@@ -23,36 +23,4 @@ extension SecurityScopedBookmarkResolver.Target {
         }
     }
 
-    /// Wallpaper Engine install root — the directory containing `assets/`
-    /// the user authorised so the renderer can fall back to engine builtins.
-    static var wpeEngineAssets: Self {
-        Self(label: "wpeEngineAssets") { original, refreshed in
-            Task { @MainActor in
-                guard SettingsManager.shared.loadWPEEngineAssetsBookmark() == original else {
-                    Logger.info(
-                        "[bookmark/wpeEngineAssets] skipped stale refresh save — stored bookmark changed between resolve and save",
-                        category: .fileAccess
-                    )
-                    return
-                }
-                SettingsManager.shared.saveWPEEngineAssetsBookmark(refreshed)
-            }
-        }
-    }
-
-    /// Apple Aerials wallpaper library directory.
-    static var aerialsDirectory: Self {
-        Self(label: "aerialsDirectory") { original, refreshed in
-            Task { @MainActor in
-                guard SettingsManager.shared.loadAerialsDirectoryBookmark() == original else {
-                    Logger.info(
-                        "[bookmark/aerialsDirectory] skipped stale refresh save — stored bookmark changed between resolve and save",
-                        category: .fileAccess
-                    )
-                    return
-                }
-                SettingsManager.shared.saveAerialsDirectoryBookmark(refreshed)
-            }
-        }
-    }
 }

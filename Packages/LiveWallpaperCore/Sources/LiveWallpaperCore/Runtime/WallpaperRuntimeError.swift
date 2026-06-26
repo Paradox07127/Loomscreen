@@ -42,8 +42,8 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
 
     public enum Severity: Sendable { case error, warning, info }
 
-    /// Visual severity for the banner. `error` is unrecoverable without user
-    /// action; `warning` is recoverable; `info` is a degraded-mode notice.
+    /// `error` is unrecoverable without user action; `warning` is recoverable;
+    /// `info` is a degraded-mode notice.
     public var severity: Severity {
         switch self {
         case .fileAccessDenied, .sandboxRevoked, .mediaNotPlayable:
@@ -55,7 +55,6 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
         }
     }
 
-    /// Short, actionable headline shown in the banner (one line).
     public var title: String {
         switch self {
         case .fileAccessDenied(let url):
@@ -71,8 +70,7 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
         }
     }
 
-    /// Middle-truncated path / URL providing exactly the actionable detail.
-    /// Falls back to nil for errors with no associated path.
+    /// Middle-truncated path / URL; nil for errors with no associated path.
     public var subtitlePath: String? {
         switch self {
         case .fileAccessDenied(let url),

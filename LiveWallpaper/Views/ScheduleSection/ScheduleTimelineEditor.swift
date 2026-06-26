@@ -3,15 +3,8 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 
-/// Interactive 24h timeline. Each slot segment renders three hit regions:
-/// `.leadingEdge` and `.trailingEdge` handles (3pt-wide visual, 8pt-wide
-/// hit area) for drag-resize, and the middle for translating the whole
-/// slot. A double-tap on an empty hour cell calls `onRequestInsert` with
-/// the tapped hour.
-///
-/// All edits are commit-on-drag-end through `onCommitTimeChange`. The
-/// parent re-runs `SchedulePolicy.conflicts` and either accepts the
-/// change or rejects it; on rejection the drag preview unwinds back to
+/// Interactive 24h timeline. Edits are commit-on-drag-end via
+/// `onCommitTimeChange`; on parent rejection the preview unwinds back to
 /// the stored hours automatically because rendering is sourced from
 /// `slots`, not the in-flight drag delta.
 struct ScheduleTimelineEditor: View {
@@ -49,10 +42,8 @@ struct ScheduleTimelineEditor: View {
                     cursor(width: width)
                 }
                 .contentShape(Rectangle())
-                // Anchor every gesture inside the timeline to this stable
-                // named space — without it, attaching `DragGesture` to the
-                // moving segment views would put the gesture in `.local`
-                // space which drifts with the segment's own `.offset(...)`,
+                // Anchor gestures to a stable named space: a `.local` gesture
+                // on the moving segment would drift with its own `.offset(...)`,
                 // creating a feedback loop on every render.
                 .coordinateSpace(name: timelineCoordSpaceName)
                 .onTapGesture(count: 2) { location in
@@ -179,8 +170,7 @@ struct ScheduleTimelineEditor: View {
         }
     }
 
-    /// Hours to render — uses the live drag preview when this slot is the
-    /// active drag, otherwise the persisted hours.
+    /// Live drag preview when this slot is the active drag, else persisted hours.
     private func displayHours(for slot: ScheduleSlot) -> (start: Int, end: Int) {
         if let drag, drag.slotID == slot.id {
             return drag.proposedHours
@@ -205,13 +195,11 @@ struct ScheduleTimelineEditor: View {
             : (slot.videoBookmarkData == nil ? accent.opacity(0.45) : accent.opacity(0.70))
 
         ZStack(alignment: .topLeading) {
-            // Body — middle hit area drags the whole slot
             RoundedRectangle(cornerRadius: 3)
                 .fill(fill)
                 .frame(width: width, height: trackHeight)
                 .gesture(translateGesture(for: slot, hourWidth: hourWidth))
 
-            // Edges
             if showLeadingHandle {
                 handle(for: slot, edge: .leadingEdge, hourWidth: hourWidth, position: 0)
             }
@@ -345,28 +333,21 @@ struct ScheduleTimelineEditor: View {
     }
 }
 
-/// Stable name for the timeline's coordinate space. Every gesture inside
-/// the editor anchors to it so that `value.translation` reflects cursor
-/// delta in timeline pixels, not segment-local pixels (which would drift
-/// as the segment's `.offset(...)` re-positions during the drag).
 private let timelineCoordSpaceName = "schedule.timeline.space"
 
-/// Drag state for the timeline. Pure value type — `ScheduleTimelineEditor`
-/// holds one and recomputes the rendered hours from the original slot
-/// + the delta, so the source-of-truth never desyncs.
+/// Recomputes rendered hours from the original slot + delta, so the
+/// source-of-truth never desyncs.
 ///
-/// Edge drags preserve the slot's wrap-mode (non-wrap stays non-wrap, wrap
-/// stays wrap). Without that constraint, dragging a leading edge across
-/// the trailing would silently flip a 6-hour Morning slot into a 22-hour
-/// wrap-around, and `timelineSegments()` would change from one segment to
-/// two mid-drag — restructuring `ForEach` and resetting the gesture
-/// (visible as a jittery, snap-back drag).
+/// Edge drags preserve the slot's wrap-mode. Without that, dragging a
+/// leading edge across the trailing would flip a 6-hour slot into a
+/// 22-hour wrap-around, and `timelineSegments()` would change from one
+/// segment to two mid-drag — restructuring `ForEach` and resetting the
+/// gesture (jittery, snap-back drag).
 ///
-/// `translate` keeps the slot's length constant but `proposedHours` can
-/// still wrap across midnight, which changes the rendered segment count
-/// (1 ↔ 2). If the user grabbed a segment that disappears during the
-/// flip, SwiftUI drops the gesture host — a known limitation that
-/// surfaces only on multi-hour translates across the midnight boundary.
+/// `translate` keeps length constant but `proposedHours` can still wrap
+/// across midnight (segment count 1 ↔ 2). If the grabbed segment
+/// disappears during the flip, SwiftUI drops the gesture host — a known
+/// limitation on multi-hour translates across the midnight boundary.
 struct TimelineDragSession: Equatable, Sendable {
     enum Edge: Sendable { case leadingEdge, trailingEdge }
     enum Kind: Equatable, Sendable {
@@ -390,12 +371,12 @@ struct TimelineDragSession: Equatable, Sendable {
         case .edge(.leadingEdge):
             let newStart: Int
             if wasWrap {
-                // Preserve wrap: new_start > originalEnd, ≤ 23
+                // Preserve wrap.
                 let minStart = originalEnd + 1
                 let maxStart = 23
                 newStart = max(minStart, min(maxStart, originalStart + deltaHours))
             } else {
-                // Preserve non-wrap: 0 ≤ new_start ≤ originalEnd - 1
+                // Preserve non-wrap.
                 let minStart = 0
                 let maxStart = originalEnd - 1
                 newStart = max(minStart, min(maxStart, originalStart + deltaHours))
@@ -405,15 +386,13 @@ struct TimelineDragSession: Equatable, Sendable {
         case .edge(.trailingEdge):
             let newEnd: Int
             if wasWrap {
-                // Preserve wrap: 0 ≤ new_end ≤ originalStart - 1
+                // Preserve wrap.
                 let minEnd = 0
                 let maxEnd = originalStart - 1
                 newEnd = max(minEnd, min(maxEnd, originalEnd + deltaHours))
             } else {
-                // Preserve non-wrap: originalStart + 1 ≤ new_end ≤ 23.
-                // (Stopping at 23 instead of 24 keeps the slot non-wrap;
-                // users who want the slot to end exactly at next-day
-                // midnight use the popover.)
+                // Preserve non-wrap. Stopping at 23 (not 24) keeps the slot
+                // non-wrap; ending exactly at next-day midnight uses the popover.
                 let minEnd = originalStart + 1
                 let maxEnd = 23
                 newEnd = max(minEnd, min(maxEnd, originalEnd + deltaHours))
@@ -421,8 +400,8 @@ struct TimelineDragSession: Equatable, Sendable {
             return (originalStart, newEnd)
 
         case .translate:
-            // Length is preserved → segment count stays stable → gesture
-            // host doesn't restructure. Wrap may flip; that's fine here.
+            // Length preserved → stable segment count → gesture host doesn't
+            // restructure. Wrap may flip; that's fine here.
             return (
                 normalize(originalStart + deltaHours),
                 normalize(originalEnd + deltaHours)
@@ -431,10 +410,10 @@ struct TimelineDragSession: Equatable, Sendable {
     }
 }
 
-/// Tiny standalone view so the resize cursor `push/pop` can be balanced
-/// against an explicit `onDisappear` — matches `PlaylistRow`'s handle
-/// pattern. An inline `.onHover` modifier would leak a pushed cursor if
-/// the view disappeared while still hovered.
+/// Standalone view so the resize cursor `push/pop` balances against an
+/// explicit `onDisappear` (matches `PlaylistRow`'s handle pattern). An
+/// inline `.onHover` would leak a pushed cursor if the view disappeared
+/// while still hovered.
 private struct TimelineEdgeHandle<G: Gesture>: View {
     let visualWidth: CGFloat
     let hitWidth: CGFloat

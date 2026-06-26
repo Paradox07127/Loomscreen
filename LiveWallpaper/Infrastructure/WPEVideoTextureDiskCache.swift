@@ -15,12 +15,9 @@ import CryptoKit
 ///
 /// Lifetime: `store` hands the renderer a *leased* URL; `WPEVideoTextureSource`
 /// calls `release` on invalidate instead of deleting, so the file survives for
-/// reuse. Three reclamation paths keep the folder bounded:
-///   1. `collectOrphans(referencedWorkshopIDs:)` at launch — drops buckets for
-///      uninstalled scenes plus untracked/loose leftovers.
-///   2. `enforceSizeLimit()` — LRU eviction (by mtime) whenever the folder
-///      exceeds `maxBytes`. Never evicts a leased (live) file.
-///   3. `purgeAll()` — the Settings "Clear" action.
+/// reuse. Three reclamation paths keep the folder bounded: `collectOrphans` at
+/// launch, `enforceSizeLimit` LRU eviction over `maxBytes`, and `purgeAll` for
+/// the Settings "Clear" action. None ever evicts a leased (live) file.
 ///
 /// Pre-refactor this folder was a UUID-named scratch dir that only self-cleaned
 /// on a clean `invalidate()`; crashes/force-quits leaked files unbounded and no
@@ -28,9 +25,9 @@ import CryptoKit
 actor WPEVideoTextureDiskCache {
     static let shared = WPEVideoTextureDiskCache()
 
-    /// Default disk ceiling. The folder is a reuse cache, not a system of
-    /// record (the source bytes live inside each scene's `.tex`), so a modest
-    /// cap is the right LRU backstop between launches.
+    /// Disk ceiling. The folder is a reuse cache, not a system of record (the
+    /// source bytes live inside each scene's `.tex`), so a modest LRU cap is
+    /// enough.
     static let defaultMaxBytes: UInt64 = 2 * 1024 * 1024 * 1024  // 2 GiB
 
     /// Bucket for videos whose owning scene has no path-safe workshop ID
@@ -57,7 +54,6 @@ actor WPEVideoTextureDiskCache {
         self.maxBytes = maxBytes
     }
 
-    /// `~/Library/Caches/wpe-tex-video/`.
     nonisolated static var defaultRootURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("wpe-tex-video", isDirectory: true)
@@ -65,10 +61,9 @@ actor WPEVideoTextureDiskCache {
 
     // MARK: - Store / lease
 
-    /// Stages `data` under the scene's bucket, content-addressed by SHA-256.
-    /// Returns the leased file URL. Reuses an existing file with a matching
-    /// size (touching its mtime so reuse refreshes LRU rank); otherwise writes
-    /// atomically. Enforces the size cap after writing.
+    /// Stages `data` under the scene's bucket, content-addressed by SHA-256,
+    /// and returns the leased file URL. Reuses a same-size existing file,
+    /// touching its mtime so reuse refreshes LRU rank.
     func store(_ data: Data, workshopID: String) throws -> URL {
         let bucketURL = rootURL.appendingPathComponent(bucketName(for: workshopID), isDirectory: true)
         try fileManager.createDirectory(at: bucketURL, withIntermediateDirectories: true)
@@ -86,10 +81,9 @@ actor WPEVideoTextureDiskCache {
         return target
     }
 
-    /// Releases a leased file back to the cache. The file is **kept** for
-    /// reuse (eligible for later LRU/GC once no live source holds it), not
-    /// deleted. Balances one `store`; the file stays protected until every
-    /// holder has released it.
+    /// Balances one `store`. The file is **kept** for reuse (eligible for
+    /// later LRU/GC once no live source holds it), not deleted, and stays
+    /// protected until every holder has released it.
     func release(_ url: URL) {
         let path = url.standardizedFileURL.path
         guard let count = leaseCounts[path] else { return }
@@ -250,7 +244,6 @@ actor WPEVideoTextureDiskCache {
         let modified: Date
     }
 
-    /// Every regular file under the root with its allocated size + mtime.
     private func allFiles() -> [FileRecord] {
         guard let enumerator = fileManager.enumerator(
             at: rootURL,
@@ -284,7 +277,6 @@ actor WPEVideoTextureDiskCache {
         return records
     }
 
-    /// Recursive allocated-byte total for a file or directory.
     private func byteCount(at url: URL) -> UInt64 {
         if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
             guard let enumerator = fileManager.enumerator(
@@ -307,7 +299,7 @@ actor WPEVideoTextureDiskCache {
         (leaseCounts[path] ?? 0) > 0
     }
 
-    /// Whether `url` (a file, or a directory containing one) is currently leased.
+    /// True if `url` is a leased file or a directory containing one.
     private func containsLeasedFile(_ url: URL) -> Bool {
         guard !leaseCounts.isEmpty else { return false }
         let path = url.standardizedFileURL.path

@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 import AVKit
 
-/// SwiftUI wrapper around an `AVPlayerLayer` with stable sizing and clear chrome.
 struct CustomVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
     var fitMode: VideoFitMode = .aspectFill
@@ -25,9 +24,7 @@ struct CustomVideoPlayer: NSViewRepresentable {
     }
 }
 
-/// NSView hosting an `AVPlayerLayer`. The layer tracks the view's bounds with
-/// a transparent background; `intrinsicContentSize = .zero` lets the SwiftUI
-/// parent own all layout decisions.
+/// `intrinsicContentSize = .zero` lets the SwiftUI parent own all layout decisions.
 final class PlayerLayerHostView: NSView {
     private let playerLayer = AVPlayerLayer()
 

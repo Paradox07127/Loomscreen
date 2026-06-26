@@ -65,8 +65,7 @@ actor SteamCMDProcessRunner {
     }
 
     /// Parses a SteamCMD download status line such as
-    /// `Update state (0x61) downloading, progress: 42.34 (12345 / 67890)`
-    /// into percent + downloaded/total bytes. Returns nil for non-progress lines.
+    /// `Update state (0x61) downloading, progress: 42.34 (12345 / 67890)`.
     nonisolated static func parseDownloadProgressLine(_ line: String) -> SteamCMDDownloadProgress? {
         guard let progressRange = line.range(of: "progress:") else { return nil }
         let tail = line[progressRange.upperBound...]
@@ -85,10 +84,10 @@ actor SteamCMDProcessRunner {
             }
         }
 
-        // Percent-only fallback: `progress: 42.34` (SteamCMD frequently omits the
+        // Percent-only fallback: `progress: 42.34`. SteamCMD frequently omits the
         // byte detail for workshop_download_item, which previously left the UI
-        // stuck on an indeterminate spinner with no progress bar). The download
-        // size for the label then comes from the item's known file size.
+        // stuck on an indeterminate spinner. The label's size then comes from the
+        // item's known file size.
         let numericPrefix = tail.drop(while: { $0 == " " }).prefix(while: { $0.isNumber || $0 == "." })
         guard let percent = Double(numericPrefix), percent.isFinite, percent >= 0 else { return nil }
         return SteamCMDDownloadProgress(percent: percent, downloadedBytes: nil, totalBytes: nil)
@@ -201,8 +200,7 @@ actor SteamCMDProcessRunner {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             "TMPDIR": NSTemporaryDirectory(),
             // Force a deterministic English UTF-8 locale so SteamCMD's status
-            // lines parse the same regardless of the user's system locale,
-            // rather than inheriting a launcher-controlled TMPDIR/LANG.
+            // lines parse the same regardless of the user's system locale.
             "LANG": "en_US.UTF-8",
         ]
     }
@@ -444,8 +442,7 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
         if shouldSignal { eof.signal() }
     }
 
-    /// Splits the accumulated buffer on newlines and returns the latest parsable
-    /// progress line. Caller holds `lock`.
+    /// Returns the latest parsable progress line. Caller holds `lock`.
     private func drainCompletedProgressLines() -> SteamCMDDownloadProgress? {
         var latest: SteamCMDDownloadProgress?
         while let terminator = lineBuffer.rangeOfCharacter(from: .newlines) {

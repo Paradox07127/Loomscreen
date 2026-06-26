@@ -4,9 +4,8 @@ import LiveWallpaperCore
 
 /// Resolves bookmark → URL → AVURLAsset metadata (resolution + duration + folder).
 ///
-/// `actor` ownership for the in-flight task table + cache; calls are cheap to
-/// fan in from many rows because identical bookmarks reuse the same in-flight
-/// task and never hit AVFoundation twice.
+/// `actor`-owned in-flight table + cache: identical bookmarks fanned in from
+/// many rows reuse the same in-flight task and never hit AVFoundation twice.
 actor PlaylistMetadataService {
     static let shared = PlaylistMetadataService()
 
@@ -16,10 +15,8 @@ actor PlaylistMetadataService {
 
     private init() {}
 
-    /// Returns metadata for the bookmark. Repeated calls with the same
-    /// bookmark await the same in-flight task; cancellation is cooperative
-    /// (the caller's parent task cancellation drops their wait but does not
-    /// invalidate the shared computation).
+    /// Cancellation is cooperative: a caller's parent-task cancellation drops
+    /// their wait but does not invalidate the shared in-flight computation.
     func metadata(for bookmark: Data) async -> PlaylistRowMetadata {
         let key = cacheKey(for: bookmark)
         if let cached = cache[key] { return cached }
@@ -39,16 +36,14 @@ actor PlaylistMetadataService {
         return result
     }
 
-    /// Drops a cached entry — call when the underlying bookmark is removed
-    /// or the user explicitly refreshes.
     func invalidate(_ bookmark: Data) {
         cache.removeValue(forKey: cacheKey(for: bookmark))
     }
 
     private func storeInCache(_ value: PlaylistRowMetadata, for key: String) {
         if cache.count >= cacheLimit {
-            // Coarse eviction: drop a random entry. The cache is read-mostly
-            // and bounded to row count — full LRU machinery would dwarf the value.
+            // Random eviction: cache is read-mostly and bounded to row count,
+            // so full LRU machinery would dwarf the value.
             if let victim = cache.keys.randomElement() {
                 cache.removeValue(forKey: victim)
             }

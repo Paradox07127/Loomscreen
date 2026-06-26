@@ -15,8 +15,7 @@ public enum WPETexFormat: Int, Sendable, Equatable {
     case bc7 = 12
     case rgba1010102 = 13
 
-    /// Bytes per pixel for uncompressed formats; nil for block-compressed
-    /// (BC) formats where the unit is a 4×4 block.
+    /// nil for block-compressed (BC) formats where the unit is a 4×4 block.
     public var bytesPerPixel: Int? {
         switch self {
         case .rgba8888, .rgba1010102: return 4
@@ -71,9 +70,8 @@ public enum WPETexFormat: Int, Sendable, Equatable {
     }
 }
 
-/// Failure modes from `WPETexDecoder`. Each case maps to a precise UI
-/// `FallbackReason` so the user sees "Format 13 (BC7) Metal-only" instead
-/// of "scene unsupported".
+/// Each case maps to a precise UI `FallbackReason` so the user sees
+/// "Format 13 (BC7) Metal-only" instead of "scene unsupported".
 public enum WPETexDecodeError: Error, Equatable, Sendable, LocalizedError {
     case unsupportedContainer(magic: String)
     case unsupportedBlock(magic: String)
@@ -120,9 +118,6 @@ public enum WPETexDecodeError: Error, Equatable, Sendable, LocalizedError {
 
 // MARK: - Value types parsed out of the container
 
-/// `TEXI` block payload. Width / height are in pixels; `mipmapCount`
-/// counts the mip chain stored in the following `TEXB` block.
-///
 /// `imageWidth/imageHeight/unknownInt0` are TEXI fields the decoder reads
 /// but doesn't act on; they are surfaced here for dump fidelity so future
 /// runtime/transpiler work can cross-reference padded atlas dimensions

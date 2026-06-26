@@ -345,8 +345,8 @@ struct WPEMetalSceneRendererTests {
             device: device
         )
 
-        // Before load: soundRuntime is nil, the calls should not crash
-        // and the state is cached for later application by the deferred audio startup.
+        // Before load soundRuntime is nil: calls must not crash, and state is
+        // cached for the deferred audio startup to apply later.
         renderer.setAudioMuted(true)
         renderer.setAudioVolume(0.4)
         #expect(true)

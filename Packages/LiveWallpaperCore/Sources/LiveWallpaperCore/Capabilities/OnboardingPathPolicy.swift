@@ -9,9 +9,7 @@ public enum OnboardingSourceAction: Sendable, Equatable {
     case html
 }
 
-/// SKU-derived plan for the onboarding source-picker step. Pure value type so
-/// the picker view can be unit-tested against a synthesised `ProductCapabilities`
-/// without standing up the runtime.
+/// SKU-derived plan for the onboarding source-picker step.
 ///
 /// Both Pro and Lite currently surface the same two sources (Video / Web) —
 /// shader is not promoted and WPE is held back until the importer pipeline

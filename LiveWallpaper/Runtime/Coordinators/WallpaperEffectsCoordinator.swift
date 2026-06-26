@@ -3,13 +3,9 @@ import Foundation
 import Observation
 
 /// Owns video-effect application (CIFilter pipeline) and weather-reactive
-/// monitoring. Replaces the cluster of effects + weather methods that
-/// previously lived directly on `ScreenManager`. Two callbacks bridge back
-/// to runtime concerns that aren't part of effects responsibility yet:
-/// `saveConfiguration` funnels writes through
-/// `WallpaperPersistenceCoordinator`, and `applyFrameRateLimit` /
-/// `screenRefreshRate` reach into the playback / refresh-rate cache the
-/// manager still owns.
+/// monitoring. Callbacks bridge to runtime concerns the manager still owns:
+/// `saveConfiguration` funnels writes through `WallpaperPersistenceCoordinator`,
+/// `applyFrameRateLimit` / `screenRefreshRate` reach the playback / refresh-rate cache.
 @MainActor
 final class WallpaperEffectsCoordinator {
     let weatherService: WeatherReactiveService
@@ -21,10 +17,9 @@ final class WallpaperEffectsCoordinator {
     private let applyFrameRateLimit: @MainActor (FrameRateLimit, Screen) -> Void
     private let screenRefreshRate: @MainActor (CGDirectDisplayID) -> Int
 
-    /// Bumped each time `observeWeatherChanges()` registers a new observer.
-    /// The onChange callback short-circuits when its captured generation no
-    /// longer matches the latest value, so accidentally re-registering does
-    /// not cascade into stacked callbacks.
+    /// Bumped per `observeWeatherChanges()` registration; the onChange callback
+    /// short-circuits when its captured generation is stale, so re-registering
+    /// does not cascade into stacked callbacks.
     private var weatherTrackingGeneration: UInt64 = 0
 
     init(
@@ -115,7 +110,6 @@ final class WallpaperEffectsCoordinator {
         refreshWeatherMonitoringState()
     }
 
-    /// Applies the CIFilter chain to a screen's active video player.
     func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
         guard let player = screen.videoPlayer else {
             Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
@@ -134,7 +128,6 @@ final class WallpaperEffectsCoordinator {
         )
     }
 
-    /// Cancels any in-flight effect application for the given screen.
     func cancelInflight(for screenID: CGDirectDisplayID) {
         videoEffectsApplier.cancelInflight(for: screenID)
     }
