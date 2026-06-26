@@ -499,6 +499,13 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     /// axis scales independently, so "1 0" parallaxes horizontally only and
     /// "0 1" vertically only. `.zero` pins the layer (no parallax).
     public let parallaxDepth: SIMD2<Double>
+    /// WPE SceneScript attached to this layer's `visible` field (a JS program
+    /// with `init()`/`update()` that drives the layer's visibility/alpha and any
+    /// video texture). `nil` for the common static-visibility case.
+    public let visibleScript: String?
+    /// Resolved scriptProperty overrides for `visibleScript` (user-bound values
+    /// like `ruchang` overlaid on the script's declared defaults).
+    public let scriptProperties: [String: WPESceneScriptPropertyValue]
 
     public init(
         id: String,
@@ -524,7 +531,9 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         dependencies: [String] = [],
         effects: [WPESceneImageEffect],
         animationLayers: [WPESceneAnimationLayer],
-        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
+        parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0),
+        visibleScript: String? = nil,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:]
     ) {
         self.id = id
         self.name = name
@@ -550,6 +559,8 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.effects = effects
         self.animationLayers = animationLayers
         self.parallaxDepth = parallaxDepth
+        self.visibleScript = visibleScript
+        self.scriptProperties = scriptProperties
     }
 
     public func resolvedAlpha(at time: Double) -> Double {

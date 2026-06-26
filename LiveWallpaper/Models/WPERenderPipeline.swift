@@ -65,6 +65,26 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
+    /// Returns a copy with each layer's alpha overridden by `alpha[objectID]`
+    /// (clearing any authored alpha animation so the override isn't re-collapsed
+    /// per frame). Drives script-controlled layer fades (e.g. a video intro
+    /// fading out). Only the overridden layers are rebuilt; others pass through.
+    func applyingLayerAlpha(_ alpha: [String: Double]) -> WPEPreparedRenderPipeline {
+        guard !alpha.isEmpty else { return self }
+        return WPEPreparedRenderPipeline(
+            layers: layers.map { layer in
+                guard let value = alpha[layer.graphLayer.objectID] else { return layer }
+                let geometry = layer.graphLayer.geometry
+                guard geometry.alpha != value || geometry.alphaAnimation != nil else { return layer }
+                return WPEPreparedRenderLayer(
+                    graphLayer: layer.graphLayer.applyingAlpha(value),
+                    puppetModel: layer.puppetModel,
+                    passes: layer.passes
+                )
+            }
+        )
+    }
+
     /// Returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
@@ -127,6 +147,43 @@ private extension WPERenderLayer {
             attachment: attachment,
             animationLayers: animationLayers,
             geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
+    /// Overrides the layer's alpha (clearing the authored alpha animation so a
+    /// later `resolved(at:)` keeps the script-driven value).
+    func applyingAlpha(_ alpha: Double) -> WPERenderLayer {
+        let g = geometry
+        let overridden = WPERenderLayerGeometry(
+            origin: g.origin,
+            scale: g.scale,
+            angles: g.angles,
+            alignment: g.alignment,
+            size: g.size,
+            puppetMeshCenter: g.puppetMeshCenter,
+            alpha: alpha,
+            alphaAnimation: nil,
+            color: g.color,
+            brightness: g.brightness
+        )
+        return WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: overridden,
             localGeometry: localGeometry,
             compositeA: compositeA,
             compositeB: compositeB,

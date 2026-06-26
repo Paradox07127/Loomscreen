@@ -160,6 +160,36 @@ struct WPEVideoTextureSourcePacingTests {
         #expect(source.texture(at: 0) == nil)
     }
 
+    @Test("Script control plays the clip once and freezes — does not keep looping")
+    func scriptControlPlaysOnceAndHolds() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // 1s clip; a still-looping source keeps advancing/wrapping past its end.
+        let videoURL = try await SyntheticVideoFixture.writeMP4(durationSeconds: 1.0, frameRate: 24)
+        defer { try? FileManager.default.removeItem(at: videoURL) }
+
+        let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
+        defer { source.invalidate() }
+
+        // Drives texture(at:) like the render loop (that's where the wrap-freeze runs).
+        func pump(_ seconds: TimeInterval) async throws {
+            let deadline = Date().addingTimeInterval(seconds)
+            while Date() < deadline {
+                _ = source.texture(at: 0)
+                try await Task.sleep(for: .milliseconds(16))
+            }
+        }
+
+        source.scriptPlay()                 // script takes over → play once
+        try await pump(2.0)                 // past the 1s clip + its first wrap → frozen
+        let frozenAt = source.currentItemPlaybackSeconds
+        try await pump(0.6)                 // a looping source would keep advancing
+        let stillFrozenAt = source.currentItemPlaybackSeconds
+
+        #expect(abs(stillFrozenAt - frozenAt) < 0.05,
+                "Script-controlled source must freeze after one play, not keep looping")
+        #expect(source.texture(at: 0) != nil, "A frame must still be shown while frozen")
+    }
+
     // MARK: - Helpers
 
     /// Polls `texture(at:)` on the main actor every 30 ms until a non-nil

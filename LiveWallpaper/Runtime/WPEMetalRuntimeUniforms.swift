@@ -3,10 +3,6 @@ import AppKit
 import Foundation
 import QuartzCore
 
-/// Per-frame WPE runtime uniforms produced by `WPEMetalFrameClock` and merged
-/// into prepared pass uniforms before the Metal executor runs. Built-in
-/// shaders ignore the entries they do not bind, so this layer can ship before
-/// the Phase 2D custom-shader translator consumes them.
 /// Per-frame, smoothed camera-parallax state. `smoothed` is the cursor offset
 /// from screen center (−0.5…0.5 per axis) after exponential smoothing and the
 /// scene's amount/mouse-influence calibration. `pixelOffset` turns it into a
@@ -37,7 +33,7 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
     /// Normalizes a raw `WPEParallaxGain` override to the usable range. `nil`
     /// (key absent) or a non-finite value falls back to `defaultGain`; `0` is
     /// honored (parallax off); negatives clamp to 0; the magnitude is capped at
-    /// `maxGain`. Pure, so the resolution policy is unit-testable.
+    /// `maxGain`.
     static func clampedGain(_ raw: Double?) -> Double {
         guard let raw, raw.isFinite else { return defaultGain }
         return min(max(raw, 0), maxGain)
@@ -70,8 +66,7 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
 /// Frame-rate-independent exponential smoother for camera parallax. Holds the
 /// smoothed cursor offset across frames; `frame(...)` advances it toward the
 /// (calibrated) cursor target each frame. Neutral when the scene disables
-/// parallax or zeroes amount / mouse-influence. Kept as a value type so it can
-/// be unit-tested independently of the renderer.
+/// parallax or zeroes amount / mouse-influence.
 struct WPECameraParallaxSmoother: Equatable, Sendable {
     private(set) var smoothed = SIMD2<Float>(0, 0)
     private var lastTime: Double?
@@ -123,6 +118,9 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
     }
 }
 
+/// Per-frame WPE runtime uniforms produced by `WPEMetalFrameClock`, merged into
+/// prepared pass uniforms before the Metal executor runs. Built-in shaders
+/// ignore entries they don't bind.
 struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     let time: Double
     let daytime: Double
@@ -136,7 +134,6 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     /// Click state from the interactive view, meaningful only while the scene's
     /// per-screen "Interactive" (click capture) toggle is on; neutral otherwise.
     var pointerClick: WPEPointerFrame = .neutral
-    /// Scene-level camera parallax for this frame (neutral when disabled).
     var cameraParallax: WPECameraParallaxFrame = .neutral
     /// Per-channel spectrum, 64 bins each, normalized 0…1, low frequency → high.
     /// Fed from the shared system-audio broker. Audio-reactive shaders consume
@@ -152,8 +149,8 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
         pointerPosition: SIMD2<Double>(0.5, 0.5)
     )
 
-    /// Mono initializer — duplicates one 64-bin spectrum into both channels.
-    /// Kept for the frame-clock default path and fixtures.
+    /// Duplicates one 64-bin spectrum into both channels. For the frame-clock
+    /// default path and fixtures.
     init(
         time: Double,
         daytime: Double,
@@ -172,7 +169,6 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
         )
     }
 
-    /// Stereo initializer — independent left/right 64-bin spectra.
     init(
         time: Double,
         daytime: Double,

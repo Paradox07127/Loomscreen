@@ -117,6 +117,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
     private var textScriptInstances: [String: WPESceneScriptInstance] = [:]
+    /// Layer (image-object) SceneScripts keyed by objectID — visible-scripts that
+    /// drive a layer's visibility/alpha and its video texture (e.g. an intro that
+    /// plays once then hides). Empty for the common no-layer-script scene.
+    private var layerScriptInstances: [String: WPELayerScriptInstance] = [:]
+    /// objectID → the `dynamicTextureSources` key of the layer's video source, so
+    /// a layer script's `getVideoTexture()` commands reach the right player.
+    /// Populated for ALL video-backed layers (a button script drives a different
+    /// layer's video via `thisScene.getLayer(name)`), not just scripted ones.
+    private var layerVideoSourceKey: [String: String] = [:]
+    /// Layer name → objectID, so a script's `thisScene.getLayer(name)` output can
+    /// be resolved to the target layer.
+    private var layerObjectIDByName: [String: String] = [:]
+    /// Live per-layer alpha overrides driven by layer scripts (objectID → alpha).
+    private var liveLayerAlpha: [String: Double] = [:]
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -549,6 +563,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         onProgress?("Loading text overlays")
         loadTextOverlays(from: document)
         debugStage("text.load.done", "objects=\(textObjects.count)")
+        try Task.checkCancellation()
+
+        // Layer visible-scripts (video intros etc.). After textures so the video
+        // sources exist; runs each script's init() to seed visibility/alpha and
+        // suppress auto-play on script-owned video sources.
+        loadLayerScripts(from: document)
         try Task.checkCancellation()
 
         // Audio startup is deferred to after the first frame (see below): the
@@ -1280,6 +1300,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         uniforms.pointerClick = mtkView.clickCaptureEnabled ? mtkView.pointerFrame : .neutral
         previousPointer = pointer
         lastRuntimeUniforms = uniforms
+        // Tick layer SceneScripts (e.g. a video intro that plays once then hides):
+        // each drives its layer's visibility/alpha + video playback. Gated so a
+        // scene with no layer scripts pays nothing (no per-frame pipeline rebuild).
+        var framePipeline = pipeline
+        if !layerScriptInstances.isEmpty {
+            for (objectID, instance) in layerScriptInstances {
+                if let output = instance.tick() {
+                    applyLayerScriptOutput(output, ownObjectID: objectID)
+                }
+            }
+            framePipeline = pipeline
+                .applyingLayerVisibility(liveLayerVisibility)
+                .applyingLayerAlpha(liveLayerAlpha)
+        }
         // Particles tick (CPU sim) BEFORE the layer composite so the executor can
         // interleave their draws at each system's scene paint index.
         if !particleSystems.isEmpty {
@@ -1338,7 +1372,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let gpuRenderStart = splitFirstFrame ? DispatchTime.now() : nil
         let frame = try executor.render(
-            pipeline: pipeline,
+            pipeline: framePipeline,
             size: sceneRenderSize,
             textures: currentTextures,
             dynamicTextureNames: Set(dynamicTextureSources.keys),
@@ -1579,6 +1613,100 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             objectScale: SIMD3<Float>(Float(object.scale.x), Float(object.scale.y), Float(object.scale.z)),
             objectAngleZ: Float(object.angles.z)
         )
+    }
+
+    /// Builds a `WPELayerScriptInstance` per image object whose `visible` field
+    /// is a SceneScript, maps each to its video source, and applies the script's
+    /// `init()` state (visibility/alpha + video stop/seek). Runs after textures so
+    /// the video sources exist. No-op for scenes without layer scripts.
+    private func loadLayerScripts(from document: WPESceneDocument) {
+        layerScriptInstances = [:]
+        layerVideoSourceKey = [:]
+        layerObjectIDByName = [:]
+        liveLayerAlpha = [:]
+        let scripted = document.imageObjects.filter { $0.visibleScript != nil }
+        guard !scripted.isEmpty, let pipeline = renderPipeline else { return }
+
+        // Map EVERY layer's name→id and (when video-backed) id→video-source-key,
+        // so a script's `thisScene.getLayer(name)` can drive another layer's video
+        // (e.g. the button that controls 千咲入场动画).
+        for layer in pipeline.layers {
+            let id = layer.graphLayer.objectID
+            layerObjectIDByName[layer.graphLayer.objectName] = id
+            if let key = videoTexturePaths(for: layer).first(where: { dynamicTextureSources[$0] is WPEVideoTextureSource }) {
+                layerVideoSourceKey[id] = key
+            }
+        }
+
+        for object in scripted {
+            guard let script = object.visibleScript else { continue }
+            do {
+                let instance = try WPELayerScriptInstance(
+                    script: script,
+                    scriptProperties: object.scriptProperties
+                )
+                layerScriptInstances[object.id] = instance
+                applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
+                let out = instance.initialOutput
+                let others = out.others.map { entry in
+                    "\(entry.key)[id=\(layerObjectIDByName[entry.key] ?? "?") vis=\(entry.value.visible) cmds=\(entry.value.videoCommands.count)]"
+                }.joined(separator: ",")
+                Logger.notice(
+                    "[LayerScript] \(object.name) ownVideo=\(layerVideoSourceKey[object.id] ?? "none") initVisible=\(out.own.visible) initCmds=\(out.own.videoCommands) getLayer={\(others)}",
+                    category: .wpeRender
+                )
+            } catch {
+                Logger.warning("[LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
+            }
+        }
+    }
+
+    /// Applies a layer script's full output: its own layer plus any layers it
+    /// drove via `thisScene.getLayer(name)` (resolved name→objectID).
+    private func applyLayerScriptOutput(_ output: WPELayerScriptOutput, ownObjectID: String) {
+        applyLayerScriptState(output.own, objectID: ownObjectID)
+        for (name, state) in output.others {
+            guard let targetID = layerObjectIDByName[name] else { continue }
+            applyLayerScriptState(state, objectID: targetID)
+        }
+    }
+
+    /// Applies one layer's resolved state: visibility + alpha into the live
+    /// override maps, and any buffered video commands to that layer's video source.
+    private func applyLayerScriptState(_ state: WPELayerScriptState, objectID: String) {
+        liveLayerVisibility[objectID] = state.visible
+        liveLayerAlpha[objectID] = state.alpha
+        guard !state.videoCommands.isEmpty,
+              let key = layerVideoSourceKey[objectID],
+              let video = dynamicTextureSources[key] as? WPEVideoTextureSource else { return }
+        for command in state.videoCommands {
+            switch command {
+            case .play: video.scriptPlay()
+            case .pause: video.scriptPause()
+            case .stop: video.scriptStop()
+            case .seek(let seconds): video.scriptSetCurrentTime(seconds)
+            }
+        }
+    }
+
+    /// External texture paths a layer references, in pass order — mirrors the
+    /// `loadTextures` walk so a layer script can find its video source key.
+    private func videoTexturePaths(for layer: WPEPreparedRenderLayer) -> [String] {
+        var paths: [String] = []
+        if layer.passes.isEmpty {
+            if let path = externalTexturePath(for: .image(layer.graphLayer.imagePath)) {
+                paths.append(path)
+            }
+            return paths
+        }
+        for pass in layer.passes {
+            for reference in requiredTextureReferences(for: pass) {
+                if let path = externalTexturePath(for: reference) {
+                    paths.append(path)
+                }
+            }
+        }
+        return paths
     }
 
     /// Spawn one `WPEParticleSystem` per parsed particle object.
@@ -1849,6 +1977,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         textRenderer = nil
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
+        layerScriptInstances.removeAll(keepingCapacity: false)
+        layerVideoSourceKey.removeAll(keepingCapacity: false)
+        layerObjectIDByName.removeAll(keepingCapacity: false)
+        liveLayerAlpha.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
@@ -2070,6 +2202,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         textRenderer = nil
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
+        layerScriptInstances.removeAll(keepingCapacity: false)
+        layerVideoSourceKey.removeAll(keepingCapacity: false)
+        layerObjectIDByName.removeAll(keepingCapacity: false)
+        liveLayerAlpha.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
         cameraParallaxSettings = .disabled

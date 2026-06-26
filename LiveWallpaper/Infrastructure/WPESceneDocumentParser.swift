@@ -631,7 +631,12 @@ enum WPESceneDocumentParser {
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
-        let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
+        // `maxwidth` only constrains the text when WPE's "Limit Width" toggle
+        // (`limitwidth`) is on. With it off (the default), the text is unbounded;
+        // applying `maxwidth` unconditionally made large clock/date text wrap at
+        // every glyph (each digit is wider than the authored 500pt maxwidth).
+        let limitWidth = parseBool(dict["limitwidth"]) ?? false
+        let maxWidth = limitWidth ? unwrapDouble(dict["maxwidth"]) : nil
         let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
         // WPE text-box footprint ("size") + transparent margin ("padding"). A
         // text object renders like an image layer whose texture is this box, so
@@ -696,6 +701,21 @@ enum WPESceneDocumentParser {
 
         guard let dict = raw as? [String: Any] else {
             return raw
+        }
+
+        // A field carrying a `script` is script-driven (a SceneScript computes it
+        // per frame); its `user`/`value` is the script's own enable binding, not a
+        // plain user-property envelope. Collapsing it to `value` would discard the
+        // script (e.g. an intro video layer whose `visible` is `{script, user, value}`),
+        // so preserve the dict — recursing so nested `scriptproperties` envelopes
+        // still resolve to the user's values.
+        if let script = dict["script"] as? String, !script.isEmpty {
+            var resolved: [String: Any] = [:]
+            resolved.reserveCapacity(dict.count)
+            for (key, value) in dict {
+                resolved[key] = resolveUserPropertyEnvelopes(in: value, userValues: userValues)
+            }
+            return resolved
         }
 
         if let key = dict["user"] as? String,
@@ -1049,6 +1069,19 @@ enum WPESceneDocumentParser {
 
         let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
 
+        // A `visible` field that is a script-dict carries a WPE SceneScript that
+        // drives the layer's visibility/alpha (and any video texture) per frame —
+        // e.g. an intro video that plays once then hides. Capture it; the layer
+        // stays renderable (visible defaults true above) until init()/update() run.
+        var visibleScript: String? = nil
+        var visibleScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+        if let visibleDict = dict["visible"] as? [String: Any],
+           let script = visibleDict["script"] as? String, !script.isEmpty {
+            visibleScript = script
+            visibleScriptProperties = scriptPropertyValues(visibleDict["scriptproperties"])
+            diagnostics.append(.init(severity: .info, message: "Image \(name) has a visible-script; runs as a layer SceneScript"))
+        }
+
         return WPESceneImageObject(
             id: id,
             name: name,
@@ -1073,7 +1106,9 @@ enum WPESceneDocumentParser {
             dependencies: dependencies,
             effects: effects,
             animationLayers: animationLayers,
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            visibleScript: visibleScript,
+            scriptProperties: visibleScriptProperties
         )
     }
 

@@ -308,6 +308,317 @@ enum WPESceneScriptError: Error, Equatable {
     case executionTimedOut
 }
 
+// MARK: - Layer SceneScript (visible-script video intros)
+
+/// One playback command a layer script issued via `thisLayer.getVideoTexture()`.
+enum WPELayerVideoCommand: Sendable, Equatable {
+    case play
+    case pause
+    case stop
+    case seek(TimeInterval)
+}
+
+/// The observable result of running a layer SceneScript's `init()`/`update()`:
+/// the script's resolved `thisLayer.visible`/`alpha`, plus the video commands it
+/// issued this run (drained each time). Pure value type so it crosses the
+/// engine-queue → MainActor boundary safely.
+struct WPELayerScriptState: Sendable, Equatable {
+    var visible: Bool
+    var alpha: Double
+    var videoCommands: [WPELayerVideoCommand]
+}
+
+/// A layer script's full output for one run: state for its own layer (`thisLayer`)
+/// plus state for any other layers it reached via `thisScene.getLayer(name)`
+/// (keyed by layer name). The renderer resolves the names to objectIDs.
+struct WPELayerScriptOutput: Sendable, Equatable {
+    var own: WPELayerScriptState
+    var others: [String: WPELayerScriptState]
+}
+
+/// Runs a WPE SceneScript attached to an image layer's `visible` field — a JS
+/// program whose `init()`/`update()` drive the layer's visibility/alpha and its
+/// video texture (`thisLayer.getVideoTexture().play()/stop()/…`). Unlike
+/// `WPESceneScriptInstance` (which consumes a returned text string), this reads
+/// the script's mutations to `thisLayer` back after each tick and surfaces the
+/// buffered video commands so the renderer can apply them.
+///
+/// Same containment model as `WPESceneScriptInstance`: each script owns a
+/// JSContext on a dedicated serial queue, every evaluation is wall-clock
+/// budgeted, and an overrun poisons the instance (frozen at its last state)
+/// rather than hanging the render thread.
+@MainActor
+final class WPELayerScriptInstance {
+    private let engine: LayerEngine
+    private let hasUpdateFunction: Bool
+    private let tickBudget: TimeInterval
+    private var isPoisoned = false
+    /// Output produced by `init()` at setup (apply once when the layer loads).
+    let initialOutput: WPELayerScriptOutput
+
+    private static var quarantine: [LayerEngine] = []
+
+    init(
+        script: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        setupBudget: TimeInterval = 2.0,
+        tickBudget: TimeInterval = 0.5,
+        nowProviderMillis: (@Sendable () -> Double)? = nil
+    ) throws {
+        self.tickBudget = tickBudget
+        let engine = LayerEngine(nowProviderMillis: nowProviderMillis)
+        self.engine = engine
+        var prepared = WPESceneScriptInstance.preprocess(script: script)
+        // Strip ESM `import` lines (e.g. `import * as WEMath from 'WEMath';`) —
+        // a top-level `import` is a SyntaxError in JSContext's non-module eval,
+        // which would otherwise abort the whole module and leave no init/update.
+        prepared = prepared.replacingOccurrences(
+            of: "(?m)^[\\t ]*import\\b[^\\n]*$",
+            with: "",
+            options: .regularExpression
+        )
+        if !scriptProperties.isEmpty {
+            prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
+        }
+        guard let outcome = engine.setUp(
+            script: prepared,
+            scriptProperties: scriptProperties,
+            budget: setupBudget
+        ) else {
+            Self.quarantine.append(engine)
+            isPoisoned = true
+            Logger.warning("Layer SceneScript setup exceeded \(setupBudget)s — script disabled", category: .wpeRender)
+            throw WPESceneScriptError.executionTimedOut
+        }
+        switch outcome {
+        case .contextUnavailable:
+            throw WPESceneScriptError.contextUnavailable
+        case .ready(let hasUpdate, let output):
+            self.hasUpdateFunction = hasUpdate
+            self.initialOutput = output
+        }
+    }
+
+    /// Tick `update()`; returns the script's new per-layer output, or nil when
+    /// there's no `update()` or the instance is poisoned/timed out.
+    func tick() -> WPELayerScriptOutput? {
+        guard hasUpdateFunction, !isPoisoned else { return nil }
+        guard let output = engine.tick(budget: tickBudget) else {
+            isPoisoned = true
+            Self.quarantine.append(engine)
+            Logger.warning("Layer SceneScript update() exceeded \(tickBudget)s — frozen", category: .wpeRender)
+            return nil
+        }
+        return output
+    }
+
+    private final class LayerEngine: @unchecked Sendable {
+        enum SetupOutcome {
+            case ready(hasUpdate: Bool, output: WPELayerScriptOutput)
+            case contextUnavailable
+        }
+
+        /// Key for `thisLayer` in the per-layer command/handle maps (other layers
+        /// use their `getLayer(name)` name).
+        private static let ownKey = ""
+
+        private let queue = DispatchQueue(label: "com.livewallpaper.wpe-layerscript", qos: .userInitiated)
+        private var context: JSContext?
+        private var updateFunction: JSValue?
+        private var thisLayer: JSValue?
+        /// Set by the context exception handler so `init()` failures can degrade
+        /// safely (run on the engine queue, so no synchronization needed).
+        private var didThrow = false
+        /// Handles minted by `thisScene.getLayer(name)`, keyed by layer name.
+        private var namedLayers: [String: JSValue] = [:]
+        /// Video commands per layer key ("" = thisLayer, else the getLayer name).
+        /// Drained on the engine queue (where the JS blocks also append) so there
+        /// is no cross-thread race.
+        private var pendingVideo: [String: [WPELayerVideoCommand]] = [:]
+        private let nowProviderMillis: (@Sendable () -> Double)?
+
+        init(nowProviderMillis: (@Sendable () -> Double)?) {
+            self.nowProviderMillis = nowProviderMillis
+        }
+
+        func setUp(
+            script: String,
+            scriptProperties: [String: WPESceneScriptPropertyValue],
+            budget: TimeInterval
+        ) -> SetupOutcome? {
+            runWithBudget(budget) { self.setUpOnQueue(script: script, scriptProperties: scriptProperties) }
+        }
+
+        func tick(budget: TimeInterval) -> WPELayerScriptOutput? {
+            runWithBudget(budget) { self.tickOnQueue() }
+        }
+
+        private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<T>()
+            queue.async {
+                box.value = work()
+                done.signal()
+            }
+            guard done.wait(timeout: .now() + budget) == .success else { return nil }
+            return box.value
+        }
+
+        private func setUpOnQueue(
+            script: String,
+            scriptProperties: [String: WPESceneScriptPropertyValue]
+        ) -> SetupOutcome {
+            guard let context = JSContext() else { return .contextUnavailable }
+            self.context = context
+            WPESceneScriptInstance.installSandbox(in: context)
+            WPESceneScriptBaseclasses.install(in: context)
+            installLayerBridge(in: context)
+            if let nowProviderMillis {
+                let now: @convention(block) () -> Double = { nowProviderMillis() }
+                context.setObject(now, forKeyedSubscript: "__hostNow" as NSString)
+                _ = context.evaluateScript("Date.now = function(){ return __hostNow(); };")
+            }
+            context.exceptionHandler = { [weak self] _, _ in self?.didThrow = true }
+            _ = context.evaluateScript(script)
+            if !scriptProperties.isEmpty {
+                wpeInstallScriptProperties(
+                    overrides: scriptProperties,
+                    declaredDefaults: wpeDeclaredScriptPropertyDefaults(
+                        context.objectForKeyedSubscript("scriptProperties")
+                    ),
+                    into: context
+                )
+            }
+            let updateValue = context.objectForKeyedSubscript("update")
+            if let updateValue, !updateValue.isUndefined, updateValue.hasProperty("call") {
+                updateFunction = updateValue
+            } else {
+                updateFunction = nil
+            }
+            pendingVideo.removeAll(keepingCapacity: true)
+            didThrow = false
+            if let initFn = context.objectForKeyedSubscript("init"),
+               !initFn.isUndefined, initFn.hasProperty("call") {
+                _ = initFn.call(withArguments: [])
+            }
+            // A script that throws in init() (e.g. an API we don't yet support)
+            // must NOT half-apply — degrade to "shown as authored" so a broken
+            // script can't hide its layer, and don't tick its update().
+            if didThrow {
+                return .ready(hasUpdate: false, output: WPELayerScriptOutput(
+                    own: WPELayerScriptState(visible: true, alpha: 1, videoCommands: []),
+                    others: [:]
+                ))
+            }
+            return .ready(hasUpdate: updateFunction != nil, output: readOutput())
+        }
+
+        private func tickOnQueue() -> WPELayerScriptOutput {
+            guard let updateFunction else {
+                return WPELayerScriptOutput(own: .init(visible: true, alpha: 1, videoCommands: []), others: [:])
+            }
+            pendingVideo.removeAll(keepingCapacity: true)
+            _ = updateFunction.call(withArguments: [])
+            return readOutput()
+        }
+
+        /// Installs a real `thisLayer` (the script's own layer), a `thisScene`
+        /// whose `getLayer(name)` mints per-name handles (so a button script can
+        /// drive another video layer), and a small `WEMath` shim. All replace the
+        /// base-class read-only stubs.
+        private func installLayerBridge(in context: JSContext) {
+            let layer = makeLayerHandle(key: Self.ownKey, in: context)
+            context.setObject(layer, forKeyedSubscript: "thisLayer" as NSString)
+            self.thisLayer = layer
+
+            let getLayer: @convention(block) (JSValue) -> JSValue = { [weak self] nameValue in
+                guard let self,
+                      nameValue.isString,
+                      let name = nameValue.toString(), !name.isEmpty else {
+                    return JSValue(nullIn: context)
+                }
+                if let existing = self.namedLayers[name] { return existing }
+                let handle = self.makeLayerHandle(key: name, in: context)
+                self.namedLayers[name] = handle
+                return handle
+            }
+            let scene = JSValue(newObjectIn: context)!
+            scene.setObject(getLayer, forKeyedSubscript: "getLayer" as NSString)
+            context.setObject(scene, forKeyedSubscript: "thisScene" as NSString)
+            context.setObject(scene, forKeyedSubscript: "scene" as NSString)
+
+            // Minimal `WEMath` shim — the `import * as WEMath` line is stripped, so
+            // the namespace would otherwise be undefined. Covers what intro/button
+            // scripts use (linear interpolation + clamping).
+            if let weMath = JSValue(newObjectIn: context) {
+                let mix: @convention(block) (Double, Double, Double) -> Double = { a, b, t in a + (b - a) * t }
+                let clampFn: @convention(block) (Double, Double, Double) -> Double = { x, lo, hi in Swift.min(Swift.max(x, lo), hi) }
+                let saturate: @convention(block) (Double) -> Double = { Swift.min(Swift.max($0, 0), 1) }
+                weMath.setObject(mix, forKeyedSubscript: "mix" as NSString)
+                weMath.setObject(mix, forKeyedSubscript: "lerp" as NSString)
+                weMath.setObject(clampFn, forKeyedSubscript: "clamp" as NSString)
+                weMath.setObject(saturate, forKeyedSubscript: "saturate" as NSString)
+                context.setObject(weMath, forKeyedSubscript: "WEMath" as NSString)
+            }
+        }
+
+        /// A writable layer handle (visible/alpha + `getVideoTexture()`) tagged
+        /// with `key` so its video commands route to the right layer.
+        private func makeLayerHandle(key: String, in context: JSContext) -> JSValue {
+            let handle = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            handle.setObject(true, forKeyedSubscript: "visible" as NSString)
+            handle.setObject(1.0, forKeyedSubscript: "alpha" as NSString)
+            let videoHandle = makeVideoHandle(key: key, in: context)
+            let getVideoTexture: @convention(block) () -> JSValue = { videoHandle }
+            handle.setObject(getVideoTexture, forKeyedSubscript: "getVideoTexture" as NSString)
+            return handle
+        }
+
+        private func makeVideoHandle(key: String, in context: JSContext) -> JSValue {
+            let handle = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            let append: @Sendable (WPELayerVideoCommand) -> Void = { [weak self] command in
+                self?.pendingVideo[key, default: []].append(command)
+            }
+            let play: @convention(block) () -> Void = { append(.play) }
+            let pause: @convention(block) () -> Void = { append(.pause) }
+            let stop: @convention(block) () -> Void = { append(.stop) }
+            let setCurrentTime: @convention(block) (JSValue) -> Void = { arg in append(.seek(arg.toDouble())) }
+            let getCurrentTime: @convention(block) () -> Double = { 0 }
+            handle.setObject(play, forKeyedSubscript: "play" as NSString)
+            handle.setObject(pause, forKeyedSubscript: "pause" as NSString)
+            handle.setObject(stop, forKeyedSubscript: "stop" as NSString)
+            handle.setObject(setCurrentTime, forKeyedSubscript: "setCurrentTime" as NSString)
+            handle.setObject(getCurrentTime, forKeyedSubscript: "getCurrentTime" as NSString)
+            return handle
+        }
+
+        private func readOutput() -> WPELayerScriptOutput {
+            let own = stateFor(handle: thisLayer, key: Self.ownKey)
+            var others: [String: WPELayerScriptState] = [:]
+            for (name, handle) in namedLayers {
+                others[name] = stateFor(handle: handle, key: name)
+            }
+            pendingVideo.removeAll(keepingCapacity: true)
+            return WPELayerScriptOutput(own: own, others: others)
+        }
+
+        private func stateFor(handle: JSValue?, key: String) -> WPELayerScriptState {
+            let visible = handle?.objectForKeyedSubscript("visible")?.toBool() ?? true
+            let alphaValue = handle?.objectForKeyedSubscript("alpha")
+            let alpha = (alphaValue?.isNumber == true) ? (alphaValue?.toDouble() ?? 1) : 1
+            return WPELayerScriptState(
+                visible: visible,
+                alpha: alpha.isFinite ? alpha : 1,
+                videoCommands: pendingVideo[key] ?? []
+            )
+        }
+
+        private final class ResultBox<T>: @unchecked Sendable {
+            var value: T?
+        }
+    }
+}
+
 extension WPESceneScriptPropertyValue {
     /// The bridged value to assign onto the JS `scriptProperties` object.
     var jsBridged: Any {

@@ -575,4 +575,147 @@ struct WPESceneScriptRuntimeTests {
         let leaf = try #require(document.textObjects.first { $0.id == "3" })
         #expect(leaf.visible == false)   // grandparent hidden → leaf hidden
     }
+
+    // MARK: - Layer visible-script (video intro)
+
+    @Test("Visible-script on an image object is captured during parse")
+    func captureVisibleScriptDuringParse() throws {
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [{
+                "id": 7, "name": "Intro", "image": "models/intro.json",
+                "visible": { "script": "export function update(){}", "value": true }
+            }]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let image = try #require(document.imageObjects.first)
+        #expect(image.visibleScript?.contains("update") == true)
+    }
+
+    @Test("Visible-script with a user binding is still captured (not collapsed to a bool)")
+    func captureVisibleScriptWithUserBinding() throws {
+        // A `visible: {script, user, value}` envelope (e.g. the 千咲拉镜 intro layer)
+        // must keep its script — the user-property pre-pass must not collapse it to
+        // the bool `value`, which would drop the script and let the video auto-loop.
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [{
+                "id": 7, "name": "Intro", "image": "models/intro.json",
+                "visible": { "script": "export function update(){}", "user": "ruchang", "value": true }
+            }]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8), userValues: ["ruchang": .bool(true)])
+        let image = try #require(document.imageObjects.first)
+        #expect(image.visibleScript?.contains("update") == true)
+    }
+
+    @Test("Layer video-intro script: init hides+stops, plays once, hides after timeout")
+    func layerVideoIntroPlaysOnce() throws {
+        let script = """
+        'use strict';
+        import * as WEMath from 'WEMath';
+        export var scriptProperties = createScriptProperties()
+            .addCheckbox({ name: 'play', value: true })
+            .addCheckbox({ name: 'hideStopped', value: true })
+            .finish();
+        let video, stopped = false, startTime = 0, fadeStartTime = 0, fadingOut = false;
+        export function init() {
+            thisLayer.visible = false;
+            video = thisLayer.getVideoTexture();
+            video.stop();
+            video.setCurrentTime(0);
+            thisLayer.alpha = 1;
+        }
+        export function update() {
+            const currentTime = Date.now();
+            if (!stopped && scriptProperties.play) {
+                if (startTime === 0) { startTime = currentTime; video.play(); }
+                else if (currentTime - startTime >= 15000) {
+                    if (!fadingOut) { fadingOut = true; fadeStartTime = currentTime; }
+                    const fadeProgress = (currentTime - fadeStartTime) / 1000;
+                    if (fadeProgress < 1) { thisLayer.alpha = 1 - fadeProgress; }
+                    else { thisLayer.alpha = 0; video.stop(); stopped = true; if (scriptProperties.hideStopped) thisLayer.visible = false; }
+                } else { thisLayer.alpha = 1; }
+            }
+            thisLayer.visible = thisLayer.alpha > 0.001;
+        }
+        """
+
+        final class Clock: @unchecked Sendable {
+            private let lock = NSLock()
+            private var ms: Double = 0
+            func now() -> Double { lock.lock(); defer { lock.unlock() }; return ms }
+            func set(_ value: Double) { lock.lock(); ms = value; lock.unlock() }
+        }
+        let clock = Clock()
+        let instance = try WPELayerScriptInstance(script: script, nowProviderMillis: { clock.now() })
+
+        // init(): layer hidden, video stopped + rewound, alpha seeded to 1.
+        #expect(instance.initialOutput.own.visible == false)
+        #expect(instance.initialOutput.own.alpha == 1)
+        #expect(instance.initialOutput.own.videoCommands.contains(.stop))
+        #expect(instance.initialOutput.own.videoCommands.contains(.seek(0)))
+
+        // Use a realistic epoch base — the script treats `startTime === 0` as its
+        // "not started" sentinel, so a literal 0 would collide with real time.
+        let base: Double = 1_000_000
+        // First update: starts playback, layer visible, alpha 1.
+        clock.set(base)
+        let first = try #require(instance.tick()).own
+        #expect(first.videoCommands.contains(.play))
+        #expect(first.alpha == 1)
+        #expect(first.visible == true)
+
+        // Mid-window (t=5s): still playing, no new commands.
+        clock.set(base + 5000)
+        let mid = try #require(instance.tick()).own
+        #expect(mid.visible == true)
+        #expect(mid.videoCommands.isEmpty)
+
+        // Fade begins past 15s, completes ~1s later → stopped + hidden.
+        clock.set(base + 16100)
+        _ = instance.tick()
+        clock.set(base + 17300)
+        let end = try #require(instance.tick()).own
+        #expect(end.videoCommands.contains(.stop))
+        #expect(end.visible == false)
+        #expect(end.alpha == 0)
+    }
+
+    @Test("getLayer drives another layer: button init stops + hides the target video")
+    func getLayerControlsAnotherLayer() throws {
+        // Mirrors the 入场动画开关 button: its init() hides + stops a SEPARATE
+        // video layer via thisScene.getLayer(name).
+        let script = """
+        'use strict';
+        export var scriptProperties = createScriptProperties()
+            .addCheckbox({ name: 'enableScript', value: true })
+            .finish();
+        let target, video;
+        export function init() {
+            thisLayer.visible = true;
+            target = thisScene.getLayer('千咲入场动画');
+            video = target.getVideoTexture();
+            video.stop();
+            video.setCurrentTime(0);
+            target.alpha = 0;
+            target.visible = false;
+        }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        let other = try #require(instance.initialOutput.others["千咲入场动画"])
+        #expect(other.visible == false)
+        #expect(other.alpha == 0)
+        #expect(other.videoCommands.contains(.stop))
+        #expect(other.videoCommands.contains(.seek(0)))
+        // The button itself stays visible.
+        #expect(instance.initialOutput.own.visible == true)
+    }
 }
