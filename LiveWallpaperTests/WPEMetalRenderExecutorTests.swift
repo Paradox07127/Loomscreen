@@ -2703,6 +2703,50 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 768)
     }
 
+    @Test("Layer-local effect FBO sizes to the layer footprint only when WPEMetalLayerLocalFBOSizing is on")
+    func layerLocalFBOSizingFlagControlsFootprint() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "fx",
+            objectName: "Effect",
+            imagePath: "materials/base.png",
+            materialPath: "materials/base.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(0, 0, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 200, height: 200),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_fx_a",
+            compositeB: "_rt_imageLayerComposite_fx_b",
+            localFBOs: [WPERenderFBO(name: "fxBlur", scale: 1, format: "rgba8888")],
+            passes: []
+        )
+        let key = WPEMetalRenderTargetPool.layerLocalFBOSizingDefaultsKey
+        let prior = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let prior { UserDefaults.standard.set(prior, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let scene = CGSize(width: 3840, height: 2160)
+
+        UserDefaults.standard.set(false, forKey: key)
+        let off = try pool.texture(for: .fbo(name: "fxBlur"), layer: layer, sceneSize: scene, avoiding: nil)
+        #expect(off.width == 3840)
+        #expect(off.height == 2160)
+
+        UserDefaults.standard.set(true, forKey: key)
+        pool.releaseAll()
+        let on = try pool.texture(for: .fbo(name: "fxBlur"), layer: layer, sceneSize: scene, avoiding: nil)
+        #expect(on.width == 200)
+        #expect(on.height == 200)
+    }
+
     @Test("Projectlayer composite target also uses full scene size")
     func projectlayerCompositeTargetUsesFullSceneSize() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

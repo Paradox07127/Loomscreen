@@ -198,7 +198,7 @@ final class WPEMetalStaticLayerCompositeCache {
     /// frame must not be used — it would leave some skipped target unseeded).
     func cachedLayer(for layerID: String, requiredTargets: Set<String>) -> CachedLayer? {
         guard let cached = cachedByLayerID[layerID],
-              requiredTargets.isSubset(of: Set(cached.texturesByTarget.keys)) else {
+              requiredTargets.allSatisfy({ cached.texturesByTarget[$0] != nil }) else {
             return nil
         }
         lru.touch(layerID)

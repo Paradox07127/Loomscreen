@@ -28851,7 +28851,7 @@
       }
     },
     "Show only scene wallpapers" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -28874,7 +28874,7 @@
       }
     },
     "Show only video wallpapers" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -28897,7 +28897,7 @@
       }
     },
     "Show only web / HTML wallpapers" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -35513,7 +35513,7 @@
       }
     },
     "Windows-only items — a Windows .exe application wallpaper, or a project type macOS can't recognize. These can't run here." : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "ja" : {
           "stringUnit" : {

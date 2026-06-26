@@ -76,6 +76,36 @@ final class WPEMetalRenderTargetPool {
         UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
     }
 
+    static let layerLocalFBOSizingDefaultsKey = "WPEMetalLayerLocalFBOSizing"
+    /// Size a layer's OWN local effect FBOs (`layer.localFBOs`, not scene-wide
+    /// declared FBOs and not scene aliases) to the layer footprint instead of the
+    /// full scene — a small overlay's blur/glow FBO at 4K otherwise allocates and
+    /// renders ~99.5% wasted pixels. Default ON (device-validated 2026-06-26: memory
+    /// dropped, no visual regression). Manual override wins:
+    /// `defaults write … WPEMetalLayerLocalFBOSizing -bool NO` restores full-scene FBOs.
+    static var isLayerLocalFBOSizingEnabled: Bool {
+        UserDefaults.standard.object(forKey: layerLocalFBOSizingDefaultsKey) as? Bool ?? true
+    }
+
+    /// Pixel footprint for a layer-private effect FBO when `isLayerLocalFBOSizingEnabled`:
+    /// the layer's own footprint instead of the full scene. Used by BOTH `targetKey`
+    /// (allocation) and `diagnosticKey` (alias planning) so they can never mis-key.
+    /// nil → keep the full-scene default (scene alias, cross-layer declared FBO, or flag off).
+    /// Only `layer.localFBOs` entries qualify (no other layer reads them).
+    /// (A `WPEMetalLayerLocalFBOScale` downsample knob was tried + removed: shrinking a
+    /// scene-sized FBO to a distinct half-scene size took it OUT of the shared FBO-aliasing
+    /// heap → separate allocation → device-measured memory went UP, not down.)
+    static func layerLocalFBOPixelSize(
+        fboName: String,
+        layer: WPERenderLayer,
+        sceneSize: CGSize
+    ) -> CGSize? {
+        guard isLayerLocalFBOSizingEnabled,
+              !WPEMetalShaderInputs.isSceneAliasName(fboName),
+              layer.localFBOs.contains(where: { $0.name == fboName }) else { return nil }
+        return layerCompositeSize(for: layer, sceneSize: sceneSize)
+    }
+
     private let device: MTLDevice
     private let maximumTextureDimension2D: Int
     private var slots: [WPEMetalRenderTargetKey: Slot] = [:]
@@ -192,6 +222,16 @@ final class WPEMetalRenderTargetPool {
                 pixelFormat: pixelFormat
             )
         }
+        if case .fbo(let fboName) = target,
+           let localSize = Self.layerLocalFBOPixelSize(fboName: fboName, layer: layer, sceneSize: sceneSize) {
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
+                height: wpeRenderTargetDimension(localSize.height, scale: spec.scale),
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        }
         return WPEMetalRenderTargetKey(
             name: spec.name,
             sceneSize: sceneSize,
@@ -283,6 +323,16 @@ final class WPEMetalRenderTargetPool {
                 pixelFormat: pixelFormat
             )
         case .scene, .fbo:
+            if case .fbo(let fboName) = target,
+               let localSize = Self.layerLocalFBOPixelSize(fboName: fboName, layer: layer, sceneSize: sceneSize) {
+                return WPEMetalRenderTargetKey(
+                    name: spec.name,
+                    width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
+                    height: wpeRenderTargetDimension(localSize.height, scale: spec.scale),
+                    format: spec.format,
+                    pixelFormat: pixelFormat
+                )
+            }
             return WPEMetalRenderTargetKey(
                 name: spec.name,
                 sceneSize: sceneSize,
