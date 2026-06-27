@@ -236,13 +236,8 @@ struct AppleAerialsLibraryView: View {
     }
 
     private func resolveScopedURL(_ bookmarkData: Data) -> URL? {
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+        try? SecurityScopedBookmarkResolver.shared
+            .resolve(bookmarkData, target: .transient).get().url
     }
 
     private func openWallpaperSettings() {

@@ -97,13 +97,8 @@ final class WPEImportCoordinator {
 
     func activateHistoryEntry(_ entry: WPEHistoryEntry, for screen: Screen) async {
         do {
-            var isStale = false
-            let folderURL = try URL(
-                resolvingBookmarkData: entry.origin.sourceFolderBookmark,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
+            let folderURL = try SecurityScopedBookmarkResolver.shared
+                .resolve(entry.origin.sourceFolderBookmark, target: .transient).get().url
             let didStartScope = folderURL.startAccessingSecurityScopedResource()
             defer {
                 if didStartScope {

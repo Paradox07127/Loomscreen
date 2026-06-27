@@ -569,13 +569,9 @@ struct WPECachedContentResolver {
     /// bookmarked. Scene needs the cache.
     private func sourceFolderContent(for origin: WPEOrigin) -> WallpaperContent? {
         guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return nil }
-        var isStale = false
-        guard let folderURL = try? URL(
-            resolvingBookmarkData: origin.sourceFolderBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return nil }
+        guard let folderURL = try? SecurityScopedBookmarkResolver.shared
+            .resolve(origin.sourceFolderBookmark, target: .transient).get().url
+        else { return nil }
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
 
@@ -721,13 +717,9 @@ struct WPECachedContentResolver {
         cacheRelativePath: String,
         entryFile: String
     ) -> WallpaperContent? {
-        var isStale = false
-        guard let folderURL = try? URL(
-            resolvingBookmarkData: origin.sourceFolderBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return nil }
+        guard let folderURL = try? SecurityScopedBookmarkResolver.shared
+            .resolve(origin.sourceFolderBookmark, target: .transient).get().url
+        else { return nil }
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
 

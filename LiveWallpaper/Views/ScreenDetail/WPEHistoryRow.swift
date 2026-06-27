@@ -183,13 +183,8 @@ struct WPEHistoryRow: View {
     }
 
     private func resolveFolderURL() -> URL? {
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: entry.origin.sourceFolderBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+        try? SecurityScopedBookmarkResolver.shared
+            .resolve(entry.origin.sourceFolderBookmark, target: .transient).get().url
     }
 
     private func showInFinder() {

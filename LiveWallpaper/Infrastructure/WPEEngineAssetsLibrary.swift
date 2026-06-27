@@ -140,13 +140,7 @@ extension WPEEngineAssetsLibrary {
     }
 
     nonisolated static func resolveDirectoryBookmark(_ bookmarkData: Data) throws -> DirectoryBookmarkResolution {
-        var isStale = false
-        let url = try URL(
-            resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+        let (url, isStale) = try SecurityScopedBookmarkResolver.shared.resolveData(bookmarkData)
         return DirectoryBookmarkResolution(url: url, isStale: isStale)
     }
 

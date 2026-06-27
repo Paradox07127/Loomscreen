@@ -564,13 +564,9 @@ struct WorkshopInstalledView: View {
     }
 
     private func showInFinder(_ entry: WPEHistoryEntry) {
-        var isStale = false
-        guard let folder = try? URL(
-            resolvingBookmarkData: entry.origin.sourceFolderBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return }
+        guard let folder = try? SecurityScopedBookmarkResolver.shared
+            .resolve(entry.origin.sourceFolderBookmark, target: .transient).get().url
+        else { return }
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
         NSWorkspace.shared.activateFileViewerSelecting([folder])
@@ -1381,13 +1377,9 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
     let bookmark = entry.origin.sourceFolderBookmark
     let knownSize = entry.sizeBytes
     let outcome = await Task.detached(priority: .userInitiated) { () -> (info: WPELocalProjectInfo?, freshSize: Int64?) in
-        var isStale = false
-        guard let folder = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return (nil, nil) }
+        guard let folder = try? SecurityScopedBookmarkResolver.shared
+            .resolve(bookmark, target: .transient).get().url
+        else { return (nil, nil) }
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 

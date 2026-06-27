@@ -226,13 +226,8 @@ private struct AspectFillImage: NSViewRepresentable {
         await Task.detached(priority: .userInitiated) {
             var scopedURL: URL?
             if let bookmarkData {
-                var isStale = false
-                scopedURL = try? URL(
-                    resolvingBookmarkData: bookmarkData,
-                    options: .withSecurityScope,
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                )
+                scopedURL = try? SecurityScopedBookmarkResolver.shared
+                    .resolve(bookmarkData, target: .transient).get().url
             }
             let didStart = scopedURL?.startAccessingSecurityScopedResource() ?? false
             defer { if didStart { scopedURL?.stopAccessingSecurityScopedResource() } }

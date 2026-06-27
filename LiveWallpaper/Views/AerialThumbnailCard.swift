@@ -236,13 +236,8 @@ struct AerialThumbnailCard: View {
 
         let bookmarkData = asset.bookmarkData
         let resolved: URL? = await Task.detached { () -> URL? in
-            var isStale = false
-            return try? URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
+            try? SecurityScopedBookmarkResolver.shared
+                .resolve(bookmarkData, target: .transient).get().url
         }.value
 
         guard let url = resolved else { return }
