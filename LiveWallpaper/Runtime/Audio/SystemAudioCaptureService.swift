@@ -370,10 +370,10 @@ final class SystemAudioCaptureService: @unchecked Sendable {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var size = UInt32(MemoryLayout<CFString?>.size)
-        var uid: CFString?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var uid: Unmanaged<CFString>?
         let status = AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &uid)
-        guard status == noErr, let resolved = uid else {
+        guard status == noErr, let resolved = uid?.takeRetainedValue() else {
             throw CaptureError.tapUIDUnavailable(status)
         }
         return resolved

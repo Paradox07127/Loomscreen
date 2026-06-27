@@ -637,18 +637,21 @@ struct WorkshopInstalledView: View {
         screenManager.removeWPEImport(workshopID: workshopID)
 
         if origin.resourceLocation == .cache, !workshopID.isEmpty {
-            do {
-                try WallpaperEngineCache().deleteFiles(workshopID: workshopID)
-            } catch {
-                errorMessage = String(
-                    localized: "Removed \(origin.title) from the library, but its files couldn't be deleted.",
-                    comment: "Workshop delete: history removed but cache files couldn't be deleted."
-                )
+            let title = origin.title
+            Task {
+                do {
+                    try await WallpaperEngineCache().deleteFiles(workshopID: workshopID)
+                } catch {
+                    errorMessage = String(
+                        localized: "Removed \(title) from the library, but its files couldn't be deleted.",
+                        comment: "Workshop delete: history removed but cache files couldn't be deleted."
+                    )
+                }
+                // Free the SteamCMD download that seeded this cache copy, else its
+                // bytes linger. Best-effort; the delete tombstone in `removeWorkshop`
+                // already stops the auto-scan from resurrecting it.
+                await doctor.deleteDownloadedItemFolders(workshopID: workshopID)
             }
-            // Free the SteamCMD download that seeded this cache copy, else its
-            // bytes linger. Best-effort; the delete tombstone in `removeWorkshop`
-            // already stops the auto-scan from resurrecting it.
-            Task { await doctor.deleteDownloadedItemFolders(workshopID: workshopID) }
         }
         reload()
     }

@@ -78,7 +78,7 @@ final class WPEVideoTextureSource {
         }
         self.textureCache = cache
 
-        let assetOptions: [String: Any] = [
+        let assetOptions: [String: any Sendable] = [
             AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
             AVURLAssetAllowsCellularAccessKey: false,
             AVURLAssetAllowsExpensiveNetworkAccessKey: false,
