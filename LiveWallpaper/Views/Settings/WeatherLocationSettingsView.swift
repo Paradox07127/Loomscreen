@@ -152,10 +152,8 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self else { return }
-                self.completer.queryFragment = trimmed
-            }
+            guard let self else { return }
+            self.completer.queryFragment = trimmed
         }
     }
 

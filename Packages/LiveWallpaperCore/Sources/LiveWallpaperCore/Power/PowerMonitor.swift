@@ -68,7 +68,7 @@ public final class PowerMonitor: @unchecked Sendable {
         )?.takeRetainedValue() else { return }
 
         runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .defaultMode)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
 
         if currentPowerSource.isOnBattery {
             startBatteryMonitoring()
@@ -172,7 +172,7 @@ public final class PowerMonitor: @unchecked Sendable {
 
     deinit {
         if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .defaultMode)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
         }
         stopBatteryMonitoring()
     }

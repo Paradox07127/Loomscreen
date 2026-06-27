@@ -256,8 +256,9 @@ actor WorkshopQueryService {
         if let task = inflight[cacheKey] {
             return try await task.value
         }
-        let task = Task { [self] in
-            try await fetchFromCacheOrNetwork(request, cacheKey: cacheKey, apiKey: apiKey)
+        let task = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.fetchFromCacheOrNetwork(request, cacheKey: cacheKey, apiKey: apiKey)
         }
         inflight[cacheKey] = task
         do {

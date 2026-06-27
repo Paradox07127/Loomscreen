@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 import LiveWallpaperCore
+import os
 
 /// App-wide owner of the single system-audio capture pipeline. There is exactly
 /// one tap + one `AudioSpectrumBroker` for the whole app; every audio-reactive
@@ -31,9 +32,10 @@ final class SystemAudioCaptureManager {
     nonisolated static let broker = AudioSpectrumBroker()
 
     /// Cheap nonisolated hint for the render hot path to skip the snapshot when
-    /// capture is off. A one-frame-stale read is harmless.
-    nonisolated(unsafe) private static var captureActive = false
-    nonisolated static var isCapturing: Bool { captureActive }
+    /// capture is off. Written on the main actor, read from render threads, so
+    /// the unfair lock provides the cross-thread synchronization.
+    nonisolated private static let captureActive = OSAllocatedUnfairLock(initialState: false)
+    nonisolated static var isCapturing: Bool { captureActive.withLock { $0 } }
 
     private var isEnabled = false
     private var consumerCount = 0
@@ -89,11 +91,11 @@ final class SystemAudioCaptureManager {
         do {
             try service.start()
             serviceBox = service
-            Self.captureActive = true
+            Self.captureActive.withLock { $0 = true }
             state = .capturing
         } catch {
             serviceBox = nil
-            Self.captureActive = false
+            Self.captureActive.withLock { $0 = false }
             state = .failed("\(error)")
             Logger.warning("[AudioCapture] manager: capture start failed: \(error)", category: .audioCapture)
         }
@@ -104,7 +106,7 @@ final class SystemAudioCaptureManager {
             service.stop()
         }
         serviceBox = nil
-        Self.captureActive = false
+        Self.captureActive.withLock { $0 = false }
         Self.broker.resetToSilence()
         if state != .unsupported {
             state = .idle

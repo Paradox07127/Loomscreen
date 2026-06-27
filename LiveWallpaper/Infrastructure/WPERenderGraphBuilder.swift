@@ -315,32 +315,26 @@ struct WPERenderGraphBuilder: Sendable {
             uniquingKeysWith: { first, _ in first }
         )
         var cache: [Int: simd_float4x4] = [:]
-        var visiting: Set<Int> = []
-        var invalid: Set<Int> = []
-        func world(_ index: Int) -> simd_float4x4? {
-            if let cached = cache[index] { return cached }
-            guard !invalid.contains(index),
-                  !visiting.contains(index),
-                  let local = localByIndex[index] else {
-                invalid.insert(index)
-                return nil
-            }
-            visiting.insert(index)
-            defer { visiting.remove(index) }
-            let resolved: simd_float4x4
-            if let parent = parentByIndex[index] ?? nil, parent != index {
-                guard let parentWorld = world(parent) else {
-                    invalid.insert(index)
-                    return nil
+        
+        for _ in 0..<bones.count {
+            var progress = false
+            for bone in bones {
+                let index = bone.index
+                if cache[index] != nil { continue }
+                guard let local = localByIndex[index] else { continue }
+                
+                if let parent = parentByIndex[index] ?? nil, parent != index {
+                    if let parentWorld = cache[parent] {
+                        cache[index] = parentWorld * local
+                        progress = true
+                    }
+                } else {
+                    cache[index] = local
+                    progress = true
                 }
-                resolved = parentWorld * local
-            } else {
-                resolved = local
             }
-            cache[index] = resolved
-            return resolved
+            if !progress { break }
         }
-        for bone in bones { _ = world(bone.index) }
         return cache
     }
 

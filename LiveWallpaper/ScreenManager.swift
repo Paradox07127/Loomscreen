@@ -137,6 +137,15 @@ final class ScreenManager {
     /// pause/resume overlay.
     @ObservationIgnored private var userAbsenceReasons: Set<UserAbsenceReason> = []
     private var isUserAbsent: Bool { !userAbsenceReasons.isEmpty }
+    /// No display is lit when the panels or the whole machine are asleep — no
+    /// render or memory-pressure response is possible, so SystemMonitor's 2s
+    /// poll is parked here (Pro-only; gated on `.systemMonitor`).
+    private var allDisplaysAsleep: Bool {
+        userAbsenceReasons.contains(.displaySleep) || userAbsenceReasons.contains(.systemSleep)
+    }
+    /// Tracks whether we currently hold a SystemMonitor reference, so the
+    /// reference-counted start/stop stays balanced across sleep/wake churn.
+    @ObservationIgnored private var systemMonitorActive = false
     /// System memory pressure, folded into the performance policy so a
     /// low-memory condition suspends every wallpaper type and **auto-resumes**
     /// once memory recovers — unlike the old `handleLowMemory` path, which
@@ -483,7 +492,25 @@ final class ScreenManager {
             ? userAbsenceReasons.insert(reason).inserted
             : (userAbsenceReasons.remove(reason) != nil)
         guard changed else { return }
+        reconcileSystemMonitor()
         refreshPerformancePolicyForAllScreens()
+    }
+
+    /// Park / resume SystemMonitor's poll alongside display availability.
+    /// Conservative gate (all displays asleep) rather than per-session, because
+    /// the system-memory-pressure warning that drives `setMemoryPressure` is
+    /// derived inside SystemMonitor's own sampling loop — stopping the poll
+    /// stops that warning, so we only park it when no display can render at all.
+    private func reconcileSystemMonitor() {
+        guard featureCatalog.isEnabled(.systemMonitor) else { return }
+        let shouldRun = !allDisplaysAsleep
+        guard shouldRun != systemMonitorActive else { return }
+        systemMonitorActive = shouldRun
+        if shouldRun {
+            SystemMonitor.shared.startMonitoring()
+        } else {
+            SystemMonitor.shared.stopMonitoring()
+        }
     }
 
     private func handleScreenParameterChange() {
@@ -520,6 +547,7 @@ final class ScreenManager {
     
     private func setupMemoryMonitoring() {
         SystemMonitor.shared.startMonitoring()
+        systemMonitorActive = true
 
         NotificationCenter.default.publisher(for: .systemMemoryWarning)
             .receive(on: DispatchQueue.main)
@@ -689,6 +717,22 @@ final class ScreenManager {
         screen.resetRuntimeSession()
         playbackCoordinator.refreshVideoAudioLeadership()
         refreshAppNapAssertion()
+    }
+
+    /// App-termination teardown: synchronously tears down every render session
+    /// (each `cleanup()` pauses its AVPlayer, releases its WKWebView / Metal
+    /// renderer, and closes its window) and parks SystemMonitor. Bounded — just
+    /// a loop of in-process releases, no I/O — so it stays inside the terminate
+    /// watchdog. Unlike `resetAllWallpaperSessions()` it skips config-cache
+    /// clearing and async UI notifications, which are pointless mid-exit.
+    func tearDownForTermination() {
+        for screen in screens {
+            releaseRuntimeSession(screen)
+        }
+        if systemMonitorActive {
+            systemMonitorActive = false
+            SystemMonitor.shared.stopMonitoring()
+        }
     }
 
     func resetAllWallpaperSessions() {
@@ -1158,16 +1202,14 @@ final class ScreenManager {
     // MARK: - System Events
     private func handleSystemSleep() {
         Logger.info("System sleep detected", category: .lifecycle)
-        userAbsenceReasons.insert(.systemSleep)
-        refreshPerformancePolicyForAllScreens()
+        setUserAbsence(.systemSleep, present: true)
     }
 
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
         refreshScreens()
         powerMonitor.refreshPowerStatus()
-        userAbsenceReasons.remove(.systemSleep)
-        refreshPerformancePolicyForAllScreens()
+        setUserAbsence(.systemSleep, present: false)
     }
 
     private func captureDesktopSnapshotsForLockIfNeeded() {

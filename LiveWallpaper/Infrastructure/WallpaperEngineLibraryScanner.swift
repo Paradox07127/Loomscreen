@@ -134,8 +134,7 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
 
             let previewURL: URL? = {
                 guard let name = project.previewFileName else { return nil }
-                let candidate = child.appendingPathComponent(name)
-                return fileManager.fileExists(atPath: candidate.path) ? candidate : nil
+                return WPEPathSafety.resourceURL(root: child, relativePath: name)
             }()
 
             results.append(DiscoveredProject(

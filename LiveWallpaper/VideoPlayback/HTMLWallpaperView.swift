@@ -162,6 +162,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     deinit {
+        let url = activeSecurityScopedURL
+        if let url {
+            Task { @MainActor in
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
         #if !LITE_BUILD
         if let token = developerModeObserver {
             NotificationCenter.default.removeObserver(token)
@@ -1298,6 +1304,18 @@ extension HTMLWallpaperView: WKNavigationDelegate {
                 description: nsError.localizedDescription
             ))
         }
+    }
+
+    /// WebContent process crash leaves the WKWebView blank/transparent with no
+    /// `didFail` callback. Reload the current source so the wallpaper recovers
+    /// instead of staying permanently white.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard !isCleaningUp else { return }
+        Logger.error(
+            "HTML wallpaper WebContent process terminated; reloading source. url=\(webView.url?.absoluteString ?? "<no url>")",
+            category: .screenManager
+        )
+        reloadCurrentSource()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {

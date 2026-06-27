@@ -44,6 +44,21 @@ public final class WallpaperConfigurationStore {
         fingerprint: String?
     ) -> ScreenConfiguration? {
         if let direct = get(for: screenID) {
+            // ID hit but the cached config carries a *different, explicit*
+            // fingerprint: macOS recycled this CGDirectDisplayID onto a
+            // physically different panel. Trust the fingerprint, not the ID —
+            // stamping it onto the old config would hand the previous panel's
+            // wallpaper to the new one. Fall through to the fingerprint scan,
+            // evicting the stale ID→config binding first.
+            if let fingerprint, !fingerprint.isUnknownDisplayFingerprint,
+               let cachedFingerprint = direct.displayFingerprint,
+               !cachedFingerprint.isUnknownDisplayFingerprint,
+               cachedFingerprint != fingerprint {
+                cache.removeValue(forKey: screenID)
+                return migrateByFingerprint(to: screenID, fingerprint: fingerprint)
+            }
+            // Cached fingerprint missing/unknown: lenient reuse — back-fill the
+            // now-known fingerprint onto the same config.
             if let fingerprint, !fingerprint.isUnknownDisplayFingerprint,
                direct.displayFingerprint != fingerprint {
                 var stamped = direct
@@ -58,6 +73,13 @@ public final class WallpaperConfigurationStore {
             return nil
         }
 
+        return migrateByFingerprint(to: screenID, fingerprint: fingerprint)
+    }
+
+    private func migrateByFingerprint(
+        to screenID: CGDirectDisplayID,
+        fingerprint: String
+    ) -> ScreenConfiguration? {
         let all = persistence.loadConfigurations()
         guard var match = all.first(where: { $0.displayFingerprint == fingerprint }) else {
             return nil

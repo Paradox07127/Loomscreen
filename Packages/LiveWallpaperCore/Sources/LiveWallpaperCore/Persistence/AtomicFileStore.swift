@@ -201,17 +201,28 @@ public struct AtomicFileStore<Value: Codable> {
         )
 
         if let handle = try? FileHandle(forWritingTo: tempURL) {
-            try? handle.synchronize()
+            let fd = handle.fileDescriptor
+            _ = fcntl(fd, F_FULLFSYNC)
             try? handle.close()
         }
 
-        if fileExists(fileURL) {
-            if fileExists(backupURL) {
-                try fileManager.removeItem(at: backupURL)
+        var rotated = false
+        do {
+            if fileExists(fileURL) {
+                if fileExists(backupURL) {
+                    try fileManager.removeItem(at: backupURL)
+                }
+                try fileManager.moveItem(at: fileURL, to: backupURL)
+                rotated = true
             }
-            try fileManager.moveItem(at: fileURL, to: backupURL)
+            try fileManager.moveItem(at: tempURL, to: fileURL)
+        } catch {
+            if rotated {
+                // Rollback: restore backup back to primary location
+                try? fileManager.moveItem(at: backupURL, to: fileURL)
+            }
+            throw error
         }
-        try fileManager.moveItem(at: tempURL, to: fileURL)
 
         fsyncParentDirectory(of: fileURL)
     }
@@ -240,12 +251,12 @@ public struct AtomicFileStore<Value: Codable> {
         close(fd)
     }
 
-    /// Calls `fsync(2)` on the parent directory's file descriptor so the rename's directory-entry update is durable.
+    /// Calls `fcntl(fd, F_FULLFSYNC)` on the parent directory's file descriptor so the rename's directory-entry update is durable.
     private func fsyncParentDirectory(of url: URL) {
         let parent = url.deletingLastPathComponent().path(percentEncoded: false)
         let fd = open(parent, O_RDONLY)
         guard fd >= 0 else { return }
-        _ = fsync(fd)
+        _ = fcntl(fd, F_FULLFSYNC)
         close(fd)
     }
 

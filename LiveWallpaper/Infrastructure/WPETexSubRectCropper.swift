@@ -52,6 +52,9 @@ enum WPETexSubRectCropper {
         subRect: CGRect?,
         mapping: WPEMetalTextureFormatMapping
     ) throws -> CroppedTextureBytes {
+        guard atlasWidth > 0, atlasHeight > 0 else {
+            throw Failure.truncatedImageBytes
+        }
         guard let subRect else {
             return try wholeAtlas(
                 atlasBytes: atlasBytes,

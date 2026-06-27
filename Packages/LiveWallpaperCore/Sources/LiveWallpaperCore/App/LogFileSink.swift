@@ -24,10 +24,23 @@ public final class LogFileSink: @unchecked Sendable {
     private let rotationByteThreshold: UInt64 = 1_048_576  // 1 MiB
     private let rotationKeepCount = 3
 
+    /// Persistent append handle + in-memory size, both guarded by `lock`. Avoids a
+    /// per-line open/close + `stat` on the hot warning path. Reset on rotation.
+    private var writeHandle: FileHandle?
+    private var cachedSize: UInt64 = 0
+
     private init() {
         formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         fileURL = Self.prepareLogFileURL()
+        if let url = fileURL,
+           let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64 {
+            cachedSize = size
+        }
+    }
+
+    deinit {
+        try? writeHandle?.close()
     }
 
     /// Gates only the file mirror; the underlying `os.Logger` always receives the call.
@@ -63,21 +76,35 @@ public final class LogFileSink: @unchecked Sendable {
 
     private func appendUnlocked(_ entry: String, to url: URL) {
         guard let data = entry.data(using: .utf8) else { return }
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
+        guard let handle = openWriteHandleUnlocked(url) else {
             try? data.write(to: url, options: .atomic)
+            cachedSize = UInt64(data.count)
+            return
+        }
+        do {
+            try handle.write(contentsOf: data)
+            cachedSize &+= UInt64(data.count)
+        } catch {
+            try? handle.close()
+            writeHandle = nil
         }
     }
 
+    private func openWriteHandleUnlocked(_ url: URL) -> FileHandle? {
+        if let handle = writeHandle { return handle }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
+        _ = try? handle.seekToEnd()
+        writeHandle = handle
+        return handle
+    }
+
     private func rotateIfNeededUnlocked(url: URL) {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attrs[.size] as? UInt64,
-              size >= rotationByteThreshold else {
-            return
-        }
+        guard cachedSize >= rotationByteThreshold else { return }
+
+        // Release the handle before moving the file out from under it; the next
+        // append reopens against the fresh empty file.
+        try? writeHandle?.close()
+        writeHandle = nil
 
         let fm = FileManager.default
         let oldest = url.deletingPathExtension()
@@ -91,6 +118,7 @@ public final class LogFileSink: @unchecked Sendable {
         let firstRotated = url.deletingPathExtension().appendingPathExtension("1.log")
         try? fm.moveItem(at: url, to: firstRotated)
         try? Data().write(to: url, options: .atomic)
+        cachedSize = 0
     }
 
     private static func levelTag(_ level: Logger.Level) -> String {

@@ -60,6 +60,7 @@ final class WeatherReactiveService {
     /// `nonisolated(unsafe)`: only mutated from MainActor code, but deinit
     /// (released on an arbitrary queue) also touches it, which Swift 6 can't prove safe.
     @ObservationIgnored nonisolated(unsafe) private var preferenceObserver: NSObjectProtocol?
+    @ObservationIgnored private var lastFetchCompletedAt: Date?
 
     // MARK: - Open-Meteo Response Model
 
@@ -93,7 +94,7 @@ final class WeatherReactiveService {
         locationProvider.requestCoreLocationAuthorizationIfNeeded()
 
         updateTask?.cancel()
-        startFetch()
+        startFetch(force: false)
         updateTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
@@ -102,7 +103,7 @@ final class WeatherReactiveService {
                     return
                 }
                 await MainActor.run {
-                    self?.startFetch()
+                    self?.startFetch(force: false)
                 }
             }
         }
@@ -116,14 +117,14 @@ final class WeatherReactiveService {
     }
 
     func refresh() {
-        startFetch()
+        startFetch(force: true)
     }
 
     /// Single-flight fetch — supersedes any in-flight fetch so refresh taps don't pile up overlapping requests.
-    private func startFetch() {
+    private func startFetch(force: Bool) {
         fetchTask?.cancel()
         fetchTask = Task { [weak self] in
-            await self?.fetchWeatherIfPossible()
+            await self?.fetchWeatherIfPossible(force: force)
         }
     }
 
@@ -144,7 +145,7 @@ final class WeatherReactiveService {
 
     // MARK: - Weather Fetch (Open-Meteo)
 
-    private func fetchWeatherIfPossible() async {
+    private func fetchWeatherIfPossible(force: Bool) async {
         // Off means the entire weather-reactive pipeline is dormant: no
         // location query, no Open-Meteo request, no observable updates.
         // We still clear the cached state so a previously-rendered
@@ -160,6 +161,13 @@ final class WeatherReactiveService {
             return
         }
 
+        // Apply a 5-minute cooldown to prevent API spamming unless explicitly forced.
+        let now = Date()
+        if !force, let last = lastFetchCompletedAt, now.timeIntervalSince(last) < 300 {
+            Logger.info("Skipping weather fetch (within 5m cooldown).", category: .screenManager)
+            return
+        }
+
         locationStatus = .fetching
 
         let resolution = await locationProvider.resolveCoordinate()
@@ -172,8 +180,9 @@ final class WeatherReactiveService {
             return
         }
 
-        let lat = coordinate.latitude
-        let lon = coordinate.longitude
+        // Round coordinates to 2 decimal places (~1.1km precision) to preserve user location privacy.
+        let lat = Double(round(coordinate.latitude * 100) / 100)
+        let lon = Double(round(coordinate.longitude * 100) / 100)
         let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=weather_code,temperature_2m,cloud_cover&timezone=auto"
 
         guard let url = URL(string: urlString) else {
@@ -197,6 +206,7 @@ final class WeatherReactiveService {
             currentEffectAdjustments = mapDescriptionToEffects(description, cloudCover: cloudCover)
             locationStatus = .available
             lastError = nil
+            lastFetchCompletedAt = Date()
 
             Logger.info("Weather updated: \(description.rawValue), code=\(weatherCode), particle=\(currentParticleEffect.rawValue), source=\(resolution.resolvedSource?.rawValue ?? "none")", category: .screenManager)
         } catch is CancellationError {
@@ -204,6 +214,7 @@ final class WeatherReactiveService {
         } catch {
             lastError = error.localizedDescription
             locationStatus = .error
+            lastFetchCompletedAt = Date()
             Logger.error("Weather fetch failed: \(error.localizedDescription)", category: .screenManager)
         }
     }

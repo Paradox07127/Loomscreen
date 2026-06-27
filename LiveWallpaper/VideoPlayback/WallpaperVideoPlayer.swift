@@ -1018,4 +1018,14 @@ final class WallpaperVideoPlayer {
         stopAccessingResource()
         Logger.debug("Video player resources cleaned up", category: .videoPlayer)
     }
+
+    deinit {
+        let url = videoURL
+        let hadAccess = accessToken
+        if hadAccess, let url {
+            Task { @MainActor in
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+    }
 }

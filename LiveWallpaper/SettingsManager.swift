@@ -10,6 +10,7 @@ final class SettingsManager {
 
     private var cachedGlobalSettings: GlobalSettings?
     private var cachedConfigurations: [ScreenConfiguration]?
+    private var cachedWallpaperBookmarks: [WallpaperBookmark]?
 
     /// Three big JSON blobs that used to live in `UserDefaults`. Moved to
     /// `~/Library/Application Support/<bundle-id>/Configuration/` so writes
@@ -20,17 +21,18 @@ final class SettingsManager {
     private let globalSettingsStore: AtomicFileStore<GlobalSettings>
     private let wallpaperBookmarksStore: AtomicFileStore<[WallpaperBookmark]>
 
-    /// Serial off-MainActor writer for `screenConfigStore`. Cache mutations
-    /// remain synchronous on MainActor; disk encode/fsync/rename are queued
-    /// to this actor so toggle/slider handlers return immediately instead of
-    /// blocking the UI for tens of milliseconds per write.
+    /// Serial off-MainActor writer for all three file stores (configs, global
+    /// settings, bookmarks). Cache mutations remain synchronous on MainActor;
+    /// disk encode/fsync/rename are queued to this actor so toggle/slider/save
+    /// handlers return immediately instead of blocking the UI per write.
     private let configurationPersistenceActor: WallpaperPersistenceActor
 
-    /// Monotonic counter assigned to every screen-configuration write or
-    /// delete so the persistence actor can drop submissions that were
-    /// superseded by a newer MainActor mutation while the prior task was
-    /// still in flight.
+    /// Per-store monotonic counters: the actor drops any submission whose
+    /// generation is older than the last it committed, so a stale in-flight
+    /// write can't overwrite a newer MainActor mutation (or resurrect a reset).
     private var configurationWriteGeneration: UInt64 = 0
+    private var globalSettingsWriteGeneration: UInt64 = 0
+    private var bookmarksWriteGeneration: UInt64 = 0
 
     private enum Keys {
         static let screenConfigurations = "screenConfigurations"
@@ -58,12 +60,18 @@ final class SettingsManager {
             fileURL: directory.url(for: .screenConfigurations)
         )
         self.screenConfigStore = screenConfigStore
-        self.configurationPersistenceActor = WallpaperPersistenceActor(store: screenConfigStore)
-        self.globalSettingsStore = AtomicFileStore(
+        let globalSettingsStore = AtomicFileStore<GlobalSettings>(
             fileURL: directory.url(for: .globalSettings)
         )
-        self.wallpaperBookmarksStore = AtomicFileStore(
+        let wallpaperBookmarksStore = AtomicFileStore<[WallpaperBookmark]>(
             fileURL: directory.url(for: .wallpaperBookmarks)
+        )
+        self.globalSettingsStore = globalSettingsStore
+        self.wallpaperBookmarksStore = wallpaperBookmarksStore
+        self.configurationPersistenceActor = WallpaperPersistenceActor(
+            store: screenConfigStore,
+            globalSettingsStore: globalSettingsStore,
+            bookmarksStore: wallpaperBookmarksStore
         )
 
         migrateLegacyUserDefaultsIfNeeded()
@@ -119,33 +127,70 @@ final class SettingsManager {
         }
     }
 
+    /// Drains every store routed through the persistence actor before exit so the
+    /// last MainActor commits (global settings, bookmarks, screen configs) are
+    /// durable. Re-submitting the latest cached value with a fresh generation
+    /// either commits the final state or is a no-op if an in-flight task already
+    /// wrote it; the actor's per-store generation guard keeps writes ordered.
     func flushPendingConfigurationWrites() async {
         configurationWriteGeneration &+= 1
-        let generation = configurationWriteGeneration
+        let configGeneration = configurationWriteGeneration
         do {
-            try await configurationPersistenceActor.write(loadConfigurations(), generation: generation)
+            try await configurationPersistenceActor.write(loadConfigurations(), generation: configGeneration)
         } catch {
             Logger.error(
                 "Final configuration flush failed: \(error.localizedDescription)",
                 category: .settings
             )
         }
+
+        if let settings = cachedGlobalSettings {
+            globalSettingsWriteGeneration &+= 1
+            let generation = globalSettingsWriteGeneration
+            do {
+                try await configurationPersistenceActor.writeGlobalSettings(settings, generation: generation)
+            } catch {
+                Logger.error("Final global-settings flush failed: \(error.localizedDescription)", category: .settings)
+            }
+        }
+
+        if let bookmarks = cachedWallpaperBookmarks {
+            bookmarksWriteGeneration &+= 1
+            let generation = bookmarksWriteGeneration
+            do {
+                try await configurationPersistenceActor.writeBookmarks(bookmarks, generation: generation)
+            } catch {
+                Logger.error("Final bookmarks flush failed: \(error.localizedDescription)", category: .settings)
+            }
+        }
     }
     
     // MARK: - Global Settings
 
+    /// Updates the in-memory cache (and login-item side effect) synchronously so
+    /// MainActor readers see the new value immediately; the disk write is queued
+    /// to the serial persistence actor so the fsync/rename never blocks the UI.
     func saveGlobalSettings(_ settings: GlobalSettings) {
         let previousStartOnLogin = cachedGlobalSettings?.startOnLogin ?? loadGlobalSettings().startOnLogin
-        do {
-            try globalSettingsStore.write(settings)
-            cachedGlobalSettings = settings
-            if previousStartOnLogin != settings.startOnLogin {
-                applyStartOnLoginSetting(settings.startOnLogin)
+        cachedGlobalSettings = settings
+        if previousStartOnLogin != settings.startOnLogin {
+            applyStartOnLoginSetting(settings.startOnLogin)
+        }
+
+        globalSettingsWriteGeneration &+= 1
+        let generation = globalSettingsWriteGeneration
+        Task { [weak self, configurationPersistenceActor] in
+            do {
+                try await configurationPersistenceActor.writeGlobalSettings(settings, generation: generation)
+                Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
+            } catch {
+                await MainActor.run {
+                    guard let self,
+                          self.globalSettingsWriteGeneration == generation else { return }
+                    Logger.error("Failed to persist global settings: \(error.localizedDescription)", category: .settings)
+                    self.cachedGlobalSettings = nil
+                }
             }
-            Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
-        } catch {
-            Logger.error("Failed to persist global settings: \(error.localizedDescription)", category: .settings)
-            cachedGlobalSettings = nil
         }
     }
 
@@ -351,14 +396,22 @@ final class SettingsManager {
     func cleanAllSettings(applyLoginSetting: Bool = true) {
         cachedGlobalSettings = GlobalSettings()
         cachedConfigurations = []
+        cachedWallpaperBookmarks = []
 
+        // Route deletes through the same serial actor with bumped generations so
+        // an in-flight async write (older generation) can't resurrect the file
+        // after the reset.
         configurationWriteGeneration &+= 1
-        let generation = configurationWriteGeneration
+        globalSettingsWriteGeneration &+= 1
+        bookmarksWriteGeneration &+= 1
+        let configGeneration = configurationWriteGeneration
+        let globalGeneration = globalSettingsWriteGeneration
+        let bookmarksGeneration = bookmarksWriteGeneration
         Task { [configurationPersistenceActor] in
-            await configurationPersistenceActor.delete(generation: generation)
+            await configurationPersistenceActor.delete(generation: configGeneration)
+            await configurationPersistenceActor.deleteGlobalSettings(generation: globalGeneration)
+            await configurationPersistenceActor.deleteBookmarks(generation: bookmarksGeneration)
         }
-        globalSettingsStore.delete()
-        wallpaperBookmarksStore.delete()
 
         UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
         UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
@@ -596,14 +649,29 @@ final class SettingsManager {
     // MARK: - Wallpaper Bookmarks
 
     func loadWallpaperBookmarks() -> [WallpaperBookmark] {
-        wallpaperBookmarksStore.read() ?? []
+        if let cached = cachedWallpaperBookmarks { return cached }
+        let bookmarks = wallpaperBookmarksStore.read() ?? []
+        cachedWallpaperBookmarks = bookmarks
+        return bookmarks
     }
 
+    /// Cache is updated synchronously (so a subsequent `loadWallpaperBookmarks`
+    /// can't read the not-yet-flushed disk copy); the write is queued async.
     func saveWallpaperBookmarks(_ bookmarks: [WallpaperBookmark]) {
-        do {
-            try wallpaperBookmarksStore.write(bookmarks)
-        } catch {
-            Logger.error("Failed to persist wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
+        cachedWallpaperBookmarks = bookmarks
+        bookmarksWriteGeneration &+= 1
+        let generation = bookmarksWriteGeneration
+        Task { [weak self, configurationPersistenceActor] in
+            do {
+                try await configurationPersistenceActor.writeBookmarks(bookmarks, generation: generation)
+            } catch {
+                await MainActor.run {
+                    guard let self,
+                          self.bookmarksWriteGeneration == generation else { return }
+                    Logger.error("Failed to persist wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
+                    self.cachedWallpaperBookmarks = nil
+                }
+            }
         }
     }
 

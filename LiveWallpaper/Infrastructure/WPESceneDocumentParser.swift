@@ -36,7 +36,7 @@ enum WPESceneDocumentParser {
         // Record property→target bindings BEFORE resolving envelopes, since
         // resolution replaces `{"user":K}` with the literal value and loses the key.
         let propertyBindings = extractUserPropertyBindings(in: json)
-        let resolvedJSON = resolveUserPropertyEnvelopes(in: json, userValues: userValues)
+        let resolvedJSON = try resolveUserPropertyEnvelopes(in: json, userValues: userValues)
         guard let root = resolvedJSON as? [String: Any] else {
             throw WPESceneDocumentError.rootNotObject
         }
@@ -200,10 +200,10 @@ enum WPESceneDocumentParser {
             kind: WPEScenePropertyBindingKind,
             action: WPEScenePropertyBindingAction
         ) {
-            let specs = userPropertyBindingSpecs(in: raw).sorted { lhs, rhs in
+            let specs = (try? userPropertyBindingSpecs(in: raw))?.sorted { lhs, rhs in
                 if lhs.key != rhs.key { return lhs.key < rhs.key }
                 return (lhs.condition ?? "") < (rhs.condition ?? "")
-            }
+            } ?? []
             for spec in specs {
                 result[spec.key, default: []].append(WPEScenePropertyBinding(
                     propertyKey: spec.key,
@@ -285,11 +285,14 @@ enum WPESceneDocumentParser {
     /// — e.g. color components). Handles both the simple form
     /// `{"user":K,"value":...}` and the condition form
     /// `{"user":{"name":K,"condition":"2"},"value":...}` (style selectors).
-    private static func userPropertyBindingSpecs(in raw: Any?) -> Set<UserPropertyBindingSpec> {
+    private static func userPropertyBindingSpecs(in raw: Any?, depth: Int = 0) throws -> Set<UserPropertyBindingSpec> {
+        guard depth < 100 else {
+            throw WPESceneDocumentError.malformedField("scene.json is too deeply nested")
+        }
         guard let raw else { return [] }
         if let array = raw as? [Any] {
-            return array.reduce(into: Set<UserPropertyBindingSpec>()) { specs, value in
-                specs.formUnion(userPropertyBindingSpecs(in: value))
+            return try array.reduce(into: Set<UserPropertyBindingSpec>()) { specs, value in
+                specs.formUnion(try userPropertyBindingSpecs(in: value, depth: depth + 1))
             }
         }
         guard let dict = raw as? [String: Any] else { return [] }
@@ -306,7 +309,7 @@ enum WPESceneDocumentParser {
             }
         }
         for value in dict.values {
-            specs.formUnion(userPropertyBindingSpecs(in: value))
+            specs.formUnion(try userPropertyBindingSpecs(in: value, depth: depth + 1))
         }
         return specs
     }
@@ -352,6 +355,10 @@ enum WPESceneDocumentParser {
                   parent != id,
                   objectsByID[parent] != nil,
                   !stack.contains(parent) else {
+                memo[id] = local
+                return local
+            }
+            guard stack.count < 100 else {
                 memo[id] = local
                 return local
             }
@@ -439,6 +446,10 @@ enum WPESceneDocumentParser {
                   parent != id,
                   objectsByID[parent] != nil,
                   !stack.contains(parent) else {
+                memo[id] = own
+                return own
+            }
+            guard stack.count < 100 else {
                 memo[id] = own
                 return own
             }
@@ -689,11 +700,15 @@ enum WPESceneDocumentParser {
     /// via its bound property) actually drive the parsed document.
     private static func resolveUserPropertyEnvelopes(
         in raw: Any,
-        userValues: [String: WallpaperEngineProjectPropertyValue]
-    ) -> Any {
+        userValues: [String: WallpaperEngineProjectPropertyValue],
+        depth: Int = 0
+    ) throws -> Any {
+        guard depth < 100 else {
+            throw WPESceneDocumentError.malformedField("scene.json is too deeply nested")
+        }
         if let array = raw as? [Any] {
-            return array.map {
-                resolveUserPropertyEnvelopes(in: $0, userValues: userValues)
+            return try array.map {
+                try resolveUserPropertyEnvelopes(in: $0, userValues: userValues, depth: depth + 1)
             }
         }
 
@@ -711,16 +726,17 @@ enum WPESceneDocumentParser {
             var resolved: [String: Any] = [:]
             resolved.reserveCapacity(dict.count)
             for (key, value) in dict {
-                resolved[key] = resolveUserPropertyEnvelopes(in: value, userValues: userValues)
+                resolved[key] = try resolveUserPropertyEnvelopes(in: value, userValues: userValues, depth: depth + 1)
             }
             return resolved
         }
 
         if let key = dict["user"] as? String,
            dict.keys.contains("value") {
-            let fallback = resolveUserPropertyEnvelopes(
+            let fallback = try resolveUserPropertyEnvelopes(
                 in: dict["value"] ?? NSNull(),
-                userValues: userValues
+                userValues: userValues,
+                depth: depth + 1
             )
             guard let override = userValues[key] else {
                 return fallback
@@ -734,9 +750,10 @@ enum WPESceneDocumentParser {
         if let user = dict["user"] as? [String: Any],
            let name = user["name"] as? String, !name.isEmpty,
            dict.keys.contains("value") {
-            let fallback = resolveUserPropertyEnvelopes(
+            let fallback = try resolveUserPropertyEnvelopes(
                 in: dict["value"] ?? NSNull(),
-                userValues: userValues
+                userValues: userValues,
+                depth: depth + 1
             )
             guard let override = userValues[name] else {
                 return fallback
@@ -763,9 +780,10 @@ enum WPESceneDocumentParser {
         var resolved: [String: Any] = [:]
         resolved.reserveCapacity(dict.count)
         for (key, value) in dict {
-            resolved[key] = resolveUserPropertyEnvelopes(
+            resolved[key] = try resolveUserPropertyEnvelopes(
                 in: value,
-                userValues: userValues
+                userValues: userValues,
+                depth: depth + 1
             )
         }
         return resolved

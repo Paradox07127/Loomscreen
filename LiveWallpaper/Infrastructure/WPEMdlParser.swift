@@ -415,25 +415,34 @@ enum WPEPuppetAnimationEvaluator {
             // as world bind directly (uncomposed) and a translation-only `worldAbsolute` auto-detect
             // that always misfired here because each bone's frame-0 local equals its raw local.
             var cache = [simd_float4x4?](repeating: nil, count: channels.count)
-            var visiting = [Bool](repeating: false, count: channels.count)
-            func world(_ index: Int) -> simd_float4x4 {
-                if let cached = cache[index] { return cached }
-                if visiting[index] { return matrix_identity_float4x4 }
-                visiting[index] = true
-                let local = bind
-                    ? (rawByBone[channels[index].boneIndex] ?? localMatrix(index, true))
-                    : localMatrix(index, false)
-                let composed: simd_float4x4
-                if let parent = parentChannel[index] {
-                    composed = world(parent) * local
-                } else {
-                    composed = local
+            for _ in 0..<channels.count {
+                var progress = false
+                for index in 0..<channels.count {
+                    if cache[index] != nil { continue }
+                    
+                    let local = bind
+                        ? (rawByBone[channels[index].boneIndex] ?? localMatrix(index, true))
+                        : localMatrix(index, false)
+                    
+                    if let parent = parentChannel[index] {
+                        if let parentWorld = cache[parent] {
+                            cache[index] = parentWorld * local
+                            progress = true
+                        }
+                    } else {
+                        cache[index] = local
+                        progress = true
+                    }
                 }
-                visiting[index] = false
-                cache[index] = composed
-                return composed
+                if !progress { break }
             }
-            return (0..<channels.count).map { world($0) }
+            
+            for index in 0..<channels.count {
+                if cache[index] == nil {
+                    cache[index] = matrix_identity_float4x4
+                }
+            }
+            return cache.map { $0! }
         }
 
         let bindWorld = worldMatrices(bind: true)

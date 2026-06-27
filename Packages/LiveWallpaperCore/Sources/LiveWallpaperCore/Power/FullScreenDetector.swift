@@ -137,6 +137,12 @@ public final class FullScreenDetector {
                 continue
             }
 
+            // Transparent panels (e.g. invisible overlays) don't occlude the
+            // wallpaper, so they must not count toward coverage/occlusion.
+            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha < 0.1 {
+                continue
+            }
+
             let windowFrame = CGRect(
                 x: boundsDict["X"] ?? 0,
                 y: boundsDict["Y"] ?? 0,

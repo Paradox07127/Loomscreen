@@ -2,6 +2,7 @@
 import CoreAudio
 import Foundation
 import LiveWallpaperCore
+import os
 
 /// App-wide system-audio capture engine. Owns ONE Core Audio Process Tap (a
 /// global stereo mixdown of every process' output), drives it into a single
@@ -26,6 +27,7 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         case tapCreationFailed(OSStatus)
         case tapUIDUnavailable(OSStatus)
         case tapFormatUnavailable(OSStatus)
+        case unsupportedTapFormat(AudioStreamBasicDescription)
         case aggregateCreationFailed(OSStatus)
         case ioProcCreationFailed(OSStatus)
         case startFailed(OSStatus)
@@ -35,6 +37,9 @@ final class SystemAudioCaptureService: @unchecked Sendable {
             case .tapCreationFailed(let s): return "AudioHardwareCreateProcessTap failed (OSStatus \(s))"
             case .tapUIDUnavailable(let s): return "kAudioTapPropertyUID read failed (OSStatus \(s))"
             case .tapFormatUnavailable(let s): return "kAudioTapPropertyFormat read failed (OSStatus \(s))"
+            case .unsupportedTapFormat(let f):
+                return "tap format is not 32-bit float PCM "
+                    + "(formatID \(f.mFormatID), flags \(f.mFormatFlags), bits \(f.mBitsPerChannel))"
             case .aggregateCreationFailed(let s): return "AudioHardwareCreateAggregateDevice failed (OSStatus \(s))"
             case .ioProcCreationFailed(let s): return "AudioDeviceCreateIOProcIDWithBlock failed (OSStatus \(s))"
             case .startFailed(let s): return "AudioDeviceStart failed (OSStatus \(s))"
@@ -44,14 +49,19 @@ final class SystemAudioCaptureService: @unchecked Sendable {
 
     /// Strongly captured by the IOProc block (never `self`, so the HAL holding
     /// the block does not pin the service alive and block its own teardown).
-    private final class IOContext {
+    private final class IOContext: @unchecked Sendable {
         let processor: AudioSpectrumProcessor
         let broker: AudioSpectrumBroker
         var scratchLeft: [Float] = []
         var scratchRight: [Float] = []
+        
+        private let diagnosticLock = OSAllocatedUnfairLock(initialState: Float(0))
         /// Diagnostic only (written on ioQueue, read on main) — confirms the tap
         /// delivers normalized [-1, 1] audio rather than non-normalized data.
-        var lastInputPeak: Float = 0
+        var lastInputPeak: Float {
+            get { diagnosticLock.withLock { $0 } }
+            set { diagnosticLock.withLock { $0 = newValue } }
+        }
 
         init(processor: AudioSpectrumProcessor, broker: AudioSpectrumBroker) {
             self.processor = processor
@@ -119,6 +129,21 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         guard formatStatus == noErr, asbd.mSampleRate > 0 else {
             teardown()
             throw CaptureError.tapFormatUnavailable(formatStatus)
+        }
+
+        // The IOProc reads samples as `Float`; bail loudly rather than
+        // misinterpret integer or non-32-bit PCM as float garbage.
+        guard asbd.mFormatID == kAudioFormatLinearPCM,
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              asbd.mBitsPerChannel == 32 else {
+            Logger.error(
+                "[AudioCapture] unsupported tap format "
+                    + "formatID=\(asbd.mFormatID) flags=\(asbd.mFormatFlags) "
+                    + "bits=\(asbd.mBitsPerChannel) — expected 32-bit float PCM",
+                category: .audioCapture
+            )
+            teardown()
+            throw CaptureError.unsupportedTapFormat(asbd)
         }
 
         // Private aggregate device; `TapAutoStartKey` auto-starts the sub-tap.

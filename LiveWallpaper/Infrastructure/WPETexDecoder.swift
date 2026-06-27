@@ -552,6 +552,7 @@ struct WPETexDecoder: Sendable {
                 frameMipmaps.append(try parseMipmap(
                     version: effectiveBitmapVersion,
                     index: mipmapIndex,
+                    info: info,
                     reader: &reader
                 ))
             }
@@ -568,6 +569,7 @@ struct WPETexDecoder: Sendable {
     private func parseMipmap(
         version: Int,
         index: Int,
+        info: WPETexInfo,
         reader: inout WPETexByteReader
     ) throws -> WPETexMipmap {
         var v4Fields: WPETexMipmapV4Fields?
@@ -586,6 +588,9 @@ struct WPETexDecoder: Sendable {
 
         let mipWidth = Int(try reader.readInt32(blockName: "TEXB.mipWidth"))
         let mipHeight = Int(try reader.readInt32(blockName: "TEXB.mipHeight"))
+        guard mipWidth > 0 && mipHeight > 0 && mipWidth <= info.width && mipHeight <= info.height else {
+            throw WPETexDecodeError.invalidDimensions(width: mipWidth, height: mipHeight)
+        }
 
         var compressedFlag: UInt32 = 0
         var decompressedByteCount: Int?
@@ -967,7 +972,8 @@ struct WPETexDecoder: Sendable {
             if let expectedByteCount, expectedByteCount > 0 {
                 outputCount = min(outputCount, expectedByteCount)
             }
-            guard outputCount > 0 else {
+            let maxDecompressedSizeLimit = 268_435_456 // 256 MB
+            guard outputCount > 0 && outputCount <= maxDecompressedSizeLimit else {
                 throw WPETexDecodeError.decompressionFailed(mipmap: mipmap)
             }
             let inflated = try lz4Inflate(payload: payload, outputCount: outputCount, mipmap: mipmap)

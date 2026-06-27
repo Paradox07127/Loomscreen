@@ -39,7 +39,7 @@ extension WallpaperRuntimeSession {
 }
 
 @MainActor
-protocol WallpaperPerformanceConfigurable: AnyObject {
+protocol WallpaperPerformanceConfigurable: AnyObject, Sendable {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile)
 }
 
@@ -233,6 +233,15 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         player = nil
     }
 
+    deinit {
+        let p = player
+        if let p {
+            Task { @MainActor in
+                p.cleanup()
+            }
+        }
+    }
+
     private func attachErrorHandler(to player: WallpaperVideoPlayer) {
         player.onError = { [weak self] error in
             self?.runtimeError = error
@@ -363,5 +372,17 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackC
         window?.close()
         window = nil
         performanceTarget = nil
+    }
+
+    deinit {
+        let w = window
+        let target = performanceTarget
+        if w != nil || target != nil {
+            Task { @MainActor in
+                target?.applyPerformanceProfile(.suspended)
+                (target as? any WallpaperResourceCleanable)?.cleanup()
+                w?.close()
+            }
+        }
     }
 }

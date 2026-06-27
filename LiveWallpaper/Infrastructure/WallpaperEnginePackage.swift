@@ -89,7 +89,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         let dataStart = UInt64(cursor)
         let package = Self(magic: magic, entries: entries, dataStart: dataStart)
         for entry in entries {
-            _ = try package.dataRange(for: entry, dataCount: data.count)
+            _ = try package.dataRange(for: entry, in: data)
         }
         return package
     }
@@ -281,7 +281,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         do {
             for entry in entries {
-                let range = try dataRange(for: entry, dataCount: data.count)
+                let range = try dataRange(for: entry, in: data)
                 let targetURL = inflightURL.appendingPathComponent(Self.filesystemSafeEntryName(entry.name))
                 let standardizedTarget = targetURL.standardizedFileURL
                 guard standardizedTarget.path.hasPrefix(inflightPath + "/") else {
@@ -349,18 +349,20 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return canonical.isEmpty ? nil : canonical.joined(separator: "/")
     }
 
-    private func dataRange(for entry: Entry, dataCount: Int) throws -> Range<Data.Index> {
+    private func dataRange(for entry: Entry, in data: Data) throws -> Range<Data.Index> {
         let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
         let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)
         guard !startOverflow,
               !endOverflow,
-              absoluteEnd <= UInt64(dataCount),
+              absoluteEnd <= UInt64(data.count),
               absoluteStart <= absoluteEnd,
               let start = Int(exactly: absoluteStart),
               let end = Int(exactly: absoluteEnd) else {
             throw WPEPackageError.entryOutOfBounds(name: entry.name)
         }
-        return start..<end
+        // start/end are relative to the data blob; rebase onto absolute indices so `data[range]` is valid on sliced Data (startIndex != 0).
+        let base = data.startIndex
+        return (base + start)..<(base + end)
     }
 
     /// Shortens any path component that exceeds the APFS 255-byte limit so the
@@ -440,10 +442,12 @@ fileprivate extension Data {
         guard cursor >= 0, cursor <= count, count - cursor >= 4 else {
             throw WPEPackageError.truncatedHeader
         }
-        let value = UInt32(self[cursor])
-            | (UInt32(self[cursor + 1]) << 8)
-            | (UInt32(self[cursor + 2]) << 16)
-            | (UInt32(self[cursor + 3]) << 24)
+        // cursor is relative; `subscript`/range indices are absolute on sliced Data (startIndex != 0).
+        let base = startIndex
+        let value = UInt32(self[base + cursor])
+            | (UInt32(self[base + cursor + 1]) << 8)
+            | (UInt32(self[base + cursor + 2]) << 16)
+            | (UInt32(self[base + cursor + 3]) << 24)
         cursor += 4
         return value
     }
@@ -468,7 +472,8 @@ fileprivate extension Data {
         guard length >= 0, cursor >= 0, cursor <= count, length <= count - cursor else {
             throw WPEPackageError.truncatedHeader
         }
-        let range = cursor..<(cursor + length)
+        let base = startIndex
+        let range = (base + cursor)..<(base + cursor + length)
         cursor += length
         return Data(self[range])
     }

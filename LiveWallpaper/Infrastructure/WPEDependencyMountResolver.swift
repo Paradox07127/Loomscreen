@@ -18,9 +18,37 @@ struct WPEDependencyMountResolver {
         let appSupportRoot = (applicationSupportRootURL ?? WPEPathSafety.defaultApplicationSupportRoot(fileManager: fileManager))?
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let sourceFolderURL = origin.flatMap { WPEPathSafety.resolveSecurityScopedBookmark($0.sourceFolderBookmark) }
-        let workshopRoot = sourceFolderURL?
-            .deletingLastPathComponent()
+        // Resolve and start accessing the library root bookmark if available
+        var libraryRootURL: URL?
+        var didStartLibraryAccess = false
+        if let rootData = UserDefaults.standard.data(forKey: "WPELibrary.RootBookmark.v1") {
+            if case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(rootData, target: .transient) {
+                libraryRootURL = resolved.url
+                didStartLibraryAccess = resolved.url.startAccessingSecurityScopedResource()
+            }
+        }
+        defer {
+            if didStartLibraryAccess, let libraryRootURL {
+                libraryRootURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        // Resolve and start accessing the source folder bookmark if available
+        var sourceFolderURL: URL?
+        var didStartSourceAccess = false
+        if let origin {
+            if case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(origin.sourceFolderBookmark, target: .transient) {
+                sourceFolderURL = resolved.url
+                didStartSourceAccess = resolved.url.startAccessingSecurityScopedResource()
+            }
+        }
+        defer {
+            if didStartSourceAccess, let sourceFolderURL {
+                sourceFolderURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let workshopRoot = (libraryRootURL ?? sourceFolderURL?.deletingLastPathComponent())?
             .standardizedFileURL
             .resolvingSymlinksInPath()
 

@@ -46,7 +46,8 @@ struct WPETexByteReader {
 
     mutating func readMagic() throws -> String {
         try ensure(byteCount: 9, blockName: "magic")
-        let raw = data.subdata(in: cursor..<(cursor + 9))
+        let start = data.startIndex + cursor
+        let raw = data.subdata(in: start..<(start + 9))
         cursor += 9
         let trimmed = raw.prefix { $0 != 0 }
         guard let asciiString = String(data: Data(trimmed), encoding: .ascii),
@@ -58,7 +59,8 @@ struct WPETexByteReader {
 
     mutating func readBytes(count: Int, blockName: String) throws -> Data {
         try ensure(byteCount: count, blockName: blockName)
-        let slice = data.subdata(in: cursor..<(cursor + count))
+        let start = data.startIndex + cursor
+        let slice = data.subdata(in: start..<(start + count))
         cursor += count
         return slice
     }
@@ -67,14 +69,15 @@ struct WPETexByteReader {
     /// Used by `TEXB` v4 to surface the `v4Condition` string into the IR
     /// for dump fidelity (older code path discarded it via skip-only).
     mutating func readNullTerminatedString(blockName: String) throws -> String {
-        guard cursor <= data.count else {
+        let absoluteCursor = data.startIndex + cursor
+        guard absoluteCursor <= data.endIndex else {
             throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
         }
-        guard let terminator = data[cursor...].firstIndex(of: 0) else {
+        guard let terminator = data[absoluteCursor...].firstIndex(of: 0) else {
             throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
         }
-        let slice = data.subdata(in: cursor..<terminator)
-        cursor = terminator + 1
+        let slice = data.subdata(in: absoluteCursor..<terminator)
+        cursor = (terminator - data.startIndex) + 1
         return String(data: slice, encoding: .ascii) ?? ""
     }
 

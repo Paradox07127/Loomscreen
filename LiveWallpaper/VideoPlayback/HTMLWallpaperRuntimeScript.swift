@@ -542,16 +542,45 @@ enum HTMLWallpaperRuntimeScript {
                 } catch (e) {}
             }
 
+            // Self-perpetuating loops (tick(){...;requestAnimationFrame(tick);})
+            // break their chain if the suspend override drops the callback:
+            // resume then re-grants nothing to restart. Queue callbacks while
+            // suspended (assigning a monotonic id so cancelAnimationFrame can
+            // drop them) and replay the queue through native rAF on resume.
+            var rafCafBackup = null;
+            var rafQueue = [];
+            var rafQueueNextId = 1;
+
             function installRafOverride() {
                 if (rafBackup) return;
                 rafBackup = window.requestAnimationFrame;
-                window.requestAnimationFrame = function () { return 0; };
+                rafCafBackup = window.cancelAnimationFrame;
+                window.requestAnimationFrame = function (cb) {
+                    var id = rafQueueNextId++;
+                    rafQueue.push({ id: id, cb: cb });
+                    return id;
+                };
+                window.cancelAnimationFrame = function (id) {
+                    for (var i = 0; i < rafQueue.length; i++) {
+                        if (rafQueue[i].id === id) { rafQueue.splice(i, 1); return; }
+                    }
+                };
             }
 
             function restoreRaf() {
                 if (!rafBackup) return;
-                window.requestAnimationFrame = rafBackup;
+                var native = rafBackup;
+                window.requestAnimationFrame = native;
+                if (rafCafBackup) window.cancelAnimationFrame = rafCafBackup;
                 rafBackup = null;
+                rafCafBackup = null;
+                var pending = rafQueue;
+                rafQueue = [];
+                for (var i = 0; i < pending.length; i++) {
+                    (function (entry) {
+                        native.call(window, function (t) { entry.cb(t); });
+                    })(pending[i]);
+                }
             }
 
             function installRafThrottle(ratio) {

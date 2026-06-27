@@ -154,6 +154,7 @@ final class WallpaperThumbnailService {
             }
         }
 
+        webView.stopLoading()
         pendingWebViews.removeValue(forKey: cacheKey)
 
         if let image, didLoad {

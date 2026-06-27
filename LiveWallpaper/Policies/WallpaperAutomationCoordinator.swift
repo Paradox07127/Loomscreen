@@ -43,7 +43,10 @@ final class WallpaperAutomationCoordinator {
                 }
 
                 let now = Date()
-                for screen in screenProvider() {
+                let screens = screenProvider()
+                let liveIDs = Set(screens.map(\.id))
+                lastRotation = lastRotation.filter { liveIDs.contains($0.key) }
+                for screen in screens {
                     guard let configuration = configurationProvider(screen.id),
                           let rotationMinutes = configuration.playlistRotationMinutes,
                           configuration.playlistBookmarks?.isEmpty == false else {

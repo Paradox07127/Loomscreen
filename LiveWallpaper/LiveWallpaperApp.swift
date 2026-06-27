@@ -266,13 +266,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Drains the async persistence actor before exit so the last UI commits (typically a toggle the user flipped just before Cmd-Q) are durable on disk.
+    /// Tears down render sessions (pauses AVPlayers, releases WKWebViews / Metal
+    /// renderers — so WebKit's SQLite/WAL closes cleanly and no video/snapshot
+    /// staging is left mid-write) and drains the async persistence actor before
+    /// exit, so the last UI commits (typically a toggle flipped just before
+    /// Cmd-Q) are durable on disk. The teardown is in-process and bounded; the
+    /// flush is the only awaited work and is capped by a watchdog so a stuck
+    /// disk write can't hold the quit past the system terminate deadline.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isWaitingForTerminationFlush else { return .terminateNow }
         isWaitingForTerminationFlush = true
+        screenManager?.tearDownForTermination()
         Task { @MainActor in
-            await SettingsManager.shared.flushPendingConfigurationWrites()
-            sender.reply(toApplicationShouldTerminate: true)
+            // Reply on whichever lands first: the flush, or a 2s watchdog. The
+            // persistence-actor writes don't honor cancellation, so we don't
+            // cancel the flush — we just stop *waiting* on it once the deadline
+            // passes, so a stuck disk write can't hold the quit past the system
+            // terminate watchdog. `replied` guards the single allowed reply.
+            var replied = false
+            let reply = {
+                guard !replied else { return }
+                replied = true
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+            let flush = Task { await SettingsManager.shared.flushPendingConfigurationWrites() }
+            let watchdog = Task {
+                try? await Task.sleep(for: .seconds(2))
+                reply()
+            }
+            await flush.value
+            watchdog.cancel()
+            reply()
         }
         return .terminateLater
     }

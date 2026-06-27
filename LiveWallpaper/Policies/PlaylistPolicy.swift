@@ -16,11 +16,11 @@ enum PlaylistPolicy {
         let normalized = ((currentCursor % playlistCount) + playlistCount) % playlistCount
 
         if shuffle {
-            var candidate = randomIndex(playlistCount)
-            if candidate == normalized {
-                candidate = (candidate + 1) % playlistCount
-            }
-            return candidate
+            // Pick a non-zero offset into the remaining items so every index other
+            // than `normalized` is equally likely — the old random()+collision-bump
+            // doubled the probability of (current+1).
+            let offset = randomIndex(playlistCount - 1) + 1
+            return (normalized + offset) % playlistCount
         }
 
         return (normalized + 1) % playlistCount
@@ -36,11 +36,8 @@ enum PlaylistPolicy {
         let normalized = ((currentCursor % playlistCount) + playlistCount) % playlistCount
 
         if shuffle {
-            var candidate = randomIndex(playlistCount)
-            if candidate == normalized {
-                candidate = (candidate + playlistCount - 1) % playlistCount
-            }
-            return candidate
+            let offset = randomIndex(playlistCount - 1) + 1
+            return (normalized + offset) % playlistCount
         }
 
         return (normalized - 1 + playlistCount) % playlistCount

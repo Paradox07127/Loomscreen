@@ -26,6 +26,9 @@ final class AppleAerialsLibrary {
     /// Drops stale async scan results.
     @ObservationIgnored private var scanGeneration: UInt64 = 0
 
+    /// Cancels the in-flight scan when a newer `refresh()` supersedes it.
+    @ObservationIgnored private var scanTask: Task<Result<[AerialAsset], Error>, Never>?
+
     init() {
         self.isAuthorized = SettingsManager.shared.loadAerialsDirectoryBookmark() != nil
         self.assets = []
@@ -65,6 +68,7 @@ final class AppleAerialsLibrary {
     }
 
     func refresh() async {
+        scanTask?.cancel()
         guard let directoryURL = resolveAuthorizedDirectory() else { return }
 
         let didStartAccess = directoryURL.startAccessingSecurityScopedResource()
@@ -98,7 +102,7 @@ final class AppleAerialsLibrary {
         }
 
         let metadataDir = directoryURL
-        let result: Result<[AerialAsset], Error> = await Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) { () -> Result<[AerialAsset], Error> in
             do {
                 let metadata = Self.loadMetadata(for: metadataDir)
                 let scanned = try Self.scanAssets(
@@ -110,7 +114,9 @@ final class AppleAerialsLibrary {
             } catch {
                 return .failure(error)
             }
-        }.value
+        }
+        scanTask = task
+        let result = await task.value
 
         guard scanGeneration == myGeneration else {
             Logger.debug("Discarding stale Aerials scan result", category: .fileAccess)
@@ -132,6 +138,7 @@ final class AppleAerialsLibrary {
 
     func clearAccess() {
         scanGeneration &+= 1
+        scanTask?.cancel()
         SettingsManager.shared.clearAerialsDirectoryBookmark()
         isAuthorized = false
         assets = []
@@ -330,14 +337,19 @@ extension AppleAerialsLibrary {
             ) else {
                 return []
             }
-            return enumerator.compactMap { item in
-                guard let url = item as? URL, url.pathExtension.lowercased() == "mov" else {
-                    return nil
+            var matches: [URL] = []
+            var checked = 0
+            for case let url as URL in enumerator {
+                checked += 1
+                if checked % 256 == 0, Task.isCancelled { return [] }
+                if url.pathExtension.lowercased() == "mov" {
+                    matches.append(url)
                 }
-                return url
             }
+            return matches
         }
 
+        if Task.isCancelled { return [] }
         return try fileManager
             .contentsOfDirectory(
                 at: directoryURL,
