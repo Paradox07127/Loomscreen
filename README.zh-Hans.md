@@ -1,83 +1,93 @@
-# LiveWallpaper · Loomscreen
+<div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#运行环境)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#运行环境)
-[![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/Loomscreen/releases)
+<img src="docs/images/loomscreen-logo.png" width="128" alt="Loomscreen" />
 
-> [English](README.md) | 简体中文
+# Loomscreen
 
-> 🚧 **持续开发中。** Loomscreen 正在不断迭代完善,欢迎提建议、反馈 bug、贡献 PR —— 来开 [issue](https://github.com/Paradox07127/Loomscreen/issues) 或者 [discussion](https://github.com/Paradox07127/Loomscreen/discussions)。
+### macOS 动态壁纸 —— 视频、网页、着色器、Wallpaper Engine 场景,铺满每一块屏幕。
 
-一款 macOS 菜单栏应用,把视频和网页变成跨多显示器的动态壁纸。
+[![License: MIT](https://img.shields.io/badge/Lite-MIT-yellow.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#系统要求)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#系统要求)
+[![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver)](https://github.com/Paradox07127/Loomscreen/releases/latest)
 
-本仓库的代码同时构建两个产品:
+**[⬇ 下载](https://github.com/Paradox07127/Loomscreen/releases/latest)** ·
+**[✨ 功能](docs/features.md)** ·
+**[⚖ Lite vs Pro](docs/lite-vs-pro.md)** ·
+**[🛠 构建](docs/building.md)** ·
+[English](README.md)
 
-| 构建 | 许可 | 备注 |
-|---|---|---|
-| **LiveWallpaper Pro** | 商业版,单独分发 | 全功能 |
-| **Loomscreen Lite** | **MIT 开源,通过 GitHub Releases 分发** | 轻量运行时;Pro 独有的渲染器、本地项目导入、开发者工具在编译期排除 |
+</div>
 
-> ⚠️ Loomscreen 处于 **0.x** 版本线 —— 功能与配置形态在 `0.y` 之间可能有破坏性变更,到 `1.0.0` 时才会锁定。
+---
 
-## 快速开始
+Loomscreen 是一个菜单栏 App,把你的桌面变成会动的场景,又不打扰你。指给它一个视频、
+一个网页、一段 Apple Aerial、一个 Metal 着色器,或一个 Wallpaper Engine 工程——它会
+在每一块连接的显示器上渲染,在全屏游戏时自动暂停,其余时间则尽量省电。
 
-1. 从 [Releases](https://github.com/Paradox07127/Loomscreen/releases) 下载 `Loomscreen-x.y.z.dmg`。
-2. 打开 DMG,把 **Loomscreen.app** 拖到 `/Applications`。
-3. 在终端**执行一次** —— Loomscreen 采用 ad-hoc 签名(暂无 Apple Developer ID),所以 macOS Gatekeeper 会在第一次启动时拦截:
+它由同一套代码构建出两个版本:
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🆓 Loomscreen Lite
+**免费 · 开源(MIT)**
+
+轻量运行时。视频、HTML、Apple Aerials 壁纸均为全保真——与 Pro 同一套播放引擎,
+只是不含重型渲染器。通过本仓库 GitHub Releases 分发。
+
+</td>
+<td width="50%" valign="top">
+
+### ⭐ Loomscreen Pro
+**完整版**
+
+包含 Lite 全部功能,外加 Metal 场景/着色器渲染器、Wallpaper Engine 场景播放、
+本地工程导入、Workshop 预览,以及开发者工具。
+
+</td>
+</tr>
+</table>
+
+> Lite 是**轻量运行时,不是阉割界面**——视频 / HTML / Aerials 的观感与行为和 Pro
+> 完全一致。区别在于打包了哪些渲染器,而不是少了哪些按钮。完整对照见
+> [Lite vs Pro](docs/lite-vs-pro.md)。
+
+> 🚧 **0.x 阶段。** Loomscreen 仍在快速迭代,在稳定到 `1.0.0` 之前,配置结构与界面
+> 可能在 `0.y` 版本之间变化。欢迎反馈与报告问题 —— 提交
+> [issue](https://github.com/Paradox07127/Loomscreen/issues)。
+
+## ✨ 亮点
+
+- 🎬 **任意来源** —— 本地视频、网页 / HTML、Apple Aerials、Metal 着色器,以及 Wallpaper Engine 场景(Pro)。
+- 🖥 **每块屏幕** —— 每台显示器独立壁纸,支持播放列表与按时间调度。
+- 🎛 **特效** —— 实时后期特效、粒子叠加、天气联动场景。
+- 🔖 **收藏与播放列表** —— 收藏壁纸、轮播一组、定时随机切换。
+- 🎮 **不碍事** —— 全屏游戏/应用时自动暂停;适配 ProMotion;省电。
+- 🔄 **安静更新** —— 每次启动检查一次 GitHub Releases(12 小时节流),无遥测、无后台轮询。
+
+→ 带"怎么做、为什么"的完整介绍见 **[docs/features.md](docs/features.md)**。
+
+## 🚀 快速开始
+
+1. 从 **[Releases](https://github.com/Paradox07127/Loomscreen/releases/latest)** 下载最新的 `Loomscreen-x.y.z.dmg`(Lite)。
+2. 打开 DMG,把 **Loomscreen.app** 拖入 `/Applications`。
+3. 由于尚无付费 Apple Developer ID,构建为 ad-hoc 签名,首次启动需在终端**执行一次**清除隔离标记:
    ```bash
    xattr -dr com.apple.quarantine /Applications/Loomscreen.app
    ```
-4. 双击 `Loomscreen.app`,图标出现在菜单栏。
+4. 启动后图标出现在菜单栏。
 
-Loomscreen 在每次启动时查 GitHub Releases(每 12 小时节流;不做后台轮询,无遥测)。也可在 **设置 → 关于** 手动触发检查。
+完整安装、更新与排错见 **[docs/install.md](docs/install.md)**。
 
-## 功能对照
+## 系统要求
 
-| 能力 | Pro | Lite |
-|---|:---:|:---:|
-| 视频 / HTML / Apple 航拍壁纸 | ✅ | ✅ |
-| 多显示器、播放列表、定时计划、收藏库 | ✅ | ✅ |
-| 实时滤镜、粒子叠层、天气联动 | ✅ | ✅ |
-| **Metal 着色器程序化壁纸** | ✅ | — |
-| **本地拷贝项目目录导入** | ✅ | — |
-| **兼容 Scene 工程渲染** | ✅ | — |
-| **Steam Workshop URL 预览**（仅直发 Pro 版） | ✅ | — |
-| **开发者工具** | ✅ | — |
+- macOS 14.0(Sonoma)或更新
+- **Apple Silicon Mac** —— 不支持 Intel
+- 从源码构建需 Xcode 16.2+
 
-Lite 是**轻量运行时,而不是 UI 阉割版** —— 视频 / HTML / 航拍的体验与 Pro 完全一致。能力矩阵的权威定义在 [ProductCapabilities.swift](Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift)。
-
-## LiveWallpaper Pro 本地项目导入
-
-LiveWallpaper Pro 可扫描并导入从 Windows 上 Wallpaper Engine 库**拷贝过来**的本地项目目录。工作流:
-
-1. 在 Windows 上,通过 Steam / Wallpaper Engine 下载**你有权使用**的壁纸。
-2. 把包含编号项目子目录的本地文件夹拷贝到 Mac。
-3. 在 Pro 中选择该目录。应用扫描本地 `project.json`,为受支持的项目准备播放。
-
-LiveWallpaper **不会**内置任何 Wallpaper Engine 内容、不绕过作者权限。用户需自行确保对所导入的项目文件拥有合法使用权。需要 Windows 可执行文件或 `.dll` 插件的项目在 macOS 上跳过。
-
-## LiveWallpaper Pro · Steam Workshop 预览
-
-直发 Pro 版（不含 Mac App Store / Lite 版本）支持从粘贴的 Workshop 链接获取官方元数据 —— 标题、预览图、文件大小、最近更新时间 —— 通过 HTTPS 直连 Valve 的 `ISteamRemoteStorage/GetPublishedFileDetails` 公共接口。**无需登录 Steam、无需 API key、不经过 Loomscreen 任何后端。**
-
-未来真正运行 Workshop 内容时也是沙箱化的：每个 Workshop 来源的 HTML 壁纸都被强制放在新建的 `WKWebsiteDataStore.nonPersistent()` 会话里，附带严格的 Content-Security-Policy，禁用 `<frame>`、`<object>`、`<base>`、`<form>` 等外泄路径。
-
-我们刻意不做的事：
-
-- 在 Loomscreen 里显示任何 Steam 密码输入框。
-- 采集、存储、记录、代理或传输你的 Steam 密码、Steam Guard 验证码、会话 Token。
-- 嵌入共享 Steam Web API key，或者把 Workshop 请求绕路到 Loomscreen 的服务器。
-
-要真正**下载** Workshop 内容，需要你自己的 Steam 账号 + 官方 Valve SteamCMD（Homebrew 或 Valve 官网 tarball 装均可），这条设置流程会在后续版本上线。在那之前，行内的"在 Steam 中打开"按钮会把用户交给真正的 Steam 客户端处理。
-
-## 运行环境
-
-- macOS 14.0(Sonoma)或更高版本
-- **必须 Apple Silicon Mac** —— 不支持 Intel Mac
-- Xcode 16.2+(从源码构建)
-
-## 从源码构建
+## 🛠 从源码构建
 
 ```bash
 git clone https://github.com/Paradox07127/Loomscreen.git
@@ -85,12 +95,15 @@ cd LiveWallpaper
 open LiveWallpaper.xcodeproj
 ```
 
-选择 **LiveWallpaperLite** scheme 构建 Loomscreen Lite(`LITE_BUILD` 编译标志启用,`#if !LITE_BUILD` 守卫的 Pro 源码会被排除),或者 **LiveWallpaper** scheme 构建完整 Pro 版。`⌘R` 运行。
+Lite 选 **LiveWallpaperLite** scheme(置 `LITE_BUILD`,`#if !LITE_BUILD` 的 Pro 专属
+源码被排除),完整版选 **LiveWallpaper**,然后 `⌘R`。详见
+**[docs/building.md](docs/building.md)** · **[RELEASING.md](RELEASING.md)**。
 
-两个 scheme 不能并行构建 —— 它们共享同一个 `XCBuildData/build.db`。
+## 贡献 · 安全 · 许可
 
-## 参与贡献 · 安全 · 许可
+- **欢迎 PR 与 issue。** 提交前在 `LiveWallpaper` scheme 跑 `xcodebuild test`、在
+  `LiveWallpaperLite` 跑 `xcodebuild build`,两者都须通过。测试套件强制运行时不变量。
+- **安全问题:** 请用 GitHub 的[私密漏洞上报](https://github.com/Paradox07127/Loomscreen/security/advisories/new),不要公开 issue。
+- **许可:** MIT —— 见 [LICENSE](LICENSE),覆盖整个代码库(含 `#if !LITE_BUILD` 的 Pro 专属模块)。
 
-- **欢迎 PR 和 issue。** 在开 PR 之前请本地跑通 `LiveWallpaper` scheme 的 `xcodebuild test` 和 `LiveWallpaperLite` scheme 的 `xcodebuild build`,两者都必须成功。测试套件强制了若干运行时约定 —— 如果 PR 需要偏离,请在描述里明确说明。
-- **安全漏洞:** 请使用 GitHub 的 [私有漏洞报告通道](https://github.com/Paradox07127/Loomscreen/security/advisories/new),不要开公开 issue。
-- **许可:** MIT —— 见 [LICENSE](LICENSE)。整个 LiveWallpaper 代码库(包括 `#if !LITE_BUILD` 守卫的 Pro 独有模块)同样适用该许可。
+<div align="center"><sub>Loomscreen 不捆绑 Wallpaper Engine 内容,也不绕过创作者授权——你需自行对导入的任何壁纸的版权负责。</sub></div>
