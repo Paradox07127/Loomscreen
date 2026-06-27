@@ -54,17 +54,22 @@ fi
 case "$SKU" in
   lite)
     SCHEME="LiveWallpaperLite"
-    PRODUCT="Loomscreen"          # archived .app + artifact name
+    APP_NAME="Loomscreen"          # archived .app basename (build product)
+    ARTIFACT="Loomscreen"          # dmg / archive / sha basename
+    VOLNAME="Loomscreen"
     BUNDLE_ID="com.loomscreen"
-    DISPLAY_NAME="Loomscreen"
-    TAG_PREFIX="loomscreen-v"
+    DISPLAY_NAME="Loomscreen"      # expected CFBundleDisplayName
     ;;
   pro)
     SCHEME="LiveWallpaper"
-    PRODUCT="LiveWallpaper"
+    # App bundle is still LiveWallpaper.app (binary rename deferred), but the
+    # artifact carries the unified Loomscreen Pro brand. The Lite updater keys
+    # off the `Loomscreen-` prefix + `-Pro-` exclusion, so this name matters.
+    APP_NAME="LiveWallpaper"
+    ARTIFACT="Loomscreen-Pro"
+    VOLNAME="Loomscreen Pro"
     BUNDLE_ID="Taijia.LiveWallpaper"
     DISPLAY_NAME="LiveWallpaper"
-    TAG_PREFIX="v"
     ;;
   *)
     echo "ERROR: --sku must be 'lite' or 'pro' (got: $SKU)" >&2
@@ -74,15 +79,15 @@ esac
 
 # ---------- environment ----------
 
-DERIVED_DATA="${DERIVED_DATA:-/tmp/${PRODUCT}Release}"
+DERIVED_DATA="${DERIVED_DATA:-/tmp/${ARTIFACT}Release}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
 OUTPUT_DIR="$ROOT/build/release"
-STAGING_DIR="$OUTPUT_DIR/staging-$PRODUCT"
-ARCHIVE_PATH="$OUTPUT_DIR/${PRODUCT}-${VERSION}.xcarchive"
-APP_PATH="$STAGING_DIR/${PRODUCT}.app"
-DMG_PATH="$OUTPUT_DIR/${PRODUCT}-${VERSION}.dmg"
+STAGING_DIR="$OUTPUT_DIR/staging-$ARTIFACT"
+ARCHIVE_PATH="$OUTPUT_DIR/${ARTIFACT}-${VERSION}.xcarchive"
+APP_PATH="$STAGING_DIR/${APP_NAME}.app"
+DMG_PATH="$OUTPUT_DIR/${ARTIFACT}-${VERSION}.dmg"
 SHA_PATH="${DMG_PATH}.sha256"
 
 mkdir -p "$OUTPUT_DIR"
@@ -152,15 +157,15 @@ xcodebuild archive \
   DEVELOPMENT_TEAM="" \
   PROVISIONING_PROFILE_SPECIFIER="" \
   ENABLE_HARDENED_RUNTIME=YES \
-  > "$OUTPUT_DIR/archive-$PRODUCT.log" 2>&1 || {
+  > "$OUTPUT_DIR/archive-$ARTIFACT.log" 2>&1 || {
     echo "ERROR: xcodebuild archive failed. Tail of log:" >&2
-    tail -40 "$OUTPUT_DIR/archive-$PRODUCT.log" >&2
+    tail -40 "$OUTPUT_DIR/archive-$ARTIFACT.log" >&2
     exit 1
   }
 
-ARCHIVED_APP="$ARCHIVE_PATH/Products/Applications/${PRODUCT}.app"
+ARCHIVED_APP="$ARCHIVE_PATH/Products/Applications/${APP_NAME}.app"
 if [[ ! -d "$ARCHIVED_APP" ]]; then
-  echo "ERROR: archive did not produce ${PRODUCT}.app at $ARCHIVED_APP" >&2
+  echo "ERROR: archive did not produce ${APP_NAME}.app at $ARCHIVED_APP" >&2
   exit 1
 fi
 
@@ -232,22 +237,22 @@ $DISPLAY_NAME $VERSION
 This build is ad-hoc signed (no paid Apple Developer ID yet). On first
 launch macOS Gatekeeper will block it unless you run, one time, in Terminal:
 
-    xattr -dr com.apple.quarantine /Applications/${PRODUCT}.app
+    xattr -dr com.apple.quarantine /Applications/${APP_NAME}.app
 
-After that, double-click ${PRODUCT}.app like any other app.
+After that, double-click ${APP_NAME}.app like any other app.
 EOF
 
 echo "== [$SKU] Creating DMG =="
 hdiutil create \
-  -volname "$DISPLAY_NAME" \
+  -volname "$VOLNAME" \
   -srcfolder "$STAGING_DIR" \
   -ov \
   -format UDZO \
   -fs HFS+ \
   "$DMG_PATH" \
-  > "$OUTPUT_DIR/dmg-$PRODUCT.log" 2>&1 || {
+  > "$OUTPUT_DIR/dmg-$ARTIFACT.log" 2>&1 || {
     echo "ERROR: hdiutil create failed. Tail of log:" >&2
-    tail -20 "$OUTPUT_DIR/dmg-$PRODUCT.log" >&2
+    tail -20 "$OUTPUT_DIR/dmg-$ARTIFACT.log" >&2
     exit 1
   }
 
@@ -263,5 +268,5 @@ echo "============================================================"
 echo "  DMG:      $DMG_PATH"
 echo "  Size:     ${DMG_SIZE_MB} MB"
 echo "  SHA-256:  $SHA_PATH"
-echo "  Tag:      ${TAG_PREFIX}${VERSION}"
+echo "  Tag:      loomscreen-v${VERSION} (unified release; attach both SKUs)"
 echo "============================================================"

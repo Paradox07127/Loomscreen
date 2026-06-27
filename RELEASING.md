@@ -1,14 +1,22 @@
-# Releasing Loomscreen (Lite)
+# Releasing Loomscreen
 
-Both SKUs ship as ad-hoc-signed DMGs (no paid Apple Developer ID yet). The
-shared packaging engine is `scripts/release-app.sh --sku {lite,pro}`:
+Both editions ship from one **unified GitHub Release** per version, tagged
+`loomscreen-v<X.Y.Z>`, carrying both ad-hoc-signed DMGs (no paid Apple Developer
+ID yet). The shared packaging engine is `scripts/release-app.sh --sku {lite,pro}`:
 
-- **Lite** (`LiveWallpaperLite` → `Loomscreen.app`, `com.loomscreen`, tag
-  `loomscreen-v<X.Y.Z>`). Pushing that tag triggers
-  `.github/workflows/release-loomscreen.yml`, which builds + publishes a DMG +
-  SHA-256. `scripts/release-loomscreen.sh` is a thin wrapper for `--sku lite`.
-- **Pro** (`LiveWallpaper` → `LiveWallpaper.app`, `Taijia.LiveWallpaper`, tag
-  `v<X.Y.Z>`). No CI workflow yet — package locally with `--sku pro`.
+- **Lite** (`LiveWallpaperLite` → `Loomscreen.app`, `com.loomscreen`) →
+  `Loomscreen-X.Y.Z.dmg`. `scripts/release-loomscreen.sh` is a thin wrapper for
+  `--sku lite`.
+- **Pro** (`LiveWallpaper` → `LiveWallpaper.app`, `Taijia.LiveWallpaper`) →
+  `Loomscreen-Pro-X.Y.Z.dmg`. The app bundle is still `LiveWallpaper.app` (binary
+  rename deferred); only the artifact carries the unified Loomscreen Pro brand.
+
+> **Asset naming matters.** The Lite in-app updater
+> ([`UpdateChecker`](LiveWallpaper/Infrastructure/UpdateChecker.swift)) resolves
+> the DMG whose name starts with `Loomscreen-` and does **not** contain `-pro-`.
+> Keep the Lite DMG named `Loomscreen-X.Y.Z.dmg` and the Pro DMG
+> `Loomscreen-Pro-X.Y.Z.dmg`, and upload the **Lite DMG first** so older clients
+> (which pick the first `.dmg` alphabetically) also resolve Lite.
 
 Versioning is SemVer on the `0.x` line: any `0.y` → `0.(y+1)` bump may break
 the config schema / UI / feature gating until `1.0.0`.
@@ -75,24 +83,28 @@ git tag -a loomscreen-vX.Y.Z -m "Loomscreen X.Y.Z"
 git push origin loomscreen-vX.Y.Z
 ```
 
-Build locally (requires a clean tree and matching `MARKETING_VERSION`).
+Build both DMGs locally (requires a clean tree and matching `MARKETING_VERSION`).
 Add `--skip-checks` to bypass the RC gate the same way CI does (e.g. when the
 i18n guard is red on pre-existing, CI-ignored strings):
 
 ```sh
 scripts/release-app.sh --sku lite --version X.Y.Z   # -> build/release/Loomscreen-X.Y.Z.dmg
-scripts/release-app.sh --sku pro  --version X.Y.Z   # -> build/release/LiveWallpaper-X.Y.Z.dmg
+scripts/release-app.sh --sku pro  --version X.Y.Z   # -> build/release/Loomscreen-Pro-X.Y.Z.dmg
 ```
 
-Publish Lite to GitHub Releases:
+Publish **one unified release** — Lite asset first (see the asset-naming note
+above), Pro second:
 
 ```sh
 gh release create loomscreen-vX.Y.Z \
-  build/release/Loomscreen-X.Y.Z.dmg \
-  build/release/Loomscreen-X.Y.Z.dmg.sha256 \
+  build/release/Loomscreen-X.Y.Z.dmg     build/release/Loomscreen-X.Y.Z.dmg.sha256 \
+  build/release/Loomscreen-Pro-X.Y.Z.dmg build/release/Loomscreen-Pro-X.Y.Z.dmg.sha256 \
   --title "Loomscreen X.Y.Z" \
-  --notes-file CHANGELOG.md
+  --notes-file <notes.md>
 ```
+
+Write the notes as a download table (Lite vs Pro) plus a short "what's new" —
+see the 0.2.0 release for the template.
 
 ## Post-release
 

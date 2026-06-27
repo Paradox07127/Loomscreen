@@ -82,6 +82,29 @@ struct UpdateCheckerTests {
         #expect(release.downloadURL?.lastPathComponent == "Loomscreen-1.1.0.dmg")
     }
 
+    @Test("Unified release resolves the Lite DMG, never the Pro DMG")
+    func unifiedReleasePicksLiteNotPro() async {
+        resetDefaults()
+        // Pro listed first to prove the name filter, not asset order, decides.
+        let transport = StubTransport(releases: [
+            release(tag: "loomscreen-v1.1.0",
+                    assetNames: ["Loomscreen-Pro-1.1.0.dmg", "Loomscreen-1.1.0.dmg"])
+        ])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_000_000) },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        guard case .available(let release) = checker.status else {
+            Issue.record("Expected .available, got \(String(describing: checker.status))")
+            return
+        }
+        #expect(release.downloadURL?.lastPathComponent == "Loomscreen-1.1.0.dmg")
+    }
+
     @Test("Reports .upToDate when the newest tag matches the running version")
     func reportsUpToDateWhenSameVersion() async {
         resetDefaults()
@@ -457,6 +480,23 @@ struct UpdateCheckerTests {
                     browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/\(tag)/\(name)")
                 )]
             } ?? []
+        )
+    }
+
+    private func release(tag: String, assetNames: [String]) -> GitHubRelease {
+        GitHubRelease(
+            tagName: tag,
+            body: nil,
+            draft: false,
+            prerelease: false,
+            publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/\(tag)"),
+            assets: assetNames.map { name in
+                GitHubRelease.Asset(
+                    name: name,
+                    browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/\(tag)/\(name)")
+                )
+            }
         )
     }
 }

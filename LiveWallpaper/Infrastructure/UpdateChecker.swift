@@ -170,10 +170,11 @@ final class UpdateChecker {
 
     private static func trustedDMGDownloadURL(for asset: GitHubRelease.Asset) -> URL? {
         // A unified release carries both the Lite (`Loomscreen-*.dmg`) and Pro
-        // (`LiveWallpaper-*.dmg`) builds; the Lite updater must resolve its own
-        // DMG, never the Pro one — match the Lite name prefix explicitly.
+        // (`Loomscreen-Pro-*.dmg`) builds; the Lite updater must resolve its own
+        // DMG, never the Pro one — match the Lite name and exclude the Pro one
+        // regardless of the asset order GitHub returns.
         let name = asset.name.lowercased()
-        guard name.hasPrefix("loomscreen-"), name.hasSuffix(".dmg"),
+        guard name.hasPrefix("loomscreen-"), !name.contains("-pro-"), name.hasSuffix(".dmg"),
               let url = asset.browserDownloadURL,
               isTrustedGitHubURL(url, pathPrefix: trustedDownloadPathPrefix),
               url.pathExtension.lowercased() == "dmg"
@@ -182,9 +183,10 @@ final class UpdateChecker {
     }
 
     private static func isTrustedGitHubURL(_ url: URL, pathPrefix: String) -> Bool {
-        url.scheme?.lowercased() == "https"
-            && url.host?.lowercased() == trustedGitHubHost
-            && url.path.hasPrefix(pathPrefix)
+        let standardized = url.standardized
+        return standardized.scheme?.lowercased() == "https"
+            && standardized.host?.lowercased() == trustedGitHubHost
+            && standardized.path.hasPrefix(pathPrefix)
     }
 }
 
@@ -235,13 +237,18 @@ struct GitHubRelease: Decodable, Sendable, Equatable {
 /// from the canonical GitHub host or that exceeds the size cap — both
 /// defenses against a hostile or compromised origin.
 struct URLSessionUpdateCheckerTransport: UpdateCheckerTransport {
-    let session: URLSession
+    private let session: URLSession
 
     static let maximumResponseBytes = 512 * 1024
     static let requestTimeoutSeconds: TimeInterval = 15
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            self.session = URLSession(configuration: config, delegate: RedirectBlocker(), delegateQueue: nil)
+        }
     }
 
     func fetchReleases(from url: URL) async throws -> [GitHubRelease] {
@@ -278,5 +285,23 @@ struct URLSessionUpdateCheckerTransport: UpdateCheckerTransport {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode([GitHubRelease].self, from: data)
+    }
+}
+
+private final class RedirectBlocker: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        if let url = request.url,
+           url.scheme?.lowercased() == "https",
+           url.host?.lowercased() == "api.github.com" {
+            completionHandler(request)
+        } else {
+            completionHandler(nil)
+        }
     }
 }
