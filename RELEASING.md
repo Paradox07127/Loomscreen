@@ -61,14 +61,21 @@ writes reports under `.audit/`; it does not fail the build.
 
 ## Cutting the release
 
-Preferred — let CI build and publish:
+> **CI is currently broken for releases.** The workflow pins `xcode-version: 16.2`,
+> but `LiveWallpaperSharedUI` now needs a modern Xcode (dev builds on 26.x), so the
+> clean CI archive fails to compile. GitHub has no Xcode-26 runner yet, so until the
+> runner image catches up (or the workflow is repointed), **publish Lite from a
+> locally-built DMG** — the same path as Pro — instead of relying on the tag-push CI.
+> 0.2.0 shipped this way: `gh release create loomscreen-vX.Y.Z <local dmg> <sha>`.
+
+Tag-push (CI auto-build) — only viable once the runner can build the current code:
 
 ```sh
 git tag -a loomscreen-vX.Y.Z -m "Loomscreen X.Y.Z"
 git push origin loomscreen-vX.Y.Z
 ```
 
-Or build locally (requires a clean tree and matching `MARKETING_VERSION`).
+Build locally (requires a clean tree and matching `MARKETING_VERSION`).
 Add `--skip-checks` to bypass the RC gate the same way CI does (e.g. when the
 i18n guard is red on pre-existing, CI-ignored strings):
 
