@@ -119,7 +119,6 @@ Temporary Items
 *.log
 .audit/
 
-docs/
 .claude/
 
 .vm-bridge/
