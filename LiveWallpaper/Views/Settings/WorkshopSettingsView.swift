@@ -109,7 +109,7 @@ struct WorkshopSettingsView: View {
                         Button("Open") { showingDoctor = true }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Open the SteamCMD diagnostics sheet")
+                            .help(Text("Open the SteamCMD diagnostics sheet"))
                     }
                     // Claim intrinsic width: SettingRow's title column is greedy
                     // (maxWidth:.infinity, layoutPriority 1) and would otherwise
@@ -138,7 +138,7 @@ struct WorkshopSettingsView: View {
                         Button("Replace") { showingKeyEntry = true }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("Set a new Steam Web API key")
+                            .help(Text("Set a new Steam Web API key"))
                         Button("Forget on this Mac", role: .destructive) {
                             Task {
                                 try? await workshopServices.keychain.deleteWebAPIKey()
@@ -151,12 +151,12 @@ struct WorkshopSettingsView: View {
                         Button("Browse online") { showingBrowse = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .help("Open the Workshop browse sheet")
+                            .help(Text("Open the Workshop browse sheet"))
                     } else {
                         Button("Set key") { showingKeyEntry = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .help("Paste your Steam Web API key")
+                            .help(Text("Paste your Steam Web API key"))
                     }
                 }
             } header: {
@@ -180,7 +180,7 @@ struct WorkshopSettingsView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .fixedSize()
-                        .help("Inspect and clear the Workshop browse cache")
+                        .help(Text("Inspect and clear the Workshop browse cache"))
                 }
             } header: {
                 Text("Cache")
@@ -244,18 +244,18 @@ struct WorkshopSettingsView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize()
-                    .help("Pick a different Wallpaper Engine install folder")
+                    .help(Text("Pick a different Wallpaper Engine install folder"))
                 Button("Forget", role: .destructive) { engineAssets.clearAccess() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize()
-                    .help("Remove access to the Wallpaper Engine install folder")
+                    .help(Text("Remove access to the Wallpaper Engine install folder"))
             } else {
                 Button("Link folder…") { Task { _ = await engineAssets.requestAccess() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize()
-                    .help("Grant read-only access to a Wallpaper Engine install for extra scene coverage")
+                    .help(Text("Grant read-only access to a Wallpaper Engine install for extra scene coverage"))
             }
         }
     }

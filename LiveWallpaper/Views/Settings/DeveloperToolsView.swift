@@ -425,7 +425,7 @@ struct DeveloperToolsView: View {
             .width(min: 120, ideal: 220)
 
             TableColumn("Result") { entry in
-                Label(entry.result.rawValue.capitalized, systemImage: resultIcon(entry.result))
+                Label(resultLabel(entry.result), systemImage: resultIcon(entry.result))
                     .foregroundStyle(resultColor(entry.result))
             }
             .width(min: 80, ideal: 100)
@@ -655,6 +655,15 @@ struct DeveloperToolsView: View {
         case .fail: return "xmark.octagon.fill"
         case .timeout: return "clock.badge.exclamationmark"
         case .skipped: return "minus.circle"
+        }
+    }
+
+    private func resultLabel(_ result: WPECorpusPlaybackReport.Entry.Outcome) -> String {
+        switch result {
+        case .pass: return String(localized: "Pass", comment: "Corpus playback result: passed.")
+        case .fail: return String(localized: "Fail", comment: "Corpus playback result: failed.")
+        case .timeout: return String(localized: "Timeout", comment: "Corpus playback result: timed out.")
+        case .skipped: return String(localized: "Skipped", comment: "Corpus playback result: skipped.")
         }
     }
 

@@ -80,23 +80,26 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .binaryResolution(let error):
-            return "SteamCMD binary could not be resolved: \(error)"
+            let detail = String(describing: error)
+            return String(localized: "SteamCMD binary could not be resolved: \(detail)", comment: "Workshop diagnostics error; %@ is the underlying binary-resolution failure.")
         case .bookmarkCreation(let reason):
-            return "Could not create a security-scoped bookmark: \(reason)"
+            return String(localized: "Could not create a security-scoped bookmark: \(reason)", comment: "Workshop diagnostics error; %@ is the failure reason.")
         case .missingBinaryBinding:
-            return "No SteamCMD binary is selected."
+            return String(localized: "No SteamCMD binary is selected.", comment: "Workshop diagnostics error.")
         case .missingWorkdirBinding:
-            return "No SteamCMD working directory is selected."
+            return String(localized: "No SteamCMD working directory is selected.", comment: "Workshop diagnostics error.")
         case .bookmarkResolution(let reason):
-            return "Stored security-scoped bookmark could not be resolved: \(reason)"
+            return String(localized: "Stored security-scoped bookmark could not be resolved: \(reason)", comment: "Workshop diagnostics error; %@ is the failure reason.")
         case .invalidUsername:
-            return "Steam username must match ^[A-Za-z0-9_]{1,32}$."
+            return String(localized: "Steam username must match ^[A-Za-z0-9_]{1,32}$.", comment: "Workshop diagnostics error for an invalid Steam username.")
         case .workdirNotDirectory(let url):
-            return "SteamCMD working directory is not a folder: \(url.path(percentEncoded: false))"
+            let path = url.path(percentEncoded: false)
+            return String(localized: "SteamCMD working directory is not a folder: \(path)", comment: "Workshop diagnostics error; %@ is the offending path.")
         case .steamLibraryMissingConfig(let url):
-            return "Shared Steam library must contain config/config.vdf: \(url.path(percentEncoded: false))"
+            let path = url.path(percentEncoded: false)
+            return String(localized: "Shared Steam library must contain config/config.vdf: \(path)", comment: "Workshop diagnostics error; %@ is the offending path.")
         case .untrustedBinary:
-            return "SteamCMD is not a verified Valve build."
+            return String(localized: "SteamCMD is not a verified Valve build.", comment: "Workshop diagnostics error when the SteamCMD binary is not trusted.")
         }
     }
 }

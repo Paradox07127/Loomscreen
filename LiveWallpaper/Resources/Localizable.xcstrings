@@ -7593,6 +7593,34 @@
         }
       }
     },
+    "Could not create a security-scoped bookmark: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not create a security-scoped bookmark: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セキュリティスコープ付きブックマークを作成できませんでした: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建安全作用域书签:%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法建立安全範圍書籤:%@"
+          }
+        }
+      }
+    },
     "Could not find that location: %@" : {
       "comment" : "Manual weather location lookup error. The placeholder is the system error.",
       "localizations" : {
@@ -12700,6 +12728,34 @@
         }
       }
     },
+    "Fail" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fail"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗"
+          }
+        }
+      }
+    },
     "Failed" : {
       "localizations" : {
         "ja" : {
@@ -17530,6 +17586,34 @@
         }
       }
     },
+    "Metal is unavailable on this Mac." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal is unavailable on this Mac."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac では Metal を利用できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 上 Metal 不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 上 Metal 無法使用。"
+          }
+        }
+      }
+    },
     "Midday" : {
       "comment" : "Default schedule slot name.",
       "extractionState" : "manual",
@@ -19096,6 +19180,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未設定快速鍵"
+          }
+        }
+      }
+    },
+    "No SteamCMD binary is selected." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No SteamCMD binary is selected."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD のバイナリが選択されていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未选择 SteamCMD 可执行文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇 SteamCMD 執行檔。"
+          }
+        }
+      }
+    },
+    "No SteamCMD working directory is selected." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No SteamCMD working directory is selected."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD の作業ディレクトリが選択されていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未选择 SteamCMD 工作目录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇 SteamCMD 工作目錄。"
           }
         }
       }
@@ -21503,6 +21643,34 @@
         }
       }
     },
+    "Pass" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pass"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "合格"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通過"
+          }
+        }
+      }
+    },
     "Passed" : {
       "localizations" : {
         "ja" : {
@@ -22372,6 +22540,34 @@
         }
       }
     },
+    "Pick a folder for SteamCMD's downloads." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a folder for SteamCMD's downloads."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD のダウンロード用フォルダを選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 SteamCMD 的下载文件夹。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇 SteamCMD 的下載資料夾。"
+          }
+        }
+      }
+    },
     "Pick a single .html file. Sibling assets next to the file are accessible." : {
       "localizations" : {
         "en" : {
@@ -22513,6 +22709,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新選擇來源"
+          }
+        }
+      }
+    },
+    "Pick the SteamCMD executable or its steamcmd.sh wrapper." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick the SteamCMD executable or its steamcmd.sh wrapper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD の実行ファイルまたは steamcmd.sh ラッパーを選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 SteamCMD 可执行文件或其 steamcmd.sh 包装脚本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇 SteamCMD 執行檔或其 steamcmd.sh 包裝指令碼。"
           }
         }
       }
@@ -28469,6 +28693,34 @@
         }
       }
     },
+    "Shared Steam library must contain config/config.vdf: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared Steam library must contain config/config.vdf: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有 Steam ライブラリには config/config.vdf が必要です: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享 Steam 库必须包含 config/config.vdf:%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共用 Steam 程式庫必須包含 config/config.vdf:%@"
+          }
+        }
+      }
+    },
     "Shortcut rejected: %@" : {
       "localizations" : {
         "en" : {
@@ -29373,6 +29625,34 @@
         }
       }
     },
+    "Skipped" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skipped"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スキップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已略過"
+          }
+        }
+      }
+    },
     "Snow" : {
       "comment" : "Weather condition.",
       "localizations" : {
@@ -30096,6 +30376,34 @@
         }
       }
     },
+    "Steam username must match ^[A-Za-z0-9_]{1,32}$." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam username must match ^[A-Za-z0-9_]{1,32}$."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam のユーザー名は ^[A-Za-z0-9_]{1,32}$ に一致する必要があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam 用户名必须匹配 ^[A-Za-z0-9_]{1,32}$。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam 使用者名稱必須符合 ^[A-Za-z0-9_]{1,32}$。"
+          }
+        }
+      }
+    },
     "Steam Web API key" : {
       "localizations" : {
         "ja" : {
@@ -30165,6 +30473,34 @@
         }
       }
     },
+    "SteamCMD binary could not be resolved: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD binary could not be resolved: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD のバイナリを解決できませんでした: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法解析 SteamCMD 可执行文件:%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法解析 SteamCMD 執行檔:%@"
+          }
+        }
+      }
+    },
     "SteamCMD Doctor" : {
       "localizations" : {
         "ja" : {
@@ -30210,6 +30546,34 @@
         }
       }
     },
+    "SteamCMD is not a verified Valve build." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD is not a verified Valve build."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD は検証済みの Valve ビルドではありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD 不是经过验证的 Valve 版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD 不是經過驗證的 Valve 版本。"
+          }
+        }
+      }
+    },
     "SteamCMD isn't a verified Valve build, so the download was blocked. Re-select the official SteamCMD in the Doctor." : {
       "comment" : "Workshop download blocked: unverified SteamCMD binary.",
       "localizations" : {
@@ -30229,6 +30593,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SteamCMD 不是已驗證的 Valve 建置，因此下載被阻擋。請在 Doctor 中重新選擇官方 SteamCMD。"
+          }
+        }
+      }
+    },
+    "SteamCMD working directory is not a folder: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD working directory is not a folder: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD の作業ディレクトリがフォルダではありません: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD 工作目录不是文件夹:%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SteamCMD 工作目錄不是資料夾:%@"
           }
         }
       }
@@ -30393,6 +30785,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儲存在你的 Mac 上（鑰匙圈，不透過 iCloud 同步），並透過 HTTPS 直接傳送到 Valve 的 Steam Web API。Loomscreen 絕不會代理你的金鑰。"
+          }
+        }
+      }
+    },
+    "Stored security-scoped bookmark could not be resolved: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stored security-scoped bookmark could not be resolved: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存されたセキュリティスコープ付きブックマークを解決できませんでした: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法解析已存储的安全作用域书签:%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法解析已儲存的安全範圍書籤:%@"
           }
         }
       }
@@ -32207,6 +32627,34 @@
         }
       }
     },
+    "Timeout" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timeout"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイムアウト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逾時"
+          }
+        }
+      }
+    },
     "Tip: many creators publish a video version of the same wallpaper." : {
       "localizations" : {
         "en" : {
@@ -33578,6 +34026,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用作桌布"
+          }
+        }
+      }
+    },
+    "Use Binary" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Binary"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このバイナリを使用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用该可执行文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此執行檔"
+          }
+        }
+      }
+    },
+    "Use Folder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このフォルダを使用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用该文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此資料夾"
           }
         }
       }

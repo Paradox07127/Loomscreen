@@ -210,7 +210,7 @@ struct WorkshopDoctorView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Copy all probe reports as redacted JSON to clipboard")
+            .help(Text("Copy all probe reports as redacted JSON to clipboard"))
 
             Spacer()
 
@@ -225,7 +225,7 @@ struct WorkshopDoctorView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .disabled(service.state == .probing)
-            .help("Run every diagnostic check against the bound SteamCMD install.")
+            .help(Text("Run every diagnostic check against the bound SteamCMD install."))
         }
     }
 
@@ -431,8 +431,8 @@ private struct BinaryPickerRow: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.treatsFilePackagesAsDirectories = false
-        panel.message = "Pick the SteamCMD executable or its steamcmd.sh wrapper."
-        panel.prompt = "Use Binary"
+        panel.message = String(localized: "Pick the SteamCMD executable or its steamcmd.sh wrapper.", comment: "Open-panel message when choosing the SteamCMD binary in the Workshop diagnostics sheet.")
+        panel.prompt = String(localized: "Use Binary", comment: "Open-panel confirm button when choosing the SteamCMD binary.")
         // Pre-position the panel at the most plausible install location so
         // users don't have to navigate the filesystem when SteamCMD is in
         // its canonical Homebrew / Valve-tarball spot.
@@ -559,8 +559,8 @@ private struct WorkdirRadioRow: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.message = "Pick a folder for SteamCMD's downloads."
-        panel.prompt = "Use Folder"
+        panel.message = String(localized: "Pick a folder for SteamCMD's downloads.", comment: "Open-panel message when choosing the SteamCMD download folder.")
+        panel.prompt = String(localized: "Use Folder", comment: "Open-panel confirm button when choosing the SteamCMD download folder.")
         if panel.runModal() == .OK, let url = panel.url {
             onPickSeparate(url)
         }
@@ -669,24 +669,24 @@ private struct ProbeRow: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
                 .foregroundStyle(DesignTokens.Colors.Status.active)
-                .accessibilityLabel("Passed")
+                .accessibilityLabel(Text("Passed"))
         case .yellow:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 18))
                 .foregroundStyle(DesignTokens.Colors.Status.warning)
-                .accessibilityLabel("Warning")
+                .accessibilityLabel(Text("Warning"))
         case .red:
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 18))
                 .foregroundStyle(DesignTokens.Colors.Status.danger)
-                .accessibilityLabel("Failed")
+                .accessibilityLabel(Text("Failed"))
         case .running:
             ProgressView().controlSize(.small).accessibilityLabel("Running")
         case .notRun:
             Image(systemName: "circle.dotted")
                 .font(.system(size: 17))
                 .foregroundStyle(.tertiary)
-                .accessibilityLabel("Not run")
+                .accessibilityLabel(Text("Not run"))
         }
     }
 
@@ -798,7 +798,7 @@ private struct ProbeRow: View {
                 .labelStyle(.iconOnly)
         }
         .buttonStyle(.borderless)
-        .help("Re-run this probe")
+        .help(Text("Re-run this probe"))
     }
 
     private func pickBinary() {

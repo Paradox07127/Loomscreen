@@ -48,13 +48,13 @@ struct SteamWebAPIKeyEntrySheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.regular)
-                    .help("Discard changes")
+                    .help(Text("Discard changes"))
                 Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
                     .disabled(validation != .valid)
-                    .help("Save key to Keychain and close")
+                    .help(Text("Save key to Keychain and close"))
             }
             dataFlowFooter
         }
@@ -127,8 +127,8 @@ struct SteamWebAPIKeyEntrySheet: View {
             }
             .buttonStyle(.plain)
             .disabled(!hasReadTOU)
-            .help(isShowingKey ? "Hide key" : "Show key")
-            .accessibilityLabel(isShowingKey ? "Hide key" : "Show key")
+            .help(isShowingKey ? Text("Hide key") : Text("Show key"))
+            .accessibilityLabel(isShowingKey ? Text("Hide key") : Text("Show key"))
         }
         .padding(.horizontal, DesignTokens.Spacing.sm)
         .padding(.vertical, DesignTokens.Spacing.xs)

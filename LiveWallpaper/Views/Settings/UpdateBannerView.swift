@@ -53,7 +53,9 @@ struct UpdateBannerView: View {
             }
             Button("Later", role: .cancel) {}
         } message: { release in
-            Text("\(BundleIdentity.productDisplayName) \(release.version.description) is available. Open the GitHub Releases page to download the new build.")
+            let productName = BundleIdentity.productDisplayName
+            let versionText = release.version.description
+            Text("\(productName) \(versionText) is available. Open the GitHub Releases page to download the new build.")
         }
     }
 

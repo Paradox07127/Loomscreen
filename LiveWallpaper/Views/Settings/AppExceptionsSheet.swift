@@ -116,7 +116,7 @@ struct AppExceptionsSheet: View {
         panel.allowedContentTypes = [.application]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Add"
+        panel.prompt = String(localized: "Add", comment: "Open-panel confirm button to add the chosen app to the exceptions list.")
         guard panel.runModal() == .OK,
               let url = panel.url,
               let bundleID = Bundle(url: url)?.bundleIdentifier,

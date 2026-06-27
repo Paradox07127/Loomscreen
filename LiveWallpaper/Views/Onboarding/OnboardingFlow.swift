@@ -76,6 +76,7 @@ struct OnboardingFlow: View {
 
     private var progressIndicator: some View {
         let totalSteps = OnboardingStep.allCases.count
+        let stepLabel = Text("Step \(currentStep.rawValue + 1) of \(totalSteps)")
         return HStack(spacing: 8) {
             ForEach(0..<totalSteps, id: \.self) { index in
                 let isCurrent = index == currentStep.rawValue
@@ -86,7 +87,7 @@ struct OnboardingFlow: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Step \(currentStep.rawValue + 1) of \(totalSteps)"))
+        .accessibilityLabel(stepLabel)
     }
 
     private func nextStep() {

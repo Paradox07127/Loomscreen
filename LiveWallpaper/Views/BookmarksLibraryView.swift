@@ -224,7 +224,8 @@ private struct BookmarkTile: View {
     }
 
     private var accessibilityLabel: Text {
-        Text("\(bookmark.label), \(Text(bookmark.wallpaperType.titleKey)) wallpaper bookmark",
+        let name = bookmark.label
+        return Text("\(name), \(Text(bookmark.wallpaperType.titleKey)) wallpaper bookmark",
              comment: "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / HTML / Shader / Scene).")
     }
 

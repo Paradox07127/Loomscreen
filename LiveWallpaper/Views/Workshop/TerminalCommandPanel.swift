@@ -34,7 +34,7 @@ struct TerminalCommandPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .help("Copy command to clipboard")
+                .help(Text("Copy command to clipboard"))
 
                 Button(action: openTerminal) {
                     Label("Terminal", systemImage: "terminal")
@@ -42,7 +42,7 @@ struct TerminalCommandPanel: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Open Terminal.app")
+                .help(Text("Open Terminal.app"))
             }
         }
         .padding(.horizontal, DesignTokens.Spacing.md)

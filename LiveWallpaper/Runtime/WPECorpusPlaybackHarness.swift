@@ -143,7 +143,7 @@ final class WPECorpusPlaybackHarness {
         var errorDescription: String? {
             switch self {
             case .metalUnavailable:
-                return "Metal is unavailable on this Mac."
+                return String(localized: "Metal is unavailable on this Mac.", comment: "Corpus playback harness error when Metal is unavailable.")
             }
         }
     }
