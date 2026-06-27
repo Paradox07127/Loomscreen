@@ -1,2 +1,0 @@
-# cmd.exe requires CRLF line endings; everything else stays LF.
-*.cmd text eol=crlf
