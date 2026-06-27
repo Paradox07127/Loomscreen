@@ -1249,6 +1249,17 @@ struct WPERenderGraphBuilderTests {
         data.appendLittleEndian(UInt32(indices.count))
         return data
     }
+
+    @Test("Texture names keep significant trailing space (scene 3351072238)")
+    func parseTexturePathPreservesSignificantWhitespace() {
+        // The packaged asset is literally `materials/妃咲 60帧 .tex`; trimming the
+        // reference broke the candidate lookup. Verbatim name, blank-only → nil.
+        #expect(WPERenderGraphBuilder.parseTexturePath("妃咲 60帧 ") == "妃咲 60帧 ")
+        #expect(WPERenderGraphBuilder.parseTexturePath(["name": "妃咲 60帧 "]) == "妃咲 60帧 ")
+        #expect(WPERenderGraphBuilder.parseTexturePath("layer_albedo") == "layer_albedo")
+        #expect(WPERenderGraphBuilder.parseTexturePath("   ") == nil)
+        #expect(WPERenderGraphBuilder.parseTexturePath("") == nil)
+    }
 }
 
 private extension Data {

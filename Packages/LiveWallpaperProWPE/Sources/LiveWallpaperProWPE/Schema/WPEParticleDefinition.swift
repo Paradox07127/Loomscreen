@@ -250,6 +250,14 @@ public struct WPEParticleOscillatePosition: Equatable, Sendable {
     }
 }
 
+/// WPE emitter geometry. `sphererandom` scatters within a radius; `boxrandom`
+/// scatters within an axis-aligned box (per-axis `distancemax` half-extents) —
+/// how full-screen effects like rain spread across the frame.
+public enum WPEParticleEmitterShape: String, Sendable, Equatable {
+    case sphere
+    case box
+}
+
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
 /// file. Fields cover the subset of the WPE DSL the runtime actually
 /// drives — emitter geometry, the random initializers, and the operator
@@ -263,6 +271,13 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// empty `renderer: []` array only emits/expands its children and must NOT
     /// register a drawable system (it has no material/sprite of its own).
     public let rendersSprite: Bool
+    /// `renderer: [{name:"rope"}]` — a ribbon/trail that connects its particles
+    /// in emission order into one textured strip (meteor tails, cursor trails)
+    /// instead of N independent billboards. Drawn as a per-frame triangle strip,
+    /// NOT instanced quads: stacking the quads (all knots spawn at one point with
+    /// no spread, relying on the rope to spread them along the control-point path)
+    /// piled into an additive white blob (scene 3351072238).
+    public let isRope: Bool
     public let maxCount: Int
     public let rate: Double
     /// Emitter `instantaneous` count: particles spawned in a one-time burst
@@ -279,8 +294,17 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// small). Sampling uniformly over-sizes the average.
     public let sizeExponent: Double
     public let originOffset: SIMD3<Double>
-    public let dispersalMin: Double
-    public let dispersalMax: Double
+    /// Emission distribution. `.sphere` (the WPE default `sphererandom`) uses the
+    /// `.x` of dispersalMin/Max as a scalar radius; `.box` (`boxrandom`) samples
+    /// each axis independently within ±dispersalMax (per-axis half-extents). A box
+    /// emitter parsed as a sphere collapses its vector `distancemax` to one point
+    /// (scene 3351072238: 500 rain halos piled into a white blob).
+    public let emitterShape: WPEParticleEmitterShape
+    /// Per-axis emission bounds. Sphere reads `.x` as the radius; box reads all
+    /// three as half-extents. Stored as a vector so `boxrandom`'s
+    /// `distancemax: "1200 1000 0"` survives instead of failing scalar parsing.
+    public let dispersalMin: SIMD3<Double>
+    public let dispersalMax: SIMD3<Double>
     public let directionMask: SIMD3<Double>
     public let velocityMin: SIMD3<Double>
     public let velocityMax: SIMD3<Double>
@@ -361,11 +385,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         return attractors.contains { pointerIDs.contains($0.controlPointID) }
     }
 
+    /// Back-compat sphere initializer: scalar `dispersalMin/Max` broadcast to a
+    /// vector radius. Keeps the many existing call sites (tests, `.empty`) intact;
+    /// box emitters use the vector designated init below.
     public init(
         materialRelativePath: String?,
         childRelativePaths: [String] = [],
         childReferences: [WPEParticleChildReference]? = nil,
         rendersSprite: Bool = true,
+        isRope: Bool = false,
         maxCount: Int,
         rate: Double,
         instantaneousCount: Int = 0,
@@ -414,6 +442,118 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         attractors: [WPEParticleControlPointAttractor] = [],
         hasColorInitializer: Bool = false
     ) {
+        self.init(
+            materialRelativePath: materialRelativePath,
+            childRelativePaths: childRelativePaths,
+            childReferences: childReferences,
+            rendersSprite: rendersSprite,
+            isRope: isRope,
+            maxCount: maxCount,
+            rate: rate,
+            instantaneousCount: instantaneousCount,
+            startDelay: startDelay,
+            lifetimeMin: lifetimeMin,
+            lifetimeMax: lifetimeMax,
+            sizeMin: sizeMin,
+            sizeMax: sizeMax,
+            sizeExponent: sizeExponent,
+            originOffset: originOffset,
+            emitterShape: .sphere,
+            dispersalMin: SIMD3<Double>(dispersalMin, dispersalMin, dispersalMin),
+            dispersalMax: SIMD3<Double>(dispersalMax, dispersalMax, dispersalMax),
+            velocityMin: velocityMin,
+            velocityMax: velocityMax,
+            colorMin: colorMin,
+            colorMax: colorMax,
+            fadeInSeconds: fadeInSeconds,
+            directionMask: directionMask,
+            alphaMin: alphaMin,
+            alphaMax: alphaMax,
+            rotationMin: rotationMin,
+            rotationMax: rotationMax,
+            angularVelocityMin: angularVelocityMin,
+            angularVelocityMax: angularVelocityMax,
+            fadeOutSeconds: fadeOutSeconds,
+            alphaChange: alphaChange,
+            oscillateAlpha: oscillateAlpha,
+            sizeChange: sizeChange,
+            colorChange: colorChange,
+            oscillatePosition: oscillatePosition,
+            gravity: gravity,
+            drag: drag,
+            angularForceZ: angularForceZ,
+            angularDrag: angularDrag,
+            turbulenceSpeedMin: turbulenceSpeedMin,
+            turbulenceSpeedMax: turbulenceSpeedMax,
+            turbulenceScale: turbulenceScale,
+            turbulenceTimescale: turbulenceTimescale,
+            turbulenceOffset: turbulenceOffset,
+            turbulenceMask: turbulenceMask,
+            turbulencePhaseMin: turbulencePhaseMin,
+            turbulencePhaseMax: turbulencePhaseMax,
+            sequenceMultiplier: sequenceMultiplier,
+            animationMode: animationMode,
+            controlPoints: controlPoints,
+            attractors: attractors,
+            hasColorInitializer: hasColorInitializer
+        )
+    }
+
+    public init(
+        materialRelativePath: String?,
+        childRelativePaths: [String] = [],
+        childReferences: [WPEParticleChildReference]? = nil,
+        rendersSprite: Bool = true,
+        isRope: Bool = false,
+        maxCount: Int,
+        rate: Double,
+        instantaneousCount: Int = 0,
+        startDelay: Double,
+        lifetimeMin: Double,
+        lifetimeMax: Double,
+        sizeMin: Double,
+        sizeMax: Double,
+        sizeExponent: Double = 1,
+        originOffset: SIMD3<Double>,
+        emitterShape: WPEParticleEmitterShape = .sphere,
+        dispersalMin: SIMD3<Double>,
+        dispersalMax: SIMD3<Double>,
+        velocityMin: SIMD3<Double>,
+        velocityMax: SIMD3<Double>,
+        colorMin: SIMD3<Double>,
+        colorMax: SIMD3<Double>,
+        fadeInSeconds: Double,
+        directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        alphaMin: Double = 1,
+        alphaMax: Double = 1,
+        rotationMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        rotationMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        angularVelocityMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        angularVelocityMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        fadeOutSeconds: Double = 0,
+        alphaChange: WPEParticleAlphaChange? = nil,
+        oscillateAlpha: WPEParticleOscillateAlpha? = nil,
+        sizeChange: WPEParticleSizeChange? = nil,
+        colorChange: WPEParticleColorChange? = nil,
+        oscillatePosition: WPEParticleOscillatePosition? = nil,
+        gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        drag: Double = 0,
+        angularForceZ: Double = 0,
+        angularDrag: Double = 0,
+        turbulenceSpeedMin: Double = 0,
+        turbulenceSpeedMax: Double = 0,
+        turbulenceScale: Double = 0.005,
+        turbulenceTimescale: Double = 0.01,
+        turbulenceOffset: Double = 0,
+        turbulenceMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        turbulencePhaseMin: Double = 0,
+        turbulencePhaseMax: Double = 0,
+        sequenceMultiplier: Double = 1,
+        animationMode: WPEParticleAnimationMode = .sequence,
+        controlPoints: [WPEParticleControlPoint] = [],
+        attractors: [WPEParticleControlPointAttractor] = [],
+        hasColorInitializer: Bool = false
+    ) {
         self.materialRelativePath = materialRelativePath
         // Prefer explicit child references; fall back to bare paths (origin 0)
         // for the convenience/back-compat `childRelativePaths:` initializer.
@@ -421,6 +561,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             WPEParticleChildReference(relativePath: $0)
         }
         self.rendersSprite = rendersSprite
+        self.isRope = isRope
         self.maxCount = maxCount
         self.rate = rate
         self.instantaneousCount = max(0, instantaneousCount)
@@ -431,6 +572,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.sizeMax = sizeMax
         self.sizeExponent = max(0.0001, sizeExponent)
         self.originOffset = originOffset
+        self.emitterShape = emitterShape
         self.dispersalMin = dispersalMin
         self.dispersalMax = dispersalMax
         self.directionMask = directionMask
@@ -500,6 +642,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             materialRelativePath: materialRelativePath,
             childReferences: childReferences,
             rendersSprite: rendersSprite,
+            isRope: isRope,
             maxCount: scaledMaxCount,
             rate: rate * rateScale,
             instantaneousCount: scaledInstantaneous,
@@ -510,6 +653,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             sizeMax: sizeMax * sizeScale,
             sizeExponent: sizeExponent,
             originOffset: originOffset,
+            emitterShape: emitterShape,
             dispersalMin: dispersalMin,
             dispersalMax: dispersalMax,
             velocityMin: velocityMin * speedScale,
@@ -563,6 +707,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             materialRelativePath: materialRelativePath,
             childReferences: childReferences,
             rendersSprite: rendersSprite,
+            isRope: isRope,
             maxCount: maxCount,
             rate: rate,
             instantaneousCount: instantaneousCount,
@@ -573,6 +718,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             sizeMax: sizeMax,
             sizeExponent: sizeExponent,
             originOffset: originOffset + delta,
+            emitterShape: emitterShape,
             dispersalMin: dispersalMin,
             dispersalMax: dispersalMax,
             velocityMin: velocityMin,
@@ -668,7 +814,11 @@ public enum WPEParticleDefinitionParser {
             } ?? []
         // Absent `renderer` keeps legacy drawable behavior; an explicit empty
         // array marks a simulation-only spawner (renders nothing itself).
-        let rendersSprite = (json["renderer"] as? [[String: Any]]).map { !$0.isEmpty } ?? true
+        let rendererEntries = json["renderer"] as? [[String: Any]]
+        let rendersSprite = rendererEntries.map { !$0.isEmpty } ?? true
+        let isRope = rendererEntries?.contains {
+            ($0["name"] as? String)?.lowercased() == "rope"
+        } ?? false
         let maxCount = (json["maxcount"] as? Int)
             ?? (json["maxcount"] as? Double).map { Int($0) }
             ?? 0
@@ -679,8 +829,9 @@ public enum WPEParticleDefinitionParser {
         var rate: Double = 0
         var instantaneousCount: Int = 0
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
-        var dispersalMin: Double = 0
-        var dispersalMax: Double = 0
+        var emitterShape: WPEParticleEmitterShape = .sphere
+        var dispersalMin = SIMD3<Double>(0, 0, 0)
+        var dispersalMax = SIMD3<Double>(0, 0, 0)
         // WPE scene particles render as 2D billboards unless an emitter
         // explicitly opts into a Z axis. Defaulting missing `directions`
         // to Z=1 collapses depth-only random offsets back onto the same
@@ -692,8 +843,23 @@ public enum WPEParticleDefinitionParser {
             rate = WPEValueParser.double(first["rate"]) ?? 0
             instantaneousCount = WPEValueParser.double(first["instantaneous"]).map { max(0, Int($0)) } ?? 0
             origin = WPEValueParser.vector3(first["origin"]) ?? SIMD3(0, 0, 0)
-            dispersalMin = WPEValueParser.double(first["distancemin"]) ?? 0
-            dispersalMax = WPEValueParser.double(first["distancemax"]) ?? 0
+            if (first["name"] as? String)?.lowercased() == "boxrandom" {
+                // `boxrandom` distances are per-axis half-extents (e.g.
+                // "1200 1000 0"). Scalar parsing would fail → collapse the box to
+                // a point and pile every particle on the origin (scene 3351072238).
+                emitterShape = .box
+                func absVec(_ v: SIMD3<Double>?) -> SIMD3<Double> {
+                    guard let v else { return SIMD3(0, 0, 0) }
+                    return SIMD3(Swift.abs(v.x), Swift.abs(v.y), Swift.abs(v.z))
+                }
+                dispersalMin = absVec(WPEValueParser.vector3(first["distancemin"]))
+                dispersalMax = absVec(WPEValueParser.vector3(first["distancemax"]))
+            } else {
+                let scalarMin = max(0, WPEValueParser.double(first["distancemin"]) ?? 0)
+                let scalarMax = max(scalarMin, WPEValueParser.double(first["distancemax"]) ?? 0)
+                dispersalMin = SIMD3(scalarMin, scalarMin, scalarMin)
+                dispersalMax = SIMD3(scalarMax, scalarMax, scalarMax)
+            }
             if let mask = WPEValueParser.vector3(first["directions"]) {
                 directionMask = SIMD3<Double>(abs(mask.x), abs(mask.y), abs(mask.z))
             }
@@ -920,6 +1086,7 @@ public enum WPEParticleDefinitionParser {
             materialRelativePath: material,
             childReferences: childReferences,
             rendersSprite: rendersSprite,
+            isRope: isRope,
             maxCount: max(0, maxCount),
             rate: max(0, rate),
             instantaneousCount: instantaneousCount,
@@ -930,8 +1097,9 @@ public enum WPEParticleDefinitionParser {
             sizeMax: max(sizeMin, sizeMax),
             sizeExponent: sizeExponent,
             originOffset: origin,
-            dispersalMin: max(0, dispersalMin),
-            dispersalMax: max(dispersalMin, dispersalMax),
+            emitterShape: emitterShape,
+            dispersalMin: dispersalMin,
+            dispersalMax: dispersalMax,
             velocityMin: velocityMin,
             velocityMax: velocityMax,
             colorMin: colorMin,

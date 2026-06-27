@@ -610,6 +610,10 @@ struct WPEParticleVertexOut {
     float2 uvNext;
     float frameBlend;
     float4 color;
+    // REFRACT screen-space tangents (WPE ComputeScreenRefractionTangents): the
+    // quad's rotated right/up axes in screen-UV, pre-scaled by g_RefractAmount.
+    // .xy = right, .zw = up. Zero for non-refract systems.
+    float4 screenTangents;
 };
 
 struct WPEParticleProjection {
@@ -712,6 +716,12 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     }
     out.frameBlend = blend;
     out.color = instance.color;
+    // Screen tangents = the quad's rotated right/up in screen-UV × g_RefractAmount
+    // (frameRectMode.w; 0 ⇒ non-refract). Matches WPE's right/up→g_ViewRight/Up
+    // projection for the 2D orthographic case (g_ViewRight=+x, g_ViewUp=+y).
+    float refractAmount = sprite.frameRectMode.w;
+    out.screenTangents.xy = float2(c, -s) * refractAmount;
+    out.screenTangents.zw = float2(s, c) * refractAmount;
     return out;
 }
 
@@ -742,6 +752,79 @@ fragment half4 wpe_particle_instanced_fragment(
     // blend factors handle the translucent/additive/normal split set
     // up by `particlePipelineState`.
     return half4(rgb, alpha);
+}
+
+// genericparticle REFRACT (lens water droplets / heat haze). Instead of a flat
+// sprite, the droplet shows the DISTORTED SCENE BEHIND it: sample the scene
+// snapshot (texture2) at this fragment's screen UV, offset by the droplet's
+// normal map (texture1), then multiply the albedo by it. White albedo ⇒ pure
+// refracted background = a glassy droplet; on a dark background it (correctly)
+// nearly vanishes. Reuses the instanced quad vertex (`[[position]]` gives the
+// screen pixel, so no screen-coord varying is needed). Offset sign mirrors WPE's
+// GLSL; magnitude = g_RefractAmount (sprite.frameRectMode.w).
+fragment half4 wpe_particle_refract_fragment(
+    WPEParticleVertexOut in [[stage_in]],
+    texture2d<half, access::sample> albedoTex [[texture(0)]],
+    texture2d<half, access::sample> normalTex [[texture(1)]],
+    texture2d<half, access::sample> backgroundTex [[texture(2)]],
+    constant WPEParticleSpriteParams& sprite [[buffer(0)]],
+    constant WPEParticleProjection& projection [[buffer(1)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    half4 sLo = albedoTex.sample(linearSampler, in.uvCurrent);
+    half4 sHi = albedoTex.sample(linearSampler, in.uvNext);
+    half4 albedo = mix(sLo, sHi, half(in.frameBlend));
+    // WPE RGBA8888 normal+mask packing: x in alpha, y in green, mask in red.
+    half4 nt = normalTex.sample(linearSampler, in.uvCurrent);
+    float nx = float(nt.a) * 2.0 - 1.0;
+    float ny = float(nt.g) * 2.0 - 1.0;
+    float mask = float(nt.r);
+    float2 sceneSize = max(projection.sceneSize.xy, float2(1.0));
+    float2 screenUV = in.position.xy / sceneSize;   // [[position]] = pixels, top-left
+    // Project the tangent-space normal onto the quad's screen tangents (WPE's
+    // v_ScreenTangents·normal). The tangents already fold in g_RefractAmount and
+    // the quad rotation, so the offset rotates with the sprite and carries the
+    // sign — no hardcoded axis flip.
+    float2 offset = (in.screenTangents.xy * nx + in.screenTangents.zw * ny) * mask * float(in.color.a);
+    half3 background = backgroundTex.sample(linearSampler, screenUV + offset).rgb;
+    half overbright = max(half(sprite.frameRectMode.z), half(0));
+    half3 rgb = albedo.rgb * half3(in.color.rgb) * background * overbright;
+    half alpha = albedo.a * half(in.color.a);
+    return half4(rgb, alpha);
+}
+
+// Rope/ribbon renderer (WPE `renderer: [{name:"rope"}]`). The CPU builds a
+// per-frame triangle strip through the system's particles in emission order
+// (two edge vertices per knot, offset ±half-size along the segment normal),
+// so a meteor tail / cursor trail draws as ONE continuous textured strip
+// rather than N stacked billboards. Reuses `wpe_particle_instanced_fragment`
+// (frameBlend 0 ⇒ a single texture sample). v maps along the rope, u across.
+struct WPEParticleRopeVertex {
+    float4 positionUV;   // xy = centered scene pixels (Y-up), zw = uv
+    float4 color;        // rgb 0..1, a = alpha
+};
+
+vertex WPEParticleVertexOut wpe_particle_rope_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEParticleRopeVertex* verts [[buffer(1)]],
+    constant WPEParticleProjection& projection [[buffer(2)]]
+) {
+    WPEParticleRopeVertex v = verts[vertexID];
+    float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
+    float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
+    float2 parallaxPixels = projection.padding.xy;   // camera-parallax offset
+    float2 ndc = float2(
+        (v.positionUV.x + parallaxPixels.x) / halfWidth,
+        (v.positionUV.y + parallaxPixels.y) / halfHeight
+    );
+    WPEParticleVertexOut out;
+    out.position = float4(ndc, 0.0, 1.0);
+    out.uvCurrent = v.positionUV.zw;
+    out.uvNext = v.positionUV.zw;
+    out.frameBlend = 0.0;
+    out.color = v.color;
+    out.screenTangents = float4(0.0);   // rope never refracts
+    return out;
 }
 
 // Phase 2D-N: text overlay quad. Vertex stage takes per-overlay center

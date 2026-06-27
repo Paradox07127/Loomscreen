@@ -62,6 +62,53 @@ struct WPEHistoryTests {
         #expect(decoded.recentWPEImports == [entry])
     }
 
+    @Test("Re-import keeps the previously measured size")
+    func reimportPreservesSize() throws {
+        withIsolatedGlobalSettings {
+            let manager = SettingsManager.shared
+            manager.recordWPEImport(makeEntry("1", sizeBytes: 4096))
+            // Activation re-records with no size; it must not be lost.
+            manager.recordWPEImport(makeEntry("1", title: "Reactivated"))
+
+            let entry = manager.loadGlobalSettings().recentWPEImports.first
+            #expect(entry?.origin.title == "Reactivated")
+            #expect(entry?.sizeBytes == 4096)
+        }
+    }
+
+    @Test("updateWPEImportSize backfills once and never overwrites")
+    func updateSizeBackfillsOnce() throws {
+        withIsolatedGlobalSettings {
+            let manager = SettingsManager.shared
+            manager.recordWPEImport(makeEntry("1"))
+            #expect(manager.loadGlobalSettings().recentWPEImports.first?.sizeBytes == nil)
+
+            manager.updateWPEImportSize(workshopID: "1", sizeBytes: 2048)
+            #expect(manager.loadGlobalSettings().recentWPEImports.first?.sizeBytes == 2048)
+
+            // Already measured → second call is a no-op (no clobber).
+            manager.updateWPEImportSize(workshopID: "1", sizeBytes: 9999)
+            #expect(manager.loadGlobalSettings().recentWPEImports.first?.sizeBytes == 2048)
+
+            // Unknown id → no-op.
+            manager.updateWPEImportSize(workshopID: "missing", sizeBytes: 1)
+            #expect(manager.loadGlobalSettings().recentWPEImports.count == 1)
+        }
+    }
+
+    @Test("Legacy JSON without sizeBytes decodes to nil")
+    func legacyDecodeWithoutSize() throws {
+        // A nil optional encodes with no key (encodeIfPresent), mirroring JSON
+        // written before the field existed — round-trips back to nil.
+        let entry = makeEntry("7", title: "Legacy")
+        let data = try JSONEncoder().encode(entry)
+        #expect(!String(decoding: data, as: UTF8.self).contains("sizeBytes"))
+
+        let decoded = try JSONDecoder().decode(WPEHistoryEntry.self, from: data)
+        #expect(decoded.sizeBytes == nil)
+        #expect(decoded.origin.workshopID == "7")
+    }
+
     private func withIsolatedGlobalSettings(_ body: () throws -> Void) rethrows {
         let defaults = UserDefaults.standard
         let keys = [
@@ -93,7 +140,8 @@ struct WPEHistoryTests {
     private func makeEntry(
         _ workshopID: String,
         title: String? = nil,
-        lastUsedAt: Date? = nil
+        lastUsedAt: Date? = nil,
+        sizeBytes: Int64? = nil
     ) -> WPEHistoryEntry {
         let origin = WPEOrigin(
             workshopID: workshopID,
@@ -106,7 +154,8 @@ struct WPEHistoryTests {
         return WPEHistoryEntry(
             origin: origin,
             importedAt: Date(timeIntervalSince1970: Double(workshopID) ?? 0),
-            lastUsedAt: lastUsedAt
+            lastUsedAt: lastUsedAt,
+            sizeBytes: sizeBytes
         )
     }
 }

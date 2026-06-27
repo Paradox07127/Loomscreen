@@ -993,8 +993,12 @@ struct WPERenderGraphBuilder: Sendable {
     /// (`{"name": "masks/…"}`, how per-instance effect masks are declared).
     static func parseTexturePath(_ raw: Any?) -> String? {
         if let string = raw as? String {
-            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            // Preserve the name verbatim: WPE matches asset names literally, and
+            // a real filename can legitimately end in a space (e.g.
+            // `materials/妃咲 60帧 .tex`) — Windows hides the trailing space but
+            // the .pkg TOC + every JSON reference keep it. Trimming it mismatched
+            // the packaged file (scene 3351072238). Only reject blank entries.
+            return string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : string
         }
         guard let dict = raw as? [String: Any] else { return nil }
         for key in ["value", "name", "texture", "path", "file"] {

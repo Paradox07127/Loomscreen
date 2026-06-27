@@ -167,6 +167,15 @@ final class SettingsManager {
 
     func recordWPEImport(_ entry: WPEHistoryEntry) {
         var settings = loadGlobalSettings()
+        // History activation re-records an entry with `sizeBytes == nil`; carry
+        // the previously measured size forward so it isn't thrown away (and
+        // re-walked) on every apply.
+        var entry = entry
+        if entry.sizeBytes == nil {
+            entry.sizeBytes = settings.recentWPEImports.first {
+                $0.origin.workshopID == entry.origin.workshopID
+            }?.sizeBytes
+        }
         var recent = settings.recentWPEImports.filter {
             $0.origin.workshopID != entry.origin.workshopID
         }
@@ -180,6 +189,18 @@ final class SettingsManager {
         settings.deletedWorkshopIDs.removeAll { $0 == entry.origin.workshopID }
         saveGlobalSettings(settings)
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
+    /// Backfills a single import's measured folder size. Patches only that one
+    /// field on the still-present entry (no whole-blob clobber from a stale
+    /// captured copy), and only when it hasn't been measured yet.
+    func updateWPEImportSize(workshopID: String, sizeBytes: Int64) {
+        var settings = loadGlobalSettings()
+        guard let index = settings.recentWPEImports.firstIndex(where: {
+            $0.origin.workshopID == workshopID
+        }), settings.recentWPEImports[index].sizeBytes == nil else { return }
+        settings.recentWPEImports[index].sizeBytes = sizeBytes
+        saveGlobalSettings(settings)
     }
 
     /// Upper bound on the delete-tombstone list. Each tombstone is just a

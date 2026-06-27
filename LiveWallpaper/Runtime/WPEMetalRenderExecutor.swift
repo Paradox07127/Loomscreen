@@ -758,6 +758,13 @@ final class WPEMetalRenderExecutor {
     /// frame at a time.
     private var currentSceneSize: CGSize = .zero
 
+    // Object IDs that are parents of at least one other layer. A `composelayer`
+    // that hosts children is a WPE "layer group" (transform/opacity container),
+    // NOT a scene-capture effect box — its children render as flat layers, so its
+    // own sub-rect scene passthrough must be suppressed (else it paints a
+    // picture-in-picture scene-copy; scene 3632513108's bottom-right control panel).
+    private var groupingContainerObjectIDs: Set<String> = []
+
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
     /// holds one snapshot of the scene output after EACH scene-target pass so
@@ -782,6 +789,7 @@ final class WPEMetalRenderExecutor {
         sceneID: String? = nil,
         particleSystems: [WPEParticleSystem] = [],
         particleTextures: [ObjectIdentifier: MTLTexture] = [:],
+        particleNormalTextures: [ObjectIdentifier: MTLTexture] = [:],
         particleParallax: WPECameraParallaxFrame = .neutral
     ) throws -> MTLTexture {
         // Async submission: take a permit up front so the CPU blocks here (rather
@@ -850,6 +858,7 @@ final class WPEMetalRenderExecutor {
         )
         frameState.cameraParallax = runtimeUniforms.cameraParallax
         currentSceneSize = size
+        groupingContainerObjectIDs = Set(preparedPipeline.layers.compactMap { $0.graphLayer.parentObjectID })
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
         let attachmentContext = makeAttachmentFrameContext(
@@ -882,6 +891,7 @@ final class WPEMetalRenderExecutor {
                     sceneSize: size,
                     cameraParallax: particleParallax,
                     texturesByMaterial: particleTextures,
+                    normalsByMaterial: particleNormalTextures,
                     traceIndex: traceIndex
                 ) {
                     didEncode = true
@@ -1205,13 +1215,29 @@ final class WPEMetalRenderExecutor {
         sceneSize: CGSize,
         cameraParallax: WPECameraParallaxFrame,
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
+        normalsByMaterial: [ObjectIdentifier: MTLTexture],
         traceIndex: Int
     ) throws -> Bool {
         guard system.liveInstanceCount > 0 else { return false }
+        // A rope needs ≥2 knots (4 verts) for a strip; a degenerate/empty ribbon
+        // draws nothing, so skip the pass entirely rather than encode an empty one.
+        if system.isRope, system.ropeVertexCount < 4 { return false }
         // Systems whose texture failed to load were filtered at scene-load; skip
         // defensively so a stale texture-slot binding can't leak in.
         guard let texture = texturesByMaterial[ObjectIdentifier(system)] else { return false }
-        let state = try particlePipelineState(colorPixelFormat: output.pixelFormat, blendMode: system.blendMode)
+        // REFRACT: needs the normal map AND a snapshot of the scene drawn so far
+        // (= `_rt_FullFrameBuffer`) to sample as the refracted background. Without
+        // either, fall back to the flat-sprite path.
+        let refractNormal = system.isRope ? nil : normalsByMaterial[ObjectIdentifier(system)]
+        let refractBackground: MTLTexture? = refractNormal == nil ? nil
+            : snapshotForRefraction(of: output, into: commandBuffer)
+        let isRefract = refractNormal != nil && refractBackground != nil
+        let state = try particlePipelineState(
+            colorPixelFormat: output.pixelFormat,
+            blendMode: system.blendMode,
+            isRope: system.isRope,
+            isRefract: isRefract
+        )
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = output
@@ -1245,31 +1271,50 @@ final class WPEMetalRenderExecutor {
                 useFrameRects ? 1 : 0,
                 Float(system.spriteSheet?.frameRects?.count ?? 0),
                 system.overbright,
-                0
+                isRefract ? system.refractAmount : 0   // .w = g_RefractAmount (0 ⇒ non-refract)
             )
         )
 
         encoder.setRenderPipelineState(state)
-        encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
         encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
-        encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
-        // Buffer(4) must always be bound for the vertex function's signature.
-        // Use the system's pre-allocated frame-rect buffer (any frame count);
-        // a 1-element dummy covers the uniform-grid path.
-        if let frameRectsBuffer = system.frameRectsBuffer {
-            encoder.setVertexBuffer(frameRectsBuffer, offset: 0, index: 4)
-        } else {
-            var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
-            encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)
-        }
         encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
         encoder.setFragmentTexture(texture, index: 0)
-        encoder.drawPrimitives(
-            type: .triangleStrip,
-            vertexStart: 0,
-            vertexCount: 4,
-            instanceCount: system.liveInstanceCount
-        )
+        if isRefract {
+            // g_Texture1 = refraction normal map ; g_Texture3-equivalent = the
+            // scene-so-far snapshot. sceneSize (projection) lets the fragment turn
+            // its pixel position into a screen UV for the background sample.
+            encoder.setFragmentTexture(refractNormal, index: 1)
+            encoder.setFragmentTexture(refractBackground, index: 2)
+            encoder.setFragmentBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 1)
+        }
+        if system.isRope, let ropeBuffer = system.ropeVertexBuffer {
+            // One continuous ribbon strip: 2 edge vertices per knot, built by
+            // `tick`. No instancing, no sprite-sheet rects.
+            encoder.setVertexBuffer(ropeBuffer, offset: 0, index: 1)
+            encoder.drawPrimitives(
+                type: .triangleStrip,
+                vertexStart: 0,
+                vertexCount: system.ropeVertexCount
+            )
+        } else {
+            encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
+            encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
+            // Buffer(4) must always be bound for the vertex function's signature.
+            // Use the system's pre-allocated frame-rect buffer (any frame count);
+            // a 1-element dummy covers the uniform-grid path.
+            if let frameRectsBuffer = system.frameRectsBuffer {
+                encoder.setVertexBuffer(frameRectsBuffer, offset: 0, index: 4)
+            } else {
+                var dummyFrameRect = SIMD4<Float>(0, 0, 1, 1)
+                encoder.setVertexBytes(&dummyFrameRect, length: MemoryLayout<SIMD4<Float>>.stride, index: 4)
+            }
+            encoder.drawPrimitives(
+                type: .triangleStrip,
+                vertexStart: 0,
+                vertexCount: 4,
+                instanceCount: system.liveInstanceCount
+            )
+        }
         encoder.endEncoding()
 
         #if !LITE_BUILD && DEBUG
@@ -1578,21 +1623,62 @@ final class WPEMetalRenderExecutor {
     private struct ParticlePipelineKey: Hashable {
         let pixelFormat: UInt
         let blendMode: WPEParticleBlendMode
+        let isRope: Bool
+        let isRefract: Bool
     }
 
     private var particlePipelineCache: [ParticlePipelineKey: MTLRenderPipelineState] = [:]
+    /// Reused scene snapshot for REFRACT particle passes; reallocated when the
+    /// output size/format changes. One full-frame copy per refract pass.
+    private var refractionBackground: MTLTexture?
+
+    /// Blit the scene-so-far into a private cached texture so a REFRACT particle
+    /// pass can sample it as the refracted background (can't read+write the live
+    /// attachment). Returns nil if the output can't be a blit source.
+    private func snapshotForRefraction(of output: MTLTexture, into commandBuffer: MTLCommandBuffer) -> MTLTexture? {
+        guard !output.isFramebufferOnly else { return nil }
+        let bg: MTLTexture
+        if let cached = refractionBackground, cached.width == output.width,
+           cached.height == output.height, cached.pixelFormat == output.pixelFormat {
+            bg = cached
+        } else {
+            let desc = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: output.pixelFormat, width: output.width,
+                height: output.height, mipmapped: false)
+            desc.usage = [.shaderRead]
+            desc.storageMode = .private
+            guard let tex = device.makeTexture(descriptor: desc) else { return nil }
+            tex.label = "WPE refraction background"
+            refractionBackground = tex
+            bg = tex
+        }
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
+        blit.copy(from: output, to: bg)
+        blit.endEncoding()
+        return bg
+    }
 
     private func particlePipelineState(
         colorPixelFormat: MTLPixelFormat,
-        blendMode: WPEParticleBlendMode
+        blendMode: WPEParticleBlendMode,
+        isRope: Bool = false,
+        isRefract: Bool = false
     ) throws -> MTLRenderPipelineState {
-        let key = ParticlePipelineKey(pixelFormat: colorPixelFormat.rawValue, blendMode: blendMode)
+        let key = ParticlePipelineKey(
+            pixelFormat: colorPixelFormat.rawValue, blendMode: blendMode,
+            isRope: isRope, isRefract: isRefract)
         if let cached = particlePipelineCache[key] {
             return cached
         }
+        // Rope shares the instanced fragment (frameBlend 0 ⇒ one texture sample)
+        // but uses a ribbon-strip vertex stage instead of the per-instance quad.
+        // Refract reuses the instanced quad vertex but a fragment that multiplies
+        // by the scene framebuffer at a normal-offset screen UV.
+        let vertexName = isRope ? "wpe_particle_rope_vertex" : "wpe_particle_vertex"
+        let fragmentName = isRefract ? "wpe_particle_refract_fragment" : "wpe_particle_instanced_fragment"
         guard let library = device.makeDefaultLibrary(),
-              let vertex = library.makeFunction(name: "wpe_particle_vertex"),
-              let fragment = library.makeFunction(name: "wpe_particle_instanced_fragment") else {
+              let vertex = library.makeFunction(name: vertexName),
+              let fragment = library.makeFunction(name: fragmentName) else {
             throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
         }
         let descriptor = MTLRenderPipelineDescriptor()
@@ -3559,6 +3645,11 @@ final class WPEMetalRenderExecutor {
         // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
             guard Self.subregionComposeOutputEnabled else { return false }
+            // A compose layer that parents children is a layer-group container, not
+            // a scene-effect box: its children render flat, so confining its own
+            // passthrough to the authored box would paint a scene-copy PiP. Keep it
+            // fullscreen (identity passthrough = invisible).
+            if groupingContainerObjectIDs.contains(layer.objectID) { return false }
             return WPEMetalSceneCaptureUtilityModels.outputGeometry(
                 path: layer.imagePath,
                 geometry: layer.geometry,

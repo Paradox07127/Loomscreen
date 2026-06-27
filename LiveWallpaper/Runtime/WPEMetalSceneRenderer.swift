@@ -51,6 +51,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         UserDefaults.standard.bool(forKey: "WPEParticlePrewarmEnabled")
     }
 
+    /// Slave a revealed loop video's playhead to lead its intro overlay by the
+    /// measured phase offset (seamless intro→loop). Default on; `-bool NO` disables.
+    private static var introPhaseAlignEnabled: Bool {
+        UserDefaults.standard.object(forKey: "WPEMetalIntroPhaseAlignEnabled") as? Bool ?? true
+    }
+
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
@@ -86,6 +92,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// + drawn each frame.
     private var particleSystems: [WPEParticleSystem] = []
     private var particleTextures: [ObjectIdentifier: MTLTexture] = [:]
+    /// Refraction normal map (`g_Texture1`) for REFRACT particle systems, keyed
+    /// like `particleTextures`. Absent ⇒ the system renders as a flat sprite.
+    private var particleNormalTextures: [ObjectIdentifier: MTLTexture] = [:]
     /// Phase 2D-N: text overlay draws assembled at load time. Each
     /// frame re-rasterizes via the cached WPETextRenderer (cache hits
     /// the common case) and draws atop the scene output.
@@ -131,6 +140,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var layerObjectIDByName: [String: String] = [:]
     /// Live per-layer alpha overrides driven by layer scripts (objectID → alpha).
     private var liveLayerAlpha: [String: Double] = [:]
+    /// Intro→loop phase alignment: an intro overlay (`introPhaseSource`) and the
+    /// free-running loop it reveals (`loopPhaseSource`) are often the same
+    /// animation a few seconds out of phase, with nothing in the scripts wiring the
+    /// handoff. We measure the offset once (`intro@t ≈ loop@(t+offset)`) and slave
+    /// the loop's playhead to lead the intro by it, so the crossfade is seamless.
+    private var introPhaseSource: WPEVideoTextureSource?
+    private var loopPhaseSource: WPEVideoTextureSource?
+    private var introLoopOffset: TimeInterval?
+    /// Bumped per reload so a slow async measurement from a prior scene is ignored.
+    private var introPhaseToken = 0
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -1310,6 +1329,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     applyLayerScriptOutput(output, ownObjectID: objectID)
                 }
             }
+            updateIntroPhaseAlign()
             framePipeline = pipeline
                 .applyingLayerVisibility(liveLayerVisibility)
                 .applyingLayerAlpha(liveLayerAlpha)
@@ -1381,6 +1401,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             sceneID: descriptor.workshopID,
             particleSystems: particleSystems,
             particleTextures: particleTextures,
+            particleNormalTextures: particleNormalTextures,
             particleParallax: parallaxFrame
         )
         if let texPrepStart, let gpuRenderStart {
@@ -1544,6 +1565,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         /// multiplier on the shader output (1 = unchanged). Drives additive
         /// glow intensity.
         let overbright: Float
+        /// `genericparticle` `REFRACT` combo — screen-space refraction (lens
+        /// water droplets / heat haze): the particle multiplies its colour by the
+        /// scene framebuffer sampled at a normal-map-offset UV, so it shows the
+        /// distorted background instead of a flat sprite. Needs `normalTexturePath`.
+        let isRefract: Bool
+        /// Second pass texture (`g_Texture1`), the refraction normal map.
+        let normalTexturePath: String?
+        /// `g_RefractAmount` (screen-UV offset scale). WPE default 0.05.
+        let refractAmount: Float
     }
 
     private func parseParticleMaterial(at relativePath: String) -> ParticleMaterialDescriptor? {
@@ -1557,10 +1587,24 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let textures = firstPass["textures"] as? [Any]
         let firstTexturePath = textures?.first as? String
         let constants = firstPass["constantshadervalues"] as? [String: Any]
+        let combos = firstPass["combos"] as? [String: Any]
+        let isRefract: Bool = {
+            guard let raw = combos?["REFRACT"] else { return false }
+            if let n = raw as? NSNumber { return n.intValue != 0 }
+            return false
+        }()
+        let refractAmount: Float = {
+            guard let n = constants?["ui_editor_properties_refract_amount"] as? NSNumber,
+                  !(constants?["ui_editor_properties_refract_amount"] is Bool) else { return 0.05 }
+            return Float(truncating: n)
+        }()
         return ParticleMaterialDescriptor(
             blendMode: WPEParticleBlendMode(materialString: blendString),
             firstTexturePath: firstTexturePath,
-            overbright: Self.overbright(fromConstants: constants)
+            overbright: Self.overbright(fromConstants: constants),
+            isRefract: isRefract,
+            normalTexturePath: (textures?.count ?? 0) >= 2 ? textures?[1] as? String : nil,
+            refractAmount: refractAmount
         )
     }
 
@@ -1624,6 +1668,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         layerVideoSourceKey = [:]
         layerObjectIDByName = [:]
         liveLayerAlpha = [:]
+        introPhaseSource = nil
+        loopPhaseSource = nil
+        introLoopOffset = nil
+        introPhaseToken += 1
         let scripted = document.imageObjects.filter { $0.visibleScript != nil }
         guard !scripted.isEmpty, let pipeline = renderPipeline else { return }
 
@@ -1647,18 +1695,54 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
-                let out = instance.initialOutput
-                let others = out.others.map { entry in
-                    "\(entry.key)[id=\(layerObjectIDByName[entry.key] ?? "?") vis=\(entry.value.visible) cmds=\(entry.value.videoCommands.count)]"
-                }.joined(separator: ",")
-                Logger.notice(
-                    "[LayerScript] \(object.name) ownVideo=\(layerVideoSourceKey[object.id] ?? "none") initVisible=\(out.own.visible) initCmds=\(out.own.videoCommands) getLayer={\(others)}",
-                    category: .wpeRender
-                )
             } catch {
                 Logger.warning("[LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
+        setUpIntroPhaseAlign(scripted: scripted)
+    }
+
+    /// Identify the intro overlay video and the free-running loop video it reveals,
+    /// then measure their phase offset off-thread (used by `updateIntroPhaseAlign`).
+    /// Intro = a scripted layer that owns a video. Loop = a video no script drives:
+    /// by now every scripted layer's init commands have run, so the intro overlay
+    /// and any button-driven video are already `scriptControlled`, leaving the
+    /// free-running loop as the one that isn't.
+    private func setUpIntroPhaseAlign(scripted: [WPESceneImageObject]) {
+        guard Self.introPhaseAlignEnabled else { return }
+        guard let introKey = scripted.compactMap({ layerVideoSourceKey[$0.id] }).first,
+              let intro = dynamicTextureSources[introKey] as? WPEVideoTextureSource,
+              let introURL = intro.analysisURL else { return }
+        let loop = layerVideoSourceKey.values
+            .compactMap { self.dynamicTextureSources[$0] as? WPEVideoTextureSource }
+            .first { !$0.isScriptControlled }
+        guard let loop, let loopURL = loop.analysisURL else { return }
+        introPhaseSource = intro
+        loopPhaseSource = loop
+        let token = introPhaseToken
+        Task { [weak self] in
+            let offset = await WPEVideoPhaseOffset.measure(introURL: introURL, loopURL: loopURL)
+            guard let self, self.introPhaseToken == token else { return }
+            self.introLoopOffset = offset
+        }
+    }
+
+    /// Keep the revealed loop's playhead leading the intro by the measured offset
+    /// while the intro plays, so the crossfade lands on matching frames. Cheap:
+    /// re-seeks only when phase drifts (after the first correction it stays put).
+    private func updateIntroPhaseAlign() {
+        guard let offset = introLoopOffset,
+              let intro = introPhaseSource,
+              let loop = loopPhaseSource,
+              intro.isActivelyPlaying else { return }
+        let duration = loop.loopDurationSeconds
+        guard duration > 0.1 else { return }
+        let target = ((intro.currentPlayheadSeconds + offset)
+            .truncatingRemainder(dividingBy: duration) + duration)
+            .truncatingRemainder(dividingBy: duration)
+        let delta = abs(loop.currentPlayheadSeconds - target)
+        let circularDrift = min(delta, duration - delta)
+        if circularDrift > 0.3 { loop.alignPlayhead(to: target) }
     }
 
     /// Applies a layer script's full output: its own layer plus any layers it
@@ -1719,6 +1803,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func loadParticleSystems(from document: WPESceneDocument) async {
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
+        particleNormalTextures.removeAll(keepingCapacity: true)
         for object in document.particleObjects where object.visible {
             await expandParticleTree(
                 path: object.particleRelativePath,
@@ -1902,6 +1987,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
         system.overbright = material?.overbright ?? 1.0
+        // REFRACT (lens water droplets / heat haze): needs the normal map too.
+        // If it fails to load, fall back to the flat-sprite path rather than a
+        // refraction that samples nothing.
+        if material?.isRefract == true, let normalPath = material?.normalTexturePath,
+           let normalPayload = try? await makeTextureResource(
+               relativePath: normalPath, label: "particle normal \(normalPath)",
+               colorSpace: .linear),   // a normal map is DATA — sRGB gamma corrupts its vectors
+           case .staticTexture(let normalTexture) = normalPayload {
+            system.isRefract = true
+            system.refractAmount = material?.refractAmount ?? 0.05
+            particleNormalTextures[ObjectIdentifier(system)] = normalTexture
+        }
         if requiresFollowParent {
             system.followParent = followParent
             system.requiresFollowParent = true
@@ -1972,6 +2069,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
+        particleNormalTextures.removeAll(keepingCapacity: false)
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
@@ -1981,6 +2079,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
+        introPhaseSource = nil
+        loopPhaseSource = nil
+        introLoopOffset = nil
         soundRuntime?.stop()
         soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
@@ -2197,6 +2298,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
+        particleNormalTextures.removeAll(keepingCapacity: false)
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
@@ -2206,6 +2308,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
+        introPhaseSource = nil
+        loopPhaseSource = nil
+        introLoopOffset = nil
         soundRuntime?.stop()
         soundRuntime = nil
         cameraParallaxSettings = .disabled
@@ -2594,7 +2699,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a raw texture so the caller can route MP4 video and multi-frame animations through dedicated dynamic sources.
-    private func makeTextureResource(relativePath: String, label: String) async throws -> WPELoadedTextureResource {
+    private func makeTextureResource(
+        relativePath: String,
+        label: String,
+        colorSpace: WPEMetalColorSpace = .sRGB
+    ) async throws -> WPELoadedTextureResource {
         var lastError: Error?
         for candidate in textureCandidates(for: relativePath) {
             do {
@@ -2626,13 +2735,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                             return .dynamicSource(source)
                         }
 
-                        return .staticTexture(try await textureLoader.makeTexture(from: payload, label: label))
+                        return .staticTexture(try await textureLoader.makeTexture(from: payload, label: label, colorSpace: colorSpace))
                     } catch {
                         lastError = error
                     }
                 }
                 let image = try resourceResolver.resolveImage(relativePath: candidate)
-                return .staticTexture(try await textureLoader.makeTexture(from: image, label: label))
+                return .staticTexture(try await textureLoader.makeTexture(from: image, label: label, colorSpace: colorSpace))
             } catch {
                 lastError = error
             }

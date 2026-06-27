@@ -21,7 +21,11 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         self.uploadQueue = uploadQueue
     }
 
-    func makeTexture(from payload: WPETexTexturePayload, label: String) async throws -> MTLTexture {
+    func makeTexture(
+        from payload: WPETexTexturePayload,
+        label: String,
+        colorSpace: WPEMetalColorSpace = .sRGB
+    ) async throws -> MTLTexture {
         if payload.videoPayload != nil {
             throw WPEMetalTextureLoaderError.malformedPayload(
                 "video payload must be routed through WPEVideoTextureSource"
@@ -39,7 +43,8 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
                 from: payload,
                 label: label,
                 device: device,
-                capabilities: capabilities
+                capabilities: capabilities,
+                colorSpace: colorSpace
             )
         }
     }
@@ -113,7 +118,11 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         )
     }
 
-    func makeTexture(from cgImage: CGImage, label: String) async throws -> MTLTexture {
+    func makeTexture(
+        from cgImage: CGImage,
+        label: String,
+        colorSpace: WPEMetalColorSpace = .sRGB
+    ) async throws -> MTLTexture {
         let device = self.device
         return try await uploadQueue.perform {
             let loader = MTKTextureLoader(device: device)
@@ -121,7 +130,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
                 let texture = try loader.newTexture(
                     cgImage: cgImage,
                     options: [
-                        MTKTextureLoader.Option.SRGB: true,
+                        MTKTextureLoader.Option.SRGB: colorSpace == .sRGB,
                         MTKTextureLoader.Option.textureUsage: MTLTextureUsage.shaderRead.rawValue
                     ]
                 )
@@ -153,7 +162,8 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         from payload: WPETexTexturePayload,
         label: String,
         device: MTLDevice,
-        capabilities: WPEMetalTextureCapabilities
+        capabilities: WPEMetalTextureCapabilities,
+        colorSpace: WPEMetalColorSpace = .sRGB
     ) throws -> MTLTexture {
         guard let format = payload.info.format else {
             throw WPEMetalTextureLoaderError.malformedPayload("unknown texture format \(payload.info.textureFormatCode)")
@@ -162,7 +172,8 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
             throw WPEMetalTextureLoaderError.malformedPayload("missing mipmap")
         }
 
-        let mapping = try WPEMetalTextureFormatMapper.mapping(for: format, capabilities: capabilities)
+        let mapping = try WPEMetalTextureFormatMapper.mapping(
+            for: format, capabilities: capabilities, colorSpace: colorSpace)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: mapping.pixelFormat,
             width: mip.width,

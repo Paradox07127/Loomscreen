@@ -1456,4 +1456,151 @@ struct WPEParticleSystemTests {
             objectAngleZ: 0
         )
     }
+
+    // MARK: - Rope renderer (scene 3351072238)
+
+    @Test("Parser flags renderer:[{name:rope}] as a rope; sprite/empty stay false")
+    func parserDetectsRopeRenderer() throws {
+        func def(_ renderer: String) -> WPEParticleDefinition? {
+            let json = """
+            {"maxcount": 8, "renderer": \(renderer),
+             "emitter":[{"name":"sphererandom","rate":32}],
+             "material":"materials/presets/trail_1.json"}
+            """
+            return WPEParticleDefinitionParser.parse(data: Data(json.utf8))
+        }
+        #expect(try #require(def("[{\"name\":\"rope\"}]")).isRope == true)
+        #expect(try #require(def("[{\"name\":\"sprite\"}]")).isRope == false)
+        #expect(try #require(def("[]")).isRope == false)
+    }
+
+    @Test("Rope builds a 2-vertex-per-knot ribbon with finite width")
+    func ropeBuildsRibbonStrip() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Velocity spreads particles along +Y over time, so older knots sit higher
+        // → an ordered, non-degenerate vertical ribbon.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil,
+            isRope: true,
+            maxCount: 32,
+            rate: 64,
+            startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 10, sizeMax: 10,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 200, 0), velocityMax: SIMD3(0, 200, 0),
+            colorMin: SIMD3(85, 153, 255), colorMax: SIMD3(85, 153, 255),
+            fadeInSeconds: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        #expect(system.isRope)
+        #expect(system.ropeVertexBuffer != nil)
+        system.tick(now: 0)
+        for step in 1...20 { system.tick(now: Double(step) * 0.05) }
+
+        let alive = system.liveInstanceCount
+        #expect(alive >= 2)
+        #expect(system.ropeVertexCount == alive * 2)
+
+        let verts = try #require(system.ropeVertexBuffer).contents()
+            .bindMemory(to: WPEParticleRopeVertex.self, capacity: system.ropeVertexCount)
+        var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
+        var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
+        for i in 0..<system.ropeVertexCount {
+            minX = min(minX, verts[i].positionUV.x); maxX = max(maxX, verts[i].positionUV.x)
+            minY = min(minY, verts[i].positionUV.y); maxY = max(maxY, verts[i].positionUV.y)
+        }
+        // Spine sits at x=0; each knot's edges straddle ±half-size, so a vertical
+        // trail is ≈ size (10) wide in X — real ribbon area, not a collapsed spike.
+        #expect(abs((maxX - minX) - 10) < 0.5)
+        // The +Y velocity spreads knots along the trail: a genuine length, not a pile.
+        #expect((maxY - minY) > 50)
+        // v runs 0→1 head→tail along the rope.
+        #expect(abs(verts[0].positionUV.w - 0) < 0.001)
+        #expect(abs(verts[system.ropeVertexCount - 1].positionUV.w - 1) < 0.001)
+        // The blue colorrandom (85,153,255)/255 survives onto the ribbon — NOT white.
+        #expect(verts[0].color.x < 0.5 && verts[0].color.z > 0.9)
+    }
+
+    @Test("Stationary rope collapses to zero-area strip (no white blob)")
+    func ropeStationaryDrawsNoArea() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Every particle spawns at one point and never moves (the trail_1 case at
+        // rest): the ribbon must collapse to a colinear strip with no fill area.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil,
+            isRope: true,
+            maxCount: 32,
+            rate: 64,
+            startDelay: 0,
+            lifetimeMin: 100, lifetimeMax: 100,
+            sizeMin: 10, sizeMax: 10,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(85, 153, 255), colorMax: SIMD3(85, 153, 255),
+            fadeInSeconds: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        system.tick(now: 0)
+        for step in 1...10 { system.tick(now: Double(step) * 0.05) }
+        guard system.ropeVertexCount >= 4 else { return }
+
+        let verts = try #require(system.ropeVertexBuffer).contents()
+            .bindMemory(to: WPEParticleRopeVertex.self, capacity: system.ropeVertexCount)
+        var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
+        var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
+        for i in 0..<system.ropeVertexCount {
+            minX = min(minX, verts[i].positionUV.x); maxX = max(maxX, verts[i].positionUV.x)
+            minY = min(minY, verts[i].positionUV.y); maxY = max(maxY, verts[i].positionUV.y)
+        }
+        // One axis has zero extent ⇒ the strip is colinear ⇒ zero rasterized area.
+        #expect(min(maxX - minX, maxY - minY) < 0.001)
+    }
+
+    // MARK: - boxrandom emitter (scene 3351072238 rain pile)
+
+    @Test("boxrandom parses vector distancemax and scatters across the box")
+    func boxEmitterScattersAcrossExtent() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let json = """
+        {"maxcount": 200, "renderer":[{"name":"sprite"}],
+         "emitter":[{"name":"boxrandom","rate":400,"distancemax":"1200 1000 0"}],
+         "initializer":[{"name":"lifetimerandom","min":100,"max":100}]}
+        """
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.emitterShape == .box)
+        #expect(def.dispersalMax == SIMD3<Double>(1200, 1000, 0))
+
+        let system = try #require(WPEParticleSystem(
+            definition: def, device: device, sceneTransform: centeredParticleTransform))
+        system.tick(now: 0)
+        for step in 1...8 { system.tick(now: Double(step) * 0.05) }
+        let alive = system.liveInstanceCount
+        #expect(alive > 20)
+
+        let p = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: alive)
+        var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
+        var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
+        for i in 0..<alive {
+            minX = min(minX, p[i].positionAndSize.x); maxX = max(maxX, p[i].positionAndSize.x)
+            minY = min(minY, p[i].positionAndSize.y); maxY = max(maxY, p[i].positionAndSize.y)
+        }
+        // Scattered across the box (≈ ±1200 × ±1000), NOT piled at the origin —
+        // the regression that stacked 500 rain halos into a white blob.
+        #expect((maxX - minX) > 800)
+        #expect((maxY - minY) > 600)
+    }
+
+    @Test("Scalar sphererandom emitter still parses as a sphere")
+    func sphereEmitterStaysScalar() throws {
+        let json = """
+        {"maxcount": 20, "emitter":[{"name":"sphererandom","rate":2,"distancemax":512}]}
+        """
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.emitterShape == .sphere)
+        #expect(def.dispersalMax == SIMD3<Double>(512, 512, 512))
+    }
 }

@@ -11,6 +11,13 @@ struct WPEParticleInstance {
     var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z = spriteFrameIndex; w = signed sprite Y scale
 }
 
+/// One ribbon-strip vertex for the rope renderer. Layout MUST match
+/// `WPEParticleRopeVertex` in `WPEMetalBuiltins.metal`.
+struct WPEParticleRopeVertex {
+    var positionUV: SIMD4<Float>        // xy = centered scene pixels (Y-up) ; zw = uv (u across, v along the rope)
+    var color: SIMD4<Float>             // rgb 0…1, a = current alpha
+}
+
 /// One-shot world-space placement applied to a `WPEParticleSystem` at load time.
 ///
 /// **Coordinate convention: WPE author space is Y-up, bottom-left
@@ -143,6 +150,16 @@ final class WPEParticleSystem {
     let blendMode: WPEParticleBlendMode
     let sceneTransform: WPEParticleSceneTransform
     let instanceBuffer: MTLBuffer
+    /// True for a `renderer: [{name:"rope"}]` ribbon/trail. When set, `tick`
+    /// fills `ropeVertexBuffer` with a triangle strip instead of `instanceBuffer`,
+    /// and the executor draws that strip rather than instanced quads.
+    let isRope: Bool
+    /// Triangle-strip ribbon vertices (2 per knot), allocated only for rope
+    /// systems. `nil` for ordinary sprite systems.
+    let ropeVertexBuffer: MTLBuffer?
+    /// Live ribbon vertex count written by the last `tick`; 0 ⇒ nothing to draw
+    /// (fewer than 2 knots). The executor draws `[0, ropeVertexCount)` as a strip.
+    private(set) var ropeVertexCount: Int = 0
     /// Atlas slicing metadata for the sprite texture. `nil` ⇒ single-
     /// frame static texture, the executor binds a full-UV pass-through
     /// sprite-sheet uniform (cols=rows=frames=1, mask=0).
@@ -157,6 +174,12 @@ final class WPEParticleSystem {
     /// Material `ui_editor_properties_overbright` colour multiplier (>1 brighter,
     /// <1 dimmer). Bound into the fragment uniform; defaults to 1 (no change).
     var overbright: Float = 1.0
+    /// `genericparticle` REFRACT: draw via the screen-space refraction pipeline
+    /// (multiply by the scene framebuffer at a normal-offset UV) instead of a flat
+    /// sprite. Set only when the refraction normal map also loaded.
+    var isRefract: Bool = false
+    /// `g_RefractAmount` — screen-UV refraction offset scale (WPE default 0.05).
+    var refractAmount: Float = 0.05
     /// Live cursor position in the centered render frame (Y-up), or `nil` when
     /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
     /// by the renderer each frame; drives pointer-locked control points
@@ -279,6 +302,19 @@ final class WPEParticleSystem {
         }
         buffer.label = "WPE particle instances"
         self.instanceBuffer = buffer
+        self.isRope = definition.isRope
+        if definition.isRope {
+            // 2 edge vertices per knot. A failed allocation degrades to "no rope
+            // draw" rather than failing the whole system.
+            let ropeBuffer = device.makeBuffer(
+                length: cap * 2 * MemoryLayout<WPEParticleRopeVertex>.stride,
+                options: [.storageModeShared]
+            )
+            ropeBuffer?.label = "WPE particle rope strip"
+            self.ropeVertexBuffer = ropeBuffer
+        } else {
+            self.ropeVertexBuffer = nil
+        }
         self.rng = SystemRandomNumberGenerator()
         // Y-up author space: gravity is used as authored (no flip), then
         // honored through the scene object's scale/rotation like velocity.
@@ -431,8 +467,59 @@ final class WPEParticleSystem {
         lastTickTime = 0
     }
 
+    /// Per-particle draw attributes shared by the sprite and rope paths: the
+    /// operator-modulated alpha (fade envelope × alphachange × oscillatealpha),
+    /// the `sizechange`-scaled + additive-capped size, the `colorchange` tint,
+    /// the `oscillateposition`-swayed draw position, and the lifetime fraction.
+    /// Rotation/sprite-frame are sprite-only and stay in `tick`.
+    private func drawAttributes(
+        of particle: Particle
+    ) -> (position: SIMD3<Float>, rgb: SIMD3<Float>, alpha: Float, size: Float, lifetimeFraction: Float) {
+        let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
+        let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
+        var alpha = particle.alphaBase * envelope
+        if let alphaChange = definition.alphaChange {
+            alpha *= Float(alphaChange.factor(lifetimeFraction: Double(lifetimeFraction)))
+        }
+        if let oscillateAlpha = definition.oscillateAlpha {
+            alpha *= Float(oscillateAlpha.factor(age: Double(particle.age)))
+        }
+        alpha = min(max(alpha, 0), 1)
+        // `sizechange`: lifetime-fraction multiplier on the sprite quad.
+        var spriteSize = particle.size
+        if let sizeChange = definition.sizeChange {
+            spriteSize *= Float(sizeChange.factor(lifetimeFraction: Double(lifetimeFraction)))
+        }
+        // Re-apply the additive cap on the FINAL size: `sizechange` can grow
+        // the sprite past the spawn-time cap and re-hit the saturation path.
+        if blendMode == .additive {
+            spriteSize = min(spriteSize, sceneTransform.sceneHeight)
+        }
+        // `colorchange`: lifetime-fraction RGB multiplier on the tint — only
+        // for particles that authored a colour initializer. A texture-coloured
+        // particle with no base colour (wildfire's white r8 smoke) must keep
+        // its texture colour, not get ramped to the operator's hue → red.
+        var rgb = particle.color
+        if definition.hasColorInitializer, let colorChange = definition.colorChange {
+            let c = colorChange.color(lifetimeFraction: Double(lifetimeFraction))
+            rgb *= SIMD3<Float>(Float(c.x), Float(c.y), Float(c.z))
+        }
+        // `oscillateposition`: transient sine sway (never integrated into
+        // the stored position, so the particle sways without drifting).
+        var drawPosition = particle.position
+        if particle.oscPosScale != 0, particle.oscPosFrequency != 0 {
+            let sway = sin((particle.age + particle.oscPosPhase) * particle.oscPosFrequency * 2 * Float.pi)
+            drawPosition += oscillatePositionMask * (sway * particle.oscPosScale)
+        }
+        return (drawPosition, rgb, alpha, spriteSize, lifetimeFraction)
+    }
+
     func tick(now: Double) {
         advance(now: now)
+        if isRope {
+            buildRopeGeometry()
+            return
+        }
         let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
         // Sprite-sheet frame selection splits on `animationmode`:
         //
@@ -459,42 +546,12 @@ final class WPEParticleSystem {
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
             let particle = particles[index]
-            let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
-            let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
-            var alpha = particle.alphaBase * envelope
-            if let alphaChange = definition.alphaChange {
-                alpha *= Float(alphaChange.factor(lifetimeFraction: Double(lifetimeFraction)))
-            }
-            if let oscillateAlpha = definition.oscillateAlpha {
-                alpha *= Float(oscillateAlpha.factor(age: Double(particle.age)))
-            }
-            alpha = min(max(alpha, 0), 1)
-            // `sizechange`: lifetime-fraction multiplier on the sprite quad.
-            var spriteSize = particle.size
-            if let sizeChange = definition.sizeChange {
-                spriteSize *= Float(sizeChange.factor(lifetimeFraction: Double(lifetimeFraction)))
-            }
-            // Re-apply the additive cap on the FINAL size: `sizechange` can grow
-            // the sprite past the spawn-time cap and re-hit the saturation path.
-            if blendMode == .additive {
-                spriteSize = min(spriteSize, sceneTransform.sceneHeight)
-            }
-            // `colorchange`: lifetime-fraction RGB multiplier on the tint — only
-            // for particles that authored a colour initializer. A texture-coloured
-            // particle with no base colour (wildfire's white r8 smoke) must keep
-            // its texture colour, not get ramped to the operator's hue → red.
-            var rgb = particle.color
-            if definition.hasColorInitializer, let colorChange = definition.colorChange {
-                let c = colorChange.color(lifetimeFraction: Double(lifetimeFraction))
-                rgb *= SIMD3<Float>(Float(c.x), Float(c.y), Float(c.z))
-            }
-            // `oscillateposition`: transient sine sway (never integrated into
-            // the stored position, so the particle sways without drifting).
-            var drawPosition = particle.position
-            if particle.oscPosScale != 0, particle.oscPosFrequency != 0 {
-                let sway = sin((particle.age + particle.oscPosPhase) * particle.oscPosFrequency * 2 * Float.pi)
-                drawPosition += oscillatePositionMask * (sway * particle.oscPosScale)
-            }
+            let attrs = drawAttributes(of: particle)
+            let lifetimeFraction = attrs.lifetimeFraction
+            let alpha = attrs.alpha
+            let spriteSize = attrs.size
+            let rgb = attrs.rgb
+            let drawPosition = attrs.position
             let frameIndex: Float
             if animatesSequence {
                 let raw = lifetimeFraction * cyclesPerLifetime * frameCount
@@ -515,6 +572,70 @@ final class WPEParticleSystem {
             written += 1
         }
         aliveCount = written
+    }
+
+    /// Build the rope ribbon: order the live particles by age (emission order,
+    /// since the slot pool interleaves free slots), then emit two edge vertices
+    /// per knot offset ±half-size along the segment normal. A stationary control
+    /// point ⇒ coincident knots ⇒ a zero-area strip that draws nothing, which is
+    /// exactly why this replaces the additive-sprite pile (scene 3351072238).
+    private func buildRopeGeometry() {
+        guard let buffer = ropeVertexBuffer else {
+            aliveCount = 0
+            ropeVertexCount = 0
+            return
+        }
+        var knots: [(position: SIMD2<Float>, color: SIMD4<Float>, halfSize: Float, age: Float)] = []
+        knots.reserveCapacity(capacity)
+        for index in 0..<capacity {
+            let particle = particles[index]
+            guard particle.age != .greatestFiniteMagnitude else { continue }
+            let attrs = drawAttributes(of: particle)
+            knots.append((
+                SIMD2<Float>(attrs.position.x, attrs.position.y),
+                SIMD4<Float>(attrs.rgb.x, attrs.rgb.y, attrs.rgb.z, attrs.alpha),
+                max(0, attrs.size * 0.5),
+                particle.age
+            ))
+        }
+        aliveCount = knots.count
+        guard knots.count >= 2 else {
+            ropeVertexCount = 0
+            return
+        }
+        knots.sort { $0.age < $1.age }
+
+        let verts = buffer.contents().bindMemory(to: WPEParticleRopeVertex.self, capacity: capacity * 2)
+        let count = knots.count
+        // Carry the last valid normal across degenerate (coincident) segments so
+        // a momentary overlap doesn't collapse the ribbon to a spike.
+        var lastNormal = SIMD2<Float>(0, 1)
+        var written = 0
+        for i in 0..<count {
+            let prev = knots[max(0, i - 1)].position
+            let next = knots[min(count - 1, i + 1)].position
+            let tangent = next - prev
+            let length = (tangent.x * tangent.x + tangent.y * tangent.y).squareRoot()
+            var normal = lastNormal
+            if length > 1e-4 {
+                let unit = tangent / length
+                normal = SIMD2<Float>(-unit.y, unit.x)
+                lastNormal = normal
+            }
+            let knot = knots[i]
+            let offset = normal * knot.halfSize
+            let along = Float(i) / Float(count - 1)   // v runs 0→1 head→tail
+            verts[written] = WPEParticleRopeVertex(
+                positionUV: SIMD4<Float>(knot.position.x + offset.x, knot.position.y + offset.y, 0, along),
+                color: knot.color
+            )
+            verts[written + 1] = WPEParticleRopeVertex(
+                positionUV: SIMD4<Float>(knot.position.x - offset.x, knot.position.y - offset.y, 1, along),
+                color: knot.color
+            )
+            written += 2
+        }
+        ropeVertexCount = written
     }
 
     var liveInstanceCount: Int { aliveCount }
@@ -716,24 +837,40 @@ final class WPEParticleSystem {
     /// particle this frame, so a one-shot burst isn't consumed on a no-op.
     @discardableResult
     private func spawn(into slot: Int) -> Bool {
-        let theta = Double.random(in: 0..<2 * .pi, using: &rng)
-        let phi = Double.random(in: 0..<(.pi), using: &rng)
-        let radius = uniform(definition.dispersalMin, definition.dispersalMax)
         // Y-up author space: emitter origin and per-particle velocity are
         // used as authored (no Y-flip). The scene object's scale/rotation
         // is then applied via applyModelMatrix/applyModelDirection — that
         // rotation is what makes the SAME leaves preset rise in a rotated
         // emitter (3725117707) yet fall in an un-rotated one (saber).
-        let dispersal = Self.dispersalVector(
-            radius: radius,
-            theta: theta,
-            phi: phi,
-            mask: SIMD3<Float>(
-                Float(definition.directionMask.x),
-                Float(definition.directionMask.y),
-                Float(definition.directionMask.z)
+        let dispersal: SIMD3<Float>
+        switch definition.emitterShape {
+        case .box:
+            // `boxrandom`: uniform per axis within ±half-extent around the origin —
+            // how full-screen rain/snow scatters across the frame. Sampling a
+            // sphere here (or failing to parse the vector extent) piled all 500 rain
+            // halos on one point → a white blob (scene 3351072238). Inner-box
+            // exclusion via distancemin is uncommon and intentionally not modeled.
+            let ext = definition.dispersalMax
+            dispersal = SIMD3<Float>(
+                Float(uniform(-ext.x, ext.x)),
+                Float(uniform(-ext.y, ext.y)),
+                Float(uniform(-ext.z, ext.z))
             )
-        )
+        case .sphere:
+            let theta = Double.random(in: 0..<2 * .pi, using: &rng)
+            let phi = Double.random(in: 0..<(.pi), using: &rng)
+            let radius = uniform(definition.dispersalMin.x, definition.dispersalMax.x)
+            dispersal = Self.dispersalVector(
+                radius: radius,
+                theta: theta,
+                phi: phi,
+                mask: SIMD3<Float>(
+                    Float(definition.directionMask.x),
+                    Float(definition.directionMask.y),
+                    Float(definition.directionMask.z)
+                )
+            )
+        }
         let emitterOriginLocal = SIMD3<Float>(
             Float(definition.originOffset.x),
             Float(definition.originOffset.y),
@@ -764,7 +901,13 @@ final class WPEParticleSystem {
             position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
         }
         let velocity = sceneTransform.applyModelDirection(localVelocity)
-        let sizeScale = sceneTransform.worldSizeMultiplier()
+        // REFRACT "lens water" droplets: the object scale (e.g. 3.52×) is there to
+        // spread the emitter BOX across the whole screen — but applying it to each
+        // droplet too turns the authored 50–200px beads into 700px magnifying
+        // lenses. Keep the authored size; the screen-wide scatter still comes from
+        // objectScale via `applyModelMatrix` on the spawn position. (Targeted to
+        // refract pending a Windows-WPE oracle size comparison.)
+        let sizeScale = isRefract ? 1.0 : sceneTransform.worldSizeMultiplier()
         // `sizerandom` exponent: WPE samples min + (max-min)·rand^exp (exp>1
         // biases toward min). `uniform` is exp==1; only pay `pow` when it differs.
         let sizeSample: Double

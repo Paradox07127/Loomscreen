@@ -1072,12 +1072,12 @@ private struct WPEInstalledInspectorContent: View {
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
 
-    /// All local (no API). Size appears once the off-main folder scan lands;
-    /// the date is always available.
+    /// All local (no API). Size shows instantly from the persisted measurement,
+    /// or once the first off-main folder scan lands; the date is always available.
     private var metaRow: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             Group {
-                if let bytes = localInfo?.sizeBytes, bytes > 0 {
+                if let bytes = entry.sizeBytes ?? localInfo?.sizeBytes, bytes > 0 {
                     Label {
                         Text(verbatim: Self.byteFormatter.string(fromByteCount: bytes))
                     } icon: {
@@ -1376,36 +1376,48 @@ private struct WPEProjectDisplayManifest: Decodable {
 /// imports).
 private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELocalProjectInfo? {
     let bookmark = entry.origin.sourceFolderBookmark
-    return await Task.detached(priority: .utility) {
+    let knownSize = entry.sizeBytes
+    let outcome = await Task.detached(priority: .userInitiated) { () -> (info: WPELocalProjectInfo?, freshSize: Int64?) in
         var isStale = false
         guard let folder = try? URL(
             resolvingBookmarkData: bookmark,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
-        ) else { return nil }
+        ) else { return (nil, nil) }
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
-        // Independent of the manifest text fields, so compute it either way.
-        let size = directorySize(of: folder)
+        // Walk the tree only on first open; persisted size short-circuits it.
+        let size = knownSize ?? directorySize(of: folder)
+        let freshSize = (knownSize == nil && size > 0) ? size : nil
 
         let manifestURL = folder.appendingPathComponent("project.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(WPEProjectDisplayManifest.self, from: data)
         else {
-            return size > 0
+            let info = size > 0
                 ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size)
                 : nil
+            return (info, freshSize)
         }
 
-        return WPELocalProjectInfo(
+        let info = WPELocalProjectInfo(
             cleanedDescription: manifest.description.flatMap(strippedWPEMarkup),
             tags: manifest.tags ?? [],
             contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines),
             sizeBytes: size > 0 ? size : nil
         )
+        return (info, freshSize)
     }.value
+
+    if let freshSize = outcome.freshSize {
+        await SettingsManager.shared.updateWPEImportSize(
+            workshopID: entry.origin.workshopID,
+            sizeBytes: freshSize
+        )
+    }
+    return outcome.info
 }
 
 /// Recursively sum every regular file under `folder`. Reads only file metadata

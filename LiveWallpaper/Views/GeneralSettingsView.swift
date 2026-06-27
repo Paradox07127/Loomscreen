@@ -143,7 +143,6 @@ struct GeneralSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loginItemRegistrationDidFail)) { note in
             if let reason = note.userInfo?["reason"] as? LoginItemFailure {
                 loginItemAlert = reason
-                // 失败时把 toggle 复位，避免 UI 显示已开但实际没生效。
                 if startOnLogin {
                     startOnLogin = false
                 }

@@ -155,7 +155,6 @@ final class WPEVideoTextureSource {
             if playhead + 0.1 < scriptLastPlaybackSeconds {
                 player.pause()
                 scriptHeldAtEnd = true
-                Logger.notice("[LayerScript] video froze at loop wrap (playhead \(String(format: "%.2f", scriptLastPlaybackSeconds))s→\(String(format: "%.2f", playhead))s) — play-once", category: .wpeRender)
                 return latest?.texture   // hold the pre-wrap (≈ last) frame
             }
             scriptLastPlaybackSeconds = playhead
@@ -355,6 +354,40 @@ final class WPEVideoTextureSource {
         guard time.isValid, !time.isIndefinite else { return 0 }
         let seconds = time.seconds
         return seconds.isFinite ? seconds : 0
+    }
+
+    // MARK: - Intro→loop phase alignment
+
+    /// On-disk MP4 backing this source (for offline frame analysis), or nil when
+    /// the source was staged differently. Distinct from the in-memory custom URL,
+    /// which `AVAssetImageGenerator` can't read.
+    var analysisURL: URL? { cleanupURL }
+
+    var currentPlayheadSeconds: TimeInterval { playheadSeconds }
+
+    var loopDurationSeconds: TimeInterval {
+        let duration = player.currentItem?.duration ?? .invalid
+        guard duration.isValid, !duration.isIndefinite else { return 0 }
+        let seconds = duration.seconds
+        return seconds.isFinite ? seconds : 0
+    }
+
+    var isActivelyPlaying: Bool { !isInvalidated && player.rate > 0 }
+
+    /// True once a layer SceneScript has taken over this source's playback (an
+    /// intro overlay or a button-driven video). The free-running loop a scene
+    /// reveals is the video that is NOT script-controlled.
+    var isScriptControlled: Bool { scriptControlled }
+
+    /// Seek to `seconds` to phase-align a free-running loop with an intro overlay.
+    /// Plain seek — does NOT enter script-controlled mode (the loop keeps looping).
+    func alignPlayhead(to seconds: TimeInterval) {
+        guard !isInvalidated, !scriptControlled else { return }
+        player.seek(
+            to: CMTime(seconds: max(0, seconds), preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
     }
 
     // MARK: - Testing seam

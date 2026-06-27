@@ -34,7 +34,7 @@ enum WPESceneProjectSchemaLoader {
         let supportRoot = applicationSupportRootURL ?? defaultApplicationSupportRoot()
         let workshopID = descriptor.workshopID
 
-        return await Task.detached(priority: .utility) {
+        return await Task.detached(priority: .userInitiated) {
             if let supportRoot,
                let outcome = readFromCache(
                    supportRoot: supportRoot,
