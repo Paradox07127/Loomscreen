@@ -15,6 +15,42 @@ not covered by this file.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-27
+
+App-wide UI overhaul plus a batch of stability and localization fixes. The
+WPE Metal scene renderer is Pro-only (`#if !LITE_BUILD`), so its work is not
+listed here.
+
+### Added
+- Design-token foundation for the app UI: a Typography scale plus semantic
+  Color / Status tokens, documented in a `DESIGN.md`, with app and shared-
+  package text migrated onto the tokens.
+- Native Xcode-style detail inspector (`.inspector()` / AppKit split bridge)
+  with a toolbar toggle that compresses the detail instead of growing the
+  window.
+- Scene tab as a lightweight quick-apply surface with a "Browse all"
+  Workshop entry; type glyphs on installed / scene cards.
+- Clearer General and Workshop settings copy with info tooltips.
+
+### Changed
+- App-wide UI unification: slimmer sidebar with status-colored row icons, a
+  compact inspector, one unified glass gallery card, circular/larger header
+  icon buttons, and `SettingRow` adopted across settings panels.
+- Workshop online browse: debounced auto-search (Search button removed),
+  full-height resizable detail panel, and the tab switcher / panel toggle
+  moved into the window toolbar.
+- Freeing disk space now deletes downloaded Workshop files outright instead
+  of moving them to the Trash.
+
+### Fixed
+- Inspector expand/collapse animation and layout glitches (panel stays
+  mounted, window no longer jumps, sidebar width pinned).
+- Scene detail now scrolls at small window heights.
+- Destructive buttons drop the red plate behind red text; bookmark action
+  only shows when there is a project to bookmark.
+- String-catalog sync: every entry translated, stale entries dropped, and
+  the localization coverage suite is fully green again.
+
 ## [0.1.0] — 2026-05-25
 
 First public release. Open-source Lite edition of the LiveWallpaper
@@ -51,5 +87,6 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...HEAD
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...HEAD
+[0.2.0]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...loomscreen-v0.2.0
 [0.1.0]: https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v0.1.0
