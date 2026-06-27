@@ -218,17 +218,19 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// `false` in Lite so an imported settings bundle can never smuggle
     /// the Web Inspector into the lightweight runtime.
     private func currentDeveloperModeEnabled() -> Bool {
-        #if !LITE_BUILD
+        #if DEBUG && !LITE_BUILD
         return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
         #else
         return false
         #endif
     }
 
-    /// Lite pins the value to `false` regardless of the requested state.
+    /// Web Inspector is a DEBUG-only affordance: Release and Lite pin
+    /// `isInspectable` to `false` regardless of the requested state or any
+    /// persisted/imported Developer Mode flag.
     func applyDeveloperMode(_ enabled: Bool) {
         if #available(macOS 13.3, *) {
-            #if !LITE_BUILD
+            #if DEBUG && !LITE_BUILD
             webView.isInspectable = enabled
             #else
             webView.isInspectable = false
@@ -1320,7 +1322,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
         if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
-            Logger.warning("HTML wallpaper response: HTTP \(response.statusCode) for \(response.url?.absoluteString ?? "?")", category: .screenManager)
+            Logger.warning("HTML wallpaper response: HTTP \(response.statusCode) for host \(response.url?.host ?? "?")", category: .screenManager)
             let failingURL = response.url ?? webView.url ?? URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
             reportError(.webNavigationFailed(failingURL, code: response.statusCode, description: "HTTP \(response.statusCode)"))
         }

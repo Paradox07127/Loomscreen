@@ -81,7 +81,10 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         return f
     }()
 
-    /// Disabled by default; the corpus harness flips it on for per-scene dumps.
+    /// DEBUG-only: hard-disabled in Release so a stray `WPESceneDebugArtifactsEnabled`
+    /// flag (e.g. from `defaults write` or an imported settings bundle) can never make
+    /// a shipping build write first-frame snapshots / scene-debug dumps. Disabled by
+    /// default even in DEBUG; the corpus harness flips it on for per-scene dumps.
     var isEnabled: Bool {
         #if DEBUG
         testingEnabledOverrideLock.lock()
@@ -90,7 +93,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         if let testingOverride { return testingOverride }
         return UserDefaults.standard.bool(forKey: Self.defaultsKey)
         #else
-        return UserDefaults.standard.bool(forKey: Self.defaultsKey)
+        return false
         #endif
     }
 

@@ -1843,6 +1843,7 @@
       }
     },
     "Add" : {
+      "comment" : "Open-panel confirm button to add the chosen app to the exceptions list.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7594,6 +7595,7 @@
       }
     },
     "Could not create a security-scoped bookmark: %@" : {
+      "comment" : "Workshop diagnostics error; %@ is the failure reason.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12729,6 +12731,7 @@
       }
     },
     "Fail" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -17587,6 +17590,7 @@
       }
     },
     "Metal is unavailable on this Mac." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -19185,6 +19189,7 @@
       }
     },
     "No SteamCMD binary is selected." : {
+      "comment" : "Workshop diagnostics error.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -19213,6 +19218,7 @@
       }
     },
     "No SteamCMD working directory is selected." : {
+      "comment" : "Workshop diagnostics error.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -21644,6 +21650,7 @@
       }
     },
     "Pass" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -22541,6 +22548,7 @@
       }
     },
     "Pick a folder for SteamCMD's downloads." : {
+      "comment" : "Open-panel message when choosing the SteamCMD download folder.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -22714,6 +22722,7 @@
       }
     },
     "Pick the SteamCMD executable or its steamcmd.sh wrapper." : {
+      "comment" : "Open-panel message when choosing the SteamCMD binary in the Workshop diagnostics sheet.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -28694,6 +28703,7 @@
       }
     },
     "Shared Steam library must contain config/config.vdf: %@" : {
+      "comment" : "Workshop diagnostics error; %@ is the offending path.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -29626,6 +29636,7 @@
       }
     },
     "Skipped" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -30377,6 +30388,7 @@
       }
     },
     "Steam username must match ^[A-Za-z0-9_]{1,32}$." : {
+      "comment" : "Workshop diagnostics error for an invalid Steam username.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -30474,6 +30486,7 @@
       }
     },
     "SteamCMD binary could not be resolved: %@" : {
+      "comment" : "Workshop diagnostics error; %@ is the underlying binary-resolution failure.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -30547,6 +30560,7 @@
       }
     },
     "SteamCMD is not a verified Valve build." : {
+      "comment" : "Workshop diagnostics error when the SteamCMD binary is not trusted.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -30598,6 +30612,7 @@
       }
     },
     "SteamCMD working directory is not a folder: %@" : {
+      "comment" : "Workshop diagnostics error; %@ is the offending path.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -30790,6 +30805,7 @@
       }
     },
     "Stored security-scoped bookmark could not be resolved: %@" : {
+      "comment" : "Workshop diagnostics error; %@ is the failure reason.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -32628,6 +32644,7 @@
       }
     },
     "Timeout" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -34031,6 +34048,7 @@
       }
     },
     "Use Binary" : {
+      "comment" : "Open-panel confirm button when choosing the SteamCMD binary.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -34059,6 +34077,7 @@
       }
     },
     "Use Folder" : {
+      "comment" : "Open-panel confirm button when choosing the SteamCMD download folder.",
       "localizations" : {
         "en" : {
           "stringUnit" : {

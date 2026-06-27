@@ -722,7 +722,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 self.soundRuntime = runtime
                 if self.currentProfile == .quality {
                     if !runtime.play() {
-                        Logger.warning("Deferred scene audio failed to start (engine.start)", category: .wpeRender)
+                        Logger.warning("Scene \(workshopID) deferred audio failed to start (engine.start)", category: .wpeRender)
                     }
                 }
                 if WPESceneLoadTiming.isEnabled {
@@ -1696,7 +1696,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
             } catch {
-                Logger.warning("[LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
+                Logger.warning("Scene \(descriptor.workshopID) [LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         setUpIntroPhaseAlign(scripted: scripted)
@@ -2335,6 +2335,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
+    /// Suppresses repeat `draw(in:)` failure logs within a failure streak so a
+    /// broken pipeline warns once, not once per frame.
+    private var didLogFrameFailure = false
+
     nonisolated func draw(in view: MTKView) {
         MainActor.assumeIsolated { [weak self] in
             guard let self, didLoad else { return }
@@ -2349,13 +2353,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 }
                 guard let texture = textureToPresent else { return }
                 let presented = try executor.present(texture: texture, in: view, fitMode: presentFitMode)
+                didLogFrameFailure = false
                 // Start audio only after the first frame is actually on screen, so
                 // the synchronous engine spin-up can never delay the first pixels.
                 if presented, pendingAudioStartupDocument != nil {
                     beginDeferredAudioStartup()
                 }
             } catch {
-                Logger.warning("Experimental Metal scene present failed: \(error.localizedDescription)", category: .screenManager)
+                // Per-frame path: log only the first failure of a streak (resets on
+                // recovery) so a persistently-broken pipeline can't flood the log.
+                if !didLogFrameFailure {
+                    Logger.warning("Scene \(descriptor.workshopID) frame render/present failed: \(error.localizedDescription)", category: .screenManager)
+                    didLogFrameFailure = true
+                }
             }
         }
     }

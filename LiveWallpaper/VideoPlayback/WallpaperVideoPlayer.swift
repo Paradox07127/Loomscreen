@@ -240,7 +240,7 @@ final class WallpaperVideoPlayer {
                             memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
                             activeAsset = memAsset
                             loader = result.loader
-                            Logger.notice(
+                            Logger.info(
                                 "Loaded \(fileSize / (1024 * 1024)) MB video into RAM — 0 physical reads expected after warmup",
                                 category: .videoPlayer
                             )
@@ -1001,7 +1001,7 @@ final class WallpaperVideoPlayer {
         currentVideoComposition = nil
 
         if inMemoryAssetLoader != nil {
-            Logger.notice("Releasing in-memory video cache for \(videoURL?.lastPathComponent ?? "<unknown>")", category: .videoPlayer)
+            Logger.info("Releasing in-memory video cache for \(videoURL?.lastPathComponent ?? "<unknown>")", category: .videoPlayer)
         }
         inMemoryAssetLoader = nil
 

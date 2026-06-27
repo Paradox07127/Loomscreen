@@ -151,7 +151,7 @@ final class AmbientWallpaperSessionBuilder {
         // returns an in-place provider instead, so the missing directory is fine.
         if descriptor.assetStorage == .cache, assets.provider == nil {
             guard fileManager.fileExists(atPath: cacheURL.path) else {
-                Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
+                Logger.warning("Scene descriptor cache directory missing: \(cacheURL.lastPathComponent)", category: .screenManager)
                 return nil
             }
         }

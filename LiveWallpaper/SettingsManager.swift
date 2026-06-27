@@ -557,7 +557,7 @@ final class SettingsManager {
         case .url(let url):
             guard let scheme = url.scheme?.lowercased(),
                   scheme == "http" || scheme == "https" else {
-                Logger.error("Invalid remote HTML URL for screen \(screenID): \(url.absoluteString)", category: .fileAccess)
+                Logger.error("Invalid remote HTML URL for screen \(screenID): unsupported scheme '\(url.scheme ?? "none")'", category: .fileAccess)
                 return false
             }
             return true

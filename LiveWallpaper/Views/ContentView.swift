@@ -27,10 +27,11 @@ struct ContentView: View {
         self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
-    /// Pinned to `false` in Lite so a settings import can never auto-light the
-    /// Developer Tools surface inside the lightweight runtime.
+    /// `false` outside local Pro DEBUG builds: the Developer Tools surface
+    /// compiles into DEBUG only, and Lite never auto-lights it from a settings
+    /// import. In DEBUG it defaults on (see `GlobalSettings.defaultDeveloperModeEnabled`).
     private static func loadDeveloperModeEnabled() -> Bool {
-        #if !LITE_BUILD
+        #if DEBUG && !LITE_BUILD
         return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
         #else
         return false
@@ -38,7 +39,7 @@ struct ContentView: View {
     }
 
     private var canShowDeveloperTools: Bool {
-        #if !LITE_BUILD
+        #if DEBUG && !LITE_BUILD
         return developerModeEnabled && featureCatalog.isEnabled(.developerTools)
         #else
         return false
@@ -171,7 +172,7 @@ struct ContentView: View {
     /// user just disabled the toggle while sitting on the Developer Tools page.
     private func refreshDeveloperModeStateAndSelection() {
         developerModeEnabled = ContentView.loadDeveloperModeEnabled()
-        #if !LITE_BUILD
+        #if DEBUG && !LITE_BUILD
         if !canShowDeveloperTools, selectedNavigation == .developerTools {
             scheduleNavigationChange { selectedNavigation = .general }
         }
@@ -304,7 +305,7 @@ enum Navigation: Hashable {
     case appleAerials
     case bookmarks
     case workshop
-    #if !LITE_BUILD
+    #if DEBUG && !LITE_BUILD
     case developerTools
     #endif
 }
@@ -361,7 +362,7 @@ struct Sidebar: View {
                 }
                 #endif
 
-                #if !LITE_BUILD
+                #if DEBUG && !LITE_BUILD
                 if featureCatalog.isEnabled(.developerTools), developerModeEnabled {
                     NavigationLink(value: Navigation.developerTools) {
                         Label("Developer Tools", systemImage: "wrench.and.screwdriver")
@@ -548,7 +549,7 @@ struct DetailContent: View {
                 EmptyView()
                 #endif
 
-            #if !LITE_BUILD
+            #if DEBUG && !LITE_BUILD
             case .developerTools:
                 if canShowDeveloperTools {
                     DeveloperToolsView()

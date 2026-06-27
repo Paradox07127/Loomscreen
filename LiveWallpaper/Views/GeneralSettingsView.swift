@@ -398,46 +398,47 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Double-gated (compile-out via `#if !LITE_BUILD` + runtime capability) so
-    /// it can't accidentally enable in a misconfigured SKU.
+    /// The Developer Mode toggle (and the Developer Tools surface it reveals)
+    /// compiles into local Pro DEBUG builds only — never a Release binary — so
+    /// end users can't reach the diagnostic harness or the HTML Web Inspector.
+    /// "Log Files" stays in every Pro build so users can still grab logs for a
+    /// bug report.
     @ViewBuilder
     private var advancedSection: some View {
         #if !LITE_BUILD
-        if featureCatalog.isEnabled(.developerTools) {
-            Section {
-                SettingRow(
-                    icon: "wrench.and.screwdriver",
-                    iconColor: .orange,
-                    title: "Developer Mode",
-                    subtitle: "Show Developer Tools in the sidebar and enable right-click Inspect Element on HTML wallpapers.",
-                    info: "When on, HTML wallpapers open with WebKit's Web Inspector accessible — right-click in a webview wallpaper to inspect. Recommended only when debugging your own content."
-                ) {
-                    Toggle("", isOn: $developerModeEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: developerModeEnabled) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Developer Mode"))
-                        .accessibilityHint(Text("Reveals diagnostic tools and HTML web inspector. Off by default."))
-                }
-
-                if developerModeEnabled {
-                    SettingRow(
-                        icon: "doc.text.magnifyingglass",
-                        iconColor: .orange,
-                        title: "Log Files",
-                        subtitle: "Open the folder containing the app's diagnostic logs."
-                    ) {
-                        Button("Show in Finder") { revealLogFolder() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .fixedSize()
-                            .accessibilityLabel(Text("Show logs in Finder"))
-                            .accessibilityHint(Text("Opens the folder containing the app's log files"))
-                    }
-                }
-            } header: {
-                Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
+        Section {
+            #if DEBUG
+            SettingRow(
+                icon: "wrench.and.screwdriver",
+                iconColor: .orange,
+                title: "Developer Mode",
+                subtitle: "Show Developer Tools in the sidebar and enable right-click Inspect Element on HTML wallpapers.",
+                info: "When on, HTML wallpapers open with WebKit's Web Inspector accessible — right-click in a webview wallpaper to inspect. Recommended only when debugging your own content."
+            ) {
+                Toggle("", isOn: $developerModeEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: developerModeEnabled) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Developer Mode"))
+                    .accessibilityHint(Text("Reveals diagnostic tools and HTML web inspector. Off by default."))
             }
+            #endif
+
+            SettingRow(
+                icon: "doc.text.magnifyingglass",
+                iconColor: .orange,
+                title: "Log Files",
+                subtitle: "Open the folder containing the app's diagnostic logs."
+            ) {
+                Button("Show in Finder") { revealLogFolder() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityLabel(Text("Show logs in Finder"))
+                    .accessibilityHint(Text("Opens the folder containing the app's log files"))
+            }
+        } header: {
+            Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
         }
         #endif
     }

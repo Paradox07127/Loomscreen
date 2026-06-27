@@ -1,10 +1,12 @@
-#if !LITE_BUILD
+#if DEBUG && !LITE_BUILD
 import SwiftUI
 import AppKit
 
-/// Pro-only diagnostic surface gated at runtime by the Developer Mode
-/// toggle in Settings → General → Advanced — hidden until the user opts in,
-/// so end users never see it unless they go looking.
+/// Pro-only diagnostic surface compiled into local DEBUG builds only — it
+/// ships in no Release binary at all, so it can never reach end users (and the
+/// scene-debug artifact writer it drives is hard-disabled in Release too).
+/// Within a DEBUG build it is still gated at runtime by the Developer Mode
+/// toggle in Settings → General → Advanced.
 struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
 
