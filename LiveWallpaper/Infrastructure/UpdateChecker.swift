@@ -169,7 +169,11 @@ final class UpdateChecker {
     }
 
     private static func trustedDMGDownloadURL(for asset: GitHubRelease.Asset) -> URL? {
-        guard asset.name.lowercased().hasSuffix(".dmg"),
+        // A unified release carries both the Lite (`Loomscreen-*.dmg`) and Pro
+        // (`LiveWallpaper-*.dmg`) builds; the Lite updater must resolve its own
+        // DMG, never the Pro one — match the Lite name prefix explicitly.
+        let name = asset.name.lowercased()
+        guard name.hasPrefix("loomscreen-"), name.hasSuffix(".dmg"),
               let url = asset.browserDownloadURL,
               isTrustedGitHubURL(url, pathPrefix: trustedDownloadPathPrefix),
               url.pathExtension.lowercased() == "dmg"
