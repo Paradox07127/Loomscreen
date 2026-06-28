@@ -379,7 +379,7 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // Low Power Mode toggles flip `GameModeDetector.isActive` without
+        // Low Power Mode toggles flip `GameModeDetector.shared.isActive` without
         // changing the frontmost app, so we need a dedicated subscription
         // here — otherwise the policy refresh would wait for the next
         // unrelated event. The notification name is the AppKit/Foundation
@@ -684,7 +684,9 @@ final class ScreenManager {
         case .html:
             config.savedHTMLSource = nil
             config.savedHTMLConfig = nil
-        case .metalShader, .scene:
+        case .scene:
+            config.savedSceneDescriptor = nil
+        case .metalShader:
             break
         }
 
@@ -1107,7 +1109,11 @@ final class ScreenManager {
     func applyPerformancePolicy(to screen: Screen) -> WallpaperPerformanceProfile {
         let settings = SettingsManager.shared.loadGlobalSettings()
         let profile = WallpaperPolicyEngine.performanceProfile(
-            inputs: policyInputs(for: screen, applicationRuleActive: currentApplicationRuleActive(settings)),
+            inputs: policyInputs(
+                for: screen,
+                applicationRuleActive: currentApplicationRuleActive(settings),
+                frontmostExcluded: ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
+            ),
             settings: settings
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
@@ -1117,16 +1123,21 @@ final class ScreenManager {
     /// Snapshots the current *raw* system state for `screen`. The `GlobalSettings`
     /// gating lives in `WallpaperPolicyEngine`, so detector/state readings are
     /// passed through ungated.
-    private func policyInputs(for screen: Screen, applicationRuleActive: Bool) -> WallpaperPolicyInputs {
+    private func policyInputs(
+        for screen: Screen,
+        applicationRuleActive: Bool,
+        frontmostExcluded: Bool
+    ) -> WallpaperPolicyInputs {
         WallpaperPolicyInputs(
             powerSource: powerMonitor.currentPowerSource,
             isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id),
             isWindowOccluding: fullScreenDetector.isDesktopOccluded(for: screen.id),
             isApplicationRuleActive: applicationRuleActive,
             thermalState: ProcessInfo.processInfo.thermalState,
-            isGameModeActive: GameModeDetector.isActive,
+            isGameModeActive: GameModeDetector.shared.isActive,
             isUserAbsent: isUserAbsent,
-            isUnderMemoryPressure: isUnderMemoryPressure
+            isUnderMemoryPressure: isUnderMemoryPressure,
+            isFrontmostExcludedByRule: frontmostExcluded
         )
     }
 
@@ -1137,9 +1148,14 @@ final class ScreenManager {
     private func refreshPerformancePolicyForAllScreens() {
         let settings = SettingsManager.shared.loadGlobalSettings()
         let applicationRuleActive = currentApplicationRuleActive(settings)
+        let frontmostExcluded = ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
         for screen in screens {
             let profile = WallpaperPolicyEngine.performanceProfile(
-                inputs: policyInputs(for: screen, applicationRuleActive: applicationRuleActive),
+                inputs: policyInputs(
+                    for: screen,
+                    applicationRuleActive: applicationRuleActive,
+                    frontmostExcluded: frontmostExcluded
+                ),
                 settings: settings
             )
             screen.runtimeSession?.applyPerformanceProfile(profile)
@@ -1570,8 +1586,7 @@ final class ScreenManager {
             return
         }
 
-        configuration.activeWallpaper = .scene(descriptor)
-        configuration.wpeOrigin = origin
+        configuration.setSceneWallpaper(descriptor, origin: origin)
         saveConfiguration(configuration)
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
@@ -1700,6 +1715,7 @@ final class ScreenManager {
                 )
                 if sceneSession.applyScenePropertyPatch(patch) {
                     configuration.activeWallpaper = .scene(descriptor)
+                    configuration.savedSceneDescriptor = descriptor
                     saveConfiguration(configuration)
                     notifyWallpaperSessionChanged()
                     return
@@ -1709,6 +1725,7 @@ final class ScreenManager {
         #endif
 
         configuration.activeWallpaper = .scene(descriptor)
+        configuration.savedSceneDescriptor = descriptor
         saveConfiguration(configuration)
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }

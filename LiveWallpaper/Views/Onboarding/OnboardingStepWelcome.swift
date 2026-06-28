@@ -2,6 +2,13 @@ import SwiftUI
 
 struct OnboardingStepWelcome: View {
     let nextStep: () -> Void
+    @Environment(\.featureCatalog) private var featureCatalog
+
+    private var tagline: LocalizedStringKey {
+        featureCatalog.isEnabled(.scene)
+            ? "Video, web, shaders, and Wallpaper Engine scenes — alive on every display."
+            : "Local video, interactive web, and Apple Aerials — alive on every display."
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +25,7 @@ struct OnboardingStepWelcome: View {
                     .font(DesignTokens.Typography.hero)
                     .accessibilityAddTraits(.isHeader)
 
-                Text("Bring your desktop to life with dynamic wallpapers — video, web pages, shaders, and more — across every display.")
+                Text(tagline)
                     .font(DesignTokens.Typography.sectionTitle)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

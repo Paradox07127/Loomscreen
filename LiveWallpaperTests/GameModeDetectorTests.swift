@@ -2,122 +2,62 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Pure-classifier coverage for `GameModeDetector`. The load-bearing contract:
-/// a real (Steam-launched) game pauses the wallpaper, while a maximised
-/// non-game window (Safari/Finder) does not — proven without a live game by
-/// driving the injectable `evaluate` / `isGame` seam.
+/// `GameModeDetector` classifies the frontmost app purely on its declared
+/// `LSApplicationCategoryType` — the same signal macOS Game Mode keys on.
+/// Install paths and storefront bundle IDs are deliberately NOT signals, and an
+/// unreadable category is `.unknown` and fails open (no pause).
 @Suite("GameModeDetector classification")
 struct GameModeDetectorTests {
 
-    private func app(
-        bundleID: String? = nil,
-        bundlePath: String? = nil,
-        executablePath: String? = nil,
-        category: String? = nil
-    ) -> GameModeDetector.FrontmostApp {
-        GameModeDetector.FrontmostApp(
-            bundleID: bundleID,
-            bundlePath: bundlePath,
-            executablePath: executablePath,
-            category: category
-        )
-    }
-
-    // MARK: - The fix: Steam-launched game executables
-
-    @Test("A Steam game executable (no category, non-launcher bundle) is a game")
-    func steamGameExecutableIsGame() {
-        let hades = app(
-            bundleID: "com.supergiant.hades",
-            bundlePath: "/Users/me/Library/Application Support/Steam/steamapps/common/Hades/Hades.app",
-            executablePath: "/Users/me/Library/Application Support/Steam/steamapps/common/Hades/Hades.app/Contents/MacOS/Hades",
-            category: nil
-        )
-        #expect(GameModeDetector.isGame(hades))
-    }
-
-    @Test("Custom SteamLibrary path is matched case-insensitively")
-    func customSteamLibraryIsGame() {
-        let game = app(executablePath: "/Volumes/Games/SteamLibrary/SteamApps/Common/Celeste/Celeste.app/Contents/MacOS/Celeste")
-        #expect(GameModeDetector.isGame(game))
-    }
-
-    @Test("Epic / Battle.net / GOG install roots are games")
-    func otherLauncherInstallRootsAreGames() {
-        #expect(GameModeDetector.isGameInstallPath("/Users/me/Epic Games/Fortnite/Game.app"))
-        #expect(GameModeDetector.isGameInstallPath("/Applications/Battle.net/World of Warcraft/wow.app"))
-        #expect(GameModeDetector.isGameInstallPath("/Users/me/GOG Games/Witcher/witcher.app"))
-    }
-
-    // MARK: - The false-positive guard: maximised non-game windows
-
-    @Test("A maximised Safari window is not a game")
-    func maximisedSafariIsNotGame() {
-        let safari = app(
-            bundleID: "com.apple.Safari",
-            bundlePath: "/Applications/Safari.app",
-            executablePath: "/Applications/Safari.app/Contents/MacOS/Safari",
-            category: "public.app-category.productivity"
-        )
-        #expect(!GameModeDetector.isGame(safari))
-    }
-
-    @Test("Finder under /System is not a game")
-    func finderIsNotGame() {
-        let finder = app(
-            bundleID: "com.apple.finder",
-            bundlePath: "/System/Library/CoreServices/Finder.app",
-            executablePath: "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder"
-        )
-        #expect(!GameModeDetector.isGame(finder))
-    }
-
-    // MARK: - Existing signals still hold
-
-    @Test("Storefront launcher bundle prefix is a game (launcher window in front)")
-    func launcherPrefixIsGame() {
-        #expect(GameModeDetector.isGame(app(bundleID: "com.valvesoftware.steam.helper", bundlePath: "/Applications/Steam.app")))
-        #expect(GameModeDetector.isGame(app(bundleID: "com.epicgames.launcher", bundlePath: "/Applications/Epic Games Launcher.app")))
-    }
-
-    @Test("A declared game category is a game even outside install roots")
+    @Test("A declared game category classifies as game and pauses")
     func declaredGameCategoryIsGame() {
-        let storeGame = app(
-            bundleID: "com.example.indie",
-            bundlePath: "/Applications/Indie.app",
-            executablePath: "/Applications/Indie.app/Contents/MacOS/Indie",
-            category: "public.app-category.action-games"
-        )
-        #expect(GameModeDetector.isGame(storeGame))
+        #expect(GameModeDetector.classification(forCategory: "public.app-category.games") == .game)
+        #expect(GameModeDetector.classification(forCategory: "public.app-category.role-playing-games") == .game)
+        #expect(GameModeDetector.evaluate(lowPowerMode: false, classification: .game))
     }
 
-    @Test("isGameCategory matches the games variants only")
-    func gameCategoryStringMatching() {
+    @Test("A non-game category classifies as non-game and does not pause")
+    func nonGameCategoryIsNotGame() {
+        #expect(GameModeDetector.classification(forCategory: "public.app-category.productivity") == .nonGame)
+        #expect(!GameModeDetector.evaluate(lowPowerMode: false, classification: .nonGame))
+    }
+
+    @Test("A missing / unreadable category is unknown and fails open")
+    func unknownCategoryFailsOpen() {
+        #expect(GameModeDetector.classification(forCategory: nil) == .unknown)
+        #expect(!GameModeDetector.evaluate(lowPowerMode: false, classification: .unknown))
+    }
+
+    @Test("Only the official games categories match — bare 'games' or near-misses do not")
+    func categoryAllowlistIsStrict() {
         #expect(GameModeDetector.isGameCategory("public.app-category.games"))
-        #expect(GameModeDetector.isGameCategory("public.app-category.role-playing-games"))
+        #expect(GameModeDetector.isGameCategory("public.app-category.puzzle-games"))
+        #expect(!GameModeDetector.isGameCategory("games"))
         #expect(!GameModeDetector.isGameCategory("public.app-category.productivity"))
-        #expect(!GameModeDetector.isGameCategory("games"))           // missing prefix
-        #expect(!GameModeDetector.isGameCategory(nil))
+        #expect(!GameModeDetector.isGameCategory("public.app-category.gamesomething"))
     }
 
-    // MARK: - evaluate() top-level branches
+    // The regression this refactor fixes: a Steam-pathed app with no declared
+    // category is `.unknown`, NOT a game. Path heuristics were removed so the
+    // detector can't claim coverage it doesn't have — such games are handled by
+    // the full-screen pause rule or an Application Exception instead.
+    @Test("Install path is no longer a game signal")
+    func installPathIsNotAGameSignal() {
+        let steamPlist = URL(fileURLWithPath:
+            "/Users/me/Library/Application Support/Steam/steamapps/common/Hades/Hades.app/Contents/Info.plist")
+        #expect(GameModeDetector.readClassification(infoPlistAt: steamPlist) == .unknown)
+    }
 
-    @Test("Low Power Mode forces active regardless of frontmost app")
+    @Test("A non-existent Info.plist reads as unknown, never throwing")
+    func missingPlistIsUnknown() {
+        let missing = URL(fileURLWithPath: "/nonexistent/Path.app/Contents/Info.plist")
+        #expect(GameModeDetector.readCategory(infoPlistAt: missing) == nil)
+        #expect(GameModeDetector.readClassification(infoPlistAt: missing) == .unknown)
+    }
+
+    @Test("Low Power Mode forces active regardless of classification")
     func lowPowerModeForcesActive() {
-        #expect(GameModeDetector.evaluate(lowPowerMode: true, frontmost: nil))
-        #expect(GameModeDetector.evaluate(lowPowerMode: true, frontmost: app(bundleID: "com.apple.Safari")))
-    }
-
-    @Test("No frontmost app and no Low Power Mode is inactive")
-    func noFrontmostIsInactive() {
-        #expect(!GameModeDetector.evaluate(lowPowerMode: false, frontmost: nil))
-    }
-
-    @Test("evaluate routes a non-game frontmost to false and a game to true")
-    func evaluateRoutesThroughClassifier() {
-        let safari = app(bundleID: "com.apple.Safari", executablePath: "/Applications/Safari.app/Contents/MacOS/Safari")
-        let game = app(executablePath: "/Users/me/Library/Application Support/Steam/steamapps/common/Hollow Knight/hollow_knight.app/Contents/MacOS/hollow_knight")
-        #expect(!GameModeDetector.evaluate(lowPowerMode: false, frontmost: safari))
-        #expect(GameModeDetector.evaluate(lowPowerMode: false, frontmost: game))
+        #expect(GameModeDetector.evaluate(lowPowerMode: true, classification: .unknown))
+        #expect(GameModeDetector.evaluate(lowPowerMode: true, classification: .nonGame))
     }
 }

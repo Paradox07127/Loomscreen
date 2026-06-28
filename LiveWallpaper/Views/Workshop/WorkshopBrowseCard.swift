@@ -147,10 +147,7 @@ struct WorkshopBrowseCard: View {
         .accessibilityHidden(true)
     }
 
-    /// Dark enough that white glyphs clear WCAG AA contrast even over bright
-    /// previews (system green is too light). Explicit RGB so it stays constant
-    /// across light/dark mode.
-    private static let inLibraryGreen = Color(red: 0.08, green: 0.35, blue: 0.15)
+    private static let inLibraryGreen = DesignTokens.Colors.badgeActive
 
     // MARK: - Footer
 

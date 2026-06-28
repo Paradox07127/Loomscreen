@@ -64,11 +64,7 @@ struct WorkshopDownloadToastHost: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        }
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.xl))
         .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 6)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(verbatim: "\(event.headline): \(event.title). \(event.message)"))

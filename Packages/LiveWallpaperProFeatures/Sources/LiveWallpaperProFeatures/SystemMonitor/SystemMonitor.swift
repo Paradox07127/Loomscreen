@@ -35,6 +35,16 @@ public enum MonitoringStartPolicy {
     public static let initialSampleDelay: Duration = .milliseconds(350)
 }
 
+/// Glanceable roll-up of system pressure for the collapsed sidebar pill's
+/// status dot. Comparable so the dot can show the more severe of the thermal
+/// and utilisation readings.
+public enum SystemLoadLevel: Int, Sendable, Comparable {
+    case calm = 0
+    case elevated = 1
+    case high = 2
+    public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
 @MainActor @Observable
 public final class SystemMonitor {
     public static let shared = SystemMonitor()
@@ -114,6 +124,22 @@ public final class SystemMonitor {
         @unknown default:
             return String(localized: "Unknown", defaultValue: "Unknown", comment: "Thermal state label.")
         }
+    }
+
+    /// Peak system pressure across thermal state and CPU/GPU/RAM utilisation.
+    /// The 50/80% utilisation cuts mirror `colorForPercent` in the dashboard so
+    /// the collapsed pill's dot matches the gauge rings when expanded.
+    public var loadLevel: SystemLoadLevel {
+        let peak = max(systemCpuUsage, gpuUsage, systemMemoryUsage * 100)
+        let utilisation: SystemLoadLevel = peak >= 80 ? .high : (peak >= 50 ? .elevated : .calm)
+        let thermal: SystemLoadLevel
+        switch thermalState {
+        case .nominal:           thermal = .calm
+        case .fair:              thermal = .elevated
+        case .serious, .critical: thermal = .high
+        @unknown default:        thermal = .calm
+        }
+        return max(utilisation, thermal)
     }
 
     // MARK: - Update Loop

@@ -32,10 +32,7 @@ struct DiagnosticExportToast: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.thinMaterial, in: Capsule())
-                .overlay {
-                    Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                }
+                .adaptiveGlassSurface(.capsule)
                 .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 6)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task(id: isPresented) {

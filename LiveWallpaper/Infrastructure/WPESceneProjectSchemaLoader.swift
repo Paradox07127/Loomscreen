@@ -70,10 +70,12 @@ enum WPESceneProjectSchemaLoader {
             return nil
         }
         do {
-            let parsed = try WallpaperEngineProjectPropertySchema.read(
-                from: folderURL,
-                includeSchemeColor: true
-            )
+            // schemecolor is the WPE GLOBAL accent — most scenes never bind a
+            // field to it, so the picker is a no-op for them on macOS. Hidden by
+            // default (matches read()'s default); scenes that DO reference it via
+            // a `{"user":"schemecolor"}` envelope still resolve its value through
+            // effectiveSceneValues in the renderer.
+            let parsed = try WallpaperEngineProjectPropertySchema.read(from: folderURL)
             return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "cache at \(folderURL.path)")
         } catch {
             return Outcome(
@@ -98,10 +100,7 @@ enum WPESceneProjectSchemaLoader {
         case .success(let resolved):
             do {
                 let parsed = try SecurityScopedBookmarkResolver.withScopedAccess(resolved.url) { _ in
-                    try WallpaperEngineProjectPropertySchema.read(
-                        from: resolved.url,
-                        includeSchemeColor: true
-                    )
+                    try WallpaperEngineProjectPropertySchema.read(from: resolved.url)
                 }
                 return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "source folder at \(resolved.url.path)")
             } catch {

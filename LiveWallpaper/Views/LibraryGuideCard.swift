@@ -75,15 +75,7 @@ struct LibraryGuideCard: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.regularMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-                    .blendMode(.overlay)
-            )
+            .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.lg))
             .frame(maxWidth: DesignTokens.GuidedLibrary.featureWidth)
 
             HStack(spacing: 10) {

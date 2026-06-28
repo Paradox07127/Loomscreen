@@ -14,7 +14,8 @@ extension WallpaperPolicyInputs {
         thermalState: ProcessInfo.ThermalState = .nominal,
         isGameModeActive: Bool = false,
         isUserAbsent: Bool = false,
-        isUnderMemoryPressure: Bool = false
+        isUnderMemoryPressure: Bool = false,
+        isFrontmostExcludedByRule: Bool = false
     ) -> WallpaperPolicyInputs {
         WallpaperPolicyInputs(
             powerSource: powerSource,
@@ -24,7 +25,8 @@ extension WallpaperPolicyInputs {
             thermalState: thermalState,
             isGameModeActive: isGameModeActive,
             isUserAbsent: isUserAbsent,
-            isUnderMemoryPressure: isUnderMemoryPressure
+            isUnderMemoryPressure: isUnderMemoryPressure,
+            isFrontmostExcludedByRule: isFrontmostExcludedByRule
         )
     }
 }

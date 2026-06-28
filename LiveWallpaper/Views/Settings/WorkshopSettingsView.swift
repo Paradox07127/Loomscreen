@@ -8,116 +8,25 @@ struct WorkshopSettingsView: View {
     @Environment(SteamCMDDoctorService.self) private var doctorService
     @Environment(WorkshopServices.self) private var workshopServices
 
-    @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
     @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
     @AppStorage("loomscreen.workshop.hidesDownloaded.v1") private var hidesDownloadedInBrowse = false
 
     @State private var engineAssets = WPEEngineAssetsLibrary.shared
     @State private var showingDoctor = false
     @State private var showingKeyEntry = false
-    @State private var showingCacheManagement = false
     @State private var showingBrowse = false
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("Status") {
-                    Label("Ready", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(DesignTokens.Colors.Status.active)
-                        .font(DesignTokens.Typography.bodyEmphasized)
-                }
+                capabilityChips
             } header: {
                 Text("Steam Workshop")
             } footer: {
-                Text("Paste-and-preview works out of the box. Online browsing needs your own free Steam Web API key. Downloading needs the official SteamCMD + your Steam account — open the Doctor below to wire that up.")
+                Text("Your Steam password, Steam Guard codes, and session tokens are never read or stored.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Privacy") {
-                Label("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.", systemImage: "lock.shield")
-                    .labelStyle(.titleAndIcon)
-                    .font(DesignTokens.Typography.body)
-                Label("Workshop metadata is fetched directly from Valve over HTTPS. We never proxy through a Loomscreen server.", systemImage: "network")
-                    .labelStyle(.titleAndIcon)
-                    .font(DesignTokens.Typography.body)
-                Label("Workshop wallpapers run inside an isolated, ephemeral WKWebView with a strict Content-Security-Policy.", systemImage: "shield.lefthalf.filled")
-                    .labelStyle(.titleAndIcon)
-                    .font(DesignTokens.Typography.body)
-            }
-
-            Section("Onboarding") {
-                SettingRow(
-                    icon: "hand.wave",
-                    iconColor: .blue,
-                    title: "Show the welcome sheet next time",
-                    subtitle: "Reopen the Workshop intro the next time you open it"
-                ) {
-                    Toggle("", isOn: Binding(
-                        get: { !onboardingShown },
-                        set: { onboardingShown = !$0 }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .accessibilityLabel(Text("Show the welcome sheet next time"))
-                }
-            }
-
-            Section {
-                SettingRow(
-                    icon: "eye.slash",
-                    iconColor: .pink,
-                    title: "Blur mature thumbnails",
-                    subtitle: "Hide Mature covers in Browse until you click to reveal"
-                ) {
-                    Toggle("", isOn: $blurMatureThumbnails)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .accessibilityLabel(Text("Blur mature thumbnails until clicked"))
-                }
-                SettingRow(
-                    icon: "tray.full",
-                    iconColor: .indigo,
-                    title: "Hide items already in my library",
-                    subtitle: "Keep Browse Online focused on wallpapers you don't have yet"
-                ) {
-                    Toggle("", isOn: $hidesDownloadedInBrowse)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .accessibilityLabel(Text("Hide items already in my library when browsing"))
-                }
-            } header: {
-                Text("Content")
-            } footer: {
-                Text("Application wallpapers are always hidden because they can't run here. The Installed tab is where you revisit your full library.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section {
-                SettingRow(
-                    icon: "stethoscope",
-                    iconColor: .teal,
-                    title: "SteamCMD Doctor",
-                    subtitle: "Check SteamCMD and Steam sign-in before downloading",
-                    info: "Downloading from the Workshop needs the official SteamCMD command-line tool plus your own Steam sign-in. The Doctor runs probes and tells you exactly what's missing."
-                ) {
-                    HStack(spacing: DesignTokens.Spacing.xs) {
-                        doctorIndicator
-                        Button("Open") { showingDoctor = true }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help(Text("Open the SteamCMD diagnostics sheet"))
-                    }
-                    // Claim intrinsic width: SettingRow's title column is greedy
-                    // (maxWidth:.infinity, layoutPriority 1) and would otherwise
-                    // starve these controls, wrapping/clipping their labels.
-                    .fixedSize()
-                }
-            } header: {
-                Text("Downloads")
             }
 
             Section {
@@ -159,8 +68,28 @@ struct WorkshopSettingsView: View {
                             .help(Text("Paste your Steam Web API key"))
                     }
                 }
+
+                SettingRow(
+                    icon: "stethoscope",
+                    iconColor: .teal,
+                    title: "SteamCMD Doctor",
+                    subtitle: "Check SteamCMD and Steam sign-in before downloading",
+                    info: "Downloading from the Workshop needs the official SteamCMD command-line tool plus your own Steam sign-in. The Doctor runs probes and tells you exactly what's missing."
+                ) {
+                    HStack(spacing: DesignTokens.Spacing.xs) {
+                        doctorIndicator
+                        Button("Open") { showingDoctor = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help(Text("Open the SteamCMD diagnostics sheet"))
+                    }
+                    // Claim intrinsic width: SettingRow's title column is greedy
+                    // (maxWidth:.infinity, layoutPriority 1) and would otherwise
+                    // starve these controls, wrapping/clipping their labels.
+                    .fixedSize()
+                }
             } header: {
-                Text("Browse Online")
+                Text("Setup")
             } footer: {
                 Text("\"Forget on this Mac\" only removes the local copy — revoke the key itself at steamcommunity.com/dev/apikey.")
                     .font(.caption)
@@ -170,20 +99,29 @@ struct WorkshopSettingsView: View {
 
             Section {
                 SettingRow(
-                    icon: "internaldrive",
-                    iconColor: .gray,
-                    title: "Workshop browse cache",
-                    subtitle: "Cached browse results (5-min refresh, 100 MB cap)",
-                    info: "Holds the JSON responses behind Browse Online so paging stays fast. Scene assets are read in place from their source — they're no longer copied into a cache."
+                    icon: "eye.slash",
+                    iconColor: .pink,
+                    title: "Blur mature thumbnails",
+                    subtitle: "Hide Mature covers in Browse until you click to reveal"
                 ) {
-                    Button("Manage") { showingCacheManagement = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .fixedSize()
-                        .help(Text("Inspect and clear the Workshop browse cache"))
+                    Toggle("", isOn: $blurMatureThumbnails)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel(Text("Blur mature thumbnails until clicked"))
+                }
+                SettingRow(
+                    icon: "tray.full",
+                    iconColor: .indigo,
+                    title: "Hide items already in my library",
+                    subtitle: "Keep Browse Online focused on wallpapers you don't have yet"
+                ) {
+                    Toggle("", isOn: $hidesDownloadedInBrowse)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel(Text("Hide items already in my library when browsing"))
                 }
             } header: {
-                Text("Cache")
+                Text("Content")
             }
 
             Section {
@@ -218,9 +156,6 @@ struct WorkshopSettingsView: View {
             SteamWebAPIKeyEntrySheet(services: workshopServices) {
                 Task { await workshopServices.refreshAPIKeyStatus() }
             }
-        }
-        .sheet(isPresented: $showingCacheManagement) {
-            cacheSheet
         }
         .sheet(isPresented: $showingBrowse) {
             WorkshopBrowseView(services: workshopServices, doctor: doctorService) {
@@ -260,6 +195,39 @@ struct WorkshopSettingsView: View {
         }
     }
 
+    /// At-a-glance "what works right now" row. Preview is always available;
+    /// Browse needs the user's API key; Download needs SteamCMD probed green.
+    private var capabilityChips: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            capabilityChip("Preview", ready: true, needs: "")
+            capabilityChip("Browse", ready: workshopServices.hasWebAPIKey, needs: "needs key")
+            capabilityChip("Download", ready: downloadReady, needs: "needs SteamCMD")
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var downloadReady: Bool {
+        if case .done(let allGreen, _) = doctorService.state { return allGreen }
+        return false
+    }
+
+    private func capabilityChip(_ title: LocalizedStringKey, ready: Bool, needs: LocalizedStringKey) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(ready ? DesignTokens.Colors.Status.active : DesignTokens.Colors.Status.warning)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(DesignTokens.Typography.bodyEmphasized)
+                if !ready {
+                    Text(needs).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.secondary.opacity(0.08)))
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.15), lineWidth: 0.5))
+    }
+
     @ViewBuilder
     private var doctorIndicator: some View {
         switch doctorService.state {
@@ -289,23 +257,6 @@ struct WorkshopSettingsView: View {
                 .foregroundStyle(DesignTokens.Colors.Status.warning)
                 .font(DesignTokens.Typography.bodyEmphasized)
         }
-    }
-
-    private var cacheSheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Workshop cache")
-                    .font(.headline)
-                Spacer()
-                Button("Done") { showingCacheManagement = false }
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-            .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
-            .background(.bar)
-            WorkshopCacheManagementView(cache: workshopServices.queryCache)
-        }
-        .frame(minWidth: 460, idealWidth: 520, minHeight: 360, idealHeight: 420)
     }
 
     private func indicatorDot(_ color: Color, label: String) -> some View {

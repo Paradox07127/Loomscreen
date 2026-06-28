@@ -271,9 +271,7 @@ private struct BookmarkTile: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 20, height: 20)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .environment(\.colorScheme, .dark)
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                    .floatingGlyphGlass(hovered: false)
                     .padding(7)
                 Spacer()
             }
@@ -433,7 +431,16 @@ private struct BookmarkTile: View {
     }
 
     private var bookmarkCacheKey: String {
-        "bookmark::" + bookmark.id.uuidString
+        // Include the content type so a thumbnail cached for one type can never
+        // be served for another if a bookmark's resolved content changes.
+        let typeTag: String
+        switch bookmark.content {
+        case .video:       typeTag = "video"
+        case .html:        typeTag = "html"
+        case .metalShader: typeTag = "shader"
+        case .scene:       typeTag = "scene"
+        }
+        return "bookmark::\(typeTag)::\(bookmark.id.uuidString)"
     }
 
     // MARK: Context menu

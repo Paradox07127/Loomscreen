@@ -47,6 +47,38 @@ struct ApplicationPerformanceRuleTests {
         #expect(profile == .suspended)
     }
 
+    @Test("A neverPause trigger is not itself a pause match")
+    func neverPauseDoesNotPause() {
+        let rule = ApplicationPerformanceRule(bundleID: "com.example.tool", displayName: "Tool", trigger: .neverPause)
+        #expect(!ApplicationPerformanceRuleEngine.shouldPause(
+            frontmostBundleID: "com.example.tool", runningBundleIDs: ["com.example.tool"], rules: [rule]
+        ))
+    }
+
+    @Test("frontmostIsExcluded matches only a neverPause rule on the frontmost app")
+    func frontmostExcludedMatching() {
+        let never = ApplicationPerformanceRule(bundleID: "com.example.tool", displayName: "Tool", trigger: .neverPause)
+        let pause = ApplicationPerformanceRule(bundleID: "com.example.tool", displayName: "Tool", trigger: .frontmost)
+        #expect(ApplicationPerformanceRuleEngine.frontmostIsExcluded(frontmostBundleID: "com.example.tool", rules: [never]))
+        #expect(!ApplicationPerformanceRuleEngine.frontmostIsExcluded(frontmostBundleID: "com.other.app", rules: [never]))
+        #expect(!ApplicationPerformanceRuleEngine.frontmostIsExcluded(frontmostBundleID: "com.example.tool", rules: [pause]))
+    }
+
+    @Test("A frontmost neverPause exception vetoes discretionary pauses but not safety ones")
+    func neverPauseVetoesDiscretionaryOnly() {
+        let settings = GlobalSettings(pauseInGameMode: true)
+        // Game mode would pause, but the exclusion vetoes it.
+        #expect(WallpaperPolicyEngine.performanceProfile(
+            inputs: .test(isGameModeActive: true, isFrontmostExcludedByRule: true),
+            settings: settings
+        ) == .quality)
+        // Thermal is a safety pause — the exclusion can't veto it.
+        #expect(WallpaperPolicyEngine.performanceProfile(
+            inputs: .test(thermalState: .critical, isFrontmostExcludedByRule: true),
+            settings: settings
+        ) == .suspended)
+    }
+
     @Test("GlobalSettings defaults to no rules and round-trips through Codable")
     func codableDefaultsAndRoundTrip() throws {
         let emptyJSON = Data("{}".utf8)

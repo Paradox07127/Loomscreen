@@ -1,21 +1,19 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Wrapper around `OnboardingPickerView` owning per-step state (selected
-/// display IDs); a named step type so `OnboardingFlow.switch currentStep` is uniform.
+/// Thin wrapper so `OnboardingFlow.switch currentStep` stays uniform.
 struct OnboardingStepFirstWallpaper: View {
     let policy: OnboardingPathPolicy
     let nextStep: () -> Void
     let skip: () -> Void
-
-    @State private var selectedScreenIDs: Set<CGDirectDisplayID> = []
+    let openAppleAerials: () -> Void
 
     var body: some View {
         OnboardingPickerView(
-            selectedScreenIDs: $selectedScreenIDs,
             galleryActions: policy.galleryActions,
             nextStep: nextStep,
-            skip: skip
+            skip: skip,
+            openAppleAerials: openAppleAerials
         )
     }
 }

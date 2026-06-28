@@ -105,7 +105,7 @@ struct MenuBarContent: View {
     }
 
     private var displays: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: MenuBarMetrics.componentSpacing) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
                     .font(DesignTokens.Typography.body)
@@ -113,7 +113,7 @@ struct MenuBarContent: View {
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
             } else {
                 let screens = screenManager.screens
-                ForEach(Array(screens.enumerated()), id: \.element.id) { index, screen in
+                ForEach(screens, id: \.id) { screen in
                     let summary = screenManager.wallpaperSummary(for: screen)
                     let visualState = displayVisualState(for: summary.activity)
 
@@ -136,10 +136,6 @@ struct MenuBarContent: View {
                             screenManager.advancePlaylist(for: screen)
                         }
                     )
-
-                    if index < screens.count - 1 {
-                        Divider().padding(.horizontal, 4)
-                    }
                 }
             }
         }
@@ -196,7 +192,7 @@ struct MenuBarContent: View {
         case .fair:     return DesignTokens.Colors.Status.caution
         case .serious:  return DesignTokens.Colors.Status.warning
         case .critical: return DesignTokens.Colors.Status.danger
-        @unknown default: return .gray
+        @unknown default: return DesignTokens.Colors.textTertiary
         }
     }
 
@@ -623,6 +619,9 @@ private struct MenuBarDisplayRow: View {
         .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
         .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
+        // Glass module on the glass panel (Control-Center style) — an opaque
+        // surfaceRaised fill read as a stark white box in light mode.
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
     }
 }
 

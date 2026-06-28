@@ -16,6 +16,11 @@ public enum DesignTokens {
         public static let separator = Color(nsColor: .separatorColor)
         public static let accent = Color(nsColor: .controlAccentColor)
 
+        /// Dark green for white-glyph "active / in-library" badges over bright
+        /// artwork — system green is too light to clear WCAG AA there. Fixed RGB
+        /// (not adaptive) on purpose; the badge sits on its own glass backing.
+        public static let badgeActive = Color(red: 0.08, green: 0.35, blue: 0.15)
+
         public enum Status {
             public static let active = Color(nsColor: .systemGreen)
             public static let warning = Color(nsColor: .systemOrange)

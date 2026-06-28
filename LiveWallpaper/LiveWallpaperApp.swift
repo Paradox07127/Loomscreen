@@ -470,17 +470,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = NSWindowController(window: window)
         onboardingWindowController = controller
 
-        let flow = OnboardingFlow(onClose: { [weak self] in
-            self?.onboardingWindowController?.close()
-        })
+        let flow = OnboardingFlow(
+            onClose: { [weak self] in
+                self?.onboardingWindowController?.close()
+            },
+            onShowAppleAerials: { [weak self] in
+                self?.showSettings()
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .openAppleAerials, object: nil)
+                }
+            }
+        )
 
         if let manager = screenManager {
+            let base = flow
+                .environment(manager)
+                .environment(\.featureCatalog, manager.featureCatalog)
+            #if !LITE_BUILD && DIRECT_DISTRIBUTION
             window.contentView = NSHostingView(
-                rootView: flow
-                    .environment(manager)
-                    .environment(\.featureCatalog, manager.featureCatalog)
+                rootView: base
+                    .environment(workshopDoctorService)
+                    .environment(workshopServices)
                     .appLanguageScoped()
             )
+            #else
+            window.contentView = NSHostingView(rootView: base.appLanguageScoped())
+            #endif
         } else {
             Logger.warning("Onboarding shown without ScreenManager — Pro picker will fail to render", category: .ui)
             window.contentView = NSHostingView(rootView: flow.appLanguageScoped())

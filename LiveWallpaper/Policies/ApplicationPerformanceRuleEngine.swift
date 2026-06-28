@@ -16,6 +16,23 @@ enum ApplicationPerformanceRuleEngine {
         return shouldPause(frontmostBundleID: frontmost, runningBundleIDs: running, rules: rules)
     }
 
+    /// True when the frontmost app carries a `.neverPause` exception — the
+    /// policy engine uses this to veto discretionary pauses.
+    @MainActor
+    static func isFrontmostExcluded(for settings: GlobalSettings) -> Bool {
+        let rules = settings.applicationPerformanceRules
+        guard rules.contains(where: { $0.trigger == .neverPause }) else { return false }
+        return frontmostIsExcluded(
+            frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            rules: rules
+        )
+    }
+
+    static func frontmostIsExcluded(frontmostBundleID: String?, rules: [ApplicationPerformanceRule]) -> Bool {
+        guard let frontmostBundleID else { return false }
+        return rules.contains { $0.trigger == .neverPause && $0.bundleID == frontmostBundleID }
+    }
+
     /// True if any rule matches the current foreground / running state, meaning
     /// the wallpaper should suspend.
     static func shouldPause(
@@ -30,6 +47,8 @@ enum ApplicationPerformanceRuleEngine {
                 if let frontmostBundleID, frontmostBundleID == rule.bundleID { return true }
             case .running:
                 if runningBundleIDs.contains(rule.bundleID) { return true }
+            case .neverPause:
+                continue
             }
         }
         return false

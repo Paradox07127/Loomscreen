@@ -51,7 +51,7 @@ struct RuntimeErrorBanner: View {
             }
         }
         .padding(12)
-        .background(severityFill, in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md))
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md), tint: severityTint)
         .overlay(
             RoundedRectangle(cornerRadius: DesignTokens.Corner.md)
                 .stroke(severityTint.opacity(0.4), lineWidth: 0.5)
@@ -75,9 +75,5 @@ struct RuntimeErrorBanner: View {
         case .warning: return DesignTokens.Colors.Status.warning
         case .info:    return .blue
         }
-    }
-
-    private var severityFill: some ShapeStyle {
-        AnyShapeStyle(.regularMaterial)
     }
 }

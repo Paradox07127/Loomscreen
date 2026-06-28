@@ -80,12 +80,9 @@ struct GeneralSettingsView: View {
             #if !LITE_BUILD
             if featureCatalog.isEnabled(.wpeImport) {
                 WPECacheManagementView()
-                    .tabItem { Label("Cache", systemImage: "internaldrive") }
+                    .tabItem { Label("Storage", systemImage: "internaldrive") }
             }
             #endif
-
-            backupTab
-                .tabItem { Label("Backup", systemImage: "externaldrive") }
 
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -386,6 +383,8 @@ struct GeneralSettingsView: View {
 
             advancedSection
 
+            backupSection
+
             // Loose in the Form (not a Section) so the grouped card background doesn't render around it.
             resetDefaultsRow
                 .listRowBackground(Color.clear)
@@ -542,7 +541,7 @@ struct GeneralSettingsView: View {
             SettingRow(
                 icon: "memorychip",
                 iconColor: .pink,
-                title: "Video memory cache",
+                title: "Video preload (RAM)",
                 subtitle: "Preload video loops into memory to reduce disk reads",
                 info: "Caching keeps each looping video in RAM so it doesn't re-read your disk every cycle — saving SSD wear and power. Drag to Off to stream straight from disk and use the least memory. The value below is the budget per screen (and the total across all displays)."
             ) {
@@ -559,7 +558,7 @@ struct GeneralSettingsView: View {
                         in: 0...Double(GlobalSettings.maxVideoCacheBytes / (1024 * 1024)),
                         step: 32
                     ) {
-                        Text("Video memory cache")
+                        Text("Video preload (RAM)")
                     } minimumValueLabel: {
                         Text("Off")
                             .font(.caption2)
@@ -572,7 +571,7 @@ struct GeneralSettingsView: View {
                     .labelsHidden()
                     .controlSize(.small)
                     .frame(width: 240)
-                    .accessibilityLabel(Text("Video memory cache per screen"))
+                    .accessibilityLabel(Text("Video preload (RAM)"))
                     .accessibilityValue(Text(videoCacheValueLabel))
 
                     Text(videoCacheValueLabel)
@@ -870,46 +869,44 @@ struct GeneralSettingsView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - Backup Tab
+    // MARK: - Backup & Restore (General → bottom)
 
     @ViewBuilder
-    private var backupTab: some View {
-        settingsForm {
-            Section {
-                SettingRow(
-                    icon: "square.and.arrow.up",
-                    iconColor: .blue,
-                    title: "Export Configuration",
-                    subtitle: "Save settings, bookmarks, and per-display setup to a .lwconfig file",
-                    info: "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
-                ) {
-                    Button("Export…") { beginExport() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .fixedSize()
-                        .accessibilityHint(Text("Save the current settings, bookmarks, and per-display setup to a backup file"))
-                }
-
-                SettingRow(
-                    icon: "square.and.arrow.down",
-                    iconColor: .blue,
-                    title: "Import Configuration",
-                    subtitle: "Restore from a previously exported .lwconfig file",
-                    info: "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
-                ) {
-                    Button("Import…") { beginImport() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .fixedSize()
-                        .accessibilityHint(Text("Restore settings, bookmarks, and per-display setup from a backup file"))
-                }
-            } header: {
-                Text("Backup & Restore")
-            } footer: {
-                Text("Backup files travel between Macs and let you roll back a misconfiguration. They contain bookmarks (pointers to your wallpaper files) but not the wallpaper files themselves — the original folders must exist on the destination Mac for the bookmarks to resolve.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var backupSection: some View {
+        Section {
+            SettingRow(
+                icon: "square.and.arrow.up",
+                iconColor: .blue,
+                title: "Export Configuration",
+                subtitle: "Save settings, bookmarks, and per-display setup to a .lwconfig file",
+                info: "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
+            ) {
+                Button("Export…") { beginExport() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityHint(Text("Save the current settings, bookmarks, and per-display setup to a backup file"))
             }
+
+            SettingRow(
+                icon: "square.and.arrow.down",
+                iconColor: .blue,
+                title: "Import Configuration",
+                subtitle: "Restore from a previously exported .lwconfig file",
+                info: "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
+            ) {
+                Button("Import…") { beginImport() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityHint(Text("Restore settings, bookmarks, and per-display setup from a backup file"))
+            }
+        } header: {
+            Text("Backup & Restore")
+        } footer: {
+            Text("Backups store references to your wallpaper files, not the files themselves — the originals must exist on the Mac you restore to.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

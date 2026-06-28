@@ -83,6 +83,7 @@ struct AppExceptionsSheet: View {
             )) {
                 Text("When frontmost").tag(ApplicationPerformanceRule.Trigger.frontmost)
                 Text("While running").tag(ApplicationPerformanceRule.Trigger.running)
+                Text("Never pause").tag(ApplicationPerformanceRule.Trigger.neverPause)
             }
             .labelsHidden()
             .fixedSize()

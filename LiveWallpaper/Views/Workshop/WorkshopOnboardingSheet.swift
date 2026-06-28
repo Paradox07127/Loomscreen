@@ -17,17 +17,16 @@ struct WorkshopOnboardingSheet: View {
                 Text("Browse Wallpaper Engine from Steam")
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text("Paste any Workshop URL and Loomscreen pulls the official preview, title, and creator. Downloading needs your own Steam account and SteamCMD — those are an opt-in setup step.")
+                Text("Paste a Workshop URL to preview it, or set up online browsing and downloading.")
                     .font(DesignTokens.Typography.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 10) {
-                bullet(systemImage: "lock.shield", text: "We never see your Steam password, Steam Guard codes, or session tokens.")
-                bullet(systemImage: "network", text: "Metadata is fetched from Valve over HTTPS. No third-party download services.")
-                bullet(systemImage: "key", text: "Online browsing uses your own free Steam Web API key (requires Mobile Steam Guard + at least $5 of Steam Store history).")
-                bullet(systemImage: "checkmark.seal", text: "Pro & direct-distribution only — the Mac App Store build doesn't ship Workshop access.")
+                bullet(systemImage: "network", text: "Direct to Valve over HTTPS — no third-party services.")
+                bullet(systemImage: "key", text: "Online browsing uses your own free Steam Web API key.")
+                bullet(systemImage: "arrow.down.circle", text: "Downloads run through Steam's official SteamCMD.")
             }
             .frame(maxWidth: 420, alignment: .leading)
 

@@ -496,7 +496,7 @@ struct HTMLOptionsInspector: View {
                 .font(DesignTokens.Typography.code)
                 .frame(width: 380, height: 200)
                 .scrollContentBackground(.hidden)
-                .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .background(DesignTokens.Colors.surfaceSunken, in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
 
             HStack {
                 Button("Reset") {

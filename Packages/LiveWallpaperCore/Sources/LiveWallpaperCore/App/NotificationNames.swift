@@ -81,6 +81,10 @@ extension Notification.Name {
     /// from `WorkshopDeepLink` on appear / receipt.
     public static let openWorkshopPane = Notification.Name("OpenWorkshopPane")
 
+    /// Request the main window to navigate to the Apple Aerials library (e.g.
+    /// the onboarding "Apple Aerials" card on Lite / MAS Pro).
+    public static let openAppleAerials = Notification.Name("OpenAppleAerials")
+
     /// `SMAppService.register/unregister` produced an outcome that needs
     /// user-visible follow-up (approval pending, app not in /Applications/,
     /// or thrown error). `userInfo["reason"]: LoginItemFailure`.

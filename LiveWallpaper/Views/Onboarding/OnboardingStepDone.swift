@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OnboardingStepDone: View {
     let finish: () -> Void
+    @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +59,7 @@ struct OnboardingStepDone: View {
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
 
-            ForEach(Array(tipBullets.enumerated()), id: \.offset) { _, tip in
+            ForEach(Array(tips.enumerated()), id: \.offset) { _, tip in
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: tip.symbol)
                         .font(.system(size: 12, weight: .semibold))
@@ -81,12 +82,26 @@ struct OnboardingStepDone: View {
         .accessibilityElement(children: .combine)
     }
 
-    private let tipBullets: [DoneStepTip] = [
-        .init(symbol: "calendar.badge.clock", text: "Set up playlists or schedule changes"),
-        .init(symbol: "sparkles", text: "Tweak speed, fit, color, and effects"),
-        .init(symbol: "bookmark.fill", text: "Save favorites with Bookmarks"),
-        .init(symbol: "play.tv", text: "Browse Apple Aerials from the sidebar")
-    ]
+    /// Direct-distribution Pro leads with Steam Workshop (its signature
+    /// surface); Lite / MAS Pro lead with the everyday playlist/effects tips.
+    /// Gated on `.workshopOnline`, not `.scene`, so MAS Pro (scenes via import,
+    /// no Workshop) doesn't advertise a surface it can't reach.
+    private var tips: [DoneStepTip] {
+        if featureCatalog.isEnabled(.workshopOnline) {
+            return [
+                .init(symbol: "cube.transparent.fill", text: "Download Wallpaper Engine scenes from Steam Workshop"),
+                .init(symbol: "calendar.badge.clock", text: "Set up playlists or schedule changes"),
+                .init(symbol: "sparkles", text: "Tweak speed, fit, color, and effects"),
+                .init(symbol: "play.tv", text: "Browse Apple Aerials from the sidebar")
+            ]
+        }
+        return [
+            .init(symbol: "calendar.badge.clock", text: "Set up playlists or schedule changes"),
+            .init(symbol: "sparkles", text: "Tweak speed, fit, color, and effects"),
+            .init(symbol: "bookmark.fill", text: "Save favorites with Bookmarks"),
+            .init(symbol: "play.tv", text: "Browse Apple Aerials from the sidebar")
+        ]
+    }
 }
 
 private struct DoneStepTip {

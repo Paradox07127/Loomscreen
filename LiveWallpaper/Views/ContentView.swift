@@ -64,6 +64,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
             scheduleNavigationChange { selectedNavigation = .workshop }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
+            scheduleNavigationChange { selectedNavigation = .appleAerials }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             scheduleDefaultDisplaySelection()
         }
@@ -382,13 +385,12 @@ struct Sidebar: View {
             if featureCatalog.isEnabled(.systemMonitor) {
                 VStack(spacing: 0) {
                     Divider()
-                    SystemMonitorView(
+                    SystemMonitorPill(
                         activeDisplayCount: activeWallpaperDisplayCount,
                         totalDisplayCount: screenManager.screens.count
                     )
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, DesignTokens.Spacing.sm)
+                    .padding(.vertical, DesignTokens.Spacing.sm)
                 }
             }
         }

@@ -2,7 +2,10 @@
 import SwiftUI
 import AppKit
 
-/// Stats are computed off the actor so the UI never blocks on filesystem walks.
+/// Unified "Storage" tab. Every reclaimable on-disk cache the app keeps is shown
+/// here with one running total and a single "Clear All Caches" action, plus
+/// per-category clears. Stats are computed off the actor so the UI never blocks
+/// on filesystem walks. Empty categories collapse so the page stays short.
 @MainActor
 struct WPECacheManagementView: View {
     @State private var stats: WPECacheStats?
@@ -13,6 +16,7 @@ struct WPECacheManagementView: View {
     @State private var videoStats: WPEVideoCacheStats?
     @State private var isLoadingVideo: Bool = true
     @State private var showingVideoClearConfirmation: Bool = false
+    @State private var showingClearAllConfirmation: Bool = false
     @State private var lastVideoFreedBytes: UInt64?
     /// Bytes of redundant SteamCMD source archives (`.pkg`) whose payload is
     /// already unpacked into the cache — reclaimable without losing wallpapers.
@@ -23,6 +27,14 @@ struct WPECacheManagementView: View {
     /// computed once per refresh rather than per render.
     @State private var reachableIDs: Set<String> = []
 
+    #if DIRECT_DISTRIBUTION
+    /// The Workshop online-browse JSON cache (self-capped at 5-min TTL + 100 MB),
+    /// folded into the Storage total + Clear All so it lives in one place.
+    @Environment(WorkshopServices.self) private var workshopServices
+    @State private var workshopCacheBytes: Int64 = 0
+    @State private var showingWorkshopClearConfirmation: Bool = false
+    #endif
+
     private let cache: WallpaperEngineCache
 
     init(cache: WallpaperEngineCache = WallpaperEngineCache()) {
@@ -31,74 +43,17 @@ struct WPECacheManagementView: View {
 
     var body: some View {
         Form {
-            Section {
-                summaryRow
-            } header: {
-                HStack {
-                    Text("Imported Project Cache (Legacy)")
-                    Spacer()
-                    if let stats {
-                        Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel(Text("Cache totals \(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) across \(stats.entries.count) projects"))
-                    }
-                }
-            } footer: {
-                if let last = lastFreedBytes, last > 0 {
-                    Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("New scenes read their assets in place from the source, so this cache only holds older imports. Unreferenced leftovers are reclaimed automatically at startup.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if let stats, !stats.entries.isEmpty {
-                Section {
-                    ForEach(stats.entries) { entry in
-                        cacheRow(for: entry)
-                    }
-                } header: {
-                    Text("Cached Projects (\(stats.entries.count))")
-                }
-
-                Section {
-                    HStack(spacing: 12) {
-                        Button(role: .destructive) {
-                            confirmClearAll()
-                        } label: {
-                            Label("Clear All", systemImage: "trash")
-                        }
-                        .destructiveControlTint()
-                        .controlSize(.regular)
-
-                        Button(role: .destructive) {
-                            confirmPurgeOlderThan(days: 30)
-                        } label: {
-                            Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
-                        }
-                        .destructiveControlTint()
-                        .controlSize(.regular)
-                        .disabled(unusedCandidates(olderThanDays: 30).isEmpty)
-
-                        Spacer()
-                    }
-                } footer: {
-                    if isOversized {
-                        Label("Cache is using more than 1 GB. Consider clearing unused projects.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(DesignTokens.Colors.Status.warning)
-                    }
-                }
-            }
-
-            reclaimArchivesSection
+            summarySection
 
             videoCacheSection
+
+            #if DIRECT_DISTRIBUTION
+            workshopCacheSection
+            #endif
+
+            legacyCacheSection
+
+            reclaimArchivesSection
         }
         .settingsFormChrome()
         .onAppear { Task { await refreshStats() } }
@@ -106,6 +61,18 @@ struct WPECacheManagementView: View {
             Task { await refreshStats() }
         }
         .confirmDestructive($pendingDestructive)
+        .confirmationDialog(
+            "Clear all caches?",
+            isPresented: $showingClearAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear", role: .destructive) {
+                Task { await clearAllCaches() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes every cached file. Active wallpapers re-extract what they need on next render.")
+        }
         .confirmationDialog(
             "Clear scene video texture cache?",
             isPresented: $showingVideoClearConfirmation,
@@ -118,8 +85,78 @@ struct WPECacheManagementView: View {
         } message: {
             Text("Deletes every extracted video file. Each scene re-extracts its video the next time it renders.")
         }
+        #if DIRECT_DISTRIBUTION
+        .confirmationDialog(
+            "Clear Workshop browse cache?",
+            isPresented: $showingWorkshopClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear", role: .destructive) {
+                Task { await purgeWorkshopCache() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes all cached Workshop query responses. Pages will reload from Steam the next time you browse.")
+        }
+        #endif
         .errorAlert("Cache Error", message: $errorMessage)
     }
+
+    // MARK: - Summary (total + clear-all)
+
+    private var totalBytes: UInt64 {
+        var total = UInt64(stats?.totalBytes ?? 0)
+        total += videoStats?.totalBytes ?? 0
+        total += UInt64(max(0, reclaimableArchiveBytes))
+        #if DIRECT_DISTRIBUTION
+        total += UInt64(max(0, workshopCacheBytes))
+        #endif
+        return total
+    }
+
+    private var isAnyLoading: Bool {
+        isLoading || isLoadingVideo
+    }
+
+    @ViewBuilder
+    private var summarySection: some View {
+        Section {
+            if isAnyLoading {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Calculating cache size…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(byteFormatter.string(fromByteCount: Int64(totalBytes)))
+                        .font(DesignTokens.Typography.pageTitle)
+                    Text("Total storage used by all caches")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(role: .destructive) {
+                    showingClearAllConfirmation = true
+                } label: {
+                    Label("Clear All Caches", systemImage: "trash")
+                }
+                .destructiveControlTint()
+                .controlSize(.regular)
+                .disabled(totalBytes == 0)
+            }
+        } header: {
+            Text("Storage")
+        } footer: {
+            Text("Caches are bounded and cleared automatically — use these only to reclaim space now.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Scene video texture cache (the primary growing cache)
 
     /// Surfaces the `wpe-tex-video` folder's actual on-disk footprint (the
     /// `du`-equivalent), which previously went uncounted in Settings.
@@ -169,10 +206,112 @@ struct WPECacheManagementView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("MP4 frames extracted from scene video layers, reused across launches. Orphaned scenes are reclaimed automatically at startup.")
+                Text("Frames extracted from scene videos, reused across launches. Capped at 2 GB — the least-recently-used files are removed first, and orphaned scenes are reclaimed at startup.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - Workshop browse cache (DIRECT_DISTRIBUTION only)
+
+    #if DIRECT_DISTRIBUTION
+    @ViewBuilder
+    private var workshopCacheSection: some View {
+        if workshopCacheBytes > 0 {
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(byteFormatter.string(fromByteCount: workshopCacheBytes))
+                        .font(DesignTokens.Typography.pageTitle)
+                    Text("On-disk Workshop browse cache")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(role: .destructive) {
+                    showingWorkshopClearConfirmation = true
+                } label: {
+                    Label("Clear cache", systemImage: "trash")
+                }
+                .destructiveControlTint()
+                .controlSize(.regular)
+            } header: {
+                Text("Workshop browse cache")
+            } footer: {
+                Text("Browse results from Steam, refreshed every 5 minutes and capped at 100 MB.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    #endif
+
+    // MARK: - Legacy imported-project cache (hidden when empty)
+
+    @ViewBuilder
+    private var legacyCacheSection: some View {
+        if let stats, !stats.entries.isEmpty {
+            Section {
+                summaryRow
+            } header: {
+                HStack {
+                    Text("Imported Project Cache (Legacy)")
+                    Spacer()
+                    Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("Cache totals \(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) across \(stats.entries.count) projects"))
+                }
+            } footer: {
+                if let last = lastFreedBytes, last > 0 {
+                    Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("New scenes read their assets in place from the source, so this cache only holds older imports. Unreferenced leftovers are reclaimed automatically at startup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Section {
+                ForEach(stats.entries) { entry in
+                    cacheRow(for: entry)
+                }
+            } header: {
+                Text("Cached Projects (\(stats.entries.count))")
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Button(role: .destructive) {
+                        confirmClearAll()
+                    } label: {
+                        Label("Clear All", systemImage: "trash")
+                    }
+                    .destructiveControlTint()
+                    .controlSize(.regular)
+
+                    Button(role: .destructive) {
+                        confirmPurgeOlderThan(days: 30)
+                    } label: {
+                        Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
+                    }
+                    .destructiveControlTint()
+                    .controlSize(.regular)
+                    .disabled(unusedCandidates(olderThanDays: 30).isEmpty)
+
+                    Spacer()
+                }
+            } footer: {
+                if isOversized {
+                    Label("Cache is using more than 1 GB. Consider clearing unused projects.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(DesignTokens.Colors.Status.warning)
+                }
             }
         }
     }
@@ -301,6 +440,7 @@ struct WPECacheManagementView: View {
         reclaimableArchiveBytes = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
         }.value
+        workshopCacheBytes = await workshopServices.queryCache.sizeBytes()
         #endif
         await refreshVideoStats()
     }
@@ -316,6 +456,11 @@ struct WPECacheManagementView: View {
         reclaimableArchiveBytes = 0
         await refreshStats()
     }
+
+    private func purgeWorkshopCache() async {
+        await workshopServices.queryCache.clear()
+        await refreshStats()
+    }
     #endif
 
     private func refreshVideoStats() async {
@@ -328,6 +473,23 @@ struct WPECacheManagementView: View {
         let freed = await WPEVideoTextureDiskCache.shared.purgeAll()
         lastVideoFreedBytes = freed
         await refreshVideoStats()
+    }
+
+    /// Nukes every reclaimable on-disk cache in one action so storage never
+    /// creeps up unnoticed. Live wallpapers re-extract what they need on demand.
+    private func clearAllCaches() async {
+        _ = await cache.purgeAll()
+        _ = await WPEVideoTextureDiskCache.shared.purgeAll()
+        #if DIRECT_DISTRIBUTION
+        await workshopServices.queryCache.clear()
+        let cachedIDs = await cache.listCompletedWorkshopIDs()
+            .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
+        _ = await Task.detached {
+            WPEDownloadArchiveReclaimer().reclaim(cachedIDs: cachedIDs)
+        }.value
+        #endif
+        await refreshStats()
+        NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
     private func purgeAll() async {

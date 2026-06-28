@@ -5,9 +5,9 @@ public struct GlobalSettings: Codable, Sendable {
     public var preservePlaybackOnLock: Bool
     public var startOnLogin: Bool
     public var pauseOnFullScreen: Bool
-    /// Auto-pause when the foreground app looks like a game (matches a known
-    /// launcher bundle id, or macOS is in Low Power Mode). Lets the user
-    /// reclaim full GPU during gameplay without manually disabling the
+    /// Auto-pause when the foreground app declares a game
+    /// `LSApplicationCategoryType` (or macOS is in Low Power Mode). Lets the
+    /// user reclaim full GPU during gameplay without manually disabling the
     /// wallpaper. Default `true` is the common case; users with multi-monitor
     /// setups where the game runs on a secondary display can opt out.
     public var pauseInGameMode: Bool

@@ -2,48 +2,40 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// Surfaces only Video + Web/HTML. Shader and Wallpaper Engine are deliberately
-/// withheld: shader isn't the main story and WPE waits until the importer is
-/// reliable. SKU-conditional UI can return via `OnboardingPathPolicy`.
+/// Onboarding source step. Two SKU-derived cards: a single "Import a file"
+/// action that opens one picker and routes by type (video / web / — on Pro —
+/// Wallpaper Engine scene), plus a second card that is either Steam Workshop
+/// (direct Pro) or Apple Aerials. Files can also be dropped straight onto the
+/// step. Applies to every display so the first wallpaper appears immediately.
 struct OnboardingPickerView: View {
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    @Binding var selectedScreenIDs: Set<CGDirectDisplayID>
 
     let galleryActions: [OnboardingSourceAction]
     let nextStep: () -> Void
     let skip: () -> Void
+    let openAppleAerials: () -> Void
 
-    @State private var stage: Stage = .gallery
-    @State private var showHTMLSheet = false
     @State private var inlineError: LocalizedStringKey?
+    @State private var isDropTargeted = false
 
-    private enum Stage: Equatable {
-        case gallery
-        case confirm(SourceDraft)
-    }
-
-    enum SourceDraft: Equatable {
-        case video(URL, Data)
-        case html(HTMLSource)
-    }
+    private var sceneCapable: Bool { featureCatalog.isEnabled(.scene) }
 
     var body: some View {
         VStack(spacing: 18) {
             header
 
-            Group {
-                switch stage {
-                case .gallery:
-                    galleryContent
-                case .confirm(let draft):
-                    confirmContent(for: draft)
+            VStack(spacing: 12) {
+                ForEach(galleryActions.indices, id: \.self) { idx in
+                    galleryRow(for: galleryActions[idx])
                 }
             }
-            .transition(stageTransition)
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first else { return false }
+                return handleImportedURL(url)
+            } isTargeted: { isDropTargeted = $0 }
 
             Spacer(minLength: 0)
 
@@ -55,143 +47,71 @@ struct OnboardingPickerView: View {
         }
         .padding(.horizontal, 36)
         .padding(.bottom, 20)
-        .onAppear(perform: seedSelectionIfNeeded)
-        .sheet(isPresented: $showHTMLSheet) {
-            HTMLPickerSheet(
-                onCancel: { showHTMLSheet = false },
-                onConfirm: { source in
-                    showHTMLSheet = false
-                    enterConfirm(.html(source))
-                }
-            )
-        }
+        .overlay(dropHighlight)
     }
 
     // MARK: - Subviews
 
     private var header: some View {
         VStack(spacing: 4) {
-            Text(headerTitle)
+            Text("Pick Your First Wallpaper")
                 .font(DesignTokens.Typography.pageTitle)
                 .accessibilityAddTraits(.isHeader)
-
-            Text(headerSubtitle)
+            Text("Choose how to bring your desktop to life.")
                 .font(DesignTokens.Typography.body)
                 .foregroundStyle(.secondary)
         }
         .multilineTextAlignment(.center)
     }
 
-    private var headerTitle: LocalizedStringKey {
-        switch stage {
-        case .gallery: return "Pick Your First Wallpaper"
-        case .confirm: return "Confirm and Apply"
-        }
-    }
-
-    private var headerSubtitle: LocalizedStringKey {
-        switch stage {
-        case .gallery: return "Choose how to bring your desktop to life."
-        case .confirm: return "Apply this wallpaper to your selected displays."
-        }
-    }
-
-    private var galleryContent: some View {
-        VStack(spacing: 12) {
-            ForEach(galleryActions.indices, id: \.self) { idx in
-                galleryRow(for: galleryActions[idx])
-            }
-        }
-    }
-
     @ViewBuilder
     private func galleryRow(for action: OnboardingSourceAction) -> some View {
         switch action {
-        case .video:
+        case .importFile:
             ActionRowCard(
-                icon: "film",
+                icon: "square.and.arrow.down",
                 tint: .blue,
-                title: "Use a Video",
-                subtitle: "MP4 or MOV from your Mac",
-                action: pickVideoFile
+                title: "Import a File",
+                subtitle: sceneCapable
+                    ? "Video, web page, or Wallpaper Engine scene"
+                    : "Video or web page",
+                action: openImportPanel
             )
-        case .html:
+        case .workshop:
             ActionRowCard(
-                icon: "globe",
-                tint: .green,
-                title: "Use Web or HTML",
-                subtitle: "Website, .html file, or folder of assets",
-                action: { showHTMLSheet = true }
+                icon: "cube.transparent",
+                tint: .purple,
+                title: "Steam Workshop",
+                subtitle: "Browse and download community scenes",
+                action: nextStep
+            )
+        case .appleAerials:
+            ActionRowCard(
+                icon: "sparkles.tv",
+                tint: .teal,
+                title: "Apple Aerials",
+                subtitle: "Apple TV's aerial screensavers",
+                action: openAppleAerials
             )
         }
-    }
-
-    private func confirmContent(for draft: SourceDraft) -> some View {
-        VStack(spacing: 14) {
-            sourceSummary(for: draft)
-            OnboardingDisplayPillRow(
-                screens: screenManager.screens,
-                selectedScreenIDs: $selectedScreenIDs
-            )
-            VStack(spacing: 8) {
-                Button {
-                    apply(draft)
-                } label: {
-                    Text("Apply as Wallpaper", comment: "Primary CTA in the onboarding picker.")
-                        .frame(minWidth: 160)
-                }
-                .adaptiveGlassButton(.prominent)
-                .controlSize(.regular)
-                .keyboardShortcut(.defaultAction)
-
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                        stage = .gallery
-                    }
-                } label: {
-                    Text("Pick Different Source", comment: "Secondary onboarding action that returns to the gallery.")
-                        .font(DesignTokens.Typography.body)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func sourceSummary(for draft: SourceDraft) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: draft.symbolName)
-                .font(.system(size: 24))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 32)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(draft.headlineKey)
-                    .font(DesignTokens.Typography.sectionTitle)
-                Text(verbatim: draft.detail)
-                    .font(DesignTokens.Typography.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .adaptiveGlassSurface(.roundedRectangle(12))
-        .frame(maxWidth: 440)
     }
 
     @ViewBuilder
     private var skipFooter: some View {
-        if case .gallery = stage {
-            Button(action: skip) {
-                Text("Skip for Now", comment: "Secondary onboarding action that defers wallpaper setup.")
-                    .font(DesignTokens.Typography.body)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+        Button(action: skip) {
+            Text("Skip for Now", comment: "Secondary onboarding action that defers wallpaper setup.")
+                .font(DesignTokens.Typography.body)
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    private var dropHighlight: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(Color.accentColor.opacity(isDropTargeted ? 0.6 : 0), lineWidth: 2)
+            .padding(.horizontal, 24)
+            .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
+            .allowsHitTesting(false)
     }
 
     private func inlineErrorBanner(_ message: LocalizedStringKey) -> some View {
@@ -211,109 +131,117 @@ struct OnboardingPickerView: View {
         .transition(.opacity)
     }
 
-    private var stageTransition: AnyTransition {
-        reduceMotion ? .opacity : .asymmetric(
-            insertion: .move(edge: .trailing).combined(with: .opacity),
-            removal: .move(edge: .leading).combined(with: .opacity)
-        )
-    }
+    // MARK: - Import routing
 
-    // MARK: - Actions
-
-    private func seedSelectionIfNeeded() {
-        if selectedScreenIDs.isEmpty {
-            selectedScreenIDs = Set(screenManager.screens.map(\.id))
-        }
-    }
-
-    private func enterConfirm(_ draft: SourceDraft) {
-        inlineError = nil
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-            stage = .confirm(draft)
-        }
-    }
-
-    private func pickVideoFile() {
+    private func openImportPanel() {
+        NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
-        panel.prompt = L10n.Panel.preview
-
-        let response = panel.runModal()
-        guard response == .OK, let url = panel.url,
-              let bookmark = ResourceUtilities.createVideoBookmark(for: url) else { return }
+        panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
+        panel.prompt = L10n.Panel.useAsWallpaper
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-        enterConfirm(.video(url, bookmark))
+        _ = handleImportedURL(url)
     }
 
-    private func apply(_ draft: SourceDraft) {
-        let targets = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
-        guard !targets.isEmpty else {
-            withAnimation(.easeOut(duration: 0.18)) {
-                inlineError = "Choose at least one display."
+    /// Routes one dropped/picked URL to the right wallpaper kind and applies it
+    /// to all displays. Returns whether it was accepted.
+    @discardableResult
+    private func handleImportedURL(_ url: URL) -> Bool {
+        clearError()
+
+        if ResourceUtilities.isSupportedVideoURL(url) {
+            guard let bookmark = ResourceUtilities.createVideoBookmark(for: url) else {
+                return fail("Couldn't read that file. Try a different one.")
             }
-            return
-        }
-        inlineError = nil
-        switch draft {
-        case .video(let url, let bookmark):
-            for screen in targets {
+            for screen in screenManager.screens {
                 screenManager.setVideo(url: url, bookmarkData: bookmark, for: screen)
             }
-        case .html(let source):
+            nextStep()
+            return true
+        }
+
+        if isDirectoryURL(url) {
+            if folderLooksLikeScene(url) {
+                #if !LITE_BUILD
+                if sceneCapable {
+                    applyScene(url)
+                    nextStep()
+                    return true
+                }
+                #endif
+                return fail("Wallpaper Engine scenes need the Pro edition.")
+            }
+            guard let bookmark = ResourceUtilities.createBookmark(for: url) else {
+                return fail("Couldn't read that folder. Try a different one.")
+            }
+            let entries = scopedDirectoryEntries(url)
+            let indexFileName = ResourceUtilities.inferHTMLIndexFileName(from: entries)
+            applyHTML(.folder(bookmarkData: bookmark, indexFileName: indexFileName))
+            nextStep()
+            return true
+        }
+
+        if ResourceUtilities.isSupportedHTMLResourceURL(url),
+           let source = ResourceUtilities.htmlSourceFromPickedFile(url) {
+            applyHTML(source)
+            nextStep()
+            return true
+        }
+
+        return fail("That file type isn't supported. Pick a video, web page, or scene.")
+    }
+
+    private func applyHTML(_ source: HTMLSource) {
+        for screen in screenManager.screens {
+            screenManager.setHTMLWallpaperPreservingConfig(source: source, for: screen)
+        }
+    }
+
+    #if !LITE_BUILD
+    private func applyScene(_ folderURL: URL) {
+        let targets = screenManager.screens
+        let didStartScope = folderURL.startAccessingSecurityScopedResource()
+        Task { @MainActor in
+            defer { if didStartScope { folderURL.stopAccessingSecurityScopedResource() } }
             for screen in targets {
-                screenManager.setHTMLWallpaperPreservingConfig(source: source, for: screen)
+                await screenManager.importWallpaperEngineProject(at: folderURL, for: screen)
             }
         }
-        nextStep()
+    }
+    #endif
+
+    // MARK: - Helpers
+
+    private func isDirectoryURL(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    /// A folder with a `project.json` at its root is a Wallpaper Engine scene.
+    private func folderLooksLikeScene(_ url: URL) -> Bool {
+        scopedDirectoryEntries(url).contains { $0.lowercased() == "project.json" }
+    }
+
+    private func scopedDirectoryEntries(_ url: URL) -> [String] {
+        let didStartScope = url.startAccessingSecurityScopedResource()
+        defer { if didStartScope { url.stopAccessingSecurityScopedResource() } }
+        return (try? FileManager.default.contentsOfDirectory(atPath: url.path(percentEncoded: false))) ?? []
+    }
+
+    @discardableResult
+    private func fail(_ message: LocalizedStringKey) -> Bool {
+        withAnimation(.easeOut(duration: 0.18)) { inlineError = message }
+        return false
+    }
+
+    private func clearError() {
+        if inlineError != nil { inlineError = nil }
     }
 }
 
-private extension OnboardingPickerView.SourceDraft {
-    var symbolName: String {
-        switch self {
-        case .video: return "film"
-        case .html: return "globe"
-        }
-    }
-
-    var headlineKey: LocalizedStringKey {
-        switch self {
-        case .video: return "Video selected"
-        case .html: return "Web page selected"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .video(let url, _):
-            return url.lastPathComponent
-        case .html(let source):
-            return source.summaryDescription
-        }
-    }
-}
-
-private extension HTMLSource {
-    var summaryDescription: String {
-        switch self {
-        case .url(let url):
-            return url.host ?? url.absoluteString
-        case .folder(_, let indexFileName):
-            return indexFileName
-        case .file, .inline:
-            return String(
-                localized: "Local HTML file",
-                defaultValue: "Local HTML file",
-                comment: "Onboarding confirm-stage description fallback for an HTML file source."
-            )
-        }
-    }
-}
-
-/// Row layout (not a grid) so the 2 cards fill the onboarding window's width
+/// Row layout (not a grid) so the cards fill the onboarding window's width
 /// with a bigger tap target.
 private struct ActionRowCard: View {
     let icon: String
@@ -362,7 +290,7 @@ private struct ActionRowCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
-                    .fill(.regularMaterial)
+                    .fill(DesignTokens.Colors.surfaceRaised)
             )
             .galleryTileChrome(isHovering: isActive, reduceMotion: reduceMotion)
         }

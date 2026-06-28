@@ -9,9 +9,10 @@ import SwiftUI
 ///     because there's no parent HTMLConfig in the `.scene(...)` case;
 ///   - the apply path goes through `ScreenManager.updateSceneDescriptor`
 ///     instead of `updateHTMLConfig`;
-///   - `schemecolor` is *included* in the schema (the scene renderer
-///     consumes it via Phase B uniform injection; the HTML inspector
-///     hides it because CSS already paints it).
+///   - `schemecolor` (the WPE global accent) is HIDDEN by default: most scenes
+///     never bind a field to it, so the picker is a no-op for them. The renderer
+///     still resolves its value via `effectiveSceneValues` for the rare scene
+///     that references it through a `{"user":"schemecolor"}` envelope.
 struct WPESceneCustomSettingsCard: View {
     var screen: Screen
     var schema: WallpaperEngineProjectPropertySchema

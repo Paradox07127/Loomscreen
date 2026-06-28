@@ -118,7 +118,7 @@ public struct SystemMonitorView: View {
         case .fair:     return DesignTokens.Colors.Gauge.medium
         case .serious:  return DesignTokens.Colors.Gauge.high
         case .critical: return DesignTokens.Colors.Gauge.high
-        @unknown default: return .gray
+        @unknown default: return DesignTokens.Colors.textTertiary
         }
     }
 

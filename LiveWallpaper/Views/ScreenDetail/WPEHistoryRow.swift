@@ -144,7 +144,7 @@ struct WPEHistoryRow: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .thumbnailBadgeGlass(tint: Color(red: 0.08, green: 0.35, blue: 0.15), opacity: 0.85)
+        .thumbnailBadgeGlass(tint: DesignTokens.Colors.badgeActive, opacity: 0.85)
         .padding(DesignTokens.Spacing.sm)
         .accessibilityHidden(true)
     }

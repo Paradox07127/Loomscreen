@@ -15,6 +15,9 @@ struct WallpaperPolicyInputs {
     var isGameModeActive: Bool
     var isUserAbsent: Bool
     var isUnderMemoryPressure: Bool
+    /// Frontmost app carries a `.neverPause` exception — vetoes the
+    /// discretionary suspends below (but not the safety ones).
+    var isFrontmostExcludedByRule: Bool = false
 }
 
 enum WallpaperPolicyEngine {
@@ -24,18 +27,22 @@ enum WallpaperPolicyEngine {
         inputs: WallpaperPolicyInputs,
         settings: GlobalSettings
     ) -> WallpaperPerformanceProfile {
-        // Unconditional triggers (no user opt-out): the user isn't watching,
-        // memory is under pressure, an app rule fired, or the system is hot.
-        let shouldSuspend = inputs.isUserAbsent ||
+        // Safety suspends: the user isn't watching, memory is under pressure, or
+        // the system is hot. No opt-out, and a `.neverPause` exception can't veto
+        // them (overriding thermal would risk overheating).
+        let safetySuspend = inputs.isUserAbsent ||
             inputs.isUnderMemoryPressure ||
-            inputs.isApplicationRuleActive ||
-            shouldSuspendForThermal(inputs.thermalState) ||
-            // Setting-gated triggers (each predicate owns its own toggle).
+            shouldSuspendForThermal(inputs.thermalState)
+
+        // Discretionary suspends yield the GPU for games / full-screen / battery /
+        // app rules. A `.neverPause` exception on the frontmost app vetoes them.
+        let discretionarySuspend = inputs.isApplicationRuleActive ||
             (settings.pauseInGameMode && inputs.isGameModeActive) ||
             shouldPauseForPower(globalSettings: settings, powerSource: inputs.powerSource) ||
             shouldApplyFullScreenPolicy(globalSettings: settings, isHiddenByFullScreen: inputs.isHiddenByFullScreen) ||
             shouldApplyWindowOcclusionPolicy(globalSettings: settings, isWindowOccluding: inputs.isWindowOccluding)
 
+        let shouldSuspend = safetySuspend || (discretionarySuspend && !inputs.isFrontmostExcludedByRule)
         return shouldSuspend ? .suspended : .quality
     }
 

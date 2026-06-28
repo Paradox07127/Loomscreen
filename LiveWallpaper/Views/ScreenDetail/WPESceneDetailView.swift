@@ -412,7 +412,7 @@ struct WPESceneDetailView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(.ultraThinMaterial, in: Capsule())
+        .adaptiveGlassSurface(.capsule)
     }
 
     private var actions: some View {

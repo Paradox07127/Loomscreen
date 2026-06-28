@@ -15,6 +15,10 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// Last applied HTML source — restored on type switch back to HTML.
     public var savedHTMLSource: HTMLSource?
     public var savedHTMLConfig: HTMLConfig?
+    /// Last applied scene descriptor — its custom `propertyOverrides` are restored
+    /// when the user re-picks the same scene after a type switch. Without it a
+    /// scene's settings vanished the moment another wallpaper type went active.
+    public var savedSceneDescriptor: SceneDescriptor?
     public var playbackSpeed: Double
     public var fitMode: VideoFitMode
     public var videoDisplayMode: VideoDisplayMode = .perDisplay
@@ -72,6 +76,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case savedVideoPackageEntryName
         case savedHTMLSource
         case savedHTMLConfig
+        case savedSceneDescriptor
         case playbackSpeed
         case fitMode
         case videoDisplayMode
@@ -347,6 +352,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
+        savedSceneDescriptor = try c.decodeIfPresent(SceneDescriptor.self, forKey: .savedSceneDescriptor)
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
         displayFingerprint = try c.decodeIfPresent(String.self, forKey: .displayFingerprint)
         // Absent in legacy / loose-video payloads → nil. Refined below from the
@@ -365,6 +371,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                source.isRestorableHTMLSource {
                 savedHTMLSource = source
                 savedHTMLConfig = config
+            }
+            if savedSceneDescriptor == nil, case .scene(let descriptor) = decodedWallpaper {
+                savedSceneDescriptor = descriptor
             }
             return
         }
@@ -446,6 +455,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(savedVideoPackageEntryName, forKey: .savedVideoPackageEntryName)
         try c.encodeIfPresent(savedHTMLSource, forKey: .savedHTMLSource)
         try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
+        try c.encodeIfPresent(savedSceneDescriptor, forKey: .savedSceneDescriptor)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
         try c.encode(videoDisplayMode, forKey: .videoDisplayMode)
@@ -498,6 +508,23 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         preserveCurrentVideoBookmarkIfNeeded()
         preserveCurrentHTMLIfNeeded()
         activeWallpaper = .metalShader(source)
+    }
+
+    public mutating func setSceneWallpaper(_ descriptor: SceneDescriptor, origin: WPEOrigin?) {
+        preserveCurrentVideoBookmarkIfNeeded()
+        preserveCurrentHTMLIfNeeded()
+        // Re-picking the same scene after a type switch carries its last-used
+        // custom settings back, mirroring savedVideo/savedHTML restoration.
+        var resolved = descriptor
+        if descriptor.propertyOverrides.isEmpty,
+           let saved = savedSceneDescriptor,
+           saved.isSameScene(as: descriptor),
+           !saved.propertyOverrides.isEmpty {
+            resolved = descriptor.withPropertyOverrides(saved.propertyOverrides)
+        }
+        activeWallpaper = .scene(resolved)
+        wpeOrigin = origin
+        savedSceneDescriptor = resolved
     }
 
     @discardableResult

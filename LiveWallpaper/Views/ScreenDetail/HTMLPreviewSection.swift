@@ -101,7 +101,7 @@ struct HTMLPreviewSection: View {
                 .scaledToFill()
         } else if isLoading {
             ZStack {
-                Rectangle().fill(.regularMaterial)
+                Rectangle().fill(DesignTokens.Colors.pageBackground)
                 LiquidGlassSpinner()
             }
         } else if loadFailed {
@@ -138,7 +138,7 @@ struct HTMLPreviewSection: View {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 11, weight: .semibold))
                 .padding(7)
-                .background(.thinMaterial, in: Circle())
+                .adaptiveGlassSurface(.circle, interactive: true)
         }
         .buttonStyle(.plain)
         .opacity(source == nil ? 0 : 1)

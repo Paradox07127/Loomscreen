@@ -98,6 +98,30 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         )
     }
 
+    public func withPropertyOverrides(
+        _ overrides: [String: WallpaperEngineProjectPropertyValue]
+    ) -> SceneDescriptor {
+        SceneDescriptor(
+            workshopID: workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: capabilityTier,
+            assetStorage: assetStorage,
+            dependencyWorkshopIDs: dependencyWorkshopIDs,
+            preflightTier: preflightTier,
+            preflightFeatureFlags: preflightFeatureFlags,
+            propertyOverrides: overrides
+        )
+    }
+
+    /// Same underlying scene (workshop item + entry), ignoring user overrides
+    /// and derived preflight metadata — lets saved settings carry across a re-pick.
+    public func isSameScene(as other: SceneDescriptor) -> Bool {
+        workshopID == other.workshopID
+            && cacheRelativePath == other.cacheRelativePath
+            && entryFile == other.entryFile
+    }
+
     private enum CodingKeys: String, CodingKey {
         case workshopID
         case cacheRelativePath

@@ -11,6 +11,10 @@ public struct ApplicationPerformanceRule: Codable, Equatable, Sendable, Identifi
         case frontmost
         /// Pause whenever the app is running, even in the background.
         case running
+        /// Never pause while this app is frontmost — vetoes auto game-mode /
+        /// full-screen / occlusion / battery pauses so the user can "un-flag" a
+        /// mis-detected app. Safety pauses (thermal / memory / idle) still win.
+        case neverPause
     }
 
     public var bundleID: String

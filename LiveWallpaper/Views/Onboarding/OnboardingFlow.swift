@@ -1,19 +1,23 @@
 import LiveWallpaperCore
 import SwiftUI
 
-private enum OnboardingStep: Int, CaseIterable {
+private enum OnboardingStep: Hashable {
     case welcome
     case pick
+    case workshop
     case done
 }
 
 struct OnboardingFlow: View {
     @AppStorage("Onboarding.Completed") private var hasCompletedOnboarding: Bool = false
-    @State private var currentStep: OnboardingStep = .welcome
+    @State private var index = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.featureCatalog) private var featureCatalog
 
     let onClose: () -> Void
+    /// AppDelegate opens the main window at the Apple Aerials library. Defaults
+    /// to a no-op so previews / tests can construct the flow standalone.
+    var onShowAppleAerials: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -27,12 +31,21 @@ struct OnboardingFlow: View {
             }
         }
         .frame(width: 520, height: 540)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: currentStep)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: index)
     }
 
     private var policy: OnboardingPathPolicy {
         OnboardingPathPolicy(capabilities: featureCatalog.capabilities)
     }
+
+    private var steps: [OnboardingStep] {
+        var result: [OnboardingStep] = [.welcome, .pick]
+        if policy.showsWorkshopSetup { result.append(.workshop) }
+        result.append(.done)
+        return result
+    }
+
+    private var currentStep: OnboardingStep { steps[min(index, steps.count - 1)] }
 
     private var background: some View {
         ZStack(alignment: .top) {
@@ -57,7 +70,18 @@ struct OnboardingFlow: View {
             case .welcome:
                 OnboardingStepWelcome(nextStep: nextStep)
             case .pick:
-                OnboardingStepFirstWallpaper(policy: policy, nextStep: nextStep, skip: skip)
+                OnboardingStepFirstWallpaper(
+                    policy: policy,
+                    nextStep: nextStep,
+                    skip: skipToDone,
+                    openAppleAerials: showAppleAerials
+                )
+            case .workshop:
+                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                OnboardingStepWorkshop(continueStep: nextStep, skip: nextStep)
+                #else
+                EmptyView()
+                #endif
             case .done:
                 OnboardingStepDone(finish: finish)
             }
@@ -75,15 +99,15 @@ struct OnboardingFlow: View {
     }
 
     private var progressIndicator: some View {
-        let totalSteps = OnboardingStep.allCases.count
-        let stepLabel = Text("Step \(currentStep.rawValue + 1) of \(totalSteps)")
+        let total = steps.count
+        let stepLabel = Text("Step \(index + 1) of \(total)")
         return HStack(spacing: 8) {
-            ForEach(0..<totalSteps, id: \.self) { index in
-                let isCurrent = index == currentStep.rawValue
+            ForEach(0..<total, id: \.self) { i in
+                let isCurrent = i == index
                 Capsule()
                     .fill(isCurrent ? Color.accentColor : Color.secondary.opacity(0.28))
                     .frame(width: isCurrent ? 22 : 8, height: 6)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: currentStep)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: index)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -91,12 +115,19 @@ struct OnboardingFlow: View {
     }
 
     private func nextStep() {
-        guard let next = OnboardingStep(rawValue: currentStep.rawValue + 1) else { return }
-        withAnimation { currentStep = next }
+        guard index < steps.count - 1 else { return }
+        withAnimation { index += 1 }
     }
 
-    private func skip() {
-        withAnimation { currentStep = .done }
+    private func skipToDone() {
+        guard let doneIndex = steps.firstIndex(of: .done) else { return }
+        withAnimation { index = doneIndex }
+    }
+
+    private func showAppleAerials() {
+        hasCompletedOnboarding = true
+        onShowAppleAerials()
+        onClose()
     }
 
     private func finish() {
