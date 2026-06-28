@@ -42,6 +42,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// (60 × 122 MB raw) to the streaming source.
     private static let lazyAnimationRawByteThreshold = 200_000_000
 
+    static let textureCacheBudgetMiBDefaultsKey = "WPEMetalTextureCacheBudgetMiB"
+    /// Optional VRAM budget (MiB) for reloadable static source textures. Default
+    /// OFF: unset or 0 ⇒ unbounded (eager resident cache, byte-identical to the
+    /// legacy path). When set, inactive (hidden-layer) textures over budget are
+    /// LRU-evicted and reloaded on demand. `defaults write Taijia.LiveWallpaper
+    /// WPEMetalTextureCacheBudgetMiB -int 256`.
+    static var textureCacheBudgetBytes: Int? {
+        guard let raw = UserDefaults.standard.object(forKey: textureCacheBudgetMiBDefaultsKey) else { return nil }
+        let mib = (raw as? NSNumber)?.intValue ?? 0
+        guard mib > 0 else { return nil }
+        return mib * 1_048_576
+    }
+
     /// When true, emitters are pre-populated to their steady-state spread on
     /// load (`WPEParticleSystem.prewarm`, up to ~900 substeps/system — the
     /// dominant `particles.load` cost). Default OFF: emitters start empty and
@@ -151,10 +164,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Bumped per reload so a slow async measurement from a prior scene is ignored.
     private var introPhaseToken = 0
     private var loadedTextures: [String: MTLTexture] = [:]
+    /// Reloadable static-texture bookkeeping for the optional VRAM budget
+    /// (`textureCacheBudgetBytes`). Inactive over-budget entries are evicted and
+    /// reloaded on demand; dynamic/video sources are never tracked here.
+    private struct StaticTextureCacheRecord: Sendable {
+        let layerName: String
+        let candidates: [String]
+        var bytes: Int
+    }
+    private var staticTextureCacheRecords: [String: StaticTextureCacheRecord] = [:]
+    private var textureCacheLRU = WPEMetalTextureCacheLRU(budgetBytes: 0)
+    private var textureCacheBudgetBytesInUse: Int?
+    private var staticTexturePlaceholderPaths: Set<String> = []
+    private var pendingStaticTextureReloads: Set<String> = []
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
     /// during `performLoad()`; refreshed each render via
-    /// `texturesForCurrentFrame(time:)` so the executor sees the live frame.
+    /// `texturesForCurrentFrame(time:pipeline:)` so the executor sees the live frame.
     private var dynamicTextureSources: [String: WPEDynamicTextureSource] = [:]
     private var sceneRenderSize: CGSize = CGSize(width: 1, height: 1)
     private var cameraUniforms: WPEMetalCameraUniforms = .identity
@@ -277,13 +303,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         self.engineAssetsRootURL = engineAssetsRootURL
         let executor = try WPEMetalRenderExecutor(device: device)
         let resolutionTracer = WPEResolutionTracer()
-        let didStartEngineAssetsAccess = engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false
-        // Only feed the engine-assets root to the resolver when its security
-        // scope actually opened — otherwise the resolver would attempt reads
-        // from an unauthorized root and the "fallback disabled" log below would
-        // be a lie.
-        let effectiveEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
-        self.activeEngineAssetsRootURL = effectiveEngineAssetsRootURL
+        // A managed (in-app-downloaded) install lives inside our sandbox
+        // container — it's always readable and has no security scope to open, so
+        // don't gate it on `startAccessingSecurityScopedResource()` (which
+        // returns false for container-internal paths).
+        let needsScope = engineAssetsRootURL.map { !WPEEngineAssetsLibrary.isContainerInternal($0) } ?? false
+        let didStartEngineAssetsAccess = needsScope
+            ? (engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false)
+            : false
+        // Feed the engine-assets root to the resolver when it needs no scope
+        // (container-internal) or its security scope actually opened — otherwise
+        // the resolver would attempt reads from an unauthorized root.
+        let effectiveEngineAssetsRootURL: URL? = engineAssetsRootURL.flatMap {
+            (!needsScope || didStartEngineAssetsAccess) ? $0 : nil
+        }
+        // Only the scoped case has access to stop on teardown.
+        self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.sceneAssetProvider = assetProvider
         self.projectManifestRootURL = projectManifestRootURL
         if let assetProvider {
@@ -312,7 +347,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         self.snapshotter = snapshotter
         super.init()
 
-        if engineAssetsRootURL != nil && !didStartEngineAssetsAccess {
+        if needsScope && !didStartEngineAssetsAccess {
             Logger.warning(
                 "Wallpaper Engine assets security scope could not be started — engine fallback disabled for this session",
                 category: .fileAccess
@@ -1195,7 +1230,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return try executor.render(
             pipeline: truncated,
             size: sceneRenderSize,
-            textures: texturesForCurrentFrame(time: uniforms.time),
+            textures: try texturesForCurrentFrame(time: uniforms.time, pipeline: truncated),
             dynamicTextureNames: Set(dynamicTextureSources.keys),
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms,
@@ -1389,7 +1424,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // steady-state frame (only the load-time first frame ever gets past it).
         let splitFirstFrame = !didLoad && WPESceneLoadTiming.isEnabled
         let texPrepStart = splitFirstFrame ? DispatchTime.now() : nil
-        let currentTextures = texturesForCurrentFrame(time: uniforms.time)
+        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: framePipeline)
         let gpuRenderStart = splitFirstFrame ? DispatchTime.now() : nil
         let frame = try executor.render(
             pipeline: framePipeline,
@@ -2479,6 +2514,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
         loadedTextures = [:]
         dynamicTextureSources = [:]
+        resetTextureCacheBudgetState()
 
         // Collect the unique external textures in pipeline order. Deduping up
         // front (instead of the old per-iteration map check) means concurrent
@@ -2554,7 +2590,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 }
                 switch result {
                 case .staticTexture(let texture):
-                    loadedTextures[jobs[index].path] = texture
+                    recordLoadedStaticTexture(
+                        path: jobs[index].path,
+                        layerName: jobs[index].layerName,
+                        candidates: jobs[index].candidates,
+                        texture: texture
+                    )
                 case .needsOnActor:
                     // Rare: video / multi-frame animation / heavy-streaming
                     // `.tex`. Their source construction is @MainActor-only, so
@@ -2644,8 +2685,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             try Task.checkCancellation()
             switch resource {
             case .staticTexture(let texture):
-                loadedTextures[path] = texture
+                recordLoadedStaticTexture(
+                    path: path,
+                    layerName: layerName,
+                    candidates: textureCandidates(for: path),
+                    texture: texture
+                )
             case .dynamicSource(let source):
+                forgetStaticTextureCacheRecord(path)
                 dynamicTextureSources[path] = source
                 if let texture = source.texture(at: lastRuntimeUniforms?.time ?? 0) {
                     loadedTextures[path] = texture
@@ -2883,8 +2930,199 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return texture
     }
 
-    /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before every render call.
-    private func texturesForCurrentFrame(time: TimeInterval) -> [String: MTLTexture] {
+    private func recordLoadedStaticTexture(
+        path: String,
+        layerName: String,
+        candidates: [String],
+        texture: MTLTexture
+    ) {
+        loadedTextures[path] = texture
+        staticTexturePlaceholderPaths.remove(path)
+        let bytes = Self.textureResidentBytes(for: texture)
+        staticTextureCacheRecords[path] = StaticTextureCacheRecord(
+            layerName: layerName,
+            candidates: candidates,
+            bytes: bytes
+        )
+        if textureCacheBudgetBytesInUse != nil {
+            textureCacheLRU.admit(path, bytes: bytes)
+        }
+    }
+
+    private func forgetStaticTextureCacheRecord(_ path: String) {
+        staticTextureCacheRecords.removeValue(forKey: path)
+        staticTexturePlaceholderPaths.remove(path)
+        pendingStaticTextureReloads.remove(path)
+        textureCacheLRU.remove(path)
+    }
+
+    private func resetTextureCacheBudgetState() {
+        staticTextureCacheRecords.removeAll(keepingCapacity: false)
+        staticTexturePlaceholderPaths.removeAll(keepingCapacity: false)
+        pendingStaticTextureReloads.removeAll(keepingCapacity: false)
+        textureCacheLRU.removeAll()
+        textureCacheBudgetBytesInUse = nil
+    }
+
+    private func activateTextureCacheBudget(_ budgetBytes: Int) {
+        guard textureCacheBudgetBytesInUse != budgetBytes else { return }
+        textureCacheLRU = WPEMetalTextureCacheLRU(budgetBytes: budgetBytes)
+        textureCacheBudgetBytesInUse = budgetBytes
+        for (path, record) in staticTextureCacheRecords
+        where loadedTextures[path] != nil && !staticTexturePlaceholderPaths.contains(path) {
+            textureCacheLRU.admit(path, bytes: record.bytes)
+        }
+    }
+
+    private func deactivateTextureCacheBudget() {
+        guard textureCacheBudgetBytesInUse != nil else { return }
+        textureCacheBudgetBytesInUse = nil
+        textureCacheLRU.removeAll()
+        // Budget turned off mid-session: reload anything previously evicted so the
+        // eager-resident invariant holds again.
+        for path in staticTextureCacheRecords.keys where loadedTextures[path] == nil {
+            scheduleStaticTextureReload(for: path)
+        }
+    }
+
+    /// External texture paths the upcoming frame actually samples, restricted to
+    /// reloadable static ones (the only eviction candidates).
+    private func activeStaticTexturePaths(for pipeline: WPEPreparedRenderPipeline) -> Set<String> {
+        activeExternalTexturePaths(for: pipeline).filter { staticTextureCacheRecords[$0] != nil }
+    }
+
+    private func activeExternalTexturePaths(for pipeline: WPEPreparedRenderPipeline) -> Set<String> {
+        var paths = Set<String>()
+        for layer in pipeline.layers {
+            // A plain image layer with no passes is still drawn (encodeCopy) when
+            // visible, so its image texture is sampled and must stay protected.
+            if layer.passes.isEmpty {
+                if layer.graphLayer.visible,
+                   let path = externalTexturePath(for: .image(layer.graphLayer.imagePath)) {
+                    paths.insert(path)
+                }
+                continue
+            }
+            for pass in layer.passes {
+                // Hidden layers still encode composite/FBO passes (dependents may
+                // sample them); only their scene draw is skipped — mirror that here.
+                if !layer.graphLayer.visible {
+                    switch pass.pass.target {
+                    case .scene:
+                        continue
+                    case .layerComposite, .fbo:
+                        break
+                    }
+                }
+                for reference in requiredTextureReferences(for: pass) {
+                    if let path = externalTexturePath(for: reference) {
+                        paths.insert(path)
+                    }
+                }
+            }
+        }
+        return paths
+    }
+
+    /// Guarantee every active static path has at least a placeholder this frame
+    /// (so an evicted texture never renders as a missing/black draw) and queue a
+    /// reload for any that are missing or placeholder-only.
+    private func ensureActiveStaticTexturesResident(_ activePaths: Set<String>) throws {
+        for path in activePaths {
+            if loadedTextures[path] == nil {
+                loadedTextures[path] = try makeDynamicPlaceholderTexture(label: "\(path) static placeholder")
+                staticTexturePlaceholderPaths.insert(path)
+            }
+            if staticTexturePlaceholderPaths.contains(path) {
+                scheduleStaticTextureReload(for: path)
+            }
+        }
+    }
+
+    private func touchStaticTextureCache(paths: Set<String>) {
+        for path in paths {
+            textureCacheLRU.touch(path)
+        }
+    }
+
+    private func evictInactiveStaticTextures(protecting protected: Set<String>) {
+        let evicted = textureCacheLRU.evictOverBudget(protecting: protected)
+        for path in evicted {
+            loadedTextures.removeValue(forKey: path)
+            staticTexturePlaceholderPaths.remove(path)
+            Logger.info("[WPE.texture-cache] evicted static texture path=\(path)", category: .wpeRender)
+        }
+    }
+
+    /// Reload an evicted static texture off the main thread, then republish on the
+    /// main actor under a `loadGeneration` guard so a reload from a prior scene is
+    /// ignored. Triggers a redraw so the placeholder is replaced once resident.
+    private func scheduleStaticTextureReload(for path: String) {
+        guard let record = staticTextureCacheRecords[path],
+              pendingStaticTextureReloads.insert(path).inserted else { return }
+        let generation = loadGeneration
+        let resolver = resourceResolver
+        let loader = textureLoader
+        let threshold = Self.lazyAnimationRawByteThreshold
+        Task(priority: .utility) { @MainActor [weak self] in
+            let result = try? await Self.resolveStaticTextureOrDefer(
+                relativePath: path,
+                label: "WPE texture \(path)",
+                candidates: record.candidates,
+                resolver: resolver,
+                loader: loader,
+                streamingThreshold: threshold
+            )
+            guard let self, self.loadGeneration == generation else { return }
+            self.pendingStaticTextureReloads.remove(path)
+            switch result {
+            case .staticTexture(let texture):
+                self.recordLoadedStaticTexture(
+                    path: path,
+                    layerName: record.layerName,
+                    candidates: record.candidates,
+                    texture: texture
+                )
+            case .needsOnActor:
+                try? await self.loadDynamicTextureOnActor(path: path, layerName: record.layerName)
+            case .none:
+                Logger.warning("[WPE.texture-cache] reload failed path=\(path)", category: .wpeRender)
+                return
+            }
+            self.mtkView.setNeedsDisplay(self.mtkView.bounds)
+        }
+    }
+
+    private static func textureResidentBytes(for texture: MTLTexture) -> Int {
+        // BC formats are block-compressed in VRAM (the texture loader uploads them
+        // compressed); per-pixel math would 4-6x over-count the budget.
+        switch texture.pixelFormat {
+        case .bc1_rgba, .bc1_rgba_srgb:
+            return compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 8)
+        case .bc2_rgba, .bc2_rgba_srgb, .bc3_rgba, .bc3_rgba_srgb,
+             .bc7_rgbaUnorm, .bc7_rgbaUnorm_srgb:
+            return compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 16)
+        default:
+            return texture.width * texture.height * textureCacheBytesPerPixel(for: texture.pixelFormat)
+        }
+    }
+
+    private static func compressedTextureBytes(width: Int, height: Int, bytesPerBlock: Int) -> Int {
+        max((width + 3) / 4, 1) * max((height + 3) / 4, 1) * bytesPerBlock
+    }
+
+    private static func textureCacheBytesPerPixel(for pixelFormat: MTLPixelFormat) -> Int {
+        switch pixelFormat {
+        case .rgba16Float: return 8
+        case .rg8Unorm: return 2
+        case .r8Unorm: return 1
+        default: return 4
+        }
+    }
+
+    /// Phase 2E: pulls fresh `MTLTexture`s from dynamic sources and enforces the
+    /// optional static-texture VRAM budget before every render call.
+    private func texturesForCurrentFrame(time: TimeInterval, pipeline: WPEPreparedRenderPipeline) throws -> [String: MTLTexture] {
         let shouldLogHeartbeat = time - lastHeartbeatTime >= 10.0 || lastHeartbeatTime < 0
         var dynamicFrameLog: [String] = []
         for (path, source) in dynamicTextureSources {
@@ -2898,6 +3136,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 } else {
                     dynamicFrameLog.append("\(path)#?")
                 }
+            }
+        }
+
+        // Zero overhead on the default (budget never enabled, nothing evicted) path:
+        // only walk active paths when the budget is/was active or a placeholder
+        // still awaits reload.
+        if Self.textureCacheBudgetBytes != nil
+            || textureCacheBudgetBytesInUse != nil
+            || !staticTexturePlaceholderPaths.isEmpty {
+            let activeStaticPaths = activeStaticTexturePaths(for: pipeline)
+            try ensureActiveStaticTexturesResident(activeStaticPaths)
+            if let budgetBytes = Self.textureCacheBudgetBytes {
+                activateTextureCacheBudget(budgetBytes)
+                touchStaticTextureCache(paths: activeStaticPaths)
+                evictInactiveStaticTextures(protecting: activeStaticPaths)
+            } else {
+                deactivateTextureCacheBudget()
             }
         }
         // Heartbeat throttled to 10s so it confirms liveness without spamming
@@ -2916,6 +3171,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         dynamicTextureSources.values.forEach { $0.invalidate() }
         dynamicTextureSources.removeAll()
         loadedTextures.removeAll()
+        resetTextureCacheBudgetState()
     }
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {

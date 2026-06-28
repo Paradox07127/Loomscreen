@@ -8,6 +8,26 @@ import Testing
 @Suite("WPE Metal render executor")
 struct WPEMetalRenderExecutorTests {
 
+    @Test("Refraction snapshot freshness tracks output texture identity")
+    func refractionSnapshotFreshnessTracksOutputIdentity() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let output = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 0, count: 16))
+        let scratch = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 0, count: 16))
+        var frameState = WPEMetalFrameState(output: output, sceneSize: CGSize(width: 2, height: 2))
+
+        frameState.markRefractionSnapshotFresh(for: output)
+        #expect(frameState.hasFreshRefractionSnapshot(for: output))
+        #expect(!frameState.hasFreshRefractionSnapshot(for: scratch))
+
+        // A write to a different texture must not invalidate the snapshot.
+        frameState.registerWrite(texture: scratch, targetID: .named("scratch"))
+        #expect(frameState.hasFreshRefractionSnapshot(for: output))
+
+        // A write to the same output texture invalidates it (next pass re-blits).
+        frameState.registerWrite(texture: output, targetID: .scene)
+        #expect(!frameState.hasFreshRefractionSnapshot(for: output))
+    }
+
     @Test("Renders solidcolor pass to offscreen texture")
     func rendersSolidColor() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

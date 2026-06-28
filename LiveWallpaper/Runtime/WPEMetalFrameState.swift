@@ -38,6 +38,10 @@ struct WPEMetalFrameState {
     /// blends, culls, or rejects fragments via depth.
     var initializedTextures: Set<ObjectIdentifier> = []
     var depthTextures: [WPEMetalDepthTextureKey: MTLTexture] = [:]
+    /// Identity of the output texture whose REFRACT snapshot is still current.
+    /// Cleared the moment that same physical texture is written again, so a
+    /// recycled output never inherits a stale snapshot.
+    private var freshRefractionSnapshotOutputID: ObjectIdentifier?
     /// Scene-level camera parallax for this frame; object-quad (scene-targeted)
     /// draws translate each layer by `cameraParallax.pixelOffset(depth:…)`.
     var cameraParallax: WPECameraParallaxFrame = .neutral
@@ -68,14 +72,26 @@ struct WPEMetalFrameState {
     }
 
     mutating func registerWrite(texture: MTLTexture, targetID: WPEMetalTargetID) {
+        let textureID = ObjectIdentifier(texture)
         writtenTargets.insert(targetID)
-        initializedTextures.insert(ObjectIdentifier(texture))
+        initializedTextures.insert(textureID)
+        if freshRefractionSnapshotOutputID == textureID {
+            freshRefractionSnapshotOutputID = nil
+        }
         switch targetID {
         case .scene:
             latestSceneTexture = texture
         case .named(let name):
             latestNamedTextures[name] = texture
         }
+    }
+
+    mutating func markRefractionSnapshotFresh(for texture: MTLTexture) {
+        freshRefractionSnapshotOutputID = ObjectIdentifier(texture)
+    }
+
+    func hasFreshRefractionSnapshot(for texture: MTLTexture) -> Bool {
+        freshRefractionSnapshotOutputID == ObjectIdentifier(texture)
     }
 
     mutating func seedPreviousTexture(_ texture: MTLTexture, targetID: WPEMetalTargetID) {

@@ -150,6 +150,19 @@ final class WPEMetalRenderExecutor {
         return nil
     }
 
+    static let refractionSnapshotReuseDefaultsKey = "WPEMetalRefractionSnapshotReuseEnabled"
+    /// Skip the per-refract-pass full-frame blit while no write has touched the
+    /// same output texture since the last snapshot. Default ON; suite-first so
+    /// `defaults write Taijia.LiveWallpaper WPEMetalRefractionSnapshotReuseEnabled
+    /// -bool NO` is honoured even when the renderer runs outside the app's standard domain.
+    static var isRefractionSnapshotReuseEnabled: Bool {
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
+           suite.object(forKey: refractionSnapshotReuseDefaultsKey) != nil {
+            return suite.bool(forKey: refractionSnapshotReuseDefaultsKey)
+        }
+        return UserDefaults.standard.object(forKey: refractionSnapshotReuseDefaultsKey) as? Bool ?? true
+    }
+
     /// Rollback gate for sub-region compose-layer output (the audio-visualizer
     /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
     /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
@@ -764,6 +777,11 @@ final class WPEMetalRenderExecutor {
     // own sub-rect scene passthrough must be suppressed (else it paints a
     // picture-in-picture scene-copy; scene 3632513108's bottom-right control panel).
     private var groupingContainerObjectIDs: Set<String> = []
+    /// Logical targets rendered by >1 depth-using pass: their depth may be loaded
+    /// across encoders (e.g. a `depthTest:less` pass reading a prior pass's depth),
+    /// so they keep persistent depth rather than transient/memoryless. Recomputed
+    /// per render from the prepared pipeline.
+    private var persistentDepthTargetIDs: Set<WPEMetalTargetID> = []
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -859,6 +877,7 @@ final class WPEMetalRenderExecutor {
         frameState.cameraParallax = runtimeUniforms.cameraParallax
         currentSceneSize = size
         groupingContainerObjectIDs = Set(preparedPipeline.layers.compactMap { $0.graphLayer.parentObjectID })
+        persistentDepthTargetIDs = computePersistentDepthTargetIDs(for: preparedPipeline)
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
         let attachmentContext = makeAttachmentFrameContext(
@@ -892,13 +911,10 @@ final class WPEMetalRenderExecutor {
                     cameraParallax: particleParallax,
                     texturesByMaterial: particleTextures,
                     normalsByMaterial: particleNormalTextures,
+                    frameState: &frameState,
                     traceIndex: traceIndex
                 ) {
                     didEncode = true
-                    // Mark the scene target written so a later scene pass loads
-                    // (instead of clearing away) the particles, and so
-                    // previous-frame history + full-frame aliases see them.
-                    frameState.registerWrite(texture: output, targetID: .scene)
                     #if DEBUG
                     captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
                     #endif
@@ -1216,6 +1232,7 @@ final class WPEMetalRenderExecutor {
         cameraParallax: WPECameraParallaxFrame,
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
         normalsByMaterial: [ObjectIdentifier: MTLTexture],
+        frameState: inout WPEMetalFrameState,
         traceIndex: Int
     ) throws -> Bool {
         guard system.liveInstanceCount > 0 else { return false }
@@ -1230,7 +1247,7 @@ final class WPEMetalRenderExecutor {
         // either, fall back to the flat-sprite path.
         let refractNormal = system.isRope ? nil : normalsByMaterial[ObjectIdentifier(system)]
         let refractBackground: MTLTexture? = refractNormal == nil ? nil
-            : snapshotForRefraction(of: output, into: commandBuffer)
+            : snapshotForRefraction(of: output, into: commandBuffer, frameState: &frameState)
         let isRefract = refractNormal != nil && refractBackground != nil
         let state = try particlePipelineState(
             colorPixelFormat: output.pixelFormat,
@@ -1316,6 +1333,11 @@ final class WPEMetalRenderExecutor {
             )
         }
         encoder.endEncoding()
+        // Mark the scene target written so a later scene pass loads (instead of
+        // clearing away) the particles, previous-frame history + full-frame
+        // aliases see them, and any refraction snapshot taken before this draw is
+        // invalidated before the next interleaved pass requests another.
+        frameState.registerWrite(texture: output, targetID: .scene)
 
         #if !LITE_BUILD && DEBUG
         WPECanonicalTraceRecorder.shared.recordParticlePass(
@@ -1628,19 +1650,29 @@ final class WPEMetalRenderExecutor {
     }
 
     private var particlePipelineCache: [ParticlePipelineKey: MTLRenderPipelineState] = [:]
-    /// Reused scene snapshot for REFRACT particle passes; reallocated when the
-    /// output size/format changes. One full-frame copy per refract pass.
+    /// Reused scene snapshot storage for REFRACT particle passes; reallocated when
+    /// the output size/format changes. A frame-local freshness guard decides
+    /// whether the contents can be reused without another full-frame blit.
     private var refractionBackground: MTLTexture?
 
     /// Blit the scene-so-far into a private cached texture so a REFRACT particle
     /// pass can sample it as the refracted background (can't read+write the live
-    /// attachment). Returns nil if the output can't be a blit source.
-    private func snapshotForRefraction(of output: MTLTexture, into commandBuffer: MTLCommandBuffer) -> MTLTexture? {
+    /// attachment). Returns nil if the output can't be a blit source. Reuses the
+    /// last snapshot when no write touched the same output texture since.
+    private func snapshotForRefraction(
+        of output: MTLTexture,
+        into commandBuffer: MTLCommandBuffer,
+        frameState: inout WPEMetalFrameState
+    ) -> MTLTexture? {
         guard !output.isFramebufferOnly else { return nil }
         let bg: MTLTexture
         if let cached = refractionBackground, cached.width == output.width,
            cached.height == output.height, cached.pixelFormat == output.pixelFormat {
             bg = cached
+            if Self.isRefractionSnapshotReuseEnabled,
+               frameState.hasFreshRefractionSnapshot(for: output) {
+                return bg
+            }
         } else {
             let desc = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: output.pixelFormat, width: output.width,
@@ -1655,6 +1687,7 @@ final class WPEMetalRenderExecutor {
         guard let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
         blit.copy(from: output, to: bg)
         blit.endEncoding()
+        frameState.markRefractionSnapshotFresh(for: output)
         return bg
     }
 
@@ -1819,6 +1852,21 @@ final class WPEMetalRenderExecutor {
         return blendModeRequiresExistingDestination(pass.pass.blending)
     }
 
+    /// Targets used by more than one depth pass (depth-write OR depth-test) — a
+    /// later pass can `.load` an earlier pass's depth (e.g. `depthTest:less` across
+    /// encoders), so their depth must stay persistent rather than transient/memoryless.
+    private func computePersistentDepthTargetIDs(
+        for pipeline: WPEPreparedRenderPipeline
+    ) -> Set<WPEMetalTargetID> {
+        var depthPassCounts: [WPEMetalTargetID: Int] = [:]
+        for layer in pipeline.layers {
+            for pass in layer.passes where depthCache.needsAttachment(for: pass) {
+                depthPassCounts[WPEMetalTargetID(target: pass.pass.target), default: 0] += 1
+            }
+        }
+        return Set(depthPassCounts.compactMap { $0.value > 1 ? $0.key : nil })
+    }
+
     private func blendModeRequiresExistingDestination(_ blendMode: String) -> Bool {
         let normalized = blendMode
             .lowercased()
@@ -1946,10 +1994,20 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].clearColor = clearColor(for: targetID)
 
         if needsDepth {
-            let depth = try depthCache.attachmentTexture(for: destination, frameState: &frameState)
+            let depth = try depthCache.attachmentTexture(
+                for: destination,
+                frameState: &frameState,
+                allowTransient: !persistentDepthTargetIDs.contains(targetID)
+            )
             descriptor.depthAttachment.texture = depth
-            descriptor.depthAttachment.loadAction = shouldLoadExistingAttachment ? .load : .clear
-            descriptor.depthAttachment.storeAction = .store
+            if depthCache.isTransientDepthAttachment(depth) {
+                // Memoryless depth cannot load/store; it's per-pass transient regardless.
+                descriptor.depthAttachment.loadAction = .clear
+                descriptor.depthAttachment.storeAction = .dontCare
+            } else {
+                descriptor.depthAttachment.loadAction = shouldLoadExistingAttachment ? .load : .clear
+                descriptor.depthAttachment.storeAction = .store
+            }
             descriptor.depthAttachment.clearDepth = 1
         }
 

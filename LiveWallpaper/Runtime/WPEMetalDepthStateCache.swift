@@ -15,6 +15,33 @@ final class WPEMetalDepthStateCache {
         self.device = device
     }
 
+    static let memorylessDepthDefaultsKey = "WPEMetalMemorylessDepthEnabled"
+    /// Default ON. Suite-first so `defaults write Taijia.LiveWallpaper
+    /// WPEMetalMemorylessDepthEnabled -bool NO` is honoured even when the renderer
+    /// runs in a process whose standard domain isn't the app's.
+    static var isMemorylessDepthEnabled: Bool {
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
+           suite.object(forKey: memorylessDepthDefaultsKey) != nil {
+            return suite.bool(forKey: memorylessDepthDefaultsKey)
+        }
+        return UserDefaults.standard.object(forKey: memorylessDepthDefaultsKey) as? Bool ?? true
+    }
+
+    /// Whether this device + flag permit memoryless (tile-only) depth at all. The
+    /// caller additionally opts a target out (`allowTransient: false`) when more
+    /// than one pass writes its depth, since those can load depth across encoders.
+    /// Intel/AMD (no `.apple1`) and the flag-off path stay on `.private`.
+    var depthAttachmentIsTransient: Bool {
+        Self.isMemorylessDepthEnabled && device.supportsFamily(.apple1)
+    }
+
+    /// Derive load/store from the actual texture so a hot defaults change can't pair
+    /// a memoryless texture (cached for the frame) with a `.store` action — which is
+    /// a Metal validation crash.
+    func isTransientDepthAttachment(_ texture: MTLTexture) -> Bool {
+        texture.storageMode == .memoryless
+    }
+
     func needsAttachment(for pass: WPEPreparedRenderPass) -> Bool {
         pass.pass.depthWrite.lowercased() == "enabled"
             || pass.pass.depthWrite.lowercased() == "true"
@@ -24,7 +51,8 @@ final class WPEMetalDepthStateCache {
     /// Phase 2C audit fix: depth textures key on (target, exact destination dimensions) so a scaled FBO's depth attachment matches its color attachment dimensions instead of being stuck at scene size.
     func attachmentTexture(
         for destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        frameState: inout WPEMetalFrameState
+        frameState: inout WPEMetalFrameState,
+        allowTransient: Bool = true
     ) throws -> MTLTexture {
         let key = WPEMetalDepthTextureKey(
             targetID: destination.id,
@@ -34,7 +62,7 @@ final class WPEMetalDepthStateCache {
         if let existing = frameState.depthTextures[key] {
             return existing
         }
-        let texture = try makeDepthTexture(width: key.width, height: key.height)
+        let texture = try makeDepthTexture(width: key.width, height: key.height, allowTransient: allowTransient)
         frameState.depthTextures[key] = texture
         return texture
     }
@@ -57,7 +85,7 @@ final class WPEMetalDepthStateCache {
         return state
     }
 
-    private func makeDepthTexture(width: Int, height: Int) throws -> MTLTexture {
+    private func makeDepthTexture(width: Int, height: Int, allowTransient: Bool) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .depth32Float,
             width: max(width, 1),
@@ -65,7 +93,7 @@ final class WPEMetalDepthStateCache {
             mipmapped: false
         )
         descriptor.usage = [.renderTarget]
-        descriptor.storageMode = .private
+        descriptor.storageMode = allowTransient && depthAttachmentIsTransient ? .memoryless : .private
 
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
