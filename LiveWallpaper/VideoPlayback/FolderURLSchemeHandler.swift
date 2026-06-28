@@ -210,6 +210,16 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         activeTasks[taskID]?.cancel()
 
         let worker = Task.detached(priority: .userInitiated) { [weak self, source, mime, rangeHeader, url, delivery, taskID, cspHeader] in
+            var source = source
+            var mime = mime
+            // Off the main thread, swap a raw `.ogg` (WKWebView decodes it
+            // unreliably → silent) for a cached AAC transcode; raw ogg on miss.
+            if case .file(let oggURL) = source,
+               OggAudioTranscoder.isOggFamily(oggURL),
+               let aac = OggAudioTranscoder.shared.transcodedM4A(forOgg: oggURL) {
+                source = .file(aac)
+                mime = Self.mimeType(for: aac)
+            }
             do {
                 let totalLength = try Self.totalLength(of: source)
                 let range = Self.byteRange(from: rangeHeader, totalLength: totalLength)
@@ -286,7 +296,11 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// safety is enforced by `canonicalLookupName` (rejects leading `/` / `..`).
     private func packageByteSource(for url: URL) -> (source: ByteSource, mime: String)? {
         guard let backing = activePackageBacking else { return nil }
-        let requestPath = url.path.removingPercentEncoding ?? url.path
+        // WPE authors hardcode Windows `\` separators (e.g. `font\Foo.ttf`);
+        // normalize to `/` so the asset resolves on macOS. `canonicalLookupName`
+        // still rejects leading `/` and `..` traversal.
+        let requestPath = (url.path.removingPercentEncoding ?? url.path)
+            .replacingOccurrences(of: "\\", with: "/")
         let relativePath = requestPath.hasPrefix("/") ? String(requestPath.dropFirst()) : requestPath
         guard let lookup = WallpaperEnginePackage.canonicalLookupName(relativePath) else { return nil }
 
@@ -454,7 +468,10 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
 
     nonisolated static func resolvedFileURL(for requestURL: URL, inside folderURL: URL) throws -> URL {
         let rootURL = folderURL.standardizedFileURL.resolvingSymlinksInPath()
-        let requestPath = requestURL.path.removingPercentEncoding ?? requestURL.path
+        // WPE authors hardcode Windows `\` separators; normalize to `/`. The
+        // root-containment check below still rejects `..` traversal (`..\` → `../`).
+        let requestPath = (requestURL.path.removingPercentEncoding ?? requestURL.path)
+            .replacingOccurrences(of: "\\", with: "/")
         let relativePath = requestPath.hasPrefix("/") ? String(requestPath.dropFirst()) : requestPath
         let candidate = rootURL
             .appendingPathComponent(relativePath)
