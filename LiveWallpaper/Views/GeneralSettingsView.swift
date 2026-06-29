@@ -25,6 +25,8 @@ struct GeneralSettingsView: View {
 
     /// Default off — privacy-sensitive opt-in.
     @State private var audioResponseEnabled: Bool
+    /// Default off — Pro-only scene power saving (adaptive frame rate).
+    @State private var adaptiveFrameRateEnabled: Bool
     @State private var weatherLocation: WeatherLocationPreference
 
     @State private var pendingDestructive: PendingDestructive?
@@ -59,6 +61,7 @@ struct GeneralSettingsView: View {
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
         _audioResponseEnabled = State(initialValue: settings.audioResponseEnabled)
+        _adaptiveFrameRateEnabled = State(initialValue: settings.adaptiveFrameRateEnabled)
         _weatherLocation = State(initialValue: settings.weatherLocation)
     }
 
@@ -502,6 +505,23 @@ struct GeneralSettingsView: View {
                     .accessibilityLabel(Text("Pause when windows cover the desktop"))
                     .accessibilityHint(Text("Pause when other apps' windows cover at least 85 percent of a display"))
             }
+
+            #if !LITE_BUILD
+            SettingRow(
+                icon: "gauge.with.dots.needle.33percent",
+                iconColor: .teal,
+                title: "Reduce frame rate when covered",
+                subtitle: "Lower the frame rate when windows cover the desktop or on battery, to save power",
+                info: "When windows cover about half the screen, or your Mac is unplugged and wallpapers keep playing, the frame rate drops to about half to save GPU power. Full speed returns once the desktop is visible again. Affects scene (Wallpaper Engine) wallpapers."
+            ) {
+                Toggle("", isOn: $adaptiveFrameRateEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: adaptiveFrameRateEnabled) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Reduce frame rate when covered"))
+                    .accessibilityHint(Text("Lower the frame rate when windows cover the desktop or on battery, to save power"))
+            }
+            #endif
 
             SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode") {
                 Toggle("", isOn: $pauseInGameMode)
@@ -947,6 +967,7 @@ struct GeneralSettingsView: View {
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.developerModeEnabled = developerModeEnabled
         settings.audioResponseEnabled = audioResponseEnabled
+        settings.adaptiveFrameRateEnabled = adaptiveFrameRateEnabled
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {

@@ -57,6 +57,9 @@ final class WPEEngineAssetsLibrary {
 
         do {
             let bookmarkData = try Self.createReadOnlyBookmark(for: engineRoot)
+            // A manual link supersedes any prior downloaded install — drop the
+            // managed marker so `resolveAuthorizedRoot` honors the new folder.
+            SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
             SettingsManager.shared.saveWPEEngineAssetsBookmark(bookmarkData)
             isAuthorized = true
             engineRootDisplayName = engineRoot.lastPathComponent
@@ -71,14 +74,84 @@ final class WPEEngineAssetsLibrary {
     }
 
     func resolveAuthorizedRoot() -> URL? {
-        resolveAuthorizedRoot(using: Self.resolveDirectoryBookmark)
+        if let managed = Self.managedInstallRoot() {
+            isAuthorized = true
+            engineRootDisplayName = Self.managedDisplayName
+            lastError = nil
+            return managed
+        }
+        return resolveAuthorizedRoot(using: Self.resolveDirectoryBookmark)
     }
 
+    /// Re-derive the published `isAuthorized` / display-name state. Call after a
+    /// download or removal mutates the managed install out-of-band.
+    func refresh() {
+        _ = resolveAuthorizedRoot()
+        if !Self.hasManagedInstall && SettingsManager.shared.loadWPEEngineAssetsBookmark() == nil {
+            isAuthorized = false
+            engineRootDisplayName = nil
+        }
+    }
+
+    var isManagedInstall: Bool { Self.hasManagedInstall }
+
     func clearAccess() {
+        SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
         SettingsManager.shared.clearWPEEngineAssetsBookmark()
         isAuthorized = false
         engineRootDisplayName = nil
         lastError = nil
+    }
+}
+
+// MARK: - Managed (downloaded) install
+
+extension WPEEngineAssetsLibrary {
+    static let managedDisplayName = String(
+        localized: "Wallpaper Engine (downloaded)",
+        defaultValue: "Wallpaper Engine (downloaded)",
+        comment: "Engine-assets status when the assets were downloaded in-app via SteamCMD."
+    )
+
+    /// `<container>/Library/Application Support/Steam/steamapps/common/wallpaper_engine`
+    /// — where a SteamCMD `app_update 431960` lands under the sandbox-redirected
+    /// STEAMROOT. In-container: full access, no security-scoped bookmark needed.
+    nonisolated static func managedContainerRoot() -> URL {
+        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Steam/steamapps/common/wallpaper_engine", isDirectory: true)
+    }
+
+    /// True when a managed buildid is recorded AND the pruned install still has
+    /// its `assets/` subtree. A recorded buildid with no files on disk self-heals
+    /// (the stale marker is cleared) so we fall back to any manual link.
+    static var hasManagedInstall: Bool { managedInstallRoot() != nil }
+
+    static func managedInstallRoot(fileManager: FileManager = .default) -> URL? {
+        guard SettingsManager.shared.wpeEngineAssetsManagedBuildID != nil else { return nil }
+        let root = managedContainerRoot()
+        guard hasAssetsSubdirectory(root, fileManager: fileManager) else {
+            SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
+            return nil
+        }
+        return root
+    }
+
+    /// Engine-assets roots inside the app's own sandbox container need no
+    /// security scope — the renderer must not drop them when
+    /// `startAccessingSecurityScopedResource()` returns false for them.
+    nonisolated static func isContainerInternal(_ url: URL) -> Bool {
+        let home = canonicalPath(URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+        let target = canonicalPath(url)
+        return target == home || target.hasPrefix(home + "/")
+    }
+
+    /// Symlink-resolved path with any trailing slash stripped. `resolvingSymlinksInPath()`
+    /// appends a trailing "/" for existing directories, which would turn the
+    /// containment check's `home + "/"` into a non-matching `//`.
+    nonisolated static func canonicalPath(_ url: URL) -> String {
+        var path = url.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)
+        while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+        return path
     }
 }
 

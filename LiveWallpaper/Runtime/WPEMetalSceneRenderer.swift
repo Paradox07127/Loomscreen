@@ -22,6 +22,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// running at 60 made their `g_Time`-driven motion look ≈2× too fast.
     /// `MTKView` clamps this to the display's refresh rate.
     static let defaultPreferredFPS = 30
+    /// Floor for the adaptive "background" throttle — never drop a still-visible
+    /// wallpaper below this even when occluded/on battery (15 FPS measured at
+    /// ~83 mW vs ~330 mW at 60, a ~75% GPU-power cut, while staying watchable).
+    static let adaptiveThrottleFloorFPS = 15
     /// Native vsync cap used when the user picks `.unlimited` — MTKView's
     /// throttle clamps to the display refresh anyway, but we surface a
     /// concrete value here so a `setPreferredFramesPerSecond(0)` doesn't get
@@ -77,6 +81,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `assets/`). Captured at init for graph + pipeline builder use; the
     /// security scope is owned here for the lifetime of the renderer.
     private let engineAssetsRootURL: URL?
+    /// `engineAssetsRootURL` gated by access: nil when an external (non-container)
+    /// root's security scope failed to open, else the usable root. Graph/pipeline
+    /// builders must use THIS, not the raw root, so a scope-denied manual link
+    /// never feeds the resolver.
+    private let effectiveEngineAssetsRootURL: URL?
     /// `(unsafe)` because `deinit` is non-isolated and needs to clear the
     /// reference + drop the scope. All other writes happen on `@MainActor`
     /// (`cleanup()`), so observed mutation is single-threaded.
@@ -236,6 +245,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// whenever the renderer is not suspended. Defaults to the WPE-compatible
     /// 30 FPS until `setFrameRateLimit(_:)` overrides it.
     private var userPreferredFPS: Int = WPEMetalSceneRenderer.defaultPreferredFPS
+    /// System-driven background throttle (adaptive frame rate). Layered on top
+    /// of `userPreferredFPS` via `effectiveFPS` so it never clobbers the user's
+    /// saved ceiling — clearing it restores the exact prior rate.
+    private var adaptiveThrottleActive = false
     /// Inspector mute state cached here so callers that arrive before the
     /// deferred audio startup can still record intent; `beginDeferredAudioStartup`
     /// reads these to seed `WPESoundRuntime` at the right level (and re-applies
@@ -273,12 +286,28 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var lastHeartbeatTime: TimeInterval = -1
 
     var renderedTexture: MTLTexture? { outputTexture }
-    /// CGImage read-back of the most recent rendered frame. Captured at the end
-    /// of `performLoad()` **only when scene-debug artifacts are enabled** — the
-    /// inspector now shows the project's preview GIF, so production skips the
-    /// synchronous GPU read-back. Refreshed by `reload()`, cleared by
-    /// `cleanup()`, and otherwise `nil`.
+    /// Read-back of the first frame, captured at the end of `performLoad()`
+    /// **only when scene-debug artifacts are enabled**. Production leaves it
+    /// `nil`; the inspector reuses a current frame via `captureLivePoster()`.
     var previewSnapshot: NSImage? { cachedSnapshot }
+
+    /// Reuses the *current* on-screen frame as a still poster for the inspector.
+    /// Steady-state draws submit async and the output pool recycles textures, so
+    /// the live `outputTexture` can't be read back directly; force one
+    /// synchronized frame, read it, restore the live submission mode. On-demand
+    /// only (never on the load path) so wallpaper startup is untouched, and it
+    /// captures the current frame so a settled intro / warmed particles / decoded
+    /// video are included — unlike frame 0. Returns nil before first present or
+    /// for a non-RGBA8 (e.g. HDR) target, where the caller keeps the preview GIF.
+    func captureLivePoster() -> NSImage? {
+        guard didLoad, hasPresentedFrame, renderPipeline != nil else { return nil }
+        let previousSync = executor.synchronizeFrameCompletion
+        executor.synchronizeFrameCompletion = true
+        defer { executor.synchronizeFrameCompletion = previousSync }
+        guard let texture = try? renderCurrentFrame() else { return nil }
+        outputTexture = texture
+        return snapshotter.snapshot(from: texture)
+    }
     var onProgress: (@MainActor (String) -> Void)?
     var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
         resolutionTracer.snapshot()
@@ -319,6 +348,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         // Only the scoped case has access to stop on teardown.
         self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
+        self.effectiveEngineAssetsRootURL = effectiveEngineAssetsRootURL
         self.sceneAssetProvider = assetProvider
         self.projectManifestRootURL = projectManifestRootURL
         if let assetProvider {
@@ -514,7 +544,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         onProgress?("Building render graph")
         let cacheRoot = cacheRootURL
         let mounts = dependencyMounts
-        let engineRoot = engineAssetsRootURL
+        let engineRoot = effectiveEngineAssetsRootURL
         let provider = sceneAssetProvider
         let graph = try await Task.detached(priority: .userInitiated) {
             let builder = provider.map {
@@ -670,10 +700,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             #if DEBUG
             dumpScenePassesIfRequested()
             #endif
-            // The snapshot + visual-stats read-backs exist only to feed the
+            // The snapshot + visual-stats read-backs here exist only to feed the
             // scene-debug artifacts (first-frame PNG + stats). The inspector
-            // now shows the project's preview GIF, so skip the synchronous GPU
-            // read-back entirely unless artifacts are actually being captured.
+            // reuses a *current* live frame on demand (captureLivePoster), so
+            // production skips this synchronous load-path read-back — it would
+            // slow first-frame present, and frame 0 often predates a scene's
+            // intro / warmed particles / decoded video anyway.
             if WPESceneDebugArtifacts.shared.isEnabled {
                 cachedSnapshot = snapshotter.snapshot(from: outputTexture)
                 let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture)
@@ -2234,8 +2266,27 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         guard resolved != userPreferredFPS else { return }
         userPreferredFPS = resolved
+        applyEffectiveFrameRate()
+    }
+
+    /// The user ceiling, optionally halved (floored at `adaptiveThrottleFloorFPS`,
+    /// never above the ceiling) while the adaptive background throttle is active.
+    private var effectiveFPS: Int {
+        guard adaptiveThrottleActive else { return userPreferredFPS }
+        return min(userPreferredFPS, max(Self.adaptiveThrottleFloorFPS, userPreferredFPS / 2))
+    }
+
+    /// Suspended scenes don't drive frames, so the ceiling re-applies on the
+    /// next `.quality` transition (mirrors `setFrameRateLimit`'s old guard).
+    private func applyEffectiveFrameRate() {
         guard currentProfile != .suspended else { return }
-        mtkView.preferredFramesPerSecond = userPreferredFPS
+        mtkView.preferredFramesPerSecond = effectiveFPS
+    }
+
+    func setAdaptiveFrameRateThrottle(_ active: Bool) {
+        guard active != adaptiveThrottleActive else { return }
+        adaptiveThrottleActive = active
+        applyEffectiveFrameRate()
     }
 
     /// Forwards the inspector's mute toggle into the scene's audio
@@ -2305,7 +2356,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         case .quality:
             mtkView.isPaused = !needsContinuousFrames
             mtkView.enableSetNeedsDisplay = !needsContinuousFrames
-            mtkView.preferredFramesPerSecond = userPreferredFPS
+            mtkView.preferredFramesPerSecond = effectiveFPS
             // Restart scene audio that a prior `.suspended` paused. No-op when
             // audio never started (deferred startup) or is already running.
             soundRuntime?.resume()
@@ -2394,6 +2445,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 if presented, pendingAudioStartupDocument != nil {
                     beginDeferredAudioStartup()
                 }
+            } catch is WPEMetalFrameInFlightBudgetExhausted {
+                // GPU still busy on a prior frame — skip this vsync rather than
+                // block the @MainActor (keeps other displays at full rate). The
+                // previously presented frame stays on screen; not a failure.
+                return
             } catch {
                 // Per-frame path: log only the first failure of a streak (resets on
                 // recovery) so a persistently-broken pipeline can't flood the log.

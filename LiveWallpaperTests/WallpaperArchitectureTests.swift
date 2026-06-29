@@ -895,15 +895,31 @@ struct WallpaperPolicyEngineTests {
     func fullScreenFallbackPollingDecision() {
         #expect(WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: true),
-            hasConfiguredWallpaperSessions: true
+            hasConfiguredWallpaperSessions: true,
+            hasConfiguredSceneSessions: false
         ))
         #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: false),
-            hasConfiguredWallpaperSessions: true
+            hasConfiguredWallpaperSessions: true,
+            hasConfiguredSceneSessions: false
         ))
         #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: true),
-            hasConfiguredWallpaperSessions: false
+            hasConfiguredWallpaperSessions: false,
+            hasConfiguredSceneSessions: false
+        ))
+        // Adaptive frame rate reads the occlusion fraction, so it needs the
+        // fallback poll when both pause toggles are off — but only when a scene
+        // session is live (it never throttles video/HTML).
+        #expect(WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+            globalSettings: GlobalSettings(pauseOnFullScreen: false, adaptiveFrameRateEnabled: true),
+            hasConfiguredWallpaperSessions: true,
+            hasConfiguredSceneSessions: true
+        ))
+        #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+            globalSettings: GlobalSettings(pauseOnFullScreen: false, adaptiveFrameRateEnabled: true),
+            hasConfiguredWallpaperSessions: true,
+            hasConfiguredSceneSessions: false
         ))
     }
 }

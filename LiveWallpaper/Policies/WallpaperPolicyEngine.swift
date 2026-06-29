@@ -84,10 +84,16 @@ enum WallpaperPolicyEngine {
 
     static func shouldEnableFullScreenFallbackPolling(
         globalSettings: GlobalSettings,
-        hasConfiguredWallpaperSessions: Bool
+        hasConfiguredWallpaperSessions: Bool,
+        hasConfiguredSceneSessions: Bool
     ) -> Bool {
-        // Either window-coverage rule needs the detector polling as a fallback.
-        (globalSettings.pauseOnFullScreen || globalSettings.pauseOnWindowOcclusion)
+        // The pause rules apply to every wallpaper kind; adaptive frame rate
+        // only throttles the scene renderer, so it only needs the poll when a
+        // scene session is live (avoids needless 30s CGWindowList scans in
+        // video/HTML-only setups carrying a stale-on flag).
+        let coverageRule = (globalSettings.pauseOnFullScreen || globalSettings.pauseOnWindowOcclusion)
             && hasConfiguredWallpaperSessions
+        let adaptiveRule = globalSettings.adaptiveFrameRateEnabled && hasConfiguredSceneSessions
+        return coverageRule || adaptiveRule
     }
 }

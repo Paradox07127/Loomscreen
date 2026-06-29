@@ -6,6 +6,7 @@ import Foundation
 final class FakeFullScreenDetector: FullScreenDetecting {
     private var storedHiddenScreens: [CGDirectDisplayID: Bool]
     private var storedOccludedScreens: [CGDirectDisplayID: Bool]
+    private var storedOcclusionFractions: [CGDirectDisplayID: CGFloat]
 
     private(set) var checkNowCallCount = 0
     private(set) var setFallbackPollingEnabledValues: [Bool] = []
@@ -13,10 +14,12 @@ final class FakeFullScreenDetector: FullScreenDetecting {
 
     init(
         hiddenScreens: [CGDirectDisplayID: Bool] = [:],
-        occludedScreens: [CGDirectDisplayID: Bool] = [:]
+        occludedScreens: [CGDirectDisplayID: Bool] = [:],
+        occlusionFractions: [CGDirectDisplayID: CGFloat] = [:]
     ) {
         storedHiddenScreens = hiddenScreens
         storedOccludedScreens = occludedScreens
+        storedOcclusionFractions = occlusionFractions
     }
 
     var hiddenScreens: [CGDirectDisplayID: Bool] {
@@ -27,12 +30,20 @@ final class FakeFullScreenDetector: FullScreenDetecting {
         storedOccludedScreens
     }
 
+    var occlusionFractions: [CGDirectDisplayID: CGFloat] {
+        storedOcclusionFractions
+    }
+
     func setHiddenScreens(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
         storedHiddenScreens = hiddenScreens
     }
 
     func setOccludedScreens(_ occludedScreens: [CGDirectDisplayID: Bool]) {
         storedOccludedScreens = occludedScreens
+    }
+
+    func setOcclusionFractions(_ occlusionFractions: [CGDirectDisplayID: CGFloat]) {
+        storedOcclusionFractions = occlusionFractions
     }
 
     func isDesktopHidden(for screenID: CGDirectDisplayID) -> Bool {
@@ -42,6 +53,10 @@ final class FakeFullScreenDetector: FullScreenDetecting {
 
     func isDesktopOccluded(for screenID: CGDirectDisplayID) -> Bool {
         storedOccludedScreens[screenID] ?? false
+    }
+
+    func occlusionFraction(for screenID: CGDirectDisplayID) -> Double {
+        Double(storedOcclusionFractions[screenID] ?? 0)
     }
 
     func checkNow() {

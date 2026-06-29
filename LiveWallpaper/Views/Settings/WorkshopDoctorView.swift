@@ -613,6 +613,7 @@ private struct ProbeRow: View {
     let onCopied: () -> Void
 
     @State private var commandRevealed = false
+    @State private var showingSignOutConfirm = false
 
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
@@ -642,6 +643,9 @@ private struct ProbeRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if report.id == .cachedLogin, revealedCommand != nil {
+                    securityGuaranteeCard
+                }
                 if let cmd = revealedCommand {
                     TerminalCommandPanel(command: cmd, redactedPreview: false, onCopied: onCopied)
                         .padding(.top, DesignTokens.Spacing.xs)
@@ -691,6 +695,11 @@ private struct ProbeRow: View {
     }
 
     private var inlineValue: String? {
+        // Surface the signed-in account on the cached-login row (the redacted
+        // probe detail never carries the username).
+        if report.id == .cachedLogin, case .green = report.status, let user = service.username {
+            return user
+        }
         switch report.status {
         case .green(let detail): return detail
         default: return nil
@@ -722,7 +731,7 @@ private struct ProbeRow: View {
     private var hasActionRow: Bool {
         guard report.status != .notRun, report.status != .running else { return false }
         switch report.status {
-        case .green: return false
+        case .green: return report.id == .cachedLogin  // green cached-login → "Sign out"
         default: return true
         }
     }
@@ -756,6 +765,23 @@ private struct ProbeRow: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             showCommandButton()
+
+        case (.cachedLogin, .green):
+            Button("Sign out", role: .destructive) { showingSignOutConfirm = true }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .confirmationDialog(
+                    Text("Sign out of SteamCMD?"),
+                    isPresented: $showingSignOutConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Sign out", role: .destructive) {
+                        Task { await service.signOut() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This clears the cached Steam session on this Mac. You'll sign in again in Terminal to download. To sign out everywhere, deauthorize this device in Steam → Settings → Security.")
+                }
 
         case (.wallpaperEngineOwnership, .red):
             Button("Open WE Store") {
@@ -799,6 +825,28 @@ private struct ProbeRow: View {
         }
         .buttonStyle(.borderless)
         .help(Text("Re-run this probe"))
+    }
+
+    /// Reassures the user before they run the Terminal sign-in command that the
+    /// app never touches their credentials — the whole point of the out-of-app
+    /// login.
+    private var securityGuaranteeCard: some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
+            Image(systemName: "lock.shield.fill")
+                .foregroundStyle(DesignTokens.Colors.Status.active)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your credentials stay in Terminal")
+                    .font(DesignTokens.Typography.caption.weight(.bold))
+                Text("You enter your password and Steam Guard code directly into Valve's official SteamCMD. This app never sees, requests, or stores them.")
+                    .font(DesignTokens.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(DesignTokens.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.Colors.Status.active.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md))
+        .padding(.top, DesignTokens.Spacing.xs)
     }
 
     private func pickBinary() {

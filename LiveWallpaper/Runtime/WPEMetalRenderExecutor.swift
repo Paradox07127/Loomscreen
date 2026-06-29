@@ -280,10 +280,29 @@ final class WPEMetalRenderExecutor {
     /// falls out — so a target is never recycled while its GPU write is in flight.
     /// (See `isOutputTextureReusable` / `noteVendedOutputTexture`.)
     static let maxFramesInFlight = 2
-    /// Backpressure for asynchronous frame submission: blocks the render caller
+    /// Backpressure for asynchronous frame submission: gates the render caller
     /// once `maxFramesInFlight` frames are queued so the CPU cannot outrun the GPU
     /// (which would starve the output ring and grow latency unboundedly).
     private let inFlightSemaphore = DispatchSemaphore(value: maxFramesInFlight)
+
+    static let nonBlockingFrameSubmitDefaultsKey = "WPEMetalNonBlockingFrameSubmit"
+    /// Drop the frame instead of blocking when the in-flight budget is full.
+    /// `render()` runs on the @MainActor (MTKView's `draw(in:)`), and that actor
+    /// is shared across every display — so a blocking `inFlightSemaphore.wait()`
+    /// here while this display's GPU is busy also stalls *other* displays'
+    /// `draw` callbacks, dropping a dual-60fps setup to 30fps each. Polling and
+    /// skipping the frame keeps the actor free; each display paces to its own
+    /// GPU independently. Default ON; `-bool NO` restores the blocking wait.
+    static var isNonBlockingFrameSubmitEnabled: Bool {
+        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
+           suite.object(forKey: nonBlockingFrameSubmitDefaultsKey) != nil {
+            return suite.bool(forKey: nonBlockingFrameSubmitDefaultsKey)
+        }
+        return UserDefaults.standard.object(forKey: nonBlockingFrameSubmitDefaultsKey) as? Bool ?? true
+    }
+    /// Cached at init — the submit discipline never changes mid-session, so the
+    /// per-frame render path doesn't re-read defaults.
+    private let nonBlockingFrameSubmit = WPEMetalRenderExecutor.isNonBlockingFrameSubmitEnabled
     /// When true, `render()` and the text passes block on GPU completion
     /// (`waitUntilCompleted`) so a CPU read-back of the frame (scene-debug
     /// first-frame snapshot, visual-stats, GPU capture, test pixel diffs) observes
@@ -816,7 +835,18 @@ final class WPEMetalRenderExecutor {
         // handler on success; the `defer` releases it on any early throw so a
         // permit is never lost.
         let asyncSubmission = !synchronizeFrameCompletion
-        if asyncSubmission { inFlightSemaphore.wait() }
+        if asyncSubmission {
+            if nonBlockingFrameSubmit {
+                // Poll, don't block: a blocking wait here holds the @MainActor
+                // (this runs from MTKView.draw) and starves other displays.
+                // Thrown before the `defer` below is armed, so no stray signal.
+                if inFlightSemaphore.wait(timeout: .now()) == .timedOut {
+                    throw WPEMetalFrameInFlightBudgetExhausted()
+                }
+            } else {
+                inFlightSemaphore.wait()
+            }
+        }
         var didCommitAsync = false
         defer { if asyncSubmission && !didCommitAsync { inFlightSemaphore.signal() } }
         #if DEBUG

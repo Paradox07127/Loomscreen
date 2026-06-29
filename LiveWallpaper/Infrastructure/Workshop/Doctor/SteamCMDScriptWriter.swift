@@ -84,6 +84,49 @@ enum SteamCMDScriptWriter {
         """
     }
 
+    /// Full Wallpaper Engine (app 431960) install/update. `ForcePlatformType
+    /// windows` pulls the Windows depot on macOS (WPE has no Mac build); `validate`
+    /// repairs the previous run's pruned tree so only the missing files re-download.
+    static func appUpdateScript(username: String) throws -> String {
+        guard validateUsername(username) else { throw SteamCMDScriptError.invalidUsername }
+        return """
+        @ShutdownOnFailedCommand 1
+        @NoPromptForPassword 1
+        @sSteamCmdForcePlatformType windows
+        login \(username)
+        app_update 431960 validate
+        quit
+        """
+    }
+
+    /// Logs the cached account out of SteamCMD, clearing its cached session.
+    /// `login` first (cached, no password prompt) so `logout` targets the active
+    /// account; the re-run cached-login probe is the source of truth for success.
+    static func logoutScript(username: String) throws -> String {
+        guard validateUsername(username) else { throw SteamCMDScriptError.invalidUsername }
+        return """
+        @NoPromptForPassword 1
+        login \(username)
+        logout
+        quit
+        """
+    }
+
+    /// Metadata-only query of app 431960. `app_info_update 1` forces a fresh
+    /// pull so the printed public-branch `buildid` reflects the latest build —
+    /// the cheap signal for "is an update available" without downloading.
+    static func appInfoScript(username: String) throws -> String {
+        guard validateUsername(username) else { throw SteamCMDScriptError.invalidUsername }
+        return """
+        @ShutdownOnFailedCommand 1
+        @NoPromptForPassword 1
+        login \(username)
+        app_info_update 1
+        app_info_print 431960
+        quit
+        """
+    }
+
     /// `^[A-Za-z0-9_]{1,32}$` — Steam's documented login-name charset.
     static func validateUsername(_ username: String) -> Bool {
         guard !username.isEmpty, username.count <= 32 else { return false }

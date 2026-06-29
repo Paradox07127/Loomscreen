@@ -10,32 +10,30 @@ struct WPESceneDetailView: View {
     let origin: WPEOrigin
     let descriptor: SceneDescriptor
     let session: SceneWallpaperSession?
-    let onClearWallpaper: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.featureCatalog) private var featureCatalog
     @State private var state: SceneRenderState = .idle
-    /// The verbose renderer log never lives inline on the card, so the card
-    /// stays compact and the layout barely shifts on error.
+    /// The live renderer's own frame, reused as the hero poster once it presents.
+    @State private var livePoster: NSImage?
+    /// The verbose renderer log opens in a sheet, never inline, so the layout
+    /// barely shifts on error.
     @State private var showLogSheet = false
 
     var body: some View {
         VStack(spacing: 16) {
             previewCard
+            infoBar
             errorBanner
-            metadata
-            actions
         }
-        .padding(24)
-        .frame(maxWidth: 560)
-        .adaptiveGlassSurface(.roundedRectangle(24))
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showLogSheet) {
             DiagnosticLogSheet(title: origin.title, log: fullDiagnosticText, tint: currentSeverityTint)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
         .task(id: descriptor.workshopID) {
+            livePoster = nil
             await refreshState()
         }
         .onChange(of: reduceMotion) { _, _ in
@@ -51,35 +49,53 @@ struct WPESceneDetailView: View {
 
     // MARK: - Subviews
 
-    @ViewBuilder
     private var previewCard: some View {
         ZStack {
-            switch state {
-            case .idle:
-                fallbackBackground
-                LiquidGlassSpinner()
-            case .loading(let progress):
-                fallbackBackground
-                LiquidGlassSpinner(progressText: progress)
-            case .ready:
-                fallbackBackground
-            case .error(let fallbackReason):
-                fallbackBackground
-                    .overlay(alignment: .bottom) { previewErrorStrip(reason: fallbackReason) }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(severityColor(for: fallbackReason).opacity(0.45), lineWidth: 1.5)
-                    }
+            // Chrome (clip + shadow) sits on the image layer only — matching the
+            // video / HTML cardBody — so the info capsule overlays on top rather
+            // than being clipped or shadowed with it.
+            ZStack { stateBackground }
+                .screenPreviewChrome()
+            // Info capsule lives INSIDE the aspect-fit ZStack (exactly like the
+            // video / HTML overlays) so it tracks the 16:9 content and never
+            // escapes onto the letterbox margin on a wide window.
+            VStack {
+                HStack {
+                    SceneInformationOverlay(origin: origin, descriptor: descriptor)
+                    Spacer(minLength: 0)
+                }
+                Spacer(minLength: 0)
             }
+            .padding(16)
+            .allowsHitTesting(false)
         }
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
+        // 16:9 on the ZStack, matching the video / HTML preview sections; the
+        // (non-scrolling) host bounds the height so a wide window can't grow it.
+        .aspectRatio(16 / 9, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        // Bounded (not `maxHeight: .infinity`): the card lives inside a ScrollView,
-        // so an unbounded preview would expand without limit under its infinite
-        // height proposal.
-        .frame(height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var stateBackground: some View {
+        switch state {
+        case .idle:
+            fallbackBackground
+            LiquidGlassSpinner()
+        case .loading(let progress):
+            fallbackBackground
+            LiquidGlassSpinner(progressText: progress)
+        case .ready:
+            fallbackBackground
+        case .error(let fallbackReason):
+            fallbackBackground
+                .overlay(alignment: .bottom) { previewErrorStrip(reason: fallbackReason) }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(severityColor(for: fallbackReason).opacity(0.45), lineWidth: 1.5)
+                }
+        }
     }
 
     /// Surfaces a glanceable error code without hiding the artwork — the friendly
@@ -179,6 +195,24 @@ struct WPESceneDetailView: View {
                 // Log button a separate, focusable VoiceOver node.
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 8)
+                if reason.isActionable {
+                    Button {
+                        Task { @MainActor in
+                            withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+                                state = .loading
+                            }
+                            livePoster = nil
+                            await session?.reload()
+                            await refreshState()
+                        }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityHint(Text("Re-decodes the scene with the current cache state"))
+                }
                 Button {
                     showLogSheet = true
                 } label: {
@@ -269,61 +303,68 @@ struct WPESceneDetailView: View {
         return .accentColor
     }
 
-    /// Uses the project's own preview GIF rather than a first-frame Metal snapshot:
-    /// the live `MTKView` already drives the wallpaper, so the inspector avoids a
-    /// synchronous GPU read-back just to show a thumbnail.
+    /// Reuses the live renderer's own frame (already drawn for the desktop —
+    /// no re-render) as the hero, byte-identical to the wallpaper. Falls back to
+    /// the project's preview GIF while loading or if the read-back is unavailable.
+    @ViewBuilder
     private var fallbackBackground: some View {
-        WPEPreviewView(
-            imageURL: previewURL,
-            securityScopedBookmarkData: origin.sourceFolderBookmark,
-            aspectRatio: nil
-        )
+        Group {
+            if let livePoster {
+                Image(nsImage: livePoster)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                WPEPreviewView(
+                    imageURL: previewURL,
+                    securityScopedBookmarkData: origin.sourceFolderBookmark,
+                    aspectRatio: nil
+                )
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .blur(radius: state.isLoading ? 6 : 0)
         .overlay(Color.black.opacity(state.isLoading ? 0.35 : 0.0))
     }
 
-    private var metadata: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(verbatim: origin.title)
-                    .font(.title3.bold())
-                Spacer()
-                statusPill
-            }
-            HStack(spacing: 4) {
-                workshopIDLabel
-                Text("· capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Scene metadata capability suffix. The placeholder is the capability tier.")
-                    .font(.caption)
+    /// Floating glass info bar under the preview — the scene-type analog of the
+    /// video command bar. Display name, live status, and Clear live in the shared
+    /// `ScreenDetailHeader`, so this carries only scene-specific identity.
+    private var infoBar: some View {
+        HStack(spacing: 10) {
+            Text(verbatim: origin.title)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            workshopLinkButton
+            Button {
+                showLogSheet = true
+            } label: {
+                Image(systemName: "terminal")
+                    .font(.body)
                     .foregroundStyle(.secondary)
-                Spacer(minLength: 4)
-                Button {
-                    showLogSheet = true
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(Text("Open renderer diagnostics"))
-                .accessibilityLabel(Text("Open renderer diagnostics"))
             }
+            .buttonStyle(.plain)
+            .help(Text("Open renderer diagnostics"))
+            .accessibilityLabel(Text("Open renderer diagnostics"))
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .adaptiveGlassSurface(.capsule)
         .contextMenu {
             Button {
                 showLogSheet = true
             } label: {
-                Label("Renderer Diagnostics", systemImage: "info.circle")
+                Label("Renderer Diagnostics", systemImage: "terminal")
             }
         }
     }
 
-    /// Actionable only for a numeric Steam item; locally-imported projects whose
-    /// ID isn't a Steam item render as plain text.
+    /// Compact hyperlink button to the item's Workshop page. Shown only for a
+    /// numeric Steam item; locally-imported projects have no web page.
     @ViewBuilder
-    private var workshopIDLabel: some View {
+    private var workshopLinkButton: some View {
         if isSteamWorkshopID, let url = steamWorkshopURL {
             #if DIRECT_DISTRIBUTION
             if featureCatalog.isEnabled(.wpeImport) {
@@ -340,7 +381,9 @@ struct WPESceneDetailView: View {
                         Label("Open Steam Page", systemImage: "safari")
                     }
                 } label: {
-                    workshopIDText.foregroundStyle(Color.accentColor)
+                    Image(systemName: "safari")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -348,26 +391,21 @@ struct WPESceneDetailView: View {
                 .help(Text("Find this item in the Workshop, or open its Steam page"))
                 .accessibilityLabel(Text("Workshop ID \(origin.workshopID). Find in Workshop or open the Steam page.", comment: "A11y label for the Workshop ID menu. The placeholder is the numeric Workshop ID."))
             } else {
-                workshopIDWebLink(url)
+                workshopWebLinkButton(url)
             }
             #else
-            workshopIDWebLink(url)
+            workshopWebLinkButton(url)
             #endif
-        } else {
-            workshopIDText.foregroundStyle(.secondary)
         }
     }
 
-    private var workshopIDText: Text {
-        Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID. The placeholder is the Workshop ID.")
-            .font(.caption)
-    }
-
-    private func workshopIDWebLink(_ url: URL) -> some View {
+    private func workshopWebLinkButton(_ url: URL) -> some View {
         Button {
             NSWorkspace.shared.open(url)
         } label: {
-            workshopIDText.foregroundStyle(Color.accentColor)
+            Image(systemName: "safari")
+                .font(.body)
+                .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
         .help(Text("Open this item's Steam Workshop page"))
@@ -401,64 +439,31 @@ struct WPESceneDetailView: View {
     }
     #endif
 
-    private var statusPill: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(verbatim: stateLabel)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.primary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .adaptiveGlassSurface(.capsule)
-    }
-
-    private var actions: some View {
-        HStack(spacing: 12) {
-            Button(role: .destructive) {
-                onClearWallpaper()
-            } label: {
-                Label("Clear Scene", systemImage: "xmark.circle")
-            }
-            .adaptiveGlassButton(.regular)
-            .destructiveControlTint()
-            .controlSize(.regular)
-            .accessibilityHint(Text("Removes the scene wallpaper from this display"))
-
-            Spacer()
-
-            if case .error(let reason) = state, reason.isActionable {
-                Button {
-                    Task { @MainActor in
-                        withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
-                            state = .loading
-                        }
-                        await session?.reload()
-                        await refreshState()
-                    }
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .accessibilityHint(Text("Re-decodes the scene with the current cache state"))
-            }
-        }
-    }
 
     // MARK: - State derivation
 
     private func refreshState() async {
         let next = derivedState()
-        guard next != state else { return }
-        // Animate so the error console's insertion/removal slides instead of
-        // snapping the layout; the guard keeps the 0.4s poll from re-animating
-        // when nothing changed.
-        withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
-            state = next
+        if next != state {
+            // Animate so the error console's insertion/removal slides instead of
+            // snapping the layout; the `!=` guard keeps the 0.4s poll from
+            // re-animating when nothing changed.
+            withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+                state = next
+            }
         }
+        await captureLivePosterIfNeeded(for: next)
+    }
+
+    /// Reuses the live renderer's *current* frame as the hero once the scene is
+    /// presenting. Yields first so the state-change animation isn't held up by
+    /// the synchronous capture; the GIF placeholder shows until it lands.
+    private func captureLivePosterIfNeeded(for next: SceneRenderState) async {
+        guard case .ready = next, livePoster == nil,
+              let renderer = session?.sceneRenderer else { return }
+        await Task.yield()
+        guard livePoster == nil else { return }
+        livePoster = renderer.captureLivePoster()
     }
 
     private func derivedState() -> SceneRenderState {
@@ -471,8 +476,8 @@ struct WPESceneDetailView: View {
             return .loading(progress: session.loadProgress)
         }
         // Still suspend the *live* renderer under Reduce Motion; the inspector
-        // itself just shows the project's preview GIF (which holds a static
-        // poster under Reduce Motion), so there's no separate paused state.
+        // shows a static reused frame (or the preview GIF poster) anyway, so
+        // there's no separate paused state.
         renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
         return .ready
     }
@@ -527,19 +532,6 @@ struct WPESceneDetailView: View {
         }
     }
 
-    private var stateLabel: String {
-        switch state {
-        case .idle:
-            return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer state.")
-        case .loading:
-            return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
-        case .ready:
-            return String(localized: "Playing", defaultValue: "Playing", comment: "Scene renderer state.")
-        case .error:
-            return String(localized: "Error", defaultValue: "Error", comment: "Scene renderer state.")
-        }
-    }
-
     private var stateAccessibilityText: String {
         switch state {
         case .idle:
@@ -550,15 +542,6 @@ struct WPESceneDetailView: View {
             return String(localized: "Scene preview", defaultValue: "Scene preview", comment: "Scene renderer accessibility state.")
         case .error:
             return String(localized: "Scene cannot be played", defaultValue: "Scene cannot be played", comment: "Scene renderer accessibility state.")
-        }
-    }
-
-    private var statusColor: Color {
-        switch state {
-        case .ready:   return .blue
-        case .loading: return DesignTokens.Colors.Status.caution
-        case .error:   return DesignTokens.Colors.Status.danger
-        case .idle:    return .secondary
         }
     }
 
@@ -686,8 +669,8 @@ enum SceneRenderState: Equatable {
     case idle
     case loading(progress: String?)
     /// Scene loaded and presenting. The live `MTKView` drives the desktop
-    /// wallpaper itself; the detail card shows the project's preview GIF so it
-    /// never has to read back a frame off the GPU.
+    /// wallpaper; the detail card reuses the renderer's current frame as the
+    /// hero poster (captured on demand, off the load path).
     case ready
     case error(FallbackReason)
 
@@ -706,6 +689,96 @@ enum SceneRenderState: Equatable {
         case (.ready, .ready): return true
         case (.error(let l), .error(let r)): return l == r
         default: return false
+        }
+    }
+}
+
+// MARK: - Information overlay
+
+/// Floating dark capsule over the scene preview — the scene-type analog of
+/// `VideoInformationOverlay` / `HTMLInformationOverlay`. Every value reads from
+/// the in-memory descriptor / origin, so there's no project.json parse here.
+/// Short status tags stay verbatim to match the video / HTML badge convention.
+struct SceneInformationOverlay: View {
+    let origin: WPEOrigin
+    let descriptor: SceneDescriptor
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "cube.transparent")
+                Text(verbatim: origin.originalType.localizedDisplayName)
+            }
+            // High-signal first (warnings, abnormal capability) so the verbose
+            // feature-flag tail is what clips first on a narrow preview. Normal
+            // states (image-only capability, legacy cache storage) stay hidden to
+            // cut clutter.
+            if requiresWindowsPlugin {
+                tag("WIN PLUGIN", background: DesignTokens.Colors.Status.danger.opacity(0.55))
+            }
+            if descriptor.capabilityTier != .imageOnly {
+                tag(descriptor.capabilityTier.localizedLabel, background: capabilityBackground)
+            }
+            if let storageLabel {
+                tag(storageLabel)
+            }
+            if !descriptor.dependencyWorkshopIDs.isEmpty {
+                HStack(spacing: 3) {
+                    Image(systemName: "shippingbox")
+                    Text(verbatim: "\(descriptor.dependencyWorkshopIDs.count)")
+                }
+            }
+            ForEach(featureLabels, id: \.self) { tag($0) }
+        }
+        .font(DesignTokens.Typography.code)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .thumbnailBadgeGlass()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tag(_ text: String, background: Color = Color.white.opacity(0.18)) -> some View {
+        Text(verbatim: text)
+            .font(DesignTokens.Typography.badge)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(background, in: Capsule())
+    }
+
+    private var capabilityBackground: Color {
+        switch descriptor.capabilityTier {
+        case .imageOnly:   return Color.white.opacity(0.18)
+        case .degraded:    return DesignTokens.Colors.Status.warning.opacity(0.55)
+        case .unsupported: return DesignTokens.Colors.Status.danger.opacity(0.55)
+        }
+    }
+
+    private var storageLabel: String? {
+        switch descriptor.assetStorage {
+        case .cache:           return nil
+        case .sourceDirectory: return "FOLDER"
+        case .packageSource:   return "PACKAGED"
+        }
+    }
+
+    private var requiresWindowsPlugin: Bool {
+        origin.requiresWindowsPlugin || descriptor.preflightFeatureFlags.contains(.windowsPlugin)
+    }
+
+    private var featureLabels: [String] {
+        descriptor.preflightFeatureFlags.compactMap { flag in
+            switch flag {
+            case .customShaderSource: return "SHADER"
+            case .particleObject:     return "PARTICLE"
+            case .textObject:         return "TEXT"
+            case .soundObject:        return "AUDIO"
+            case .lightObject:        return "LIGHT"
+            case .animationLayer:     return "ANIM"
+            case .imageEffect:        return "FX"
+            case .unknownObject:      return nil
+            case .windowsPlugin:      return nil
+            }
         }
     }
 }

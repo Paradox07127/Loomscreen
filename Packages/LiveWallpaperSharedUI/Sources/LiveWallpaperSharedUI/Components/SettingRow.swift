@@ -5,10 +5,23 @@ import SwiftUI
 /// Use `info` for "what does this do" explanations and keep `subtitle` for
 /// live state ("Browsing data is cleared on each session") so the two roles
 /// don't bleed into each other.
+/// A small, uniform status seal rendered right after a `SettingRow` title (icon-only).
+public struct SettingRowTitleBadge {
+    let systemImage: String
+    let tint: Color
+    let accessibilityLabel: Text
+    public init(systemImage: String, tint: Color, accessibilityLabel: Text) {
+        self.systemImage = systemImage
+        self.tint = tint
+        self.accessibilityLabel = accessibilityLabel
+    }
+}
+
 public struct SettingRow<Content: View>: View {
     let icon: String
     let iconColor: Color
     let title: Text
+    let titleBadge: SettingRowTitleBadge?
     let subtitle: Text?
     let info: Text?
     let content: Content
@@ -17,6 +30,7 @@ public struct SettingRow<Content: View>: View {
         icon: String,
         iconColor: Color = .accentColor,
         title: LocalizedStringKey,
+        titleBadge: SettingRowTitleBadge? = nil,
         subtitle: LocalizedStringKey? = nil,
         info: LocalizedStringKey? = nil,
         @ViewBuilder content: () -> Content
@@ -24,6 +38,7 @@ public struct SettingRow<Content: View>: View {
         self.icon = icon
         self.iconColor = iconColor
         self.title = Text(title)
+        self.titleBadge = titleBadge
         self.subtitle = subtitle.map { Text($0) }
         self.info = info.map { Text($0) }
         self.content = content()
@@ -38,12 +53,14 @@ public struct SettingRow<Content: View>: View {
         iconColor: Color = .accentColor,
         verbatimTitle: String,
         verbatimSubtitle: String? = nil,
+        titleBadge: SettingRowTitleBadge? = nil,
         info: LocalizedStringKey? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.icon = icon
         self.iconColor = iconColor
         self.title = Text(verbatim: verbatimTitle)
+        self.titleBadge = titleBadge
         self.subtitle = verbatimSubtitle.map { Text(verbatim: $0) }
         self.info = info.map { Text($0) }
         self.content = content()
@@ -67,6 +84,12 @@ public struct SettingRow<Content: View>: View {
                         .font(.body.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if let titleBadge {
+                        Image(systemName: titleBadge.systemImage)
+                            .font(.caption)
+                            .foregroundStyle(titleBadge.tint)
+                            .accessibilityLabel(titleBadge.accessibilityLabel)
+                    }
                     if let info {
                         InfoTooltipButton(text: info)
                     }

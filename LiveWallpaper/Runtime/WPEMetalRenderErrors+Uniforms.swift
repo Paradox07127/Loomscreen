@@ -4,6 +4,13 @@ import Foundation
 import Metal
 import simd
 
+/// Async-path frame skip: every in-flight permit is taken (the GPU hasn't
+/// finished a prior frame), so the caller drops this frame. NOT a failure and
+/// deliberately kept out of `WPEMetalRenderExecutorError` (which is a
+/// user-facing `LocalizedError`) — it's pure flow control that lets the
+/// executor poll the in-flight semaphore instead of blocking the @MainActor.
+struct WPEMetalFrameInFlightBudgetExhausted: Error {}
+
 enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     case commandQueueUnavailable
     case libraryUnavailable

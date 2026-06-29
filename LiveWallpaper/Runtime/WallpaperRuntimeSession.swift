@@ -50,6 +50,10 @@ protocol WallpaperPerformanceConfigurable: AnyObject, Sendable {
 @MainActor
 protocol WallpaperFrameRateConfigurable: AnyObject {
     func setFrameRateLimit(_ limit: FrameRateLimit)
+    /// Layers a system-driven "background" throttle on top of the user's
+    /// ceiling without overwriting it (adaptive frame-rate / power saving).
+    /// `true` runs at the reduced tempo; `false` restores the user's limit.
+    func setAdaptiveFrameRateThrottle(_ active: Bool)
 }
 
 /// Implemented by sessions whose audio is owned by something other than

@@ -123,7 +123,7 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// Drives `WorkshopBrowseView`: request shape, paginated browse, debounced
+/// Drives `WorkshopBrowsePane`: request shape, paginated browse, debounced
 /// search, inline error surfacing. Read-only — owns no download workflow.
 @MainActor
 @Observable

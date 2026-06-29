@@ -104,11 +104,14 @@ struct ScreenDetailHeader: View {
                             .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
                         }
 
+                        // Same circular glass chrome as its sibling icon buttons,
+                        // just red-tinted — NOT destructiveControlTint(), whose
+                        // rounded-rect surface would clash with the circle shape.
                         Button(role: .destructive, action: onClearWallpaper) {
                             Image(systemName: "trash")
                         }
                         .adaptiveGlassButton(.regular, shape: .circle)
-                        .destructiveControlTint()
+                        .tint(DesignTokens.Colors.Status.danger)
                         .controlSize(.large)
                         .help(Text(clearHelpText))
                         .accessibilityLabel(Text(clearAccessibilityLabel))

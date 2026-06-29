@@ -300,9 +300,7 @@ struct HTMLInformationOverlay: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(0.6))
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
+        .thumbnailBadgeGlass()
         .accessibilityElement(children: .combine)
     }
 

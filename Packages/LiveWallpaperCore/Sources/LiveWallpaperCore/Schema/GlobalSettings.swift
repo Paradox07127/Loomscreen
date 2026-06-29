@@ -76,6 +76,13 @@ public struct GlobalSettings: Codable, Sendable {
     /// must be an explicit opt-in, never on by default.
     public var audioResponseEnabled: Bool = false
 
+    /// Pro-only opt-in: drop scene wallpapers to roughly half frame rate when a
+    /// display is mostly covered by windows, or when running on battery with
+    /// playback kept on. GPU power is near-linear in presented frames on Apple
+    /// Silicon (~5.5 mW/fps measured), so this is a large, pixel-identical power
+    /// saving in states where the wallpaper is barely visible. Default off.
+    public var adaptiveFrameRateEnabled: Bool = false
+
     /// 150 MB default — covers a typical 30s 1080p clip outright and a 30s
     /// low-bitrate 4K with margin, while keeping the visible memory
     /// footprint under ~200 MB per screen so users glancing at Activity
@@ -117,7 +124,8 @@ public struct GlobalSettings: Codable, Sendable {
         applicationPerformanceRules: [ApplicationPerformanceRule] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
         developerModeEnabled: Bool = GlobalSettings.defaultDeveloperModeEnabled,
-        audioResponseEnabled: Bool = false
+        audioResponseEnabled: Bool = false,
+        adaptiveFrameRateEnabled: Bool = false
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -135,6 +143,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.developerModeEnabled = developerModeEnabled
         self.audioResponseEnabled = audioResponseEnabled
+        self.adaptiveFrameRateEnabled = adaptiveFrameRateEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -158,5 +167,6 @@ public struct GlobalSettings: Codable, Sendable {
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
         developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? GlobalSettings.defaultDeveloperModeEnabled
         audioResponseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .audioResponseEnabled)) ?? false
+        adaptiveFrameRateEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .adaptiveFrameRateEnabled)) ?? false
     }
 }

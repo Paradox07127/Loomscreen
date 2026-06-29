@@ -179,23 +179,16 @@ struct WPESceneSection: View {
            case .scene(let descriptor) = configuration.activeWallpaper,
            let origin = configuration.wpeOrigin {
             let session = screen.runtimeSession as? SceneWallpaperSession
-            // Card stays chrome-free: settings live in the right inspector; Apply / Workshop live in the screen header + sidebar.
-            ScrollView {
-                WPESceneDetailView(
-                    origin: origin,
-                    descriptor: descriptor,
-                    session: session,
-                    onClearWallpaper: {
-                        pendingDestructive = PendingDestructive(
-                            .clearScene(sceneName: origin.title, displayName: screen.name)
-                        ) {
-                            screenManager.clearWallpaperForScreen(screen)
-                        }
-                    }
-                )
-                .padding(24)
-                .frame(maxWidth: .infinity)
-            }
+            // Chrome-free, and NOT scrolled: like the video preview area the
+            // 16:9 hero must stay height-bounded by the viewport, otherwise a
+            // wide window grows it unboundedly tall and introduces vertical scroll.
+            WPESceneDetailView(
+                origin: origin,
+                descriptor: descriptor,
+                session: session
+            )
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             EmptyView()
         }

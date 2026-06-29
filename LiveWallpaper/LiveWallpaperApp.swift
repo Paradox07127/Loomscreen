@@ -206,6 +206,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
 
+        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        // Auto-run the Workshop Doctor once at launch when it's already
+        // configured, so the in-app "Download from Steam" path is ready without
+        // a manual probe run. Deferred + background; skipped when unconfigured
+        // (nothing meaningful to probe) so users who never set up SteamCMD pay
+        // no launch cost.
+        if !runtimeOptions.isTesting,
+           workshopDoctorService.binaryBookmarkData != nil,
+           workshopDoctorService.workdirBookmarkData != nil {
+            Task { @MainActor [workshopDoctorService] in
+                try? await Task.sleep(for: .seconds(3))
+                await workshopDoctorService.runAll()
+            }
+        }
+        #endif
+
         #if LITE_BUILD
         // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we
         // hand-roll a single-shot launch-time update check (no background

@@ -43,6 +43,11 @@ final class SettingsManager {
         static let trustedHosts = "TrustedHTMLHosts.v1"
         static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
         static let wpeEngineAssetsRootBookmark = "WPEEngineAssets.RootBookmark.v1"
+        /// Set only when the engine assets came from the in-app SteamCMD download
+        /// (the pruned container install). Presence = the managed install is the
+        /// active engine-assets root; the value is its Steam `buildid` for update
+        /// checks. Cleared when the user forgets/removes or manually links elsewhere.
+        static let wpeEngineAssetsManagedBuildID = "WPEEngineAssets.ManagedBuildID.v1"
         static let appLanguage = AppLanguagePreference.storageKey
         /// Bumped each time we successfully migrate a blob out of UserDefaults
         /// into the file store. Lets us run the migration at most once even
@@ -318,6 +323,21 @@ final class SettingsManager {
     func clearWPEEngineAssetsBookmark() {
         UserDefaults.standard.removeObject(forKey: Keys.wpeEngineAssetsRootBookmark)
         NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
+    }
+
+    /// Steam `buildid` of the in-app-downloaded engine assets, or nil when no
+    /// managed install is present. Setting it also notifies so the assets
+    /// library re-resolves and the UI flips to "Linked".
+    var wpeEngineAssetsManagedBuildID: String? {
+        get { UserDefaults.standard.string(forKey: Keys.wpeEngineAssetsManagedBuildID) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                UserDefaults.standard.set(newValue, forKey: Keys.wpeEngineAssetsManagedBuildID)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.wpeEngineAssetsManagedBuildID)
+            }
+            NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
+        }
     }
 
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {

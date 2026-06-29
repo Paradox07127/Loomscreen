@@ -576,6 +576,9 @@ final class ScreenManager {
         withObservationTracking {
             _ = fullScreenDetector.hiddenScreens
             _ = fullScreenDetector.occludedScreens
+            // Adaptive throttle reacts to partial coverage below the 0.85
+            // pause cutoff, so track the (quantized) fraction too.
+            _ = fullScreenDetector.occlusionFractions
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self,
@@ -712,6 +715,7 @@ final class ScreenManager {
 
     /// Tears down the live runtime session without touching persistence.
     private func releaseRuntimeSession(_ screen: Screen) {
+        adaptiveFrameRateOcclusionThrottled[screen.id] = nil
         bumpTransition(for: screen.id)
         effectsCoordinator.cancelInflight(for: screen.id)
         transitionRegistry.cancelAssetReadiness(for: screen.id)
@@ -1101,6 +1105,13 @@ final class ScreenManager {
         refreshPerformancePolicyForAllScreens()
     }
 
+    /// Per-display latch for the *occlusion* arm of the adaptive frame-rate
+    /// throttle so the policy can apply hysteresis (avoids flapping as window
+    /// coverage hovers near the enter/exit thresholds). Tracks occlusion alone —
+    /// folding in the battery arm would let unplugging at ~45% coverage stay
+    /// throttled on the lower exit threshold. Cleared on session release.
+    @ObservationIgnored private var adaptiveFrameRateOcclusionThrottled: [CGDirectDisplayID: Bool] = [:]
+
     /// Single source of truth for resolving + applying the performance policy to
     /// one screen. Every raw signal is gathered here (via `policyInputs`), so no
     /// other type re-assembles the rule inputs — `PlaybackCoordinator` calls back
@@ -1108,16 +1119,71 @@ final class ScreenManager {
     @discardableResult
     func applyPerformancePolicy(to screen: Screen) -> WallpaperPerformanceProfile {
         let settings = SettingsManager.shared.loadGlobalSettings()
+        return resolveAndApplyPerformanceState(
+            to: screen,
+            settings: settings,
+            applicationRuleActive: currentApplicationRuleActive(settings),
+            frontmostExcluded: ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
+        )
+    }
+
+    /// Resolves the universal suspend/quality profile and applies it together
+    /// with the scene-only adaptive frame-rate throttle — the single place that
+    /// pairs the two so a future edit can't drift the all-screens and
+    /// single-screen paths apart. Context (`settings` and the rule flags) is
+    /// passed in so the all-screens loop computes it once.
+    @discardableResult
+    private func resolveAndApplyPerformanceState(
+        to screen: Screen,
+        settings: GlobalSettings,
+        applicationRuleActive: Bool,
+        frontmostExcluded: Bool
+    ) -> WallpaperPerformanceProfile {
         let profile = WallpaperPolicyEngine.performanceProfile(
             inputs: policyInputs(
                 for: screen,
-                applicationRuleActive: currentApplicationRuleActive(settings),
-                frontmostExcluded: ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
+                applicationRuleActive: applicationRuleActive,
+                frontmostExcluded: frontmostExcluded
             ),
             settings: settings
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
+        applyAdaptiveFrameRate(to: screen, settings: settings)
         return profile
+    }
+
+    /// Layers the adaptive background frame-rate throttle on top of the binary
+    /// play/pause profile. Pixel-identical; only the presented frame *rate*
+    /// changes, which on Apple Silicon is the dominant GPU-power driver. Scene
+    /// renderer only — the video path uses a separate composition cap. No-op in
+    /// Lite (no scene renderer).
+    private func applyAdaptiveFrameRate(to screen: Screen, settings: GlobalSettings) {
+        #if !LITE_BUILD
+        guard let scene = screen.runtimeSession as? SceneWallpaperSession,
+              let controller = scene.frameRateController else {
+            adaptiveFrameRateOcclusionThrottled[screen.id] = nil
+            return
+        }
+        // Disabling the setting must actively release any live throttle, not
+        // just stop computing one.
+        guard settings.adaptiveFrameRateEnabled else {
+            adaptiveFrameRateOcclusionThrottled[screen.id] = nil
+            controller.setAdaptiveFrameRateThrottle(false)
+            return
+        }
+        let occlusionThrottled = AdaptiveFrameRatePolicy.shouldThrottleForOcclusion(
+            occlusionFraction: fullScreenDetector.occlusionFraction(for: screen.id),
+            currentlyThrottled: adaptiveFrameRateOcclusionThrottled[screen.id] ?? false
+        )
+        adaptiveFrameRateOcclusionThrottled[screen.id] = occlusionThrottled
+        let shouldThrottle = AdaptiveFrameRatePolicy.shouldThrottle(
+            enabled: true,
+            occlusionThrottled: occlusionThrottled,
+            onBattery: powerMonitor.currentPowerSource.isOnBattery,
+            pausesOnBattery: settings.globalPauseOnBattery
+        )
+        controller.setAdaptiveFrameRateThrottle(shouldThrottle)
+        #endif
     }
 
     /// Snapshots the current *raw* system state for `screen`. The `GlobalSettings`
@@ -1150,15 +1216,12 @@ final class ScreenManager {
         let applicationRuleActive = currentApplicationRuleActive(settings)
         let frontmostExcluded = ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
         for screen in screens {
-            let profile = WallpaperPolicyEngine.performanceProfile(
-                inputs: policyInputs(
-                    for: screen,
-                    applicationRuleActive: applicationRuleActive,
-                    frontmostExcluded: frontmostExcluded
-                ),
-                settings: settings
+            resolveAndApplyPerformanceState(
+                to: screen,
+                settings: settings,
+                applicationRuleActive: applicationRuleActive,
+                frontmostExcluded: frontmostExcluded
             )
-            screen.runtimeSession?.applyPerformanceProfile(profile)
         }
         // A policy refresh always commits the derived session state, so observers
         // can't leave the SwiftUI layer out of sync with the render loops by
@@ -1188,9 +1251,13 @@ final class ScreenManager {
     private func updateFullScreenFallbackPolling() {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let hasConfiguredSessions = wallpaperSessionSummaries.contains { $0.isConfigured }
+        let hasConfiguredSceneSessions = wallpaperSessionSummaries.contains {
+            $0.isConfigured && $0.wallpaperType == .scene
+        }
         let shouldEnablePolling = WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: globalSettings,
-            hasConfiguredWallpaperSessions: hasConfiguredSessions
+            hasConfiguredWallpaperSessions: hasConfiguredSessions,
+            hasConfiguredSceneSessions: hasConfiguredSceneSessions
         )
 
         fullScreenDetector.setFallbackPollingEnabled(shouldEnablePolling)

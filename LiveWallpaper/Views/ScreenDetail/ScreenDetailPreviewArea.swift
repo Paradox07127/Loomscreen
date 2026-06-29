@@ -100,26 +100,30 @@ struct ScreenDetailPreviewArea: View {
     }
 
     private var htmlContent: some View {
-        // Same frame as scene/shader: a ScrollView with self-padding so the
-        // preview + source form scroll rather than overflow at small heights.
-        ScrollView {
-            VStack(spacing: 16) {
-                if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
-                    HTMLPreviewSection(
-                        source: draft.htmlSource,
-                        config: draft.htmlConfig,
-                        wpePreviewURL: wpeWebPreviewURL,
-                        wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
+        // GeometryReader caps the 16:9 preview at the viewport height so a wide
+        // window letterboxes it (like the video preview) instead of growing it
+        // unboundedly tall inside the ScrollView. The source form still scrolls.
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 16) {
+                    if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
+                        HTMLPreviewSection(
+                            source: draft.htmlSource,
+                            config: draft.htmlConfig,
+                            wpePreviewURL: wpeWebPreviewURL,
+                            wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
+                        )
+                        .frame(maxHeight: geo.size.height)
+                    }
+                    HTMLSourceSection(
+                        screen: screen,
+                        source: $draft.htmlSource,
+                        config: $draft.htmlConfig
                     )
                 }
-                HTMLSourceSection(
-                    screen: screen,
-                    source: $draft.htmlSource,
-                    config: $draft.htmlConfig
-                )
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

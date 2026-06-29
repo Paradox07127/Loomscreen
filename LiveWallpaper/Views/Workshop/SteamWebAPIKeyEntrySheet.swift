@@ -30,7 +30,11 @@ struct SteamWebAPIKeyEntrySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
             header
-            disclosurePanel
+            antiPhishingCard
+            Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
+                .font(DesignTokens.Typography.body)
+                .tint(Color.accentColor)
+                .fixedSize(horizontal: false, vertical: true)
             Toggle(isOn: $hasReadTOU) {
                 Text("I have read the Steam Web API Terms of Use.")
                     .font(DesignTokens.Typography.body)
@@ -56,7 +60,6 @@ struct SteamWebAPIKeyEntrySheet: View {
                     .disabled(validation != .valid)
                     .help(Text("Save key to Keychain and close"))
             }
-            dataFlowFooter
         }
         .padding(DesignTokens.Spacing.xl)
         .frame(width: 460)
@@ -72,33 +75,32 @@ struct SteamWebAPIKeyEntrySheet: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: DesignTokens.Spacing.xs) {
             Text("Set your Steam Web API key")
                 .font(.headline)
-            Text("Use your own Steam account's key. Free, but requires Mobile Steam Guard and a non-limited Steam account.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            InfoTooltipButton(text: "Loomscreen uses your own Steam account's Web API key to read Workshop metadata — free, but it needs Mobile Steam Guard and a non-limited Steam account. Calls go directly to Valve over HTTPS; the key is stored only in this Mac's Keychain (no iCloud sync) and is never proxied through Loomscreen.")
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var disclosurePanel: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            Text("Loomscreen uses Valve's Steam Web API to fetch Workshop metadata.")
-                .font(DesignTokens.Typography.body)
-            Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
-                .font(DesignTokens.Typography.body)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
-                .font(DesignTokens.Typography.body)
-                .tint(Color.accentColor)
-                .fixedSize(horizontal: false, vertical: true)
+    private var antiPhishingCard: some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
+            Image(systemName: "shield.lefthalf.filled")
+                .foregroundStyle(DesignTokens.Colors.Status.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Official source only")
+                    .font(DesignTokens.Typography.caption.weight(.bold))
+                Text("Generate your key only at steamcommunity.com/dev/apikey. Never paste a key from a third-party site or installer. If a key may be compromised, [revoke it on Steam](https://steamcommunity.com/dev/apikey).")
+                    .font(DesignTokens.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .tint(Color.accentColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(DesignTokens.Spacing.md)
+        .padding(DesignTokens.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md))
+        .background(DesignTokens.Colors.Status.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md))
     }
 
     private var keyField: some View {
@@ -158,14 +160,6 @@ struct SteamWebAPIKeyEntrySheet: View {
         case .error(let message):
             label(text: message, tint: DesignTokens.Colors.Status.danger, system: "exclamationmark.triangle.fill")
         }
-    }
-
-    private var dataFlowFooter: some View {
-        Text("Stored on your Mac (Keychain, no iCloud sync) and sent directly to Valve's Steam Web API over HTTPS. Loomscreen never proxies your key.")
-            .font(DesignTokens.Typography.badge)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func label(text: String, tint: Color, system: String) -> some View {

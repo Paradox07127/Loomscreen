@@ -113,7 +113,7 @@ struct WPEFallbackCard: View {
                         Button {
                             openWorkshop(workshopID: id)
                         } label: {
-                            Label("Open", systemImage: "arrow.up.right.square")
+                            Label("Open", systemImage: "safari")
                                 .labelStyle(.iconOnly)
                         }
                         .buttonStyle(.borderless)
@@ -152,7 +152,7 @@ struct WPEFallbackCard: View {
                 Button {
                     openWorkshop()
                 } label: {
-                    Label("Open this project", systemImage: "arrow.up.right.square")
+                    Label("Open this project", systemImage: "safari")
                 }
                 .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
@@ -162,7 +162,7 @@ struct WPEFallbackCard: View {
             Button {
                 openWorkshop()
             } label: {
-                Label("View in Workshop", systemImage: "arrow.up.right.square")
+                Label("View in Workshop", systemImage: "safari")
             }
             .adaptiveGlassButton(.regular)
             .controlSize(.regular)

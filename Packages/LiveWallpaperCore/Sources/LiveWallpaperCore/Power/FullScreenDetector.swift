@@ -14,6 +14,14 @@ public final class FullScreenDetector {
     /// which needs a single ≥95% window. Drives `pauseOnWindowOcclusion`.
     public private(set) var occludedScreens: [CGDirectDisplayID: Bool] = [:]
 
+    /// Continuous union-coverage fraction (0…1) behind `occludedScreens`,
+    /// quantized to `occlusionFractionStep` so adaptive-frame-rate observers
+    /// only wake on meaningful change (this updates far more often than the
+    /// ≥0.85 boolean as windows move).
+    public private(set) var occlusionFractions: [CGDirectDisplayID: CGFloat] = [:]
+
+    @ObservationIgnored private static let occlusionFractionStep: CGFloat = 0.05
+
     /// Cap on how many windows feed the union-area calculation per display.
     /// The union is computed by coordinate compression (~O(n²) cells × n
     /// rects); keeping only the largest few dozen windows bounds the cost
@@ -86,27 +94,29 @@ public final class FullScreenDetector {
     private func checkFullScreenState() {
         var result: [CGDirectDisplayID: Bool] = [:]
         var occlusion: [CGDirectDisplayID: Bool] = [:]
+        var fractions: [CGDirectDisplayID: CGFloat] = [:]
         let screens = NSScreen.screens
 
         for screen in screens {
             if let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
                 result[id] = false
                 occlusion[id] = false
+                fractions[id] = 0
             }
         }
 
         if !NSScreen.screensHaveSeparateSpaces {
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
-            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen }
-            updateIfChanged(result, occlusion)
+            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0 }
+            updateIfChanged(result, occlusion, fractions)
             return
         }
 
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
-            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen }
-            updateIfChanged(result, occlusion)
+            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0 }
+            updateIfChanged(result, occlusion, fractions)
             return
         }
 
@@ -166,10 +176,16 @@ public final class FullScreenDetector {
             let screenArea = cgScreenFrame.width * cgScreenFrame.height
             guard screenArea > 0 else { continue }
             let rects = windowsByScreen[screenID] ?? []
-            occlusion[screenID] = Self.unionArea(of: rects) >= screenArea * 0.85
+            let fraction = Self.unionArea(of: rects) / screenArea
+            // Floor (not round) to the step so a quantized value never exceeds
+            // the true coverage — keeps the policy's 0.5/0.4 thresholds honest
+            // instead of effectively shifting them to ~0.475/0.375.
+            let quantized = (fraction / Self.occlusionFractionStep).rounded(.down) * Self.occlusionFractionStep
+            fractions[screenID] = min(1, max(0, quantized))
+            occlusion[screenID] = fraction >= 0.85
         }
 
-        updateIfChanged(result, occlusion)
+        updateIfChanged(result, occlusion, fractions)
     }
 
     /// Area of the union of `rects` (overlaps counted once) via coordinate
@@ -212,13 +228,17 @@ public final class FullScreenDetector {
 
     private func updateIfChanged(
         _ newFullScreen: [CGDirectDisplayID: Bool],
-        _ newOcclusion: [CGDirectDisplayID: Bool]
+        _ newOcclusion: [CGDirectDisplayID: Bool],
+        _ newFractions: [CGDirectDisplayID: CGFloat]
     ) {
         if newFullScreen != hiddenScreens {
             hiddenScreens = newFullScreen
         }
         if newOcclusion != occludedScreens {
             occludedScreens = newOcclusion
+        }
+        if newFractions != occlusionFractions {
+            occlusionFractions = newFractions
         }
     }
 
@@ -230,6 +250,10 @@ public final class FullScreenDetector {
 
     public func isDesktopOccluded(for screenID: CGDirectDisplayID) -> Bool {
         occludedScreens[screenID] ?? false
+    }
+
+    public func occlusionFraction(for screenID: CGDirectDisplayID) -> Double {
+        Double(occlusionFractions[screenID] ?? 0)
     }
 
     public func checkNow() {

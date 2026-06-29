@@ -24,6 +24,13 @@ struct SteamCMDDownloadProgress: Equatable, Sendable {
 /// orphan the child workers.
 actor SteamCMDProcessRunner {
 
+    /// App-wide serialization for SteamCMD: only one process may touch the shared
+    /// STEAMROOT at a time. Launch auto-probes, the Doctor's manual run, ownership
+    /// probes, workshop downloads, and the engine `app_update` all funnel through
+    /// `run`; concurrent instances otherwise collide on SteamCMD's own
+    /// single-instance lock and fail spuriously (or interleave staging writes).
+    private static let steamcmdGate = AsyncSemaphore(value: 1)
+
     func run(
         binary: URL,
         args: [String],
@@ -32,6 +39,9 @@ actor SteamCMDProcessRunner {
         workingDirectory: URL?,
         onProgress: SteamCMDProgressHandler? = nil
     ) async -> SteamCMDRunResult {
+        do { try await Self.steamcmdGate.acquire() }
+        catch { return SteamCMDRunResult(exitCode: nil, stdout: "", stderr: "", timedOut: false, killed: true) }
+        defer { Self.steamcmdGate.release() }
         do {
             try Task.checkCancellation()
             let spawned = try Self.spawn(
@@ -263,8 +273,15 @@ actor SteamCMDProcessRunner {
         let timedOut = !timeoutTask.isCancelled && processGroup.didTerminate
         let killed = processGroup.didTerminate
 
-        stdoutCapture.waitForEOF(timeout: 1)
-        stderrCapture.waitForEOF(timeout: 1)
+        // Drain the pipes off a utility-QoS thread. `waitForEOF` blocks on a
+        // DispatchSemaphore that the FileHandle readability handler (default QoS)
+        // signals; blocking the actor's user-initiated thread on it tripped the
+        // Thread Performance Checker's priority-inversion warning. Waiting at
+        // utility QoS (≤ the signaler) removes the inversion.
+        await Task.detached(priority: .utility) {
+            stdoutCapture.waitForEOF(timeout: 1)
+            stderrCapture.waitForEOF(timeout: 1)
+        }.value
         let stdout = stdoutCapture.string
         let stderr = stderrCapture.string
         stdoutCapture.stop()
@@ -462,6 +479,57 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
     private func publish(_ progress: SteamCMDDownloadProgress?) {
         guard let progress else { return }
         onProgress?(progress.percent, progress.downloadedBytes, progress.totalBytes)
+    }
+}
+
+/// A FIFO counting semaphore for async/await. `acquire()` honors task
+/// cancellation (throws `CancellationError` instead of stranding a waiter), so a
+/// cancelled SteamCMD operation queued behind a long-running one bails promptly.
+final class AsyncSemaphore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var permits: Int
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
+
+    init(value: Int) { self.permits = value }
+
+    func acquire() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if Task.isCancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if permits > 0 {
+                    permits -= 1
+                    lock.unlock()
+                    continuation.resume()
+                    return
+                }
+                waiters.append((id, continuation))
+                lock.unlock()
+            }
+        } onCancel: {
+            lock.lock()
+            guard let index = waiters.firstIndex(where: { $0.id == id }) else { lock.unlock(); return }
+            let waiter = waiters.remove(at: index)
+            lock.unlock()
+            waiter.continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    func release() {
+        lock.lock()
+        if waiters.isEmpty {
+            permits += 1
+            lock.unlock()
+        } else {
+            let waiter = waiters.removeFirst()
+            lock.unlock()
+            waiter.continuation.resume()
+        }
     }
 }
 #endif

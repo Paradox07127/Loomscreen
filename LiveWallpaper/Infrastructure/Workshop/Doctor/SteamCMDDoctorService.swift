@@ -117,6 +117,19 @@ enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
     case failed(reason: String)
 }
 
+/// Outcome of a full Wallpaper Engine (`app_update 431960`) install/update.
+/// `installRoot` is the on-disk `wallpaper_engine` directory SteamCMD wrote to;
+/// `buildID` is the installed Steam build (nil when the manifest couldn't be read).
+enum WPEAppUpdateResult: Sendable {
+    case updated(installRoot: URL, buildID: String?)
+    case notConfigured(reason: String)
+    case loginRequired
+    case untrustedBinary
+    case notEntitled
+    case timedOut
+    case failed(reason: String)
+}
+
 @MainActor
 @Observable
 final class SteamCMDDoctorService {
@@ -129,7 +142,7 @@ final class SteamCMDDoctorService {
     }
 
     private static let valveTeamIdentifier = "MXGJJ98X76"
-    private static let wallpaperEngineAppID: UInt32 = 431960
+    nonisolated private static let wallpaperEngineAppID: UInt32 = 431960
     /// Empirically validated public free WE community item used as the primary
     /// ownership probe (Phase 0 empirical pass, 2026-05-28).
     private static let primaryOwnershipProbeID: UInt64 = 3725117707
@@ -596,6 +609,66 @@ final class SteamCMDDoctorService {
         }
     }
 
+    /// Signs the cached account out of SteamCMD (a local revocation path). Runs
+    /// `+logout`, ALWAYS scrubs the container-local auth artifacts (so sign-out
+    /// reliably revokes on this Mac even if `logout` was a no-op or the probe
+    /// can't confirm — they just get regenerated on the next Terminal login),
+    /// then re-verifies. The Steam username is kept (the probe needs it); the
+    /// account stays usable from a fresh Terminal login.
+    func signOut() async {
+        // Mark the session not-signed-in immediately: download entry points gate
+        // on `isDownloadReady` (cachedLogin green), so this closes the window
+        // where a download could start mid sign-out, and — since the "Sign out"
+        // action only shows for a GREEN cachedLogin — prevents a double-fire.
+        setProbe(.cachedLogin, status: .running)
+        if let username, SteamCMDScriptWriter.validateUsername(username),
+           binaryBookmarkData != nil, workdirBookmarkData != nil,
+           let binary = try? resolveBinaryURL(), let workdir = try? resolveWorkdirURL() {
+            let scope = workdir.startAccessingSecurityScopedResource()
+            defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
+            if let script = try? SteamCMDScriptWriter.logoutScript(username: username) {
+                _ = try? await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: 30)
+            }
+        }
+        clearCachedSessionFiles()
+        await runProbe(.cachedLogin)
+    }
+
+    /// Forgets the stored Steam username (secondary to `signOut`). Resets the
+    /// login/ownership probes since both key off the username.
+    func forgetUsername() {
+        username = nil
+        setProbe(.cachedLogin, status: .notRun)
+        setProbe(.wallpaperEngineOwnership, status: .notRun)
+    }
+
+    /// Deletes ONLY SteamCMD's cached-credential artifacts in the app's own
+    /// container Steam root: `config/config.vdf`, `config/loginusers.vdf`, and any
+    /// `ssfn*` (Steam Guard machine tokens). Never touches `steamapps/`,
+    /// `depotcache/`, `userdata/`, library folders, the API-key Keychain, or the
+    /// SteamCMD binary/workdir bookmarks. Containment is checked on the resolved
+    /// path; the delete operates on the literal path so a final-component symlink
+    /// is unlinked, not followed to its target.
+    private func clearCachedSessionFiles() {
+        let steamRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Steam", isDirectory: true)
+        let configDir = steamRoot.appendingPathComponent("config", isDirectory: true)
+        var targets = [
+            configDir.appendingPathComponent("config.vdf", isDirectory: false),
+            configDir.appendingPathComponent("loginusers.vdf", isDirectory: false),
+        ]
+        for dir in [steamRoot, configDir] {
+            if let children = try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                targets += children.filter { $0.lastPathComponent.hasPrefix("ssfn") }
+            }
+        }
+        for target in targets {
+            let resolved = target.standardizedFileURL.resolvingSymlinksInPath()
+            guard WPEEngineAssetsLibrary.isContainerInternal(resolved) else { continue }
+            try? fileManager.removeItem(at: target)
+        }
+    }
+
     private func runWallpaperEngineOwnershipProbe() async {
         guard isGreen(.cachedLogin) else {
             setProbe(.wallpaperEngineOwnership, status: .yellow(
@@ -672,6 +745,10 @@ final class SteamCMDDoctorService {
     /// task cancellation (the runner terminates SteamCMD's process group).
     static let downloadTimeout: TimeInterval = 1200
 
+    /// Full WPE (app 431960) install is multi-GB; allow a long ceiling so a
+    /// first-time download on a slow link isn't killed mid-way. Cancellable.
+    static let appUpdateTimeout: TimeInterval = 5400
+
     /// A cached Steam login is required because otherwise SteamCMD prompts for a
     /// password, which `@NoPromptForPassword` refuses. Reads `probes` so SwiftUI
     /// re-evaluates as the Doctor changes.
@@ -743,6 +820,206 @@ final class SteamCMDDoctorService {
         } catch {
             return .failed(reason: redacted(error.localizedDescription))
         }
+    }
+
+    /// Downloads / updates the full Wallpaper Engine app (431960) via SteamCMD.
+    /// Under the sandbox-redirected STEAMROOT this lands in the container at
+    /// `…/Steam/steamapps/common/wallpaper_engine`; the caller prunes it to the
+    /// `assets/` subtree. Mirrors `downloadWorkshopItem`'s gating/scope handling.
+    func updateWallpaperEngineApp(onProgress: SteamCMDProgressHandler? = nil) async -> WPEAppUpdateResult {
+        guard binaryBookmarkData != nil else {
+            return .notConfigured(reason: SteamCMDDoctorError.missingBinaryBinding.errorDescription ?? "No SteamCMD binary is selected.")
+        }
+        guard workdirBookmarkData != nil else {
+            return .notConfigured(reason: SteamCMDDoctorError.missingWorkdirBinding.errorDescription ?? "No SteamCMD working directory is selected.")
+        }
+        guard let username, SteamCMDScriptWriter.validateUsername(username) else {
+            return .notConfigured(reason: "Enter your Steam username in the SteamCMD Doctor first.")
+        }
+        guard isGreen(.cachedLogin) else { return .loginRequired }
+
+        do {
+            let binary = try resolveBinaryURL()
+            guard await ensureTrustedBinary(binary) else { return .untrustedBinary }
+            let workdir = try resolveWorkdirURL()
+            let workdirScope = workdir.startAccessingSecurityScopedResource()
+            defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
+
+            let script = try SteamCMDScriptWriter.appUpdateScript(username: username)
+            let result = try await runSteamCMDScript(
+                script,
+                binary: binary,
+                workdir: workdir,
+                timeout: Self.appUpdateTimeout,
+                onProgress: onProgress
+            )
+
+            if result.timedOut { return .timedOut }
+            if Task.isCancelled || result.killed { return .failed(reason: "Download cancelled.") }
+
+            let out = result.stdout
+            // Cross-platform reality: forcing the Windows depot on macOS stages the
+            // files to `steamapps/downloading/431960/` but NEVER performs the final
+            // install/commit into `common/wallpaper_engine/` (steamcmd leaves the
+            // app "uninstalled" with no error), so "Success! App … fully installed"
+            // never prints. Treat the content as ready when a candidate dir holds a
+            // complete asset subtree; the caller relocates it out of staging.
+            if let installRoot = Self.resolveWPEInstallRoot(workdir: workdir, fileManager: fileManager),
+               Self.isWPEContentComplete(installRoot: installRoot, fileManager: fileManager),
+               Self.isWPEStagingComplete(installRoot: installRoot, fileManager: fileManager) {
+                let buildID = Self.readInstalledBuildID(installRoot: installRoot, fileManager: fileManager)
+                return .updated(installRoot: installRoot, buildID: buildID)
+            }
+            // "No subscription" = this account doesn't own Wallpaper Engine.
+            if out.contains("No subscription") { return .notEntitled }
+            return .failed(reason: "SteamCMD didn't produce a complete Wallpaper Engine asset tree. Open the Doctor and use Export diagnostics for the raw output.")
+        } catch SteamCMDScriptError.invalidUsername {
+            return .notConfigured(reason: "Steam username must match ^[A-Za-z0-9_]{1,32}$.")
+        } catch {
+            return .failed(reason: redacted(error.localizedDescription))
+        }
+    }
+
+    /// Metadata-only query of app 431960's latest public-branch `buildid`. Returns
+    /// nil on any failure (not configured, not logged in, parse miss) — the caller
+    /// treats nil as "couldn't check" rather than "no update".
+    func latestWallpaperEngineBuildID() async -> String? {
+        guard binaryBookmarkData != nil, workdirBookmarkData != nil,
+              let username, SteamCMDScriptWriter.validateUsername(username),
+              isGreen(.cachedLogin) else { return nil }
+        do {
+            let binary = try resolveBinaryURL()
+            guard await ensureTrustedBinary(binary) else { return nil }
+            let workdir = try resolveWorkdirURL()
+            let workdirScope = workdir.startAccessingSecurityScopedResource()
+            defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
+            let script = try SteamCMDScriptWriter.appInfoScript(username: username)
+            let result = try await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: 120)
+            if result.timedOut || result.killed { return nil }
+            return Self.parsePublicBuildID(fromAppInfo: result.stdout)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Install-dir candidates for app 431960, in priority order: the
+    /// sandbox-redirected container STEAMROOT first (where app-button downloads
+    /// land, full access), then the bound workdir's tree (custom steamcmd dirs).
+    nonisolated static func wpeInstallRootCandidates(workdir: URL, fileManager: FileManager) -> [URL] {
+        let appSupport = try? fileManager.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        var candidates: [URL] = []
+        // Freshly-staged content FIRST: a just-run `app_update` lands here (cross-
+        // platform never commits to `common/`). On an UPDATE this must outrank the
+        // previously-relocated `common/wallpaper_engine`, or we'd keep stale assets
+        // and the cleanup would delete the new download. The dir holds `assets/`
+        // directly.
+        if let appSupport {
+            candidates.append(appSupport.appendingPathComponent(
+                "Steam/steamapps/downloading/\(wallpaperEngineAppID)", isDirectory: true))
+        }
+        candidates.append(workdir.appendingPathComponent(
+            "steamapps/downloading/\(wallpaperEngineAppID)", isDirectory: true))
+        // Committed install (rare on macOS; the platform-native / custom-workdir case).
+        if let appSupport {
+            candidates.append(appSupport.appendingPathComponent(
+                "Steam/steamapps/common/wallpaper_engine", isDirectory: true))
+        }
+        candidates.append(workdir.appendingPathComponent(
+            "steamapps/common/wallpaper_engine", isDirectory: true))
+        return candidates
+    }
+
+    nonisolated static func resolveWPEInstallRoot(workdir: URL, fileManager: FileManager) -> URL? {
+        wpeInstallRootCandidates(workdir: workdir, fileManager: fileManager).first { root in
+            var isDir = ObjCBool(false)
+            let assets = root.appendingPathComponent("assets", isDirectory: true)
+            return fileManager.fileExists(atPath: assets.path(percentEncoded: false), isDirectory: &isDir) && isDir.boolValue
+        }
+    }
+
+    /// The asset subtree must hold the framework dirs scenes actually reference
+    /// (`materials`/`models`/`shaders`) — guards against treating a download
+    /// interrupted mid-stage as complete. WPE's example/preview files may be
+    /// "missing" (separate depot) without affecting these.
+    nonisolated static func isWPEContentComplete(installRoot: URL, fileManager: FileManager) -> Bool {
+        let assets = installRoot.appendingPathComponent("assets", isDirectory: true)
+        return ["materials", "models", "shaders"].allSatisfy { sub in
+            var isDir = ObjCBool(false)
+            let u = assets.appendingPathComponent(sub, isDirectory: true)
+            return fileManager.fileExists(atPath: u.path(percentEncoded: false), isDirectory: &isDir) && isDir.boolValue
+        }
+    }
+
+    /// Manifest evidence that the download actually finished — guards against
+    /// treating an interrupted-mid-stage tree (dirs present, files partial) as
+    /// complete. True when the manifest shows the install committed (buildid set)
+    /// OR staging fully written (`BytesStaged == BytesToStage`, > 0).
+    nonisolated static func isWPEStagingComplete(installRoot: URL, fileManager: FileManager) -> Bool {
+        let manifest = installRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("appmanifest_\(wallpaperEngineAppID).acf", isDirectory: false)
+        guard let acf = try? String(contentsOf: manifest, encoding: .utf8) else { return false }
+        if let build = parseACFBuildID(acf), build != "0" { return true }
+        guard let toStage = parseACFUInt(acf, key: "BytesToStage"),
+              let staged = parseACFUInt(acf, key: "BytesStaged"),
+              toStage > 0 else { return false }
+        return staged == toStage
+    }
+
+    nonisolated static func parseACFUInt(_ acf: String, key: String) -> UInt64? {
+        firstCapture(in: acf, pattern: "\"\(key)\"\\s+\"(\\d+)\"").flatMap(UInt64.init)
+    }
+
+    nonisolated static func readInstalledBuildID(installRoot: URL, fileManager: FileManager) -> String? {
+        // `…/steamapps/{common/wallpaper_engine,downloading/431960}` → `…/steamapps/appmanifest_431960.acf`.
+        let manifest = installRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("appmanifest_\(wallpaperEngineAppID).acf", isDirectory: false)
+        guard let acf = try? String(contentsOf: manifest, encoding: .utf8) else { return nil }
+        let build = parseACFBuildID(acf)
+        if let build, build != "0" { return build }
+        // Staged-not-committed leaves buildid=0; TargetBuildID is the build we staged.
+        return firstCapture(in: acf, pattern: #""TargetBuildID"\s+"(\d+)""#) ?? build
+    }
+
+    nonisolated static func parseACFBuildID(_ acf: String) -> String? {
+        firstCapture(in: acf, pattern: #""buildid"\s+"(\d+)""#)
+    }
+
+    /// Pulls the `public` branch buildid out of `app_info_print` output, scoped to
+    /// the `public` block's own braces so a missing public buildid can't fall
+    /// through to a sibling branch (e.g. `beta`).
+    nonisolated static func parsePublicBuildID(fromAppInfo stdout: String) -> String? {
+        let scope: Substring
+        if let branches = stdout.range(of: "\"branches\"") {
+            scope = stdout[branches.upperBound...]
+        } else {
+            scope = stdout[...]
+        }
+        guard let publicKey = scope.range(of: "\"public\"") else { return nil }
+        let body = Self.bracedBlock(in: scope[publicKey.upperBound...]) ?? scope[publicKey.upperBound...]
+        return firstCapture(in: String(body), pattern: #""buildid"\s+"(\d+)""#)
+    }
+
+    /// Returns the text inside the first `{ … }` of `text`, brace-balanced, so a
+    /// VDF key's value block can be isolated from following siblings.
+    nonisolated static func bracedBlock(in text: Substring) -> Substring? {
+        guard let open = text.firstIndex(of: "{") else { return nil }
+        var depth = 0
+        var i = open
+        while i < text.endIndex {
+            let c = text[i]
+            if c == "{" { depth += 1 }
+            else if c == "}" {
+                depth -= 1
+                if depth == 0 { return text[text.index(after: open)..<i] }
+            }
+            i = text.index(after: i)
+        }
+        return nil
     }
 
     /// Hands each `steamapps/workshop/content/431960/<id>/` project folder to
@@ -1109,7 +1386,8 @@ final class SteamCMDDoctorService {
         // real home). Pin the Terminal sign-in to that same container HOME so
         // the cached login the user creates is the one the app reads back.
         let containerHome = NSHomeDirectory()
-        return "HOME=\(Self.shellEscaped(containerHome)) " + command(binary: binary, args: ["+login", username])
+        // `+quit` so the one-shot command exits once the cached session is written.
+        return "HOME=\(Self.shellEscaped(containerHome)) " + command(binary: binary, args: ["+login", username, "+quit"])
     }
 
     private func xattrCommand(for binary: URL) -> String {

@@ -2,8 +2,7 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// The "Browse Online" tab content, carved out of `WorkshopBrowseView` so it
-/// can be embedded headerless inside `WorkshopPaneView`.
+/// The "Browse Online" tab content, embedded headerless inside `WorkshopPaneView`.
 struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
     let doctor: SteamCMDDoctorService

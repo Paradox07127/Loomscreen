@@ -17,8 +17,13 @@ extension PowerMonitor: PowerMonitoring {}
 public protocol FullScreenDetecting: AnyObject {
     var hiddenScreens: [CGDirectDisplayID: Bool] { get }
     var occludedScreens: [CGDirectDisplayID: Bool] { get }
+    /// Per-display union-coverage fraction (0…1), quantized so observers only
+    /// wake on meaningful change. The continuous source behind the binary
+    /// `occludedScreens` (≥0.85), used by adaptive frame-rate throttling.
+    var occlusionFractions: [CGDirectDisplayID: CGFloat] { get }
     func isDesktopHidden(for screenID: CGDirectDisplayID) -> Bool
     func isDesktopOccluded(for screenID: CGDirectDisplayID) -> Bool
+    func occlusionFraction(for screenID: CGDirectDisplayID) -> Double
     func checkNow()
     func setFallbackPollingEnabled(_ enabled: Bool)
 }
