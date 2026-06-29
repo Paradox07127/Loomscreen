@@ -15,6 +15,26 @@ not covered by this file.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-29
+
+Maintenance release. Most of this cycle's work is in the Pro-only Metal scene
+renderer (large performance and GPU-memory wins) and is not listed here; the
+Lite-facing changes are below.
+
+### Added
+- HTML wallpapers now transcode Ogg audio to AAC so tracks WebKit can't play
+  natively still play.
+
+### Changed
+- Onboarding, scene, and settings refinements; assorted UI polish.
+
+### Fixed
+- Security-scoped bookmark resolution now routes through a single resolver that
+  always observes the staleness flag, reducing "re-grant access after restart"
+  cases for imported folders and authorized directories.
+- Cleared remaining compiler warnings; the in-app updater resolves the Lite DMG
+  on a unified release; full ja / zh-Hans / zh-Hant coverage maintained.
+
 ## [0.2.0] — 2026-06-27
 
 App-wide UI overhaul plus a batch of stability and localization fixes. The
@@ -87,6 +107,7 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...HEAD
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.1...HEAD
+[0.2.1]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...loomscreen-v0.2.1
 [0.2.0]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...loomscreen-v0.2.0
 [0.1.0]: https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v0.1.0
