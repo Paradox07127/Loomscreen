@@ -321,6 +321,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
         resolutionTracer.snapshot()
     }
+    /// GPU command-buffer errors observed since load — surfaced in the scene
+    /// diagnostic log because they fire post-return on a GPU thread and never
+    /// reach `loadDiagnostics`.
+    var gpuErrorSummary: (count: Int, last: String?) {
+        executor.gpuErrorSink.summary
+    }
 
     init(
         descriptor: SceneDescriptor,

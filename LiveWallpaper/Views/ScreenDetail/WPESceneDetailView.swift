@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import Metal
 import SwiftUI
 
 /// Scene detail card for Wallpaper Engine projects. Reuses the renderer instance
@@ -235,17 +236,36 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// PII-scrubbed diagnostic text for the log window.
+    /// PII-scrubbed diagnostic text for the log window. Shown in Release too: the
+    /// resolution tracer already runs unconditionally, so surfacing it costs
+    /// nothing and is what makes a user bug report actionable (which refs missed,
+    /// why the capability badge reads the way it does).
     private var fullDiagnosticText: String {
         var lines: [String] = ["Capability: \(descriptor.capabilityTier.localizedLabel)"]
+        if let preflight = descriptor.preflightTier, preflight != .nativePlayable {
+            lines.append("Preflight: \(preflight.localizedLabel)")
+        }
+        if !descriptor.preflightFeatureFlags.isEmpty {
+            lines.append("Features: \(descriptor.preflightFeatureFlags.map(\.rawValue).joined(separator: ", "))")
+        }
         if case .error(let reason) = state {
             lines.append("Error code: \(errorCode(for: reason))")
         }
         lines.append("")
-        lines.append(session?.sceneRenderer?.loadDiagnostics?.errorDescription
-            ?? "All declared layers decoded cleanly.")
-        #if DEBUG
-        if let snapshot = session?.sceneRenderer?.resolutionDiagnostics {
+
+        let loadDiagnostic = session?.sceneRenderer?.loadDiagnostics?.errorDescription
+        let snapshot = session?.sceneRenderer?.resolutionDiagnostics
+
+        if let loadDiagnostic {
+            lines.append(loadDiagnostic)
+        }
+
+        if let snapshot {
+            if loadDiagnostic == nil {
+                lines.append(snapshot.missedRefs.isEmpty
+                    ? "All declared refs resolved (\(snapshot.resolvedCount))."
+                    : "\(snapshot.missedRefs.count) ref(s) unresolved, \(snapshot.resolvedCount) resolved.")
+            }
             lines.append("")
             lines.append("Resource Resolution")
             lines.append(Self.resolutionSummaryText(snapshot))
@@ -257,8 +277,35 @@ struct WPESceneDetailView: View {
                     lines.append("  \(event.ref): \(event.finalOutcome.debugLabel)")
                 }
             }
+            // Refs the scene package didn't carry but a built-in / engine-assets /
+            // dependency mount covered — a "scene shipped incomplete" signal.
+            let fallback = Self.fallbackResolvedRefs(snapshot)
+            if !fallback.isEmpty {
+                lines.append("Resolved via fallback (not in scene package):")
+                for entry in fallback.prefix(40) {
+                    lines.append("  \(entry.ref) <- \(entry.origin)")
+                }
+            }
+            // Capability is computed at import (path probe + parser diagnostics);
+            // a clean runtime resolve means the badge is an import-time false positive.
+            if loadDiagnostic == nil
+                && descriptor.capabilityTier == .degraded
+                && snapshot.missedRefs.isEmpty {
+                lines.append("")
+                lines.append("Note: \"Limited Compatibility\" was set at import; every ref resolved at runtime — see Preflight above for the reason.")
+            }
+        } else if loadDiagnostic == nil {
+            lines.append("No render diagnostics yet (scene not loaded).")
         }
-        #endif
+
+        if let gpu = session?.sceneRenderer?.gpuErrorSummary, gpu.count > 0 {
+            lines.append("")
+            lines.append("GPU errors: \(gpu.count)" + (gpu.last.map { " (last: \($0))" } ?? ""))
+        }
+
+        lines.append("")
+        lines.append(contentsOf: environmentLines())
+
         return PIISanitizer.scrub(lines.joined(separator: "\n"))
     }
 
@@ -420,7 +467,6 @@ struct WPESceneDetailView: View {
         URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(origin.workshopID)")
     }
 
-    #if DEBUG
     private static func resolutionSummaryText(_ snapshot: WPEResolutionDiagnosticsSnapshot) -> String {
         let counts = snapshot.resolvedByOrigin
         let dependencyCount = counts.reduce(0) { partial, entry in
@@ -437,7 +483,65 @@ struct WPESceneDetailView: View {
         }
         return "Events: \(snapshot.events.count), resolved: \(snapshot.resolvedCount), \(parts.joined(separator: ", "))"
     }
-    #endif
+
+    private static func fallbackResolvedRefs(
+        _ snapshot: WPEResolutionDiagnosticsSnapshot
+    ) -> [(ref: String, origin: String)] {
+        var seen = Set<String>()
+        var result: [(ref: String, origin: String)] = []
+        for event in snapshot.events {
+            guard event.finalOutcome == .resolved,
+                  let hit = event.attempts.last, hit.outcome == .resolved,
+                  hit.origin != .scene,
+                  seen.insert(event.ref).inserted else { continue }
+            result.append((event.ref, hit.origin.debugLabel))
+        }
+        return result
+    }
+
+    private func environmentLines() -> [String] {
+        var lines: [String] = ["Environment"]
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        lines.append("App \(version) (\(build)) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        if let gpu = MTLCreateSystemDefaultDevice()?.name {
+            lines.append("GPU: \(gpu)")
+        }
+        let screens = NSScreen.screens.map {
+            "\(Int($0.frame.width))×\(Int($0.frame.height))@\(Int($0.backingScaleFactor))x"
+        }
+        lines.append("Displays: \(screens.count) [\(screens.joined(separator: ", "))]")
+        let flags = Self.nonDefaultRenderFlags()
+        if !flags.isEmpty {
+            lines.append("Flags: \(flags.joined(separator: ", "))")
+        }
+        return lines
+    }
+
+    /// Render-behaviour `defaults` knobs surfaced in bug reports so dev-vs-user
+    /// flag drift ("works on my machine") is visible. Only explicitly-set keys
+    /// print; the curated list excludes pure dump/trace toggles.
+    private static let renderFlagKeys = [
+        "WPEMetalBypassEffects", "WPEMetalFBOAliasingEnabled",
+        "WPEMetalMemorylessDepthEnabled", "WPEMetalNonBlockingFrameSubmit",
+        "WPEMetalRefractionSnapshotReuseEnabled", "WPEMetalSerializeFrames",
+        "WPEMetalShaderPrewarmEnabled", "WPEMetalStaticLayerCacheEnabled",
+        "WPEMetalStaticLayerCacheBudgetMiB", "WPEMetalTextureCacheBudgetMiB",
+        "WPEMetalLayerLocalFBOSizing", "WPEMetalSubregionComposeOutput",
+        "WPEMetalIntroPhaseAlignEnabled", "WPEEnableMSDFText", "WPEParallaxGain",
+        "WPEParticlePrewarmEnabled", "WPEPuppetEnableSkinning",
+        "WPEPuppetAttachmentBindAnchor", "WPEPuppetClipComposite",
+        "WPEPuppetDeferMeshWarp"
+    ]
+
+    private static func nonDefaultRenderFlags() -> [String] {
+        let defaults = UserDefaults.standard
+        return renderFlagKeys.compactMap { key in
+            guard let value = defaults.object(forKey: key) else { return nil }
+            return "\(key.dropFirst(3))=\(value)"
+        }
+    }
 
 
     // MARK: - State derivation

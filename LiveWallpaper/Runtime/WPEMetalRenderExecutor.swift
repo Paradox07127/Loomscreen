@@ -71,6 +71,29 @@ enum WPEMetalSceneCaptureUtilityModels {
     }
 }
 
+/// Thread-safe sink for GPU command-buffer errors. They surface in the
+/// completed handler on a GPU thread *after* the frame call returned, so they
+/// can't throw — recorded here and surfaced in the scene diagnostic log. Bounded
+/// to count + last message so a persistently-failing GPU never grows memory.
+final class WPEGPUErrorSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var errorCount = 0
+    private var lastMessage: String?
+
+    func record(_ message: String) {
+        lock.lock()
+        errorCount += 1
+        lastMessage = message
+        lock.unlock()
+    }
+
+    var summary: (count: Int, last: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (errorCount, lastMessage)
+    }
+}
+
 final class WPEMetalRenderExecutor {
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share
     /// a single sRGB pixel format so render pipelines built for the offscreen
@@ -280,6 +303,7 @@ final class WPEMetalRenderExecutor {
     /// `max(2, maxFramesInFlight)` — see `noteVendedOutputTexture`.
     private var recentOutputTextureIDs: [ObjectIdentifier] = []
     private let presentTracker = PresentInFlightTracker()
+    let gpuErrorSink = WPEGPUErrorSink()
     /// Diagnostics that hold several successive frame textures at once
     /// (`debugRenderSuccessiveFrameTextures`) disable recycling so each frame
     /// keeps distinct storage.
@@ -1148,13 +1172,16 @@ final class WPEMetalRenderExecutor {
             // GPU-side ordering on the shared queue still guarantees the text and
             // present buffers (committed later) observe this frame's writes.
             let semaphore = inFlightSemaphore
+            let sink = gpuErrorSink
             commandBuffer.addCompletedHandler { cb in
                 semaphore.signal()
                 // Logged in every build (the old synchronous path threw on error,
                 // which the caller logged) so a GPU failure isn't silent in release.
                 if cb.status == .error {
+                    let detail = cb.error?.localizedDescription ?? "unknown"
+                    sink.record("async-frame: \(detail)")
                     Logger.warning(
-                        "[WPE async-frame] command buffer error: \(cb.error?.localizedDescription ?? "unknown")",
+                        "[WPE async-frame] command buffer error: \(detail)",
                         category: .wpeRender
                     )
                 }
@@ -1165,6 +1192,7 @@ final class WPEMetalRenderExecutor {
             commandBuffer.commit()
             commandBuffer.waitUntilCompleted()
             if commandBuffer.status == .error {
+                gpuErrorSink.record("frame: \(commandBuffer.error?.localizedDescription ?? "unknown")")
                 throw WPEMetalRenderExecutorError.commandBufferFailed
             }
         }
@@ -1865,17 +1893,13 @@ final class WPEMetalRenderExecutor {
         // while this GPU read is still in flight.
         let sourceID = ObjectIdentifier(source)
         let tracker = presentTracker
+        let sink = gpuErrorSink
         tracker.increment(sourceID)
         commandBuffer.addCompletedHandler { cb in
             tracker.decrement(sourceID)
-            #if DEBUG
             if cb.status == .error {
-                Logger.warning(
-                    "[present] commandBuffer ERROR after present: \(cb.error?.localizedDescription ?? "unknown")",
-                    category: .wpeRender
-                )
+                sink.record("present: \(cb.error?.localizedDescription ?? "unknown")")
             }
-            #endif
         }
         commandBuffer.commit()
         return true
