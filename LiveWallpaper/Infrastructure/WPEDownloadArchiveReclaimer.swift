@@ -25,24 +25,9 @@ struct WPEDownloadArchiveReclaimer {
     }
 
     /// Container-local SteamCMD Workshop content root — where a sandboxed app's
-    /// steamcmd actually writes (STEAMROOT redirected into the container). Chain-
-    /// anchored to Application Support so a symlinked `Steam` can't re-base it.
+    /// steamcmd actually writes (STEAMROOT redirected into the container).
     static func containerSteamContentRoot(fileManager: FileManager = .default) -> URL? {
-        guard let appSupport = try? fileManager.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
-        ) else { return nil }
-        let safeAppSupport = appSupport.standardizedFileURL.resolvingSymlinksInPath()
-        let steam = safeAppSupport
-            .appendingPathComponent("Steam", isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard WPEPathSafety.contains(steam, in: safeAppSupport) else { return nil }
-        let contentRoot = steam
-            .appendingPathComponent("steamapps/workshop/content/431960", isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard WPEPathSafety.contains(contentRoot, in: steam) else { return nil }
-        return contentRoot
+        WPEStoragePaths.containerWorkshopContentRoot(fileManager: fileManager)
     }
 
     func reclaimableBytes(cachedIDs: Set<String>) -> Int64 {

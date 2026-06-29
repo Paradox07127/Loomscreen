@@ -7,6 +7,10 @@ import CryptoKit
 /// Idempotent: a sibling `manifest.json` records the source pkg's
 /// `(size, mtime)` fingerprint and lets repeated imports skip re-extraction.
 actor WallpaperEngineCache {
+    /// Shared instance over the default cache root. Tests that need a custom root
+    /// still construct directly via `init(rootURL:)`.
+    static let shared = WallpaperEngineCache()
+
     private let rootURL: URL
     private let fileManager: FileManager
 
@@ -90,64 +94,6 @@ actor WallpaperEngineCache {
         let hex = head.map { String(format: "%02x", $0) }.joined(separator: " ")
         let ascii = String(head.map { (32...126).contains($0) ? Character(UnicodeScalar($0)) : "." })
         return "size: \(size)B, head: [\(hex)] \"\(ascii)\""
-    }
-
-    func ensureMirroredDirectory(workshopID: String, sourceFolderURL: URL) async throws -> URL {
-        let cacheURL = try cacheDirectory(for: workshopID)
-        // Defense-in-depth: if the "source" resolves to our own cache directory
-        // (e.g. a library root misconfigured to point at wpe-cache), the mirror
-        // below would `removeItem(cacheURL)` and wipe the payload it reads from.
-        // Never self-destruct — return the existing cache untouched.
-        let canonicalSource = sourceFolderURL.standardizedFileURL.resolvingSymlinksInPath()
-        let canonicalCache = cacheURL.standardizedFileURL.resolvingSymlinksInPath()
-        if canonicalSource == canonicalCache {
-            guard cacheHasPayload(cacheURL) else {
-                throw WPECacheError.extractionFailed("Source folder is the cache destination and has no payload")
-            }
-            Logger.info("WPE cache self-mirror skipped for workshop \(workshopID)", category: .screenManager)
-            return cacheURL
-        }
-        let fingerprint = try fingerprint(forDirectory: sourceFolderURL)
-
-        if let manifest = readManifest(in: cacheURL),
-           manifest.fingerprint == fingerprint,
-           cacheHasPayload(cacheURL) {
-            Logger.info("WPE cache hit for unpacked workshop \(workshopID)", category: .screenManager)
-            return cacheURL
-        }
-
-        Logger.info("WPE cache mirroring unpacked workshop \(workshopID)", category: .screenManager)
-        do {
-            if fileManager.fileExists(atPath: cacheURL.path) {
-                try fileManager.removeItem(at: cacheURL)
-            }
-            try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
-            let children = try fileManager.contentsOfDirectory(
-                at: sourceFolderURL,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: []
-            )
-            for child in children {
-                let values = try child.resourceValues(forKeys: [.isDirectoryKey])
-                let destination = cacheURL.appendingPathComponent(
-                    child.lastPathComponent,
-                    isDirectory: values.isDirectory == true
-                )
-                try fileManager.copyItem(at: child, to: destination)
-            }
-            try writeManifest(
-                Manifest(fingerprint: fingerprint, extractedAt: Date().timeIntervalSince1970),
-                in: cacheURL
-            )
-            Logger.info("WPE cache mirrored unpacked workshop \(workshopID)", category: .screenManager)
-            return cacheURL
-        } catch let error as WPECacheError {
-            Logger.error("WPE directory mirror failed: \(error.localizedDescription)", category: .screenManager)
-            throw error
-        } catch {
-            Logger.error("WPE directory mirror failed: \(error.localizedDescription)", category: .screenManager)
-            throw WPECacheError.extractionFailed(String(describing: error))
-        }
     }
 
     /// Workshop IDs whose extracted payload currently lives under the cache root.
@@ -419,73 +365,6 @@ actor WallpaperEngineCache {
         } catch {
             throw WPECacheError.pkgUnreadable(error.localizedDescription)
         }
-    }
-
-    private func fingerprint(forDirectory sourceFolderURL: URL) throws -> Fingerprint {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: sourceFolderURL.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            throw WPECacheError.pkgUnreadable("Source folder is missing")
-        }
-
-        let root = sourceFolderURL.standardizedFileURL.resolvingSymlinksInPath()
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [
-                .isDirectoryKey,
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-                .fileSizeKey,
-                .contentModificationDateKey
-            ],
-            options: []
-        ) else {
-            throw WPECacheError.pkgUnreadable("Cannot enumerate source folder")
-        }
-
-        var entries: [(relativePath: String, url: URL, values: URLResourceValues)] = []
-        for case let url as URL in enumerator {
-            let values = try url.resourceValues(forKeys: [
-                .isDirectoryKey,
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-                .fileSizeKey,
-                .contentModificationDateKey
-            ])
-            if values.isSymbolicLink == true {
-                throw WPECacheError.extractionFailed("Unpacked WPE project contains a symbolic link: \(url.lastPathComponent)")
-            }
-            let absolute = url.standardizedFileURL.resolvingSymlinksInPath().path
-            let rootPath = root.path
-            guard absolute.hasPrefix(rootPath + "/") else {
-                throw WPECacheError.extractionFailed("Unpacked WPE project entry escapes its source folder")
-            }
-            let relative = String(absolute.dropFirst(rootPath.count + 1))
-            entries.append((relative, url, values))
-        }
-
-        var hasher = SHA256()
-        var totalSize: UInt64 = 0
-        var latestMTime: TimeInterval = 0
-        for entry in entries.sorted(by: { $0.relativePath < $1.relativePath }) {
-            hasher.update(data: Data(entry.relativePath.utf8))
-            if entry.values.isDirectory == true {
-                hasher.update(data: Data(" directory\n".utf8))
-            } else if entry.values.isRegularFile == true {
-                let size = UInt64(max(entry.values.fileSize ?? 0, 0))
-                let mtime = entry.values.contentModificationDate?.timeIntervalSince1970 ?? 0
-                totalSize += size
-                latestMTime = max(latestMTime, mtime)
-                hasher.update(data: Data(" file \(size) \(mtime) ".utf8))
-                hasher.update(data: Data(try Self.streamingSHA256Hex(of: entry.url).utf8))
-                hasher.update(data: Data("\n".utf8))
-            }
-        }
-
-        let sha = hasher.finalize()
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return Fingerprint(size: totalSize, mtime: latestMTime, sha256: sha)
     }
 
     private static func streamingSHA256Hex(of url: URL) throws -> String {

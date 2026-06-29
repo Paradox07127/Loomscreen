@@ -101,6 +101,79 @@ struct WPETextRendererTests {
         #expect(first.texture === second.texture)
     }
 
+    @Test("Box-fit text memoizes the font-size measurement and stays cache-coherent")
+    func boxFitTextMemoizesFontSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: FileManager.default.temporaryDirectory,
+            dependencyMounts: []
+        )
+        let renderer = WPETextRenderer(device: device, resolver: resolver)
+        func object(box: SIMD2<Double>?) -> WPESceneTextObject {
+            WPESceneTextObject(
+                id: "1", name: "Boxed", text: "Fit me",
+                fontRelativePath: nil, pointSize: 32,
+                color: SIMD3<Double>(1, 1, 1), alpha: 1,
+                origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+                visible: true, horizontalAlignment: "center", verticalAlignment: "middle",
+                maxWidth: nil, parallaxDepth: SIMD2<Double>(0, 0),
+                boxSize: box, padding: 8
+            )
+        }
+        let boxed = object(box: SIMD2<Double>(400, 200))
+        let first = try #require(renderer.rasterize(boxed))
+        let second = try #require(renderer.rasterize(boxed))
+        #expect(first.texture === second.texture)
+        // Box-fit scaling actually applied: the box-fit render differs in size
+        // from the same text at raw pointSize (proves the memoized effectiveFontSize
+        // returns the scaled value, not the base).
+        let unboxed = try #require(renderer.rasterize(object(box: nil)))
+        #expect(first.size != unboxed.size)
+    }
+
+    @Test("Rasterized texture is a neutral coverage mask, not baked color")
+    func rasterizesNeutralCoverageMask() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: FileManager.default.temporaryDirectory,
+            dependencyMounts: []
+        )
+        let renderer = WPETextRenderer(device: device, resolver: resolver)
+        // Authored RED: the old baked path would have produced red pixels. The
+        // mask must stay neutral (premultiplied white ⇒ rgb == alpha); color is
+        // applied only by the overlay shader at draw time.
+        let object = WPESceneTextObject(
+            id: "1", name: "Mask", text: "W",
+            fontRelativePath: nil, pointSize: 64,
+            color: SIMD3<Double>(1, 0, 0), alpha: 1,
+            origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+            visible: true, horizontalAlignment: "center", verticalAlignment: "middle",
+            maxWidth: nil, parallaxDepth: SIMD2<Double>(0, 0)
+        )
+        let tex = try #require(renderer.rasterize(object)).texture
+        let bytesPerRow = tex.width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * tex.height)
+        bytes.withUnsafeMutableBytes { ptr in
+            tex.getBytes(
+                ptr.baseAddress!,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, tex.width, tex.height),
+                mipmapLevel: 0
+            )
+        }
+        var maxAlpha = 0
+        var maxChannelDelta = 0
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            let a = Int(bytes[i + 3])
+            maxAlpha = max(maxAlpha, a)
+            maxChannelDelta = max(maxChannelDelta, abs(Int(bytes[i]) - a))
+            maxChannelDelta = max(maxChannelDelta, abs(Int(bytes[i + 1]) - a))
+            maxChannelDelta = max(maxChannelDelta, abs(Int(bytes[i + 2]) - a))
+        }
+        #expect(maxAlpha > 0)           // glyph actually rasterized
+        #expect(maxChannelDelta <= 2)   // neutral premultiplied white, not red
+    }
+
     @Test("Empty text object is rejected at parse time")
     func emptyTextRejected() throws {
         let json = #"""

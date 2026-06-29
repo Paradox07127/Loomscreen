@@ -546,6 +546,50 @@ struct WPERenderGraphBuilderTests {
         #expect(graph.layers.map(\.objectID) == ["first", "second", "third"])
     }
 
+    @Test("Layer-script-referenced hidden layers survive pruning (3470764447 day/night bands)")
+    func layerScriptReferencedHiddenLayersSurvivePruning() throws {
+        // A time-of-day script reveals authored-hidden band layers by name (here in
+        // an array literal, like 3470764447's 后处理层). They must stay in the graph
+        // so their videos load — otherwise the switch lands on a layer that isn't
+        // there → black background. An unrelated hidden layer the script never names
+        // must still get pruned (no regression to all-variants-render, 3226487183).
+        let script = """
+        var displayVideo = ["day", "night"].map(v => thisScene.getLayer(v));
+        export function init() {}
+        export function update() {}
+        """
+        func band(_ id: String, visible: Bool, visibleScript: String? = nil) -> WPESceneImageObject {
+            WPESceneImageObject(
+                id: id, name: id,
+                imageRelativePath: "materials/\(id).png", materialRelativePath: nil,
+                origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1), angles: SIMD3<Double>(0, 0, 0),
+                visible: visible, alpha: 1, color: SIMD3<Double>(1, 1, 1), brightness: 1,
+                blendMode: .normal, alignment: .center, size: nil,
+                effects: [], animationLayers: [], visibleScript: visibleScript
+            )
+        }
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [
+                band("day", visible: true),
+                band("night", visible: false),
+                band("unrelated", visible: false),
+                band("post", visible: true, visibleScript: script)
+            ],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+        let ids = Set(graph.layers.map(\.objectID))
+
+        #expect(ids.contains("night"))
+        #expect(ids.contains("day"))
+        #expect(!ids.contains("unrelated"))
+    }
+
     @Test("Composite dependency cycle keeps all layers in deterministic scene order")
     func compositeDependencyCycleKeepsAllLayersInDeterministicSceneOrder() throws {
         let root = FileManager.default.temporaryDirectory

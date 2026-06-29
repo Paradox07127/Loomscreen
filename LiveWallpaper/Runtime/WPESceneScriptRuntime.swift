@@ -409,6 +409,24 @@ final class WPELayerScriptInstance {
         return output
     }
 
+    /// Invoke the script's `applyUserProperties(changedUserProperties)` with the
+    /// scene's user-property values. Time-of-day scripts gate their day/night
+    /// switch on a flag set ONLY here (e.g. `timevarying`), so without this the
+    /// switch never activates. Returns the resulting layer output (the unchanged
+    /// current state when the script declares no such handler); nil only when
+    /// poisoned, timed out, or given no properties.
+    @discardableResult
+    func applyUserProperties(_ properties: [String: WPESceneScriptPropertyValue]) -> WPELayerScriptOutput? {
+        guard !isPoisoned, !properties.isEmpty else { return nil }
+        guard let output = engine.applyUserProperties(properties, budget: tickBudget) else {
+            isPoisoned = true
+            Self.quarantine.append(engine)
+            Logger.warning("Layer SceneScript applyUserProperties() exceeded \(tickBudget)s — frozen", category: .wpeRender)
+            return nil
+        }
+        return output
+    }
+
     private final class LayerEngine: @unchecked Sendable {
         enum SetupOutcome {
             case ready(hasUpdate: Bool, output: WPELayerScriptOutput)
@@ -448,6 +466,13 @@ final class WPELayerScriptInstance {
 
         func tick(budget: TimeInterval) -> WPELayerScriptOutput? {
             runWithBudget(budget) { self.tickOnQueue() }
+        }
+
+        func applyUserProperties(
+            _ properties: [String: WPESceneScriptPropertyValue],
+            budget: TimeInterval
+        ) -> WPELayerScriptOutput? {
+            runWithBudget(budget) { self.applyUserPropertiesOnQueue(properties) }
         }
 
         private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
@@ -516,6 +541,23 @@ final class WPELayerScriptInstance {
             }
             pendingVideo.removeAll(keepingCapacity: true)
             _ = updateFunction.call(withArguments: [])
+            return readOutput()
+        }
+
+        private func applyUserPropertiesOnQueue(
+            _ properties: [String: WPESceneScriptPropertyValue]
+        ) -> WPELayerScriptOutput {
+            guard let context,
+                  let fn = context.objectForKeyedSubscript("applyUserProperties"),
+                  !fn.isUndefined, fn.hasProperty("call"),
+                  let bag = JSValue(newObjectIn: context) else {
+                return readOutput()
+            }
+            for (name, value) in properties {
+                bag.setObject(value.jsBridged, forKeyedSubscript: name as NSString)
+            }
+            pendingVideo.removeAll(keepingCapacity: true)
+            _ = fn.call(withArguments: [bag])
             return readOutput()
         }
 

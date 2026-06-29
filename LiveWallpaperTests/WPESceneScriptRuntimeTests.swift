@@ -712,4 +712,85 @@ struct WPESceneScriptRuntimeTests {
         #expect(other.videoCommands.contains(.seek(0)))
         #expect(instance.initialOutput.own.visible == true)
     }
+
+    @Test("applyUserProperties activates the time-of-day switch (3470764447 后处理层)")
+    func applyUserPropertiesDrivesTimeOfDaySwitch() throws {
+        // Mirrors 3470764447's 后处理层: its update() gates the day/night switch on
+        // `timeVarying`, which WPE sets ONLY through applyUserProperties. Without
+        // that call, init()'s getLayer() leaves all five time-band layers at the
+        // default visible=true and update() no-ops — the bug. Bands span the whole
+        // day so any real wall-clock hour resolves to `morning`, keeping it
+        // deterministic without a clock injection.
+        let script = """
+        'use strict';
+        var displayVideo = ["morning", "day", "dusk", "night", "mddn"];
+        var electDisplay = false;
+        var timeVarying = false;
+        var morningtime = 4, daytime = 9, dusktime = 17, nighttime = 20;
+        export function init() {
+            displayVideo = displayVideo.map(video => thisScene.getLayer(video));
+        }
+        var playVideo = function(num) {
+            displayVideo.forEach((video, i) => {
+                if (i === num) { video.getVideoTexture().play(); video.visible = true; }
+                else { video.getVideoTexture().pause(); video.visible = false; }
+            });
+        }
+        export function update() {
+            var hours = (new Date()).getHours();
+            if (timeVarying) {
+                if (hours >= morningtime && hours < daytime) playVideo(0);
+                else if (hours >= daytime && hours < dusktime) playVideo(1);
+                else if (hours >= dusktime && hours < nighttime) playVideo(2);
+                else playVideo(3);
+            }
+        }
+        export function applyUserProperties(p) {
+            if (p.hasOwnProperty('timevarying')) timeVarying = p.timevarying;
+            if (p.hasOwnProperty('morningtime')) morningtime = p.morningtime;
+            if (p.hasOwnProperty('daytime')) daytime = p.daytime;
+            if (p.hasOwnProperty('dusktime')) dusktime = p.dusktime;
+            if (p.hasOwnProperty('nighttime')) nighttime = p.nighttime;
+        }
+        """
+        let bands = ["morning", "day", "dusk", "night", "mddn"]
+        let instance = try WPELayerScriptInstance(script: script)
+
+        // Bug repro: init referenced all five layers, so they all default-show, and
+        // update() can't narrow because timeVarying is still false.
+        #expect(bands.allSatisfy { instance.initialOutput.others[$0]?.visible == true })
+        let beforeProps = try #require(instance.tick())
+        #expect(bands.allSatisfy { beforeProps.others[$0]?.visible == true })
+
+        // Fix: deliver the user-property bag (timevarying on, bands covering all
+        // 24h → morning). The next tick narrows to exactly the morning layer.
+        instance.applyUserProperties([
+            "timevarying": .bool(true),
+            "morningtime": .number(0),
+            "daytime": .number(24),
+            "dusktime": .number(24),
+            "nighttime": .number(24),
+        ])
+        let afterProps = try #require(instance.tick())
+        #expect(afterProps.others["morning"]?.visible == true)
+        #expect(afterProps.others["morning"]?.videoCommands.contains(.play) == true)
+        for hidden in ["day", "dusk", "night", "mddn"] {
+            #expect(afterProps.others[hidden]?.visible == false)
+            #expect(afterProps.others[hidden]?.videoCommands.contains(.pause) == true)
+        }
+    }
+
+    @Test("applyUserProperties is a safe no-op for scripts without the handler")
+    func applyUserPropertiesNoHandlerIsSafe() throws {
+        let script = """
+        'use strict';
+        export function init() { thisLayer.visible = true; }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        // No applyUserProperties handler → returns the current state, unchanged.
+        let output = try #require(instance.applyUserProperties(["timevarying": .bool(true)]))
+        #expect(output.own.visible == true)
+        #expect(try #require(instance.tick()).own.visible == true)
+    }
 }

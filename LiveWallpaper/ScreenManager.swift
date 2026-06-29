@@ -1353,13 +1353,20 @@ final class ScreenManager {
         // persisting the result. Match the active SceneDescriptor — what
         // actually drives the renderer and names the cache dir — not the
         // separate `wpeOrigin` metadata, which can be nil or stale.
+        // Match scenes by their live descriptor AND video/web by their persisted
+        // `wpeOrigin` — a packaged video/web import renders as `.video`/`.html`,
+        // so a scene-only match left it rendering from files about to be deleted.
         let cacheRelativePath = "wpe-cache/\(workshopID)"
         for screen in screens {
-            guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
-                  case .scene(let descriptor) = config.activeWallpaper,
-                  descriptor.workshopID == workshopID || descriptor.cacheRelativePath == cacheRelativePath
-            else { continue }
-            clearWallpaperOfType(.scene, for: screen)
+            guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { continue }
+            let matchesScene: Bool
+            if case .scene(let descriptor) = config.activeWallpaper {
+                matchesScene = descriptor.workshopID == workshopID || descriptor.cacheRelativePath == cacheRelativePath
+            } else {
+                matchesScene = false
+            }
+            guard matchesScene || config.wpeOrigin?.workshopID == workshopID else { continue }
+            clearWallpaperOfType(config.activeWallpaper.wallpaperType, for: screen)
         }
         wpeImportCoordinator.removeWorkshop(workshopID: workshopID)
     }

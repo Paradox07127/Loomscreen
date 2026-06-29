@@ -5,17 +5,16 @@ import CoreText
 import Foundation
 import Metal
 
-/// CoreText-based text rasterizer. The runtime composites the texture as if
-/// it were a regular image layer. Cache keyed by everything that affects
-/// layout so static text amortizes the CoreText layout; bounded by `cacheLimit`.
+/// CoreText-based text rasterizer producing a coverage mask (opaque white
+/// glyphs); the overlay shader applies color + alpha. Cache keyed by the
+/// layout-affecting fields only (not color/alpha) so animated-alpha/tint text
+/// still hits the cache; bounded by `cacheLimit`.
 @MainActor
 final class WPETextRenderer {
     private struct CacheKey: Hashable {
         let text: String
         let fontPath: String?
         let pointSize: Int
-        let colorRGB: SIMD3<Int>      // 0..255
-        let alpha: Int                  // 0..255
         let alignment: String
         let maxWidth: Int               // 0 = unbounded
     }
@@ -25,10 +24,27 @@ final class WPETextRenderer {
         let renderedSize: CGSize
     }
 
+    /// Inputs that determine `effectiveFontSize` — text geometry only, no
+    /// color/alpha. Lets the box-fit measurement (two CoreText layouts) be
+    /// memoized so a cache-HIT frame pays nothing; box-fit text otherwise
+    /// re-ran CTFramesetter every frame even when the texture was cached.
+    private struct FontSizeKey: Hashable {
+        let text: String
+        let fontPath: String?
+        let basePointSize: Double
+        let boxWidth: Double
+        let boxHeight: Double
+        let padding: Double
+        let maxWidth: Double             // <0 = unbounded
+        let alignment: String
+    }
+
     private let device: MTLDevice
     private let resolver: WPEMultiRootResourceResolver
     private var cache: [CacheKey: CachedTexture] = [:]
     private var cacheOrder: [CacheKey] = []
+    private var fontSizeCache: [FontSizeKey: CGFloat] = [:]
+    private var fontDescriptorCache: [String: CTFontDescriptor] = [:]
     private var registeredFonts: Set<String> = []
     private let cacheLimit = 128
 
@@ -44,12 +60,6 @@ final class WPETextRenderer {
             text: object.text,
             fontPath: object.fontRelativePath,
             pointSize: Int(fontSize.rounded()),
-            colorRGB: SIMD3<Int>(
-                Int((object.color.x * 255).rounded()),
-                Int((object.color.y * 255).rounded()),
-                Int((object.color.z * 255).rounded())
-            ),
-            alpha: Int((object.alpha * 255).rounded()),
             alignment: object.horizontalAlignment,
             maxWidth: Int((object.maxWidth ?? 0).rounded())
         )
@@ -100,6 +110,17 @@ final class WPETextRenderer {
     private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
         let base = CGFloat(max(object.pointSize, 1))
         guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }
+        let key = FontSizeKey(
+            text: object.text,
+            fontPath: object.fontRelativePath,
+            basePointSize: object.pointSize,
+            boxWidth: box.x,
+            boxHeight: box.y,
+            padding: object.padding,
+            maxWidth: object.maxWidth ?? -1,
+            alignment: object.horizontalAlignment
+        )
+        if let cached = fontSizeCache[key] { return cached }
         let baseAttr = makeAttributedString(object: object, fontSize: base)
         let natural = measureBounds(baseAttr, maxWidth: object.maxWidth)
         let innerW = max(box.x - 2 * object.padding, 1)
@@ -108,7 +129,10 @@ final class WPETextRenderer {
         let nh = max(Double(natural.height), 0.5)
         let fit = min(innerW / nw, innerH / nh)
         guard fit.isFinite, fit > 0 else { return base }
-        return base * CGFloat(fit)
+        let result = base * CGFloat(fit)
+        if fontSizeCache.count >= cacheLimit { fontSizeCache.removeAll(keepingCapacity: true) }
+        fontSizeCache[key] = result
+        return result
     }
 
     private func makeAttributedString(object: WPESceneTextObject, fontSize: CGFloat) -> NSAttributedString {
@@ -116,12 +140,12 @@ final class WPETextRenderer {
             relativePath: object.fontRelativePath,
             size: fontSize
         )
-        let color = CGColor(
-            srgbRed: CGFloat(object.color.x),
-            green: CGFloat(object.color.y),
-            blue: CGFloat(object.color.z),
-            alpha: CGFloat(object.alpha)
-        )
+        // Rasterize a neutral coverage mask (opaque white glyphs); the overlay
+        // shader applies the object's color + alpha once, premultiplied. Keeps
+        // the texture independent of color/alpha so animated-alpha/tint text hits
+        // the cache, and fixes the prior double-application (color/alpha were
+        // baked here AND multiplied again in the shader).
+        let color = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
         let paragraph = NSMutableParagraphStyle()
         switch object.horizontalAlignment {
         case "left":   paragraph.alignment = .left
@@ -137,11 +161,20 @@ final class WPETextRenderer {
     }
 
     private func resolveFont(relativePath: String?, size: CGFloat) -> CTFont {
-        if let path = relativePath,
-           let url = try? resolver.resolveExistingFileURL(relativePath: path),
-           let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
-           let descriptor = descriptors.first {
-            return CTFontCreateWithFontDescriptor(descriptor, size, nil)
+        // Cache the size-independent descriptor per path: resolving the file URL
+        // (stat/symlink) + CTFontManagerCreateFontDescriptorsFromURL is the costly
+        // part and re-ran on every cache miss (e.g. a clock's once-a-second text).
+        // CTFontCreateWithFontDescriptor at the current size is cheap.
+        if let path = relativePath {
+            if let descriptor = fontDescriptorCache[path] {
+                return CTFontCreateWithFontDescriptor(descriptor, size, nil)
+            }
+            if let url = try? resolver.resolveExistingFileURL(relativePath: path),
+               let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+               let descriptor = descriptors.first {
+                fontDescriptorCache[path] = descriptor
+                return CTFontCreateWithFontDescriptor(descriptor, size, nil)
+            }
         }
         return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
     }
@@ -234,6 +267,8 @@ final class WPETextRenderer {
     func releaseAll() {
         cache.removeAll(keepingCapacity: false)
         cacheOrder.removeAll(keepingCapacity: false)
+        fontSizeCache.removeAll(keepingCapacity: false)
+        fontDescriptorCache.removeAll(keepingCapacity: false)
     }
 }
 #endif

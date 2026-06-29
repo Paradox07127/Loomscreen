@@ -186,17 +186,68 @@ final class GlobalShortcutManager {
         case .nextWallpaper:
             let target = screenUnderCursor(in: manager) ?? manager.screens.first
             if let target { manager.advancePlaylist(for: target) }
+        case .previousWallpaper:
+            let target = screenUnderCursor(in: manager) ?? manager.screens.first
+            if let target { manager.regressPlaylist(for: target) }
         case .toggleMute:
             toggleGlobalMute(via: manager)
+        case .toggleMouseInteraction:
+            toggleGlobalMouseInteraction(via: manager)
+        case .toggleWallpapers:
+            manager.setWallpapersEnabled(!manager.wallpapersGloballyEnabled)
+        case .reloadWallpapers:
+            manager.reloadAllScreens()
         }
     }
 
+    /// Only video and scene wallpapers route audio, so the new mute state is
+    /// decided from those alone — HTML/shader screens neither count toward the
+    /// "any unmuted" check nor receive the toggle.
     private func toggleGlobalMute(via manager: ScreenManager) {
-        let configurations = SettingsManager.shared.loadConfigurations()
-        let isAnyUnmuted = configurations.contains { !$0.muted }
-        let newMuted = isAnyUnmuted
+        let mutedStates: [Bool] = manager.screens.compactMap { screen in
+            guard let config = manager.getConfiguration(for: screen) else { return nil }
+            switch config.wallpaperType {
+            case .video, .scene: return config.muted
+            default: return nil
+            }
+        }
+        guard !mutedStates.isEmpty else { return }
+        let newMuted = mutedStates.contains(false)
         for screen in manager.screens {
-            manager.updateMuted(newMuted, for: screen)
+            switch manager.getConfiguration(for: screen)?.wallpaperType {
+            case .video, .scene: manager.updateMuted(newMuted, for: screen)
+            default: break
+            }
+        }
+    }
+
+    /// "Mouse interaction" means cursor-follow for scenes and click-through for
+    /// web wallpapers — the only types with a mouse seam. The new on/off state
+    /// is decided across just those screens, then pushed per type.
+    private func toggleGlobalMouseInteraction(via manager: ScreenManager) {
+        let states: [Bool] = manager.screens.compactMap { screen in
+            guard let config = manager.getConfiguration(for: screen) else { return nil }
+            switch config.wallpaperType {
+            case .scene: return config.sceneMouseInteractionEnabled
+            case .html:  return config.htmlConfig?.allowMouseInteraction
+            default:     return nil
+            }
+        }
+        guard !states.isEmpty else { return }
+        let newEnabled = !states.contains(true)
+        for screen in manager.screens {
+            guard let config = manager.getConfiguration(for: screen) else { continue }
+            switch config.wallpaperType {
+            case .scene:
+                manager.updateSceneMouseInteraction(newEnabled, for: screen)
+            case .html:
+                if var html = config.htmlConfig {
+                    html.allowMouseInteraction = newEnabled
+                    manager.updateHTMLConfig(html, for: screen)
+                }
+            default:
+                break
+            }
         }
     }
 

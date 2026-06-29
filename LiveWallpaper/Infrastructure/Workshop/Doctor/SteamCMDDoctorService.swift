@@ -1122,7 +1122,13 @@ final class SteamCMDDoctorService {
             }
         }
 
-        if let workdir = try? resolveWorkdirURL() {
+        // Only reclaim a workdir-resident copy when the workdir is INSIDE our
+        // sandbox container. `autoConfigureWorkdirIfNeeded` can bind the workdir
+        // to the user's real Steam library (`~/Library/Application Support/Steam`,
+        // outside the container), which holds their own Wallpaper Engine
+        // subscriptions — deleting from there would destroy the user's files.
+        if let workdir = try? resolveWorkdirURL(),
+           WPEEngineAssetsLibrary.isContainerInternal(workdir) {
             let scope = workdir.startAccessingSecurityScopedResource()
             defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
             if deleteItemFolder(workshopID: workshopID, under: workdir) { deleted += 1 }

@@ -834,7 +834,7 @@ vertex WPEParticleVertexOut wpe_particle_rope_vertex(
 struct WPETextOverlayUniforms {
     float4 centerAndSize;   // x,y center (pixel space) ; z,w width,height (pixels)
     float4 sceneSize;       // x = scene width, y = scene height
-    float4 color;           // rgb tint × per-text alpha (already premultiplied by alpha in .a)
+    float4 color;           // rgb = straight text color, a = text alpha (applied in shader)
 };
 
 struct WPETextOverlayVertexOut {
@@ -885,10 +885,11 @@ fragment half4 wpe_text_overlay_fragment(
     constant WPETextOverlayUniforms& u [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
-    float3 rgb = sampled.rgb * u.color.rgb;
-    float alpha = sampled.a * u.color.a;
-    return half4(float4(rgb, alpha));
+    // texture0 is a coverage mask (opaque white glyphs, .a = antialiasing
+    // coverage). Apply the object's color + alpha ONCE → premultiplied output.
+    float coverage = float(texture0.sample(linearSampler, in.uv).a);
+    float alpha = coverage * u.color.a;
+    return half4(float4(u.color.rgb * alpha, alpha));
 }
 
 fragment half4 wpe_genericparticle_fragment(

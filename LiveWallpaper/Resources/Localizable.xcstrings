@@ -4691,36 +4691,6 @@
         }
       }
     },
-    "Cache totals %@ across %lld projects" : {
-      "comment" : "Accessibility label for the WPE cache header chip — placeholders are total size and project count.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache totals %@ across %lld projects"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キャッシュ合計 %@（%lld プロジェクト）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "缓存共 %@，跨 %lld 个项目"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快取共 %@，跨 %lld 個專案"
-          }
-        }
-      }
-    },
     "Cached Projects (%lld)" : {
       "localizations" : {
         "en" : {
@@ -4745,6 +4715,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已快取的專案（%lld）"
+          }
+        }
+      }
+    },
+    "Caches" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caches"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャッシュ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快取"
           }
         }
       }
@@ -9495,6 +9495,36 @@
         }
       }
     },
+    "Downloaded Projects" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloaded Projects"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード済みプロジェクト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载项目"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載專案"
+          }
+        }
+      }
+    },
     "Downloaded Wallpaper Engine, but trimming it to the assets folder failed." : {
       "comment" : "Engine-assets download succeeded but pruning failed.",
       "localizations" : {
@@ -9886,6 +9916,36 @@
         }
       }
     },
+    "Each combo needs a modifier (⌃ ⌥ ⇧ ⌘), must be unique, and can't clash with the system." : {
+      "comment" : "Global shortcut footer bullet — modifier, uniqueness, and conflicts.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each combo needs a modifier (⌃ ⌥ ⇧ ⌘), must be unique, and can't clash with the system."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各組み合わせには修飾キー（⌃ ⌥ ⇧ ⌘）が必要で、重複やシステムとの競合は不可です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个组合都需要一个修饰键（⌃ ⌥ ⇧ ⌘），且必须唯一、不能与系统冲突。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每個組合都需要一個修飾鍵（⌃ ⌥ ⇧ ⌘），且必須唯一、不能與系統衝突。"
+          }
+        }
+      }
+    },
     "Each display renders its own full video frame" : {
       "comment" : "Description of the video display mode when each display renders its own full video frame.",
       "extractionState" : "manual",
@@ -10217,6 +10277,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "強制執行 Content Security Policy"
+          }
+        }
+      }
+    },
+    "Engine Assets" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engine Assets"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エンジンアセット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引擎资源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引擎資源"
           }
         }
       }
@@ -13506,6 +13596,36 @@
         }
       }
     },
+    "Force every display to re-render its wallpaper." : {
+      "comment" : "Global shortcut action description.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Force every display to re-render its wallpaper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのディスプレイの壁紙を強制的に再描画します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "强制所有显示器重新渲染壁纸。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "強制所有顯示器重新繪製桌布。"
+          }
+        }
+      }
+    },
     "Force SDR" : {
       "comment" : "Title for the Force SDR video color space option in the inspector picker.",
       "extractionState" : "manual",
@@ -14396,6 +14516,36 @@
         }
       }
     },
+    "Hide every wallpaper to reveal the desktop, or bring them back." : {
+      "comment" : "Global shortcut action description.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide every wallpaper to reveal the desktop, or bring them back."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての壁紙を隠してデスクトップを表示、または元に戻します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏所有壁纸以显示桌面，或重新显示它们。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隱藏所有桌布以顯示桌面，或重新顯示。"
+          }
+        }
+      }
+    },
     "Hide items already in my library" : {
       "localizations" : {
         "ja" : {
@@ -15036,36 +15186,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "閒置"
-          }
-        }
-      }
-    },
-    "If a system or other-app shortcut wins, pick a different combination." : {
-      "comment" : "Global shortcut footer bullet — conflict resolution.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "If a system or other-app shortcut wins, pick a different combination."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "システムや他のアプリのショートカットに取られたら、別の組み合わせを選んでください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "若被系统或其他 App 拦截，请改用其他组合。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "若被系統或其他 App 攔截，請改用其他組合。"
           }
         }
       }
@@ -16251,6 +16371,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按鍵 %u"
+          }
+        }
+      }
+    },
+    "Kind" : {
+      "comment" : "Storage table column header.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kind"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "種類"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "类型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "類型"
           }
         }
       }
@@ -17651,6 +17801,36 @@
         }
       }
     },
+    "Materials, models, and shaders shared by every scene — downloaded once and required by scenes that reference built-in files. Not a cache." : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Materials, models, and shaders shared by every scene — downloaded once and required by scenes that reference built-in files. Not a cache."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのシーンで共有されるマテリアル・モデル・シェーダーです。一度だけダウンロードされ、組み込みファイルを参照するシーンに必要です。キャッシュではありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有场景共享的材质、模型和着色器,只需下载一次,引用内置文件的场景需要它。不是缓存。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有場景共用的材質、模型與著色器,只需下載一次,引用內建檔案的場景需要它。不是快取。"
+          }
+        }
+      }
+    },
     "Mature" : {
       "comment" : "Spoiler cover over an adult-rated Workshop thumbnail.",
       "localizations" : {
@@ -17740,6 +17920,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "稍後再說"
+          }
+        }
+      }
+    },
+    "Measuring downloaded content…" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Measuring downloaded content…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード済みコンテンツを計測中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在计算已下载内容…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在計算已下載內容…"
           }
         }
       }
@@ -18229,62 +18439,32 @@
         }
       }
     },
-    "Must include at least one modifier (⌃ ⌥ ⇧ ⌘)." : {
-      "comment" : "Global shortcut footer bullet — modifier required.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Must include at least one modifier (⌃ ⌥ ⇧ ⌘)."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "少なくとも 1 つの修飾キー（⌃ ⌥ ⇧ ⌘）を含める必要があります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "必须包含至少一个修饰键（⌃ ⌥ ⇧ ⌘）。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "必須包含至少一個修飾鍵（⌃ ⌥ ⇧ ⌘）。"
-          }
-        }
-      }
-    },
-    "Mute or unmute every video wallpaper." : {
+    "Mute or unmute video and scene wallpapers." : {
       "comment" : "Global shortcut action description.",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mute or unmute every video wallpaper."
+            "value" : "Mute or unmute video and scene wallpapers."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "すべての動画壁紙をミュートまたはミュート解除します。"
+            "value" : "動画とシーンの壁紙をミュートまたはミュート解除します。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "静音或取消静音所有视频壁纸。"
+            "value" : "静音或取消静音视频和场景壁纸。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "將所有影片桌布靜音或取消靜音。"
+            "value" : "將影片與場景桌布靜音或取消靜音。"
           }
         }
       }
@@ -20522,6 +20702,66 @@
         }
       }
     },
+    "Open Folder" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟資料夾"
+          }
+        }
+      }
+    },
+    "Open folder for %@" : {
+      "comment" : "Storage row action. Placeholder is the wallpaper title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open folder for %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ のフォルダを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 %@ 的文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 %@ 的資料夾"
+          }
+        }
+      }
+    },
     "Open General Settings" : {
       "comment" : "Open General Settings.",
       "isCommentAutoGenerated" : true,
@@ -20755,6 +20995,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打開 Terminal.app"
+          }
+        }
+      }
+    },
+    "Open the downloaded projects folder" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the downloaded projects folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード済みプロジェクトのフォルダを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开已下载项目文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟已下載專案資料夾"
           }
         }
       }
@@ -23653,6 +23923,36 @@
         }
       }
     },
+    "Previous Wallpaper (Active Display)" : {
+      "comment" : "Global shortcut action name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous Wallpaper (Active Display)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前の壁紙（現在のディスプレイ）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一张壁纸（当前显示器）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一張桌布（目前顯示器）"
+          }
+        }
+      }
+    },
     "Primary" : {
       "comment" : "Fallback playlist entry name for the primary video.",
       "extractionState" : "manual",
@@ -24817,6 +25117,36 @@
         }
       }
     },
+    "Reload All Wallpapers" : {
+      "comment" : "Global shortcut action name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reload All Wallpapers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての壁紙を再読み込み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新加载所有壁纸"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新載入所有桌布"
+          }
+        }
+      }
+    },
     "Reload display" : {
       "localizations" : {
         "en" : {
@@ -25365,7 +25695,7 @@
       }
     },
     "Removed %@ from the library, but its files couldn't be deleted." : {
-      "comment" : "Workshop delete: history removed but cache files couldn't be deleted.",
+      "comment" : "Workshop delete: history removed but managed files couldn't be deleted.",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -28960,6 +29290,36 @@
         }
       }
     },
+    "Shared Wallpaper Engine runtime assets" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared Wallpaper Engine runtime assets"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共有の Wallpaper Engine ランタイムアセット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享的 Wallpaper Engine 运行时资源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共用的 Wallpaper Engine 執行時資源"
+          }
+        }
+      }
+    },
     "Shortcut rejected: %@" : {
       "localizations" : {
         "en" : {
@@ -29012,6 +29372,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "快捷鍵"
+          }
+        }
+      }
+    },
+    "Show / Hide All Wallpapers" : {
+      "comment" : "Global shortcut action name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show / Hide All Wallpapers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての壁紙を表示／非表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示/隐藏所有壁纸"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示／隱藏所有桌布"
           }
         }
       }
@@ -29769,6 +30159,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "單一場景偵錯"
+          }
+        }
+      }
+    },
+    "Size" : {
+      "comment" : "Storage table column header.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Size"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイズ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
           }
         }
       }
@@ -30954,6 +31374,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "第 %lld 步,共 %lld 步"
+          }
+        }
+      }
+    },
+    "Step the playlist back on the display under the cursor." : {
+      "comment" : "Global shortcut action description.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step the playlist back on the display under the cursor."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カーソル下のディスプレイのプレイリストを1つ戻します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换鼠标所在显示器的播放列表上一项。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後退游標所在顯示器的播放清單。"
           }
         }
       }
@@ -32360,6 +32810,36 @@
         }
       }
     },
+    "These are the Wallpaper Engine projects you downloaded — not caches. Removing a project's folder deletes that wallpaper." : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These are the Wallpaper Engine projects you downloaded — not caches. Removing a project's folder deletes that wallpaper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードした Wallpaper Engine プロジェクトです（キャッシュではありません）。プロジェクトのフォルダを削除すると、その壁紙も削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这些是你下载的 Wallpaper Engine 项目,不是缓存。删除某个项目的文件夹会一并删除该壁纸。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這些是你下載的 Wallpaper Engine 專案,不是快取。刪除某個專案的資料夾會一併刪除該桌布。"
+          }
+        }
+      }
+    },
     "This allows the wallpaper to run scripts, use local storage, and access WebGPU. Only trust origins you recognize." : {
       "comment" : "Body text of the Trust confirmation dialog.",
       "extractionState" : "manual",
@@ -33170,6 +33650,36 @@
         }
       }
     },
+    "Toggle Mouse Interaction" : {
+      "comment" : "Global shortcut action name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toggle Mouse Interaction"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マウス操作を切り替え"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开关鼠标交互"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換滑鼠互動"
+          }
+        }
+      }
+    },
     "Toggle Mute" : {
       "comment" : "Global shortcut action name.",
       "extractionState" : "manual",
@@ -33803,6 +34313,36 @@
         }
       }
     },
+    "Turn mouse reactions on or off for scene and web wallpapers." : {
+      "comment" : "Global shortcut action description.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn mouse reactions on or off for scene and web wallpapers."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シーンとウェブの壁紙のマウス反応をオン/オフします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启或关闭场景与网页壁纸的鼠标响应。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟或關閉場景與網頁桌布的滑鼠回應。"
+          }
+        }
+      }
+    },
     "Tweak speed, fit, color, and effects" : {
       "comment" : "Onboarding Done-step next-step tip.",
       "localizations" : {
@@ -33828,36 +34368,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "微調速度、縮放、顏色與效果"
-          }
-        }
-      }
-    },
-    "Two actions can't share the same combination." : {
-      "comment" : "Global shortcut footer bullet — uniqueness.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Two actions can't share the same combination."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "2 つの操作で同じ組み合わせを共有することはできません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "两个操作不能共用同一组合键。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "兩個操作不能共用同一組合鍵。"
           }
         }
       }
@@ -34646,36 +35156,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "影片"
-          }
-        }
-      }
-    },
-    "Video cache totals %@ across %lld files" : {
-      "comment" : "A label that describes the size and count of files in the video cache. The argument is the size in bytes, the second is the count of files.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Video cache totals %1$@ across %2$lld files"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "動画キャッシュは合計 %1$@、%2$lld 個のファイル"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "视频缓存总计 %1$@，分布在 %2$lld 个文件中"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "影片快取總計 %1$@，分布在 %2$lld 個檔案中"
           }
         }
       }
@@ -36959,6 +37439,36 @@
         }
       }
     },
+    "Your installed wallpapers, largest first" : {
+      "comment" : "Storage settings.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your installed wallpapers, largest first"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストール済みの壁紙（サイズの大きい順）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装的壁纸,按占用从大到小"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安裝的桌布,依佔用由大到小"
+          }
+        }
+      }
+    },
     "Your own free key — needed to browse online" : {
       "localizations" : {
         "en" : {
@@ -37028,6 +37538,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我們絕不讀取或儲存你的 Steam 密碼、Steam 令牌(Steam Guard)或工作階段憑證。"
+          }
+        }
+      }
+    },
+    "Details" : {
+      "comment" : "Storage section info button label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Details"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详情"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳情"
           }
         }
       }

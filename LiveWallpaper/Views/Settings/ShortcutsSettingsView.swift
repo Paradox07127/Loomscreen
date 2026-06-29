@@ -97,9 +97,7 @@ struct ShortcutsSettingsView: View {
     private var shortcutFooter: some View {
         VStack(alignment: .leading, spacing: 4) {
             shortcutFooterRow(systemImage: "moon.circle", text: "Works even when LiveWallpaper is in the background.")
-            shortcutFooterRow(systemImage: "command", text: "Must include at least one modifier (⌃ ⌥ ⇧ ⌘).")
-            shortcutFooterRow(systemImage: "arrow.left.arrow.right", text: "Two actions can't share the same combination.")
-            shortcutFooterRow(systemImage: "exclamationmark.triangle", text: "If a system or other-app shortcut wins, pick a different combination.")
+            shortcutFooterRow(systemImage: "command", text: "Each combo needs a modifier (⌃ ⌥ ⇧ ⌘), must be unique, and can't clash with the system.")
         }
         .font(.caption)
         .foregroundStyle(.secondary)

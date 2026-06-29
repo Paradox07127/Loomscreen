@@ -19,7 +19,7 @@ final class WallpaperEngineImportService {
     private let makeBookmark: @MainActor @Sendable (URL) -> Data?
 
     init(
-        cache: WallpaperEngineCache = WallpaperEngineCache(),
+        cache: WallpaperEngineCache = .shared,
         fileManager: FileManager = .default,
         validateVideo: @escaping @Sendable (URL) async throws -> Void = { url in
             try await PlayableVideoLoader.validatePlayableVideo(at: url)

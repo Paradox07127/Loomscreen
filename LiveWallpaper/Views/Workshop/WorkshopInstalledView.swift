@@ -607,46 +607,63 @@ struct WorkshopInstalledView: View {
         selectedEntry = entries.first { $0.origin.workshopID == current.origin.workshopID }
     }
 
-    /// Whether deleting this entry will touch files on disk. Only items we
-    /// downloaded/extracted into our managed cache do — folder imports point at
-    /// the user's own files, which we must never delete.
+    /// Whether deleting this entry will actually free disk — true when a copy
+    /// lives inside our container (the SteamCMD download at
+    /// `…/content/431960/<id>/` or a legacy `wpe-cache/<id>/` extraction). Keyed
+    /// on on-disk presence, NOT `resourceLocation`: packaged video/web downloads
+    /// are container-internal yet tagged `.sourceFolder`. Folder imports that
+    /// point at the user's own files have neither copy, so they free nothing.
+    /// Cheap — only evaluated for the single entry the confirm dialog presents.
     private func deletesFiles(_ entry: WPEHistoryEntry) -> Bool {
-        entry.origin.resourceLocation == .cache
+        let id = entry.origin.workshopID
+        guard WPEPathSafety.isSafeWorkshopID(id) else { return false }
+        let fm = FileManager.default
+        if let contentRoot = WPEStoragePaths.containerWorkshopContentRoot() {
+            let download = contentRoot.appendingPathComponent(id, isDirectory: true)
+            if fm.fileExists(atPath: download.path(percentEncoded: false)) { return true }
+        }
+        let cacheItem = WallpaperEngineCache.defaultRootURL.appendingPathComponent(id, isDirectory: true)
+        return fm.fileExists(atPath: cacheItem.path(percentEncoded: false))
     }
 
-    /// Always removes the library entry + any bookmark. For cache-backed items
-    /// it ALSO permanently deletes our managed copy (`…/wpe-cache/<id>/`) plus
-    /// the SteamCMD download that seeded it — a path-validated delete that can
-    /// never escape the managed roots. We delete rather than Trash because under
-    /// App Sandbox, trashing a container file only reaches the invisible
-    /// per-container `.Trash` and never frees space. User-imported source
-    /// folders are never touched.
+    /// Always removes the library entry + any bookmark, then reclaims every
+    /// managed on-disk copy regardless of the import's `resourceLocation`: a
+    /// legacy `…/wpe-cache/<id>/` extraction AND the SteamCMD download at
+    /// `…/content/431960/<id>/`. The old `resourceLocation == .cache` gate
+    /// skipped packaged video/web downloads (tagged `.sourceFolder`) and leaked
+    /// their container folders. Both reclaimers are container/workdir-scoped and
+    /// path-validated, so a user's own external library folder is never touched.
+    /// We delete rather than Trash because under App Sandbox, trashing a
+    /// container file only reaches the invisible per-container `.Trash` and never
+    /// frees space.
     private func performDelete(_ entry: WPEHistoryEntry) {
         errorMessage = nil
         if selectedEntry?.id == entry.id { selectedEntry = nil }
         let origin = entry.origin
         let workshopID = origin.workshopID
+        let title = origin.title
+        let expectedToFree = deletesFiles(entry)
 
         if bookmarkStore.containsWPEBookmark(workshopID: workshopID) {
             bookmarkStore.removeWPEBookmarks(workshopID: workshopID)
         }
         screenManager.removeWPEImport(workshopID: workshopID)
 
-        if origin.resourceLocation == .cache, !workshopID.isEmpty {
-            let title = origin.title
+        if !workshopID.isEmpty {
             Task {
+                var cacheDeleted = false
                 do {
-                    try await WallpaperEngineCache().deleteFiles(workshopID: workshopID)
+                    cacheDeleted = try await WallpaperEngineCache.shared.deleteFiles(workshopID: workshopID)
                 } catch {
+                    cacheDeleted = false
+                }
+                let downloadsRemoved = await doctor.deleteDownloadedItemFolders(workshopID: workshopID)
+                if expectedToFree, !cacheDeleted, downloadsRemoved == 0 {
                     errorMessage = String(
                         localized: "Removed \(title) from the library, but its files couldn't be deleted.",
-                        comment: "Workshop delete: history removed but cache files couldn't be deleted."
+                        comment: "Workshop delete: history removed but managed files couldn't be deleted."
                     )
                 }
-                // Free the SteamCMD download that seeded this cache copy, else its
-                // bytes linger. Best-effort; the delete tombstone in `removeWorkshop`
-                // already stops the auto-scan from resurrecting it.
-                await doctor.deleteDownloadedItemFolders(workshopID: workshopID)
             }
         }
         reload()

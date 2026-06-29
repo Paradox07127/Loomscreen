@@ -156,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
                 let keepIDs = WPESceneReachability.referencedWorkshopIDs()
-                let cache = WallpaperEngineCache()
+                let cache = WallpaperEngineCache.shared
                 await cache.collectOrphans(keepIDs: keepIDs)
                 var referenced = keepIDs
                 referenced.formUnion(await cache.listAvailableWorkshopIDs())

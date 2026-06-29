@@ -160,6 +160,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Layer name → objectID, so a script's `thisScene.getLayer(name)` output can
     /// be resolved to the target layer.
     private var layerObjectIDByName: [String: String] = [:]
+    /// objectID → texture key for scene-output-only video layers (never a hidden
+    /// composite source), kept resident only while visible. Each
+    /// `WPEVideoTextureSource` holds its whole MP4 + decode buffers (~300 MB per 4K
+    /// source), so a multi-video scene that shows one at a time otherwise pays for
+    /// all of them. `reconcileVideoResidency` flips residency per frame.
+    private var onDemandVideoKeyByID: [String: String] = [:]
+    /// Texture keys whose rebuild is in flight, so a layer staying visible across
+    /// frames doesn't spawn a duplicate Task while the first resolves.
+    private var onDemandVideoLoading: Set<String> = []
     /// Live per-layer alpha overrides driven by layer scripts (objectID → alpha).
     private var liveLayerAlpha: [String: Double] = [:]
     /// Intro→loop phase alignment: an intro overlay (`introPhaseSource`) and the
@@ -630,6 +639,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
+        indexOnDemandVideoLayers(pipeline: pipeline)
         debugStage("textures.load.done", "loaded=\(loadedTextures.count) dynamic=\(dynamicTextureSources.count)")
         dumpLoadedTexturesIfRequested()
         try Task.checkCancellation()
@@ -1401,6 +1411,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 .applyingLayerVisibility(liveLayerVisibility)
                 .applyingLayerAlpha(liveLayerAlpha)
         }
+        // Keep only currently-visible on-demand videos resident (releases hidden
+        // ones, rebuilds revealed ones). No-op unless the scene has releasable
+        // videos; reads the final per-frame visibility so it covers script-,
+        // user-property- and condition-driven switches alike.
+        reconcileVideoResidency(framePipeline)
         // Particles tick (CPU sim) BEFORE the layer composite so the executor can
         // interleave their draws at each system's scene paint index.
         if !particleSystems.isEmpty {
@@ -1753,6 +1768,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             }
         }
 
+        // WPE delivers the user-property bag to each script after init(); time-of-day
+        // scripts gate their day/night switch on it (e.g. `timevarying`), so without
+        // this the switch never runs.
+        let userProperties = currentLayerScriptUserProperties()
         for object in scripted {
             guard let script = object.visibleScript else { continue }
             do {
@@ -1762,11 +1781,110 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
+                if let output = instance.applyUserProperties(userProperties) {
+                    applyLayerScriptOutput(output, ownObjectID: object.id)
+                }
             } catch {
                 Logger.warning("Scene \(descriptor.workshopID) [LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         setUpIntroPhaseAlign(scripted: scripted)
+    }
+
+    /// Index video layers whose every pass targets `.scene` (so they're never a
+    /// hidden composite/FBO source another layer samples) — only these are safe to
+    /// release when hidden, since the executor skips a hidden scene pass entirely.
+    private func indexOnDemandVideoLayers(pipeline: WPEPreparedRenderPipeline) {
+        onDemandVideoKeyByID = [:]
+        onDemandVideoLoading = []
+        for layer in pipeline.layers {
+            guard let key = videoTexturePaths(for: layer)
+                .first(where: { dynamicTextureSources[$0] is WPEVideoTextureSource }) else { continue }
+            let sceneOnly = layer.passes.allSatisfy { pass in
+                if case .scene = pass.pass.target { return true }
+                return false
+            }
+            if sceneOnly {
+                onDemandVideoKeyByID[layer.graphLayer.objectID] = key
+            }
+        }
+    }
+
+    /// Per-frame: an on-demand video source is resident iff some layer using it is
+    /// visible this frame; otherwise it's released (freeing its resident MP4 +
+    /// buffers) and rebuilt on the next reveal. Aggregated by texture key, so two
+    /// layers sharing one video keep it while either is visible. No-op for the
+    /// common single-always-visible-video scene.
+    private func reconcileVideoResidency(_ framePipeline: WPEPreparedRenderPipeline) {
+        guard !onDemandVideoKeyByID.isEmpty else { return }
+        var visibleByID: [String: Bool] = [:]
+        visibleByID.reserveCapacity(framePipeline.layers.count)
+        for layer in framePipeline.layers {
+            visibleByID[layer.graphLayer.objectID] = layer.graphLayer.visible
+        }
+        var keyVisible: [String: Bool] = [:]
+        for (objectID, key) in onDemandVideoKeyByID {
+            if visibleByID[objectID] == true { keyVisible[key] = true }
+            else if keyVisible[key] == nil { keyVisible[key] = false }
+        }
+        for (key, visible) in keyVisible {
+            if visible {
+                lazyLoadVideo(key: key)
+            } else if let source = dynamicTextureSources[key] as? WPEVideoTextureSource {
+                // Phase-aligned intro/loop sources hold object references elsewhere;
+                // releasing one would leave those refs dangling (no rebuild hook).
+                guard source !== introPhaseSource, source !== loopPhaseSource else { continue }
+                source.invalidate()
+                dynamicTextureSources.removeValue(forKey: key)
+                // 1×1 placeholder, not a removal: a stray sampler reference resolves
+                // instead of erroring (the hidden layer's scene pass is skipped).
+                loadedTextures[key] = (try? makeDynamicPlaceholderTexture(label: "\(key) released")) ?? loadedTextures[key]
+            }
+        }
+    }
+
+    private func lazyLoadVideo(key: String) {
+        guard dynamicTextureSources[key] == nil,
+              !onDemandVideoLoading.contains(key) else { return }
+        onDemandVideoLoading.insert(key)
+        let generation = loadGeneration
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.onDemandVideoLoading.remove(key) }
+            guard self.loadGeneration == generation else { return }
+            try? await self.loadDynamicTextureOnActor(path: key, layerName: key)
+            // Force-play the freshly-rebuilt (paused) source under the current
+            // profile; a layer script re-issues its own play() next tick.
+            guard self.loadGeneration == generation,
+                  let source = self.dynamicTextureSources[key] as? WPEVideoTextureSource else { return }
+            source.applyPerformanceProfile(self.currentProfile)
+            self.mtkView.setNeedsDisplay(self.mtkView.bounds)
+        }
+    }
+
+    /// Effective scene user-property values (project.json defaults ⊕ the
+    /// descriptor's persisted overrides) bridged to the script value type, so a
+    /// layer script's `applyUserProperties` sees the SAME bag WPE delivers. Keyed
+    /// by the project.json property name the script reads (`timevarying`, etc.).
+    private func currentLayerScriptUserProperties() -> [String: WPESceneScriptPropertyValue] {
+        let manifestRoot = projectManifestRootURL ?? cacheRootURL
+        let values = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+            descriptor: descriptor,
+            cacheRootURL: manifestRoot
+        )
+        return Self.bridgeUserProperties(values)
+    }
+
+    private static func bridgeUserProperties(
+        _ values: [String: WallpaperEngineProjectPropertyValue]
+    ) -> [String: WPESceneScriptPropertyValue] {
+        values.reduce(into: [:]) { result, pair in
+            switch pair.value {
+            case .bool(let value): result[pair.key] = .bool(value)
+            case .number(let value): result[pair.key] = .number(value)
+            case .string(let value): result[pair.key] = .string(value)
+            }
+        }
     }
 
     /// Identify the intro overlay video and the free-running loop video it reveals,
@@ -2145,6 +2263,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         layerScriptInstances.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
+        onDemandVideoKeyByID.removeAll(keepingCapacity: false)
+        onDemandVideoLoading.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
         introPhaseSource = nil
         loopPhaseSource = nil
@@ -2204,6 +2324,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         liveLayerVisibility = nextLayerVisibility
         liveTextVisibility = nextTextVisibility
+
+        // Feed changed values to any layer script's `applyUserProperties` so a
+        // runtime toggle (e.g. `timevarying`) reacts without a full reload.
+        if !layerScriptInstances.isEmpty {
+            let changed = Self.bridgeUserProperties(
+                patch.newValues.filter { patch.changedKeys.contains($0.key) }
+            )
+            if !changed.isEmpty {
+                for (objectID, instance) in layerScriptInstances {
+                    if let output = instance.applyUserProperties(changed) {
+                        applyLayerScriptOutput(output, ownObjectID: objectID)
+                    }
+                }
+            }
+        }
+
         if let pipeline = renderPipeline {
             renderPipeline = pipeline.applyingLayerVisibility(liveLayerVisibility)
         }
@@ -2317,6 +2453,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         hasAnimatedShaderPasses
             || sceneSupportsAudioProcessing
             || !dynamicTextureSources.isEmpty
+            // On-demand videos may all be released (hidden) yet still need a live
+            // loop so a reveal triggers their rebuild via reconcileVideoResidency.
+            || !onDemandVideoKeyByID.isEmpty
             || !particleSystems.isEmpty
             || pointerDrivenContent
     }
@@ -2393,6 +2532,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         layerScriptInstances.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
+        onDemandVideoKeyByID.removeAll(keepingCapacity: false)
+        onDemandVideoLoading.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
         introPhaseSource = nil
         loopPhaseSource = nil

@@ -79,6 +79,7 @@ struct WPERenderGraphBuilder: Sendable {
         // hidden, so the toggle applies live without a pipeline rebuild. The
         // executor skips the scene draw while `WPERenderLayer.visible` is false.
         let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
+            .union(Self.layerScriptControlledVisibilityIDs(in: document))
         let visibleLayerIDs = Set(document.imageObjects
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
             .filter {
@@ -410,6 +411,30 @@ struct WPERenderGraphBuilder: Sendable {
                 if case .imageObject(let id) = binding.target {
                     ids.insert(id)
                 }
+            }
+        }
+        return ids
+    }
+
+    /// Image-object IDs a layer SceneScript can reveal via `thisScene.getLayer(name)`,
+    /// kept in the graph even when authored-hidden behind a condition-form binding —
+    /// else the script switches to a layer that isn't there → black background.
+    ///
+    /// The getLayer argument is usually a variable bound from an array literal
+    /// (`["morning","day",...].map(v => getLayer(v))`), so a `getLayer("…")` scan
+    /// misses it; match any string literal in the script against a layer name
+    /// instead. Names the script never mentions still prune, so this doesn't
+    /// reintroduce the all-variants-render regression (3226487183).
+    private static func layerScriptControlledVisibilityIDs(in document: WPESceneDocument) -> Set<String> {
+        let scripts = document.imageObjects.compactMap(\.visibleScript)
+        guard !scripts.isEmpty else { return [] }
+        let combined = scripts.joined(separator: "\n")
+        var ids = Set<String>()
+        for object in document.imageObjects {
+            let name = object.name
+            guard !name.isEmpty else { continue }
+            if combined.contains("\"\(name)\"") || combined.contains("'\(name)'") {
+                ids.insert(object.id)
             }
         }
         return ids

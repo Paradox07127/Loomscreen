@@ -7,7 +7,11 @@ import AppKit
 public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, Sendable {
     case togglePlayback
     case nextWallpaper
+    case previousWallpaper
     case toggleMute
+    case toggleMouseInteraction
+    case toggleWallpapers
+    case reloadWallpapers
 
     public var id: String { rawValue }
 
@@ -24,8 +28,16 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
             return String(localized: "Play / Pause All Wallpapers", defaultValue: "Play / Pause All Wallpapers", comment: "Global shortcut action name.")
         case .nextWallpaper:
             return String(localized: "Next Wallpaper (Active Display)", defaultValue: "Next Wallpaper (Active Display)", comment: "Global shortcut action name.")
+        case .previousWallpaper:
+            return String(localized: "Previous Wallpaper (Active Display)", defaultValue: "Previous Wallpaper (Active Display)", comment: "Global shortcut action name.")
         case .toggleMute:
             return String(localized: "Toggle Mute", defaultValue: "Toggle Mute", comment: "Global shortcut action name.")
+        case .toggleMouseInteraction:
+            return String(localized: "Toggle Mouse Interaction", defaultValue: "Toggle Mouse Interaction", comment: "Global shortcut action name.")
+        case .toggleWallpapers:
+            return String(localized: "Show / Hide All Wallpapers", defaultValue: "Show / Hide All Wallpapers", comment: "Global shortcut action name.")
+        case .reloadWallpapers:
+            return String(localized: "Reload All Wallpapers", defaultValue: "Reload All Wallpapers", comment: "Global shortcut action name.")
         }
     }
 
@@ -35,8 +47,16 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
             return String(localized: "Pause every active wallpaper, or resume them all.", defaultValue: "Pause every active wallpaper, or resume them all.", comment: "Global shortcut action description.")
         case .nextWallpaper:
             return String(localized: "Advance the playlist on the display under the cursor.", defaultValue: "Advance the playlist on the display under the cursor.", comment: "Global shortcut action description.")
+        case .previousWallpaper:
+            return String(localized: "Step the playlist back on the display under the cursor.", defaultValue: "Step the playlist back on the display under the cursor.", comment: "Global shortcut action description.")
         case .toggleMute:
-            return String(localized: "Mute or unmute every video wallpaper.", defaultValue: "Mute or unmute every video wallpaper.", comment: "Global shortcut action description.")
+            return String(localized: "Mute or unmute video and scene wallpapers.", defaultValue: "Mute or unmute video and scene wallpapers.", comment: "Global shortcut action description.")
+        case .toggleMouseInteraction:
+            return String(localized: "Turn mouse reactions on or off for scene and web wallpapers.", defaultValue: "Turn mouse reactions on or off for scene and web wallpapers.", comment: "Global shortcut action description.")
+        case .toggleWallpapers:
+            return String(localized: "Hide every wallpaper to reveal the desktop, or bring them back.", defaultValue: "Hide every wallpaper to reveal the desktop, or bring them back.", comment: "Global shortcut action description.")
+        case .reloadWallpapers:
+            return String(localized: "Force every display to re-render its wallpaper.", defaultValue: "Force every display to re-render its wallpaper.", comment: "Global shortcut action description.")
         }
     }
 
@@ -47,8 +67,16 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
             return GlobalShortcutBinding(keyCode: 49, modifiers: [.control, .shift])
         case .nextWallpaper:
             return GlobalShortcutBinding(keyCode: 124, modifiers: [.control, .shift])
+        case .previousWallpaper:
+            return GlobalShortcutBinding(keyCode: 123, modifiers: [.control, .shift])
         case .toggleMute:
             return GlobalShortcutBinding(keyCode: 46, modifiers: [.control, .shift])
+        case .toggleMouseInteraction:
+            return GlobalShortcutBinding(keyCode: 34, modifiers: [.control, .shift])
+        case .toggleWallpapers:
+            return GlobalShortcutBinding(keyCode: 4, modifiers: [.control, .shift])
+        case .reloadWallpapers:
+            return GlobalShortcutBinding(keyCode: 15, modifiers: [.control, .shift])
         }
     }
 }
