@@ -1772,12 +1772,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // scripts gate their day/night switch on it (e.g. `timevarying`), so without
         // this the switch never runs.
         let userProperties = currentLayerScriptUserProperties()
+        // One `shared` store for the whole scene so WPE's cross-script `shared`
+        // global coordinates across the scripts' isolated contexts.
+        let sharedState = WPESharedScriptState()
         for object in scripted {
             guard let script = object.visibleScript else { continue }
             do {
                 let instance = try WPELayerScriptInstance(
                     script: script,
-                    scriptProperties: object.scriptProperties
+                    scriptProperties: object.scriptProperties,
+                    shared: sharedState
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)

@@ -143,7 +143,7 @@ struct WPECacheManagementView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                HStack(alignment: .top) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: Int64(totalBytes)))
                             .font(DesignTokens.Typography.pageTitle)
@@ -152,19 +152,20 @@ struct WPECacheManagementView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button(role: .destructive) {
+                        showingClearAllConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .destructiveControlTint()
+                    .controlSize(.small)
+                    .disabled(totalBytes == 0)
+                    .help(Text("Clear All Caches"))
+                    .accessibilityLabel(Text("Clear All Caches"))
                     StorageInfoButton {
                         infoNote("Caches are bounded and cleared automatically — use these only to reclaim space now.")
                     }
                 }
-
-                Button(role: .destructive) {
-                    showingClearAllConfirmation = true
-                } label: {
-                    Label("Clear All Caches", systemImage: "trash")
-                }
-                .destructiveControlTint()
-                .controlSize(.regular)
-                .disabled(totalBytes == 0)
             }
         } header: {
             Text("Caches")
@@ -188,7 +189,7 @@ struct WPECacheManagementView: View {
             }
         } else if let inventory, !inventory.projects.isEmpty {
             Section {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: Int64(inventory.projectsTotalBytes)))
                             .font(DesignTokens.Typography.pageTitle)
@@ -198,18 +199,17 @@ struct WPECacheManagementView: View {
                     }
                     Spacer()
                     if let root = WPEStoragePaths.containerWorkshopContentRoot() {
-                        Button { openFolder(root) } label: {
-                            Label("Open Folder", systemImage: "folder")
-                        }
-                        .controlSize(.small)
+                        openFolderIconButton(root)
                     }
                     Button { showingProjectsSheet = true } label: {
-                        Image(systemName: "info.circle")
+                        Image(systemName: "list.bullet.rectangle")
                     }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help(Text("Details"))
-                    .accessibilityLabel(Text("Details"))
+                    .help(Text("View files"))
+                    .accessibilityLabel(Text("View files"))
+                    StorageInfoButton {
+                        infoNote("These are the Wallpaper Engine projects you downloaded — not caches. Removing a project's folder deletes that wallpaper.")
+                    }
                 }
                 .sheet(isPresented: $showingProjectsSheet) { projectsSheet }
             } header: {
@@ -301,7 +301,7 @@ struct WPECacheManagementView: View {
     private var engineAssetsSection: some View {
         if let inventory, inventory.engineAssetsBytes > 0 {
             Section {
-                HStack(spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: Int64(inventory.engineAssetsBytes)))
                             .font(DesignTokens.Typography.pageTitle)
@@ -311,10 +311,7 @@ struct WPECacheManagementView: View {
                     }
                     Spacer()
                     if let url = inventory.engineAssetsURL {
-                        Button { openFolder(url) } label: {
-                            Label("Open Folder", systemImage: "folder")
-                        }
-                        .controlSize(.small)
+                        openFolderIconButton(url)
                     }
                     StorageInfoButton {
                         infoNote("Materials, models, and shaders shared by every scene — downloaded once and required by scenes that reference built-in files. Not a cache.")
@@ -329,6 +326,15 @@ struct WPECacheManagementView: View {
     private func openFolder(_ url: URL?) {
         guard let url else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func openFolderIconButton(_ url: URL) -> some View {
+        Button { openFolder(url) } label: {
+            Image(systemName: "folder")
+        }
+        .buttonStyle(.borderless)
+        .help(Text("Open Folder"))
+        .accessibilityLabel(Text("Open Folder"))
     }
 
     @ViewBuilder
@@ -356,7 +362,7 @@ struct WPECacheManagementView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                HStack(alignment: .top) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: Int64(videoStats?.totalBytes ?? 0)))
                             .font(DesignTokens.Typography.pageTitle)
@@ -365,19 +371,20 @@ struct WPECacheManagementView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button(role: .destructive) {
+                        showingVideoClearConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .destructiveControlTint()
+                    .controlSize(.small)
+                    .disabled((videoStats?.totalBytes ?? 0) == 0)
+                    .help(Text("Clear video cache"))
+                    .accessibilityLabel(Text("Clear video cache"))
                     StorageInfoButton {
                         infoNote("Frames extracted from scene videos, reused across launches. Capped at 2 GB — the least-recently-used files are removed first, and orphaned scenes are reclaimed at startup.")
                     }
                 }
-
-                Button(role: .destructive) {
-                    showingVideoClearConfirmation = true
-                } label: {
-                    Label("Clear video cache", systemImage: "trash")
-                }
-                .destructiveControlTint()
-                .controlSize(.regular)
-                .disabled((videoStats?.totalBytes ?? 0) == 0)
             }
         } header: {
             Text("Scene Video Texture Cache")
@@ -397,7 +404,7 @@ struct WPECacheManagementView: View {
     private var workshopCacheSection: some View {
         if workshopCacheBytes > 0 {
             Section {
-                HStack(alignment: .top) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: workshopCacheBytes))
                             .font(DesignTokens.Typography.pageTitle)
@@ -406,18 +413,19 @@ struct WPECacheManagementView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button(role: .destructive) {
+                        showingWorkshopClearConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .destructiveControlTint()
+                    .controlSize(.small)
+                    .help(Text("Clear cache"))
+                    .accessibilityLabel(Text("Clear cache"))
                     StorageInfoButton {
                         infoNote("Browse results from Steam, refreshed every 5 minutes and capped at 100 MB.")
                     }
                 }
-
-                Button(role: .destructive) {
-                    showingWorkshopClearConfirmation = true
-                } label: {
-                    Label("Clear cache", systemImage: "trash")
-                }
-                .destructiveControlTint()
-                .controlSize(.regular)
             } header: {
                 Text("Workshop browse cache")
             }
@@ -431,7 +439,7 @@ struct WPECacheManagementView: View {
     private var legacyCacheSection: some View {
         if let stats, !stats.entries.isEmpty {
             Section {
-                HStack(alignment: .top) {
+                HStack(alignment: .center) {
                     summaryRow
                     StorageInfoButton {
                         infoNote("New scenes read their assets in place from the source, so this cache only holds older imports. Unreferenced leftovers are reclaimed automatically at startup.")
@@ -460,10 +468,12 @@ struct WPECacheManagementView: View {
                     Button(role: .destructive) {
                         confirmClearAll()
                     } label: {
-                        Label("Clear All", systemImage: "trash")
+                        Image(systemName: "trash")
                     }
                     .destructiveControlTint()
                     .controlSize(.regular)
+                    .help(Text("Clear All"))
+                    .accessibilityLabel(Text("Clear All"))
 
                     Button(role: .destructive) {
                         confirmPurgeOlderThan(days: 30)
@@ -494,7 +504,7 @@ struct WPECacheManagementView: View {
         #if DIRECT_DISTRIBUTION
         if reclaimableArchiveBytes > 0 {
             Section {
-                HStack(alignment: .top) {
+                HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: reclaimableArchiveBytes))
                             .font(DesignTokens.Typography.pageTitle)
@@ -504,17 +514,16 @@ struct WPECacheManagementView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
+                    Button {
+                        Task { await reclaimArchives() }
+                    } label: {
+                        Label("Reclaim download archives", systemImage: "internaldrive")
+                    }
+                    .controlSize(.small)
                     StorageInfoButton {
                         infoNote("Moves the source .pkg of legacy imports (already unpacked into the cache) to the Trash (recoverable). Wallpapers that read in place from their source are left untouched.")
                     }
                 }
-
-                Button {
-                    Task { await reclaimArchives() }
-                } label: {
-                    Label("Reclaim download archives", systemImage: "internaldrive")
-                }
-                .controlSize(.regular)
             } header: {
                 Text("Reclaimable Download Archives")
             } footer: {

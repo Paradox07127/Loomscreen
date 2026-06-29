@@ -29,7 +29,9 @@ struct WPEStorageCompactTable: View {
 
     private let rowHeight: CGFloat = 30
     private let maxVisibleRows = 10
-    private let kindWidth: CGFloat = 80
+    // Per-column widths — tune here. Name flexes to fill the remainder.
+    private let idWidth: CGFloat = 96
+    private let kindWidth: CGFloat = 64
     private let sizeWidth: CGFloat = 74
     private let actionWidth: CGFloat = 24
     private var corner: CGFloat { DesignTokens.Corner.md }
@@ -66,6 +68,7 @@ struct WPEStorageCompactTable: View {
                 item: item,
                 isAlternate: !index.isMultiple(of: 2),
                 rowHeight: rowHeight,
+                idWidth: idWidth,
                 kindWidth: kindWidth,
                 sizeWidth: sizeWidth,
                 actionWidth: actionWidth,
@@ -78,6 +81,8 @@ struct WPEStorageCompactTable: View {
         HStack(spacing: 10) {
             Text("Name")
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Text(verbatim: "ID")
+                .frame(width: idWidth, alignment: .leading)
             Text("Kind")
                 .frame(width: kindWidth, alignment: .leading)
             HStack(spacing: 3) {
@@ -85,12 +90,14 @@ struct WPEStorageCompactTable: View {
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
             .frame(width: sizeWidth, alignment: .trailing)
-            Color.clear.frame(width: actionWidth)
+            // Reserve the action column WITHOUT a greedy Color (a width-only
+            // Color.clear expands vertically and stretches the header).
+            Spacer().frame(width: actionWidth)
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
+        .frame(height: 22)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 }
 
@@ -98,6 +105,7 @@ private struct WPEStorageTableRow: View {
     let item: WPEStorageRowItem
     let isAlternate: Bool
     let rowHeight: CGFloat
+    let idWidth: CGFloat
     let kindWidth: CGFloat
     let sizeWidth: CGFloat
     let actionWidth: CGFloat
@@ -118,6 +126,14 @@ private struct WPEStorageTableRow: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(Text(verbatim: item.title))
+
+            Text(verbatim: item.id)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: idWidth, alignment: .leading)
+                .help(Text(verbatim: item.id))
 
             Text(verbatim: item.kind)
                 .font(.caption)

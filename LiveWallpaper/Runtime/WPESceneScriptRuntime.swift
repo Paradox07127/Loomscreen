@@ -358,12 +358,13 @@ final class WPELayerScriptInstance {
     init(
         script: String,
         scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        shared: WPESharedScriptState? = nil,
         setupBudget: TimeInterval = 2.0,
         tickBudget: TimeInterval = 0.5,
         nowProviderMillis: (@Sendable () -> Double)? = nil
     ) throws {
         self.tickBudget = tickBudget
-        let engine = LayerEngine(nowProviderMillis: nowProviderMillis)
+        let engine = LayerEngine(nowProviderMillis: nowProviderMillis, shared: shared)
         self.engine = engine
         var prepared = WPESceneScriptInstance.preprocess(script: script)
         // Strip ESM `import` lines (e.g. `import * as WEMath from 'WEMath';`) —
@@ -451,9 +452,15 @@ final class WPELayerScriptInstance {
         /// is no cross-thread race.
         private var pendingVideo: [String: [WPELayerVideoCommand]] = [:]
         private let nowProviderMillis: (@Sendable () -> Double)?
+        private let shared: WPESharedScriptState?
+        /// Reused per-context stubs for `getParent()` / `getAnimationLayer()` so a
+        /// chain (`getParent().getParent()`) doesn't mint a fresh object each call.
+        private var neutralLayerStubCache: JSValue?
+        private var neutralAnimationStubCache: JSValue?
 
-        init(nowProviderMillis: (@Sendable () -> Double)?) {
+        init(nowProviderMillis: (@Sendable () -> Double)?, shared: WPESharedScriptState?) {
             self.nowProviderMillis = nowProviderMillis
+            self.shared = shared
         }
 
         func setUp(
@@ -495,6 +502,7 @@ final class WPELayerScriptInstance {
             WPESceneScriptInstance.installSandbox(in: context)
             WPESceneScriptBaseclasses.install(in: context)
             installLayerBridge(in: context)
+            if let shared { wpeInstallSharedState(shared, in: context) }
             if let nowProviderMillis {
                 let now: @convention(block) () -> Double = { nowProviderMillis() }
                 context.setObject(now, forKeyedSubscript: "__hostNow" as NSString)
@@ -583,6 +591,10 @@ final class WPELayerScriptInstance {
             }
             let scene = JSValue(newObjectIn: context)!
             scene.setObject(getLayer, forKeyedSubscript: "getLayer" as NSString)
+            // `scene.on(event, cb)` isn't a real WPE API (some scenes assume it);
+            // a no-op stub keeps such a script from throwing at top-level eval.
+            let on: @convention(block) (JSValue, JSValue) -> Void = { _, _ in }
+            scene.setObject(on, forKeyedSubscript: "on" as NSString)
             context.setObject(scene, forKeyedSubscript: "thisScene" as NSString)
             context.setObject(scene, forKeyedSubscript: "scene" as NSString)
 
@@ -602,15 +614,66 @@ final class WPELayerScriptInstance {
         }
 
         /// A writable layer handle (visible/alpha + `getVideoTexture()`) tagged
-        /// with `key` so its video commands route to the right layer.
+        /// with `key` so its video commands route to the right layer. Also carries
+        /// the WPE hierarchy/animation accessors as graceful stubs (we don't model
+        /// live parent transforms or animation playback): `scale` reads 1,
+        /// `getParent()` returns a neutral ancestor, `getAnimationLayer()` a no-op —
+        /// so a UI script that walks the tree runs instead of throwing on init.
         private func makeLayerHandle(key: String, in context: JSContext) -> JSValue {
             let handle = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
             handle.setObject(true, forKeyedSubscript: "visible" as NSString)
             handle.setObject(1.0, forKeyedSubscript: "alpha" as NSString)
+            handle.setObject(Self.unitScale(in: context), forKeyedSubscript: "scale" as NSString)
             let videoHandle = makeVideoHandle(key: key, in: context)
             let getVideoTexture: @convention(block) () -> JSValue = { videoHandle }
             handle.setObject(getVideoTexture, forKeyedSubscript: "getVideoTexture" as NSString)
+            let parent = neutralLayerStub(in: context)
+            let getParent: @convention(block) () -> JSValue = { parent }
+            handle.setObject(getParent, forKeyedSubscript: "getParent" as NSString)
+            let anim = neutralAnimationStub(in: context)
+            let getAnimationLayer: @convention(block) (JSValue) -> JSValue = { _ in anim }
+            handle.setObject(getAnimationLayer, forKeyedSubscript: "getAnimationLayer" as NSString)
             return handle
+        }
+
+        private static func unitScale(in context: JSContext) -> JSValue {
+            let scale = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            scale.setObject(1.0, forKeyedSubscript: "x" as NSString)
+            scale.setObject(1.0, forKeyedSubscript: "y" as NSString)
+            scale.setObject(1.0, forKeyedSubscript: "z" as NSString)
+            return scale
+        }
+
+        /// Neutral ancestor for `getParent()`: unit scale, visible, and self-returning
+        /// `getParent()` so a `getParent().getParent()` chain terminates safely.
+        private func neutralLayerStub(in context: JSContext) -> JSValue {
+            if let cached = neutralLayerStubCache { return cached }
+            let stub = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            stub.setObject(true, forKeyedSubscript: "visible" as NSString)
+            stub.setObject(1.0, forKeyedSubscript: "alpha" as NSString)
+            stub.setObject(Self.unitScale(in: context), forKeyedSubscript: "scale" as NSString)
+            let getParent: @convention(block) () -> JSValue = { [weak self] in
+                self?.neutralLayerStubCache ?? JSValue(undefinedIn: context)
+            }
+            stub.setObject(getParent, forKeyedSubscript: "getParent" as NSString)
+            let anim = neutralAnimationStub(in: context)
+            let getAnimationLayer: @convention(block) (JSValue) -> JSValue = { _ in anim }
+            stub.setObject(getAnimationLayer, forKeyedSubscript: "getAnimationLayer" as NSString)
+            neutralLayerStubCache = stub
+            return stub
+        }
+
+        private func neutralAnimationStub(in context: JSContext) -> JSValue {
+            if let cached = neutralAnimationStubCache { return cached }
+            let stub = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            let noop: @convention(block) () -> Void = {}
+            let noop1: @convention(block) (JSValue) -> Void = { _ in }
+            for method in ["play", "pause", "stop"] {
+                stub.setObject(noop, forKeyedSubscript: method as NSString)
+            }
+            stub.setObject(noop1, forKeyedSubscript: "setFrame" as NSString)
+            neutralAnimationStubCache = stub
+            return stub
         }
 
         private func makeVideoHandle(key: String, in context: JSContext) -> JSValue {
@@ -666,6 +729,54 @@ extension WPESceneScriptPropertyValue {
         case .string(let value): return value
         }
     }
+}
+
+// MARK: - Shared cross-script state (`shared` global)
+
+/// Wallpaper Engine's `shared` global — one object visible to every script in a
+/// scene, used for cross-script coordination (e.g. a media-player widget's
+/// settings/visibility state). Each script's `JSContext` is isolated, so `shared`
+/// can't be one JSValue; it's a host-owned, lock-guarded store that per-context
+/// `shared` Proxies read/write. Values cross contexts as primitives.
+final class WPESharedScriptState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: Any] = [:]
+
+    func get(_ key: String) -> Any? {
+        lock.lock(); defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func set(_ key: String, _ value: Any?) {
+        lock.lock(); defer { lock.unlock() }
+        storage[key] = value ?? NSNull()
+    }
+}
+
+private func wpeBridgeJSValueToHost(_ value: JSValue) -> Any? {
+    if value.isBoolean { return value.toBool() }
+    if value.isNumber { return value.toDouble() }
+    if value.isString { return value.toString() }
+    if value.isNull || value.isUndefined { return nil }
+    return value.toObject()
+}
+
+/// Install `shared` as a Proxy whose traps route to `store`, so every script in
+/// the scene reads/writes the same primitives across isolated contexts.
+private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JSContext) {
+    let get: @convention(block) (String) -> Any? = { store.get($0) }
+    let set: @convention(block) (String, JSValue) -> Void = { key, value in
+        store.set(key, wpeBridgeJSValueToHost(value))
+    }
+    context.setObject(get, forKeyedSubscript: "__sharedGet" as NSString)
+    context.setObject(set, forKeyedSubscript: "__sharedSet" as NSString)
+    _ = context.evaluateScript("""
+    var shared = new Proxy({}, {
+        get: function(_t, k) { return __sharedGet(k); },
+        set: function(_t, k, v) { __sharedSet(k, v); return true; },
+        has: function(_t, k) { return __sharedGet(k) !== undefined; }
+    });
+    """)
 }
 
 // MARK: - Shared scriptProperties injection (transform + text-content scripts)

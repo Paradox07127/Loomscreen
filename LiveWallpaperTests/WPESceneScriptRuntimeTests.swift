@@ -793,4 +793,37 @@ struct WPESceneScriptRuntimeTests {
         #expect(output.own.visible == true)
         #expect(try #require(instance.tick()).own.visible == true)
     }
+
+    @Test("shared state coordinates across two layer scripts in one scene")
+    func sharedStateCoordinatesAcrossInstances() throws {
+        let store = WPESharedScriptState()
+        // Writer runs init first (synchronously), seeding `shared`.
+        _ = try WPELayerScriptInstance(script: """
+        export function init() { shared.flag = true; shared.count = 7; }
+        export function update() {}
+        """, shared: store).initialOutput
+        let reader = try WPELayerScriptInstance(script: """
+        export function init() { thisLayer.visible = (shared.flag === true && shared.count === 7); }
+        export function update() {}
+        """, shared: store)
+        #expect(reader.initialOutput.own.visible == true)
+    }
+
+    @Test("getParent / getAnimationLayer / scene.on stubs let a UI script run without throwing")
+    func hierarchyAndEventStubsDoNotThrow() throws {
+        // If any stub threw, init() would degrade to the force-visible fallback
+        // (own.visible == true). scale.x == 1 → the script sets visible = false,
+        // which proves init ran clean through all three APIs.
+        let instance = try WPELayerScriptInstance(script: """
+        scene.on("update", function() {});
+        let parent;
+        export function init() {
+            parent = thisLayer.getParent().getParent();
+            thisLayer.getAnimationLayer("x").play();
+            thisLayer.visible = Math.abs(parent.scale.x) < 0.05;
+        }
+        export function update() {}
+        """, shared: WPESharedScriptState())
+        #expect(instance.initialOutput.own.visible == false)
+    }
 }
