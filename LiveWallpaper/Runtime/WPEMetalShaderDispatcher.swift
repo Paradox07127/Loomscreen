@@ -902,9 +902,7 @@ struct WPEMetalShaderDispatcher {
         encoder.setRenderPipelineState(pipelineState)
 
         if !packedUniformSlots.isEmpty {
-            var slots = packedUniformSlots
-            let byteCount = MemoryLayout<SIMD4<Float>>.stride * slots.count
-            encoder.setFragmentBytes(&slots, length: byteCount, index: 0)
+            executor.bindTranslatedUniformSlots(packedUniformSlots, to: encoder)
         }
         if usesObjectQuad {
             var quadUniforms = executor.objectQuadUniforms(

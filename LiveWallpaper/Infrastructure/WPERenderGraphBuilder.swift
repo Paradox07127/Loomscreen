@@ -13,8 +13,8 @@ struct WPERenderGraphBuilder: Sendable {
     /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool YES`.
     private static var useAttachmentBindAnchor: Bool {
         let key = "WPEPuppetAttachmentBindAnchor"
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
-           suite.object(forKey: key) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
         return UserDefaults.standard.bool(forKey: key)
@@ -25,8 +25,8 @@ struct WPERenderGraphBuilder: Sendable {
     /// blink close. Default OFF; when OFF the graph is byte-identical (no extra texture/FBO).
     private static var puppetClipCompositeEnabled: Bool {
         let key = "WPEPuppetClipComposite"
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
-           suite.object(forKey: key) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
         return UserDefaults.standard.bool(forKey: key)

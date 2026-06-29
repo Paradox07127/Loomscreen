@@ -40,13 +40,13 @@ struct WPEShaderTranspiler {
     ///   mat2/3/4         → consecutive vec4s starting at the slot
     ///   float[N] etc.    → N slots, one element per slot, scalar in `.x`
     ///
-    /// Cap sized for workshop audio-bar visualizers like
-    /// `Simple_Audio_Bars` (245 slots = stereo 64-bucket spectra + per-bar
-    /// state + color palettes). 256 slots × 16 bytes = 4 KB, the inline
-    /// upper bound for `setFragmentBytes` on macOS — if a future shader
-    /// asks for more, the binding in `WPEMetalShaderDispatcher` needs to
-    /// switch to `setFragmentBuffer` first.
-    static let uniformSlotMaximum = 256
+    /// Hard cap on a custom shader's flattened uniform slots. ≤256 slots (4 KB) ride the inline
+    /// `setFragmentBytes` fast path; above that the binding falls back to a transient
+    /// `setFragmentBuffer` (see `WPEMetalRenderExecutor.bindTranslatedUniformSlots`). Audio
+    /// visualizers are what push past 256: `Simple_Audio_Bars` sits at 245, a stereo
+    /// `audio_responsive_oscilloscope` needs 258. 1024 × 16 = 16 KB stays well inside the
+    /// constant-buffer budget. The emitted `WPEUniforms.vals[]` is sized per shader, not to this cap.
+    static let uniformSlotMaximum = 1024
 
     /// Number of texture slots the custom-shader path declares/binds.
     /// WPE shaders use g_Texture0–g_Texture7 (corpus max slot = 7, e.g.
@@ -1977,8 +1977,11 @@ struct WPEShaderTranspiler {
         out.append("")
 
         if !uniforms.isEmpty {
+            // Size to this shader's own slot count, not `uniformSlotMaximum`: the host binds exactly
+            // `totalSlots × 16` bytes, and Metal validation rejects a buffer shorter than the struct.
+            let totalSlots = uniforms.reduce(0) { $0 + ($1.arrayLength ?? slotCount(for: $1.type)) }
             out.append("struct WPEUniforms {")
-            out.append("    float4 vals[\(WPEShaderTranspiler.uniformSlotMaximum)];")
+            out.append("    float4 vals[\(max(totalSlots, 1))];")
             out.append("};")
             out.append("")
         }
@@ -2132,6 +2135,11 @@ struct WPEShaderTranspiler {
             if let arrayLength = varying.arrayLength {
                 let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
+            } else if let arrayDimension = varying.arrayDimension {
+                // Symbolic, #define-sized array: we can't expand a literal initializer list at
+                // transpile time, so zero-init. These varyings (e.g. an oscilloscope's per-sample
+                // audio array) have no vertex-stage source on the fullscreen-quad path anyway.
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayDimension)] = {};")
             } else {
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name) = \(initializer);")
             }
@@ -2844,6 +2852,10 @@ struct WPEVaryingDecl: Equatable {
     let name: String
     let metalType: String
     let arrayLength: Int?
+    /// Raw bracket dimension when the source declared an array (`[64]` or a `#define`d symbol like
+    /// `[RESOLUTION]`). `arrayLength` is the numeric value when it parses; for a symbolic dim it's nil
+    /// but `arrayDimension` keeps the token, which resolves to a constant in the emitted MSL.
+    let arrayDimension: String?
 
     static func parse(line: String) -> Self? {
         let prefix: String
@@ -2860,18 +2872,25 @@ struct WPEVaryingDecl: Equatable {
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { return nil }
         let rawName = tokens[1]
-        let pattern = #"^([A-Za-z_][A-Za-z0-9_]*)(?:\[(\d+)\])?$"#
+        // The dimension may be a numeric literal (`[64]`) or a `#define`d symbol (`[RESOLUTION]`),
+        // so match any non-`]` token, not just digits. A symbolic dim leaking into `name` was the
+        // `audioValue[RESOLUTION]` → invalid-MSL bug (oscilloscope shaders).
+        let pattern = #"^([A-Za-z_][A-Za-z0-9_]*)(?:\[([^\]]+)\])?$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: rawName, range: NSRange(rawName.startIndex..., in: rawName)),
               let nameRange = Range(match.range(at: 1), in: rawName) else {
-            return Self(type: tokens[0], name: rawName, metalType: WPEUniformDecl.mapType(tokens[0]), arrayLength: nil)
+            return Self(type: tokens[0], name: rawName, metalType: WPEUniformDecl.mapType(tokens[0]), arrayLength: nil, arrayDimension: nil)
         }
 
+        let arrayDimension: String?
         let arrayLength: Int?
         if match.range(at: 2).location != NSNotFound,
-           let lengthRange = Range(match.range(at: 2), in: rawName) {
-            arrayLength = Int(rawName[lengthRange])
+           let dimRange = Range(match.range(at: 2), in: rawName) {
+            let token = rawName[dimRange].trimmingCharacters(in: .whitespaces)
+            arrayDimension = token
+            arrayLength = Int(token)
         } else {
+            arrayDimension = nil
             arrayLength = nil
         }
 
@@ -2879,7 +2898,8 @@ struct WPEVaryingDecl: Equatable {
             type: tokens[0],
             name: String(rawName[nameRange]),
             metalType: WPEUniformDecl.mapType(tokens[0]),
-            arrayLength: arrayLength
+            arrayLength: arrayLength,
+            arrayDimension: arrayDimension
         )
     }
 }

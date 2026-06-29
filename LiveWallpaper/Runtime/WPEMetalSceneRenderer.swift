@@ -1097,8 +1097,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// clamp to 0, capped at `maxGain`). Tune to match Wallpaper Engine with:
     ///   defaults write Taijia.LiveWallpaper WPEParallaxGain 0.8
     private static func resolvedParallaxGain() -> Double {
-        for defaults in [UserDefaults(suiteName: "Taijia.LiveWallpaper"), .standard] {
-            guard let defaults, defaults.object(forKey: "WPEParallaxGain") != nil else { continue }
+        for defaults in [UserDefaults.appSuite, .standard] {
+            guard defaults.object(forKey: "WPEParallaxGain") != nil else { continue }
             return WPECameraParallaxFrame.clampedGain(defaults.double(forKey: "WPEParallaxGain"))
         }
         return WPECameraParallaxFrame.defaultGain

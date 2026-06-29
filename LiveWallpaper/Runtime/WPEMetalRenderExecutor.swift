@@ -133,7 +133,8 @@ final class WPEMetalRenderExecutor {
     /// process `.standard` domain. Puppet flags MUST share this so `defaults write Taijia.LiveWallpaper …`
     /// is honoured uniformly even when the renderer runs in a process whose standard domain isn't the app's.
     static func puppetDefaultsFlag(_ key: String) -> Bool {
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"), suite.object(forKey: key) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
         return UserDefaults.standard.bool(forKey: key)
@@ -141,7 +142,8 @@ final class WPEMetalRenderExecutor {
 
     /// Suite-first variant that distinguishes "unset" (`nil`) from an explicit value, for override flags.
     static func puppetDefaultsFlagOptional(_ key: String) -> Bool? {
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"), suite.object(forKey: key) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
         if UserDefaults.standard.object(forKey: key) != nil {
@@ -156,8 +158,8 @@ final class WPEMetalRenderExecutor {
     /// `defaults write Taijia.LiveWallpaper WPEMetalRefractionSnapshotReuseEnabled
     /// -bool NO` is honoured even when the renderer runs outside the app's standard domain.
     static var isRefractionSnapshotReuseEnabled: Bool {
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
-           suite.object(forKey: refractionSnapshotReuseDefaultsKey) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: refractionSnapshotReuseDefaultsKey) != nil {
             return suite.bool(forKey: refractionSnapshotReuseDefaultsKey)
         }
         return UserDefaults.standard.object(forKey: refractionSnapshotReuseDefaultsKey) as? Bool ?? true
@@ -304,8 +306,8 @@ final class WPEMetalRenderExecutor {
     /// skipping the frame keeps the actor free; each display paces to its own
     /// GPU independently. Default ON; `-bool NO` restores the blocking wait.
     static var isNonBlockingFrameSubmitEnabled: Bool {
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
-           suite.object(forKey: nonBlockingFrameSubmitDefaultsKey) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: nonBlockingFrameSubmitDefaultsKey) != nil {
             return suite.bool(forKey: nonBlockingFrameSubmitDefaultsKey)
         }
         return UserDefaults.standard.object(forKey: nonBlockingFrameSubmitDefaultsKey) as? Bool ?? true
@@ -1521,17 +1523,13 @@ final class WPEMetalRenderExecutor {
                 encoder.setVertexBuffer(page.vertexBuffer, offset: 0, index: 0)
                 encoder.setFragmentTexture(page.texture, index: 0)
                 encoder.setFragmentTexture(whiteTexture, index: 1)
-                var slots = packTranslatedUniforms(
+                let slots = packTranslatedUniforms(
                     values: item.payload.uniforms,
                     layout: item.result.uniformLayout,
                     texturesBySlot: [0: page.texture, 1: whiteTexture],
                     destinationTexture: output
                 )
-                encoder.setFragmentBytes(
-                    &slots,
-                    length: MemoryLayout<SIMD4<Float>>.stride * slots.count,
-                    index: 0
-                )
+                bindTranslatedUniformSlots(slots, to: encoder)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: page.vertexCount)
             }
         }
@@ -1614,6 +1612,28 @@ final class WPEMetalRenderExecutor {
         return texture
     }
 
+    /// Slots this layout occupies, matching the per-shader `WPEUniforms.vals[]` the transpiler emits.
+    /// Slots are assigned sequentially, so the max `slot + slotCount` is the total.
+    static func translatedSlotCount(for layout: [WPEUniformSlot]) -> Int {
+        max(layout.reduce(0) { Swift.max($0, $1.slot + $1.slotCount) }, 1)
+    }
+
+    /// macOS caps `setFragmentBytes` at 4 KB (256 × 16-byte slots). Shaders under that ride the inline
+    /// fast path; audio visualizers above it (e.g. a 258-slot oscilloscope) bind a transient shared
+    /// buffer instead. The buffer is retained by the command buffer until GPU completion.
+    func bindTranslatedUniformSlots(_ slots: [SIMD4<Float>], to encoder: MTLRenderCommandEncoder, index: Int = 0) {
+        guard !slots.isEmpty else { return }
+        let byteCount = MemoryLayout<SIMD4<Float>>.stride * slots.count
+        if byteCount <= 4096 {
+            var inline = slots
+            encoder.setFragmentBytes(&inline, length: byteCount, index: index)
+        } else if let buffer = slots.withUnsafeBytes({
+            device.makeBuffer(bytes: $0.baseAddress!, length: byteCount, options: .storageModeShared)
+        }) {
+            encoder.setFragmentBuffer(buffer, offset: 0, index: index)
+        }
+    }
+
     /// Packs a `[name: value]` uniform dictionary into the translated shader's
     /// `WPEUniforms.vals[]` array by the slot indices from its uniform layout.
     /// Mirrors the per-pass packer but takes a standalone values dict (used by
@@ -1624,7 +1644,7 @@ final class WPEMetalRenderExecutor {
         texturesBySlot: [Int: MTLTexture] = [:],
         destinationTexture: MTLTexture? = nil
     ) -> [SIMD4<Float>] {
-        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
+        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: Self.translatedSlotCount(for: layout))
         for u in layout {
             guard u.slot < slots.count else { continue }
             let value = Self.textureResolutionValue(
@@ -4395,7 +4415,7 @@ final class WPEMetalRenderExecutor {
         texturesBySlot: [Int: MTLTexture] = [:],
         destinationTexture: MTLTexture? = nil
     ) -> [SIMD4<Float>] {
-        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
+        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: Self.translatedSlotCount(for: layout))
         for u in layout {
             let value = Self.textureResolutionValue(
                 named: u.name,

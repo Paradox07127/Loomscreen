@@ -75,6 +75,35 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Array varying with a #define-sized dimension ([RESOLUTION]) emits compilable MSL")
+    func reconstructsSymbolicArrayVarying() throws {
+        // Regression: audio oscilloscope (workshop 2799421411) declares `in vec4 audioValue[RESOLUTION];`
+        // where RESOLUTION is a #define. The parser's array regex only matched numeric dims, so the
+        // `[RESOLUTION]` leaked into the varying name and emitted an array with a scalar initializer —
+        // "array initializer must be an initializer list". The symbolic-dim path must zero-init instead.
+        let source = """
+        // stage: fragment
+        #version 410 core
+        #define RESOLUTION 64
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        in vec4 audioValue[RESOLUTION];
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) + audioValue[0];
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "audio_responsive_oscilloscope",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("audioValue[RESOLUTION] = {};"))
+        #expect(result.mslSource.contains("audioValue[RESOLUTION] = float4") == false)
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("waterflow v_Cycles / v_Blend varyings reconstruct from time uniforms (not screen UV)")
     func reconstructsWaterflowFlowVaryings() throws {
         // waterflow.vert computes v_Cycles = frac(t·speed)−0.5 (bounded ±0.5) and

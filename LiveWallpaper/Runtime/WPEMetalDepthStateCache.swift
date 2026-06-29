@@ -20,8 +20,8 @@ final class WPEMetalDepthStateCache {
     /// WPEMetalMemorylessDepthEnabled -bool NO` is honoured even when the renderer
     /// runs in a process whose standard domain isn't the app's.
     static var isMemorylessDepthEnabled: Bool {
-        if let suite = UserDefaults(suiteName: "Taijia.LiveWallpaper"),
-           suite.object(forKey: memorylessDepthDefaultsKey) != nil {
+        let suite = UserDefaults.appSuite
+        if suite.object(forKey: memorylessDepthDefaultsKey) != nil {
             return suite.bool(forKey: memorylessDepthDefaultsKey)
         }
         return UserDefaults.standard.object(forKey: memorylessDepthDefaultsKey) as? Bool ?? true
