@@ -220,6 +220,16 @@ final class WPEMetalRenderExecutor {
     /// don't re-translate every draw call.
     private var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
 
+    /// Per-pass fast path keyed by `WPEPreparedRenderPass.id`. `translatedShaderCache`
+    /// is keyed by a hash of the *preprocessed* source, so reaching it requires
+    /// running the (expensive) GLSL preprocessor every frame just to compute the
+    /// key — which dominated the main thread in profiling (custom-shader passes
+    /// re-preprocessed every frame). The prepared pipeline is built once at load
+    /// and reused per frame, so a pass's result is invariant; caching by pass id
+    /// skips the preprocess entirely on the hot path. Pass ids can recur across
+    /// scenes, so this is cleared on reload (via `releaseTransientResources`).
+    private var compiledShaderResultByPassID: [String: WPEShaderCompileResult] = [:]
+
     static let shaderPrewarmDefaultsKey = "WPEMetalShaderPrewarmEnabled"
     /// Off-thread shader-transpile pre-warm. Default ON (validated on-device: heavy
     /// scenes ~halved their load, e.g. 3226487183 3.3s→1.7s, with firstFrame-transpile
@@ -434,6 +444,10 @@ final class WPEMetalRenderExecutor {
         outputTexturePool.removeAll()
         recentOutputTextureIDs.removeAll()
         bootstrapPreviousTextureCache.removeAll()
+        // Pass-id keyed; a reload can reuse an id for a different shader, so drop
+        // it here (reload routes through releaseTransientResources). The
+        // content-keyed translatedShaderCache is safe to persist and is not cleared.
+        compiledShaderResultByPassID.removeAll()
     }
 
     /// Drops every cached static-layer composite. Called on scene reload /
@@ -4718,15 +4732,23 @@ final class WPEMetalRenderExecutor {
         guard let program = pass.shader else {
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
+        // Hot path: a previously-translated pass returns without re-running the
+        // GLSL preprocessor (which `makeCompileRequest` would otherwise do every
+        // frame just to recompute the content cache key).
+        if let cached = compiledShaderResultByPassID[pass.id] {
+            return cached
+        }
         guard let request = try Self.makeCompileRequest(for: pass, recordFailure: true) else {
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
         if let cached = translatedShaderCache[request.translationCacheKey] {
+            compiledShaderResultByPassID[pass.id] = cached
             return cached
         }
         do {
             let result = try shaderCompiler.compile(request)
             translatedShaderCache[request.translationCacheKey] = result
+            compiledShaderResultByPassID[pass.id] = result
             return result
         } catch let error as WPEShaderCompilerError {
             switch error {

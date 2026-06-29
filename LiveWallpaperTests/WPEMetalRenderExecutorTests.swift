@@ -55,7 +55,7 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Async submission renders past the in-flight bound without deadlock")
+    @Test("Async over-submission drops past the in-flight bound without deadlock")
     func asyncSubmissionDoesNotDeadlock() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
@@ -75,16 +75,24 @@ struct WPEMetalRenderExecutorTests {
             ])
         }
 
-        // Submit more frames than the in-flight bound. If a completion handler
-        // failed to signal the semaphore, the (maxFramesInFlight+1)th call would
-        // block here forever — so reaching the end proves the permit accounting
-        // balances under async submission.
+        // Submit more frames than the in-flight bound. Non-blocking submission
+        // (the default) DROPS excess frames — render() throws
+        // WPEMetalFrameInFlightBudgetExhausted rather than blocking the caller —
+        // so the loop must complete either way (no deadlock), and dropped frames
+        // must not leak permits (verified by the synchronous render below).
         executor.synchronizeFrameCompletion = false
         let size = CGSize(width: 4, height: 4)
+        var rendered = 0
         for _ in 0..<(WPEMetalRenderExecutor.maxFramesInFlight + 3) {
-            let output = try executor.render(pipeline: makePipeline(), size: size, textures: [:])
-            #expect(output.width == 4)
+            do {
+                let output = try executor.render(pipeline: makePipeline(), size: size, textures: [:])
+                #expect(output.width == 4)
+                rendered += 1
+            } catch is WPEMetalFrameInFlightBudgetExhausted {
+                // Expected when the in-flight budget is momentarily full.
+            }
         }
+        #expect(rendered >= 1)
 
         // Back on the synchronous path the same executor still renders correct
         // pixels (semaphore balanced, output ring intact after the async run).
