@@ -215,7 +215,12 @@ final class SettingsManager {
     /// to a dedicated store) if the library is meant to be effectively unbounded.
     static let maxRecentWPEImports = 200
 
-    func recordWPEImport(_ entry: WPEHistoryEntry) {
+    /// `clearsDeleteTombstone`: pass `true` ONLY for an explicit user re-acquire
+    /// (Browse re-download / "Import from folder…"). Passive records — applying a
+    /// history entry to a screen, or the auto-import library scan — must leave the
+    /// tombstone in place, or a still-present copy in the user's real
+    /// (out-of-container) Steam library resurrects a deleted item on the next scan.
+    func recordWPEImport(_ entry: WPEHistoryEntry, clearsDeleteTombstone: Bool = false) {
         var settings = loadGlobalSettings()
         // History activation re-records an entry with `sizeBytes == nil`; carry
         // the previously measured size forward so it isn't thrown away (and
@@ -234,9 +239,9 @@ final class SettingsManager {
             recent = Array(recent.prefix(Self.maxRecentWPEImports))
         }
         settings.recentWPEImports = recent
-        // A deliberate (re-)import overrides a prior delete: drop any tombstone so
-        // the item is no longer suppressed by the auto-import scan.
-        settings.deletedWorkshopIDs.removeAll { $0 == entry.origin.workshopID }
+        if clearsDeleteTombstone {
+            settings.deletedWorkshopIDs.removeAll { $0 == entry.origin.workshopID }
+        }
         saveGlobalSettings(settings)
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }

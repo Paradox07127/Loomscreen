@@ -71,10 +71,10 @@ final class WPEMetalRenderTargetPool {
     static let fboAliasingDefaultsKey = "WPEMetalFBOAliasingEnabled"
     /// Default ON (on-device validated). Manual override wins:
     /// `defaults write … WPEMetalFBOAliasingEnabled -bool NO` forces the
-    /// discrete-per-target path back on.
-    static var isFBOAliasingEnabled: Bool {
+    /// discrete-per-target path back on. Read once on first use, then cached —
+    /// restart to apply (this ran per-target per-frame ≈ 11–17% of render CPU in trace).
+    static let isFBOAliasingEnabled: Bool =
         UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
-    }
 
     static let layerLocalFBOSizingDefaultsKey = "WPEMetalLayerLocalFBOSizing"
     /// Size a layer's OWN local effect FBOs (`layer.localFBOs`, not scene-wide
@@ -83,9 +83,9 @@ final class WPEMetalRenderTargetPool {
     /// renders ~99.5% wasted pixels. Default ON (device-validated 2026-06-26: memory
     /// dropped, no visual regression). Manual override wins:
     /// `defaults write … WPEMetalLayerLocalFBOSizing -bool NO` restores full-scene FBOs.
-    static var isLayerLocalFBOSizingEnabled: Bool {
+    /// Read once on first use, then cached — restart to apply.
+    static let isLayerLocalFBOSizingEnabled: Bool =
         UserDefaults.standard.object(forKey: layerLocalFBOSizingDefaultsKey) as? Bool ?? true
-    }
 
     /// Pixel footprint for a layer-private effect FBO when `isLayerLocalFBOSizingEnabled`:
     /// the layer's own footprint instead of the full scene. Used by BOTH `targetKey`
@@ -98,9 +98,10 @@ final class WPEMetalRenderTargetPool {
     static func layerLocalFBOPixelSize(
         fboName: String,
         layer: WPERenderLayer,
-        sceneSize: CGSize
+        sceneSize: CGSize,
+        enabled: Bool = isLayerLocalFBOSizingEnabled
     ) -> CGSize? {
-        guard isLayerLocalFBOSizingEnabled,
+        guard enabled,
               !WPEMetalShaderInputs.isSceneAliasName(fboName),
               layer.localFBOs.contains(where: { $0.name == fboName }) else { return nil }
         return layerCompositeSize(for: layer, sceneSize: sceneSize)

@@ -21,35 +21,59 @@ struct WPEDeleteTombstoneTests {
         #expect(decoded.deletedWorkshopIDs == ["123", "456"])
     }
 
-    @Test("Recording a delete tombstone is idempotent; a deliberate re-import clears it")
-    func recordThenReimportClears() throws {
+    @Test("Recording a delete tombstone is idempotent")
+    func recordIsIdempotent() throws {
         withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
-
             manager.recordWPEDeleteTombstone(workshopID: "999")
             manager.recordWPEDeleteTombstone(workshopID: "999")
             #expect(manager.loadGlobalSettings().deletedWorkshopIDs.filter { $0 == "999" }.count == 1)
+        }
+    }
 
-            manager.recordWPEImport(
-                WPEHistoryEntry(
-                    origin: WPEOrigin(
-                        workshopID: "999",
-                        title: "Re-added",
-                        originalType: .video,
-                        sourceFolderBookmark: Data([0xCC]),
-                        cacheRelativePath: "wpe-cache/999",
-                        previewFileName: nil
-                    ),
-                    importedAt: Date(timeIntervalSince1970: 1),
-                    lastUsedAt: nil
-                )
-            )
+    @Test("A passive re-import (apply / auto-scan) leaves the tombstone in place")
+    func passiveReimportKeepsTombstone() throws {
+        withIsolatedGlobalSettings {
+            let manager = SettingsManager.shared
+            manager.recordWPEDeleteTombstone(workshopID: "999")
+
+            manager.recordWPEImport(makeReaddedEntry("999"))
+
+            let after = manager.loadGlobalSettings()
+            #expect(after.deletedWorkshopIDs.contains("999"),
+                    "a passive record must NOT resurrect a deleted item on the next library scan")
+            #expect(after.recentWPEImports.first?.origin.workshopID == "999")
+        }
+    }
+
+    @Test("An explicit re-acquire clears the tombstone")
+    func deliberateReimportClears() throws {
+        withIsolatedGlobalSettings {
+            let manager = SettingsManager.shared
+            manager.recordWPEDeleteTombstone(workshopID: "999")
+
+            manager.recordWPEImport(makeReaddedEntry("999"), clearsDeleteTombstone: true)
 
             let after = manager.loadGlobalSettings()
             #expect(!after.deletedWorkshopIDs.contains("999"),
-                    "a deliberate re-import must clear the delete tombstone")
+                    "an explicit re-acquire must clear the delete tombstone")
             #expect(after.recentWPEImports.first?.origin.workshopID == "999")
         }
+    }
+
+    private func makeReaddedEntry(_ workshopID: String) -> WPEHistoryEntry {
+        WPEHistoryEntry(
+            origin: WPEOrigin(
+                workshopID: workshopID,
+                title: "Re-added",
+                originalType: .video,
+                sourceFolderBookmark: Data([0xCC]),
+                cacheRelativePath: "wpe-cache/\(workshopID)",
+                previewFileName: nil
+            ),
+            importedAt: Date(timeIntervalSince1970: 1),
+            lastUsedAt: nil
+        )
     }
 
     @Test("An empty workshop id is never tombstoned")

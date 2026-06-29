@@ -2731,10 +2731,8 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 768)
     }
 
-    @Test("Layer-local effect FBO sizes to the layer footprint only when WPEMetalLayerLocalFBOSizing is on")
+    @Test("Layer-local effect FBO sizes to the layer footprint only when enabled")
     func layerLocalFBOSizingFlagControlsFootprint() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let pool = WPEMetalRenderTargetPool(device: device)
         let layer = WPERenderLayer(
             objectID: "fx",
             objectName: "Effect",
@@ -2755,24 +2753,15 @@ private extension WPEMetalRenderExecutorTests {
             localFBOs: [WPERenderFBO(name: "fxBlur", scale: 1, format: "rgba8888")],
             passes: []
         )
-        let key = WPEMetalRenderTargetPool.layerLocalFBOSizingDefaultsKey
-        let prior = UserDefaults.standard.object(forKey: key)
-        defer {
-            if let prior { UserDefaults.standard.set(prior, forKey: key) }
-            else { UserDefaults.standard.removeObject(forKey: key) }
-        }
         let scene = CGSize(width: 3840, height: 2160)
 
-        UserDefaults.standard.set(false, forKey: key)
-        let off = try pool.texture(for: .fbo(name: "fxBlur"), layer: layer, sceneSize: scene, avoiding: nil)
-        #expect(off.width == 3840)
-        #expect(off.height == 2160)
+        // off → no local override (caller falls back to full-scene FBO)
+        #expect(WPEMetalRenderTargetPool.layerLocalFBOPixelSize(
+            fboName: "fxBlur", layer: layer, sceneSize: scene, enabled: false) == nil)
 
-        UserDefaults.standard.set(true, forKey: key)
-        pool.releaseAll()
-        let on = try pool.texture(for: .fbo(name: "fxBlur"), layer: layer, sceneSize: scene, avoiding: nil)
-        #expect(on.width == 200)
-        #expect(on.height == 200)
+        // on → the layer's own footprint
+        #expect(WPEMetalRenderTargetPool.layerLocalFBOPixelSize(
+            fboName: "fxBlur", layer: layer, sceneSize: scene, enabled: true) == CGSize(width: 200, height: 200))
     }
 
     @Test("Projectlayer composite target also uses full scene size")
@@ -3628,9 +3617,9 @@ private extension WPEMetalRenderExecutorTests {
             if let previous { defaults.set(previous, forKey: key) }
             else { defaults.removeObject(forKey: key) }
         }
-        #expect(WPEMetalRenderExecutor.isStaticLayerCacheEnabled == false)
+        #expect(WPEMetalRenderExecutor.readStaticLayerCacheEnabled() == false)
         defaults.set(true, forKey: key)
-        #expect(WPEMetalRenderExecutor.isStaticLayerCacheEnabled == true)
+        #expect(WPEMetalRenderExecutor.readStaticLayerCacheEnabled() == true)
     }
 
     @Test("Static layer classification is conservative")

@@ -68,7 +68,7 @@ final class WorkshopFolderImportCoordinator {
 
         var imported = 0
         for projectFolder in projectFolders {
-            if await importOne(projectFolder) { imported += 1 }
+            if await importOne(projectFolder, deliberate: true) { imported += 1 }
         }
 
         emitSummary(folder: folder, imported: imported, skipped: projectFolders.count - imported)
@@ -95,7 +95,7 @@ final class WorkshopFolderImportCoordinator {
         await doctor.enumerateDownloadedItemFolders { [weak self] folder in
             guard let self else { return }
             guard !known.contains(folder.lastPathComponent) else { return }
-            if await self.importOne(folder) {
+            if await self.importOne(folder, deliberate: false) {
                 added += 1
                 known.insert(folder.lastPathComponent)
             }
@@ -158,19 +158,24 @@ final class WorkshopFolderImportCoordinator {
         defer { if didStart { resolved.url.stopAccessingSecurityScopedResource() } }
 
         var added = 0
-        for project in fresh where await importOne(project.folderURL) {
+        for project in fresh where await importOne(project.folderURL, deliberate: false) {
             added += 1
         }
         return added
     }
 
-    /// Returns true when a `WPEHistoryEntry` was recorded.
-    private func importOne(_ projectFolder: URL) async -> Bool {
+    /// Returns true when a `WPEHistoryEntry` was recorded. `deliberate` is true
+    /// only for the user-chosen "Import from folder…" panel — that explicit
+    /// re-acquire lifts a prior delete tombstone. The auto-ingest scan passes
+    /// false so a still-present out-of-container Steam copy can't resurrect a
+    /// deleted item (and it already skips tombstoned ids before calling here).
+    private func importOne(_ projectFolder: URL, deliberate: Bool) async -> Bool {
         do {
             switch try await importService.importProject(folder: projectFolder) {
             case .ready(_, let origin), .unsupported(let origin):
                 SettingsManager.shared.recordWPEImport(
-                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil),
+                    clearsDeleteTombstone: deliberate
                 )
                 return true
             case .rejected(let reason):

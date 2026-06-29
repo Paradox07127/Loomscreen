@@ -160,8 +160,11 @@ final class WorkshopDownloadCoordinator {
         }
         switch result {
         case .ready(_, let origin), .unsupported(let origin):
+            // Browse re-download / the Installed "Update" button is an explicit
+            // re-acquire, so it lifts any prior delete tombstone for this id.
             SettingsManager.shared.recordWPEImport(
-                WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil),
+                clearsDeleteTombstone: true
             )
             logger.info("Imported downloaded Workshop item into the library")
             finish(itemID: itemID, title: title, phase: .succeeded)

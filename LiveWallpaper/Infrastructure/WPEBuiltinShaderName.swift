@@ -1,8 +1,32 @@
 #if !LITE_BUILD
 import Foundation
+import os
 
 enum WPEBuiltinShaderName {
+    /// `compute` walks a ~20-branch effect cascade allocating dozens of throwaway
+    /// interpolated strings per call, on the per-pass dispatch path every frame
+    /// (trace: `isEffectAlias` + `DefaultStringInterpolation` ≈ 5% of one core).
+    /// The result is invariant for a shader name → memoize. Keyed on the raw input
+    /// so hits skip even the lowercase/path canonicalization (equivalent spellings
+    /// may take separate entries — never a wrong collision). Lock-guarded for the
+    /// per-display render threads on the roadmap; capped against unbounded scenes.
+    private static let normalizedCache = OSAllocatedUnfairLock(initialState: [String: String]())
+    private static let normalizedCacheLimit = 512
+
     static func normalized(_ shaderName: String, genericImageAsCopy: Bool = false) -> String {
+        guard !genericImageAsCopy else {
+            return compute(shaderName, genericImageAsCopy: true)
+        }
+        return normalizedCache.withLock { cache in
+            if let cached = cache[shaderName] { return cached }
+            let result = compute(shaderName, genericImageAsCopy: false)
+            if cache.count >= normalizedCacheLimit { cache.removeAll(keepingCapacity: true) }
+            cache[shaderName] = result
+            return result
+        }
+    }
+
+    private static func compute(_ shaderName: String, genericImageAsCopy: Bool) -> String {
         let stripped = canonicalName(shaderName)
 
         switch stripped {

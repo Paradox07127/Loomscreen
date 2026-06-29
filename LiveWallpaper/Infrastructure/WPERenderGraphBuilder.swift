@@ -23,14 +23,16 @@ struct WPERenderGraphBuilder: Sendable {
     /// Injects the WPE genericimage4 clip-composite bindings (clip-mask asset on slot 1 +
     /// intermediate clip RT on slot 8) so the executor can occlude an eye puppet's pupil on
     /// blink close. Default OFF; when OFF the graph is byte-identical (no extra texture/FBO).
-    private static var puppetClipCompositeEnabled: Bool {
+    /// Frozen read-once to match `WPEMetalRenderExecutor.puppetClipCompositeEnabled` — both
+    /// consumers must agree, else a same-process toggle + reload partially applies. Restart to apply.
+    private static let puppetClipCompositeEnabled: Bool = {
         let key = "WPEPuppetClipComposite"
         let suite = UserDefaults.appSuite
         if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
         return UserDefaults.standard.bool(forKey: key)
-    }
+    }()
 
     init(
         cacheRootURL: URL,

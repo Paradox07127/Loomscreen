@@ -148,9 +148,12 @@ final class WPEMetalRenderExecutor {
     /// puppet's pupil is occluded when the blink closes. Default OFF; only takes effect when
     /// the builder injected a clip-mask binding (texture slot 8) onto a genericimage4 pass.
     /// `defaults write Taijia.LiveWallpaper WPEPuppetClipComposite -bool YES`.
-    static var puppetClipCompositeEnabled: Bool {
-        puppetDefaultsFlag("WPEPuppetClipComposite")
-    }
+    static let puppetClipCompositeEnabled: Bool = puppetDefaultsFlag("WPEPuppetClipComposite")
+
+    /// Default OFF until per-scene skinning correctness is validated. Suite-first
+    /// (`defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`).
+    /// Read once on first use, then cached — restart to apply (was read per-puppet per-frame).
+    static let puppetSkinningEnabled: Bool = puppetDefaultsFlag("WPEPuppetEnableSkinning")
 
     /// Reads an opt-in bool from the app's `Taijia.LiveWallpaper` suite first, falling back to the
     /// process `.standard` domain. Puppet flags MUST share this so `defaults write Taijia.LiveWallpaper …`
@@ -180,23 +183,24 @@ final class WPEMetalRenderExecutor {
     /// same output texture since the last snapshot. Default ON; suite-first so
     /// `defaults write Taijia.LiveWallpaper WPEMetalRefractionSnapshotReuseEnabled
     /// -bool NO` is honoured even when the renderer runs outside the app's standard domain.
-    static var isRefractionSnapshotReuseEnabled: Bool {
+    /// Read once on first use, then cached — restart to apply.
+    static let isRefractionSnapshotReuseEnabled: Bool = {
         let suite = UserDefaults.appSuite
         if suite.object(forKey: refractionSnapshotReuseDefaultsKey) != nil {
             return suite.bool(forKey: refractionSnapshotReuseDefaultsKey)
         }
         return UserDefaults.standard.object(forKey: refractionSnapshotReuseDefaultsKey) as? Bool ?? true
-    }
+    }()
 
     /// Rollback gate for sub-region compose-layer output (the audio-visualizer
     /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
     /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
     /// utility layer to the legacy unconditional-fullscreen output.
-    static var subregionComposeOutputEnabled: Bool {
+    /// Read once on first use, then cached — restart to apply.
+    static let subregionComposeOutputEnabled: Bool =
         UserDefaults.standard.object(forKey: "WPEMetalSubregionComposeOutput") == nil
             ? true
             : UserDefaults.standard.bool(forKey: "WPEMetalSubregionComposeOutput")
-    }
 
     static let staticLayerCacheDefaultsKey = "WPEMetalStaticLayerCacheEnabled"
     static let staticLayerCacheBudgetMiBDefaultsKey = "WPEMetalStaticLayerCacheBudgetMiB"
@@ -204,7 +208,10 @@ final class WPEMetalRenderExecutor {
     /// Opt-in exact composite cache for static WPE layers. Default OFF so the
     /// existing render path stays byte-identical unless explicitly enabled
     /// (`defaults write … WPEMetalStaticLayerCacheEnabled -bool YES`).
-    static var isStaticLayerCacheEnabled: Bool {
+    /// Read once on first use, then cached — restart to apply. `readStaticLayerCacheEnabled()`
+    /// exposes the live read for tests.
+    static let isStaticLayerCacheEnabled: Bool = readStaticLayerCacheEnabled()
+    static func readStaticLayerCacheEnabled() -> Bool {
         UserDefaults.standard.object(forKey: staticLayerCacheDefaultsKey) == nil
             ? false
             : UserDefaults.standard.bool(forKey: staticLayerCacheDefaultsKey)
@@ -212,11 +219,12 @@ final class WPEMetalRenderExecutor {
 
     /// VRAM budget for cached composites (MiB; default 256). Over budget → LRU
     /// eviction, and the evicted layer falls back to re-rendering (slower, never wrong).
-    static var staticLayerCacheBudgetBytes: Int {
+    /// Read once on first use, then cached — restart to apply.
+    static let staticLayerCacheBudgetBytes: Int = {
         let raw = UserDefaults.standard.object(forKey: staticLayerCacheBudgetMiBDefaultsKey)
         let mib = (raw as? NSNumber)?.intValue ?? 256
         return max(0, mib) * 1_048_576
-    }
+    }()
 
     /// Mirrors the slot-0 precedence used by
     /// `WPEMetalSceneRenderer.requiredTextureReferences(for:)`: prefer the
@@ -2322,7 +2330,7 @@ final class WPEMetalRenderExecutor {
         // (Taijia suite first, .standard fallback) so the documented `defaults write Taijia.LiveWallpaper`
         // is honoured even when the renderer's standard domain isn't the app's — otherwise the clip flag
         // turns on but skinning silently stays off and the eye never deforms.
-        guard Self.puppetDefaultsFlag("WPEPuppetEnableSkinning") else {
+        guard Self.puppetSkinningEnabled else {
             return disabled("user-disabled")
         }
         let animationLayers = puppetAnimationLayers(for: layer, model: model)
