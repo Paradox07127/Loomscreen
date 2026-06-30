@@ -3,6 +3,10 @@ import CoreGraphics
 import Foundation
 import simd
 
+private func isImplicitFBOTextureName(_ name: String) -> Bool {
+    name.hasPrefix("_") && !name.hasPrefix("__")
+}
+
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
@@ -1041,7 +1045,7 @@ struct WPERenderGraphBuilder: Sendable {
         if declaredFBONames.contains(name) {
             return .fbo(name)
         }
-        if name.hasPrefix("_") {
+        if isImplicitFBOTextureName(name) {
             return .fbo(name)
         }
         return .asset(inheritDependencyPrefix(name, from: ownerPath))
@@ -1478,7 +1482,7 @@ private struct WPEMaterialPass {
         for (index, path) in override.textures {
             if path == "previous" {
                 mergedTextures[index] = .previous
-            } else if path.hasPrefix("_") {
+            } else if isImplicitFBOTextureName(path) {
                 mergedTextures[index] = .fbo(path)
             } else {
                 mergedTextures[index] = .asset(path)

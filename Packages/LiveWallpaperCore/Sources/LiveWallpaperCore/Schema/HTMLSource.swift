@@ -172,7 +172,7 @@ public enum HTMLSource: Codable, Equatable, Sendable {
         case .url(let url):
             return url.host ?? url.absoluteString
         case .inline:
-            return "Inline HTML"
+            return "Inline web content"
         }
     }
 

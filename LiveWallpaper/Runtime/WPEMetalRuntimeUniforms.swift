@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 import QuartzCore
+import simd
 
 /// Per-frame, smoothed camera-parallax state. `smoothed` is the cursor offset
 /// from screen center (−0.5…0.5 per axis) after exponential smoothing and the
@@ -227,9 +228,14 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
 
     /// Averages adjacent bins to halve resolution (64→32→16).
     private static func halve(_ bins: [Double]) -> [Double] {
-        stride(from: 0, to: bins.count, by: 2).map { i in
-            (bins[i] + bins[i + 1]) * 0.5
+        var result: [Double] = []
+        result.reserveCapacity(bins.count / 2)
+        var index = 0
+        while index + 1 < bins.count {
+            result.append((bins[index] + bins[index + 1]) * 0.5)
+            index += 2
         }
+        return result
     }
 }
 
@@ -315,6 +321,8 @@ struct WPEMetalPointerSampler: Sendable {
 struct WPEMetalCameraUniforms: Equatable, Sendable {
     let renderSize: CGSize
     let viewProjectionMatrix: [Double]
+    let usesPerspectiveProjection: Bool
+    let sceneCamera: WPESceneCamera
 
     static let identity = WPEMetalCameraUniforms(
         renderSize: CGSize(width: 1, height: 1),
@@ -323,27 +331,44 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
             0, 1, 0, 0,
             0, 0, 1, 0,
             0, 0, 0, 1
-        ]
+        ],
+        usesPerspectiveProjection: false,
+        sceneCamera: .defaultCamera
     )
 
     init(
         orthogonalProjection: WPESceneOrthogonalProjection,
-        sceneCamera: WPESceneCamera
+        sceneCamera: WPESceneCamera,
+        usesPerspectiveProjection: Bool = false
     ) {
         let width = max(orthogonalProjection.width, 1)
         let height = max(orthogonalProjection.height, 1)
         renderSize = CGSize(width: width, height: height)
-        viewProjectionMatrix = Self.topLeftOrthographicMatrix(
-            width: Double(width),
-            height: Double(height),
-            nearZ: sceneCamera.nearZ,
-            farZ: sceneCamera.farZ
-        )
+        self.usesPerspectiveProjection = usesPerspectiveProjection
+        self.sceneCamera = sceneCamera
+        viewProjectionMatrix = usesPerspectiveProjection
+            ? Self.perspectiveViewProjectionMatrix(
+                sceneCamera: sceneCamera,
+                aspect: Double(width) / Double(height)
+            )
+            : Self.topLeftOrthographicMatrix(
+                width: Double(width),
+                height: Double(height),
+                nearZ: sceneCamera.nearZ,
+                farZ: sceneCamera.farZ
+            )
     }
 
-    private init(renderSize: CGSize, viewProjectionMatrix: [Double]) {
+    private init(
+        renderSize: CGSize,
+        viewProjectionMatrix: [Double],
+        usesPerspectiveProjection: Bool,
+        sceneCamera: WPESceneCamera
+    ) {
         self.renderSize = renderSize
         self.viewProjectionMatrix = viewProjectionMatrix
+        self.usesPerspectiveProjection = usesPerspectiveProjection
+        self.sceneCamera = sceneCamera
     }
 
     var uniformValues: [String: WPESceneShaderConstantValue] {
@@ -374,6 +399,61 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
             near / (near - far),
             1
         ]
+    }
+
+    private static func perspectiveViewProjectionMatrix(
+        sceneCamera: WPESceneCamera,
+        aspect: Double
+    ) -> [Double] {
+        let eye = sceneCamera.eye
+        let center = sceneCamera.center
+        let upSeed = sceneCamera.up
+        let forward = normalized(center - eye, fallback: SIMD3<Double>(0, 0, -1))
+        let right = normalized(simd_cross(forward, upSeed), fallback: SIMD3<Double>(1, 0, 0))
+        let up = normalized(simd_cross(right, forward), fallback: SIMD3<Double>(0, 1, 0))
+
+        let fovRadians = max(min(sceneCamera.fov, 179), 1) * .pi / 180
+        let f = 1.0 / tan(fovRadians * 0.5)
+        let zNear = max(sceneCamera.nearZ, 0.0001)
+        let zFar = max(sceneCamera.farZ, zNear + 0.0001)
+
+        let projection = [
+            f / max(aspect, 0.0001), 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, zFar / (zNear - zFar), -1,
+            0, 0, (zNear * zFar) / (zNear - zFar), 0
+        ]
+        let view = [
+            right.x, up.x, -forward.x, 0,
+            right.y, up.y, -forward.y, 0,
+            right.z, up.z, -forward.z, 0,
+            -simd_dot(right, eye), -simd_dot(up, eye), simd_dot(forward, eye), 1
+        ]
+        return multiply4x4(projection, view)
+    }
+
+    private static func normalized(
+        _ value: SIMD3<Double>,
+        fallback: SIMD3<Double>
+    ) -> SIMD3<Double> {
+        let length = simd_length(value)
+        guard length.isFinite, length > 0.000001 else { return fallback }
+        return value / length
+    }
+
+    private static func multiply4x4(_ lhs: [Double], _ rhs: [Double]) -> [Double] {
+        guard lhs.count == 16, rhs.count == 16 else { return lhs }
+        var out = [Double](repeating: 0, count: 16)
+        for column in 0..<4 {
+            for row in 0..<4 {
+                var sum = 0.0
+                for k in 0..<4 {
+                    sum += lhs[k * 4 + row] * rhs[column * 4 + k]
+                }
+                out[column * 4 + row] = sum
+            }
+        }
+        return out
     }
 }
 

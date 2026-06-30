@@ -623,6 +623,67 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("clipping mask narrows float4 v_TexCoord in vec2 transform arithmetic")
+    func clippingMaskNarrowsTexCoordInVector2Arithmetic() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec2 u_textureScale;
+        uniform vec2 u_textureOffset;
+        uniform vec2 u_maskScale;
+        uniform vec2 u_maskOffset;
+        uniform vec2 texScaleCenter;
+        uniform vec2 maskScaleCenter;
+        uniform vec2 ratioDiff;
+        in vec4 v_TexCoord;
+        void main() {
+            vec2 uvTex = ((v_TexCoord * 2.0 - 1.0 - texScaleCenter) / ratioDiff / u_textureScale + 1.0 + texScaleCenter) / 2.0 - u_textureOffset;
+            vec2 uvMask = ((v_TexCoord * 2.0 - 1.0 - maskScaleCenter) / u_maskScale + 1.0 + maskScaleCenter) / 2.0 - u_maskOffset;
+            gl_FragColor = texture(g_Texture0, uvTex) * texture(g_Texture1, uvMask).a;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2800594362/effects/clipping_mask",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("v_TexCoord.xy * 2.0"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("unused clipping mask UV locals are emitted warning-clean")
+    func unusedClippingMaskUVLocalsAreWarningClean() throws {
+        let source = """
+        #version 410 core
+        uniform vec2 u_textureScale;
+        uniform vec2 u_textureOffset;
+        uniform vec2 u_maskScale;
+        uniform vec2 u_maskOffset;
+        uniform vec2 texScaleCenter;
+        uniform vec2 maskScaleCenter;
+        uniform vec2 ratioDiff;
+        in vec4 v_TexCoord;
+        void main() {
+            vec2 uvTex = ((v_TexCoord * 2.0 - 1.0 - texScaleCenter) / ratioDiff / u_textureScale + 1.0 + texScaleCenter) / 2.0 - u_textureOffset;
+            vec2 uvMask = ((v_TexCoord * 2.0 - 1.0 - maskScaleCenter) / u_maskScale + 1.0 + maskScaleCenter) / 2.0 - u_maskOffset;
+            gl_FragColor = vec4(1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2800594362/effects/clipping_mask",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("[[maybe_unused]] float2 uvTex ="))
+        #expect(result.mslSource.contains("[[maybe_unused]] float2 uvMask ="))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
     func translatesTextureLodFragment() throws {
         // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.

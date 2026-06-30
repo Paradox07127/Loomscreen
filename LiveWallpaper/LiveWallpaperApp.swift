@@ -78,7 +78,7 @@ enum SettingsWindowMetrics {
     // Floor must fit sidebar + a compressed library grid + the detail inspector
     // at its 300pt minimum (it opens trailing inside the detail column). 1080
     // left the inspector clipping past the window's right edge at min width.
-    static let minimumContentSize = CGSize(width: 1160, height: 540)
+    static let minimumContentSize = CGSize(width: 1160, height: 500)
 }
 
 @MainActor

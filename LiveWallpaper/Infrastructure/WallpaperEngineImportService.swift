@@ -174,7 +174,10 @@ final class WallpaperEngineImportService {
         let content = WallpaperContent.html(
             source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
             config: HTMLConfig(
-                physicalPixelLayout: true,
+                physicalPixelLayout: defaultHTMLPhysicalPixelLayout(
+                    folderURL: folderURL,
+                    indexFileName: project.entryFile
+                ),
                 originKind: originKind
             )
         )
@@ -211,7 +214,10 @@ final class WallpaperEngineImportService {
             let content = WallpaperContent.html(
                 source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
                 config: HTMLConfig(
-                    physicalPixelLayout: true,
+                    physicalPixelLayout: defaultHTMLPhysicalPixelLayout(
+                        folderURL: folderURL,
+                        indexFileName: project.entryFile
+                    ),
                     originKind: originKind
                 )
             )
@@ -597,7 +603,13 @@ struct WPECachedContentResolver {
                   let bookmark = makeBookmark(folderURL) else { return nil }
             return .html(
                 source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
-                config: HTMLConfig(physicalPixelLayout: true, originKind: origin.originKind)
+                config: HTMLConfig(
+                    physicalPixelLayout: defaultHTMLPhysicalPixelLayout(
+                        folderURL: folderURL,
+                        indexFileName: entryFile
+                    ),
+                    originKind: origin.originKind
+                )
             )
         case .scene, .application, .unknown:
             return nil
@@ -654,7 +666,10 @@ struct WPECachedContentResolver {
             return .html(
                 source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
                 config: HTMLConfig(
-                    physicalPixelLayout: true,
+                    physicalPixelLayout: defaultHTMLPhysicalPixelLayout(
+                        folderURL: cacheURL,
+                        indexFileName: entryFile
+                    ),
                     originKind: origin.originKind
                 )
             )
@@ -822,5 +837,12 @@ private func scenePackageEntryNames(
 /// `WPEScenePreflight` emits an unordered `Set` so descriptor persistence matches the historical ordering convention (alphabetical by raw value).
 private func sortedPreflightFeatureFlags(_ flags: Set<WPESceneFeatureFlag>) -> [WPESceneFeatureFlag] {
     flags.sorted { $0.rawValue < $1.rawValue }
+}
+
+private func defaultHTMLPhysicalPixelLayout(folderURL: URL, indexFileName: String) -> Bool {
+    HTMLWallpaperCompatibilityPolicy.shouldAutoEnablePhysicalPixelLayout(
+        folderURL: folderURL,
+        indexFileName: indexFileName
+    )
 }
 #endif

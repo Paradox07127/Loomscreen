@@ -138,6 +138,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         case .stretch: present = .stretch
         case .aspectFit: present = .contain
         case .aspectFill: present = .cover
+        case .center: present = .center
         }
         renderer?.setPresentFitMode(present)
     }

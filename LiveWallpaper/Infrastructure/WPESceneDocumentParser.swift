@@ -72,6 +72,7 @@ enum WPESceneDocumentParser {
         let objectVisibility = resolvedObjectVisibility(rawObjects)
         let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
+        var scriptHostObjects: [WPESceneScriptHostObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
         var soundObjects: [WPESceneSoundObject] = []
@@ -99,8 +100,11 @@ enum WPESceneDocumentParser {
                    scriptOrigins: scriptResolvedOrigins,
                    effectiveVisible: effectiveVisible,
                    diagnostics: &diagnostics
-               ) {
+            ) {
                 imageObjects.append(object)
+            } else if entry["image"] == nil,
+                      let object = parseScriptHostObject(entry, diagnostics: &diagnostics) {
+                scriptHostObjects.append(object)
             }
             if resolution.primary == .particle,
                let object = parseParticleObject(
@@ -176,6 +180,7 @@ enum WPESceneDocumentParser {
             camera: camera,
             general: general,
             imageObjects: imageObjects,
+            scriptHostObjects: scriptHostObjects,
             particleObjects: particleObjects,
             textObjects: textObjects,
             soundObjects: soundObjects,
@@ -184,6 +189,30 @@ enum WPESceneDocumentParser {
             objectParentByID: objectParentByID,
             ownVisibilityByID: ownVisibilityByID,
             diagnostics: diagnostics
+        )
+    }
+
+    private static func parseScriptHostObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneScriptHostObject? {
+        guard let visibleDict = dict["visible"] as? [String: Any],
+              let script = visibleDict["script"] as? String, !script.isEmpty else {
+            return nil
+        }
+        let id = objectID(in: dict)
+            ?? (dict["name"] as? String)
+            ?? "script-host-\(abs(script.hashValue))"
+        let name = (dict["name"] as? String) ?? id
+        diagnostics.append(.init(
+            severity: .info,
+            message: "Object \(name) has a visible-script but no renderable image; runs as a SceneScript host"
+        ))
+        return WPESceneScriptHostObject(
+            id: id,
+            name: name,
+            visibleScript: script,
+            scriptProperties: scriptPropertyValues(visibleDict["scriptproperties"])
         )
     }
 
@@ -1009,11 +1038,25 @@ enum WPESceneDocumentParser {
     private static func parseGeneral(_ dict: [String: Any], diagnostics: inout [WPESceneDiagnostic]) -> WPESceneGeneral {
         let clearColor = parseVector3(dict["clearcolor"]) ?? WPESceneGeneral.defaultGeneral.clearColor
         let projection: WPESceneOrthogonalProjection
+        let usesPerspectiveProjection: Bool
         if let nested = dict["orthogonalprojection"] as? [String: Any] {
             let width = parseDouble(nested["width"]) ?? WPESceneGeneral.defaultGeneral.orthogonalProjection.width
             let height = parseDouble(nested["height"]) ?? WPESceneGeneral.defaultGeneral.orthogonalProjection.height
             let auto = (nested["auto"] as? Bool) ?? WPESceneGeneral.defaultGeneral.orthogonalProjection.auto
             projection = WPESceneOrthogonalProjection(width: width, height: height, auto: auto)
+            usesPerspectiveProjection = false
+        } else if dict.keys.contains("orthogonalprojection"),
+                  dict["orthogonalprojection"] is NSNull {
+            diagnostics.append(.init(
+                severity: .info,
+                message: String(
+                    localized: "general.orthogonalprojection is null — using perspective camera with 1920×1080 render size",
+                    defaultValue: "general.orthogonalprojection is null — using perspective camera with 1920×1080 render size",
+                    comment: "Wallpaper Engine scene diagnostic when perspective projection is used."
+                )
+            ))
+            projection = WPESceneGeneral.defaultGeneral.orthogonalProjection
+            usesPerspectiveProjection = true
         } else {
             diagnostics.append(.init(
                 severity: .info,
@@ -1024,6 +1067,7 @@ enum WPESceneDocumentParser {
                 )
             ))
             projection = WPESceneGeneral.defaultGeneral.orthogonalProjection
+            usesPerspectiveProjection = false
         }
         let parallaxDefaults = WPESceneCameraParallaxSettings.disabled
         let cameraParallax = WPESceneCameraParallaxSettings(
@@ -1036,6 +1080,7 @@ enum WPESceneDocumentParser {
         return WPESceneGeneral(
             clearColor: clearColor,
             orthogonalProjection: projection,
+            usesPerspectiveProjection: usesPerspectiveProjection,
             cameraParallax: cameraParallax,
             supportsAudioProcessing: supportsAudioProcessing
         )
@@ -1090,6 +1135,7 @@ enum WPESceneDocumentParser {
         let dependencies = parseDependencyIDs(dict["dependencies"])
         let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
+        let originScript = dynamicOriginScript(in: dict["origin"])
 
         if !effects.isEmpty {
             let names = effects.map(\.name).joined(separator: ", ")
@@ -1119,6 +1165,14 @@ enum WPESceneDocumentParser {
             visibleScriptProperties = scriptPropertyValues(visibleDict["scriptproperties"])
             diagnostics.append(.init(severity: .info, message: "Image \(name) has a visible-script; runs as a layer SceneScript"))
         }
+        var alphaScript: String? = nil
+        var alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+        if let alphaDict = dict["alpha"] as? [String: Any],
+           let script = alphaDict["script"] as? String, !script.isEmpty {
+            alphaScript = script
+            alphaScriptProperties = scriptPropertyValues(alphaDict["scriptproperties"])
+            diagnostics.append(.init(severity: .info, message: "Image \(name) has an alpha-script; runs as a layer SceneScript"))
+        }
 
         return WPESceneImageObject(
             id: id,
@@ -1146,7 +1200,24 @@ enum WPESceneDocumentParser {
             animationLayers: animationLayers,
             parallaxDepth: parallaxDepth,
             visibleScript: visibleScript,
+            alphaScript: alphaScript,
+            alphaScriptProperties: alphaScriptProperties,
+            originScript: originScript,
             scriptProperties: visibleScriptProperties
+        )
+    }
+
+    private static func dynamicOriginScript(in raw: Any?) -> WPESceneTransformScript? {
+        guard let origin = raw as? [String: Any],
+              let script = origin["script"] as? String, !script.isEmpty,
+              !WPETransformScriptEvaluator.isStaticallyResolvable(script) else {
+            return nil
+        }
+        let seed = parseVector3(resolveBoundTransformValue(origin["value"])) ?? SIMD3<Double>(0, 0, 0)
+        return WPESceneTransformScript(
+            script: script,
+            scriptProperties: scriptPropertyValues(origin["scriptproperties"]),
+            seed: seed
         )
     }
 

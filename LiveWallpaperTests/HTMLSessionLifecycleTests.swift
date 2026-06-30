@@ -256,6 +256,39 @@ struct HTMLWallpaperRuntimeScriptTests {
 
 @Suite("HTML wallpaper compatibility policy")
 struct HTMLWallpaperCompatibilityPolicyTests {
+    @Test("DPR-aware Wallpaper Engine folders stay in CSS-point layout")
+    func dprAwareWallpaperEngineFolderStaysInCSSPointLayout() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LWCompatibility-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        try Data("""
+        <html>
+        <script>
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        </script>
+        </html>
+        """.utf8).write(to: folder.appendingPathComponent("index.html"))
+        try Data("{}".utf8).write(to: folder.appendingPathComponent("project.json"))
+        let bookmark = try folder.bookmarkData(
+            options: [],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+
+        let result = HTMLWallpaperCompatibilityPolicy.runtimeConfig(
+            source: .folder(bookmarkData: bookmark, indexFileName: "index.html"),
+            config: .default,
+            trustedOrigins: Set<TrustedHTMLOrigin>()
+        )
+
+        #expect(!result.config.physicalPixelLayout)
+        #expect(!result.enabledPhysicalPixelLayout)
+    }
+
     @Test("Wallpaper Engine folders keep physical-pixel layout during hot config updates")
     func wallpaperEngineFolderKeepsPhysicalPixelLayout() throws {
         let folder = FileManager.default.temporaryDirectory

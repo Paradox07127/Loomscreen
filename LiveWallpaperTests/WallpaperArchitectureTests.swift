@@ -58,7 +58,7 @@ struct WallpaperSessionDefinitionTests {
         }
 
         #expect(displayNames[0] == "example.com")
-        #expect(displayNames[1] == "Inline HTML")
+        #expect(displayNames[1] == "Inline web content")
         #expect(displayNames[2] == "Aurora")
         #expect(displayNames[3] == "Demo.mov")
     }
@@ -659,6 +659,51 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         let source = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/VideoPreviewSection.swift")
 
         #expect(source.contains("previewController.lastError"))
+    }
+
+    @Test("Scene preview does not synchronously render a live poster on MainActor")
+    func scenePreviewUsesNextFramePosterCapture() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift")
+
+        #expect(source.contains("captureLivePosterFromNextFrame"))
+        #expect(!source.contains("renderer.captureLivePoster()"))
+    }
+
+    @Test("Scene preview poster readback waits for present completion without synchronizing draw")
+    func scenePreviewPosterReadbackUsesPresentCompletion() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalSceneRenderer.swift")
+        let executor = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalRenderExecutor.swift")
+
+        #expect(source.contains("capturePendingLivePostersAfterPresent"))
+        #expect(source.contains("presentCompletion:"))
+        #expect(executor.contains("presentCompletion: (@Sendable (MTLTexture, MTLCommandBuffer, @escaping @Sendable () -> Void) -> Void)? = nil"))
+        #expect(executor.contains("presentCompletion(completionSource.texture, cb, releaseSource)"))
+        #expect(source.contains("releaseSource:"))
+        #expect(!source.contains("withSynchronizedLivePosterFrameIfNeeded"))
+    }
+
+    @Test("Scene detail fallback preview is a bounded static poster and releases ImageIO state")
+    func sceneDetailPreviewFallbackDoesNotRetainAnimatedPreviewState() throws {
+        let detail = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift")
+        let preview = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/WPEPreviewView.swift")
+
+        #expect(preview.contains("case staticPoster"))
+        #expect(detail.contains("playbackMode: .staticPoster"))
+        #expect(preview.contains("static func dismantleNSView"))
+        #expect(preview.contains("context.coordinator.cancelInflight()"))
+        #expect(preview.contains("nsView.clearImage()"))
+        #expect(preview.contains("WPEPreviewImageDecodeBudget"))
+        #expect(preview.contains("kCGImageSourceShouldCache"))
+    }
+
+    @Test("Scene preview keeps abnormal poster ratios inside the screen frame")
+    func scenePreviewFitsAbnormalPosterRatiosInsideScreenFrame() throws {
+        let detail = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift")
+
+        #expect(detail.contains("GeometryReader"))
+        #expect(detail.contains("screenPreviewSize"))
+        #expect(detail.contains(".aspectRatio(contentMode: .fit)"))
+        #expect(!detail.contains(".aspectRatio(contentMode: .fill)"))
     }
 
     private static func readSourceFile(_ relativePath: String) throws -> String {

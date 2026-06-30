@@ -153,8 +153,8 @@ struct BookmarksLibraryView: View {
         var result = store.bookmarks
         // Only honor the type filter while the chip row is visible AND that
         // type is still present — otherwise the user can land in an invisible
-        // filter (e.g. they pick "HTML", delete bookmarks until count ≤ 6 or
-        // until no HTML bookmarks remain, and the grid silently goes blank).
+        // filter (e.g. they pick "Web", delete bookmarks until count ≤ 6 or
+        // until no web bookmarks remain, and the grid silently goes blank).
         if showsTypeChips, case .type(let type) = typeFilter, availableTypes.contains(type) {
             result = result.filter { $0.wallpaperType == type }
         }
@@ -226,7 +226,7 @@ private struct BookmarkTile: View {
     private var accessibilityLabel: Text {
         let name = bookmark.label
         return Text("\(name), \(Text(bookmark.wallpaperType.titleKey)) wallpaper bookmark",
-             comment: "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / HTML / Shader / Scene).")
+             comment: "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / Web / Shader / Scene).")
     }
 
     // MARK: Thumbnail tile

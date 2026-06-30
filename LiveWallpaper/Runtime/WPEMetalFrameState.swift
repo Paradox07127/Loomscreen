@@ -27,6 +27,7 @@ enum WPEMetalTargetID: Hashable {
 struct WPEMetalFrameState {
     let output: MTLTexture
     let sceneSize: CGSize
+    let cameraUniforms: WPEMetalCameraUniforms
     var latestSceneTexture: MTLTexture?
     var latestNamedTextures: [String: MTLTexture] = [:]
     var writtenTargets: Set<WPEMetalTargetID> = []
@@ -49,11 +50,13 @@ struct WPEMetalFrameState {
     init(
         output: MTLTexture,
         sceneSize: CGSize,
+        cameraUniforms: WPEMetalCameraUniforms = .identity,
         previousSceneTexture: MTLTexture? = nil,
         previousNamedTextures: [String: MTLTexture] = [:]
     ) {
         self.output = output
         self.sceneSize = sceneSize
+        self.cameraUniforms = cameraUniforms
         self.latestSceneTexture = previousSceneTexture
         self.latestNamedTextures = previousNamedTextures
     }

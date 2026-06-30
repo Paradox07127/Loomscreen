@@ -203,6 +203,12 @@ final class WPESceneScriptInstance {
     /// `nonisolated`: also called by `WPETransformScriptEvaluator` off the main actor.
     nonisolated fileprivate static func preprocess(script: String) -> String {
         var s = script
+        // WPE serializes some exported scripts with non-breaking spaces between
+        // keywords (`export function`), which JavaScriptCore will not match via
+        // the ASCII-space replacements below.
+        for space in ["\u{00A0}", "\u{202F}", "\u{2007}", "\u{FEFF}"] {
+            s = s.replacingOccurrences(of: space, with: " ")
+        }
         s = s.replacingOccurrences(of: "'use strict';", with: "")
         s = s.replacingOccurrences(of: "\"use strict\";", with: "")
         s = s.replacingOccurrences(of: "export function", with: "function")
@@ -235,7 +241,20 @@ final class WPESceneScriptInstance {
         let setProperty: @convention(block) (String, JSValue) -> Void = { _, _ in }
         engine.setObject(getProperty, forKeyedSubscript: "getPropertyValue" as NSString)
         engine.setObject(setProperty, forKeyedSubscript: "setPropertyValue" as NSString)
+        let screenResolution = JSValue(newObjectIn: context)!
+        screenResolution.setObject(1920.0, forKeyedSubscript: "x" as NSString)
+        screenResolution.setObject(1080.0, forKeyedSubscript: "y" as NSString)
+        engine.setObject(screenResolution, forKeyedSubscript: "screenResolution" as NSString)
+        engine.setObject(screenResolution, forKeyedSubscript: "canvasSize" as NSString)
         context.setObject(engine, forKeyedSubscript: "engine" as NSString)
+
+        let input = JSValue(newObjectIn: context)!
+        let cursorScreen = JSValue(newObjectIn: context)!
+        cursorScreen.setObject(960.0, forKeyedSubscript: "x" as NSString)
+        cursorScreen.setObject(540.0, forKeyedSubscript: "y" as NSString)
+        input.setObject(cursorScreen, forKeyedSubscript: "cursorScreenPosition" as NSString)
+        input.setObject(cursorScreen, forKeyedSubscript: "cursorWorldPosition" as NSString)
+        context.setObject(input, forKeyedSubscript: "input" as NSString)
 
         let storage = JSValue(newObjectIn: context)!
         let storageBacking = NSMutableDictionary()
@@ -334,6 +353,11 @@ struct WPELayerScriptOutput: Sendable, Equatable {
     var others: [String: WPELayerScriptState]
 }
 
+enum WPELayerScriptOutputMode: Sendable, Equatable {
+    case layerState
+    case returnedAlpha(initialValue: Double)
+}
+
 /// Runs a WPE SceneScript attached to an image layer's `visible` field — a JS
 /// program whose `init()`/`update()` drive the layer's visibility/alpha and its
 /// video texture (`thisLayer.getVideoTexture().play()/stop()/…`). Unlike
@@ -361,10 +385,15 @@ final class WPELayerScriptInstance {
         shared: WPESharedScriptState? = nil,
         setupBudget: TimeInterval = 2.0,
         tickBudget: TimeInterval = 0.5,
-        nowProviderMillis: (@Sendable () -> Double)? = nil
+        nowProviderMillis: (@Sendable () -> Double)? = nil,
+        outputMode: WPELayerScriptOutputMode = .layerState
     ) throws {
         self.tickBudget = tickBudget
-        let engine = LayerEngine(nowProviderMillis: nowProviderMillis, shared: shared)
+        let engine = LayerEngine(
+            nowProviderMillis: nowProviderMillis,
+            shared: shared,
+            outputMode: outputMode
+        )
         self.engine = engine
         var prepared = WPESceneScriptInstance.preprocess(script: script)
         // Strip ESM `import` lines (e.g. `import * as WEMath from 'WEMath';`) —
@@ -399,9 +428,9 @@ final class WPELayerScriptInstance {
 
     /// Tick `update()`; returns the script's new per-layer output, or nil when
     /// there's no `update()` or the instance is poisoned/timed out.
-    func tick() -> WPELayerScriptOutput? {
+    func tick(runtimeSeconds: Double? = nil) -> WPELayerScriptOutput? {
         guard hasUpdateFunction, !isPoisoned else { return nil }
-        guard let output = engine.tick(budget: tickBudget) else {
+        guard let output = engine.tick(runtimeSeconds: runtimeSeconds, budget: tickBudget) else {
             isPoisoned = true
             Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript update() exceeded \(tickBudget)s — frozen", category: .wpeRender)
@@ -417,9 +446,16 @@ final class WPELayerScriptInstance {
     /// current state when the script declares no such handler); nil only when
     /// poisoned, timed out, or given no properties.
     @discardableResult
-    func applyUserProperties(_ properties: [String: WPESceneScriptPropertyValue]) -> WPELayerScriptOutput? {
+    func applyUserProperties(
+        _ properties: [String: WPESceneScriptPropertyValue],
+        runtimeSeconds: Double? = nil
+    ) -> WPELayerScriptOutput? {
         guard !isPoisoned, !properties.isEmpty else { return nil }
-        guard let output = engine.applyUserProperties(properties, budget: tickBudget) else {
+        guard let output = engine.applyUserProperties(
+            properties,
+            runtimeSeconds: runtimeSeconds,
+            budget: tickBudget
+        ) else {
             isPoisoned = true
             Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript applyUserProperties() exceeded \(tickBudget)s — frozen", category: .wpeRender)
@@ -453,14 +489,28 @@ final class WPELayerScriptInstance {
         private var pendingVideo: [String: [WPELayerVideoCommand]] = [:]
         private let nowProviderMillis: (@Sendable () -> Double)?
         private let shared: WPESharedScriptState?
+        private let outputMode: WPELayerScriptOutputMode
+        private var returnedAlphaValue: Double
+        private var lastRuntimeSeconds: Double?
         /// Reused per-context stubs for `getParent()` / `getAnimationLayer()` so a
         /// chain (`getParent().getParent()`) doesn't mint a fresh object each call.
         private var neutralLayerStubCache: JSValue?
         private var neutralAnimationStubCache: JSValue?
 
-        init(nowProviderMillis: (@Sendable () -> Double)?, shared: WPESharedScriptState?) {
+        init(
+            nowProviderMillis: (@Sendable () -> Double)?,
+            shared: WPESharedScriptState?,
+            outputMode: WPELayerScriptOutputMode
+        ) {
             self.nowProviderMillis = nowProviderMillis
             self.shared = shared
+            self.outputMode = outputMode
+            switch outputMode {
+            case .layerState:
+                self.returnedAlphaValue = 1
+            case .returnedAlpha(let initialValue):
+                self.returnedAlphaValue = initialValue.isFinite ? initialValue : 1
+            }
         }
 
         func setUp(
@@ -471,15 +521,18 @@ final class WPELayerScriptInstance {
             runWithBudget(budget) { self.setUpOnQueue(script: script, scriptProperties: scriptProperties) }
         }
 
-        func tick(budget: TimeInterval) -> WPELayerScriptOutput? {
-            runWithBudget(budget) { self.tickOnQueue() }
+        func tick(runtimeSeconds: Double?, budget: TimeInterval) -> WPELayerScriptOutput? {
+            runWithBudget(budget) { self.tickOnQueue(runtimeSeconds: runtimeSeconds) }
         }
 
         func applyUserProperties(
             _ properties: [String: WPESceneScriptPropertyValue],
+            runtimeSeconds: Double?,
             budget: TimeInterval
         ) -> WPELayerScriptOutput? {
-            runWithBudget(budget) { self.applyUserPropertiesOnQueue(properties) }
+            runWithBudget(budget) {
+                self.applyUserPropertiesOnQueue(properties, runtimeSeconds: runtimeSeconds)
+            }
         }
 
         private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
@@ -501,7 +554,11 @@ final class WPELayerScriptInstance {
             self.context = context
             WPESceneScriptInstance.installSandbox(in: context)
             WPESceneScriptBaseclasses.install(in: context)
+            updateEngineRuntime(0)
             installLayerBridge(in: context)
+            if case .returnedAlpha = outputMode {
+                setOwnLayerAlpha(returnedAlphaValue)
+            }
             if let shared { wpeInstallSharedState(shared, in: context) }
             if let nowProviderMillis {
                 let now: @convention(block) () -> Double = { nowProviderMillis() }
@@ -543,18 +600,34 @@ final class WPELayerScriptInstance {
             return .ready(hasUpdate: updateFunction != nil, output: readOutput())
         }
 
-        private func tickOnQueue() -> WPELayerScriptOutput {
-            guard let updateFunction else {
+        private func tickOnQueue(runtimeSeconds: Double?) -> WPELayerScriptOutput {
+            updateEngineRuntime(runtimeSeconds)
+            guard let context, let updateFunction else {
                 return WPELayerScriptOutput(own: .init(visible: true, alpha: 1, videoCommands: []), others: [:])
             }
             pendingVideo.removeAll(keepingCapacity: true)
-            _ = updateFunction.call(withArguments: [])
+            switch outputMode {
+            case .layerState:
+                _ = updateFunction.call(withArguments: [])
+            case .returnedAlpha:
+                let arg = JSValue(object: returnedAlphaValue, in: context) ?? JSValue(nullIn: context)!
+                if let result = updateFunction.call(withArguments: [arg as Any]),
+                   !result.isUndefined, !result.isNull, result.isNumber {
+                    let value = result.toDouble()
+                    if value.isFinite {
+                        returnedAlphaValue = value
+                        setOwnLayerAlpha(value)
+                    }
+                }
+            }
             return readOutput()
         }
 
         private func applyUserPropertiesOnQueue(
-            _ properties: [String: WPESceneScriptPropertyValue]
+            _ properties: [String: WPESceneScriptPropertyValue],
+            runtimeSeconds: Double?
         ) -> WPELayerScriptOutput {
+            updateEngineRuntime(runtimeSeconds)
             guard let context,
                   let fn = context.objectForKeyedSubscript("applyUserProperties"),
                   !fn.isUndefined, fn.hasProperty("call"),
@@ -567,6 +640,26 @@ final class WPELayerScriptInstance {
             pendingVideo.removeAll(keepingCapacity: true)
             _ = fn.call(withArguments: [bag])
             return readOutput()
+        }
+
+        private func updateEngineRuntime(_ runtimeSeconds: Double?) {
+            guard let context,
+                  let engine = context.objectForKeyedSubscript("engine"),
+                  !engine.isUndefined else { return }
+            let runtime = runtimeSeconds.map { $0.isFinite ? $0 : 0 } ?? 0
+            let frameTime: Double
+            if let previous = lastRuntimeSeconds {
+                frameTime = max(runtime - previous, 0)
+            } else {
+                frameTime = max(runtime, 1.0 / 30.0)
+            }
+            lastRuntimeSeconds = runtime
+            engine.setObject(runtime, forKeyedSubscript: "runtime" as NSString)
+            engine.setObject(frameTime, forKeyedSubscript: "frametime" as NSString)
+        }
+
+        private func setOwnLayerAlpha(_ value: Double) {
+            thisLayer?.setObject(value.isFinite ? value : 1, forKeyedSubscript: "alpha" as NSString)
         }
 
         /// Installs a real `thisLayer` (the script's own layer), a `thisScene`
@@ -911,7 +1004,8 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     /// `Date` check would wrongly classify every origin script as dynamic.
     private static let dynamicTokens = [
         "getTimeOfDay", "frametime", "frameTime", "getTime", "Date",
-        "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed"
+        "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
+        "input.cursorWorldPosition"
     ]
 
     /// `evaluationBudget` covers the first call's cold context bootstrap
@@ -1024,6 +1118,181 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         size.setObject(canvasSize.x, forKeyedSubscript: "x" as NSString)
         size.setObject(canvasSize.y, forKeyedSubscript: "y" as NSString)
         engine.setObject(size, forKeyedSubscript: "canvasSize" as NSString)
+    }
+}
+
+/// Runtime evaluator for dynamic WPE transform scripts. This is intentionally
+/// narrower than full SceneScript: it supports transform `update(value)` with
+/// `engine.canvasSize`, `scriptProperties`, and `input.cursorWorldPosition`,
+/// which covers cursor-follow image layers such as 3426865175's Nemophila.
+final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
+    private let engine: Engine
+    private let tickBudget: TimeInterval
+    private var isPoisoned = false
+
+    init(
+        script: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        seed: SIMD3<Double>,
+        canvasSize: SIMD2<Double>,
+        setupBudget: TimeInterval = 2.0,
+        tickBudget: TimeInterval = 0.5
+    ) throws {
+        self.tickBudget = tickBudget
+        self.engine = Engine(seed: seed, canvasSize: canvasSize)
+        var prepared = WPESceneScriptInstance.preprocess(script: script)
+        if !scriptProperties.isEmpty {
+            prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
+        }
+        guard let outcome = engine.setUp(
+            script: prepared,
+            scriptProperties: scriptProperties,
+            budget: setupBudget
+        ) else {
+            isPoisoned = true
+            throw WPESceneScriptError.executionTimedOut
+        }
+        switch outcome {
+        case .contextUnavailable:
+            throw WPESceneScriptError.contextUnavailable
+        case .ready:
+            break
+        }
+    }
+
+    func tick(pointerPosition: SIMD2<Double>) -> SIMD3<Double>? {
+        guard !isPoisoned else { return nil }
+        guard let result = engine.tick(pointerPosition: pointerPosition, budget: tickBudget) else {
+            isPoisoned = true
+            return nil
+        }
+        return result
+    }
+
+    private final class Engine: @unchecked Sendable {
+        enum SetupOutcome {
+            case ready
+            case contextUnavailable
+        }
+
+        private let queue = DispatchQueue(label: "com.livewallpaper.wpe-dynamic-transform", qos: .userInitiated)
+        private let seed: SIMD3<Double>
+        private let canvasSize: SIMD2<Double>
+        private var context: JSContext?
+        private var updateFunction: JSValue?
+        private var cursorWorldPosition: JSValue?
+        private var didThrow = false
+
+        init(seed: SIMD3<Double>, canvasSize: SIMD2<Double>) {
+            self.seed = seed
+            self.canvasSize = canvasSize
+        }
+
+        func setUp(
+            script: String,
+            scriptProperties: [String: WPESceneScriptPropertyValue],
+            budget: TimeInterval
+        ) -> SetupOutcome? {
+            runWithBudget(budget) { self.setUpOnQueue(script: script, scriptProperties: scriptProperties) }
+        }
+
+        func tick(pointerPosition: SIMD2<Double>, budget: TimeInterval) -> SIMD3<Double>?? {
+            runWithBudget(budget) { self.tickOnQueue(pointerPosition: pointerPosition) }
+        }
+
+        private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<T>()
+            queue.async {
+                box.value = work()
+                done.signal()
+            }
+            guard done.wait(timeout: .now() + budget) == .success else { return nil }
+            return box.value
+        }
+
+        private func setUpOnQueue(
+            script: String,
+            scriptProperties: [String: WPESceneScriptPropertyValue]
+        ) -> SetupOutcome {
+            guard let context = JSContext() else { return .contextUnavailable }
+            self.context = context
+            WPESceneScriptInstance.installSandbox(in: context)
+            WPESceneScriptBaseclasses.install(in: context)
+            installCanvasSize(in: context)
+            installInput(in: context)
+            context.exceptionHandler = { [weak self] _, _ in self?.didThrow = true }
+
+            didThrow = false
+            _ = context.evaluateScript(script)
+            guard !didThrow else { return .ready }
+
+            if !scriptProperties.isEmpty {
+                wpeInstallScriptProperties(
+                    overrides: scriptProperties,
+                    declaredDefaults: wpeDeclaredScriptPropertyDefaults(
+                        context.objectForKeyedSubscript("scriptProperties")
+                    ),
+                    into: context
+                )
+            }
+            let update = context.objectForKeyedSubscript("update")
+            if let update, !update.isUndefined, update.hasProperty("call") {
+                updateFunction = update
+            }
+            return .ready
+        }
+
+        private func tickOnQueue(pointerPosition: SIMD2<Double>) -> SIMD3<Double>? {
+            guard let context, let updateFunction, let valueObject = JSValue(newObjectIn: context) else {
+                return nil
+            }
+            // Renderer pointer UV is top-left; WPE cursorWorldPosition is Y-up canvas space.
+            cursorWorldPosition?.setObject(pointerPosition.x * canvasSize.x, forKeyedSubscript: "x" as NSString)
+            cursorWorldPosition?.setObject((1.0 - pointerPosition.y) * canvasSize.y, forKeyedSubscript: "y" as NSString)
+            cursorWorldPosition?.setObject(seed.z, forKeyedSubscript: "z" as NSString)
+
+            valueObject.setObject(seed.x, forKeyedSubscript: "x" as NSString)
+            valueObject.setObject(seed.y, forKeyedSubscript: "y" as NSString)
+            valueObject.setObject(seed.z, forKeyedSubscript: "z" as NSString)
+
+            didThrow = false
+            guard let result = updateFunction.call(withArguments: [valueObject]),
+                  !didThrow,
+                  !result.isUndefined, !result.isNull, result.isObject,
+                  let xValue = result.objectForKeyedSubscript("x"),
+                  let yValue = result.objectForKeyedSubscript("y") else {
+                return nil
+            }
+            let x = xValue.toDouble()
+            let y = yValue.toDouble()
+            guard x.isFinite, y.isFinite else { return nil }
+            let z = result.objectForKeyedSubscript("z")?.toDouble() ?? seed.z
+            return SIMD3<Double>(x, y, z.isFinite ? z : seed.z)
+        }
+
+        private func installCanvasSize(in context: JSContext) {
+            guard let engine = context.objectForKeyedSubscript("engine"), engine.isObject,
+                  let size = JSValue(newObjectIn: context) else { return }
+            size.setObject(canvasSize.x, forKeyedSubscript: "x" as NSString)
+            size.setObject(canvasSize.y, forKeyedSubscript: "y" as NSString)
+            engine.setObject(size, forKeyedSubscript: "canvasSize" as NSString)
+        }
+
+        private func installInput(in context: JSContext) {
+            let input = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            let cursor = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
+            cursor.setObject(seed.x, forKeyedSubscript: "x" as NSString)
+            cursor.setObject(seed.y, forKeyedSubscript: "y" as NSString)
+            cursor.setObject(seed.z, forKeyedSubscript: "z" as NSString)
+            input.setObject(cursor, forKeyedSubscript: "cursorWorldPosition" as NSString)
+            context.setObject(input, forKeyedSubscript: "input" as NSString)
+            cursorWorldPosition = cursor
+        }
+
+        private final class ResultBox<T>: @unchecked Sendable {
+            var value: T?
+        }
     }
 }
 #endif

@@ -46,7 +46,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: destination.texture
+                    sourceTexture: destination.texture,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -71,7 +72,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: destination.texture
+                    sourceTexture: destination.texture,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -109,7 +111,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: texture
+                    sourceTexture: texture,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -333,7 +336,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: texture
+                    sourceTexture: texture,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -404,7 +408,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: primary
+                    sourceTexture: primary,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -702,7 +707,8 @@ struct WPEMetalShaderDispatcher {
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     cameraParallax: frameState.cameraParallax,
-                    sourceTexture: texture
+                    sourceTexture: texture,
+                    cameraUniforms: frameState.cameraUniforms
                 )
                 encoder.setVertexBytes(
                     &quadUniforms,
@@ -733,6 +739,19 @@ struct WPEMetalShaderDispatcher {
         encoder: MTLRenderCommandEncoder,
         depthPixelFormat: MTLPixelFormat
     ) throws {
+        if Self.isGodraysCombineShader(pass.pass.shader) {
+            try dispatchGodraysCombine(
+                pass: pass,
+                layer: layer,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat
+            )
+            return
+        }
+
         let result = try executor.compileCustomShader(for: pass)
         // Dump transpiled MSL + uniform/sampler interface for cross-check against the
         // Windows RenderDoc oracle (tools/wpe-oracle shader-interface.md). Scene-debug only.
@@ -909,7 +928,106 @@ struct WPEMetalShaderDispatcher {
                 for: layer,
                 sceneSize: frameState.sceneSize,
                 cameraParallax: frameState.cameraParallax,
-                sourceTexture: primary ?? destination.texture
+                sourceTexture: primary ?? destination.texture,
+                cameraUniforms: frameState.cameraUniforms
+            )
+            encoder.setVertexBytes(
+                &quadUniforms,
+                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                index: 1
+            )
+        }
+    }
+
+    private func dispatchGodraysCombine(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat
+    ) throws {
+        let usesObjectQuad = executor.usesObjectQuadGeometry(
+            for: pass,
+            layer: layer,
+            cameraParallax: frameState.cameraParallax
+        )
+        encoder.setRenderPipelineState(try executor.renderPipeline(
+            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
+            fragmentName: "wpe_effect_godrays_combine_fragment",
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+
+        let raysReference = pass.textureBindings[0]
+            ?? pass.pass.binds[0]
+            ?? pass.pass.textures[0]
+            ?? pass.pass.source
+        let albedoReference = pass.textureBindings[1]
+            ?? pass.pass.binds[1]
+            ?? pass.pass.textures[1]
+            ?? pass.pass.source
+        let raysTexture = try WPEMetalShaderInputs.resolve(
+            reference: raysReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let albedoTexture = try WPEMetalShaderInputs.resolve(
+            reference: albedoReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            let destinationID = ObjectIdentifier(destination.texture)
+            let raysID = ObjectIdentifier(raysTexture)
+            let albedoID = ObjectIdentifier(albedoTexture)
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[godrays.combine] pass=\(pass.pass.id) "
+                    + "dst=\(destination.texture.label ?? "-") \(destination.texture.width)x\(destination.texture.height) id=\(destinationID) "
+                    + "rays=\(raysTexture.label ?? "-") \(raysTexture.width)x\(raysTexture.height) id=\(raysID) sameDst=\(raysTexture === destination.texture) "
+                    + "albedo=\(albedoTexture.label ?? "-") \(albedoTexture.width)x\(albedoTexture.height) id=\(albedoID) sameDst=\(albedoTexture === destination.texture)",
+                level: .notice
+            )
+        }
+        encoder.setFragmentTexture(raysTexture, index: 0)
+        encoder.setFragmentTexture(albedoTexture, index: 1)
+
+        let blendMode = comboValueIfPresent(named: "BLENDMODE", in: pass) ?? 9
+        var uniforms = WPEGodraysCombineUniforms(blendMode: UInt32(max(0, blendMode)))
+        encoder.setFragmentBytes(
+            &uniforms,
+            length: MemoryLayout<WPEGodraysCombineUniforms>.stride,
+            index: 0
+        )
+
+        WPESceneDebugArtifacts.shared.recordTextureBinding(
+            passID: pass.pass.id,
+            shader: pass.pass.shader,
+            slot: 0,
+            reference: raysReference,
+            texture: raysTexture,
+            fallbackToPrimary: false
+        )
+        WPESceneDebugArtifacts.shared.recordTextureBinding(
+            passID: pass.pass.id,
+            shader: pass.pass.shader,
+            slot: 1,
+            reference: albedoReference,
+            texture: albedoTexture,
+            fallbackToPrimary: false
+        )
+
+        if usesObjectQuad {
+            var quadUniforms = executor.objectQuadUniforms(
+                for: layer,
+                sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
+                sourceTexture: albedoTexture,
+                cameraUniforms: frameState.cameraUniforms
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -1096,6 +1214,10 @@ struct WPEMetalShaderDispatcher {
     }
 
     private func comboValue(named name: String, in pass: WPEPreparedRenderPass) -> Int {
+        comboValueIfPresent(named: name, in: pass) ?? 0
+    }
+
+    private func comboValueIfPresent(named name: String, in pass: WPEPreparedRenderPass) -> Int? {
         if let value = pass.comboValues[name] ?? pass.pass.combos[name] {
             return value
         }
@@ -1106,7 +1228,13 @@ struct WPEMetalShaderDispatcher {
         for (key, value) in pass.pass.combos where key.uppercased() == uppercased {
             return value
         }
-        return 0
+        return nil
+    }
+
+    private static func isGodraysCombineShader(_ shaderName: String) -> Bool {
+        let normalized = shaderName.lowercased()
+        return normalized == "effects/godrays_combine"
+            || normalized.hasSuffix("/effects/godrays_combine")
     }
 
 }

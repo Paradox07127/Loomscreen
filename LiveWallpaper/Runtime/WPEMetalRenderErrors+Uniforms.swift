@@ -150,16 +150,18 @@ struct WPECopyUniforms {
 /// (no dependency on `VideoFitMode`'s AVFoundation semantics); the session maps
 /// `VideoFitMode` onto this. `stretch` = legacy full-bleed (may distort);
 /// `contain` = letterbox preserving aspect; `cover` = crop-to-fill preserving
-/// aspect.
+/// aspect; `center` = original source size centered on the drawable.
 enum WPEPresentFitMode: Equatable {
     case stretch
     case contain
     case cover
+    case center
 }
 
 /// Layout MUST match `WPEPresentUniforms` in `WPEMetalBuiltins.metal`. Drives
 /// the final on-screen blit's aspect handling: `ndcScale` shrinks the quad for
-/// letterboxed `contain`; `uvScale`/`uvOffset` crop the source for `cover`.
+/// letterboxed `contain` or preserves source pixels for `center`;
+/// `uvScale`/`uvOffset` crop the source for `cover`.
 /// All-identity reproduces the legacy `stretch` full-bleed.
 struct WPEPresentUniforms {
     var ndcScale: SIMD2<Float>
@@ -188,6 +190,11 @@ struct WPEPresentUniforms {
         switch fitMode {
         case .stretch:
             break
+        case .center:
+            u.ndcScale = SIMD2<Float>(
+                Float(Double(sourceWidth) / Double(targetWidth)),
+                Float(Double(sourceHeight) / Double(targetHeight))
+            )
         case .contain:
             // Shrink the quad on the over-long axis; the cleared margin shows
             // through as letterbox bars.
@@ -409,6 +416,13 @@ struct WPEPulseUniforms {
     var amplitude: Float
     var time: Float
     var padding: Float = 0
+}
+
+struct WPEGodraysCombineUniforms {
+    var blendMode: UInt32
+    var padding0: UInt32 = 0
+    var padding1: UInt32 = 0
+    var padding2: UInt32 = 0
 }
 
 struct WPEIrisUniforms {

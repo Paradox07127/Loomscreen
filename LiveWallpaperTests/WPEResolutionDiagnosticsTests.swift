@@ -194,6 +194,69 @@ struct WPEResolutionDiagnosticsTests {
         #expect(snapshot.missedRefs.isEmpty, "speculative streaming decline must not count as a miss")
     }
 
+    @Test("Built-in raster sibling resolves tex-named util image refs")
+    func builtinRasterSiblingResolvesTexNamedUtilRefs() throws {
+        let primary = try makeTempRoot()
+        let builtins = try makeTempRoot()
+        defer {
+            try? FileManager.default.removeItem(at: primary)
+            try? FileManager.default.removeItem(at: builtins)
+        }
+        try writeData(Self.onePixelPNG, relativePath: "materials/util/white.png", under: builtins)
+
+        let tracer = WPEResolutionTracer()
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: primary,
+            dependencyMounts: [],
+            tracer: tracer,
+            builtinRootURL: builtins
+        )
+
+        let image = try resolver.resolveImage(relativePath: "materials/util/white.tex")
+
+        #expect(image.width == 1)
+        #expect(image.height == 1)
+        let snapshot = tracer.snapshot()
+        #expect(snapshot.resolvedCount == 1)
+        #expect(snapshot.missedRefs.isEmpty)
+    }
+
+    @Test("Workshop raw image ref stored as converted material tex resolves without miss")
+    func workshopRawImageRefStoredAsConvertedMaterialTexResolvesWithoutMiss() throws {
+        let primary = try makeTempRoot()
+        let builtins = try makeTempRoot()
+        defer {
+            try? FileManager.default.removeItem(at: primary)
+            try? FileManager.default.removeItem(at: builtins)
+        }
+        let rawRef = "workshop/2328851328/particle/雪花.jpg"
+        try writeData(
+            Self.singleFrameStaticTex(width: 4, height: 4),
+            relativePath: "materials/\(rawRef).tex",
+            under: primary
+        )
+
+        let tracer = WPEResolutionTracer()
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: primary,
+            dependencyMounts: [],
+            tracer: tracer,
+            builtinRootURL: builtins
+        )
+
+        let image = try resolver.resolveImage(relativePath: rawRef)
+
+        #expect(image.width == 4)
+        #expect(image.height == 4)
+        let snapshot = tracer.snapshot()
+        #expect(snapshot.resolvedCount == 1)
+        #expect(snapshot.missedRefs.isEmpty)
+        #expect(snapshot.events.first?.ref == rawRef)
+        #expect(snapshot.events.first?.attempts == [
+            WPEResolutionAttempt(origin: .scene, outcome: .resolved)
+        ])
+    }
+
     @Test("Tracer reset clears events")
     func resetClearsEvents() throws {
         let primary = try makeTempRoot()
@@ -278,4 +341,8 @@ struct WPEResolutionDiagnosticsTests {
         buffer.append(Data(repeating: 0x00, count: pixels))
         return buffer
     }
+
+    private static let onePixelPNG = Data(base64Encoded: """
+    iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=
+    """)!
 }

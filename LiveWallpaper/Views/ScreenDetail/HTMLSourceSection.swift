@@ -240,7 +240,7 @@ struct HTMLSourceSection: View {
             let total = others.count + 1
             chip(
                 symbol: "rectangle.on.rectangle.angled",
-                label: Text("\(total)× Active", comment: "URL chip showing the number of screens running the same HTML wallpaper."),
+                label: Text("\(total)× Active", comment: "URL chip showing the number of screens running the same web wallpaper."),
                 color: .indigo,
                 help: Text("Also active on: \(names)")
             )
@@ -366,7 +366,7 @@ struct HTMLOptionsInspector: View {
     var body: some View {
         GroupBox {
             CollapsibleSection(
-                title: "HTML Options",
+                title: "Web Options",
                 systemImage: "globe",
                 isExpanded: $isExpanded
             ) {
@@ -422,7 +422,7 @@ struct HTMLOptionsInspector: View {
             icon: "rectangle.split.2x1",
             iconColor: .indigo,
             title: "Physical-pixel layout",
-            info: "Renders HTML canvas content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for imported project folders."
+            info: "Renders CSS-naive HTML canvas content at retina resolution. Auto-enabled only for imported project folders that do not already use devicePixelRatio."
         ) {
             Toggle("", isOn: configBinding(\.physicalPixelLayout))
                 .labelsHidden()

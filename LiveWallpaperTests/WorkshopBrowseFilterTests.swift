@@ -6,6 +6,90 @@ import Testing
 @Suite("Workshop browse filters → query tags")
 struct WorkshopBrowseFilterTests {
 
+    @Test("Workshop sort modes map to Steam QueryFiles query_type codes")
+    func sortQueryTypeCodes() {
+        #expect(WorkshopSortMode.mostPopular.queryTypeCode == 3)
+        #expect(WorkshopSortMode.topRated.queryTypeCode == 0)
+        #expect(WorkshopSortMode.newest.queryTypeCode == 1)
+        #expect(WorkshopSortMode.lastUpdated.queryTypeCode == 21)
+        #expect(WorkshopSortMode.mostSubscribed.queryTypeCode == 9)
+        #expect(WorkshopSortMode.search.queryTypeCode == 12)
+    }
+
+    @Test("Workshop time frames map to Steam QueryFiles days values")
+    func timeFrameDays() {
+        #expect(WorkshopTimeFrame.today.days == 1)
+        #expect(WorkshopTimeFrame.oneWeek.days == 7)
+        #expect(WorkshopTimeFrame.thirtyDays.days == 30)
+        #expect(WorkshopTimeFrame.threeMonths.days == 90)
+        #expect(WorkshopTimeFrame.sixMonths.days == 180)
+        #expect(WorkshopTimeFrame.oneYear.days == 365)
+        #expect(WorkshopTimeFrame.allTime.days == nil)
+    }
+
+    @Test("Most popular request preserves time frame days")
+    func mostPopularRequestPreservesTimeFrameDays() {
+        let request = WorkshopQueryRequest(sort: .mostPopular, timeFrame: .sixMonths)
+
+        #expect(request.sort == .mostPopular)
+        #expect(request.timeFrame == .sixMonths)
+        #expect(request.days == 180)
+    }
+
+    @Test("Top rated all time ignores incompatible time frame")
+    func topRatedAllTimeIgnoresIncompatibleTimeFrame() {
+        let request = WorkshopQueryRequest(sort: .topRated, timeFrame: .sixMonths)
+
+        #expect(request.sort == .topRated)
+        #expect(request.timeFrame == .allTime)
+        #expect(request.days == nil)
+    }
+
+    @Test("Query request emits sort and time frame as API query items")
+    func queryRequestAPIQueryItemsIncludeSortAndTimeFrame() {
+        let request = WorkshopQueryRequest(
+            sort: .mostPopular,
+            page: 2,
+            numPerPage: 25,
+            timeFrame: .threeMonths,
+            requiredTags: ["Scene"],
+            excludedTags: ["Application"]
+        )
+
+        let values = Dictionary(
+            uniqueKeysWithValues: request.apiQueryItems(apiKey: "FAKEKEY", appID: 431960).map { ($0.name, $0.value ?? "") }
+        )
+
+        #expect(values["appid"] == "431960")
+        #expect(values["query_type"] == "3")
+        #expect(values["days"] == "90")
+        #expect(values["page"] == "2")
+        #expect(values["numperpage"] == "25")
+        #expect(values["requiredtags[0]"] == "Scene")
+        #expect(values["excludedtags[0]"] == "Application")
+    }
+
+    @Test("All-time time frame omits days from API query items")
+    func allTimeOmitsDaysAPIQueryItem() {
+        let request = WorkshopQueryRequest(sort: .topRated, timeFrame: .allTime)
+
+        let names = Set(request.apiQueryItems(apiKey: "FAKEKEY", appID: 431960).map(\.name))
+
+        #expect(!names.contains("days"))
+    }
+
+    @Test("Last updated omits incompatible days API query item")
+    func lastUpdatedOmitsIncompatibleDaysAPIQueryItem() {
+        let request = WorkshopQueryRequest(sort: .lastUpdated, timeFrame: .threeMonths)
+
+        let values = Dictionary(
+            uniqueKeysWithValues: request.apiQueryItems(apiKey: "FAKEKEY", appID: 431960).map { ($0.name, $0.value ?? "") }
+        )
+
+        #expect(values["query_type"] == "21")
+        #expect(values["days"] == nil)
+    }
+
     @Test("Content-type filter maps to the right tag")
     func contentTypeTags() {
         #expect(WorkshopContentTypeFilter.all.requiredTags.isEmpty)

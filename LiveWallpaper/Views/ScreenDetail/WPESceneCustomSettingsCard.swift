@@ -23,26 +23,35 @@ struct WPESceneCustomSettingsCard: View {
     /// Coalesces rapid slider drags into a single apply (~150ms after the last
     /// change) so continuous dragging doesn't fire an apply/reload every frame.
     @State private var sliderDebounceTasks: [String: Task<Void, Never>] = [:]
+    @State private var expandedSections: Set<String> = []
+    @State private var presentation: WPEProjectSettingsPresentation?
+    @State private var settingRows: [WPEProjectSettingsPresentation.Row] = []
 
     var body: some View {
         GroupBox {
             CollapsibleSection(
-                title: "Project Custom Settings",
+                title: "Scene Custom Settings",
                 systemImage: "slider.horizontal.3",
                 isExpanded: $isExpanded,
-                trailingAccessory: { resetAccessory }
+                trailingAccessory: {
+                    resetAccessory(hasOverrides: presentation?.hasVisibleOverrides ?? false)
+                }
             ) {
-                propertyList
+                if let presentation {
+                    settingsList(rows: settingRows, values: presentation.values)
+                }
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
+        .onAppear(perform: refreshPresentation)
+        .onChange(of: presentationRefreshKey) { _, _ in refreshPresentation() }
         .onDisappear { flushPendingSliderApply() }
     }
 
     // MARK: - Reset
 
     @ViewBuilder
-    private var resetAccessory: some View {
+    private func resetAccessory(hasOverrides: Bool) -> some View {
         if hasOverrides {
             Button(action: resetOverrides) {
                 Image(systemName: "arrow.counterclockwise")
@@ -55,53 +64,167 @@ struct WPESceneCustomSettingsCard: View {
         }
     }
 
-    private var hasOverrides: Bool {
-        // Only count overrides on settings the user can actually see and reset.
-        // A leftover override on a hidden promo/ad entry must not light up the
-        // Reset button with nothing visible to undo.
-        let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
-        let visibleKeys = Set(interactiveProperties(values: values).map(\.key))
-        return descriptor.propertyOverrides.keys.contains { visibleKeys.contains($0) }
-    }
-
     private func resetOverrides() {
         apply(descriptor.clearingPropertyOverrides())
     }
 
     // MARK: - Property list
 
-    /// Settings the card actually renders: visible, interactive, and not an
-    /// embedded ad/donation/external-link block. Real WPE projects pad
-    /// `properties` with macOS-unsupported file/directory pickers, decorative
-    /// section headers (`group`/`text`), and promo blocks the engine never binds
-    /// to the render graph. Centralised so the row list and the Reset-button
-    /// state stay in lock-step.
-    private func interactiveProperties(
+    private func settingsList(
+        rows: [WPEProjectSettingsPresentation.Row],
         values: [String: WallpaperEngineProjectPropertyValue]
-    ) -> [WallpaperEngineProjectPropertySchema.Property] {
-        schema.visibleProperties(values: values)
-            .filter { Self.isInteractive($0.type) && !$0.isPromotionalLink }
+    ) -> some View {
+        let showsSectionAffiliation = rows.contains { row in
+            if case .sectionHeader = row { return true }
+            return false
+        }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                settingRowView(
+                    for: row,
+                    values: values,
+                    showsDivider: index < rows.count - 1,
+                    showsSectionAffiliation: showsSectionAffiliation
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, -10)
     }
 
-    private var propertyList: some View {
-        let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
-        let interactive = interactiveProperties(values: values)
-
-        return VStack(spacing: 8) {
-            ForEach(interactive) { property in
+    @ViewBuilder
+    private func settingRowView(
+        for row: WPEProjectSettingsPresentation.Row,
+        values: [String: WallpaperEngineProjectPropertyValue],
+        showsDivider: Bool,
+        showsSectionAffiliation: Bool
+    ) -> some View {
+        switch row {
+        case .sectionHeader(let section):
+            rowContainer(showsDivider: showsDivider) {
+                sectionHeaderRow(section)
+            }
+        case .property(let property):
+            rowContainer(
+                showsDivider: showsDivider,
+                showsSectionAffiliation: showsSectionAffiliation
+            ) {
                 propertyView(for: property, values: values)
-                if property.id != interactive.last?.id {
-                    Divider()
-                }
             }
         }
     }
 
-    static func isInteractive(_ type: WallpaperEngineProjectPropertySchema.PropertyType) -> Bool {
-        switch type {
-        case .bool, .slider, .combo, .color, .textinput: return true
-        case .file, .directory, .group, .text, .unsupported: return false
+    private func rowContainer<Content: View>(
+        showsDivider: Bool,
+        showsSectionAffiliation: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: showsSectionAffiliation ? 6 : 0) {
+            if showsSectionAffiliation {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.blue.opacity(0.72))
+                    .frame(width: 3)
+                    .padding(.vertical, 8)
+                    .accessibilityHidden(true)
+            }
+
+            content()
         }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .overlay(alignment: .bottom) {
+                if showsDivider {
+                    Divider()
+                }
+            }
+    }
+
+    private func sectionHeaderRow(_ section: WPEProjectSettingsPresentation.Section) -> some View {
+        let isExpanded = expandedSections.contains(section.id)
+        return Button {
+            toggleSection(section.id)
+        } label: {
+            HStack(spacing: 8) {
+                Text(verbatim: section.title)
+                    .font(DesignTokens.Typography.bodyEmphasized)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private static let excludedSceneSettingKeys: Set<String> = ["schemecolor"]
+
+    private var presentationRefreshKey: PresentationRefreshKey {
+        PresentationRefreshKey(
+            workshopID: descriptor.workshopID,
+            cacheRelativePath: descriptor.cacheRelativePath,
+            entryFile: descriptor.entryFile,
+            propertyOverrides: descriptor.propertyOverrides
+        )
+    }
+
+    private struct PresentationRefreshKey: Equatable {
+        let workshopID: String
+        let cacheRelativePath: String
+        let entryFile: String
+        let propertyOverrides: [String: WallpaperEngineProjectPropertyValue]
+    }
+
+    private func refreshPresentation() {
+        let next = WPEProjectSettingsPresentation(
+            schema: schema,
+            overrides: descriptor.propertyOverrides,
+            excludedKeys: Self.excludedSceneSettingKeys
+        )
+        presentation = next
+        expandedSections = WPEProjectSettingsPresentation.prunedSectionIDs(
+            expandedSections,
+            for: next.sections
+        )
+        settingRows = next.rows(expandedSectionIDs: expandedSections)
+    }
+
+    private func toggleSection(_ sectionID: String) {
+        if expandedSections.contains(sectionID) {
+            expandedSections.remove(sectionID)
+        } else {
+            expandedSections.insert(sectionID)
+        }
+        refreshRows()
+    }
+
+    private func refreshRows() {
+        guard let presentation else { return }
+        settingRows = presentation.rows(expandedSectionIDs: expandedSections)
+    }
+
+    static func isSceneSettingCandidate(
+        _ property: WallpaperEngineProjectPropertySchema.Property
+    ) -> Bool {
+        !excludedSceneSettingKeys.contains(property.key)
+            && isInteractive(property.type)
+            && !property.isPromotionalLink
+    }
+
+    static func isInteractive(_ type: WallpaperEngineProjectPropertySchema.PropertyType) -> Bool {
+        WPEProjectSettingsPresentation.isSceneInteractive(type)
     }
 
     @ViewBuilder
@@ -111,7 +234,7 @@ struct WPESceneCustomSettingsCard: View {
     ) -> some View {
         switch property.type {
         case .bool:
-            WPEProjectSettingRow(icon: "checkmark.square", iconColor: .green, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 Toggle("", isOn: boolBinding(for: property))
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -119,7 +242,7 @@ struct WPESceneCustomSettingsCard: View {
                     .accessibilityLabel(property.displayText)
             }
         case .slider:
-            WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                     Slider(
                         value: numberBinding(for: property),
@@ -138,7 +261,7 @@ struct WPESceneCustomSettingsCard: View {
         case .combo:
             let currentValue = value(for: property, values: values)
             let optionsCoverCurrent = property.options.contains { $0.value == currentValue }
-            WPEProjectSettingRow(icon: "list.bullet.rectangle", iconColor: .purple, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 if property.options.isEmpty {
                     Text(verbatim: currentValue.stringValue)
                         .font(DesignTokens.Typography.code)
@@ -161,14 +284,14 @@ struct WPESceneCustomSettingsCard: View {
                 }
             }
         case .color:
-            WPEProjectSettingRow(icon: "paintpalette", iconColor: .pink, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 ColorPicker("", selection: colorBinding(for: property), supportsOpacity: false)
                     .labelsHidden()
                     .controlSize(.small)
                     .accessibilityLabel(property.displayText)
             }
         case .textinput:
-            WPEProjectSettingRow(icon: "text.cursor", iconColor: .teal, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 TextField("", text: stringBinding(for: property))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 132)

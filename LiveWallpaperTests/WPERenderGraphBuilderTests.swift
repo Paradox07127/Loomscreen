@@ -960,6 +960,53 @@ struct WPERenderGraphBuilderTests {
         #expect(pass.textures[2] == .fbo("_rt_FullFrameBuffer"))
     }
 
+    @Test("Double-underscore generated texture refs route through asset lookup")
+    func doubleUnderscoreGeneratedTextureRefsRouteToAssetLookup() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let generatedName = "__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70"
+        try writeJSON(["material": "materials/layer.json"], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": [generatedName]
+            ]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+
+        let object = WPESceneImageObject(
+            id: "hero",
+            name: "Hero",
+            imageRelativePath: "models/layer.json",
+            materialRelativePath: nil,
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            visible: true,
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1,
+            blendMode: .normal,
+            alignment: .center,
+            size: nil,
+            effects: [],
+            animationLayers: [],
+            parallaxDepth: SIMD2<Double>(0, 0)
+        )
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [object],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let pass = try #require(graph.layers.first?.passes.first)
+        #expect(pass.textures[0] == .asset(generatedName))
+    }
+
     @Test("Effect-declared FBO refs route through .fbo even without underscore prefix")
     func declaredEffectFBOTexturesRouteToFBO() throws {
         let root = FileManager.default.temporaryDirectory

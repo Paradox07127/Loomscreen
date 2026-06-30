@@ -15,7 +15,7 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
         case .all: return String(localized: "All", comment: "Workshop content-type filter: no type restriction.")
         case .scene: return String(localized: "Scene", comment: "Workshop content-type filter: scene wallpapers.")
         case .video: return String(localized: "Video", comment: "Workshop content-type filter: video wallpapers.")
-        case .web: return String(localized: "Web", comment: "Workshop content-type filter: web/HTML wallpapers.")
+        case .web: return String(localized: "Web", comment: "Workshop content-type filter: web wallpapers.")
         }
     }
 
@@ -158,8 +158,7 @@ final class WorkshopBrowseViewModel {
     private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
     private(set) var selectedResolutions: Set<WorkshopResolutionFilter> = Set(WorkshopResolutionFilter.selectableCases)
     private(set) var selectedGenres: Set<String> = Set(WorkshopGenre.allTags)
-    /// Trending window in days; only used when sort is `.trending`.
-    private(set) var trendingDays: Int = 7
+    private(set) var preferredTimeFrame: WorkshopTimeFrame = .allTime
     /// When set, the grid shows only this creator's published files (via
     /// GetUserFiles). Mutually exclusive with `pinnedTag`.
     private(set) var creatorFilter: CreatorFilter?
@@ -230,7 +229,7 @@ final class WorkshopBrowseViewModel {
 
     init(services: WorkshopServices) {
         self.services = services
-        self.currentRequest = WorkshopQueryRequest(sort: .topRated)
+        self.currentRequest = WorkshopQueryRequest(sort: .topRated, timeFrame: .allTime)
         // Seed `currentRequest` to match the restored filters so
         // `hasPendingChanges` is false on launch.
         loadPersistedFilters()
@@ -340,9 +339,13 @@ final class WorkshopBrowseViewModel {
     // Filter mutations below edit state and schedule the shared debounced
     // auto-apply — none query directly, so a burst of chip toggles costs one request.
 
-    func updateSortOption(_ sort: WorkshopSortMode, days: Int) {
+    func updateSort(_ sort: WorkshopSortMode) {
         preferredSort = sort
-        if sort == .trending { trendingDays = days }
+        scheduleAutoApply()
+    }
+
+    func updateTimeFrame(_ timeFrame: WorkshopTimeFrame) {
+        preferredTimeFrame = timeFrame
         scheduleAutoApply()
     }
 
@@ -528,7 +531,7 @@ final class WorkshopBrowseViewModel {
                 searchText: "",
                 page: page,
                 numPerPage: Self.perPage,
-                days: preferredSort == .trending ? trendingDays : nil,
+                timeFrame: preferredTimeFrame,
                 requiredTags: [pinnedTag],
                 excludedTags: Self.alwaysExcludedTags
             )
@@ -551,7 +554,7 @@ final class WorkshopBrowseViewModel {
             searchText: trimmed,
             page: page,
             numPerPage: Self.perPage,
-            days: preferredSort == .trending ? trendingDays : nil,
+            timeFrame: preferredTimeFrame,
             requiredTags: [],
             excludedTags: excluded
         )

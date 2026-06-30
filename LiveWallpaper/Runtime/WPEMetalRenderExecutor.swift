@@ -5,6 +5,7 @@ import LiveWallpaperProWPE
 import Metal
 import MetalKit
 import os
+import simd
 
 /// Shared classifier for WPE compose/project utility layers, so the dispatcher,
 /// target pool, and executor branch on one definition instead of duplicating
@@ -436,6 +437,13 @@ final class WPEMetalRenderExecutor {
             defer { lock.unlock() }
             return (counts[id] ?? 0) > 0
         }
+    }
+
+    /// Metal resources are thread-safe handles, but `MTLTexture` is not annotated
+    /// `Sendable` in the SDK. Present completion runs on Metal callback threads,
+    /// so wrap the source texture before capturing it in the `@Sendable` handler.
+    private struct PresentCompletionTexture: @unchecked Sendable {
+        let texture: MTLTexture
     }
 
     private struct MSDFTextPipelineKey: Hashable {
@@ -910,6 +918,7 @@ final class WPEMetalRenderExecutor {
         size: CGSize,
         textures: [String: MTLTexture],
         dynamicTextureNames: Set<String> = [],
+        dynamicLayerIDs: Set<String> = [],
         runtimeUniforms: WPEMetalRuntimeUniforms = .zero,
         cameraUniforms: WPEMetalCameraUniforms = .identity,
         sceneID: String? = nil,
@@ -990,6 +999,7 @@ final class WPEMetalRenderExecutor {
         var frameState = WPEMetalFrameState(
             output: output,
             sceneSize: size,
+            cameraUniforms: cameraUniforms,
             previousSceneTexture: reusableHistory?.sceneTexture,
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
@@ -1103,7 +1113,8 @@ final class WPEMetalRenderExecutor {
             let staticCachePlan = staticLayerCacheEnabled
                 ? WPEMetalStaticLayerClassifier.cachePlan(
                     for: layer,
-                    dynamicTextureNames: dynamicTextureNames
+                    dynamicTextureNames: dynamicTextureNames,
+                    dynamicLayerIDs: dynamicLayerIDs
                 )
                 : nil
             let cachedStaticLayer = staticCachePlan.flatMap { plan in
@@ -1960,7 +1971,12 @@ final class WPEMetalRenderExecutor {
     }
 
     @MainActor
-    func present(texture source: MTLTexture, in view: MTKView, fitMode: WPEPresentFitMode = .stretch) throws -> Bool {
+    func present(
+        texture source: MTLTexture,
+        in view: MTKView,
+        fitMode: WPEPresentFitMode = .stretch,
+        presentCompletion: (@Sendable (MTLTexture, MTLCommandBuffer, @escaping @Sendable () -> Void) -> Void)? = nil
+    ) throws -> Bool {
         guard let drawable = view.currentDrawable else {
             #if DEBUG
             Logger.info(
@@ -2010,13 +2026,21 @@ final class WPEMetalRenderExecutor {
         // output ring doesn't hand the texture to the next frame's render
         // while this GPU read is still in flight.
         let sourceID = ObjectIdentifier(source)
+        let completionSource = PresentCompletionTexture(texture: source)
         let tracker = presentTracker
         let sink = gpuErrorSink
         tracker.increment(sourceID)
         commandBuffer.addCompletedHandler { cb in
-            tracker.decrement(sourceID)
+            let releaseSource: @Sendable () -> Void = {
+                tracker.decrement(sourceID)
+            }
             if cb.status == .error {
                 sink.record("present: \(cb.error?.localizedDescription ?? "unknown")")
+            }
+            if let presentCompletion {
+                presentCompletion(completionSource.texture, cb, releaseSource)
+            } else {
+                releaseSource()
             }
         }
         commandBuffer.commit()
@@ -2228,6 +2252,15 @@ final class WPEMetalRenderExecutor {
             depthTest: pass.pass.depthTest,
             depthWrite: pass.pass.depthWrite
         ))
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[renderPassState] pass=\(pass.pass.id) layer=\(layer.objectName) shader=\(pass.pass.shader) "
+                    + "target=\(pass.pass.target) blend=\(pass.pass.blending) "
+                    + "depthTest=\(pass.pass.depthTest) depthWrite=\(pass.pass.depthWrite) "
+                    + "needsDepth=\(needsDepth) cull=\(pass.pass.cullMode)",
+                level: .notice
+            )
+        }
 
         let drewPuppetMaterial = try encodePuppetMaterialPassIfNeeded(
             pass: pass,
@@ -2935,7 +2968,8 @@ final class WPEMetalRenderExecutor {
             for: layer,
             sceneSize: frameState.sceneSize,
             cameraParallax: frameState.cameraParallax,
-            sourceTexture: sourceTexture
+            sourceTexture: sourceTexture,
+            cameraUniforms: frameState.cameraUniforms
         )
         let localSize = puppetCompositeLocalSize(for: layer, sourceTexture: sourceTexture)
         let paletteState = puppetBonePalette(for: skinningState)
@@ -3960,7 +3994,8 @@ final class WPEMetalRenderExecutor {
         for layer: WPERenderLayer,
         sceneSize: CGSize,
         cameraParallax: WPECameraParallaxFrame = .neutral,
-        sourceTexture: MTLTexture
+        sourceTexture: MTLTexture,
+        cameraUniforms: WPEMetalCameraUniforms = .identity
     ) -> WPEObjectQuadUniforms {
         let geometry = layer.geometry
         let sceneWidth = Float(max(sceneSize.width, 1))
@@ -3971,11 +4006,37 @@ final class WPEMetalRenderExecutor {
         // `usesObjectQuadGeometry`.)
         if geometry == .identity {
             let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
-            return WPEObjectQuadUniforms(
+            let uniforms = WPEObjectQuadUniforms(
                 centerAndSize: SIMD4<Float>(parallax.x, parallax.y, sceneWidth, sceneHeight),
                 sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
                 uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
             )
+            recordObjectQuadDebug(
+                layer: layer,
+                sourceTexture: sourceTexture,
+                cameraUniforms: cameraUniforms,
+                uniforms: uniforms,
+                path: "identity"
+            )
+            return uniforms
+        }
+        if cameraUniforms.usesPerspectiveProjection,
+           let projected = perspectiveObjectQuadUniforms(
+            for: layer,
+            sceneWidth: sceneWidth,
+            sceneHeight: sceneHeight,
+            cameraParallax: cameraParallax,
+            sourceTexture: sourceTexture,
+            cameraUniforms: cameraUniforms
+           ) {
+            recordObjectQuadDebug(
+                layer: layer,
+                sourceTexture: sourceTexture,
+                cameraUniforms: cameraUniforms,
+                uniforms: projected,
+                path: "perspective"
+            )
+            return projected
         }
         // Scene-capture utility subregion layers use the SAME object-quad geometry
         // as the normal placed-layer path below. At render time `geometry.origin`
@@ -4003,7 +4064,7 @@ final class WPEMetalRenderExecutor {
             width: width,
             height: height
         ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
-        return WPEObjectQuadUniforms(
+        let uniforms = WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(
                 sceneWidth,
@@ -4017,6 +4078,104 @@ final class WPEMetalRenderExecutor {
                 0,
                 0
             )
+        )
+        recordObjectQuadDebug(
+            layer: layer,
+            sourceTexture: sourceTexture,
+            cameraUniforms: cameraUniforms,
+            uniforms: uniforms,
+            path: cameraUniforms.usesPerspectiveProjection ? "perspective-fallback" : "orthographic"
+        )
+        return uniforms
+    }
+
+    private func perspectiveObjectQuadUniforms(
+        for layer: WPERenderLayer,
+        sceneWidth: Float,
+        sceneHeight: Float,
+        cameraParallax: WPECameraParallaxFrame,
+        sourceTexture: MTLTexture,
+        cameraUniforms: WPEMetalCameraUniforms
+    ) -> WPEObjectQuadUniforms? {
+        let geometry = layer.geometry
+        let camera = cameraUniforms.sceneCamera
+        let eye = SIMD3<Float>(Float(camera.eye.x), Float(camera.eye.y), Float(camera.eye.z))
+        let cameraCenter = SIMD3<Float>(Float(camera.center.x), Float(camera.center.y), Float(camera.center.z))
+        let upSeed = SIMD3<Float>(Float(camera.up.x), Float(camera.up.y), Float(camera.up.z))
+        let forward = Self.normalized(cameraCenter - eye, fallback: SIMD3<Float>(0, 0, -1))
+        let right = Self.normalized(simd_cross(forward, upSeed), fallback: SIMD3<Float>(1, 0, 0))
+        let up = Self.normalized(simd_cross(right, forward), fallback: SIMD3<Float>(0, 1, 0))
+        let origin = SIMD3<Float>(
+            Float(geometry.origin.x),
+            Float(geometry.origin.y),
+            Float(geometry.origin.z)
+        )
+        let relative = origin - eye
+        let depth = simd_dot(relative, forward)
+        guard depth.isFinite, depth > 0.0001 else { return nil }
+
+        let fov = Float(max(min(camera.fov, 179), 1)) * .pi / 180
+        let focal = sceneHeight / max(2 * tan(fov * 0.5), 0.0001)
+        let projectedCenter = SIMD2<Float>(
+            simd_dot(relative, right) / depth * focal,
+            simd_dot(relative, up) / depth * focal
+        )
+        let baseWidth = Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
+        let baseHeight = Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
+        let scaleX = Float(geometry.scale.x)
+        let scaleY = Float(geometry.scale.y)
+        let width = max(baseWidth * max(abs(scaleX), 0.0001) / depth * focal, 0.0001)
+        let height = max(baseHeight * max(abs(scaleY), 0.0001) / depth * focal, 0.0001)
+        let quadCenter = projectedCenter
+            + Self.alignmentCenterOffset(alignment: geometry.alignment, width: width, height: height)
+            + cameraParallax.pixelOffset(
+                depth: layer.parallaxDepth,
+                sceneSize: CGSize(width: CGFloat(sceneWidth), height: CGFloat(sceneHeight))
+            )
+        return WPEObjectQuadUniforms(
+            centerAndSize: SIMD4<Float>(quadCenter.x, quadCenter.y, width, height),
+            sceneSizeAndRotation: SIMD4<Float>(
+                sceneWidth,
+                sceneHeight,
+                Float(geometry.angles.z),
+                0
+            ),
+            uvSignAndPadding: SIMD4<Float>(
+                scaleX < 0 ? -1 : 1,
+                scaleY < 0 ? -1 : 1,
+                0,
+                0
+            )
+        )
+    }
+
+    private static func normalized(
+        _ value: SIMD3<Float>,
+        fallback: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        let length = simd_length(value)
+        guard length.isFinite, length > 0.000001 else { return fallback }
+        return value / length
+    }
+
+    private func recordObjectQuadDebug(
+        layer: WPERenderLayer,
+        sourceTexture: MTLTexture,
+        cameraUniforms: WPEMetalCameraUniforms,
+        uniforms: WPEObjectQuadUniforms,
+        path: String
+    ) {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return }
+        let origin = layer.geometry.origin
+        let scale = layer.geometry.scale
+        WPESceneDebugArtifacts.shared.appendLog(
+            "[objectQuad] path=\(path) perspective=\(cameraUniforms.usesPerspectiveProjection) "
+                + "layer=\(layer.objectName) id=\(layer.objectID) "
+                + "origin=(\(origin.x),\(origin.y),\(origin.z)) scale=(\(scale.x),\(scale.y),\(scale.z)) "
+                + "source=\(sourceTexture.width)x\(sourceTexture.height) "
+                + "center=(\(uniforms.centerAndSize.x),\(uniforms.centerAndSize.y)) "
+                + "size=(\(uniforms.centerAndSize.z),\(uniforms.centerAndSize.w))",
+            level: .notice
         )
     }
 
@@ -4291,7 +4450,8 @@ final class WPEMetalRenderExecutor {
                 for: layer,
                 sceneSize: frameState.sceneSize,
                 cameraParallax: frameState.cameraParallax,
-                sourceTexture: texture
+                sourceTexture: texture,
+                cameraUniforms: frameState.cameraUniforms
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4386,7 +4546,8 @@ final class WPEMetalRenderExecutor {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
-                sourceTexture: sourceTexture
+                sourceTexture: sourceTexture,
+                cameraUniforms: frameState.cameraUniforms
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4457,7 +4618,8 @@ final class WPEMetalRenderExecutor {
                 for: layer,
                 sceneSize: frameState.sceneSize,
                 cameraParallax: frameState.cameraParallax,
-                sourceTexture: sourceTexture
+                sourceTexture: sourceTexture,
+                cameraUniforms: frameState.cameraUniforms
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4481,6 +4643,16 @@ final class WPEMetalRenderExecutor {
         let gBrightness = WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
         let alpha = gAlpha * Float(layer.geometry.alpha)
         let brightness = gBrightness * Float(layer.geometry.brightness)
+        if WPESceneDebugArtifacts.shared.isEnabled {
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[imageUniform] layer=\(layer.objectName) id=\(layer.objectID) shader=\(pass.pass.shader) "
+                    + "color=(\(color.x),\(color.y),\(color.z),\(color.w)) "
+                    + "gAlpha=\(gAlpha) layerAlpha=\(layer.geometry.alpha) alpha=\(alpha) "
+                    + "gBrightness=\(gBrightness) layerBrightness=\(layer.geometry.brightness) brightness=\(brightness) "
+                    + "hasMask=\(hasMask)",
+                level: .notice
+            )
+        }
         // Diagnostic for the "black silhouette" bug: genericimage shaders do
         // `rgb = sampled.rgb * color.rgb * brightness`, so brightness==0 OR
         // color==0 blacks out the layer while alpha (a separate term) survives.

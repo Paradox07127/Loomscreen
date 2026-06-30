@@ -20,7 +20,7 @@ enum HTMLWallpaperCompatibilityPolicy {
         effective.audioVolume = trust.effectiveAudioVolume(requested: config.audioVolume)
 
         let shouldEnablePhysicalPixels = !effective.physicalPixelLayout
-            && looksLikeWallpaperEngineFolder(source)
+            && shouldAutoEnablePhysicalPixelLayout(source)
         if shouldEnablePhysicalPixels {
             effective.physicalPixelLayout = true
         }
@@ -32,18 +32,54 @@ enum HTMLWallpaperCompatibilityPolicy {
         )
     }
 
-    /// Wallpaper Engine workshop projects ship a `project.json` next to the entry HTML; presence is a strong signal we should run them in Windows-DIP mode.
+    /// Wallpaper Engine workshop projects ship a `project.json` next to the
+    /// entry HTML. Older canvas payloads generally need physical-pixel layout,
+    /// while modern Three/PIXI-style pages that read `devicePixelRatio` already
+    /// size their own backing store and must remain in CSS-point layout.
+    static func shouldAutoEnablePhysicalPixelLayout(_ source: HTMLSource) -> Bool {
+        guard case .folder(_, let indexFileName) = source else { return false }
+        return withResolvedFolderURL(source) { folderURL in
+            shouldAutoEnablePhysicalPixelLayout(folderURL: folderURL, indexFileName: indexFileName)
+        } ?? false
+    }
+
+    static func shouldAutoEnablePhysicalPixelLayout(folderURL: URL, indexFileName: String) -> Bool {
+        let manifest = folderURL.appendingPathComponent("project.json")
+        guard FileManager.default.fileExists(atPath: manifest.path) else { return false }
+        return !entryHTMLLooksDPRAware(folderURL: folderURL, indexFileName: indexFileName)
+    }
+
+    /// Wallpaper Engine workshop projects ship a `project.json` next to the entry HTML.
     static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
-        guard case .folder(let bookmarkData, _) = source else { return false }
+        withResolvedFolderURL(source) { folderURL in
+            let manifest = folderURL.appendingPathComponent("project.json")
+            return FileManager.default.fileExists(atPath: manifest.path)
+        } ?? false
+    }
+
+    private static func withResolvedFolderURL<T>(_ source: HTMLSource, _ body: (URL) -> T) -> T? {
+        guard case .folder(let bookmarkData, _) = source else { return nil }
         guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
             bookmarkData,
             target: .transient
-        ) else { return false }
+        ) else { return nil }
         let folderURL = resolved.url
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
-        let manifest = folderURL.appendingPathComponent("project.json")
-        return FileManager.default.fileExists(atPath: manifest.path)
+        return body(folderURL)
+    }
+
+    private static func entryHTMLLooksDPRAware(folderURL: URL, indexFileName: String) -> Bool {
+        guard let entryURL = WPEPathSafety.resourceURL(root: folderURL, relativePath: indexFileName) else {
+            return false
+        }
+        guard let data = try? Data(contentsOf: entryURL, options: .mappedIfSafe),
+              let source = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        let lowered = source.lowercased()
+        return lowered.contains("setpixelratio(")
+            || lowered.contains("devicepixelratio")
     }
 }
 

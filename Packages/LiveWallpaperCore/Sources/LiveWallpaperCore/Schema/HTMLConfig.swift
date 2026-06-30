@@ -59,10 +59,9 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// CSS `transform: rotate()` in degrees. Positive = clockwise.
     public var transformRotationDegrees: Double = 0
 
-    /// Sets `pageZoom = 1/backingScaleFactor` so `window.innerWidth` reports
-    /// physical pixel count instead of logical points. Required for Wallpaper
-    /// Engine web wallpapers (designed against Windows DIP) to avoid canvas
-    /// misalignment on Retina displays.
+    /// Upgrades CSS-naive GPU canvas backing stores to physical pixels on
+    /// Retina displays. Kept off for pages that already size themselves from
+    /// `devicePixelRatio`, because applying both paths produces double scaling.
     public var physicalPixelLayout: Bool = false
 
     /// When `true`, runs `WKWebView` with `WKWebsiteDataStore.nonPersistent()`

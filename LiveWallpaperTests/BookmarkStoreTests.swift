@@ -240,7 +240,7 @@ struct BookmarkStoreTests {
         let label = BookmarkStore.defaultLabel(
             for: .html(source: .inline("<html></html>"), config: .default)
         )
-        #expect(label == "Inline HTML")
+        #expect(label == "Inline web content")
     }
 
     @Test("defaultLabel: shader uses preset rawValue")

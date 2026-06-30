@@ -679,6 +679,7 @@ struct WPEShaderTranspiler {
             premultipliedInputSlots: premultipliedInputSlots,
             repeatSamplers: repeatSamplers
         )
+        inner = markLocalVariableDeclarationsMaybeUnused(inner)
 
         let usesGLOut = inner.contains("gl_FragColor")
         let usesWPEOut = inner.contains("wpe_fragColor")
@@ -704,6 +705,24 @@ struct WPEShaderTranspiler {
     }
 
     // MARK: - Type / intrinsic substitutions
+
+    private static func markLocalVariableDeclarationsMaybeUnused(_ source: String) -> String {
+        source.components(separatedBy: "\n").map { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("[[maybe_unused]]"),
+                  !trimmed.hasPrefix("for "),
+                  !trimmed.hasPrefix("for("),
+                  line.range(
+                    of: #"^\s*(?:const\s+)?(?:auto|float(?:[234](?:x[234])?)?|int[234]?|uint[234]?|bool[234]?)\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*\[[^\]]+\])?\s*(?:=|;)"#,
+                    options: .regularExpression
+                  ) != nil else {
+                return line
+            }
+
+            let indentEnd = line.firstIndex { !$0.isWhitespace } ?? line.startIndex
+            return String(line[..<indentEnd]) + "[[maybe_unused]] " + String(line[indentEnd...])
+        }.joined(separator: "\n")
+    }
 
     /// Apply token-level substitutions for the GLSL→MSL gap.
     private static func applySubstitutions(
@@ -738,6 +757,7 @@ struct WPEShaderTranspiler {
             s = rewriteProgramScopeConstDeclarations(s)
         }
         s = rewriteReservedIdentifiers(s)
+        s = canonicalizeTextureSampleAliases(s)
         s = rewriteTextureLodCalls(s, premultipliedInputSlots: premultipliedInputSlots, repeatSamplers: repeatSamplers)
         s = rewriteTextureCalls(s, premultipliedInputSlots: premultipliedInputSlots, repeatSamplers: repeatSamplers)
         s = rewriteTexCoordTextureSampleUVFallback(s)
@@ -749,7 +769,7 @@ struct WPEShaderTranspiler {
         s = rewritePointerPositionFloatAssignments(s)
         s = rewriteTextureResolutionVector2Assignments(s)
         s = rewriteVectorConstructorNarrowing(s)
-        s = rewriteTexCoordVector2Arithmetic(s)
+        s = rewriteTexCoordVector2Arithmetic(s, varyingTypesByName: varyingTypesByName)
         s = rewriteTexCoordMaskUVFallback(
             s,
             varyingTypesByName: varyingTypesByName,
@@ -764,6 +784,22 @@ struct WPEShaderTranspiler {
         s = stripInParameterQualifier(s)
 
         return s
+    }
+
+    private static func canonicalizeTextureSampleAliases(_ source: String) -> String {
+        source.components(separatedBy: "\n").map { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#define texSample2D")
+                || trimmed.hasPrefix("#define texSample2DLod")
+                || trimmed.hasPrefix("#define texture2D") {
+                return "// disabled texture sample alias macro: \(line)"
+            }
+
+            var rewritten = wordReplace(line, find: "texSample2DLod", replace: "textureLod")
+            rewritten = wordReplace(rewritten, find: "texSample2D", replace: "texture")
+            rewritten = wordReplace(rewritten, find: "texture2D", replace: "texture")
+            return rewritten
+        }.joined(separator: "\n")
     }
 
     /// Metal requires program-scope variables to live in the constant address
@@ -1098,19 +1134,77 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// WPE workshop shaders often declare v_TexCoord as vec3 while using it as
-    /// a vec2 UV in arithmetic with CAST2/vec2 values.
-    private static func rewriteTexCoordVector2Arithmetic(_ source: String) -> String {
+    /// WPE workshop shaders often declare v_TexCoord as vec3/vec4 while using
+    /// it as a vec2 UV in arithmetic.
+    private static func rewriteTexCoordVector2Arithmetic(
+        _ source: String,
+        varyingTypesByName: [String: String]
+    ) -> String {
         let pattern = #"\bv_TexCoord\s*([+\-])\s*((?:float2|CAST2)\s*\()"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return source
         }
         let range = NSRange(source.startIndex..., in: source)
-        return regex.stringByReplacingMatches(
+        var result = regex.stringByReplacingMatches(
             in: source,
             range: range,
             withTemplate: "v_TexCoord.xy $1 $2"
         )
+
+        guard let texCoordType = varyingTypesByName["v_TexCoord"],
+              ["float3", "float4"].contains(texCoordType) else {
+            return result
+        }
+
+        let declarationPattern = #"\bfloat2\s+([A-Za-z_][A-Za-z0-9_]*)\b"#
+        guard let declarationRegex = try? NSRegularExpression(pattern: declarationPattern) else {
+            return result
+        }
+        let vector2Names = Set(
+            declarationRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+                .compactMap { match -> String? in
+                    guard let range = Range(match.range(at: 1), in: result) else {
+                        return nil
+                    }
+                    return String(result[range])
+                }
+        )
+        guard !vector2Names.isEmpty else {
+            return result
+        }
+
+        result = result.components(separatedBy: "\n").map { line in
+            rewriteTexCoordVector2AssignmentLine(line, vector2Names: vector2Names)
+        }.joined(separator: "\n")
+        return result
+    }
+
+    private static func rewriteTexCoordVector2AssignmentLine(
+        _ line: String,
+        vector2Names: Set<String>
+    ) -> String {
+        guard line.contains("v_TexCoord"),
+              let semicolon = line.firstIndex(of: ";"),
+              let equal = line.firstIndex(of: "=") else {
+            return line
+        }
+        let lhs = String(line[..<equal])
+        let isVector2Declaration = lhs.range(
+            of: #"\bfloat2\s+[A-Za-z_][A-Za-z0-9_]*\s*$"#,
+            options: .regularExpression
+        ) != nil
+        let isKnownVector2Assignment = vector2Names.contains(lhs.trimmingCharacters(in: .whitespaces))
+        guard isVector2Declaration || isKnownVector2Assignment else {
+            return line
+        }
+
+        let rhsStart = line.index(after: equal)
+        let rhs = String(line[rhsStart..<semicolon])
+        let rewritten = wordReplaceUnlessMemberAccess(rhs, find: "v_TexCoord", replace: "v_TexCoord.xy")
+        guard rewritten != rhs else {
+            return line
+        }
+        return String(line[..<rhsStart]) + rewritten + String(line[semicolon...])
     }
 
     /// waterwaves/waterflow compute a resolution-scaled mask UV into `v_TexCoord.zw`

@@ -33,6 +33,7 @@ enum WPEBuiltinFrameworkAssets {
         "materials/util/solidlayer_depthtest.json",
         "materials/util/solidlayer_instance.json",
         "materials/util/solidlayer_instance_4.json",
+        "materials/util/solidlayer_instance_depthtest_4.json",
         "materials/util/white.png",
         "models/util/composelayer.json",
         "models/util/fullscreenlayer.json",

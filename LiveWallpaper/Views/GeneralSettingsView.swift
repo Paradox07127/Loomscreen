@@ -414,15 +414,15 @@ struct GeneralSettingsView: View {
                 icon: "wrench.and.screwdriver",
                 iconColor: .orange,
                 title: "Developer Mode",
-                subtitle: "Show Developer Tools in the sidebar and enable right-click Inspect Element on HTML wallpapers.",
-                info: "When on, HTML wallpapers open with WebKit's Web Inspector accessible — right-click in a webview wallpaper to inspect. Recommended only when debugging your own content."
+                subtitle: "Show Developer Tools in the sidebar and enable right-click Inspect Element on web wallpapers.",
+                info: "When on, web wallpapers open with WebKit's Web Inspector accessible — right-click in a webview wallpaper to inspect. Recommended only when debugging your own content."
             ) {
                 Toggle("", isOn: $developerModeEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .onChange(of: developerModeEnabled) { _, _ in updateGlobalSettings() }
                     .accessibilityLabel(Text("Developer Mode"))
-                    .accessibilityHint(Text("Reveals diagnostic tools and HTML web inspector. Off by default."))
+                    .accessibilityHint(Text("Reveals diagnostic tools and the web inspector. Off by default."))
             }
             #endif
 

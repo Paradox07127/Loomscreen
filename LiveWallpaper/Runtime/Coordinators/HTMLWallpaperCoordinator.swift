@@ -101,7 +101,7 @@ final class HTMLWallpaperCoordinator {
 
         var persistedConfig = config
         if !persistedConfig.physicalPixelLayout,
-           HTMLWallpaperCompatibilityPolicy.looksLikeWallpaperEngineFolder(source) {
+           HTMLWallpaperCompatibilityPolicy.shouldAutoEnablePhysicalPixelLayout(source) {
             persistedConfig.physicalPixelLayout = true
             Logger.info("HTML wallpaper: auto-enabling physical-pixel layout for Wallpaper Engine folder on screen \(screen.id)", category: .screenManager)
         }

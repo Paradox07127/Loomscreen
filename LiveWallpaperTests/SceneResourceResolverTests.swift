@@ -129,6 +129,40 @@ struct SceneResourceResolverTests {
         #expect(image.height == 4)
     }
 
+    @Test("Workshop raw image references resolve converted material tex payloads")
+    func workshopRawImageReferenceResolvesConvertedTex() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let stored = fixture.cacheRoot
+            .appendingPathComponent("materials/workshop/2328851328/particle", isDirectory: true)
+            .appendingPathComponent("雪花.jpg.tex")
+        try FileManager.default.createDirectory(at: stored.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeRGBA8888Tex(at: stored)
+
+        let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
+        let image = try resolver.resolveImage(relativePath: "workshop/2328851328/particle/雪花.jpg")
+
+        #expect(image.width == 4)
+        #expect(image.height == 4)
+    }
+
+    @Test("Workshop raw image references exist when stored as converted material tex")
+    func workshopRawImageReferenceExistsWhenStoredAsConvertedTex() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let stored = fixture.cacheRoot
+            .appendingPathComponent("materials/workshop/2328851328/particle", isDirectory: true)
+            .appendingPathComponent("雪花.jpg.tex")
+        try FileManager.default.createDirectory(at: stored.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeRGBA8888Tex(at: stored)
+
+        let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
+
+        #expect(resolver.exists(relativePath: "workshop/2328851328/particle/雪花.jpg"))
+    }
+
     @Test("Renderable probe follows model material chain to terminal asset")
     func renderableProbeFollowsMaterialChain() throws {
         let fixture = try makeFixture()

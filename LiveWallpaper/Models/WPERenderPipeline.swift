@@ -80,6 +80,23 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
+    /// Applies per-frame transform-script origin overrides before object-scoped
+    /// uniforms are derived. Used by cursor-follow image layers whose WPE
+    /// SceneScript writes `origin = input.cursorWorldPosition`.
+    func applyingLayerOrigins(_ origins: [String: SIMD3<Double>]) -> WPEPreparedRenderPipeline {
+        guard !origins.isEmpty else { return self }
+        return WPEPreparedRenderPipeline(
+            layers: layers.map { layer in
+                guard let origin = origins[layer.graphLayer.objectID] else { return layer }
+                return WPEPreparedRenderLayer(
+                    graphLayer: layer.graphLayer.applyingOrigin(origin),
+                    puppetModel: layer.puppetModel,
+                    passes: layer.passes
+                )
+            }
+        )
+    }
+
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms
@@ -138,6 +155,29 @@ extension WPEPreparedRenderPipeline {
 }
 
 private extension WPERenderLayer {
+    func applyingOrigin(_ origin: SIMD3<Double>) -> WPERenderLayer {
+        let adjustedGeometry = geometry.applyingOrigin(origin)
+        return WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: adjustedGeometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
     func applyingVisible(_ visible: Bool) -> WPERenderLayer {
         WPERenderLayer(
             objectID: objectID,
@@ -216,6 +256,23 @@ private extension WPERenderLayer {
             passes: passes,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
+        )
+    }
+}
+
+private extension WPERenderLayerGeometry {
+    func applyingOrigin(_ origin: SIMD3<Double>) -> WPERenderLayerGeometry {
+        WPERenderLayerGeometry(
+            origin: origin,
+            scale: scale,
+            angles: angles,
+            alignment: alignment,
+            size: size,
+            puppetMeshCenter: puppetMeshCenter,
+            alpha: alpha,
+            alphaAnimation: alphaAnimation,
+            color: color,
+            brightness: brightness
         )
     }
 }

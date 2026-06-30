@@ -77,18 +77,17 @@ struct WorkshopBrowseFilterRibbon: View {
             Spacer(minLength: DesignTokens.Spacing.sm)
 
             sortMenu
+            timeFrameMenu
         }
     }
 
-    /// Sort menu with the Trending window folded in as discrete entries, so
-    /// there's a single control (no separate period picker).
     private var sortMenu: some View {
         Picker("Sort", selection: Binding(
-            get: { currentSortOption },
-            set: { viewModel.updateSortOption($0.sort, days: $0.days) }
+            get: { viewModel.preferredSort },
+            set: { viewModel.updateSort($0) }
         )) {
             ForEach(Self.sortOptions) { option in
-                Text(option.title).tag(option)
+                Text(Self.sortTitle(option)).tag(option)
             }
         }
         .labelsHidden()
@@ -97,6 +96,23 @@ struct WorkshopBrowseFilterRibbon: View {
         .fixedSize()
         .disabled(controlsDisabled)
         .help(Text("Sort criteria"))
+    }
+
+    private var timeFrameMenu: some View {
+        Picker("Time Frame", selection: Binding(
+            get: { timeFrameSelection },
+            set: { viewModel.updateTimeFrame($0) }
+        )) {
+            ForEach(WorkshopTimeFrame.allCases) { option in
+                Text(Self.timeFrameTitle(option)).tag(option)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(controlsDisabled || !timeFrameApplies)
+        .help(Text("Time frame applies to Most Popular"))
     }
 
     private var filtersToggle: some View {
@@ -323,59 +339,40 @@ struct WorkshopBrowseFilterRibbon: View {
         !selected.isEmpty && selected.count < total
     }
 
-    // MARK: - Sort options (Trending period folded in)
+    private var timeFrameApplies: Bool {
+        viewModel.preferredSort == .mostPopular
+    }
 
-    private var currentSortOption: SortOption {
-        switch viewModel.preferredSort {
-        case .trending:
-            switch viewModel.trendingDays {
-            case 30: return .trendingMonth
-            case 365: return .trendingYear
-            default: return .trendingWeek
-            }
-        case .newest: return .newest
-        case .mostSubscribed: return .mostSubscribed
-        case .topRated, .search: return .topRated
+    private var timeFrameSelection: WorkshopTimeFrame {
+        timeFrameApplies ? viewModel.preferredTimeFrame : .allTime
+    }
+
+    // MARK: - Sort / time frame options
+
+    private static let sortOptions: [WorkshopSortMode] = [
+        .mostPopular, .topRated, .newest, .lastUpdated, .mostSubscribed
+    ]
+
+    private static func sortTitle(_ sort: WorkshopSortMode) -> LocalizedStringKey {
+        switch sort {
+        case .mostPopular: return "Most Popular"
+        case .topRated: return "Top Rated All Time"
+        case .newest: return "Most Recent"
+        case .lastUpdated: return "Last Updated"
+        case .mostSubscribed: return "Total Unique Subscribers"
+        case .search: return "Search"
         }
     }
 
-    private static let sortOptions: [SortOption] = [
-        .topRated, .newest, .trendingWeek, .trendingMonth, .trendingYear, .mostSubscribed
-    ]
-
-    enum SortOption: Hashable, Identifiable {
-        case topRated, newest, mostSubscribed
-        case trendingWeek, trendingMonth, trendingYear
-
-        var id: Self { self }
-
-        var sort: WorkshopSortMode {
-            switch self {
-            case .topRated: return .topRated
-            case .newest: return .newest
-            case .mostSubscribed: return .mostSubscribed
-            case .trendingWeek, .trendingMonth, .trendingYear: return .trending
-            }
-        }
-
-        var days: Int {
-            switch self {
-            case .trendingWeek: return 7
-            case .trendingMonth: return 30
-            case .trendingYear: return 365
-            default: return 0
-            }
-        }
-
-        var title: LocalizedStringKey {
-            switch self {
-            case .topRated: return "Top Rated"
-            case .newest: return "Newest"
-            case .mostSubscribed: return "Most Subscribed"
-            case .trendingWeek: return "Trending · Week"
-            case .trendingMonth: return "Trending · Month"
-            case .trendingYear: return "Trending · Year"
-            }
+    private static func timeFrameTitle(_ timeFrame: WorkshopTimeFrame) -> LocalizedStringKey {
+        switch timeFrame {
+        case .today: return "Today"
+        case .oneWeek: return "One Week"
+        case .thirtyDays: return "Thirty Days"
+        case .threeMonths: return "Three Months"
+        case .sixMonths: return "Six Months"
+        case .oneYear: return "One Year"
+        case .allTime: return "All Time"
         }
     }
 }

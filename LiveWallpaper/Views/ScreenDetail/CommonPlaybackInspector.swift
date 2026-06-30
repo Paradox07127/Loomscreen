@@ -202,10 +202,10 @@ struct CommonPlaybackInspector: View {
             icon: "aspectratio",
             iconColor: .blue,
             title: "Scaling",
-            info: "How the scene fills the screen on non-16:9 displays. Fill crops to cover, Fit adds letterbox bars, Stretch distorts to fill."
+            info: "How the scene maps onto the display. Fill crops to cover, Fit adds letterbox bars, Center keeps the render at original size, Stretch distorts to fill."
         ) {
             Picker("", selection: fitModeBinding) {
-                ForEach(VideoFitMode.allCases) { mode in
+                ForEach(VideoFitMode.sceneModes) { mode in
                     Text(mode.titleKey).tag(mode)
                 }
             }
@@ -716,7 +716,7 @@ struct HTMLRenderingDiagnosticsInspector: View {
     var body: some View {
         GroupBox {
             CollapsibleSection(
-                title: "HTML Rendering",
+                title: "Web Rendering",
                 systemImage: "ruler",
                 isExpanded: $isExpanded
             ) {
@@ -731,7 +731,7 @@ struct HTMLRenderingDiagnosticsInspector: View {
                     diagnosticRow("Screen points", diagnostics.pointSizeText)
                     diagnosticRow("Backing pixels", diagnostics.backingPixelSizeText)
                     diagnosticRow("Scale", diagnostics.scaleText)
-                    diagnosticRow("HTML viewport", diagnostics.viewportText)
+                    diagnosticRow("Web viewport", diagnostics.viewportText)
                     diagnosticRow("DPR", diagnostics.devicePixelRatioText)
                     diagnosticRow("Mode", diagnostics.modeText)
                 }
@@ -816,7 +816,7 @@ private struct HTMLRenderingDiagnostics {
         guard !config.physicalPixelLayout, let source else {
             return config.physicalPixelLayout
         }
-        return HTMLWallpaperCompatibilityPolicy.looksLikeWallpaperEngineFolder(source)
+        return HTMLWallpaperCompatibilityPolicy.shouldAutoEnablePhysicalPixelLayout(source)
     }
 
     private static func pointSizeText(_ size: CGSize) -> String {

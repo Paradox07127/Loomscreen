@@ -33,25 +33,27 @@ enum WPESceneProjectSchemaLoader {
         let cacheRelativePath = descriptor.cacheRelativePath
         let supportRoot = applicationSupportRootURL ?? defaultApplicationSupportRoot()
         let workshopID = descriptor.workshopID
+        let timing = WPECustomSettingsLoadTiming(kind: "scene", workshopID: workshopID)
 
         return await Task.detached(priority: .userInitiated) {
             if let supportRoot,
                let outcome = readFromCache(
                    supportRoot: supportRoot,
                    cacheRelativePath: cacheRelativePath,
-                   workshopID: workshopID
+                   workshopID: workshopID,
+                   timing: timing
                ) {
                 return outcome
             }
 
             guard let bookmark = wpeOrigin?.sourceFolderBookmark else {
-                return Outcome(
+                return timed(Outcome(
                     schema: nil,
                     log: "no cached project.json and wpeOrigin missing source bookmark for workshop=\(workshopID)",
                     isExpectedAbsence: false
-                )
+                ), timing: timing)
             }
-            return readFromBookmark(bookmark: bookmark, workshopID: workshopID)
+            return readFromBookmark(bookmark: bookmark, workshopID: workshopID, timing: timing)
         }.value
     }
 
@@ -60,57 +62,88 @@ enum WPESceneProjectSchemaLoader {
     private static func readFromCache(
         supportRoot: URL,
         cacheRelativePath: String,
-        workshopID: String
+        workshopID: String,
+        timing: WPECustomSettingsLoadTiming
     ) -> Outcome? {
         let folderURL = supportRoot
             .appendingPathComponent("LiveWallpaper", isDirectory: true)
             .appendingPathComponent(cacheRelativePath, isDirectory: true)
         let projectURL = folderURL.appendingPathComponent("project.json")
+        timing.mark("cache.probe.begin")
         guard FileManager.default.fileExists(atPath: projectURL.path) else {
+            timing.mark("cache.probe.miss")
             return nil
         }
+        timing.mark("cache.probe.hit")
         do {
             // schemecolor is the WPE GLOBAL accent — most scenes never bind a
             // field to it, so the picker is a no-op for them on macOS. Hidden by
             // default (matches read()'s default); scenes that DO reference it via
             // a `{"user":"schemecolor"}` envelope still resolve its value through
             // effectiveSceneValues in the renderer.
+            timing.mark("schema.read.begin")
             let parsed = try WallpaperEngineProjectPropertySchema.read(from: folderURL)
-            return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "cache at \(folderURL.path)")
+            timing.mark("schema.read.done")
+            return timed(
+                makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "cache at \(folderURL.path)"),
+                timing: timing
+            )
         } catch {
-            return Outcome(
+            timing.mark("schema.read.failed")
+            return timed(Outcome(
                 schema: nil,
                 log: "project.json read/parse failed for workshop=\(workshopID) at \(folderURL.path) (\(error.localizedDescription))",
                 isExpectedAbsence: true
-            )
+            ), timing: timing)
         }
     }
 
     // MARK: - Source-bookmark fallback
 
-    private static func readFromBookmark(bookmark: Data, workshopID: String) -> Outcome {
+    private static func readFromBookmark(
+        bookmark: Data,
+        workshopID: String,
+        timing: WPECustomSettingsLoadTiming
+    ) -> Outcome {
+        timing.mark("bookmark.resolve.begin")
         let result = SecurityScopedBookmarkResolver.shared.resolve(bookmark, target: .transient)
+        timing.mark("bookmark.resolve.done")
         switch result {
         case .failure(let failure):
-            return Outcome(
+            return timed(Outcome(
                 schema: nil,
                 log: "bookmark resolve failed for workshop=\(workshopID) (\(failure.localizedDescription))",
                 isExpectedAbsence: false
-            )
+            ), timing: timing)
         case .success(let resolved):
             do {
+                timing.mark("schema.read.begin")
                 let parsed = try SecurityScopedBookmarkResolver.withScopedAccess(resolved.url) { _ in
                     try WallpaperEngineProjectPropertySchema.read(from: resolved.url)
                 }
-                return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "source folder at \(resolved.url.path)")
+                timing.mark("schema.read.done")
+                return timed(
+                    makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "source folder at \(resolved.url.path)"),
+                    timing: timing
+                )
             } catch {
-                return Outcome(
+                timing.mark("schema.read.failed")
+                return timed(Outcome(
                     schema: nil,
                     log: "project.json read/parse failed for workshop=\(workshopID) at \(resolved.url.path) (\(error.localizedDescription))",
                     isExpectedAbsence: true
-                )
+                ), timing: timing)
             }
         }
+    }
+
+    private static func timed(_ outcome: Outcome, timing: WPECustomSettingsLoadTiming) -> Outcome {
+        timing.mark("done")
+        return Outcome(
+            schema: outcome.schema,
+            log: timing.append(to: outcome.log),
+            isExpectedAbsence: outcome.isExpectedAbsence
+        )
     }
 
     private static func makeOutcome(

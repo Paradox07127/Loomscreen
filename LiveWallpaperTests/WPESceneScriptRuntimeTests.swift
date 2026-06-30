@@ -364,10 +364,55 @@ struct WPESceneScriptRuntimeTests {
             "export function update(v){ v.x = engine.getFrequency(0); return v; }"))
         #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
             "export function update(v){ v.x = Math.random(); return v; }"))
+        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = input.cursorWorldPosition.x; return v; }"))
         let evaluator = WPETransformScriptEvaluator(canvasWidth: 100, canvasHeight: 100)
         #expect(evaluator.resolveVec3(
             script: "export function update(v){ v.x = engine.getTimeOfDay(); return v; }",
             properties: [:], seed: .init(1, 2, 3)) == nil)
+    }
+
+    @Test("Dynamic origin script follows cursorWorldPosition in WPE y-up canvas pixels")
+    func dynamicOriginScriptFollowsCursorWorldPosition() throws {
+        let script = """
+        'use strict';
+        export function update(value) {
+            value.x = input.cursorWorldPosition.x;
+            value.y = input.cursorWorldPosition.y;
+            return value;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(860.29364, 133.27734, 9),
+            canvasSize: SIMD2<Double>(3840, 2160)
+        )
+
+        let origin = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.25, 0.75)))
+
+        #expect(origin == SIMD3<Double>(960, 540, 9))
+    }
+
+    @Test("Dynamic origin script accepts WPE non-breaking keyword spaces")
+    func dynamicOriginScriptAcceptsWPENonBreakingKeywordSpaces() throws {
+        let nbsp = "\u{00A0}"
+        let script = """
+        'use\(nbsp)strict';
+        export\(nbsp)function\(nbsp)update(value) {
+            value.x = input.cursorWorldPosition.x;
+            value.y = input.cursorWorldPosition.y;
+            return value;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(860.29364, 133.27734, 9),
+            canvasSize: SIMD2<Double>(3840, 2160)
+        )
+
+        let origin = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.25, 0.75)))
+
+        #expect(origin == SIMD3<Double>(960, 540, 9))
     }
 
     @Test("A runaway origin script times out and falls back to the baked value")
@@ -613,6 +658,98 @@ struct WPESceneScriptRuntimeTests {
         #expect(image.visibleScript?.contains("update") == true)
     }
 
+    @Test("Alpha-script on an image object is captured during parse")
+    func captureAlphaScriptDuringParse() throws {
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [{
+                "id": 449,
+                "name": "RST界面背景备用",
+                "image": "models/black.json",
+                "alpha": {
+                    "script": "export function update(value){ return engine.runtime > 2 ? 0 : value; }",
+                    "scriptproperties": { "peakvalue": { "user": "newproperty15", "value": 0.25 } },
+                    "value": 1
+                }
+            }]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let image = try #require(document.imageObjects.first)
+        #expect(image.alpha == 1)
+        #expect(image.alphaScript?.contains("engine.runtime") == true)
+        #expect(image.alphaScriptProperties["peakvalue"] == .number(0.25))
+    }
+
+    @Test("Non-rendered solid visible-script is captured as a script host")
+    func captureSolidVisibleScriptHostDuringParse() throws {
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [{
+                "id": 1326,
+                "name": "MAIN",
+                "solid": true,
+                "visible": {
+                    "script": "export function update(value){ shared.dd = 1; return value; }",
+                    "value": true
+                }
+            }]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let host = try #require(document.scriptHostObjects.first)
+        #expect(host.id == "1326")
+        #expect(host.visibleScript.contains("shared.dd"))
+        #expect(document.imageObjects.isEmpty)
+    }
+
+    @Test("Layer alpha-script returns live alpha from update(value)")
+    func layerAlphaScriptUsesRuntimeReturnValue() throws {
+        let script = """
+        export var scriptProperties = createScriptProperties()
+            .addSlider({ name: 'peakvalue', value: 1 })
+            .finish();
+        export function update(value) {
+            if (engine.runtime <= 2) { return value; }
+            return 1 - Math.min((engine.runtime - 2) / 3, 1) * scriptProperties.peakvalue;
+        }
+        """
+        let instance = try WPELayerScriptInstance(
+            script: script,
+            scriptProperties: ["peakvalue": .number(1)],
+            outputMode: .returnedAlpha(initialValue: 1)
+        )
+
+        #expect(instance.initialOutput.own.alpha == 1)
+        let early = try #require(instance.tick(runtimeSeconds: 1)?.own)
+        #expect(early.alpha == 1)
+        let faded = try #require(instance.tick(runtimeSeconds: 5)?.own)
+        #expect(faded.visible == true)
+        #expect(faded.alpha == 0)
+    }
+
+    @Test("Layer alpha-script can read engine.frametime")
+    func layerAlphaScriptReadsFrameTime() throws {
+        let script = """
+        export function update(value) {
+            return value + engine.frametime;
+        }
+        """
+        let instance = try WPELayerScriptInstance(
+            script: script,
+            outputMode: .returnedAlpha(initialValue: 0)
+        )
+
+        let first = try #require(instance.tick(runtimeSeconds: 1)?.own)
+        #expect(first.alpha == 1)
+        let second = try #require(instance.tick(runtimeSeconds: 1.25)?.own)
+        #expect(abs(second.alpha - 1.25) < 0.0001)
+    }
+
     @Test("Layer video-intro script: init hides+stops, plays once, hides after timeout")
     func layerVideoIntroPlaysOnce() throws {
         let script = """
@@ -807,6 +944,27 @@ struct WPESceneScriptRuntimeTests {
         export function update() {}
         """, shared: store)
         #expect(reader.initialOutput.own.visible == true)
+    }
+
+    @Test("applyUserProperties can seed shared state from scriptProperties")
+    func applyUserPropertiesSeedsSharedState() throws {
+        let store = WPESharedScriptState()
+        let script = """
+        export var scriptProperties = createScriptProperties()
+            .addCheckbox({ name: 'menuEn', value: true })
+            .finish();
+        export function applyUserProperties(changedUserProperties) {
+            if (!scriptProperties.menuEn) { shared.dd = 0; }
+            else { shared.dd = 1; }
+        }
+        """
+        let instance = try WPELayerScriptInstance(
+            script: script,
+            scriptProperties: ["menuEn": .bool(true)],
+            shared: store
+        )
+        _ = instance.applyUserProperties(["menuinit": .bool(true)])
+        #expect(store.get("dd") as? Double == 1)
     }
 
     @Test("getParent / getAnimationLayer / scene.on stubs let a UI script run without throwing")

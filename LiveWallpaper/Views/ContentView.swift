@@ -500,7 +500,7 @@ struct ScreenRow: View {
     private func accessibilityValue(for summary: WallpaperSessionSummary) -> Text {
         switch summary.wallpaperType {
         case .html:
-            return Text("HTML wallpaper active")
+            return Text("Web wallpaper active")
         case .metalShader:
             return Text("Shader wallpaper active")
         case .video:

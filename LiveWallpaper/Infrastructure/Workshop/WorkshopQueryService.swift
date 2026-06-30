@@ -3,24 +3,62 @@ import CryptoKit
 import Foundation
 import os
 
-enum WorkshopSortMode: String, Sendable, Equatable, CaseIterable {
+enum WorkshopSortMode: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
+    case mostPopular
     case topRated
     case newest
-    case trending
+    case lastUpdated
     case mostSubscribed
     case search
 
+    var id: String { rawValue }
+
     var queryTypeCode: Int {
         switch self {
+        case .mostPopular: return 3
         case .topRated: return 0
         case .newest: return 1
-        case .trending: return 3
+        case .lastUpdated: return 21
         case .mostSubscribed: return 9
         case .search: return 12
         }
     }
+}
 
-    var requiresDays: Bool { self == .trending }
+enum WorkshopTimeFrame: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
+    case today
+    case oneWeek
+    case thirtyDays
+    case threeMonths
+    case sixMonths
+    case oneYear
+    case allTime
+
+    var id: String { rawValue }
+
+    var days: Int? {
+        switch self {
+        case .today: return 1
+        case .oneWeek: return 7
+        case .thirtyDays: return 30
+        case .threeMonths: return 90
+        case .sixMonths: return 180
+        case .oneYear: return 365
+        case .allTime: return nil
+        }
+    }
+
+    static func canonical(days: Int?) -> WorkshopTimeFrame {
+        switch days {
+        case 1: return .today
+        case 7: return .oneWeek
+        case 30: return .thirtyDays
+        case 90: return .threeMonths
+        case 180: return .sixMonths
+        case 365: return .oneYear
+        default: return .allTime
+        }
+    }
 }
 
 struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
@@ -32,6 +70,7 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
     let page: Int
     let numPerPage: Int
     let language: String?
+    let timeFrame: WorkshopTimeFrame
     let days: Int?
     let requiredTags: [String]
     let excludedTags: [String]
@@ -51,6 +90,7 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
         page: Int = 1,
         numPerPage: Int = 50,
         language: String? = nil,
+        timeFrame: WorkshopTimeFrame? = nil,
         days: Int? = nil,
         requiredTags: [String] = [],
         excludedTags: [String] = [],
@@ -62,13 +102,16 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
     ) {
         let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveSort: WorkshopSortMode = normalizedSearch.isEmpty ? sort : .search
+        let requestedTimeFrame = timeFrame ?? WorkshopTimeFrame.canonical(days: days)
+        let effectiveTimeFrame: WorkshopTimeFrame = effectiveSort == .mostPopular ? requestedTimeFrame : .allTime
 
         self.sort = effectiveSort
         self.searchText = normalizedSearch
         self.page = max(1, page)
         self.numPerPage = min(max(numPerPage, 1), 100)
         self.language = Self.canonicalLanguage(language)
-        self.days = effectiveSort.requiresDays ? Self.canonicalTrendingDays(days) : days.flatMap { $0 > 0 ? $0 : nil }
+        self.timeFrame = effectiveTimeFrame
+        self.days = effectiveTimeFrame.days
         self.requiredTags = Self.canonicalTags(requiredTags)
         self.excludedTags = Self.canonicalTags(excludedTags)
         self.returnPreviews = returnPreviews
@@ -100,13 +143,39 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
             .sorted()
     }
 
-    /// Trending (`query_type=3`) requires a `days` window. Clamp the caller's
-    /// requested period to the values Steam's Workshop browse exposes (week /
-    /// month / quarter / half-year / year), defaulting to a week.
-    private static func canonicalTrendingDays(_ days: Int?) -> Int {
-        let allowed: Set<Int> = [1, 7, 30, 90, 180, 365]
-        guard let days, allowed.contains(days) else { return 7 }
-        return days
+    func apiQueryItems(apiKey: String, appID: Int) -> [URLQueryItem] {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "appid", value: String(appID)),
+            URLQueryItem(name: "numperpage", value: String(numPerPage)),
+            URLQueryItem(name: "query_type", value: String(sort.queryTypeCode)),
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "return_previews", value: Self.steamBool(returnPreviews)),
+            URLQueryItem(name: "return_tags", value: Self.steamBool(returnTags)),
+            URLQueryItem(name: "return_metadata", value: Self.steamBool(returnMetadata)),
+            URLQueryItem(name: "return_short_description", value: Self.steamBool(returnShortDescription)),
+            URLQueryItem(name: "return_vote_data", value: "true")
+        ]
+        if !searchText.isEmpty {
+            queryItems.append(URLQueryItem(name: "search_text", value: searchText))
+        }
+        if let language {
+            queryItems.append(URLQueryItem(name: "language", value: language))
+        }
+        if let days {
+            queryItems.append(URLQueryItem(name: "days", value: String(days)))
+        }
+        for (index, tag) in requiredTags.enumerated() {
+            queryItems.append(URLQueryItem(name: "requiredtags[\(index)]", value: tag))
+        }
+        for (index, tag) in excludedTags.enumerated() {
+            queryItems.append(URLQueryItem(name: "excludedtags[\(index)]", value: tag))
+        }
+        return queryItems
+    }
+
+    private static func steamBool(_ value: Bool) -> String {
+        value ? "true" : "false"
     }
 }
 
@@ -163,6 +232,7 @@ enum WorkshopQueryCacheKey {
             page: request.page,
             numPerPage: request.numPerPage,
             language: request.language,
+            timeFrame: request.timeFrame.rawValue,
             days: request.days,
             requiredTags: request.requiredTags,
             excludedTags: request.excludedTags,
@@ -188,6 +258,7 @@ enum WorkshopQueryCacheKey {
         let page: Int
         let numPerPage: Int
         let language: String?
+        let timeFrame: String
         let days: Int?
         let requiredTags: [String]
         let excludedTags: [String]
@@ -204,6 +275,7 @@ enum WorkshopQueryCacheKey {
             case page
             case numPerPage = "numperpage"
             case language
+            case timeFrame = "time_frame"
             case days
             case requiredTags = "requiredtags"
             case excludedTags = "excludedtags"
@@ -451,36 +523,7 @@ actor WorkshopQueryService {
             return try buildUserFilesURL(for: request, steamID: creatorSteamID, apiKey: apiKey)
         }
         var components = URLComponents(url: Self.queryFilesEndpoint, resolvingAgainstBaseURL: false)!
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "key", value: apiKey),
-            URLQueryItem(name: "appid", value: String(Self.wallpaperEngineAppID)),
-            URLQueryItem(name: "numperpage", value: String(request.numPerPage)),
-            URLQueryItem(name: "query_type", value: String(request.sort.queryTypeCode)),
-            URLQueryItem(name: "page", value: String(request.page)),
-            URLQueryItem(name: "return_previews", value: Self.steamBool(request.returnPreviews)),
-            URLQueryItem(name: "return_tags", value: Self.steamBool(request.returnTags)),
-            URLQueryItem(name: "return_metadata", value: Self.steamBool(request.returnMetadata)),
-            URLQueryItem(name: "return_short_description", value: Self.steamBool(request.returnShortDescription)),
-            // Required for `vote_data.score` — without it the rating is always
-            // absent, so the stars never render.
-            URLQueryItem(name: "return_vote_data", value: "true")
-        ]
-        if !request.searchText.isEmpty {
-            queryItems.append(URLQueryItem(name: "search_text", value: request.searchText))
-        }
-        if let language = request.language {
-            queryItems.append(URLQueryItem(name: "language", value: language))
-        }
-        if let days = request.days {
-            queryItems.append(URLQueryItem(name: "days", value: String(days)))
-        }
-        for (index, tag) in request.requiredTags.enumerated() {
-            queryItems.append(URLQueryItem(name: "requiredtags[\(index)]", value: tag))
-        }
-        for (index, tag) in request.excludedTags.enumerated() {
-            queryItems.append(URLQueryItem(name: "excludedtags[\(index)]", value: tag))
-        }
-        components.queryItems = queryItems
+        components.queryItems = request.apiQueryItems(apiKey: apiKey, appID: Self.wallpaperEngineAppID)
         guard let url = components.url else { throw WorkshopQueryError.schemaMismatch }
         return url
     }

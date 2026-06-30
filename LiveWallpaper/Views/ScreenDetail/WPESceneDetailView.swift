@@ -8,6 +8,11 @@ import SwiftUI
 /// seen here is byte-identical to the live wallpaper.
 @MainActor
 struct WPESceneDetailView: View {
+    private let screenAspectRatio: CGFloat = 16 / 9
+    private let infoBarReservedHeight: CGFloat = 44
+    private let errorBannerReservedHeight: CGFloat = 76
+    private let stackSpacing: CGFloat = 16
+
     let origin: WPEOrigin
     let descriptor: SceneDescriptor
     let session: SceneWallpaperSession?
@@ -17,15 +22,26 @@ struct WPESceneDetailView: View {
     @State private var state: SceneRenderState = .idle
     /// The live renderer's own frame, reused as the hero poster once it presents.
     @State private var livePoster: NSImage?
+    @State private var livePosterTask: Task<Void, Never>?
     /// The verbose renderer log opens in a sheet, never inline, so the layout
     /// barely shifts on error.
     @State private var showLogSheet = false
 
     var body: some View {
-        VStack(spacing: 16) {
-            previewCard
-            infoBar
-            errorBanner
+        GeometryReader { geo in
+            let previewSize = screenPreviewSize(
+                in: geo.size,
+                reservedHeight: previewReservedHeight
+            )
+            VStack(spacing: stackSpacing) {
+                previewCard
+                    .frame(width: previewSize.width, height: previewSize.height)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .layoutPriority(1)
+                infoBar
+                errorBanner
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showLogSheet) {
@@ -34,11 +50,20 @@ struct WPESceneDetailView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
         .task(id: descriptor.workshopID) {
+            livePosterTask?.cancel()
+            livePosterTask = nil
             livePoster = nil
             await refreshState()
         }
         .onChange(of: reduceMotion) { _, _ in
+            livePosterTask?.cancel()
+            livePosterTask = nil
             Task { @MainActor in await refreshState() }
+        }
+        .onDisappear {
+            livePosterTask?.cancel()
+            livePosterTask = nil
+            livePoster = nil
         }
         .onReceive(Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()) { _ in
             guard state == .idle || state.isLoading else { return }
@@ -72,10 +97,6 @@ struct WPESceneDetailView: View {
         }
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
-        // 16:9 on the ZStack, matching the video / HTML preview sections; the
-        // (non-scrolling) host bounds the height so a wide window can't grow it.
-        .aspectRatio(16 / 9, contentMode: .fit)
-        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -365,13 +386,17 @@ struct WPESceneDetailView: View {
     private var fallbackBackground: some View {
         Group {
             if let livePoster {
-                Image(nsImage: livePoster)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                ZStack {
+                    Color.black
+                    Image(nsImage: livePoster)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                }
             } else {
                 WPEPreviewView(
                     imageURL: previewURL,
                     securityScopedBookmarkData: origin.sourceFolderBookmark,
+                    playbackMode: .staticPoster,
                     aspectRatio: nil
                 )
             }
@@ -379,6 +404,21 @@ struct WPESceneDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .blur(radius: state.isLoading ? 6 : 0)
         .overlay(Color.black.opacity(state.isLoading ? 0.35 : 0.0))
+    }
+
+    private var previewReservedHeight: CGFloat {
+        let base = infoBarReservedHeight + stackSpacing
+        if case .error = state {
+            return base + errorBannerReservedHeight + stackSpacing
+        }
+        return base
+    }
+
+    private func screenPreviewSize(in available: CGSize, reservedHeight: CGFloat) -> CGSize {
+        let maxHeight = max(0, available.height - reservedHeight)
+        let heightForAvailableWidth = available.width / screenAspectRatio
+        let height = min(maxHeight, heightForAvailableWidth)
+        return CGSize(width: height * screenAspectRatio, height: height)
     }
 
     /// Floating glass info bar under the preview — the scene-type analog of the
@@ -564,18 +604,24 @@ struct WPESceneDetailView: View {
                 state = next
             }
         }
-        await captureLivePosterIfNeeded(for: next)
+        captureLivePosterIfNeeded(for: next)
     }
 
-    /// Reuses the live renderer's *current* frame as the hero once the scene is
-    /// presenting. Yields first so the state-change animation isn't held up by
-    /// the synchronous capture; the GIF placeholder shows until it lands.
-    private func captureLivePosterIfNeeded(for next: SceneRenderState) async {
-        guard case .ready = next, livePoster == nil,
+    /// Reuses the next frame the live renderer presents, without forcing an
+    /// extra synchronous render. The GIF/static project preview remains visible
+    /// until the readback finishes.
+    private func captureLivePosterIfNeeded(for next: SceneRenderState) {
+        guard !reduceMotion,
+              case .ready = next,
+              livePoster == nil,
+              livePosterTask == nil,
               let renderer = session?.sceneRenderer else { return }
-        await Task.yield()
-        guard livePoster == nil else { return }
-        livePoster = renderer.captureLivePoster()
+        livePosterTask = Task { @MainActor in
+            let image = await renderer.captureLivePosterFromNextFrame()
+            guard !Task.isCancelled else { return }
+            livePoster = image
+            livePosterTask = nil
+        }
     }
 
     private func derivedState() -> SceneRenderState {

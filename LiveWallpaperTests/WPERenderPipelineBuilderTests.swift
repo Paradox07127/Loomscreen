@@ -518,6 +518,75 @@ struct WPERenderPipelineBuilderTests {
         #expect(fragmentSource.contains("#include") == false)
     }
 
+    @Test("common_blur.h provides radial blur helpers used by blur_radial_gaussian")
+    func commonBlurProvidesRadialBlurHelpers() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/blur_radial_gaussian.vert": """
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/blur_radial_gaussian.frag": """
+            // [COMBO] {"combo":"KERNEL","default":0}
+            #include "common_blur.h"
+            varying vec2 v_TexCoord;
+            uniform sampler2D g_Texture0;
+            uniform float u_Scale;
+            uniform vec2 u_Center;
+            void main() {
+            #if KERNEL == 0
+                vec4 albedo = blurRadial13a(v_TexCoord.xy, u_Center, u_Scale);
+            #endif
+                gl_FragColor = albedo;
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                geometry: .identity,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/blur_radial/effect.json"),
+                        shader: "effects/blur_radial_gaussian",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let pass = try #require(pipeline.layers.first?.passes.first)
+        let shader = try #require(pass.shader)
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: shader.name,
+            preprocessedSource: shader.fragmentSource,
+            comboValues: pass.comboValues
+        )
+
+        #expect(result.mslSource.contains("blurRadial13a"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Expands common_fragment.h ConvertSampleR8 used by WPE 2.8 font.frag")
     func expandsCommonFragmentConvertSampleR8() throws {
         let fixture = try makeFixture(files: [

@@ -152,6 +152,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// drive a layer's visibility/alpha and its video texture (e.g. an intro that
     /// plays once then hides). Empty for the common no-layer-script scene.
     private var layerScriptInstances: [String: WPELayerScriptInstance] = [:]
+    /// Image-object alpha field scripts keyed by objectID. These return an alpha
+    /// scalar from `update(value)` and intentionally do not affect visibility.
+    private var layerAlphaScriptInstances: [String: WPELayerScriptInstance] = [:]
+    /// Image-object origin SceneScripts keyed by objectID. These are dynamic
+    /// transform scripts, e.g. cursor-follow flowers that assign
+    /// `origin = input.cursorWorldPosition` every frame.
+    private var dynamicOriginScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
     /// objectID → the `dynamicTextureSources` key of the layer's video source, so
     /// a layer script's `getVideoTexture()` commands reach the right player.
     /// Populated for ALL video-backed layers (a button script drives a different
@@ -206,6 +213,47 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private let pointerSampler: WPEMetalPointerSampler
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
+    private var pendingLivePosterCaptures: [UUID: CheckedContinuation<NSImage?, Never>] = [:]
+    private final class LivePosterCaptureBatch: @unchecked Sendable {
+        weak var renderer: WPEMetalSceneRenderer?
+        let captures: [UUID: CheckedContinuation<NSImage?, Never>]
+        let generation: Int
+        let snapshotter: WPEMetalTextureSnapshotter
+
+        @MainActor
+        init(
+            renderer: WPEMetalSceneRenderer,
+            captures: [UUID: CheckedContinuation<NSImage?, Never>]
+        ) {
+            self.renderer = renderer
+            self.captures = captures
+            self.generation = renderer.loadGeneration
+            self.snapshotter = renderer.snapshotter
+        }
+
+        func captureAfterPresent(
+            from texture: MTLTexture,
+            completed: Bool,
+            releaseSource: @escaping @Sendable () -> Void
+        ) {
+            let source = WPEMetalTextureSnapshotter.SnapshotSource(texture: texture)
+            let snapshotter = snapshotter
+            Task { [self, snapshotter] in
+                let image = completed ? await snapshotter.snapshotAsync(from: source) : nil
+                releaseSource()
+                await MainActor.run {
+                    let result = renderer?.loadGeneration == generation ? image : nil
+                    finish(image: result)
+                }
+            }
+        }
+
+        func finish(image: NSImage?) {
+            for continuation in captures.values {
+                continuation.resume(returning: image)
+            }
+        }
+    }
     private var didLoad = false
     /// Bumped on every load and on teardown (`reload`/`cleanup`) so a deferred
     /// task — e.g. the off-critical-path audio startup — can detect that the
@@ -302,26 +350,94 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     var renderedTexture: MTLTexture? { outputTexture }
     /// Read-back of the first frame, captured at the end of `performLoad()`
     /// **only when scene-debug artifacts are enabled**. Production leaves it
-    /// `nil`; the inspector reuses a current frame via `captureLivePoster()`.
+    /// `nil`; the inspector requests a poster from the next normally-presented
+    /// frame via `captureLivePosterFromNextFrame()`.
     var previewSnapshot: NSImage? { cachedSnapshot }
 
-    /// Reuses the *current* on-screen frame as a still poster for the inspector.
-    /// Steady-state draws submit async and the output pool recycles textures, so
-    /// the live `outputTexture` can't be read back directly; force one
-    /// synchronized frame, read it, restore the live submission mode. On-demand
-    /// only (never on the load path) so wallpaper startup is untouched, and it
-    /// captures the current frame so a settled intro / warmed particles / decoded
-    /// video are included — unlike frame 0. Returns nil before first present or
-    /// for a non-RGBA8 (e.g. HDR) target, where the caller keeps the preview GIF.
-    func captureLivePoster() -> NSImage? {
-        guard didLoad, hasPresentedFrame, renderPipeline != nil else { return nil }
-        let previousSync = executor.synchronizeFrameCompletion
-        executor.synchronizeFrameCompletion = true
-        defer { executor.synchronizeFrameCompletion = previousSync }
-        guard let texture = try? renderCurrentFrame() else { return nil }
-        outputTexture = texture
-        return snapshotter.snapshot(from: texture)
+    /// Reuses the next frame the renderer was already going to present as the
+    /// inspector poster. This deliberately avoids forcing a fresh synchronous
+    /// `renderCurrentFrame()` on the main actor. Dynamic scenes resolve on their
+    /// next natural frame; static scenes re-present the retained output texture.
+    func captureLivePosterFromNextFrame() async -> NSImage? {
+        guard didLoad, hasPresentedFrame, renderPipeline != nil, currentProfile == .quality else {
+            return nil
+        }
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                pendingLivePosterCaptures[id] = continuation
+                requestLivePosterCaptureFrame()
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finishLivePosterCapture(id: id, image: nil)
+            }
+        }
     }
+
+    private func requestLivePosterCaptureFrame() {
+        if needsContinuousFrames {
+            mtkView.setNeedsDisplay(mtkView.bounds)
+        } else if outputTexture != nil {
+            mtkView.draw()
+        } else {
+            mtkView.setNeedsDisplay(mtkView.bounds)
+        }
+    }
+
+    private func takePendingLivePosterCaptures() -> LivePosterCaptureBatch? {
+        guard !pendingLivePosterCaptures.isEmpty else { return nil }
+        let captures = pendingLivePosterCaptures
+        pendingLivePosterCaptures.removeAll(keepingCapacity: true)
+        return LivePosterCaptureBatch(renderer: self, captures: captures)
+    }
+
+    nonisolated private static func capturePendingLivePostersAfterPresent(
+        _ batch: LivePosterCaptureBatch,
+        from texture: MTLTexture,
+        commandBuffer: MTLCommandBuffer,
+        releaseSource: @escaping @Sendable () -> Void
+    ) {
+        batch.captureAfterPresent(
+            from: texture,
+            completed: commandBuffer.status == .completed,
+            releaseSource: releaseSource
+        )
+    }
+
+    private static func livePosterPresentCompletion(
+        for batch: LivePosterCaptureBatch?
+    ) -> (@Sendable (MTLTexture, MTLCommandBuffer, @escaping @Sendable () -> Void) -> Void)? {
+        guard let batch else { return nil }
+        return { source, commandBuffer, releaseSource in
+            Self.capturePendingLivePostersAfterPresent(
+                batch,
+                from: source,
+                commandBuffer: commandBuffer,
+                releaseSource: releaseSource
+            )
+        }
+    }
+
+    private func finishLivePosterCapture(id: UUID, image: NSImage?) {
+        guard let continuation = pendingLivePosterCaptures.removeValue(forKey: id) else { return }
+        continuation.resume(returning: image)
+    }
+
+    private func finishAllPendingLivePosterCaptures(image: NSImage?) {
+        guard !pendingLivePosterCaptures.isEmpty else { return }
+        let captures = pendingLivePosterCaptures
+        pendingLivePosterCaptures.removeAll(keepingCapacity: false)
+        LivePosterCaptureBatch(renderer: self, captures: captures).finish(image: image)
+    }
+
+    private static func finishLivePosterCaptures(
+        _ batch: LivePosterCaptureBatch?,
+        image: NSImage?
+    ) {
+        batch?.finish(image: image)
+    }
+
     var onProgress: (@MainActor (String) -> Void)?
     var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
         resolutionTracer.snapshot()
@@ -641,13 +757,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         )
         cameraUniforms = WPEMetalCameraUniforms(
             orthogonalProjection: document.general.orthogonalProjection,
-            sceneCamera: document.camera
+            sceneCamera: document.camera,
+            usesPerspectiveProjection: document.general.usesPerspectiveProjection
         )
         cameraParallaxSettings = document.general.cameraParallax
         sceneSupportsAudioProcessing = document.general.supportsAudioProcessing
         cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
+        loadDynamicOriginScripts(from: document)
 
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
         // load below; awaited at the render.firstFrame gate so the first synchronous
@@ -1415,18 +1533,33 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         uniforms.pointerClick = mtkView.clickCaptureEnabled ? mtkView.pointerFrame : .neutral
         previousPointer = pointer
         lastRuntimeUniforms = uniforms
+        var framePipeline = pipeline
+        if !dynamicOriginScriptInstances.isEmpty {
+            var origins: [String: SIMD3<Double>] = [:]
+            origins.reserveCapacity(dynamicOriginScriptInstances.count)
+            for (objectID, instance) in dynamicOriginScriptInstances {
+                if let origin = instance.tick(pointerPosition: pointer) {
+                    origins[objectID] = origin
+                }
+            }
+            framePipeline = framePipeline.applyingLayerOrigins(origins)
+        }
         // Tick layer SceneScripts (e.g. a video intro that plays once then hides):
         // each drives its layer's visibility/alpha + video playback. Gated so a
         // scene with no layer scripts pays nothing (no per-frame pipeline rebuild).
-        var framePipeline = pipeline
-        if !layerScriptInstances.isEmpty {
+        if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty {
             for (objectID, instance) in layerScriptInstances {
-                if let output = instance.tick() {
+                if let output = instance.tick(runtimeSeconds: uniforms.time) {
                     applyLayerScriptOutput(output, ownObjectID: objectID)
                 }
             }
+            for (objectID, instance) in layerAlphaScriptInstances {
+                if let output = instance.tick(runtimeSeconds: uniforms.time) {
+                    applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
+                }
+            }
             updateIntroPhaseAlign()
-            framePipeline = pipeline
+            framePipeline = framePipeline
                 .applyingLayerVisibility(liveLayerVisibility)
                 .applyingLayerAlpha(liveLayerAlpha)
         }
@@ -1497,6 +1630,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             size: sceneRenderSize,
             textures: currentTextures,
             dynamicTextureNames: Set(dynamicTextureSources.keys),
+            dynamicLayerIDs: Set(dynamicOriginScriptInstances.keys),
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms,
             sceneID: descriptor.workshopID,
@@ -1766,6 +1900,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// the video sources exist. No-op for scenes without layer scripts.
     private func loadLayerScripts(from document: WPESceneDocument) {
         layerScriptInstances = [:]
+        layerAlphaScriptInstances = [:]
         layerVideoSourceKey = [:]
         layerObjectIDByName = [:]
         liveLayerAlpha = [:]
@@ -1773,8 +1908,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         loopPhaseSource = nil
         introLoopOffset = nil
         introPhaseToken += 1
-        let scripted = document.imageObjects.filter { $0.visibleScript != nil }
-        guard !scripted.isEmpty, let pipeline = renderPipeline else { return }
+        let visibleScripted = document.imageObjects.filter { $0.visibleScript != nil }
+        let alphaScripted = document.imageObjects.filter { $0.alphaScript != nil }
+        let scriptHosts = document.scriptHostObjects
+        debugStage(
+            "layerScripts.load",
+            "hosts=\(scriptHosts.count) visible=\(visibleScripted.count) alpha=\(alphaScripted.count) hostNames=\(scriptHosts.prefix(8).map(\.name).joined(separator: ","))"
+        )
+        guard (!visibleScripted.isEmpty || !alphaScripted.isEmpty || !scriptHosts.isEmpty),
+              let pipeline = renderPipeline else { return }
 
         // Map EVERY layer's name→id and (when video-backed) id→video-source-key,
         // so a script's `thisScene.getLayer(name)` can drive another layer's video
@@ -1791,10 +1933,27 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // scripts gate their day/night switch on it (e.g. `timevarying`), so without
         // this the switch never runs.
         let userProperties = currentLayerScriptUserProperties()
+        debugStage("layerScripts.userProperties", "count=\(userProperties.count)")
         // One `shared` store for the whole scene so WPE's cross-script `shared`
         // global coordinates across the scripts' isolated contexts.
         let sharedState = WPESharedScriptState()
-        for object in scripted {
+        for object in scriptHosts {
+            do {
+                let instance = try WPELayerScriptInstance(
+                    script: object.visibleScript,
+                    scriptProperties: object.scriptProperties,
+                    shared: sharedState
+                )
+                layerScriptInstances[object.id] = instance
+                applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
+                if let output = instance.applyUserProperties(userProperties) {
+                    applyLayerScriptOutput(output, ownObjectID: object.id)
+                }
+            } catch {
+                Logger.warning("Scene \(descriptor.workshopID) [ScriptHost] init failed for \(object.name): \(error)", category: .wpeRender)
+            }
+        }
+        for object in visibleScripted {
             guard let script = object.visibleScript else { continue }
             do {
                 let instance = try WPELayerScriptInstance(
@@ -1811,7 +1970,53 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 Logger.warning("Scene \(descriptor.workshopID) [LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
-        setUpIntroPhaseAlign(scripted: scripted)
+        for object in alphaScripted {
+            guard let script = object.alphaScript else { continue }
+            do {
+                let instance = try WPELayerScriptInstance(
+                    script: script,
+                    scriptProperties: object.alphaScriptProperties,
+                    shared: sharedState,
+                    outputMode: .returnedAlpha(initialValue: object.alpha)
+                )
+                layerAlphaScriptInstances[object.id] = instance
+                applyLayerAlphaScriptOutput(instance.initialOutput, ownObjectID: object.id)
+                if let output = instance.applyUserProperties(userProperties) {
+                    applyLayerAlphaScriptOutput(output, ownObjectID: object.id)
+                }
+            } catch {
+                Logger.warning("Scene \(descriptor.workshopID) [AlphaScript] init failed for \(object.name): \(error)", category: .wpeRender)
+            }
+        }
+        setUpIntroPhaseAlign(scripted: visibleScripted)
+    }
+
+    /// Builds dynamic origin script instances for image layers whose `origin`
+    /// SceneScript depends on live input. Static origin scripts were resolved by
+    /// `WPESceneDocumentParser`, so they do not reach this path.
+    private func loadDynamicOriginScripts(from document: WPESceneDocument) {
+        dynamicOriginScriptInstances = [:]
+        let scripted = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            guard let script = object.originScript else { return nil }
+            return (object.id, script)
+        }
+        guard !scripted.isEmpty else { return }
+        let canvasSize = SIMD2<Double>(
+            max(Double(sceneRenderSize.width), 1),
+            max(Double(sceneRenderSize.height), 1)
+        )
+        for (objectID, script) in scripted {
+            do {
+                dynamicOriginScriptInstances[objectID] = try WPEDynamicTransformScriptInstance(
+                    script: script.script,
+                    scriptProperties: script.scriptProperties,
+                    seed: script.seed,
+                    canvasSize: canvasSize
+                )
+            } catch {
+                Logger.warning("Scene \(descriptor.workshopID) [OriginScript] init failed for \(objectID): \(error)", category: .wpeRender)
+            }
+        }
     }
 
     /// Index video layers whose every pass targets `.scene` (so they're never a
@@ -1961,6 +2166,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let targetID = layerObjectIDByName[name] else { continue }
             applyLayerScriptState(state, objectID: targetID)
         }
+    }
+
+    private func applyLayerAlphaScriptOutput(_ output: WPELayerScriptOutput, ownObjectID: String) {
+        liveLayerAlpha[ownObjectID] = output.own.alpha
     }
 
     /// True unless some ancestor is currently hidden. Each ancestor's CURRENT
@@ -2299,6 +2508,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     func reload() async throws {
         loadGeneration &+= 1
+        finishAllPendingLivePosterCaptures(image: nil)
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = nil
         pendingAudioStartupDocument = nil
@@ -2324,6 +2534,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         layerScriptInstances.removeAll(keepingCapacity: false)
+        layerAlphaScriptInstances.removeAll(keepingCapacity: false)
+        dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
@@ -2390,21 +2602,34 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         // Feed changed values to any layer script's `applyUserProperties` so a
         // runtime toggle (e.g. `timevarying`) reacts without a full reload.
-        if !layerScriptInstances.isEmpty {
+        if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty {
             let changed = Self.bridgeUserProperties(
                 patch.newValues.filter { patch.changedKeys.contains($0.key) }
             )
             if !changed.isEmpty {
                 for (objectID, instance) in layerScriptInstances {
-                    if let output = instance.applyUserProperties(changed) {
+                    if let output = instance.applyUserProperties(
+                        changed,
+                        runtimeSeconds: lastRuntimeUniforms?.time
+                    ) {
                         applyLayerScriptOutput(output, ownObjectID: objectID)
+                    }
+                }
+                for (objectID, instance) in layerAlphaScriptInstances {
+                    if let output = instance.applyUserProperties(
+                        changed,
+                        runtimeSeconds: lastRuntimeUniforms?.time
+                    ) {
+                        applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
                     }
                 }
             }
         }
 
         if let pipeline = renderPipeline {
-            renderPipeline = pipeline.applyingLayerVisibility(liveLayerVisibility)
+            renderPipeline = pipeline
+                .applyingLayerVisibility(liveLayerVisibility)
+                .applyingLayerAlpha(liveLayerAlpha)
         }
         mtkView.setNeedsDisplay(mtkView.bounds)
         return true
@@ -2506,12 +2731,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         soundRuntime?.setMasterVolume(volume)
     }
 
-    /// True when something on stage actually changes between frames — a
-    /// dynamic texture (animated `.tex` / video) or a live particle
-    /// system. Static-scene + particle combos must NOT short-circuit
-    /// MTKView into the paused/on-demand path or particles freeze after
-    /// the first frame (the operator and turbulence updates would never
-    /// run again).
+    /// True when something on stage actually changes between frames — a dynamic
+    /// texture (animated `.tex` / video), a live particle system, or a
+    /// SceneScript-driven transform. Static-scene + dynamic-content combos must
+    /// NOT short-circuit MTKView into the paused/on-demand path or they freeze
+    /// after the first frame.
     private var needsContinuousFrames: Bool {
         hasAnimatedShaderPasses
             || sceneSupportsAudioProcessing
@@ -2520,6 +2744,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             // loop so a reveal triggers their rebuild via reconcileVideoResidency.
             || !onDemandVideoKeyByID.isEmpty
             || !particleSystems.isEmpty
+            || !dynamicOriginScriptInstances.isEmpty
+            || !layerScriptInstances.isEmpty
+            || !layerAlphaScriptInstances.isEmpty
             || pointerDrivenContent
     }
 
@@ -2575,6 +2802,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     func cleanup() {
         loadGeneration &+= 1
+        finishAllPendingLivePosterCaptures(image: nil)
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = nil
         pendingAudioStartupDocument = nil
@@ -2595,6 +2823,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         layerScriptInstances.removeAll(keepingCapacity: false)
+        layerAlphaScriptInstances.removeAll(keepingCapacity: false)
+        dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
@@ -2633,36 +2863,56 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     nonisolated func draw(in view: MTKView) {
         MainActor.assumeIsolated { [weak self] in
-            guard let self, didLoad else { return }
+            self?.drawOnMainActor(in: view)
+        }
+    }
+
+    private func drawOnMainActor(in view: MTKView) {
+        guard didLoad else { return }
+        do {
+            let textureToPresent: MTLTexture?
+            if needsContinuousFrames {
+                let frame = try renderCurrentFrame()
+                outputTexture = frame
+                textureToPresent = frame
+            } else {
+                textureToPresent = outputTexture
+            }
+            guard let texture = textureToPresent else { return }
+            let livePosterCaptures = takePendingLivePosterCaptures()
+            let presentCompletion = Self.livePosterPresentCompletion(for: livePosterCaptures)
+            var presented = false
             do {
-                let textureToPresent: MTLTexture?
-                if needsContinuousFrames {
-                    let frame = try renderCurrentFrame()
-                    outputTexture = frame
-                    textureToPresent = frame
-                } else {
-                    textureToPresent = outputTexture
+                presented = try executor.present(
+                    texture: texture,
+                    in: view,
+                    fitMode: presentFitMode,
+                    presentCompletion: presentCompletion
+                )
+                if !presented {
+                    Self.finishLivePosterCaptures(livePosterCaptures, image: nil)
                 }
-                guard let texture = textureToPresent else { return }
-                let presented = try executor.present(texture: texture, in: view, fitMode: presentFitMode)
-                didLogFrameFailure = false
-                // Start audio only after the first frame is actually on screen, so
-                // the synchronous engine spin-up can never delay the first pixels.
-                if presented, pendingAudioStartupDocument != nil {
-                    beginDeferredAudioStartup()
-                }
-            } catch is WPEMetalFrameInFlightBudgetExhausted {
-                // GPU still busy on a prior frame — skip this vsync rather than
-                // block the @MainActor (keeps other displays at full rate). The
-                // previously presented frame stays on screen; not a failure.
-                return
             } catch {
-                // Per-frame path: log only the first failure of a streak (resets on
-                // recovery) so a persistently-broken pipeline can't flood the log.
-                if !didLogFrameFailure {
-                    Logger.warning("Scene \(descriptor.workshopID) frame render/present failed: \(error.localizedDescription)", category: .screenManager)
-                    didLogFrameFailure = true
-                }
+                Self.finishLivePosterCaptures(livePosterCaptures, image: nil)
+                throw error
+            }
+            didLogFrameFailure = false
+            // Start audio only after the first frame is actually on screen, so
+            // the synchronous engine spin-up can never delay the first pixels.
+            if presented, pendingAudioStartupDocument != nil {
+                beginDeferredAudioStartup()
+            }
+        } catch is WPEMetalFrameInFlightBudgetExhausted {
+            // GPU still busy on a prior frame — skip this vsync rather than
+            // block the @MainActor (keeps other displays at full rate). The
+            // previously presented frame stays on screen; not a failure.
+            return
+        } catch {
+            // Per-frame path: log only the first failure of a streak (resets on
+            // recovery) so a persistently-broken pipeline can't flood the log.
+            if !didLogFrameFailure {
+                Logger.warning("Scene \(descriptor.workshopID) frame render/present failed: \(error.localizedDescription)", category: .screenManager)
+                didLogFrameFailure = true
             }
         }
     }
@@ -3502,7 +3752,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             ]
         }
 
-        if path.hasPrefix("_") {
+        if path.hasPrefix("_"), !path.hasPrefix("__") {
             return [path]
         }
 

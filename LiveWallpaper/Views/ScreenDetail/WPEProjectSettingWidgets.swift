@@ -9,21 +9,21 @@ struct WPEProjectSettingRow<Content: View>: View {
         case localized(LocalizedStringKey)
     }
 
-    let icon: String
-    let iconColor: Color
+    let icon: String?
+    let iconColor: Color?
     let title: String
     let subtitle: Subtitle?
     let content: Content
 
     init(
-        icon: String,
-        iconColor: Color,
+        icon: String? = nil,
+        iconColor: Color? = nil,
         title: String,
         subtitle: Subtitle? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.icon = icon
-        self.iconColor = iconColor
+        self.iconColor = iconColor ?? (icon != nil ? .accentColor : nil)
         self.title = title
         self.subtitle = subtitle
         self.content = content()
@@ -31,25 +31,27 @@ struct WPEProjectSettingRow<Content: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(iconColor.opacity(0.15))
-                    .frame(width: 24, height: 24)
-                Image(systemName: icon)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(iconColor)
+            if let icon = icon, let iconColor = iconColor {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(iconColor.opacity(0.15))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: icon)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(iconColor)
+                }
+                .accessibilityHidden(true)
             }
-            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: title)
-                    .font(.body.weight(.medium))
+                    .font(DesignTokens.Typography.body)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if subtitle != nil {
                     subtitleText
-                        .font(.subheadline)
+                        .font(DesignTokens.Typography.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

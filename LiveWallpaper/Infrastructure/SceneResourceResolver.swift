@@ -33,6 +33,9 @@ struct SceneResourceResolver: Sendable {
     let cacheRootURL: URL?
     private let provider: any WPESceneAssetProvider
     private let decoder: WPETexDecoder
+    private static let rawImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
+    ]
 
     init(cacheRootURL: URL, decoder: WPETexDecoder = WPETexDecoder()) {
         let normalized = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
@@ -62,10 +65,31 @@ struct SceneResourceResolver: Sendable {
 
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
+        var lastMissing: ResolveError?
+        for candidate in imageStorageCandidates(for: relativePath) {
+            do {
+                return try resolveImageCandidate(relativePath: candidate)
+            } catch ResolveError.fileMissing {
+                lastMissing = .fileMissing
+                continue
+            }
+        }
+        throw lastMissing ?? ResolveError.fileMissing
+    }
+
+    private func resolveImageCandidate(relativePath: String) throws -> CGImage {
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
 
         if (resolvedPath as NSString).pathExtension.lowercased() == "tex" {
-            let payload = try providerData(resolvedPath)
+            let payload: Data
+            do {
+                payload = try providerData(resolvedPath)
+            } catch ResolveError.fileMissing {
+                if let image = try resolveRasterSiblingImage(forMissingTexPath: resolvedPath) {
+                    return image
+                }
+                throw ResolveError.fileMissing
+            }
             dumpRawTexMetadataIfActive(payload: payload, targetName: resolvedPath)
             switch decoder.decode(data: payload) {
             case .success(let image):
@@ -76,6 +100,42 @@ struct SceneResourceResolver: Sendable {
         }
 
         let payload = try providerData(resolvedPath)
+        return try decodeRasterImage(payload)
+    }
+
+    private func imageStorageCandidates(for relativePath: String) -> [String] {
+        let extensionName = (relativePath as NSString).pathExtension.lowercased()
+        guard Self.rawImageExtensions.contains(extensionName) else {
+            return [relativePath]
+        }
+
+        var candidates = [relativePath, "\(relativePath).tex"]
+        let anchoredPrefixes = [
+            "materials/", "models/", "shaders/", "fonts/",
+            "scripts/", "particles/", "sounds/", "scenes/", "../"
+        ]
+        let isSingleUnderscoreReference = relativePath.hasPrefix("_") && !relativePath.hasPrefix("__")
+        if !anchoredPrefixes.contains(where: relativePath.hasPrefix), !isSingleUnderscoreReference {
+            candidates.append("materials/\(relativePath)")
+            candidates.append("materials/\(relativePath).tex")
+        }
+        return candidates
+    }
+
+    private func resolveRasterSiblingImage(forMissingTexPath texPath: String) throws -> CGImage? {
+        let basePath = (texPath as NSString).deletingPathExtension
+        for candidate in ["\(basePath).png", "\(basePath).jpg", "\(basePath).jpeg"] {
+            do {
+                let payload = try providerData(candidate)
+                return try decodeRasterImage(payload)
+            } catch ResolveError.fileMissing {
+                continue
+            }
+        }
+        return nil
+    }
+
+    private func decodeRasterImage(_ payload: Data) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(payload as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ResolveError.decodeFailed
@@ -235,13 +295,15 @@ struct SceneResourceResolver: Sendable {
             }
         }
 
-        return provider.exists(atRelativePath: resolvedPath) ? .success(()) : .failure(.fileMissing)
+        return exists(relativePath: resolvedPath) ? .success(()) : .failure(.fileMissing)
     }
 
     /// Used by tests + the import service to decide whether a scene's declared
     /// image layers are actually shipped.
     func exists(relativePath: String) -> Bool {
-        provider.exists(atRelativePath: relativePath)
+        imageStorageCandidates(for: relativePath).contains { candidate in
+            provider.exists(atRelativePath: candidate)
+        }
     }
 
     /// Returns the raw bytes for a concrete asset path (scene.json, material /

@@ -55,6 +55,85 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Godrays combine custom pass preserves FBO albedo through builtin compatibility path")
+    func godraysCombineCustomPassPreservesFBOAlbedoThroughBuiltinPath() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let albedo = try makeRGBAInputTexture(device: device, bytes: Data([
+            40, 90, 140, 255,
+            40, 90, 140, 255,
+            40, 90, 140, 255,
+            40, 90, 140, 255
+        ]))
+        let rays = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 0, count: 2 * 2 * 4))
+        let compA = "_rt_imageLayerComposite_421_a"
+        let compB = "_rt_imageLayerComposite_421_b"
+        let copyIn = copyPass(
+            id: "421.0",
+            source: .image("materials/albedo.png"),
+            target: .layerComposite(name: compA),
+            blending: "disabled"
+        )
+        let combine = WPERenderPass(
+            id: "421.5",
+            phase: .effect(file: "effects/godrays/effect.json"),
+            shader: "effects/godrays_combine",
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            textures: [
+                0: .image("materials/rays.png"),
+                1: .fbo(compA)
+            ],
+            binds: [:],
+            constants: [:],
+            combos: ["BLENDMODE": 9],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyOut = copyPass(
+            id: "421.10",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(localFBOs: [], passes: [
+            preparedBuiltinPass(copyIn),
+            WPEPreparedRenderPass(
+                    pass: combine,
+                    shader: WPEShaderProgram(
+                        name: "effects/godrays_combine",
+                        vertexSource: "",
+                        fragmentSource: "",
+                        isBuiltin: false
+                    ),
+                    textureBindings: [
+                        0: .image("materials/rays.png"),
+                        1: .fbo(compA)
+                    ],
+                    comboValues: ["BLENDMODE": 9],
+                    uniformValues: [:]
+                ),
+            preparedBuiltinPass(copyOut)
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/albedo.png": albedo,
+                "materials/rays.png": rays
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r >= 35)
+        #expect(pixel.g >= 85)
+        #expect(pixel.b >= 135)
+        #expect(pixel.a >= 250)
+    }
+
     @Test("Async over-submission drops past the in-flight bound without deadlock")
     func asyncSubmissionDoesNotDeadlock() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -1125,6 +1204,141 @@ struct WPEMetalRenderExecutorTests {
         let bounds = try #require(nonBlackBounds(output))
 
         #expect(bounds == PixelBounds(minX: 4, minY: 4, maxX: 11, maxY: 11))
+    }
+
+    @Test("Object quad geometry projects perspective world scale into screen pixels")
+    func objectQuadGeometryProjectsPerspectiveWorldScale() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(0.1, 0.1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 10, height: 10),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let cameraUniforms = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 100, height: 100, auto: true),
+            sceneCamera: WPESceneCamera(
+                center: SIMD3<Double>(0, 0, 0),
+                eye: SIMD3<Double>(0, 0, 10),
+                up: SIMD3<Double>(0, 1, 0),
+                nearZ: 0.1,
+                farZ: 100,
+                fov: 90
+            ),
+            usesPerspectiveProjection: true
+        )
+
+        let quad = executor.objectQuadUniforms(
+            for: graphLayer(pass: pass, geometry: geometry),
+            sceneSize: CGSize(width: 100, height: 100),
+            sourceTexture: input,
+            cameraUniforms: cameraUniforms
+        )
+
+        #expect(abs(quad.centerAndSize.x) < 0.01)
+        #expect(abs(quad.centerAndSize.y) < 0.01)
+        #expect(abs(quad.centerAndSize.z - 5) < 0.01)
+        #expect(abs(quad.centerAndSize.w - 5) < 0.01)
+    }
+
+    @Test("Perspective object quad renders with depth-tested generic image")
+    func perspectiveObjectQuadRendersDepthTestedGenericImage() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+        let pass = WPERenderPass(
+            id: "perspective.0",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "enabled",
+            depthWrite: "enabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 1, height: 1),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, geometry: geometry),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage4", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+        let cameraUniforms = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 100, height: 100, auto: true),
+            sceneCamera: WPESceneCamera(
+                center: SIMD3<Double>(0, 0, 0),
+                eye: SIMD3<Double>(0, 0, 10),
+                up: SIMD3<Double>(0, 1, 0),
+                nearZ: 0.1,
+                farZ: 100,
+                fov: 90
+            ),
+            usesPerspectiveProjection: true
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 100, height: 100),
+            textures: ["materials/base.png": input],
+            cameraUniforms: cameraUniforms
+        )
+        let pixel = try readPixel(output, x: 50, y: 50)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g >= 250)
+        #expect(pixel.b >= 250)
+        #expect(pixel.a >= 250)
     }
 
     @Test("Object quad geometry preserves negative scale as texture mirroring")
@@ -3675,6 +3889,11 @@ private extension WPEMetalRenderExecutorTests {
                 shaderNames: ["genericimage4", "compose", "commands/copy"],
                 source: .image("materials/dynamic.tex")),
             dynamicTextureNames: ["materials/dynamic.tex"]) == nil)
+
+        #expect(WPEMetalStaticLayerClassifier.cachePlan(
+            for: staticCachePreparedLayer(shaderNames: ["genericimage4", "compose", "commands/copy"]),
+            dynamicTextureNames: [],
+            dynamicLayerIDs: ["static-layer"]) == nil)
     }
 
     @Test("Animated (keyframe) layers are not cached")

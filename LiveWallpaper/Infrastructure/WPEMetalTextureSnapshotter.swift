@@ -11,6 +11,10 @@ import Metal
 final class WPEMetalTextureSnapshotter: @unchecked Sendable {
     static let shared = WPEMetalTextureSnapshotter()
 
+    struct SnapshotSource: @unchecked Sendable {
+        let texture: MTLTexture
+    }
+
     private let queue: DispatchQueue
 
     init(label: String = "com.livewallpaper.wpe-metal.snapshot-readback") {
@@ -19,6 +23,14 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
 
     func snapshot(from texture: MTLTexture) -> NSImage? {
         Self.makeImage(from: texture)
+    }
+
+    func snapshotAsync(from source: SnapshotSource) async -> NSImage? {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: Self.makeImage(from: source.texture))
+            }
+        }
     }
 
     private static func makeImage(from texture: MTLTexture) -> NSImage? {

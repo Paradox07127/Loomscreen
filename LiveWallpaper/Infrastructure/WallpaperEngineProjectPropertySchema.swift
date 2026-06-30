@@ -22,10 +22,8 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
         preferredLanguages: [String] = Locale.preferredLanguages,
         includeSchemeColor: Bool = false
     ) throws -> WallpaperEngineProjectPropertySchema {
-        let manifestURL = folder.appendingPathComponent("project.json")
-        let data = try Data(contentsOf: manifestURL)
-        return try parse(
-            data: data,
+        try WallpaperEngineProjectPropertySchemaCache.shared.schema(
+            from: folder,
             preferredLanguages: preferredLanguages,
             includeSchemeColor: includeSchemeColor
         )
@@ -93,8 +91,113 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
         values: [String: WallpaperEngineProjectPropertyValue]
     ) -> [Property] {
         properties.filter { property in
-            ConditionEvaluator.isVisible(condition: property.condition, values: values)
+            Self.visiblePropertyConditionMatches(
+                condition: property.condition,
+                values: values
+            )
         }
+    }
+
+    static func visiblePropertyConditionMatches(
+        condition: String?,
+        values: [String: WallpaperEngineProjectPropertyValue]
+    ) -> Bool {
+        ConditionEvaluator.isVisible(condition: condition, values: values)
+    }
+}
+
+final class WallpaperEngineProjectPropertySchemaCache: @unchecked Sendable {
+    static let shared = WallpaperEngineProjectPropertySchemaCache()
+
+    private struct Key: Hashable {
+        let projectPath: String
+        let fileSize: Int
+        let modificationTime: TimeInterval
+        let preferredLanguages: [String]
+        let includeSchemeColor: Bool
+    }
+
+    private let lock = NSLock()
+    private let limit: Int
+    private var entries: [Key: WallpaperEngineProjectPropertySchema] = [:]
+    private var recency: [Key] = []
+
+    init(limit: Int = 128) {
+        self.limit = max(1, limit)
+    }
+
+    func schema(
+        from folder: URL,
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        includeSchemeColor: Bool = false
+    ) throws -> WallpaperEngineProjectPropertySchema {
+        let manifestURL = folder.appendingPathComponent("project.json", isDirectory: false)
+        let key = try cacheKey(
+            manifestURL: manifestURL,
+            preferredLanguages: preferredLanguages,
+            includeSchemeColor: includeSchemeColor
+        )
+        if let cached = cachedValue(for: key) {
+            return cached
+        }
+
+        let data = try Data(contentsOf: manifestURL)
+        let parsed = try WallpaperEngineProjectPropertySchema.parse(
+            data: data,
+            preferredLanguages: preferredLanguages,
+            includeSchemeColor: includeSchemeColor
+        )
+        store(parsed, for: key)
+        return parsed
+    }
+
+    func removeAll() {
+        lock.lock()
+        entries.removeAll(keepingCapacity: true)
+        recency.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+
+    private func cacheKey(
+        manifestURL: URL,
+        preferredLanguages: [String],
+        includeSchemeColor: Bool
+    ) throws -> Key {
+        let values = try manifestURL.resourceValues(forKeys: [
+            .fileSizeKey,
+            .contentModificationDateKey
+        ])
+        return Key(
+            projectPath: manifestURL.standardizedFileURL.resolvingSymlinksInPath().path,
+            fileSize: values.fileSize ?? -1,
+            modificationTime: values.contentModificationDate?.timeIntervalSince1970 ?? 0,
+            preferredLanguages: preferredLanguages,
+            includeSchemeColor: includeSchemeColor
+        )
+    }
+
+    private func cachedValue(for key: Key) -> WallpaperEngineProjectPropertySchema? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let value = entries[key] else { return nil }
+        markRecentlyUsed(key)
+        return value
+    }
+
+    private func store(_ schema: WallpaperEngineProjectPropertySchema, for key: Key) {
+        lock.lock()
+        entries[key] = schema
+        markRecentlyUsed(key)
+        while entries.count > limit, let oldest = recency.first {
+            recency.removeFirst()
+            entries.removeValue(forKey: oldest)
+        }
+        lock.unlock()
+    }
+
+    private func markRecentlyUsed(_ key: Key) {
+        recency.removeAll { $0 == key }
+        recency.append(key)
     }
 }
 

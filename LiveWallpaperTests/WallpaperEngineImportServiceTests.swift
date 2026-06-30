@@ -55,6 +55,33 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.entryFile == "index.html")
     }
 
+    @Test("DPR-aware unpacked web imports with CSS-point layout")
+    func dprAwareWebImportUsesCSSPointLayout() async throws {
+        let fixture = try makeFixture(type: .web, entryFile: "index.html", pkgEntries: nil)
+        defer { fixture.cleanup() }
+        try Data("""
+        <html>
+        <script type="module">
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        </script>
+        </html>
+        """.utf8).write(to: fixture.folderURL.appendingPathComponent("index.html"))
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, _) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .html(_, let config) = content else {
+            Issue.record("Expected .html content, got \(content)")
+            return
+        }
+        #expect(!config.physicalPixelLayout)
+    }
+
     @Test("Packaged web imports in place from scene.pkg without extracting to wpe-cache")
     func packagedWebImportsInPlaceWithoutExtraction() async throws {
         // index.html lives only inside scene.pkg (project.json stays loose).

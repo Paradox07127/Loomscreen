@@ -10,9 +10,83 @@ struct SettingsWindowLayoutTests {
     func settingsWindowDefaultsFitMinimumComposedLayout() {
         #expect(SettingsWindowMetrics.defaultContentSize.width >= SettingsWindowMetrics.minimumContentSize.width)
         #expect(SettingsWindowMetrics.defaultContentSize.height >= SettingsWindowMetrics.minimumContentSize.height)
+        #expect(SettingsWindowMetrics.minimumContentSize.height <= 500)
         #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.2)
         #expect(DesignTokens.Inspector.idealWidth >= DesignTokens.Inspector.minWidth)
         #expect(DesignTokens.Inspector.idealWidth <= DesignTokens.Inspector.maxWidth)
+    }
+
+    @Test("Preview area caps media previews to the available low-height viewport")
+    func previewAreaCapsMediaPreviewsToAvailableHeight() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailPreviewArea.swift")
+
+        #expect(source.contains("GeometryReader"))
+        #expect(source.contains("cappedPreviewHeight"))
+        #expect(source.contains("videoPreviewReservedHeight"))
+        #expect(source.contains("htmlSourceReservedHeight"))
+    }
+
+    @Test("HTML preview area uses the same non-scrolling left layout as video and scene")
+    func htmlPreviewAreaUsesNonScrollingLeftLayout() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailPreviewArea.swift")
+        let htmlContent = try #require(Self.slice(
+            source,
+            from: "private var htmlContent",
+            to: "/// A Wallpaper Engine web project's shipped preview asset"
+        ))
+
+        #expect(!htmlContent.contains("ScrollView"))
+        #expect(htmlContent.contains("HTMLPreviewSection("))
+        #expect(htmlContent.contains("HTMLSourceSection("))
+        #expect(htmlContent.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
+    }
+
+    @Test("HTML wallpaper type is presented to users as Web")
+    func htmlWallpaperTypeIsPresentedAsWeb() throws {
+        let wallpaperType = try Self.readSourceFile("Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Schema/WallpaperType.swift")
+        let emptyStateGuide = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/EmptyStateGuideView.swift")
+
+        #expect(wallpaperType.contains("case .html: return \"Web\""))
+        #expect(!wallpaperType.contains("case .html: return \"HTML\""))
+        #expect(emptyStateGuide.contains("title: \"Web\""))
+        #expect(emptyStateGuide.contains("accessibilityLabel: \"Web wallpaper type\""))
+    }
+
+    @Test("Scene scaling includes Center without adding it to video preview controls")
+    func sceneScalingIncludesCenterWithoutAddingItToVideoPreviewControls() throws {
+        #expect(VideoFitMode.videoModes == [.aspectFill, .aspectFit, .stretch])
+        #expect(VideoFitMode.sceneModes == [.aspectFill, .aspectFit, .stretch, .center])
+
+        let previewArea = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailPreviewArea.swift")
+        let playbackInspector = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/CommonPlaybackInspector.swift")
+
+        #expect(previewArea.contains("ForEach(VideoFitMode.videoModes)"))
+        #expect(playbackInspector.contains("ForEach(VideoFitMode.sceneModes)"))
+    }
+
+    private static func readSourceFile(_ relativePath: String) throws -> String {
+        let bases = [
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        ]
+
+        guard let url = bases
+            .lazy
+            .map({ $0.appendingPathComponent(relativePath) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        else {
+            Issue.record("Could not locate \(relativePath)")
+            return ""
+        }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private static func slice(_ source: String, from start: String, to end: String) -> String? {
+        guard let startRange = source.range(of: start),
+              let endRange = source[startRange.lowerBound...].range(of: end) else {
+            return nil
+        }
+        return String(source[startRange.lowerBound..<endRange.lowerBound])
     }
 }
 

@@ -11,7 +11,7 @@ public enum WallpaperType: String, Codable, CaseIterable, Identifiable, Sendable
     public var titleKey: LocalizedStringKey {
         switch self {
         case .video: return "Video"
-        case .html: return "HTML"
+        case .html: return "Web"
         case .metalShader: return "Shader"
         case .scene: return "Scene"
         }

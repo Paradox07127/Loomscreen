@@ -1,3 +1,4 @@
+import Foundation
 import simd
 import Testing
 @testable import LiveWallpaper
@@ -67,5 +68,32 @@ struct WPEMetalObjectUniformsTests {
         let x = m * SIMD4<Double>(1, 0, 0, 1)
         #expect(abs(x.x) < 1e-9)
         #expect(abs(x.y - 1) < 1e-9)
+    }
+
+    @Test("Dispatcher object quads carry frame camera uniforms")
+    func dispatcherObjectQuadsCarryFrameCameraUniforms() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalShaderDispatcher.swift")
+        let quadCallCount = source.components(separatedBy: "executor.objectQuadUniforms(").count - 1
+        let cameraArgumentCount = source.components(separatedBy: "cameraUniforms: frameState.cameraUniforms").count - 1
+
+        #expect(quadCallCount > 0)
+        #expect(cameraArgumentCount == quadCallCount)
+    }
+
+    private static func readSourceFile(_ relativePath: String) throws -> String {
+        let bases = [
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        ]
+
+        guard let url = bases
+            .lazy
+            .map({ $0.appendingPathComponent(relativePath) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        else {
+            Issue.record("Could not locate \(relativePath)")
+            return ""
+        }
+        return try String(contentsOf: url, encoding: .utf8)
     }
 }

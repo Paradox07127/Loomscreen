@@ -146,15 +146,15 @@ struct ScreenDetailView: View {
             case .invalidDropType:        return "Unsupported file type"
             case .videoFormatUnsupported: return "Video format not supported"
             case .videoBookmarkFailed:    return "Couldn't open video"
-            case .htmlBookmarkFailed:     return "Couldn't open HTML resource"
-            case .htmlPickerWrongType:    return "Pick an HTML file or folder"
+            case .htmlBookmarkFailed:     return "Couldn't open web resource"
+            case .htmlPickerWrongType:    return "Pick a web file or folder"
             }
         }
 
         var message: LocalizedStringKey {
             switch self {
             case .invalidDropType:
-                return "Drop a video file, HTML file, or folder to use it as a wallpaper."
+                return "Drop a video file, web file, or folder to use it as a wallpaper."
             case .videoFormatUnsupported:
                 return "Choose an .mp4, .mov, .m4v, or similar video file."
             case .videoBookmarkFailed:
@@ -162,7 +162,7 @@ struct ScreenDetailView: View {
             case .htmlBookmarkFailed:
                 return "macOS couldn't grant the app secure access to that resource. Try moving it to a folder you own."
             case .htmlPickerWrongType:
-                return "The selection isn't an HTML file or a folder containing an index page."
+                return "The selection isn't a web file or a folder containing an index page."
             }
         }
     }
@@ -345,7 +345,7 @@ struct ScreenDetailView: View {
             case .video:
                 Button("Choose Video…") { showFilePicker() }
             case .html:
-                Button("Choose HTML…") { showHTMLSourcePicker() }
+                Button("Choose Web…") { showHTMLSourcePicker() }
             case .metalShader, .scene:
                 EmptyView()
             }
@@ -648,4 +648,3 @@ struct ScreenDetailView: View {
         draft.selectedWallpaperType = .scene
     }
 }
-

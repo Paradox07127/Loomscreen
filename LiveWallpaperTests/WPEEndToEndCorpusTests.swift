@@ -268,6 +268,78 @@ struct WPEEndToEndCorpusTests {
         #expect(renderer.loadDiagnostics == nil)
     }
 
+    @MainActor
+    @Test("Selected packaged corpus scene renders in place with measurable first-frame diagnostics")
+    func selectedPackagedCorpusSceneRendersInPlaceWithMeasurableFirstFrameDiagnostics() async throws {
+        try await assertSelectedPackagedCorpusSceneRendersNonBlack(atTime: 0, label: "corpus.package.visual")
+    }
+
+    @MainActor
+    @Test("Selected packaged corpus scene renders in place after scene time advances")
+    func selectedPackagedCorpusSceneRendersInPlaceAfterSceneTimeAdvances() async throws {
+        try await assertSelectedPackagedCorpusSceneRendersNonBlack(atTime: 6, label: "corpus.package.visual.t6")
+    }
+
+    @MainActor
+    private func assertSelectedPackagedCorpusSceneRendersNonBlack(atTime sceneTime: CFTimeInterval, label: String) async throws {
+        guard let rootPath = Self.configuredString(
+            environmentKey: "WPE_CORPUS_ROOT",
+            fileName: "loomscreen-wpe-corpus-root"
+        ) else {
+            print("[\(label)] root not configured — skipping selected-scene package visual gate")
+            return
+        }
+        let workshopID = Self.configuredString(
+            environmentKey: "WPE_CORPUS_VISUAL_WORKSHOP_ID",
+            fileName: "loomscreen-wpe-corpus-visual-workshop-id"
+        ) ?? Self.configuredString(
+            environmentKey: "WPE_CORPUS_WORKSHOP_ID",
+            fileName: "loomscreen-wpe-corpus-workshop-id"
+        ) ?? "3287199039"
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+        let folder = root.appendingPathComponent(workshopID, isDirectory: true)
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        guard FileManager.default.fileExists(atPath: pkgURL.path) else {
+            print("[\(label)] selected scene \(workshopID) has no scene.pkg — skipping")
+            return
+        }
+        let project = try WallpaperEngineProject.read(from: folder)
+        #expect(project.type == .scene)
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: SceneDescriptor(
+                workshopID: workshopID,
+                cacheRelativePath: "wpe-package-visual-cache/\(workshopID)",
+                entryFile: project.entryFile.isEmpty ? "scene.json" : project.entryFile,
+                capabilityTier: .imageOnly,
+                assetStorage: .packageSource(fileName: "scene.pkg")
+            ),
+            cacheRootURL: folder,
+            assetProvider: provider,
+            projectManifestRootURL: folder,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 128, height: 128),
+            device: device,
+            frameClock: WPEMetalFrameClock(
+                loadTime: 100,
+                currentMediaTime: { 100 + sceneTime }
+            ),
+            pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
+        )
+
+        try await renderer.load()
+
+        let texture = try #require(renderer.renderedTexture)
+        let stats = try #require(WPEMetalTextureVisualStats.analyze(texture: texture))
+        let resolution = renderer.resolutionDiagnostics
+
+        print("[\(label)] \(workshopID) \(stats.oneLineDescription)")
+        #expect(stats.nonBlackPixelCount > 0)
+        #expect(resolution.resolvedCount > 0)
+        #expect(renderer.loadDiagnostics == nil)
+    }
+
     /// Sandbox-safe directory probe.
     static func probeReadable(_ url: URL, timeoutSeconds: TimeInterval) async -> Bool {
         await withTaskGroup(of: Bool.self, returning: Bool.self) { group in

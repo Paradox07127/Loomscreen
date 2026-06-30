@@ -49,6 +49,27 @@ struct WPEMetalSceneRendererTests {
         #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidlayer")
     }
 
+    @Test("Dynamic origin scripts keep otherwise static scenes on the continuous render loop")
+    func dynamicOriginScriptsKeepRendererLive() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.cursorOriginScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device,
+            pointerSampler: .fixed(SIMD2<Double>(0.25, 0.75))
+        )
+
+        try await renderer.load()
+
+        let mtkView = try #require(renderer.nsView as? MTKView)
+        #expect(mtkView.isPaused == false)
+        #expect(mtkView.enableSetNeedsDisplay == false)
+    }
+
     @Test("Loads material texture bindings before rendering")
     func loadsMaterialTextureBindings() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -272,6 +293,12 @@ struct WPEMetalSceneRendererTests {
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.png"))
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.tex"))
 
+        let generated = renderer.textureCandidates(
+            for: "__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70"
+        )
+        #expect(generated.contains("materials/__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70.tex"))
+        #expect(generated.contains("__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70"))
+
         // A raw-image ref also probes its converted `.tex` form and the
         // `materials/` root — WPE stores `foo.png` source images as
         // `materials/foo.png.tex` (see WPEMetalSceneRenderer.textureCandidates).
@@ -408,6 +435,41 @@ private struct MetalSceneFixture {
             "image": "models/util/solidlayer.json",
             "color": "1 0 0",
             "alpha": 1
+          }]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
+        )
+    }
+
+    static func cursorOriginScene() throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [{
+            "id": "cursor",
+            "name": "Cursor Flower",
+            "type": "image",
+            "image": "models/util/solidlayer.json",
+            "color": "0 0 1",
+            "alpha": 1,
+            "origin": {
+              "value": "10 10 0",
+              "script": "'use strict';\\nexport function update(value) {\\n  value.x = input.cursorWorldPosition.x;\\n  value.y = input.cursorWorldPosition.y;\\n  return value;\\n}"
+            }
           }]
         }
         """

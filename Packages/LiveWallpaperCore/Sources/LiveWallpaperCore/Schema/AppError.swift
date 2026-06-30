@@ -47,7 +47,7 @@ public enum AppError: LocalizedError, Equatable {
             return String(
                 localized: "error.app.html_load_failed",
                 defaultValue: "Failed to load web content: \(url)",
-                comment: "Error shown when an HTML wallpaper cannot be loaded."
+                comment: "Error shown when a web wallpaper cannot be loaded."
             )
         case .wpePackageInvalid(let detail):
             return String(
@@ -106,7 +106,7 @@ public enum AppError: LocalizedError, Equatable {
             return String(
                 localized: "error.app.html_load_failed.recovery",
                 defaultValue: "Check the URL and try again",
-                comment: "Recovery suggestion for HTML wallpaper load failures."
+                comment: "Recovery suggestion for web wallpaper load failures."
             )
         case .wpePackageInvalid:
             return String(

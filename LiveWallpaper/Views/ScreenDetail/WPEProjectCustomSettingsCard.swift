@@ -111,7 +111,7 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> some View {
         switch property.type {
         case .bool:
-            WPEProjectSettingRow(icon: "checkmark.square", iconColor: .green, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 Toggle("", isOn: boolBinding(for: property))
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -119,7 +119,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .accessibilityLabel(property.displayText)
             }
         case .slider:
-            WPEProjectSettingRow(icon: "slider.horizontal.3", iconColor: .blue, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                     Slider(
                         value: numberBinding(for: property),
@@ -138,7 +138,7 @@ struct WPEProjectCustomSettingsCard: View {
         case .combo:
             let currentValue = value(for: property, values: values)
             let optionsCoverCurrent = property.options.contains { $0.value == currentValue }
-            WPEProjectSettingRow(icon: "list.bullet.rectangle", iconColor: .purple, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 if property.options.isEmpty {
                     // Author shipped a combo with no `options[]`. There is
                     // nothing the user can switch between — mark as
@@ -169,14 +169,14 @@ struct WPEProjectCustomSettingsCard: View {
                 }
             }
         case .color:
-            WPEProjectSettingRow(icon: "paintpalette", iconColor: .pink, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 ColorPicker("", selection: colorBinding(for: property), supportsOpacity: false)
                     .labelsHidden()
                     .controlSize(.small)
                     .accessibilityLabel(property.displayText)
             }
         case .textinput:
-            WPEProjectSettingRow(icon: "text.cursor", iconColor: .teal, title: property.displayText) {
+            WPEProjectSettingRow(title: property.displayText) {
                 TextField("", text: stringBinding(for: property))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 132)

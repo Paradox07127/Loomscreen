@@ -21,9 +21,9 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
             return String(localized: "The video \(url.lastPathComponent) cannot be played.", comment: "Runtime error message. The placeholder is a file name.")
         case .webNavigationFailed(let url, let code, let description):
             if let code {
-                return String(localized: "The HTML wallpaper at \(url.absoluteString) failed to load (error \(code)): \(description)", comment: "Runtime error message. Placeholders are URL, error code, and system description.")
+                return String(localized: "The web wallpaper at \(url.absoluteString) failed to load (error \(code)): \(description)", comment: "Runtime error message. Placeholders are URL, error code, and system description.")
             }
-            return String(localized: "The HTML wallpaper at \(url.absoluteString) failed to load: \(description)", comment: "Runtime error message. Placeholders are URL and system description.")
+            return String(localized: "The web wallpaper at \(url.absoluteString) failed to load: \(description)", comment: "Runtime error message. Placeholders are URL and system description.")
         case .networkOffline:
             return String(localized: "The network appears to be offline.", defaultValue: "The network appears to be offline.", comment: "Runtime error message.")
         case .sandboxRevoked:
@@ -62,7 +62,7 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
         case .mediaNotPlayable(let url, _):
             return String(localized: "Video unavailable: \(url.lastPathComponent)", comment: "Runtime error title. The placeholder is the file name.")
         case .webNavigationFailed(let url, _, _):
-            return String(localized: "HTML wallpaper failed to load: \(url.host ?? url.absoluteString)", comment: "Runtime error title. The placeholder is the URL host or full URL.")
+            return String(localized: "Web wallpaper failed to load: \(url.host ?? url.absoluteString)", comment: "Runtime error title. The placeholder is the URL host or full URL.")
         case .networkOffline:
             return String(localized: "Network offline", defaultValue: "Network offline", comment: "Runtime error title.")
         case .sandboxRevoked:

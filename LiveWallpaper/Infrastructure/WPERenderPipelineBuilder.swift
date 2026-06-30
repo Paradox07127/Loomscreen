@@ -1,6 +1,10 @@
 #if !LITE_BUILD
 import Foundation
 
+private func isImplicitFBOTextureName(_ name: String) -> Bool {
+    name.hasPrefix("_") && !name.hasPrefix("__")
+}
+
 struct WPERenderPipelineBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
     private let shaderLoader: WPEShaderSourceLoader
@@ -908,7 +912,7 @@ private struct WPEShaderSourceLoader: Sendable {
         if name == "previous" {
             return .previous
         }
-        if name.hasPrefix("_") {
+        if isImplicitFBOTextureName(name) {
             return .fbo(name)
         }
         return .asset(name)
@@ -1034,6 +1038,55 @@ private struct WPEShaderSourceLoader: Sendable {
                 color += texSample2D(g_Texture0, uv + direction) * 0.25;
                 color += texSample2D(g_Texture0, uv - direction) * 0.25;
                 return color;
+            }
+
+            vec2 blurRotateVec2(vec2 v, float r) {
+                vec2 cs = vec2(cos(r), sin(r));
+                return vec2(v.x * cs.x - v.y * cs.y, v.x * cs.y + v.y * cs.x);
+            }
+
+            vec4 blurRadial13a(vec2 uv, vec2 center, float amount) {
+                vec2 delta = uv - center;
+                amount = amount * 0.025;
+                float o1 = 1.4091998770852122 * amount;
+                float o2 = 3.2979348079914822 * amount;
+                float o3 = 5.2062900776825969 * amount;
+                vec2 r1 = blurRotateVec2(delta, o1) - delta;
+                vec2 r2 = blurRotateVec2(delta, o2) - delta;
+                vec2 r3 = blurRotateVec2(delta, o3) - delta;
+                return texSample2D(g_Texture0, uv) * 0.1976406528809576
+                    + texSample2D(g_Texture0, center + r1 + delta) * 0.2959855056006557
+                    + texSample2D(g_Texture0, center - r1 + delta) * 0.2959855056006557
+                    + texSample2D(g_Texture0, center + r2 + delta) * 0.0935333619980593
+                    + texSample2D(g_Texture0, center - r2 + delta) * 0.0935333619980593
+                    + texSample2D(g_Texture0, center + r3 + delta) * 0.0116608059608062
+                    + texSample2D(g_Texture0, center - r3 + delta) * 0.0116608059608062;
+            }
+
+            vec4 blurRadial7a(vec2 uv, vec2 center, float amount) {
+                vec2 delta = uv - center;
+                amount = amount * 0.025;
+                float o1 = 2.3515644035337887 * amount;
+                float o2 = 0.469433779698372 * amount;
+                float o3 = 1.4091998770852121 * amount;
+                float o4 = 3.0 * amount;
+                vec2 r1 = blurRotateVec2(delta, o1) - delta;
+                vec2 r2 = blurRotateVec2(delta, o2) - delta;
+                vec2 r3 = blurRotateVec2(delta, -o3) - delta;
+                vec2 r4 = blurRotateVec2(delta, -o4) - delta;
+                return texSample2D(g_Texture0, center + r1 + delta) * 0.2028175528299753
+                    + texSample2D(g_Texture0, center + r2 + delta) * 0.4044856614512112
+                    + texSample2D(g_Texture0, center + r3 + delta) * 0.3213933537319605
+                    + texSample2D(g_Texture0, center + r4 + delta) * 0.0713034319868530;
+            }
+
+            vec4 blurRadial3a(vec2 uv, vec2 center, float amount) {
+                vec2 delta = uv - center;
+                amount = amount * 0.025;
+                vec2 r1 = blurRotateVec2(delta, amount) - delta;
+                return texSample2D(g_Texture0, center + delta) * 0.5
+                    + texSample2D(g_Texture0, center + r1 + delta) * 0.25
+                    + texSample2D(g_Texture0, center - r1 + delta) * 0.25;
             }
             #endif
             """

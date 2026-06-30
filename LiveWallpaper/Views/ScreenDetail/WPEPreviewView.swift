@@ -5,6 +5,7 @@ import ImageIO
 
 /// `.autoPlay` is the back-compatible default; grid / list call sites pass `.hoverToPlay`.
 enum WPEPreviewPlaybackMode {
+    case staticPoster
     case autoPlay
     case hoverToPlay
 }
@@ -39,6 +40,7 @@ struct WPEPreviewView: View {
     private var shouldAnimate: Bool {
         guard !reduceMotion else { return false }
         switch playbackMode {
+        case .staticPoster: return false
         case .autoPlay: return true
         case .hoverToPlay: return isHovering
         }
@@ -157,6 +159,43 @@ private enum WPEPreviewDataCache {
     }()
 }
 
+private enum WPEPreviewImageDecodeBudget {
+    static let maxFrameCount = 120
+    static let maxDecodedPixelBytes = 96 * 1024 * 1024
+    static let minFrameDelay: TimeInterval = 0.033
+    nonisolated(unsafe) static let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+    nonisolated(unsafe) static let frameOptions = [
+        kCGImageSourceShouldCache: false,
+        kCGImageSourceShouldCacheImmediately: false
+    ] as CFDictionary
+
+    static func allowsAnimation(width: Int, height: Int, frameCount: Int) -> Bool {
+        frameCount <= maxFrameCount && isWithinPixelBudget(width: width, height: height, frameCount: frameCount)
+    }
+
+    static func isWithinPixelBudget(width: Int, height: Int, frameCount: Int) -> Bool {
+        guard width > 0, height > 0, frameCount > 0 else { return false }
+        let w = UInt64(width)
+        let h = UInt64(height)
+        let n = UInt64(frameCount)
+        guard w <= UInt64.max / h else { return false }
+        let pixelsPerFrame = w * h
+        guard pixelsPerFrame <= UInt64.max / n else { return false }
+        let totalPixels = pixelsPerFrame * n
+        guard totalPixels <= UInt64.max / 4 else { return false }
+        return totalPixels * 4 <= UInt64(maxDecodedPixelBytes)
+    }
+
+    static func imageDimensions(from source: CGImageSource, index: Int) -> (width: Int, height: Int)? {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any],
+              let width = (props[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue,
+              let height = (props[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue else {
+            return nil
+        }
+        return (width, height)
+    }
+}
+
 private struct AspectFillImage: NSViewRepresentable {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
@@ -166,6 +205,12 @@ private struct AspectFillImage: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AspectFillAnimatedImageView {
         AspectFillAnimatedImageView()
+    }
+
+    static func dismantleNSView(_ nsView: AspectFillAnimatedImageView, coordinator: Coordinator) {
+        coordinator.cancelInflight()
+        coordinator.reset()
+        nsView.clearImage()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -297,7 +342,7 @@ private final class AspectFillAnimatedImageView: NSView {
         frameCount = 0
         frameDelays = []
 
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+        guard let source = CGImageSourceCreateWithData(data as CFData, WPEPreviewImageDecodeBudget.sourceOptions) else {
             layer?.contents = nil
             imageSource = nil
             return false
@@ -305,19 +350,29 @@ private final class AspectFillAnimatedImageView: NSView {
 
         let count = CGImageSourceGetCount(source)
         guard count > 0,
-              let firstFrame = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+              let dimensions = WPEPreviewImageDecodeBudget.imageDimensions(from: source, index: 0),
+              WPEPreviewImageDecodeBudget.isWithinPixelBudget(width: dimensions.width, height: dimensions.height, frameCount: 1),
+              let firstFrame = CGImageSourceCreateImageAtIndex(source, 0, WPEPreviewImageDecodeBudget.frameOptions) else {
             layer?.contents = nil
             imageSource = nil
             return false
         }
 
-        imageSource = source
-        frameCount = count
         layer?.contents = firstFrame
 
-        if count > 1 {
+        if count > 1,
+           WPEPreviewImageDecodeBudget.allowsAnimation(
+               width: dimensions.width,
+               height: dimensions.height,
+               frameCount: count
+           ) {
+            imageSource = source
+            frameCount = count
             frameDelays = Self.readFrameDelays(from: source, frameCount: count)
             if wantsAnimation { scheduleNextFrame() }
+        } else {
+            imageSource = nil
+            frameCount = 1
         }
         return true
     }
@@ -339,7 +394,7 @@ private final class AspectFillAnimatedImageView: NSView {
             animationTimer = nil
             if frameCount > 1, currentFrameIndex != 0,
                let source = imageSource,
-               let poster = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+               let poster = CGImageSourceCreateImageAtIndex(source, 0, WPEPreviewImageDecodeBudget.frameOptions) {
                 currentFrameIndex = 0
                 layer?.contents = poster
             }
@@ -371,7 +426,7 @@ private final class AspectFillAnimatedImageView: NSView {
     private func advanceFrame() {
         guard let source = imageSource, frameCount > 1 else { return }
         currentFrameIndex = (currentFrameIndex + 1) % frameCount
-        if let next = CGImageSourceCreateImageAtIndex(source, currentFrameIndex, nil) {
+        if let next = CGImageSourceCreateImageAtIndex(source, currentFrameIndex, WPEPreviewImageDecodeBudget.frameOptions) {
             layer?.contents = next
         }
         scheduleNextFrame()
@@ -384,18 +439,18 @@ private final class AspectFillAnimatedImageView: NSView {
             }
             if let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
                 if let unclamped = (gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber)?.doubleValue, unclamped > 0 {
-                    return max(unclamped, 0.02)
+                    return max(unclamped, WPEPreviewImageDecodeBudget.minFrameDelay)
                 }
                 if let delay = (gif[kCGImagePropertyGIFDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, 0.02)
+                    return max(delay, WPEPreviewImageDecodeBudget.minFrameDelay)
                 }
             }
             if let png = props[kCGImagePropertyPNGDictionary as String] as? [String: Any] {
                 if let delay = (png[kCGImagePropertyAPNGUnclampedDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, 0.02)
+                    return max(delay, WPEPreviewImageDecodeBudget.minFrameDelay)
                 }
                 if let delay = (png[kCGImagePropertyAPNGDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, 0.02)
+                    return max(delay, WPEPreviewImageDecodeBudget.minFrameDelay)
                 }
             }
             return 0.1

@@ -82,6 +82,33 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(values["g_HDRParams"]?.vectorValue == [1, 0.5])
     }
 
+    @Test("Center present mode preserves source pixel size and centers")
+    func centerPresentModePreservesSourcePixelSizeAndCenters() {
+        let smaller = WPEPresentUniforms.make(
+            fitMode: .center,
+            sourceWidth: 960,
+            sourceHeight: 540,
+            targetWidth: 1920,
+            targetHeight: 1080
+        )
+
+        #expect(smaller.ndcScale == SIMD2<Float>(0.5, 0.5))
+        #expect(smaller.uvScale == SIMD2<Float>(1, 1))
+        #expect(smaller.uvOffset == SIMD2<Float>(0, 0))
+
+        let larger = WPEPresentUniforms.make(
+            fitMode: .center,
+            sourceWidth: 3840,
+            sourceHeight: 2160,
+            targetWidth: 1920,
+            targetHeight: 1080
+        )
+
+        #expect(larger.ndcScale == SIMD2<Float>(2, 2))
+        #expect(larger.uvScale == SIMD2<Float>(1, 1))
+        #expect(larger.uvOffset == SIMD2<Float>(0, 0))
+    }
+
     @Test("Pointer sampler normalizes global mouse position to top-left scene UV")
     func pointerSamplerNormalizesGlobalMousePosition() throws {
         let window = NSWindow(
@@ -189,6 +216,80 @@ struct WPEMetalRuntimeUniformsTests {
         // `.identity` geometry must inject identity per-object 2.8 transforms.
         #expect(values["g_ModelMatrix"]?.vectorValue == [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
         #expect(values["g_NormalModelMatrix"]?.vectorValue == [1, 0, 0, 0, 1, 0, 0, 0, 1])
+    }
+
+    @Test("Prepared pipeline applies dynamic origin overrides before object uniforms")
+    func preparedPipelineAppliesDynamicOriginOverrides() {
+        let pass = WPERenderPass(
+            id: "image.0",
+            phase: .material,
+            shader: "genericimage",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let layer = WPERenderLayer(
+            objectID: "154",
+            objectName: "苍月草1/Nemophila1",
+            imagePath: "models/nemophila.json",
+            materialPath: nil,
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(860, 133, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 360, height: 248),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: [pass]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: nil,
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let runtime = WPEMetalRuntimeUniforms(
+            time: 1,
+            daytime: 0,
+            brightness: 1,
+            pointerPosition: SIMD2<Double>(0.25, 0.75)
+        )
+        let prepared = pipeline
+            .applyingLayerOrigins(["154": SIMD3<Double>(960, 1620, 0)])
+            .addingMetalRuntimeUniforms(
+                runtime,
+                camera: WPEMetalCameraUniforms(
+                    orthogonalProjection: WPESceneOrthogonalProjection(width: 3840, height: 2160, auto: true),
+                    sceneCamera: .defaultCamera
+                )
+            )
+
+        let values = prepared.layers[0].passes[0].uniformValues
+        let model = values["g_ModelMatrix"]?.vectorValue
+        #expect(model?[12] == 960)
+        #expect(model?[13] == 1620)
     }
 
     @Test("Animated single shader constants clamp to final keyframe after their duration")

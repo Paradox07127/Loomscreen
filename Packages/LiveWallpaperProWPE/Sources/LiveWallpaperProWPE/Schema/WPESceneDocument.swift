@@ -10,6 +10,7 @@ public struct WPESceneDocument: Equatable, Sendable {
     public let camera: WPESceneCamera
     public let general: WPESceneGeneral
     public let imageObjects: [WPESceneImageObject]
+    public let scriptHostObjects: [WPESceneScriptHostObject]
     public let particleObjects: [WPESceneParticleObject]
     public let textObjects: [WPESceneTextObject]
     public let soundObjects: [WPESceneSoundObject]
@@ -33,6 +34,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         camera: WPESceneCamera,
         general: WPESceneGeneral,
         imageObjects: [WPESceneImageObject],
+        scriptHostObjects: [WPESceneScriptHostObject] = [],
         particleObjects: [WPESceneParticleObject] = [],
         textObjects: [WPESceneTextObject] = [],
         soundObjects: [WPESceneSoundObject] = [],
@@ -45,6 +47,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.camera = camera
         self.general = general
         self.imageObjects = imageObjects
+        self.scriptHostObjects = scriptHostObjects
         self.particleObjects = particleObjects
         self.textObjects = textObjects
         self.soundObjects = soundObjects
@@ -53,6 +56,29 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.objectParentByID = objectParentByID
         self.ownVisibilityByID = ownVisibilityByID
         self.diagnostics = diagnostics
+    }
+}
+
+/// A non-rendered SceneScript host: WPE permits objects such as `solid:true`
+/// controller layers to carry a `visible.script` whose only job is updating
+/// globals like `shared.*`. They must run with the layer scripts but do not
+/// produce draw passes.
+public struct WPESceneScriptHostObject: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let visibleScript: String
+    public let scriptProperties: [String: WPESceneScriptPropertyValue]
+
+    public init(
+        id: String,
+        name: String,
+        visibleScript: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+    ) {
+        self.id = id
+        self.name = name
+        self.visibleScript = visibleScript
+        self.scriptProperties = scriptProperties
     }
 }
 
@@ -178,6 +204,25 @@ public enum WPESceneScriptPropertyValue: Equatable, Sendable {
     case number(Double)
     case bool(Bool)
     case string(String)
+}
+
+/// WPE SceneScript attached to a transform field such as `origin`.
+/// Static scripts are evaluated once by the parser; dynamic scripts are retained
+/// here so the renderer can tick them with live inputs such as the cursor.
+public struct WPESceneTransformScript: Equatable, Sendable {
+    public let script: String
+    public let scriptProperties: [String: WPESceneScriptPropertyValue]
+    public let seed: SIMD3<Double>
+
+    public init(
+        script: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        seed: SIMD3<Double>
+    ) {
+        self.script = script
+        self.scriptProperties = scriptProperties
+        self.seed = seed
+    }
 }
 
 public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
@@ -412,6 +457,7 @@ public struct WPESceneCamera: Equatable, Sendable {
 public struct WPESceneGeneral: Equatable, Sendable {
     public let clearColor: SIMD3<Double>
     public let orthogonalProjection: WPESceneOrthogonalProjection
+    public let usesPerspectiveProjection: Bool
     public let cameraParallax: WPESceneCameraParallaxSettings
     /// WPE `general.supportsaudioprocessing`: the scene declares audio-reactive
     /// content (a shader/effect samples `g_AudioSpectrum*`). Used by the renderer
@@ -422,11 +468,13 @@ public struct WPESceneGeneral: Equatable, Sendable {
     public init(
         clearColor: SIMD3<Double>,
         orthogonalProjection: WPESceneOrthogonalProjection,
+        usesPerspectiveProjection: Bool = false,
         cameraParallax: WPESceneCameraParallaxSettings = .disabled,
         supportsAudioProcessing: Bool = false
     ) {
         self.clearColor = clearColor
         self.orthogonalProjection = orthogonalProjection
+        self.usesPerspectiveProjection = usesPerspectiveProjection
         self.cameraParallax = cameraParallax
         self.supportsAudioProcessing = supportsAudioProcessing
     }
@@ -512,6 +560,14 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     /// with `init()`/`update()` that drives the layer's visibility/alpha and any
     /// video texture). `nil` for the common static-visibility case.
     public let visibleScript: String?
+    /// WPE SceneScript attached to this layer's `alpha` field. These scripts
+    /// return the live alpha value from `update(value)` and must not change
+    /// layer visibility.
+    public let alphaScript: String?
+    public let alphaScriptProperties: [String: WPESceneScriptPropertyValue]
+    /// Dynamic WPE SceneScript attached to this layer's `origin` field. Static
+    /// origin scripts are resolved at parse time and leave this nil.
+    public let originScript: WPESceneTransformScript?
     /// Resolved scriptProperty overrides for `visibleScript` (user-bound values
     /// like `ruchang` overlaid on the script's declared defaults).
     public let scriptProperties: [String: WPESceneScriptPropertyValue]
@@ -542,6 +598,9 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         animationLayers: [WPESceneAnimationLayer],
         parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0),
         visibleScript: String? = nil,
+        alphaScript: String? = nil,
+        alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        originScript: WPESceneTransformScript? = nil,
         scriptProperties: [String: WPESceneScriptPropertyValue] = [:]
     ) {
         self.id = id
@@ -569,6 +628,9 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.animationLayers = animationLayers
         self.parallaxDepth = parallaxDepth
         self.visibleScript = visibleScript
+        self.alphaScript = alphaScript
+        self.alphaScriptProperties = alphaScriptProperties
+        self.originScript = originScript
         self.scriptProperties = scriptProperties
     }
 

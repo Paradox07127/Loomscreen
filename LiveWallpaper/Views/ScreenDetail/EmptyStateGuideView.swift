@@ -34,9 +34,9 @@ struct EmptyStateGuideView: View {
                     GuideCard(
                         icon: "globe",
                         iconTint: .green,
-                        title: "HTML",
-                        subtitle: "Web pages, local HTML, and folders.",
-                        accessibilityLabel: "HTML wallpaper type",
+                        title: "Web",
+                        subtitle: "Web pages, local .html files, and folders.",
+                        accessibilityLabel: "Web wallpaper type",
                         action: onChooseHTML
                     )
 
@@ -105,7 +105,7 @@ struct EmptyStateGuideView: View {
             Image(systemName: "arrow.down.doc")
                 .font(.system(size: 13, weight: .medium))
                 .accessibilityHidden(true)
-            Text("Or drag a video, HTML file, or folder here.")
+            Text("Or drag a video, web file, or folder here.")
                 .font(DesignTokens.Typography.caption)
         }
         .foregroundStyle(Color.accentColor)

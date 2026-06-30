@@ -3,6 +3,10 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 struct ScreenDetailPreviewArea: View {
+    private let previewAspectRatio: CGFloat = 16 / 9
+    private let videoPreviewReservedHeight: CGFloat = 56
+    private let htmlSourceReservedHeight: CGFloat = 160
+
     let screen: Screen
     @Binding var draft: ScreenDetailDraftState
     let featureCatalog: FeatureCatalog
@@ -68,24 +72,32 @@ struct ScreenDetailPreviewArea: View {
         if isLoading {
             ScreenDetailLoadingView()
         } else if draft.hasPreviewSource || previewController.hasPreviewContent {
-            VStack(spacing: 16) {
-                if featureCatalog.isEnabled(.inspectorPreview) {
-                    VideoPreviewSection(
-                        previewController: previewController,
-                        hasPreviewSource: draft.hasPreviewSource,
-                        selectedFitMode: draft.selectedFitMode,
-                        startPreview: onStartPreview
-                    )
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
-                }
+            GeometryReader { geo in
+                let previewHeight = cappedPreviewHeight(
+                    in: geo.size.height,
+                    verticalPadding: 18,
+                    reservedHeight: videoPreviewReservedHeight
+                )
+                VStack(spacing: 16) {
+                    if featureCatalog.isEnabled(.inspectorPreview) {
+                        VideoPreviewSection(
+                            previewController: previewController,
+                            hasPreviewSource: draft.hasPreviewSource,
+                            selectedFitMode: draft.selectedFitMode,
+                            startPreview: onStartPreview
+                        )
+                        .aspectRatio(previewAspectRatio, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: previewHeight)
+                        .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
+                    }
 
-                videoCommandBar
+                    videoCommandBar
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 18)
         } else {
             IllustratedEmptyState(
                 symbol: "film",
@@ -100,32 +112,42 @@ struct ScreenDetailPreviewArea: View {
     }
 
     private var htmlContent: some View {
-        // GeometryReader caps the 16:9 preview at the viewport height so a wide
-        // window letterboxes it (like the video preview) instead of growing it
-        // unboundedly tall inside the ScrollView. The source form still scrolls.
         GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: 16) {
-                    if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
-                        HTMLPreviewSection(
-                            source: draft.htmlSource,
-                            config: draft.htmlConfig,
-                            wpePreviewURL: wpeWebPreviewURL,
-                            wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
-                        )
-                        .frame(maxHeight: geo.size.height)
-                    }
-                    HTMLSourceSection(
-                        screen: screen,
-                        source: $draft.htmlSource,
-                        config: $draft.htmlConfig
+            let previewHeight = cappedPreviewHeight(
+                in: geo.size.height,
+                verticalPadding: 24,
+                reservedHeight: htmlSourceReservedHeight
+            )
+            VStack(spacing: 16) {
+                if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
+                    HTMLPreviewSection(
+                        source: draft.htmlSource,
+                        config: draft.htmlConfig,
+                        wpePreviewURL: wpeWebPreviewURL,
+                        wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
                     )
+                    .frame(maxWidth: .infinity, maxHeight: previewHeight)
+                    .layoutPriority(1)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity)
+                HTMLSourceSection(
+                    screen: screen,
+                    source: $draft.htmlSource,
+                    config: $draft.htmlConfig
+                )
             }
+            .padding(24)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func cappedPreviewHeight(
+        in containerHeight: CGFloat,
+        verticalPadding: CGFloat,
+        reservedHeight: CGFloat
+    ) -> CGFloat {
+        let available = containerHeight - (verticalPadding * 2) - reservedHeight - 16
+        return max(0, available)
     }
 
     /// A Wallpaper Engine web project's shipped preview asset, when the selected
@@ -156,7 +178,7 @@ struct ScreenDetailPreviewArea: View {
 
     private var fitModeGroup: some View {
         HStack(spacing: 6) {
-            ForEach(VideoFitMode.allCases) { mode in
+            ForEach(VideoFitMode.videoModes) { mode in
                 fitModeButton(mode)
             }
         }
@@ -276,9 +298,9 @@ struct ScreenDetailPreviewArea: View {
     private var dragHintSubtitle: LocalizedStringKey {
         switch draft.selectedWallpaperType {
         case .video:        return "Video file (.mp4, .mov, …)"
-        case .html:         return "HTML file or folder"
-        case .metalShader:  return "Switch to Video or HTML to drop"
-        case .scene:        return "Switch to Video or HTML to drop"
+        case .html:         return "Web file or folder"
+        case .metalShader:  return "Switch to Video or Web to drop"
+        case .scene:        return "Switch to Video or Web to drop"
         }
     }
 }

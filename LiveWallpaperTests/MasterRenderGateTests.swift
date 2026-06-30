@@ -56,7 +56,7 @@ struct MasterRenderGateTests {
             ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
         ])
 
-        try Self.withGate(false) {
+        Self.withGate(false) {
             let manager = Self.makeManager(screen: screen)
             defer { screen.resetRuntimeSession() }
 
@@ -90,7 +90,7 @@ struct MasterRenderGateTests {
 
         SettingsManager.shared.replaceAllConfigurations([])
 
-        try Self.withGate(false) {
+        Self.withGate(false) {
             let manager = Self.makeManager(screen: screen)
             defer { screen.resetRuntimeSession() }
 
@@ -119,7 +119,7 @@ struct MasterRenderGateTests {
         // Start with nothing configured anywhere.
         SettingsManager.shared.replaceAllConfigurations([])
 
-        try Self.withGate(false) {
+        Self.withGate(false) {
             let manager = Self.makeManager(screen: screen)
             defer { screen.resetRuntimeSession() }
 
@@ -156,7 +156,7 @@ struct MasterRenderGateTests {
             ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
         ])
 
-        try Self.withGate(false) {
+        Self.withGate(false) {
             let manager = Self.makeManager(screen: screen)
             defer { screen.resetRuntimeSession() }
 
@@ -196,7 +196,7 @@ struct MasterRenderGateTests {
             ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
         ])
 
-        try Self.withGate(true) {
+        Self.withGate(true) {
             let manager = Self.makeManager(screen: screen)
             defer { screen.resetRuntimeSession() }
 

@@ -243,6 +243,218 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(schema.properties.contains { $0.key == "bgmvolume" })
     }
 
+    @Test("Inspector schema loader reports custom settings timing when enabled")
+    func inspectorSchemaLoaderReportsTimingWhenEnabled() async throws {
+        let key = "WPECustomSettingsLoadTiming"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.set(true, forKey: key)
+
+        let folder = try makeProjectFolder(manifest: sampleManifest)
+        let bookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+
+        let outcome = await WPEProjectCustomSettingsSchemaLoader.load(
+            source: .folder(bookmarkData: bookmark, indexFileName: "index.html"),
+            wpeOrigin: nil
+        )
+
+        #expect(outcome.log.contains("[custom-settings-timing]"))
+        #expect(outcome.log.contains("bookmark.resolve"))
+        #expect(outcome.log.contains("schema.read"))
+    }
+
+    @Test("Project property schema cache invalidates when project.json changes")
+    func schemaCacheInvalidatesWhenManifestChanges() throws {
+        let folder = try makeProjectFolder(manifest: manifestWithProperty(key: "speed", text: "Speed"))
+        let cache = WallpaperEngineProjectPropertySchemaCache(limit: 8)
+
+        let first = try cache.schema(from: folder, preferredLanguages: ["en-US"])
+        #expect(first.properties.map(\.key) == ["speed"])
+
+        let manifestURL = folder.appendingPathComponent("project.json")
+        try Data(manifestWithProperty(key: "density", text: "Density").utf8).write(to: manifestURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2_000_000)],
+            ofItemAtPath: manifestURL.path
+        )
+
+        let second = try cache.schema(from: folder, preferredLanguages: ["en-US"])
+        #expect(second.properties.map(\.key) == ["density"])
+    }
+
+    @Test("Project property schema cache separates schemecolor inclusion")
+    func schemaCacheSeparatesSchemeColorInclusion() throws {
+        let folder = try makeProjectFolder(manifest: sampleManifest)
+        let cache = WallpaperEngineProjectPropertySchemaCache(limit: 8)
+
+        let hidden = try cache.schema(from: folder, preferredLanguages: ["en-US"], includeSchemeColor: false)
+        let visible = try cache.schema(from: folder, preferredLanguages: ["en-US"], includeSchemeColor: true)
+
+        #expect(!hidden.properties.contains { $0.key == "schemecolor" })
+        #expect(visible.properties.contains { $0.key == "schemecolor" })
+    }
+
+    @Test("Scene settings presentation groups visible controls by project group and skips scheme color")
+    func sceneSettingsPresentationGroupsControlsAndSkipsSchemeColor() throws {
+        let manifest = """
+        {
+          "general": {
+            "properties": {
+              "schemecolor": { "type": "color", "text": "ui_browse_properties_scheme_color", "value": "1 1 1", "order": 1 },
+              "mainGroup": { "type": "group", "text": "Main Settings", "order": 2 },
+              "enabled": { "type": "bool", "text": "Enabled", "value": true, "order": 3 },
+              "volume": { "type": "slider", "text": "Volume", "value": 20, "min": 0, "max": 100, "condition": "enabled", "order": 4 },
+              "hiddenVolume": { "type": "slider", "text": "Hidden Volume", "value": 10, "min": 0, "max": 100, "condition": "!enabled", "order": 5 },
+              "dockGroup": { "type": "group", "text": "Dock Settings", "order": 6 },
+              "dockEnabled": { "type": "bool", "text": "Dock Enabled", "value": false, "order": 7 },
+              "dockSize": { "type": "slider", "text": "Dock Size", "value": 1, "min": 0, "max": 2, "condition": "dockEnabled.value == true", "order": 8 },
+              "support": { "type": "bool", "text": "<a href='https://ko-fi.com/example'>Support</a>", "value": true, "order": 9 }
+            }
+          }
+        }
+        """
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(manifest.utf8),
+            preferredLanguages: ["en-US"],
+            includeSchemeColor: true
+        )
+
+        let presentation = WPEProjectSettingsPresentation(
+            schema: schema,
+            overrides: [:],
+            excludedKeys: ["schemecolor"]
+        )
+
+        #expect(presentation.sections.map(\.title) == ["Main Settings", "Dock Settings"])
+        #expect(presentation.sections[0].properties.map(\.key) == ["enabled", "volume"])
+        #expect(presentation.sections[1].properties.map(\.key) == ["dockEnabled"])
+        #expect(!presentation.visibleKeys.contains("schemecolor"))
+        #expect(!presentation.visibleKeys.contains("support"))
+        #expect(!presentation.hasVisibleOverrides)
+    }
+
+    @Test("Scene settings presentation recomputes section children from overrides")
+    func sceneSettingsPresentationRecomputesSectionsFromOverrides() throws {
+        let manifest = """
+        {
+          "general": {
+            "properties": {
+              "dockGroup": { "type": "group", "text": "Dock Settings", "order": 1 },
+              "dockEnabled": { "type": "bool", "text": "Dock Enabled", "value": false, "order": 2 },
+              "dockSize": { "type": "slider", "text": "Dock Size", "value": 1, "min": 0, "max": 2, "condition": "dockEnabled.value == true", "order": 3 }
+            }
+          }
+        }
+        """
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(manifest.utf8),
+            preferredLanguages: ["en-US"]
+        )
+
+        let presentation = WPEProjectSettingsPresentation(
+            schema: schema,
+            overrides: ["dockEnabled": .bool(true)],
+            excludedKeys: ["schemecolor"]
+        )
+
+        #expect(presentation.sections.count == 1)
+        #expect(presentation.sections[0].properties.map(\.key) == ["dockEnabled", "dockSize"])
+        #expect(presentation.hasVisibleOverrides)
+    }
+
+    @Test("Scene settings presentation hides a conditioned group without dropping ungrouped controls")
+    func sceneSettingsPresentationHidesConditionedGroupWithoutDroppingUngroupedControls() throws {
+        let manifest = """
+        {
+          "general": {
+            "properties": {
+              "advanced": { "type": "bool", "text": "Advanced", "value": false, "order": 1 },
+              "advancedGroup": { "type": "group", "text": "Advanced Settings", "condition": "advanced.value == true", "order": 2 },
+              "advancedSize": { "type": "slider", "text": "Advanced Size", "value": 1, "min": 0, "max": 2, "order": 3 }
+            }
+          }
+        }
+        """
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(manifest.utf8),
+            preferredLanguages: ["en-US"]
+        )
+
+        let hidden = WPEProjectSettingsPresentation(
+            schema: schema,
+            overrides: [:],
+            excludedKeys: ["schemecolor"]
+        )
+        let visible = WPEProjectSettingsPresentation(
+            schema: schema,
+            overrides: ["advanced": .bool(true)],
+            excludedKeys: ["schemecolor"]
+        )
+
+        #expect(hidden.sections.map(\.title) == ["Settings"])
+        #expect(hidden.sections[0].properties.map(\.key) == ["advanced"])
+        #expect(visible.sections.map(\.title) == ["Settings", "Advanced Settings"])
+        #expect(visible.sections[1].properties.map(\.key) == ["advancedSize"])
+    }
+
+    @Test("Scene settings presentation starts with all sections collapsed")
+    func sceneSettingsPresentationStartsWithAllSectionsCollapsed() throws {
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(groupedSceneSettingsManifest(propertyCount: 2).utf8),
+            preferredLanguages: ["en-US"]
+        )
+        let presentation = WPEProjectSettingsPresentation(schema: schema, overrides: [:])
+
+        #expect(!presentation.sections.isEmpty)
+        #expect(WPEProjectSettingsPresentation.initiallyExpandedSectionIDs(for: presentation.sections).isEmpty)
+    }
+
+    @Test("Scene settings presentation flattens expanded sections into all stable rows")
+    func sceneSettingsPresentationFlattensExpandedSectionsIntoAllRows() throws {
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(groupedSceneSettingsManifest(propertyCount: 5).utf8),
+            preferredLanguages: ["en-US"]
+        )
+        let presentation = WPEProjectSettingsPresentation(schema: schema, overrides: [:])
+
+        let collapsedRows = presentation.rows(expandedSectionIDs: [])
+        let expandedRows = presentation.rows(expandedSectionIDs: ["mainGroup"])
+
+        #expect(collapsedRows.map(\.id) == ["section:mainGroup"])
+        #expect(expandedRows.map(\.id) == [
+            "section:mainGroup",
+            "property:setting1",
+            "property:setting2",
+            "property:setting3",
+            "property:setting4",
+            "property:setting5"
+        ])
+    }
+
+    @Test("Scene settings presentation includes every property in expanded large sections")
+    func sceneSettingsPresentationIncludesEveryPropertyInExpandedLargeSections() throws {
+        let schema = try WallpaperEngineProjectPropertySchema.parse(
+            data: Data(groupedSceneSettingsManifest(propertyCount: 12).utf8),
+            preferredLanguages: ["en-US"]
+        )
+        let presentation = WPEProjectSettingsPresentation(schema: schema, overrides: [:])
+        let rows = presentation.rows(expandedSectionIDs: ["mainGroup"])
+
+        #expect(rows.count == 13)
+        #expect(rows.first?.id == "section:mainGroup")
+        #expect(rows.last?.id == "property:setting12")
+    }
+
     private var sampleManifest: String {
         """
         {
@@ -325,5 +537,40 @@ struct WallpaperEngineProjectPropertiesTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data(manifest.utf8).write(to: folder.appendingPathComponent("project.json"))
         return folder
+    }
+
+    private func manifestWithProperty(key: String, text: String) -> String {
+        """
+        {
+          "file": "scene.json",
+          "type": "Scene",
+          "general": {
+            "properties": {
+              "\(key)": { "type": "slider", "text": "\(text)", "value": 1, "min": 0, "max": 10, "order": 1 }
+            }
+          }
+        }
+        """
+    }
+
+    private func groupedSceneSettingsManifest(propertyCount: Int) -> String {
+        let settings = (1...propertyCount).map { index in
+            """
+              "setting\(index)": { "type": "bool", "text": "Setting \(index)", "value": false, "order": \(index + 1) }
+            """
+        }.joined(separator: ",\n")
+
+        return """
+        {
+          "file": "scene.json",
+          "type": "Scene",
+          "general": {
+            "properties": {
+              "mainGroup": { "type": "group", "text": "Main Settings", "order": 1 },
+        \(settings)
+            }
+          }
+        }
+        """
     }
 }

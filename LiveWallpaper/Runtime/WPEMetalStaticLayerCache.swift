@@ -32,8 +32,10 @@ struct WPEMetalStaticLayerCachePlan: Equatable, Sendable {
 enum WPEMetalStaticLayerClassifier {
     static func cachePlan(
         for layer: WPEPreparedRenderLayer,
-        dynamicTextureNames: Set<String>
+        dynamicTextureNames: Set<String>,
+        dynamicLayerIDs: Set<String> = []
     ) -> WPEMetalStaticLayerCachePlan? {
+        guard !dynamicLayerIDs.contains(layer.graphLayer.objectID) else { return nil }
         guard layer.puppetModel == nil,
               layer.graphLayer.animationLayers.isEmpty,
               layer.graphLayer.geometry.alphaAnimation == nil,

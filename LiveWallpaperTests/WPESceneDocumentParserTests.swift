@@ -190,6 +190,41 @@ struct WPESceneDocumentParserTests {
         #expect(layer.size == CGSize(width: 512, height: 512))
     }
 
+    @Test("Image origin script using cursorWorldPosition is preserved for runtime")
+    func cursorOriginScriptIsPreservedForRuntime() throws {
+        let script = """
+        'use strict';
+        export function update(value) {
+            value.x = input.cursorWorldPosition.x;
+            value.y = input.cursorWorldPosition.y;
+            return value;
+        }
+        """
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": "154",
+                "name": "苍月草1/Nemophila1",
+                "type": "image",
+                "image": "models/nemophila.json",
+                "origin": [
+                    "script": script,
+                    "value": "860.29364 133.27734 0"
+                ],
+                "size": "360 248 0"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+
+        #expect(layer.origin == SIMD3<Double>(860.29364, 133.27734, 0))
+        #expect(layer.originScript?.script == script)
+        #expect(layer.originScript?.seed == SIMD3<Double>(860.29364, 133.27734, 0))
+    }
+
     @Test("Image and text alpha animations are preserved and resolve single-shot fades")
     func alphaAnimationsPreserved() throws {
         let alphaFade: [String: Any] = [

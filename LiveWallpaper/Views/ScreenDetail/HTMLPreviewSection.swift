@@ -109,7 +109,7 @@ struct HTMLPreviewSection: View {
         } else if source != nil {
             placeholder(systemImage: "globe", title: "Tap refresh to capture preview")
         } else {
-            placeholder(systemImage: "globe", title: "No HTML source")
+            placeholder(systemImage: "globe", title: "No web source")
         }
     }
 
@@ -142,8 +142,8 @@ struct HTMLPreviewSection: View {
         }
         .buttonStyle(.plain)
         .opacity(source == nil ? 0 : 1)
-        .help(Text("Refresh HTML snapshot"))
-        .accessibilityLabel(Text("Refresh HTML preview"))
+        .help(Text("Refresh web snapshot"))
+        .accessibilityLabel(Text("Refresh web preview"))
     }
 
     // MARK: - Loading
@@ -247,12 +247,12 @@ enum HTMLPreviewKey {
     }
 }
 
-/// Floating capsule on the HTML preview: source kind, identifier, and the
+/// Floating capsule on the web preview: source kind, identifier, and the
 /// runtime-mode badges that meaningfully change how the page is drawn (insecure
 /// URL, physical-pixel layout, JavaScript off).
 ///
 /// Deliberately omits anything that already lives in a banner inside
-/// `HTMLSourceSection` (trust state for remote URLs) or the HTML Rendering
+/// `HTMLSourceSection` (trust state for remote URLs) or the Web Rendering
 /// inspector card (viewport / DPR / scale), to avoid a duplicate diagnostic.
 struct HTMLInformationOverlay: View {
     let source: HTMLSource?
@@ -328,7 +328,7 @@ struct HTMLInformationOverlay: View {
         case .file, .folder:
             return source.displayName
         case .inline:
-            return "Inline HTML"
+            return "Inline web content"
         }
     }
 }

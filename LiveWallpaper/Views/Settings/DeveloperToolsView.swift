@@ -249,6 +249,8 @@ struct DeveloperToolsView: View {
                   help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
             .init(key: "WPEMetalLoadTiming", title: "Load timing",
                   help: "Log a per-phase scene-load time breakdown ([load-timing] …) at first frame, for measuring + comparing load cost."),
+            .init(key: "WPECustomSettingsLoadTiming", title: "Custom settings timing",
+                  help: "Log WPE project custom-settings schema load timing ([custom-settings-timing] …), including bookmark resolve, cache probe, and project.json read/parse."),
             .init(key: "WPEParticlePrewarmEnabled", title: "Particle prewarm",
                   help: "Pre-populate emitters to their steady-state spread on load (the WPE-matching populated look). Off (default): emitters start empty and fill naturally — cuts the dominant particles.load cost. Reload the scene to apply."),
             .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
