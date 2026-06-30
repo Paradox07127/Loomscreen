@@ -70,6 +70,7 @@ enum WPESceneDocumentParser {
         // Effective visibility folds each object's own `visible` with its ancestor
         // groups', so a child of a condition-hidden group is hidden too.
         let objectVisibility = resolvedObjectVisibility(rawObjects)
+        let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
@@ -180,8 +181,29 @@ enum WPESceneDocumentParser {
             soundObjects: soundObjects,
             objectPaintOrder: objectPaintOrder,
             propertyBindings: propertyBindings,
+            objectParentByID: objectParentByID,
+            ownVisibilityByID: ownVisibilityByID,
             diagnostics: diagnostics
         )
+    }
+
+    /// Parent id and OWN baked `visible` for every object (groups included). The
+    /// renderer walks the parent chain live so a layer script can't show a layer
+    /// under a currently-hidden ancestor (group toggle, condition, or live image
+    /// toggle alike) — its `getParent()` is a neutral always-visible stub.
+    private static func objectHierarchy(
+        _ rawObjects: [[String: Any]]
+    ) -> (parents: [String: String], ownVisibility: [String: Bool]) {
+        var parents: [String: String] = [:]
+        var ownVisibility: [String: Bool] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object) else { continue }
+            ownVisibility[id] = parseBool(object["visible"]) ?? true
+            if let parent = parentID(in: object), parent != id {
+                parents[id] = parent
+            }
+        }
+        return (parents, ownVisibility)
     }
 
     /// Records, per user-property key, the render targets it drives and whether

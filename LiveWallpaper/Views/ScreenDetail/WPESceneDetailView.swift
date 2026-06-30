@@ -298,6 +298,14 @@ struct WPESceneDetailView: View {
             lines.append("No render diagnostics yet (scene not loaded).")
         }
 
+        if let shaders = session?.sceneRenderer?.shaderErrorSummary, shaders.count > 0 {
+            lines.append("")
+            lines.append("Shader compile failures: \(shaders.count) (pass skipped — effect not drawn)")
+            for entry in shaders.entries.prefix(20) {
+                lines.append("  \(entry.shader): \(entry.reason)")
+            }
+        }
+
         if let gpu = session?.sceneRenderer?.gpuErrorSummary, gpu.count > 0 {
             lines.append("")
             lines.append("GPU errors: \(gpu.count)" + (gpu.last.map { " (last: \($0))" } ?? ""))

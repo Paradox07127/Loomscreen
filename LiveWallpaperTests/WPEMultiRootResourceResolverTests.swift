@@ -147,6 +147,52 @@ struct WPEMultiRootResourceResolverTests {
         }
     }
 
+    @Test("Optional probe miss is not traced; required miss is")
+    func optionalProbeMissNotTraced() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let tracer = WPEResolutionTracer()
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: fixture.primaryRoot,
+            dependencyMounts: [],
+            engineAssetsRootURL: fixture.engineRoot,
+            tracer: tracer
+        )
+
+        #expect(throws: SceneResourceResolver.ResolveError.fileMissing) {
+            _ = try resolver.data(relativePath: "materials/particle/流星.tex-json", optional: true)
+        }
+        #expect(tracer.snapshot().missedRefs.isEmpty)
+
+        #expect(throws: SceneResourceResolver.ResolveError.fileMissing) {
+            _ = try resolver.data(relativePath: "materials/particle/流星.tex")
+        }
+        #expect(tracer.snapshot().missedRefs.map(\.ref) == ["materials/particle/流星.tex"])
+    }
+
+    @Test("Optional probe hit is still traced as resolved")
+    func optionalProbeHitTraced() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let engineParticle = fixture.engineRoot
+            .appendingPathComponent("assets/materials/particle", isDirectory: true)
+        try FileManager.default.createDirectory(at: engineParticle, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: engineParticle.appendingPathComponent("halo_3.tex-json"))
+
+        let tracer = WPEResolutionTracer()
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: fixture.primaryRoot,
+            dependencyMounts: [],
+            engineAssetsRootURL: fixture.engineRoot,
+            tracer: tracer
+        )
+
+        _ = try resolver.data(relativePath: "materials/particle/halo_3.tex-json", optional: true)
+        let snapshot = tracer.snapshot()
+        #expect(snapshot.resolvedCount == 1)
+        #expect(snapshot.missedRefs.isEmpty)
+    }
+
     private struct Fixture {
         let root: URL
         let primaryRoot: URL

@@ -2695,6 +2695,34 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 1)
     }
 
+    @Test("Derived puppet clip FBOs inherit the base clip target scale")
+    func derivedPuppetClipFBOsInheritBaseScale() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let base = WPERenderFBO(name: "_rt_puppetClip_106", scale: 4, format: "rgba8888")
+        let layer = WPERenderLayer(
+            objectID: "106",
+            objectName: "13眼组",
+            imagePath: "models/13眼组.json",
+            materialPath: nil,
+            geometry: .identity,
+            compositeA: "_rt_imageLayerComposite_106_a",
+            compositeB: "_rt_imageLayerComposite_106_b",
+            localFBOs: [base],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .fbo(name: "_rt_puppetClip_106_s1"),
+            layer: layer,
+            sceneSize: CGSize(width: 8, height: 4),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 2)
+        #expect(texture.height == 1)
+    }
+
     @Test("Composelayer composite target uses full scene size, not the object footprint")
     func composelayerCompositeTargetUsesFullSceneSize() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

@@ -103,6 +103,7 @@ Temporary Items
 .vm-bridge/
 cache/
 tools/
+trace/
 
 # Python bytecode
 __pycache__/

@@ -20,6 +20,13 @@ public struct WPESceneDocument: Equatable, Sendable {
     /// `scene.json`) to the render targets it drives, so a settings change
     /// can be classified as incremental or reload without re-parsing.
     public let propertyBindings: [String: [WPEScenePropertyBinding]]
+    /// Parent object id per object (groups included), and each object's OWN baked
+    /// `visible`. The renderer walks `objectParentByID` and ANDs each ancestor's
+    /// CURRENT visibility (live override if tracked, else `ownVisibilityByID`) into
+    /// a layer script's own `visible`, so a script can't show a layer under a
+    /// hidden ancestor — and a live ancestor toggle is respected, not snapshotted.
+    public let objectParentByID: [String: String]
+    public let ownVisibilityByID: [String: Bool]
     public let diagnostics: [WPESceneDiagnostic]
 
     public init(
@@ -31,6 +38,8 @@ public struct WPESceneDocument: Equatable, Sendable {
         soundObjects: [WPESceneSoundObject] = [],
         objectPaintOrder: [String: Int] = [:],
         propertyBindings: [String: [WPEScenePropertyBinding]] = [:],
+        objectParentByID: [String: String] = [:],
+        ownVisibilityByID: [String: Bool] = [:],
         diagnostics: [WPESceneDiagnostic]
     ) {
         self.camera = camera
@@ -41,6 +50,8 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.soundObjects = soundObjects
         self.objectPaintOrder = objectPaintOrder
         self.propertyBindings = propertyBindings
+        self.objectParentByID = objectParentByID
+        self.ownVisibilityByID = ownVisibilityByID
         self.diagnostics = diagnostics
     }
 }

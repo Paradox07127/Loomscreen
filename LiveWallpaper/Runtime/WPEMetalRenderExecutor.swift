@@ -4,6 +4,7 @@ import Foundation
 import LiveWallpaperProWPE
 import Metal
 import MetalKit
+import os
 
 /// Shared classifier for WPE compose/project utility layers, so the dispatcher,
 /// target pool, and executor branch on one definition instead of duplicating
@@ -61,7 +62,24 @@ enum WPEMetalSceneCaptureUtilityModels {
         return .subregion
     }
 
+    /// `compute…` allocates 2–3 throwaway strings (replace + lowercase + split/join)
+    /// per call, on the per-pass utility-layer classification path every frame
+    /// (trace: 2.3–2.8% of one core). The result is invariant for a path → memoize.
+    /// Lock-guarded for the per-display render threads on the roadmap; capacity-capped.
+    private static let strippedUtilityPathCache = OSAllocatedUnfairLock(initialState: [String: String]())
+    private static let strippedUtilityPathCacheLimit = 512
+
     private static func strippedUtilityPath(_ path: String) -> String {
+        strippedUtilityPathCache.withLock { cache in
+            if let cached = cache[path] { return cached }
+            let result = computeStrippedUtilityPath(path)
+            if cache.count >= strippedUtilityPathCacheLimit { cache.removeAll(keepingCapacity: true) }
+            cache[path] = result
+            return result
+        }
+    }
+
+    private static func computeStrippedUtilityPath(_ path: String) -> String {
         let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
         if normalized.hasPrefix("../") {
             let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
@@ -91,6 +109,27 @@ final class WPEGPUErrorSink: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return (errorCount, lastMessage)
+    }
+}
+
+/// Custom-shader compile failures, deduped by shader name, surfaced in the scene
+/// diagnostic log — the `WPESceneDebugArtifacts` dump is hard-off in Release, so
+/// otherwise a skipped (non-compiling) pass is invisible in a bug report.
+final class WPEShaderErrorSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failures: [String: String] = [:]
+
+    func record(shader: String, reason: String) {
+        lock.lock()
+        failures[shader] = reason
+        lock.unlock()
+    }
+
+    var summary: (count: Int, entries: [(shader: String, reason: String)]) {
+        lock.lock()
+        defer { lock.unlock() }
+        let entries = failures.sorted { $0.key < $1.key }.map { (shader: $0.key, reason: $0.value) }
+        return (entries.count, entries)
     }
 }
 
@@ -264,10 +303,11 @@ final class WPEMetalRenderExecutor {
     private var compiledShaderResultByPassID: [String: WPEShaderCompileResult] = [:]
 
     static let shaderPrewarmDefaultsKey = "WPEMetalShaderPrewarmEnabled"
-    /// Off-thread shader-transpile pre-warm. Default ON (validated on-device: heavy
-    /// scenes ~halved their load, e.g. 3226487183 3.3s→1.7s, with firstFrame-transpile
-    /// collapsing 1.9s→~0.1s; output-invariant by construction). Manual override still
-    /// wins: `defaults write … WPEMetalShaderPrewarmEnabled -bool NO`.
+    /// Parallel (multi-thread) shader pre-warm. Default ON (heavy scenes ~halve
+    /// load, e.g. 3226487183 3.3s→1.7s). Shaders are ALWAYS pre-compiled before
+    /// the first-frame encode regardless of this flag — compiling inline during an
+    /// open render encoder corrupts the pass. `-bool NO` only forces SERIAL
+    /// pre-warm (width 1); it does NOT disable pre-warming.
     static var isShaderPrewarmEnabled: Bool {
         UserDefaults.standard.object(forKey: shaderPrewarmDefaultsKey) as? Bool ?? true
     }
@@ -312,6 +352,7 @@ final class WPEMetalRenderExecutor {
     private var recentOutputTextureIDs: [ObjectIdentifier] = []
     private let presentTracker = PresentInFlightTracker()
     let gpuErrorSink = WPEGPUErrorSink()
+    let shaderErrorSink = WPEShaderErrorSink()
     /// Diagnostics that hold several successive frame textures at once
     /// (`debugRenderSuccessiveFrameTextures`) disable recycling so each frame
     /// keeps distinct storage.
@@ -976,11 +1017,62 @@ final class WPEMetalRenderExecutor {
             }
             .map(\.element)
         var particleCursor = 0
+        // Batch consecutive non-refract systems (same `output`, no intervening
+        // scene pass) into ONE render encoder, instead of a render pass + full-target
+        // load/store per system. Refract systems need a pre-draw blit snapshot (no
+        // open render encoder allowed) and DEBUG per-pass dumping needs a boundary
+        // per system → both end the run and render standalone. A run never spans
+        // `flushParticles` calls (a layer pass renders between them), so it is closed
+        // before returning.
         func flushParticles(before threshold: Int) throws {
+            var particleRunEncoder: MTLRenderCommandEncoder?
+            func endParticleRun() {
+                guard let encoder = particleRunEncoder else { return }
+                encoder.endEncoding()
+                particleRunEncoder = nil
+                frameState.registerWrite(texture: output, targetID: .scene)
+            }
+            // Close the run on EVERY exit — a thrown `particlePipelineState`/encoder
+            // failure mid-run must not leak an open encoder (Metal validation asserts).
+            defer { endParticleRun() }
             while particleCursor < sortedParticles.count,
                   sortedParticles[particleCursor].sortIndex < threshold {
                 let system = sortedParticles[particleCursor]
                 let traceIndex = particleCursor
+                particleCursor += 1
+
+                let isRefractSystem = !system.isRope
+                    && particleNormalTextures[ObjectIdentifier(system)] != nil
+                #if DEBUG
+                let standalone = isRefractSystem || dumpScenePasses
+                #else
+                let standalone = isRefractSystem
+                #endif
+
+                if standalone {
+                    endParticleRun()
+                    if try encodeParticleSystem(
+                        system,
+                        into: commandBuffer,
+                        output: output,
+                        sceneSize: size,
+                        cameraParallax: particleParallax,
+                        texturesByMaterial: particleTextures,
+                        normalsByMaterial: particleNormalTextures,
+                        frameState: &frameState,
+                        traceIndex: traceIndex
+                    ) {
+                        didEncode = true
+                        #if DEBUG
+                        captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
+                        #endif
+                    }
+                    continue
+                }
+
+                let encoder = try particleRunEncoder
+                    ?? makeParticleOutputEncoder(output: output, commandBuffer: commandBuffer)
+                particleRunEncoder = encoder
                 if try encodeParticleSystem(
                     system,
                     into: commandBuffer,
@@ -990,14 +1082,11 @@ final class WPEMetalRenderExecutor {
                     texturesByMaterial: particleTextures,
                     normalsByMaterial: particleNormalTextures,
                     frameState: &frameState,
-                    traceIndex: traceIndex
+                    traceIndex: traceIndex,
+                    sharedEncoder: encoder
                 ) {
                     didEncode = true
-                    #if DEBUG
-                    captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
-                    #endif
                 }
-                particleCursor += 1
             }
         }
 
@@ -1301,10 +1390,28 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// Encode one particle system on top of `output`, in its own render pass
-    /// (loadAction `.load`), into the SHARED scene command buffer — so particles
-    /// interleave with layers at their scene paint index. Returns false (no
-    /// encode) when the system has no live particles or its texture is missing.
+    /// One render encoder for particle draws into `output` (`.load`/`.store` so it
+    /// composites over the scene so far). Shared across consecutive non-refract
+    /// systems by `flushParticles`.
+    private func makeParticleOutputEncoder(
+        output: MTLTexture,
+        commandBuffer: MTLCommandBuffer
+    ) throws -> MTLRenderCommandEncoder {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        return encoder
+    }
+
+    /// Encode one particle system on top of `output`, into either its own render
+    /// pass (loadAction `.load`) or a caller-owned `sharedEncoder`, on the SHARED
+    /// scene command buffer — so particles interleave with layers at their paint
+    /// index. Returns false (no encode) when the system has no drawable particles
+    /// or its texture is missing.
     @discardableResult
     private func encodeParticleSystem(
         _ system: WPEParticleSystem,
@@ -1315,7 +1422,8 @@ final class WPEMetalRenderExecutor {
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
         normalsByMaterial: [ObjectIdentifier: MTLTexture],
         frameState: inout WPEMetalFrameState,
-        traceIndex: Int
+        traceIndex: Int,
+        sharedEncoder: MTLRenderCommandEncoder? = nil
     ) throws -> Bool {
         guard system.liveInstanceCount > 0 else { return false }
         // A rope needs ≥2 knots (4 verts) for a strip; a degenerate/empty ribbon
@@ -1325,9 +1433,12 @@ final class WPEMetalRenderExecutor {
         // defensively so a stale texture-slot binding can't leak in.
         guard let texture = texturesByMaterial[ObjectIdentifier(system)] else { return false }
         // REFRACT: needs the normal map AND a snapshot of the scene drawn so far
-        // (= `_rt_FullFrameBuffer`) to sample as the refracted background. Without
-        // either, fall back to the flat-sprite path.
-        let refractNormal = system.isRope ? nil : normalsByMaterial[ObjectIdentifier(system)]
+        // (= `_rt_FullFrameBuffer`) to sample as the refracted background. The
+        // snapshot is a blit encoder that cannot coexist with a shared open render
+        // encoder, so refraction is only available on this system's OWN pass
+        // (`sharedEncoder == nil`); `flushParticles` only ever batches non-refract.
+        let refractNormal = (sharedEncoder == nil && !system.isRope)
+            ? normalsByMaterial[ObjectIdentifier(system)] : nil
         let refractBackground: MTLTexture? = refractNormal == nil ? nil
             : snapshotForRefraction(of: output, into: commandBuffer, frameState: &frameState)
         let isRefract = refractNormal != nil && refractBackground != nil
@@ -1338,13 +1449,9 @@ final class WPEMetalRenderExecutor {
             isRefract: isRefract
         )
 
-        let descriptor = MTLRenderPassDescriptor()
-        descriptor.colorAttachments[0].texture = output
-        descriptor.colorAttachments[0].loadAction = .load
-        descriptor.colorAttachments[0].storeAction = .store
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
-        }
+        let ownsEncoder = sharedEncoder == nil
+        let encoder = try sharedEncoder
+            ?? makeParticleOutputEncoder(output: output, commandBuffer: commandBuffer)
 
         var projection = WPEParticleProjection(
             sceneSize: SIMD4<Float>(
@@ -1414,12 +1521,15 @@ final class WPEMetalRenderExecutor {
                 instanceCount: system.liveInstanceCount
             )
         }
-        encoder.endEncoding()
-        // Mark the scene target written so a later scene pass loads (instead of
-        // clearing away) the particles, previous-frame history + full-frame
-        // aliases see them, and any refraction snapshot taken before this draw is
-        // invalidated before the next interleaved pass requests another.
-        frameState.registerWrite(texture: output, targetID: .scene)
+        if ownsEncoder {
+            encoder.endEncoding()
+            // Mark the scene target written so a later scene pass loads (instead of
+            // clearing away) the particles, previous-frame history + full-frame
+            // aliases see them, and any refraction snapshot taken before this draw is
+            // invalidated before the next interleaved pass requests another. A shared
+            // run defers both to `flushParticles` when it ends the run.
+            frameState.registerWrite(texture: output, targetID: .scene)
+        }
 
         #if !LITE_BUILD && DEBUG
         WPECanonicalTraceRecorder.shared.recordParticlePass(
@@ -3032,11 +3142,9 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Resolves the WPE clip-composite routing for a genericimage4 puppet the builder flagged with a clip
-    /// mask (slot 1) + intermediate clip RT (slot 8). Part roles follow WPE's first→second-part
-    /// convention (`detectClipPairs`): parts[0] is the clip silhouette, parts[1] is clipped to it, gated
-    /// by squish geometry. A puppet whose convention/geometry doesn't hold yields nil → flat draw. The
-    /// plan/encoder still model a list of source→target pairs so the data path generalises if WPE ever
-    /// ships a multi-pair clip mesh, even though detection currently returns a single pair.
+    /// mask (slot 1) + intermediate clip RT (slot 8). Part roles are inferred from geometry: any part
+    /// that squishes closed can be a clip silhouette, and later/open parts enclosed by it are clipped.
+    /// A puppet whose geometry doesn't prove that relationship yields nil → flat draw.
     private func puppetClipCompositePlan(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -3233,12 +3341,10 @@ final class WPEMetalRenderExecutor {
         return boxes
     }
 
-    /// Resolves the clip source→target pair for a clip-mask puppet. WPE's puppet clip is a fixed
-    /// two-part convention (oracle-confirmed on 3719111841 via RenderDoc; the MDLV clip section and the
-    /// material carry only the mask name, no per-part roles): the FIRST mesh part is the clip silhouette
-    /// that squishes shut, the SECOND part is clipped to it and stays full. Animated geometry is used only
-    /// to VALIDATE that shape (shape closes, target stays open inside it) so an unfamiliar rig degrades to
-    /// a flat draw instead of being mis-clipped. Returns [] when the convention doesn't hold.
+    /// Resolves clip source→target pairs for a clip-mask puppet. The MDLV clip section and material carry
+    /// only the mask name, no per-part roles, so animated geometry decides roles: a source squishes shut;
+    /// a target stays open and is enclosed by that source in the bind pose. Returns [] when no relationship
+    /// is proven, so unfamiliar rigs degrade to a flat draw instead of being mis-clipped.
     private static func detectClipPairs(
         mesh: WPEPuppetMesh,
         animationLayers: [WPEPuppetAnimationLayer],
@@ -3288,36 +3394,73 @@ final class WPEMetalRenderExecutor {
             .map { "id\($0)=\(String(format: "%.2f", ratio($0)))" }
             .joined(separator: " ")
 
-        // WPE convention: parts[0] = clip silhouette, parts[1] = clipped target. Validate with geometry.
         let ordered = mesh.parts.filter { $0.count > 0 }
-        guard ordered.count >= 2,
-              let shape = bindByID[ordered[0].id],
-              let target = bindByID[ordered[1].id] else {
-            clipDiagnosticLog("[WPE clip] detect: NO PAIR (fewer than 2 measurable parts) minAxisRatios[\(ratioSummary)]")
+        guard ordered.count >= 2 else {
+            clipDiagnosticLog("[WPE clip] detect: NO PAIR (fewer than 2 parts) minAxisRatios[\(ratioSummary)]")
             return []
         }
-        let shapeRatio = ratio(shape.id)
-        let targetRatio = ratio(target.id)
-        let targetInsideShape = target.centerX >= shape.minX && target.centerX <= shape.maxX
-            && target.centerY >= shape.minY && target.centerY <= shape.maxY
-        guard shapeRatio < 0.85,              // the silhouette part actually closes
-              targetRatio > 0.8,              // the clipped part stays open (would show through)
-              targetRatio > shapeRatio + 0.1, // and is clearly fuller than the silhouette
-              targetInsideShape else {        // and sits inside the silhouette
+
+        func contains(_ target: PuppetClipPartBox, in source: PuppetClipPartBox) -> Bool {
+            let tolerance = max(max(source.width, source.height) * 0.02, 1)
+            return target.minX >= source.minX - tolerance
+                && target.maxX <= source.maxX + tolerance
+                && target.minY >= source.minY - tolerance
+                && target.maxY <= source.maxY + tolerance
+        }
+
+        func area(_ box: PuppetClipPartBox) -> Float {
+            max(box.width, 0) * max(box.height, 0)
+        }
+
+        func centerDistanceSquared(_ lhs: PuppetClipPartBox, _ rhs: PuppetClipPartBox) -> Float {
+            let dx = lhs.centerX - rhs.centerX
+            let dy = lhs.centerY - rhs.centerY
+            return dx * dx + dy * dy
+        }
+
+        let sourceIDs = ordered.map(\.id).filter { id in
+            bindByID[id] != nil && ratio(id) < 0.85
+        }
+        let targetIDs = Set(ordered.map(\.id).filter { id in
+            bindByID[id] != nil && ratio(id) > 0.8
+        })
+
+        var pairs: [PuppetClipPair] = []
+        for part in ordered where targetIDs.contains(part.id) {
+            guard let target = bindByID[part.id] else { continue }
+            let targetRatio = ratio(part.id)
+            let candidates: [(id: UInt32, box: PuppetClipPartBox)] = sourceIDs.compactMap { sourceID in
+                guard sourceID != part.id,
+                      let source = bindByID[sourceID],
+                      targetRatio > ratio(sourceID) + 0.1,
+                      contains(target, in: source) else {
+                    return nil
+                }
+                return (sourceID, source)
+            }
+            guard let source = candidates.min(by: { lhs, rhs in
+                let lhsArea = area(lhs.box)
+                let rhsArea = area(rhs.box)
+                if lhsArea != rhsArea { return lhsArea < rhsArea }
+                return centerDistanceSquared(lhs.box, target) < centerDistanceSquared(rhs.box, target)
+            }) else {
+                continue
+            }
+            pairs.append(PuppetClipPair(source: source.id, target: part.id))
+        }
+
+        guard !pairs.isEmpty else {
             clipDiagnosticLog(
-                "[WPE clip] detect: NO PAIR (shape id\(shape.id)=\(String(format: "%.2f", shapeRatio)) "
-                    + "target id\(target.id)=\(String(format: "%.2f", targetRatio)) inside=\(targetInsideShape)) "
-                    + "minAxisRatios[\(ratioSummary)] — first part must close, second must stay open inside it; "
-                    + "if all ~1.0 the mesh isn't deforming (skinning off?)"
+                "[WPE clip] detect: NO PAIR (no closing source encloses an open target) "
+                    + "minAxisRatios[\(ratioSummary)] — if all ~1.0 the mesh isn't deforming (skinning off?)"
             )
             return []
         }
+        let pairSummary = pairs.map { "\($0.source)→\($0.target)" }.joined(separator: ",")
         clipDiagnosticLog(
-            "[WPE clip] detect: pair=\(shape.id)→\(target.id) "
-                + "(shape=\(String(format: "%.2f", shapeRatio)) target=\(String(format: "%.2f", targetRatio))) "
-                + "minAxisRatios[\(ratioSummary)]"
+            "[WPE clip] detect: pairs=[\(pairSummary)] minAxisRatios[\(ratioSummary)]"
         )
-        return [PuppetClipPair(source: shape.id, target: target.id)]
+        return pairs
     }
 
     /// DEBUG-only `[WPE clip]` diagnostic sink (once-per-puppet/per-build messages); compiled out of
@@ -4790,40 +4933,54 @@ final class WPEMetalRenderExecutor {
         if let cached = compiledShaderResultByPassID[pass.id] {
             return cached
         }
-        guard let request = try Self.makeCompileRequest(for: pass, recordFailure: true) else {
-            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
-        }
-        if let cached = translatedShaderCache[request.translationCacheKey] {
-            compiledShaderResultByPassID[pass.id] = cached
-            return cached
-        }
         do {
-            let result = try shaderCompiler.compile(request)
-            translatedShaderCache[request.translationCacheKey] = result
-            compiledShaderResultByPassID[pass.id] = result
-            return result
-        } catch let error as WPEShaderCompilerError {
-            switch error {
-            case .glslPreprocessFailed(let reason),
-                 .translationFailed(let reason),
-                 .mslLibraryFailed(let reason):
-                // The compiler already dumped processed sources; tack on the
-                // pre-preprocess originals so a maintainer can diff to see
-                // exactly which fixup turned the source unparseable.
-                WPESceneDebugArtifacts.shared.recordShaderFailure(
-                    shaderName: program.name,
-                    originalVertex: program.vertexSource,
-                    processedVertex: request.processedVertexSource,
-                    originalFragment: program.fragmentSource,
-                    processedFragment: request.processedFragmentSource,
-                    translatedMSL: nil,
-                    errorText: "compile failed: \(reason)"
-                )
-                throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
-                    name: program.name,
-                    reason: reason
-                )
+            guard let request = try Self.makeCompileRequest(for: pass, recordFailure: true) else {
+                throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
             }
+            if let cached = translatedShaderCache[request.translationCacheKey] {
+                compiledShaderResultByPassID[pass.id] = cached
+                return cached
+            }
+            do {
+                let result = try shaderCompiler.compile(request)
+                translatedShaderCache[request.translationCacheKey] = result
+                compiledShaderResultByPassID[pass.id] = result
+                return result
+            } catch let error as WPEShaderCompilerError {
+                switch error {
+                case .glslPreprocessFailed(let reason),
+                     .translationFailed(let reason),
+                     .mslLibraryFailed(let reason):
+                    // The compiler already dumped processed sources; tack on the
+                    // pre-preprocess originals so a maintainer can diff to see
+                    // exactly which fixup turned the source unparseable.
+                    WPESceneDebugArtifacts.shared.recordShaderFailure(
+                        shaderName: program.name,
+                        originalVertex: program.vertexSource,
+                        processedVertex: request.processedVertexSource,
+                        originalFragment: program.fragmentSource,
+                        processedFragment: request.processedFragmentSource,
+                        translatedMSL: nil,
+                        errorText: "compile failed: \(reason)"
+                    )
+                    throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
+                        name: program.name,
+                        reason: reason
+                    )
+                }
+            }
+        } catch {
+            // Surface every custom-shader failure (preprocess OR compile) in the
+            // scene diagnostic log: the WPESceneDebugArtifacts dump above is
+            // hard-off in Release, so otherwise the skipped pass is invisible.
+            let reason: String
+            switch error {
+            case WPEMetalRenderExecutorError.shaderTranslatorUnavailable(_, let r): reason = r
+            case WPEMetalRenderExecutorError.unsupportedShader: reason = "unsupported shader"
+            default: reason = String(describing: error)
+            }
+            shaderErrorSink.record(shader: program.name, reason: reason)
+            throw error
         }
     }
 }

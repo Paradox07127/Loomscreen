@@ -65,10 +65,18 @@ public struct SystemMonitorView: View {
 
                     Spacer(minLength: 0)
 
+                    // Reflects ProcessInfo.thermalState — a coarse OS thermal-pressure
+                    // level, NOT a measured temperature. A flame + "Thermal" label
+                    // (instead of a thermometer) keeps users from reading the state
+                    // word as a °C reading; the API stays nominal at normal-but-warm
+                    // die temps (e.g. 70°C) by design.
                     HStack(spacing: 4) {
-                        Image(systemName: "thermometer.medium")
+                        Image(systemName: "flame")
                             .font(.caption2)
                             .foregroundStyle(thermalColor)
+                        Text("Thermal", comment: "Dashboard label for the macOS thermal-pressure state (ProcessInfo.thermalState) — an OS load level, not a measured temperature.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text(verbatim: monitor.thermalStateDescription)
                             .font(.caption)
                             .foregroundStyle(thermalColor)

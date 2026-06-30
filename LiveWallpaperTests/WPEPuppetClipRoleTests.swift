@@ -3,10 +3,9 @@ import Testing
 import simd
 @testable import LiveWallpaper
 
-/// Covers the WPE clip-role detection: parts[0] is the clip silhouette (eye-white) that squishes shut
-/// and parts[1] is the clipped target (pupil) that stays full inside it. The convention is validated by
-/// squish geometry, so a layout that doesn't match (first part stays open, target collapses, etc.) emits
-/// no clip pair instead of mis-clipping.
+/// Covers the WPE clip-role detection: a clip silhouette squishes shut, while one or more clipped
+/// targets stay full inside it. The relationship is validated by squish geometry, so a layout that
+/// doesn't prove source/target roles emits no clip pair instead of mis-clipping.
 @Suite("WPE puppet clip-role detection")
 struct WPEPuppetClipRoleTests {
     private func identityColumnMajor() -> [Float] {
@@ -145,6 +144,50 @@ struct WPEPuppetClipRoleTests {
         #expect(pairs.first?.target == 2)
     }
 
+    @Test("Multiple closing eye silhouettes clip later open targets enclosed by each silhouette")
+    func detectsMultipleSourcesWithLaterTargets() {
+        // Mirrors scene 3558034522 / 13眼组: the first two parts both blink closed, while later
+        // pupil/highlight parts stay open inside their respective eye silhouettes.
+        let vertices = quad(bone: 0, minX: 20, maxX: 60, minY: -5, maxY: 5)
+            + quad(bone: 1, minX: -60, maxX: -20, minY: -5, maxY: 5)
+            + quad(bone: 2, minX: -45, maxX: -35, minY: -3, maxY: 3)
+            + quad(bone: 3, minX: 35, maxX: 45, minY: -3, maxY: 3)
+            + quad(bone: 4, minX: 70, maxX: 90, minY: 10, maxY: 15)
+        let indices = quadIndices(base: 0) + quadIndices(base: 4) + quadIndices(base: 8)
+            + quadIndices(base: 12) + quadIndices(base: 16)
+        let mesh = WPEPuppetMesh(
+            materialPath: "eye",
+            vertices: vertices,
+            indices: indices,
+            parts: [
+                WPEPuppetMeshPart(id: 1, start: 0, count: 6),
+                WPEPuppetMeshPart(id: 2, start: 6, count: 6),
+                WPEPuppetMeshPart(id: 3, start: 12, count: 6),
+                WPEPuppetMeshPart(id: 4, start: 18, count: 6),
+                WPEPuppetMeshPart(id: 5, start: 24, count: 6)
+            ],
+            clipMaskName: "masks/clipping_mask_test"
+        )
+        let frameCount = 12
+        let animation = WPEPuppetAnimation(
+            id: 1, name: "blink", mode: "loop", fps: 30, frameCount: frameCount,
+            channels: [
+                channel(bone: 0, closedScaleY: 0.02, frameCount: frameCount),
+                channel(bone: 1, closedScaleY: 0.04, frameCount: frameCount),
+                channel(bone: 2, closedScaleY: 1, frameCount: frameCount),
+                channel(bone: 3, closedScaleY: 1, frameCount: frameCount),
+                channel(bone: 4, closedScaleY: 1, frameCount: frameCount)
+            ]
+        )
+        let bones = (0..<5).map { WPEPuppetBone(index: $0, parentIndex: nil, rawMatrix: identityColumnMajor()) }
+        let layers = [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)]
+
+        let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
+        #expect(pairs.count == 2)
+        #expect(pairs.contains { $0.source == 1 && $0.target == 4 })
+        #expect(pairs.contains { $0.source == 2 && $0.target == 3 })
+    }
+
     @Test("No clip when the first part doesn't close (convention guard rejects)")
     func firstPartMustClose() {
         // First part stays open while the second squishes — the opposite of the eye-white/pupil shape,
@@ -177,9 +220,9 @@ struct WPEPuppetClipRoleTests {
         #expect(pairs.isEmpty)
     }
 
-    @Test("Only the first→second part pair is emitted; later parts are ignored")
-    func emitsSinglePairIgnoringLaterParts() {
-        // Three parts that all match target criteria spatially; only parts[0]→parts[1] must be returned.
+    @Test("Later enclosed open targets are clipped to the same silhouette")
+    func emitsLaterEnclosedTargets() {
+        // Three parts that all match target criteria spatially; both open targets should be clipped.
         let vertices = quad(bone: 0, minX: -10, maxX: 10, minY: -5, maxY: 5)
             + quad(bone: 1, minX: -3, maxX: 3, minY: -3, maxY: 3)
             + quad(bone: 2, minX: -2, maxX: 2, minY: -2, maxY: 2)
@@ -208,9 +251,9 @@ struct WPEPuppetClipRoleTests {
         let layers = [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)]
 
         let pairs = WPEMetalRenderExecutor._testDetectClipPairs(mesh: mesh, animationLayers: layers, bones: bones)
-        #expect(pairs.count == 1)
-        #expect(pairs.first?.source == 1)
-        #expect(pairs.first?.target == 2)
+        #expect(pairs.count == 2)
+        #expect(pairs.contains { $0.source == 1 && $0.target == 2 })
+        #expect(pairs.contains { $0.source == 1 && $0.target == 5 })
     }
 }
 

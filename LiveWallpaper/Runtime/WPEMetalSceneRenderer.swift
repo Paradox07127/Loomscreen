@@ -289,6 +289,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `applyScenePropertyPatch` so a settings toggle takes effect without reload.
     private var liveLayerVisibility: [String: Bool] = [:]
     private var liveTextVisibility: [String: Bool] = [:]
+    /// Object hierarchy + own baked visibility (groups included), used to fold a
+    /// layer script's `visible` against its ancestors' CURRENT visibility so a
+    /// script can't show a layer under a hidden ancestor. See `WPESceneDocument`.
+    private var objectParentByID: [String: String] = [:]
+    private var ownVisibilityByID: [String: Bool] = [:]
 
     /// Emits a structured per-frame summary roughly once per second so runtime
     /// logs can show time advancement, dynamic texture swaps, and output size.
@@ -326,6 +331,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// reach `loadDiagnostics`.
     var gpuErrorSummary: (count: Int, last: String?) {
         executor.gpuErrorSink.summary
+    }
+
+    /// Custom-shader compile failures (the only Release-visible signal — the dump
+    /// is hard-off there). A failed pass is silently skipped.
+    var shaderErrorSummary: (count: Int, entries: [(shader: String, reason: String)]) {
+        executor.shaderErrorSink.summary
     }
 
     init(
@@ -618,6 +629,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // layer's authored `visible` into the pipeline, so these baselines
         // simply mirror it for later diffing in `applyScenePropertyPatch`.
         scenePropertyBindings = document.propertyBindings
+        objectParentByID = document.objectParentByID
+        ownVisibilityByID = document.ownVisibilityByID
         liveLayerVisibility = Dictionary(
             document.imageObjects.map { ($0.id, $0.visible) },
             uniquingKeysWith: { first, _ in first }
@@ -1634,7 +1647,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func resolveMSDFFontFragmentSource() -> String? {
         let candidates = ["shaders/font.frag", "shaders/effects/font.frag"]
         for path in candidates {
-            guard let data = try? resourceResolver.data(relativePath: path),
+            guard let data = try? resourceResolver.data(relativePath: path, optional: true),
                   let source = String(data: data, encoding: .utf8) else {
                 continue
             }
@@ -1728,7 +1741,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         var seen = Set<String>()
         for probe in probes where seen.insert(probe).inserted {
-            guard let data = try? resourceResolver.data(relativePath: probe) else {
+            guard let data = try? resourceResolver.data(relativePath: probe, optional: true) else {
                 continue
             }
             if let sheet = WPEParticleSpriteSheetParser.parse(data: data, atlasPixelSize: atlasPixelSize) {
@@ -1950,10 +1963,48 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
     }
 
+    /// True unless some ancestor is currently hidden. Each ancestor's CURRENT
+    /// visibility is its live override (image/script/text) if tracked, else its
+    /// baked `visible` (groups) — so both static group toggles and live image
+    /// toggles are honored. Pure + static for unit testing.
+    nonisolated static func ancestorChainVisible(
+        _ objectID: String,
+        parentByID: [String: String],
+        liveLayerVisibility: [String: Bool],
+        liveTextVisibility: [String: Bool],
+        ownVisibilityByID: [String: Bool]
+    ) -> Bool {
+        var seen: Set<String> = []
+        var current = parentByID[objectID]
+        while let id = current, seen.insert(id).inserted {
+            let visible = liveLayerVisibility[id]
+                ?? liveTextVisibility[id]
+                ?? ownVisibilityByID[id]
+                ?? true
+            if !visible { return false }
+            current = parentByID[id]
+        }
+        return true
+    }
+
+    private func ancestorChainVisible(_ objectID: String) -> Bool {
+        Self.ancestorChainVisible(
+            objectID,
+            parentByID: objectParentByID,
+            liveLayerVisibility: liveLayerVisibility,
+            liveTextVisibility: liveTextVisibility,
+            ownVisibilityByID: ownVisibilityByID
+        )
+    }
+
     /// Applies one layer's resolved state: visibility + alpha into the live
     /// override maps, and any buffered video commands to that layer's video source.
     private func applyLayerScriptState(_ state: WPELayerScriptState, objectID: String) {
-        liveLayerVisibility[objectID] = state.visible
+        // A hidden ancestor always wins — the script runtime's `getParent()` is an
+        // always-visible stub, so a dock script gating on `parent.visible` can't
+        // otherwise hide itself (green App Launcher Dock on 3660962877). Walk the
+        // chain live so a runtime ancestor toggle is respected, not snapshotted.
+        liveLayerVisibility[objectID] = state.visible && ancestorChainVisible(objectID)
         liveLayerAlpha[objectID] = state.alpha
         guard !state.videoCommands.isEmpty,
               let key = layerVideoSourceKey[objectID],
@@ -2258,6 +2309,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         renderPipeline = nil
         scenePropertyBindings = [:]
         liveLayerVisibility = [:]
+        objectParentByID = [:]
+        ownVisibilityByID = [:]
         liveTextVisibility = [:]
         loadDiagnostics = nil
         resolutionTracer.reset()
@@ -2529,6 +2582,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         outputTexture = nil
         scenePropertyBindings = [:]
         liveLayerVisibility = [:]
+        objectParentByID = [:]
+        ownVisibilityByID = [:]
         liveTextVisibility = [:]
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
@@ -2651,7 +2706,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// load never seeds. Captures only `Sendable` values (the compiler protocol is `Sendable`,
     /// requests are `Sendable`) — never the non-`Sendable` executor.
     private func prewarmCustomShaders(for pipeline: WPEPreparedRenderPipeline) async {
-        guard WPEMetalRenderExecutor.isShaderPrewarmEnabled else { return }
+        // Always pre-compile before the first-frame encode: compiling a pipeline
+        // state inline during an open render encoder corrupts the pass (3660962877
+        // black bg + green quad). The flag only picks parallel vs serial width.
+        let parallel = WPEMetalRenderExecutor.isShaderPrewarmEnabled
         let generation = loadGeneration
         debugStage("shader.prewarm", "begin")
 
@@ -2672,7 +2730,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
 
         let compiler = executor.shaderCompiler
-        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+        let width = parallel ? max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2)) : 1
 
         let warmed: [(key: String, result: WPEShaderCompileResult)]
         do {

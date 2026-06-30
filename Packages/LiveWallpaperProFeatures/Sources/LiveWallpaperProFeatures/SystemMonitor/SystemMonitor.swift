@@ -56,6 +56,11 @@ public final class SystemMonitor {
     public private(set) var isMemoryLow: Bool = false
     public private(set) var systemMemoryUsage: Double = 0
     public private(set) var gpuUsage: Double = 0
+    // OS thermal-*pressure* level, not a temperature: ProcessInfo.thermalState
+    // only leaves `.nominal` once macOS begins thermal management, so normal-but-warm
+    // die temps (e.g. 70°C on Apple Silicon) stay `.nominal`. A real °C reading would
+    // need SMC/IOHID sensors, which the App Sandbox blocks. Surfaced as "Thermal", not
+    // a thermometer, so the gauge isn't misread as a temperature.
     public private(set) var thermalState: ProcessInfo.ThermalState = .nominal
 
     // MARK: - Configuration

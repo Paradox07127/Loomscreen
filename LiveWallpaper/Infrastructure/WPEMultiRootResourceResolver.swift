@@ -83,13 +83,16 @@ struct WPEMultiRootResourceResolver: Sendable {
         return false
     }
 
-    func data(relativePath: String) throws -> Data {
+    /// `optional: true` = best-effort probe whose absence is expected (e.g. the
+    /// `.tex-json` sprite-sheet sidecar). A miss is not traced, so it can't inflate
+    /// the diagnostic miss list; resolved hits are still recorded.
+    func data(relativePath: String, optional: Bool = false) throws -> Data {
         if let dependency = dependencyReference(relativePath) {
-            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+            return try resolveDependency(relativePath: relativePath, dependency: dependency, optional: optional) { resolver, path in
                 try resolver.data(relativePath: path)
             }
         }
-        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
+        return try resolveWithFallbacks(relativePath: relativePath, optional: optional) { resolver, path in
             try resolver.data(relativePath: path)
         }
     }
@@ -142,6 +145,7 @@ struct WPEMultiRootResourceResolver: Sendable {
     /// built-ins, then to the optional engine-assets resolver.
     private func resolveWithFallbacks<T>(
         relativePath: String,
+        optional: Bool = false,
         _ resolve: (SceneResourceResolver, String) throws -> T
     ) throws -> T {
         var attempts: [WPEResolutionAttempt] = []
@@ -149,14 +153,14 @@ struct WPEMultiRootResourceResolver: Sendable {
         do {
             let value = try resolve(primary, relativePath)
             attempts.append(WPEResolutionAttempt(origin: .scene, outcome: .resolved))
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved, optional: optional)
             return value
         } catch SceneResourceResolver.ResolveError.fileMissing {
             attempts.append(WPEResolutionAttempt(origin: .scene, outcome: .fileMissing))
         } catch {
             let outcome = WPEResolutionOutcome.otherError("\(error)")
             attempts.append(WPEResolutionAttempt(origin: .scene, outcome: outcome))
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome, optional: optional)
             throw error
         }
 
@@ -164,36 +168,36 @@ struct WPEMultiRootResourceResolver: Sendable {
             do {
                 let value = try resolve(builtinResolver, relativePath)
                 attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: .resolved))
-                record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+                record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved, optional: optional)
                 return value
             } catch SceneResourceResolver.ResolveError.fileMissing {
                 attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: .fileMissing))
             } catch {
                 let outcome = WPEResolutionOutcome.otherError("\(error)")
                 attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: outcome))
-                record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+                record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome, optional: optional)
                 throw error
             }
         }
 
         guard let engineAssetsResolver else {
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing, optional: optional)
             throw SceneResourceResolver.ResolveError.fileMissing
         }
 
         do {
             let value = try resolve(engineAssetsResolver, relativePath)
             attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: .resolved))
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved, optional: optional)
             return value
         } catch SceneResourceResolver.ResolveError.fileMissing {
             attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: .fileMissing))
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing, optional: optional)
             throw SceneResourceResolver.ResolveError.fileMissing
         } catch {
             let outcome = WPEResolutionOutcome.otherError("\(error)")
             attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: outcome))
-            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome, optional: optional)
             throw error
         }
     }
@@ -201,6 +205,7 @@ struct WPEMultiRootResourceResolver: Sendable {
     private func resolveDependency<T>(
         relativePath: String,
         dependency: (workshopID: String, childPath: String),
+        optional: Bool = false,
         _ resolve: (SceneResourceResolver, String) throws -> T
     ) throws -> T {
         let origin = WPEResolutionOrigin.dependency(dependency.workshopID)
@@ -210,7 +215,8 @@ struct WPEMultiRootResourceResolver: Sendable {
             record(
                 relativePath: relativePath,
                 attempts: [WPEResolutionAttempt(origin: origin, outcome: outcome)],
-                finalOutcome: outcome
+                finalOutcome: outcome,
+                optional: optional
             )
             throw error
         }
@@ -220,14 +226,16 @@ struct WPEMultiRootResourceResolver: Sendable {
             record(
                 relativePath: relativePath,
                 attempts: [WPEResolutionAttempt(origin: origin, outcome: .resolved)],
-                finalOutcome: .resolved
+                finalOutcome: .resolved,
+                optional: optional
             )
             return value
         } catch SceneResourceResolver.ResolveError.fileMissing {
             record(
                 relativePath: relativePath,
                 attempts: [WPEResolutionAttempt(origin: origin, outcome: .fileMissing)],
-                finalOutcome: .fileMissing
+                finalOutcome: .fileMissing,
+                optional: optional
             )
             throw SceneResourceResolver.ResolveError.fileMissing
         } catch {
@@ -235,7 +243,8 @@ struct WPEMultiRootResourceResolver: Sendable {
             record(
                 relativePath: relativePath,
                 attempts: [WPEResolutionAttempt(origin: origin, outcome: outcome)],
-                finalOutcome: outcome
+                finalOutcome: outcome,
+                optional: optional
             )
             throw error
         }
@@ -244,10 +253,16 @@ struct WPEMultiRootResourceResolver: Sendable {
     private func record(
         relativePath: String,
         attempts: [WPEResolutionAttempt],
-        finalOutcome: WPEResolutionOutcome
+        finalOutcome: WPEResolutionOutcome,
+        optional: Bool = false
     ) {
         guard let tracer else { return }
         let event = WPEResolutionEvent(ref: relativePath, attempts: attempts, finalOutcome: finalOutcome)
+        // Optional probe miss = expected, not a missing asset — don't trace it.
+        if optional, finalOutcome != .resolved {
+            emitVerboseLog(event)
+            return
+        }
         tracer.record(event)
         emitVerboseLog(event)
     }

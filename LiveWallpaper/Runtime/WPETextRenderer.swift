@@ -96,7 +96,7 @@ final class WPETextRenderer {
 
     /// Register a packaged .ttf/.otf with the system font manager so the rasterizer can find it by Display Name.
     private func ensureFontRegistered(_ relativePath: String?) {
-        guard let path = relativePath, !registeredFonts.contains(path) else { return }
+        guard let path = relativePath, !WPESystemFont.isReference(path), !registeredFonts.contains(path) else { return }
         registeredFonts.insert(path)
         guard let url = try? resolver.resolveExistingFileURL(relativePath: path) else { return }
         var unmanagedError: Unmanaged<CFError>?
@@ -166,6 +166,9 @@ final class WPETextRenderer {
         // part and re-ran on every cache miss (e.g. a clock's once-a-second text).
         // CTFontCreateWithFontDescriptor at the current size is cheap.
         if let path = relativePath {
+            if WPESystemFont.isReference(path) {
+                return WPESystemFont.font(for: path, size: size)
+            }
             if let descriptor = fontDescriptorCache[path] {
                 return CTFontCreateWithFontDescriptor(descriptor, size, nil)
             }

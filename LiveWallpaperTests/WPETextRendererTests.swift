@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 import Metal
 import Testing
@@ -5,6 +6,18 @@ import Testing
 
 @MainActor
 struct WPETextRendererTests {
+
+    @Test("WPE systemfont_<family> refs map to OS fonts, not packaged files")
+    func systemFontReferenceMapsToOSFont() throws {
+        #expect(WPESystemFont.isReference("systemfont_arial"))
+        #expect(WPESystemFont.isReference("fonts/Monofur.ttf") == false)
+        #expect(WPESystemFont.familyName(for: "systemfont_arial") == "Arial")
+        #expect(WPESystemFont.familyName(for: "systemfont_comic_sans_ms") == "Comic Sans Ms")
+        // CoreText resolves the family by name (Arial ships on macOS) rather than treating it as a
+        // missing asset path; an unknown name still yields a usable font, never a crash.
+        let font = WPESystemFont.font(for: "systemfont_arial", size: 32)
+        #expect(CTFontGetSize(font) == 32)
+    }
 
     @Test("Parses text object with property-object value wrappers")
     func parsesTextObjectWithWrappedValues() throws {

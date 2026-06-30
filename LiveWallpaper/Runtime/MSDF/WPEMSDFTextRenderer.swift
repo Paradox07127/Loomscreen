@@ -147,6 +147,9 @@ final class WPEMSDFTextRenderer {
     /// computed with the SAME typeface that will be rendered.
     private func font(for object: WPESceneTextObject, size: CGFloat) -> CTFont {
         if let path = object.fontRelativePath {
+            if WPESystemFont.isReference(path) {
+                return WPESystemFont.font(for: path, size: size)
+            }
             registerFontIfNeeded(path)
             if let url = try? resolver.resolveExistingFileURL(relativePath: path),
                let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
@@ -158,7 +161,7 @@ final class WPEMSDFTextRenderer {
     }
 
     private func registerFontIfNeeded(_ path: String) {
-        guard !registeredFonts.contains(path) else { return }
+        guard !WPESystemFont.isReference(path), !registeredFonts.contains(path) else { return }
         registeredFonts.insert(path)
         guard let url = try? resolver.resolveExistingFileURL(relativePath: path) else { return }
         var unmanagedError: Unmanaged<CFError>?

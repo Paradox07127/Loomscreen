@@ -84,9 +84,28 @@ extension WPEPreparedRenderPipeline {
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms
     ) -> WPEPreparedRenderPipeline {
-        WPEPreparedRenderPipeline(
+        // Both are COMPUTED properties — each access rebuilds the dict (the runtime
+        // one also slices audio spectra). Resolve once per frame, not per pass.
+        let runtimeUniformValues = runtimeUniforms.uniformValues
+        let cameraUniformValues = camera.uniformValues
+        let frameExtraCount = runtimeUniformValues.count + cameraUniformValues.count
+        return WPEPreparedRenderPipeline(
             layers: layers.map { layer in
                 let resolvedGraphLayer = layer.graphLayer.resolved(at: runtimeUniforms.time)
+                // Per-object 2.8 transform uniforms (g_ModelMatrix /
+                // g_NormalModelMatrix): object-scoped (depend only on layer geometry),
+                // so derive the matrices ONCE per layer rather than per pass. Identity
+                // geometry → identity matrices, and undeclared uniforms are dropped at
+                // packing, so 2D scenes are unaffected.
+                let geometry = resolvedGraphLayer.geometry
+                let objectUniforms = WPEMetalObjectUniforms.uniformValues(
+                    origin: geometry.origin,
+                    scale: geometry.scale,
+                    angles: geometry.angles
+                )
+                // Frame/object-global entries merged into every pass; reserve once so
+                // the per-pass inserts don't trigger incremental dictionary resizes.
+                let mergedExtraCount = frameExtraCount + objectUniforms.count
                 return WPEPreparedRenderLayer(
                     graphLayer: resolvedGraphLayer,
                     puppetModel: layer.puppetModel,
@@ -94,23 +113,14 @@ extension WPEPreparedRenderPipeline {
                         var values = pass.uniformValues.mapValues {
                             $0.resolved(at: runtimeUniforms.time)
                         }
-                        for (key, value) in runtimeUniforms.uniformValues {
+                        values.reserveCapacity(values.count + mergedExtraCount)
+                        for (key, value) in runtimeUniformValues {
                             values[key] = value
                         }
-                        for (key, value) in camera.uniformValues {
+                        for (key, value) in cameraUniformValues {
                             values[key] = value
                         }
-                        // Per-object 2.8 transform uniforms (g_ModelMatrix /
-                        // g_NormalModelMatrix): object-scoped, so merged from the
-                        // resolved layer geometry here. Identity geometry → identity
-                        // matrices, and undeclared uniforms are dropped at packing,
-                        // so 2D scenes are unaffected.
-                        let geometry = resolvedGraphLayer.geometry
-                        for (key, value) in WPEMetalObjectUniforms.uniformValues(
-                            origin: geometry.origin,
-                            scale: geometry.scale,
-                            angles: geometry.angles
-                        ) {
+                        for (key, value) in objectUniforms {
                             values[key] = value
                         }
                         return WPEPreparedRenderPass(

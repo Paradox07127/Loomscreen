@@ -19621,6 +19621,36 @@
         }
       }
     },
+    "Thermal" : {
+      "comment" : "Dashboard label for the macOS thermal-pressure state (ProcessInfo.thermalState) — an OS load level, not a measured temperature.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thermal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "発熱"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "热压力"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "熱壓力"
+          }
+        }
+      }
+    },
     "Normal" : {
       "comment" : "Thermal state label.",
       "extractionState" : "manual",
