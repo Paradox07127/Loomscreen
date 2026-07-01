@@ -1,6 +1,53 @@
 import AppKit
 import Metal
 
+#if LITE_BUILD
+private enum WPEPathSafety {
+    static func isSafeRelativePath(_ value: String) -> Bool {
+        !value.isEmpty
+            && !value.hasPrefix("/")
+            && !value.contains("..")
+            && value != "."
+    }
+
+    static func isSafeCacheRelativePath(_ path: String) -> Bool {
+        path.hasPrefix("wpe-cache/")
+            && !path.contains("\\")
+            && !path.contains("..")
+            && !path.contains("//")
+    }
+
+    static func contains(_ child: URL, in parent: URL) -> Bool {
+        let childPath = normalizedPath(child.path(percentEncoded: false))
+        let parentPath = normalizedPath(parent.path(percentEncoded: false))
+        return childPath == parentPath || childPath.hasPrefix(parentPath + "/")
+    }
+
+    static func resourceURL(root: URL, relativePath: String) -> URL? {
+        guard isSafeRelativePath(relativePath) else { return nil }
+        return containedResourceURL(root: root, relativePath: relativePath)
+    }
+
+    private static func containedResourceURL(root: URL, relativePath: String) -> URL? {
+        let rootURL = root.standardizedFileURL.resolvingSymlinksInPath()
+        let url = rootURL
+            .appendingPathComponent(relativePath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard contains(url, in: rootURL) else { return nil }
+        return url
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        var normalized = path
+        while normalized.count > 1 && normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+}
+#endif
+
 struct HTMLWallpaperCompatibilityResult {
     let config: HTMLConfig
     let trust: HTMLTrust
