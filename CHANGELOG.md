@@ -15,6 +15,28 @@ not covered by this file.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-07-01
+
+### Added
+- Scene diagnostics are now included in release bug reports to improve triage for
+  scene rendering issues.
+- Release documentation structure was expanded (`docs/README.md`,
+  `docs/screenshots.md`, `docs/quick-start.md`, `docs/troubleshooting.md`) for
+  easier onboarding and publishing prep.
+
+### Changed
+- Scene and settings detail surfaces were refined for smoother workflow and clearer
+  status feedback.
+- Runtime session and resource handling were improved in scene/playlist paths to
+  reduce stale-state issues.
+
+### Fixed
+- Multiple WPE scene-path performance and stability fixes, including rendering
+  pipeline and cache behavior.
+- Better diagnostics around scene project metadata parsing, custom shader paths, and
+  multi-root resource resolution.
+- Additional edge-case hardening for HTML playlist/session handling.
+
 ## [0.2.1] — 2026-06-29
 
 Maintenance release. Most of this cycle's work is in the Pro-only Metal scene
@@ -107,7 +129,8 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.1...HEAD
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.2...HEAD
+[0.2.2]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.1...loomscreen-v0.2.2
 [0.2.1]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...loomscreen-v0.2.1
 [0.2.0]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...loomscreen-v0.2.0
 [0.1.0]: https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v0.1.0

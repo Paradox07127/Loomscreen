@@ -25,10 +25,12 @@ the config schema / UI / feature gating until `1.0.0`.
 
 1. **Land all in-flight work; tree must be clean.** `release-loomscreen.sh`
    aborts on uncommitted changes (`git diff --quiet HEAD`).
-2. **Bump the Lite version.** Set `MARKETING_VERSION` to the new `X.Y.Z` in
-   both `LiveWallpaperLite` configs in `LiveWallpaper.xcodeproj/project.pbxproj`
-   (Debug + Release — currently the two `MARKETING_VERSION = 0.1.0` entries).
-   The packaging script fails if `--version` ≠ the scheme's `MARKETING_VERSION`.
+2. **Bump the release versions.** Set `MARKETING_VERSION` to the new `X.Y.Z` in
+   both `LiveWallpaper` and `LiveWallpaperLite` Release/Debug entries in
+   `LiveWallpaper.xcodeproj/project.pbxproj` (or run release packaging and fix
+   the pre-flight failure).
+   The packaging script fails if `--version` ≠ the target scheme's
+   `MARKETING_VERSION`.
 3. **Finalize the changelog.** Rename `## [Unreleased]` → `## [X.Y.Z] — <date>`
    in `CHANGELOG.md`, add a fresh empty `[Unreleased]`, and add the footer
    compare links. Only list changes that ship in Lite — the WPE renderer is
