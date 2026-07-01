@@ -13,8 +13,6 @@ will be cut once the surface has stabilized through real-world use.
 Pro-edition (`LiveWallpaper.app`) release notes live separately and are
 not covered by this file.
 
-## [Unreleased]
-
 ## [0.2.2] — 2026-07-01
 
 ### Added
