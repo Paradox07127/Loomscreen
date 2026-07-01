@@ -9,10 +9,16 @@ interface. Video / HTML / Apple Aerials fidelity is identical.
 | Video wallpapers | ✅ | ✅ |
 | HTML / web wallpapers | ✅ | ✅ |
 | Apple Aerials | ✅ | ✅ |
-| Per-display wallpapers | ✅ | ✅ |
-| Playlists · scheduling · bookmarks | ✅ | ✅ |
-| Real-time effects · particle overlays | ✅ | ✅ |
+| Video preload & audio/playlist/schedule/preset features | ✅ | ✅ |
 | Weather-reactive scenes | ✅ | ✅ |
+| Per-display wallpapers | ✅ | ✅ |
+| Bookmarks | ✅ | ✅ |
+| Playlists | ✅ | ✅ |
+| Schedule automation | ✅ | ✅ |
+| Real-time effects / particles | ✅ | ✅ |
+| Global shortcuts | ✅ | ✅ |
+| System monitor panel | ✅ | ✅ |
+| Lock-screen snapshot sync | ✅ | ✅ |
 | Game / full-screen auto-pause | ✅ | ✅ |
 | Launch-time update check | ✅ | ✅ |
 | **Metal shader procedural wallpapers** | — | ✅ |
@@ -20,6 +26,7 @@ interface. Video / HTML / Apple Aerials fidelity is identical.
 | **Local copied project-folder import** | — | ✅ |
 | **Steam Workshop URL preview** | — | ✅ |
 | **Developer-tools harness** | — | ✅ |
+| **Workshop online browse/download** | — | ✅ (direct distribution only) |
 
 ## How the split is implemented
 

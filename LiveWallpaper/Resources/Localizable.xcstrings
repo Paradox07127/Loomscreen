@@ -15048,6 +15048,7 @@
     },
     "Image object %@ has no image path" : {
       "comment" : "Wallpaper Engine scene diagnostic. The placeholder is the image object name.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

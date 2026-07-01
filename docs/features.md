@@ -1,74 +1,215 @@
-# Features
+# Feature Guide (Detailed)
 
-A tour of what Loomscreen does. Capabilities marked **Pro** ship only in the full
-edition; everything else is in both Lite and Pro. The authoritative, code-level
-matrix lives in
-[`ProductCapabilities.swift`](../Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
+This guide maps feature blocks to the actual UI and the current implementation behavior in the repository.
 
-> 📸 Screenshots go in [`docs/images/`](images/) — drop them in and link them under
-> each section below.
+Authoritative feature gate: [ProductCapabilities.swift](../Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
 
-## Wallpaper sources
+## 0) App surfaces at a glance
 
-- **Video** — local video files, decoded on the GPU and played as a seamless loop.
-  RAM-resident playback keeps the loop seam smooth instead of stuttering at the wrap.
-- **HTML / web** — point at a local web page or bundle; it renders in a sandboxed
-  `WKWebView`. Workshop-sourced HTML runs in a non-persistent session with a strict
-  Content-Security-Policy.
-- **Apple Aerials** — the same aerial videos macOS ships as screensavers, as a
-  wallpaper.
-- **Metal shaders** *(Pro)* — procedural, code-driven wallpapers rendered directly
-  with Metal.
-- **Wallpaper-Engine scenes** *(Pro)* — render compatible Wallpaper-Engine `scene`
-  projects (layers, particles, puppets, effects) natively on Metal.
+- **Menu bar quick controls** (`LiveWallpaper/Views/MenuBarContent.swift`)
+  - Open menu, add wallpaper for active/default display.
+  - Global on/off toggle.
+  - Per-display quick status, previous/next for playlist, play/pause per display.
+  - Reload all wallpapers.
+  - Live usage strip (CPU / GPU / RAM / TEMP).
+- **Settings window** (`LiveWallpaper/Views/ContentView.swift`)
+  - Sidebar entries by feature surface and hardware/runtime capability.
+  - `Displays` + per-display config pages.
+  - `Bookmarks`, `Apple Aerials`, optional `Steam Workshop`, optional `Developer Tools`.
+  - `System Monitor` panel in sidebar footer (runtime status).
 
-## Across your displays
+## 1) Per-display workflow
 
-- **Per-display wallpapers** — set a different wallpaper on each connected monitor.
-- **Playlists** — group wallpapers, rotate them, and shuffle.
-- **Scheduling** — switch wallpapers by time of day.
-- **Bookmarks** — favorite any wallpaper as a one-tap, re-applyable item.
+Entry path: `Settings` → sidebar `Displays` → choose a display row → detail page.
 
-## Effects
+### Wallpaper type switcher
 
-- **Real-time post effects** and **particle overlays** composited over the scene.
-- **Weather-reactive** scenes that respond to current conditions.
+- `Video`, `Web`, `Metal Shader`, `Wallpaper Engine Scene` options are shown per SKU.
+- Switching type triggers runtime migration and resets draft UI to match target type.
+- In Lite, shader/scene types are not exposed.
 
-## Behaves itself
+### Preview and assignment
 
-- **Game / full-screen pause** — detects full-screen games and apps and suspends
-  rendering so it never steals GPU from what you're doing.
-- **ProMotion-aware** — adapts to the display's refresh capability.
-- **Power-conscious** — holds an App-Nap assertion only while actually rendering.
+In the main detail area (`ScreenDetailPreviewArea`), each type provides a source entry path:
 
-## Updates & privacy
+- **Video**: file picker (`NSOpenPanel`) accepts supported video files.
+- **Web**: file picker for webpage file or folder, with folder index auto-detection.
+- **Scene** (`Pro`): import scene folder when choosing **Scene** in type picker.
+- **Drag & drop** onto a screen row also maps supported source types directly.
+- One-tap actions for reload/clear/re-apply to all displays are available from the header controls.
 
-- **One check per launch** against the GitHub Releases API, throttled to 12 hours.
-  Trigger manually from **Settings → About → Check Now**, and "Skip this version" to
-  silence a release.
-- **No telemetry, no background polling, no accounts.**
+### Runtime metadata shown in header
 
-## Pro-only tools
+The header shows:
 
-- **Local project import** — scan and import project folders copied from a Windows
-  Wallpaper Engine library. See [import notes](#local-project-import-pro).
-- **Steam Workshop preview** — fetch a Workshop item's public metadata from a pasted
-  URL (no Steam sign-in, no API key, no Loomscreen backend).
-- **Developer tools** — a corpus playback harness and diagnostics for renderer work.
+- Resolution and refresh of selected screen
+- Wallpaper activity state (active/paused/error/inactive)
+- Bookmark toggle (for bookmarkable content)
 
-### Local project import (Pro)
+## 2) Playback and source-specific controls
 
-1. On Windows, use Steam / Wallpaper Engine to download wallpapers you are allowed to use.
-2. Copy the folder of numbered project folders to your Mac.
-3. In Pro, choose that folder — it scans local `project.json` files and prepares the
-   supported projects for playback.
+## 2.1 Playback controls (`ScreenDetail/ScreenDetailInspectorPanel`)
 
-Loomscreen does **not** bundle Wallpaper Engine content or bypass creator
-permissions; you are responsible for the rights to anything you import. Projects that
-need Windows executables or `.dll` plugins are skipped on macOS.
+- Master playback controls are shared across types:
+  - mute + volume
+  - frame rate limit (video/shader/scene)
+  - video display mode: per-display vs span-all-displays
+  - scene fit mode
+  - lock-screen sync toggle (video only)
+- Scene-specific controls:
+  - cursor-follow/parallax
+  - click-capture with one-time warning
 
-### What Loomscreen deliberately never does
+## 2.2 Video controls in practice
 
-- Show a Steam password field anywhere.
-- Collect, store, proxy, or transmit Steam passwords, Steam Guard codes, or tokens.
-- Embed a shared Steam Web API key or route your requests through a Loomscreen server.
+- Loop source and cache strategy:
+  - RAM preload budget per screen (`MB`) with max budget displayed.
+  - Slider and fit mode stored in screen config.
+- Playback speed and fit mode are exposed in preview controls as well.
+- Per-screen status is fed from runtime summary and used for status icons.
+
+## 3) Playlists (视频列表)
+
+Entry path: screen detail → video inspector (`PlaylistSection.swift`).
+
+- Built-in list of saved video bookmarks for that display.
+- Reorder by drag handles.
+- Controls:
+  - Add files
+  - Remove entry
+  - Previous / Next
+  - Shuffle
+  - Auto-rotate interval (`minutes`) with persistence and auto-play
+- Apply behavior:
+  - apply to current display
+  - apply to all displays (if multiple exist)
+
+## 4) Time-of-day scheduling
+
+Entry path: screen detail → schedule section in inspector.
+
+- 24-hour slot timeline + list editor.
+- Add slot from presets or custom free-range picker.
+- Slot conflict detection prevents overlap; conflicted slots are highlighted.
+- Each slot holds a selected bookmark + time range.
+- If none are matched at a given hour, runtime restores default primary wallpaper.
+
+Implementation entry:
+
+- `ScheduleSection.swift` (editor / conflict handling)
+- `SchedulePolicy.swift` (time-range overlap and active-slot decision logic)
+- `WallpaperAutomationCoordinator.swift` (minute-based periodic evaluation)
+
+## 5) Effects and scene content
+
+### Particles and environment (`ScreenDetailInspectorPanel`)
+
+- Particle preset and density.
+- Weather-reactive switch + live weather badge.
+- Weather data source from settings:
+  - off / system location / manual location.
+
+### Color / scene properties
+
+- Color adjustment controls (temperature/brightness/contrast/saturation/gain/etc., where available) in inspector panel.
+- Scene custom settings cards for supported imported projects (schema-driven) and scene assets.
+
+### Pro-only rendering pipeline
+
+- Metal shader gallery + custom import (`.lwshader`/`.metal`).
+- Wallpaper Engine scene renderer and project import flow.
+- Workshop preview/download and online browse (direct-distribution Pro only).
+
+## 6) Libraries and collections
+
+### Bookmarks (`BookmarksLibraryView.swift`)
+
+- Grid with type filter + search.
+- Apply bookmark to one display or all displays.
+- Rename/delete saved bookmarks.
+- Bookmarks persist in local store (`BookmarkStore`).
+
+### Apple Aerials (`AppleAerialsLibraryView.swift`)
+
+- Connects local Apple Aerials library.
+- Search/filter/refresh.
+- Grid apply to one / all displays.
+- Handles unauthorized/missing library states with guided actions.
+
+### Workshop (Pro + Direct Distribution only)
+
+- Library + online browser (`WorkshopPaneView.swift`).
+- Install by:
+  - linking SteamCMD/Steam account for online download flow, or
+  - local folder import flow from scene library.
+- Browse filters, pagination, API key requirement, age tags, maturity blur.
+- Per-item inspect panel + deep-link aware.
+- Settings:
+  - API key
+  - SteamCMD readiness
+  - Engine asset link/download/updates
+  - downloaded filter toggles
+
+## 7) Global settings and shortcuts
+
+Entry path: Settings `General / Shortcuts` tabs.
+
+- Behavior toggles:
+  - pause in fullscreen
+  - pause in game/low power
+  - pause on battery
+  - pause on window occlusion
+  - pause on launch etc.
+- Performance options:
+  - RAM preload budget
+  - adaptive frame rate (`Pro`)
+  - lock screen snapshot
+- App exceptions list (pause set excludes).
+- Weather location preference.
+- Global shortcuts tab:
+  - per-action capture, clear, reset
+  - master enable switch
+- About/Utility:
+- Export/import configuration bundles (`.lwconfig`)
+- Logs, bug report generation
+- Start-at-login and menu-bar dock visibility
+
+## 8) System behavior and performance model
+
+- Global on/off in menu bar keeps app resident.
+- Wallpaper automation runs schedule/playlist rotation in minute cadence.
+- Full-screen/game-window/battery behavior controls are centralized in manager/policy layers.
+- Update check:
+  - launch-time check + manual check in About tab.
+  - no background polling service.
+
+## 9) Security and privacy
+
+- No telemetry.
+- Workshop API key stored in local Keychain only (no iCloud sync).
+- Web content rendered in sandboxed source contexts.
+- Apple Aerials/files access uses scoped bookmark/security model.
+
+## 10) Known constraints (implementation-aligned)
+
+- Wallpaper Engine scenes require scene support availability and are omitted in Lite builds.
+- Weather effects and workshop browsing are gated by runtime feature flags.
+- Full-screen pause and occlusion detection reduce power but can pause visual continuity.
+- Configuration backups keep references to source files, not media copies.
+
+## 11) Where to start reading by code
+
+- Core capability gating:  
+  `Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift`
+- Screen orchestration / runtime model:  
+  `LiveWallpaper/ScreenManager.swift`
+- Screen detail UI composition:  
+  `LiveWallpaper/Views/ScreenDetail*`
+- Menu bar host and controls:  
+  `LiveWallpaper/Views/MenuBarContent.swift`
+- Settings surfaces:
+  `LiveWallpaper/Views/GeneralSettingsView.swift`
+  `LiveWallpaper/Views/Settings/*.swift`
+- Workshop stack:
+  `LiveWallpaper/Views/Workshop/*.swift`
+

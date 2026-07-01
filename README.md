@@ -1,96 +1,120 @@
-<div align="center">
-
-<img src="docs/images/loomscreen-logo.png" width="128" alt="Loomscreen" />
-
 # Loomscreen
 
-### Living wallpapers for macOS — videos, web pages, shaders, and Wallpaper-Engine scenes, on every display.
+<div align="center">
 
-[![License: MIT](https://img.shields.io/badge/Lite-MIT-yellow.svg)](LICENSE)
-[![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#requirements)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#requirements)
-[![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver)](https://github.com/Paradox07127/Loomscreen/releases/latest)
+<img src="docs/images/loomscreen-logo.png" width="144" alt="Loomscreen" />
 
-**[⬇ Download](https://github.com/Paradox07127/Loomscreen/releases/latest)** ·
-**[✨ Features](docs/features.md)** ·
-**[⚖ Lite vs Pro](docs/lite-vs-pro.md)** ·
-**[🛠 Build](docs/building.md)** ·
-[简体中文](README.zh-Hans.md)
+### Living wallpapers for macOS — videos, web pages, shaders, and Wallpaper Engine scenes across every display.
+
+![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)
+![Apple%20Silicon](https://img.shields.io/badge/Apple%20Silicon-Required-purple.svg)
+![License](https://img.shields.io/badge/Lite-MIT-yellow.svg)
+![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver)
+
+[⬇ Download](https://github.com/Paradox07127/Loomscreen/releases/latest) ·
+[🧭 Docs](docs/README.md) ·
+[✨ Features](docs/features.md) ·
+[⚖ Lite vs Pro](docs/lite-vs-pro.md) ·
+[🛠 Build](docs/building.md) ·
+[🎬 Screenshots](docs/screenshots.md) ·
+[🌐 中文](README.zh-Hans.md)
 
 </div>
 
----
+Loomscreen is a menu-bar-first macOS wallpaper platform that lets each connected display run its own live source. Import local videos/HTML, scan Apple Aerials, and (Pro) render procedural shaders or Wallpaper Engine scenes.
 
-Loomscreen is a menu-bar app that turns your desktop into a living scene and keeps
-out of your way. Point it at a video, a web page, an Apple Aerial, a Metal shader,
-or a Wallpaper-Engine project — it renders across every connected display, pauses
-itself when a game goes full-screen, and sips power the rest of the time.
+![Loomscreen main UI](docs/images/main.png)
 
-It comes in two editions built from one codebase:
+## What you can do
 
-<table>
-<tr>
-<td width="50%" valign="top">
+- **Per-display workflow**: manage wallpapers per monitor; copy one screen setup to all screens.
+- **Multiple wallpaper sources**:
+  - Local **video** playback (smooth looping, multi-monitor aware).
+  - Local or local-folder **web pages** (sandboxed `WKWebView`).
+  - Local **Apple Aerials** library items.
+  - **Shaders** (custom `.lwshader` / `.metal`) and **Wallpaper Engine scenes** (Pro).
+- **Smart playback control**: playlists, schedule rotation, shuffle, prev/next, one-click global pause switch.
+- **Rich inspectable tuning**: volume, frame limit, scaling, cursor follow, particles, color tweaks, weather-reactive effects.
+- **Quick controls in menu bar**: add wallpaper, pause/resume globally, playback stepping, live CPU/GPU/RAM/temperature strip.
+- **Persistence & portability**: bookmark favorite setups and back up/recover configuration bundles.
+- **Built for laptops**: auto-pause on full-screen, game windows, window occlusion, battery mode, and per-app exceptions.
+- **No telemetry by design**: no accounts, no remote analytics.
 
-### 🆓 Loomscreen Lite
-**Free · open-source (MIT)**
+## Editions
 
-The lightweight runtime. Video, HTML, and Apple Aerials wallpapers at full
-fidelity — same playback engine as Pro, just without the heavy renderers.
-Distributed here on GitHub Releases.
+| Edition | What you get |
+|---|---|
+| **Loomscreen Lite** | Video / HTML / Apple Aerials, playlists, schedule, bookmarks, shortcuts, weather-reactive effects, performance controls. |
+| **Loomscreen Pro** | Everything in Lite, plus Metal procedural shaders, Wallpaper Engine scenes, local scene import, Workshop preview/download path (direct distribution), and developer tools. |
 
-</td>
-<td width="50%" valign="top">
+### Live preview by scenario
 
-### ⭐ Loomscreen Pro
-**Full edition**
+- Video workflow:
 
-Everything in Lite plus the Metal scene/shader renderer, Wallpaper-Engine
-scene playback, local project import, Workshop preview, and developer tools.
+![Video workflow](docs/images/video.png)
 
-</td>
-</tr>
-</table>
+- Web wallpaper workflow:
 
-> Lite is a **lightweight runtime, not a stripped-down UI** — video / HTML / Aerials
-> look and behave exactly like Pro. The split is about which renderers ship, not
-> which buttons you get. See the full [Lite vs Pro matrix](docs/lite-vs-pro.md).
+![Web workflow](docs/images/web.png)
 
-> 🚧 **0.x line.** Loomscreen is iterating fast; the config schema and UI may shift
-> between `0.y` releases until it stabilizes at `1.0.0`. Feedback and bug reports are
-> very welcome — open an [issue](https://github.com/Paradox07127/Loomscreen/issues).
+- Scene workflow (Pro):
 
-## ✨ Highlights
+![Scene workflow](docs/images/scene.png)
 
-- 🎬 **Any source** — local videos, web pages / HTML, Apple Aerials, Metal shaders, and Wallpaper-Engine scenes (Pro).
-- 🖥 **Every display** — independent wallpapers per monitor, with playlists and time-of-day scheduling.
-- 🎛 **Effects** — real-time post effects, particle overlays, and weather-reactive scenes.
-- 🔖 **Bookmarks & playlists** — favorite a wallpaper, rotate a set, shuffle on a schedule.
-- 🎮 **Stays out of the way** — auto-pauses for full-screen games and apps; ProMotion-aware; light on battery.
-- 🔄 **Quiet updates** — one GitHub-Releases check per launch (12 h throttle), no telemetry, no background polling.
+- Workshop flow (Pro):
 
-→ Full tour with the how and why in **[docs/features.md](docs/features.md)**.
+![Workshop flow](docs/images/workshop.png)
 
-## 🚀 Quick start
+See full matrix: [docs/lite-vs-pro.md](docs/lite-vs-pro.md).  
+Implementation note: Lite removes GPU-heavy renderer modules (`#if LITE_BUILD`) rather than hiding UI.
 
-1. Download the latest `Loomscreen-x.y.z.dmg` (Lite) from **[Releases](https://github.com/Paradox07127/Loomscreen/releases/latest)**.
-2. Open the DMG and drag **Loomscreen.app** into `/Applications`.
-3. Because the build is ad-hoc signed (no paid Apple Developer ID yet), clear the
-   Gatekeeper quarantine **once** in Terminal:
+## Quick start
+
+Detailed guide: [docs/quick-start.md](docs/quick-start.md)
+
+### 1) Install
+
+1. Download the latest `Loomscreen-*.dmg` from [Releases](https://github.com/Paradox07127/Loomscreen/releases/latest).
+2. Drag **Loomscreen.app** into `/Applications`.
+3. Clear Gatekeeper quarantine once:
    ```bash
    xattr -dr com.apple.quarantine /Applications/Loomscreen.app
    ```
-4. Launch it — the icon lands in your menu bar.
+4. Launch Loomscreen — open its menu bar icon and start your first setup.
 
-Full install notes, updates, and troubleshooting: **[docs/install.md](docs/install.md)**.
+### 2) First launch flow
+
+- First launch opens a short onboarding.
+- Choose a source (video / web / Aerials; Pro adds Workshop shortcut) and it applies immediately.
+- Open the Settings window to tune per-screen behavior (playlist/schedule/colors/effects/shortcuts).
+
+### 3) Per-display setup
+
+- In **Settings → Displays** pick a monitor.
+- Choose wallpaper type: **Video / Web / Shader / Scene** (Lite has only available types).
+- Open the preview panel to set wallpaper source and play.
+- Tune playback and effects in the right inspector panel.
+
+### 4) Quick docs index
+
+- [docs/README.md](docs/README.md) — full docs index.
+- [docs/features.md](docs/features.md) — detailed feature map by app surface and function.
+- [docs/install.md](docs/install.md) — install + onboarding + first-run troubleshooting.
+- [docs/quick-start.md](docs/quick-start.md) — full workflow for first-run setup.
+- [docs/troubleshooting.md](docs/troubleshooting.md) — error scenarios and recovery.
+- [docs/screenshots.md](docs/screenshots.md) — screenshot requirements and capture checklist.
+
+## Updates
+
+- One launch-time check + manual check path in **Settings → About**.
+- Manual updates: download the new DMG and repeat the `xattr` step once.
 
 ## Requirements
 
-- macOS 14.0 (Sonoma) or later
-- **Apple Silicon Mac** — Intel is not supported
-- Xcode 16.2+ to build from source
+- macOS 14.0+ (Sonoma)
+- Apple Silicon Mac (Intel is not supported)
 
-## 🛠 Build from source
+## From source
 
 ```bash
 git clone https://github.com/Paradox07127/Loomscreen.git
@@ -98,17 +122,22 @@ cd LiveWallpaper
 open LiveWallpaper.xcodeproj
 ```
 
-Pick the **LiveWallpaperLite** scheme for Lite (`LITE_BUILD`; Pro-only sources gated
-by `#if !LITE_BUILD` are excluded) or **LiveWallpaper** for the full build, then `⌘R`.
-Details and CI notes: **[docs/building.md](docs/building.md)** · **[RELEASING.md](RELEASING.md)**.
+- Pick scheme: **LiveWallpaperLite** (Lite), **LiveWallpaper** (Pro).
 
-## Contributing · Security · License
+Build notes: [docs/building.md](docs/building.md).
 
-- **PRs and issues welcome.** Run `xcodebuild test` on the `LiveWallpaper` scheme and
-  `xcodebuild build` on `LiveWallpaperLite` before opening a PR — both must pass. The
-  test suite enforces runtime invariants.
-- **Security:** use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/Loomscreen/security/advisories/new), not public issues.
-- **License:** MIT — see [LICENSE](LICENSE). Covers the full codebase, including
-  Pro-only modules gated by `#if !LITE_BUILD`.
+## Contributing / security / license
 
-<div align="center"><sub>Loomscreen does not bundle Wallpaper Engine content or bypass creator permissions — you are responsible for the rights to any wallpapers you import.</sub></div>
+- PRs are welcome. Before opening a PR: run scheme build/test flow in your local setup.
+- Security issues should be reported via GitHub Security Advisories.
+- License: MIT (`LICENSE`), including Pro-only modules.
+
+## Community-friendly issue guide
+
+- Keep bug reports minimal and reproducible:
+  - macOS version + Apple Silicon chip
+  - screenshot of `Loomscreen -> About`
+  - exact source type (video/html/shader/scene)
+  - short steps to reproduce
+
+> Loomscreen does not ship or bypass Wallpaper Engine content. You are responsible for permission on any imported wallpapers.
