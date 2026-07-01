@@ -5,7 +5,7 @@ import SwiftUI
 struct ScreenDetailPreviewArea: View {
     private let previewAspectRatio: CGFloat = 16 / 9
     private let videoPreviewReservedHeight: CGFloat = 56
-    private let htmlSourceReservedHeight: CGFloat = 160
+    private let htmlSourceReservedHeight: CGFloat = 88
 
     let screen: Screen
     @Binding var draft: ScreenDetailDraftState
@@ -116,11 +116,13 @@ struct ScreenDetailPreviewArea: View {
             let previewHeight = cappedPreviewHeight(
                 in: geo.size.height,
                 verticalPadding: 24,
-                reservedHeight: htmlSourceReservedHeight
+                reservedHeight: htmlSourceReservedHeight,
+                interItemSpacing: 8
             )
-            VStack(spacing: 16) {
+            VStack(spacing: 8) {
                 if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
                     HTMLPreviewSection(
+                        screen: screen,
                         source: draft.htmlSource,
                         config: draft.htmlConfig,
                         wpePreviewURL: wpeWebPreviewURL,
@@ -144,9 +146,10 @@ struct ScreenDetailPreviewArea: View {
     private func cappedPreviewHeight(
         in containerHeight: CGFloat,
         verticalPadding: CGFloat,
-        reservedHeight: CGFloat
+        reservedHeight: CGFloat,
+        interItemSpacing: CGFloat = 16
     ) -> CGFloat {
-        let available = containerHeight - (verticalPadding * 2) - reservedHeight - 16
+        let available = containerHeight - (verticalPadding * 2) - reservedHeight - interItemSpacing
         return max(0, available)
     }
 

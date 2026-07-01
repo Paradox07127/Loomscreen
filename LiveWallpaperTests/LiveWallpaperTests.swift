@@ -14,6 +14,7 @@ struct SettingsWindowLayoutTests {
         #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.2)
         #expect(DesignTokens.Inspector.idealWidth >= DesignTokens.Inspector.minWidth)
         #expect(DesignTokens.Inspector.idealWidth <= DesignTokens.Inspector.maxWidth)
+        #expect(DesignTokens.Inspector.maxWidth >= 384)
     }
 
     @Test("Preview area caps media previews to the available low-height viewport")
@@ -39,6 +40,78 @@ struct SettingsWindowLayoutTests {
         #expect(htmlContent.contains("HTMLPreviewSection("))
         #expect(htmlContent.contains("HTMLSourceSection("))
         #expect(htmlContent.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
+    }
+
+    @Test("HTML rendering diagnostics live inside the preview overlay")
+    func htmlRenderingDiagnosticsLiveInsidePreviewOverlay() throws {
+        let inspectorPanel = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailInspectorPanel.swift")
+        let previewSection = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/HTMLPreviewSection.swift")
+
+        #expect(!inspectorPanel.contains("HTMLRenderingDiagnosticsInspector("))
+        #expect(previewSection.contains("HTMLRenderingDiagnosticsOverlay("))
+        #expect(previewSection.contains("HTMLRenderingDiagnostics(screen: screen"))
+        #expect(previewSection.contains(".thumbnailBadgeGlass()"))
+        #expect(previewSection.contains("alignment: .topLeading"))
+        #expect(previewSection.contains("alignment: .bottomLeading"))
+        #expect(previewSection.contains("diagnosticTag(\"Measurement\""))
+        #expect(previewSection.contains("diagnosticTag(\"Points\""))
+        #expect(previewSection.contains("diagnosticTag(\"Backing\""))
+        #expect(previewSection.contains("diagnosticTag(\"Scale\""))
+        #expect(previewSection.contains("diagnosticTag(\"Viewport\""))
+        #expect(previewSection.contains("diagnosticTag(\"DPR\""))
+        #expect(previewSection.contains("diagnosticTag(\"Mode\""))
+    }
+
+    @Test("HTML source controls use a compact row below preview")
+    func htmlSourceControlsUseCompactRowBelowPreview() throws {
+        let previewArea = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailPreviewArea.swift")
+        let sourceSection = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift")
+
+        #expect(previewArea.contains("private let htmlSourceReservedHeight: CGFloat = 88"))
+        #expect(previewArea.contains("VStack(spacing: 8)"))
+        #expect(sourceSection.contains("HStack(alignment: .center, spacing: 10)"))
+        #expect(sourceSection.contains(".frame(width: 108)"))
+        #expect(sourceSection.contains(".padding(.vertical, 6)"))
+    }
+
+    @Test("HTML preview area uses uniform outer padding")
+    func htmlPreviewAreaUsesUniformOuterPadding() throws {
+        let previewArea = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ScreenDetailPreviewArea.swift")
+        let htmlContent = try #require(Self.slice(
+            previewArea,
+            from: "private var htmlContent",
+            to: "private func cappedPreviewHeight"
+        ))
+
+        #expect(htmlContent.contains("verticalPadding: 24"))
+        #expect(htmlContent.contains(".padding(24)"))
+        #expect(!htmlContent.contains(".padding(.vertical, 14)"))
+    }
+
+    @Test("HTML preview prefers live web snapshots before static fallbacks")
+    func htmlPreviewPrefersLiveWebSnapshots() throws {
+        let previewSection = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/HTMLPreviewSection.swift")
+        let runtimeSession = try Self.readSourceFile("LiveWallpaper/Runtime/WallpaperRuntimeSession.swift")
+        let htmlView = try Self.readSourceFile("LiveWallpaper/VideoPlayback/HTMLWallpaperView.swift")
+
+        #expect(previewSection.contains("captureLiveHTMLSnapshot"))
+        #expect(previewSection.contains("let liveImage = await captureLiveHTMLSnapshot()"))
+        #expect(previewSection.contains("} else if let wpePreviewURL {"))
+        #expect(runtimeSession.contains("func captureLiveHTMLSnapshot() async -> NSImage?"))
+        #expect(htmlView.contains("func captureLivePreviewSnapshot"))
+        #expect(htmlView.contains("webView.takeSnapshot"))
+    }
+
+    @Test("Inspector resize drag clamps at minimum before drag-to-close")
+    func inspectorResizeDragClampsAtMinimumBeforeDragToClose() throws {
+        let split = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/ResizableInspectorSplit.swift")
+        let handle = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/InspectorResizeHandle.swift")
+
+        #expect(split.contains("private var dragLowerBound: CGFloat { minWidth }"))
+        #expect(split.contains("minWidth: minWidth"))
+        #expect(!split.contains("return min(max(CGFloat(liveWidth), dragLowerBound), maxWidth)"))
+        #expect(handle.contains("private func rawCandidate"))
+        #expect(handle.contains("if armed(for: rawCandidate)"))
     }
 
     @Test("HTML wallpaper type is presented to users as Web")

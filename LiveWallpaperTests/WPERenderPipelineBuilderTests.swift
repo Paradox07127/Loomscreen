@@ -14,6 +14,7 @@ struct WPERenderPipelineBuilderTests {
         #expect(WPEBuiltinShaderName.normalized("materials/util/composelayer.json") == "compose")
         #expect(WPEBuiltinShaderName.normalized("effects/distort/distort") == "effect_water")
         #expect(WPEBuiltinShaderName.normalized("genericimage2") == "genericimage2")
+        #expect(WPEBuiltinShaderName.normalized("generic4") == "genericimage4")
         #expect(WPEBuiltinShaderName.normalized("genericimage2", genericImageAsCopy: true) == "copy")
         #expect(WPEBuiltinShaderName.normalized("genericimage_custom", genericImageAsCopy: true) == "genericimage_custom")
     }
@@ -190,7 +191,7 @@ struct WPERenderPipelineBuilderTests {
                     WPERenderPass(
                         id: "7.0",
                         phase: .material,
-                        shader: "genericimage4",
+                        shader: "generic4",
                         source: .image("materials/layer.png"),
                         target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
                         textures: [:],
@@ -241,7 +242,7 @@ struct WPERenderPipelineBuilderTests {
                     WPERenderPass(
                         id: "7.0",
                         phase: .material,
-                        shader: "genericimage4",
+                        shader: "generic4",
                         source: .image("materials/layer.png"),
                         target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
                         textures: [:],
@@ -292,7 +293,7 @@ struct WPERenderPipelineBuilderTests {
                     WPERenderPass(
                         id: "7.0",
                         phase: .material,
-                        shader: "genericimage4",
+                        shader: "generic4",
                         source: .image("materials/layer.png"),
                         target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
                         textures: [:],
@@ -662,7 +663,7 @@ struct WPERenderPipelineBuilderTests {
                     WPERenderPass(
                         id: "1.0",
                         phase: .material,
-                        shader: "genericimage4",
+                        shader: "generic4",
                         source: .image("materials/base.png"),
                         target: .scene,
                         textures: [:],
@@ -681,8 +682,57 @@ struct WPERenderPipelineBuilderTests {
         let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
         let shader = try #require(pipeline.layers.first?.passes.first?.shader)
 
-        #expect(shader.name == "genericimage4")
+        #expect(shader.name == "generic4")
         #expect(shader.isBuiltin)
+    }
+
+    @Test("Dynamic transform on a non-rendered parent propagates to child geometry")
+    func dynamicParentTransformPropagatesToChildGeometry() {
+        let childGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(10, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 10, height: 10),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let graphLayer = WPERenderLayer(
+            objectID: "child",
+            objectName: "Child",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            parentObjectID: "group",
+            geometry: childGeometry,
+            localGeometry: childGeometry,
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: []
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(graphLayer: graphLayer, passes: [])
+        ])
+
+        let transformed = pipeline.applyingLayerTransforms(
+            origins: [:],
+            scales: [:],
+            angles: ["group": SIMD3<Double>(0, 0, Double.pi / 2)],
+            parentByID: ["child": "group"],
+            hostTransforms: [
+                "group": WPERenderObjectTransform(
+                    origin: SIMD3<Double>(0, 0, 0),
+                    scale: SIMD3<Double>(1, 1, 1),
+                    angles: SIMD3<Double>(0, 0, 0)
+                )
+            ]
+        )
+        let geometry = transformed.layers[0].graphLayer.geometry
+
+        #expect(abs(geometry.origin.x) < 0.0001)
+        #expect(abs(geometry.origin.y - 10) < 0.0001)
+        #expect(abs(geometry.angles.z - Double.pi / 2) < 0.0001)
     }
 
     @Test("Prefers scene-provided source for WPE effect aliases")

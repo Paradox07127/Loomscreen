@@ -28,9 +28,11 @@ enum HTMLWallpaperRuntimeScript {
     ///      page set its own between creation and play.
     ///   3. `new Audio()` — standalone objects never appended to the DOM are
     ///      invisible to the MutationObserver.
-    ///   4. `BaseAudioContext.destination` getter — routes Web Audio graphs
-    ///      through a per-context `GainNode`; the only way to cover game audio
-    ///      engines that bypass `<audio>` elements entirely.
+    ///   4. `BaseAudioContext.destination` getter + `AudioNode.connect` —
+    ///      routes Web Audio graphs through a per-context `GainNode`; the only
+    ///      way to cover game audio engines that bypass media elements entirely.
+    /// The media-element patch treats `audioVolume` as a master multiplier over
+    /// the page's own per-element volume so full volume restores author intent.
     static func masterAudioController(initialVolume: Double, initialMuted: Bool) -> String {
         let volumeLiteral = jsNumber(initialVolume)
         let mutedLiteral = initialMuted ? "true" : "false"
@@ -46,15 +48,104 @@ enum HTMLWallpaperRuntimeScript {
             var __lwVolume__ = \(volumeLiteral);
             var __lwMuted__ = \(mutedLiteral);
             var __lwAudioContexts__ = [];
+            var __lwOriginalAudioNodeConnect__ = null;
+            var __lwMediaVolumes__ = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+            var __lwMediaMutes__ = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+            var __lwNativeVolumeGetter__ = null;
+            var __lwNativeVolumeSetter__ = null;
+            var __lwNativeMutedGetter__ = null;
+            var __lwNativeMutedSetter__ = null;
 
             function effectiveLevel() { return __lwMuted__ ? 0 : __lwVolume__; }
+            function clamp01(value) {
+                value = Number(value);
+                return isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+            }
+
+            function findMediaDescriptor(name) {
+                var cursor = window.HTMLMediaElement && HTMLMediaElement.prototype;
+                while (cursor && cursor !== Object.prototype) {
+                    try {
+                        var d = Object.getOwnPropertyDescriptor(cursor, name);
+                        if (d && (typeof d.get === 'function' || typeof d.set === 'function')) return d;
+                    } catch (e) {}
+                    cursor = Object.getPrototypeOf(cursor);
+                }
+                return null;
+            }
+
+            function rememberPageVolume(el, value) {
+                value = clamp01(value);
+                if (__lwMediaVolumes__) {
+                    try { __lwMediaVolumes__.set(el, value); } catch (e) {}
+                } else {
+                    try { el.__lwPageVolume__ = value; } catch (e) {}
+                }
+                return value;
+            }
+
+            function pageVolume(el) {
+                try {
+                    if (__lwMediaVolumes__ && __lwMediaVolumes__.has(el)) return __lwMediaVolumes__.get(el);
+                    if (!__lwMediaVolumes__ && typeof el.__lwPageVolume__ === 'number') return el.__lwPageVolume__;
+                } catch (e) {}
+                try {
+                    if (__lwNativeVolumeGetter__) return clamp01(__lwNativeVolumeGetter__.call(el));
+                } catch (e) {}
+                return 1;
+            }
+
+            function rememberPageMuted(el, value) {
+                value = !!value;
+                if (__lwMediaMutes__) {
+                    try { __lwMediaMutes__.set(el, value); } catch (e) {}
+                } else {
+                    try { el.__lwPageMuted__ = value; } catch (e) {}
+                }
+                return value;
+            }
+
+            function pageMuted(el) {
+                try {
+                    if (__lwMediaMutes__ && __lwMediaMutes__.has(el)) return !!__lwMediaMutes__.get(el);
+                    if (!__lwMediaMutes__ && typeof el.__lwPageMuted__ === 'boolean') return !!el.__lwPageMuted__;
+                } catch (e) {}
+                try {
+                    if (__lwNativeMutedGetter__) return !!__lwNativeMutedGetter__.call(el);
+                } catch (e) {}
+                return false;
+            }
+
+            function setNativeVolume(el, value) {
+                value = clamp01(value);
+                try {
+                    if (__lwNativeVolumeSetter__) {
+                        __lwNativeVolumeSetter__.call(el, value);
+                    } else {
+                        el.volume = value;
+                    }
+                } catch (e) {}
+            }
+
+            function setNativeMuted(el, value) {
+                value = !!value;
+                try {
+                    if (__lwNativeMutedSetter__) {
+                        __lwNativeMutedSetter__.call(el, value);
+                    } else {
+                        el.muted = value;
+                    }
+                } catch (e) {}
+            }
 
             function applyToElement(el) {
                 if (!el) return;
                 var tag = el.tagName;
                 if (tag !== 'AUDIO' && tag !== 'VIDEO') return;
-                try { el.volume = __lwVolume__; } catch (e) {}
-                try { el.muted = __lwMuted__; } catch (e) {}
+                var requestedVolume = pageVolume(el);
+                var requestedMuted = pageMuted(el);
+                setNativeVolume(el, requestedVolume * __lwVolume__);
+                setNativeMuted(el, __lwMuted__ || requestedMuted);
             }
 
             function scanAndApply(root) {
@@ -80,11 +171,47 @@ enum HTMLWallpaperRuntimeScript {
                 } catch (e) {}
             }
 
+            function patchMediaProperties() {
+                if (!window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
+                if (HTMLMediaElement.prototype.__lwMediaPropertiesPatched__) return;
+                var volumeDescriptor = findMediaDescriptor('volume');
+                var mutedDescriptor = findMediaDescriptor('muted');
+                __lwNativeVolumeGetter__ = volumeDescriptor && volumeDescriptor.get;
+                __lwNativeVolumeSetter__ = volumeDescriptor && volumeDescriptor.set;
+                __lwNativeMutedGetter__ = mutedDescriptor && mutedDescriptor.get;
+                __lwNativeMutedSetter__ = mutedDescriptor && mutedDescriptor.set;
+                if (__lwNativeVolumeSetter__) {
+                    try {
+                        Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+                            configurable: true,
+                            get: function () { return pageVolume(this); },
+                            set: function (value) {
+                                var requested = rememberPageVolume(this, value);
+                                setNativeVolume(this, requested * __lwVolume__);
+                            }
+                        });
+                    } catch (e) {}
+                }
+                if (__lwNativeMutedSetter__) {
+                    try {
+                        Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+                            configurable: true,
+                            get: function () { return pageMuted(this) || __lwMuted__; },
+                            set: function (value) {
+                                var requested = rememberPageMuted(this, value);
+                                setNativeMuted(this, __lwMuted__ || requested);
+                            }
+                        });
+                    } catch (e) {}
+                }
+                try { HTMLMediaElement.prototype.__lwMediaPropertiesPatched__ = true; } catch (e) {}
+            }
+            patchMediaProperties();
+
             if (window.HTMLMediaElement && HTMLMediaElement.prototype.play) {
                 var originalPlay = HTMLMediaElement.prototype.play;
                 HTMLMediaElement.prototype.play = function () {
-                    try { this.volume = __lwVolume__; } catch (e) {}
-                    try { this.muted = __lwMuted__; } catch (e) {}
+                    applyToElement(this);
                     return originalPlay.apply(this, arguments);
                 };
             }
@@ -97,8 +224,7 @@ enum HTMLWallpaperRuntimeScript {
                         [null].concat(Array.prototype.slice.call(arguments))
                     );
                     var instance = new bound();
-                    try { instance.volume = __lwVolume__; } catch (e) {}
-                    try { instance.muted = __lwMuted__; } catch (e) {}
+                    applyToElement(instance);
                     return instance;
                 }
                 PatchedAudio.prototype = OriginalAudio.prototype;
@@ -121,6 +247,69 @@ enum HTMLWallpaperRuntimeScript {
                 return null;
             }
 
+            function rememberContext(ctx) {
+                if (!ctx) return;
+                if (__lwAudioContexts__.indexOf(ctx) === -1) {
+                    __lwAudioContexts__.push(ctx);
+                }
+            }
+
+            function connectMasterGain(gain, realDestination) {
+                try {
+                    if (__lwOriginalAudioNodeConnect__) {
+                        __lwOriginalAudioNodeConnect__.call(gain, realDestination);
+                    } else {
+                        gain.connect(realDestination);
+                    }
+                } catch (e) {}
+            }
+
+            function ensureMasterGain(ctx, realDestination) {
+                if (!ctx || !realDestination) return realDestination;
+                if (!ctx.__lwGainNode__) {
+                    try {
+                        var gain = ctx.createGain();
+                        gain.gain.value = effectiveLevel();
+                        gain.__lwMasterGainNode__ = true;
+                        connectMasterGain(gain, realDestination);
+                        ctx.__lwGainNode__ = gain;
+                    } catch (e) {
+                        return realDestination;
+                    }
+                }
+                rememberContext(ctx);
+                return ctx.__lwGainNode__;
+            }
+
+            function isAudioDestinationNode(node) {
+                if (!node) return false;
+                try {
+                    if (window.AudioDestinationNode && node instanceof window.AudioDestinationNode) return true;
+                } catch (e) {}
+                try {
+                    return node.constructor && node.constructor.name === 'AudioDestinationNode';
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            function patchAudioNodeConnect() {
+                if (!window.AudioNode || !AudioNode.prototype || !AudioNode.prototype.connect) return;
+                if (AudioNode.prototype.__lwConnectPatched__) return;
+                var originalConnect = AudioNode.prototype.connect;
+                __lwOriginalAudioNodeConnect__ = originalConnect;
+                AudioNode.prototype.connect = function (destination) {
+                    var args = Array.prototype.slice.call(arguments);
+                    try {
+                        if (isAudioDestinationNode(destination) && this.context) {
+                            args[0] = ensureMasterGain(this.context, destination);
+                        }
+                    } catch (e) {}
+                    return originalConnect.apply(this, args);
+                };
+                AudioNode.prototype.__lwConnectPatched__ = true;
+            }
+
             function patchAudioContext(Ctor) {
                 if (!Ctor || !Ctor.prototype) return;
                 var originalGetter = findOriginalDestinationGetter(Ctor.prototype);
@@ -130,22 +319,12 @@ enum HTMLWallpaperRuntimeScript {
                         configurable: true,
                         get: function () {
                             var real = originalGetter.call(this);
-                            if (!this.__lwGainNode__) {
-                                try {
-                                    var gain = this.createGain();
-                                    gain.gain.value = effectiveLevel();
-                                    gain.connect(real);
-                                    this.__lwGainNode__ = gain;
-                                    __lwAudioContexts__.push(this);
-                                } catch (e) {
-                                    return real;
-                                }
-                            }
-                            return this.__lwGainNode__;
+                            return ensureMasterGain(this, real);
                         }
                     });
                 } catch (e) {}
             }
+            patchAudioNodeConnect();
             patchAudioContext(window.AudioContext);
             patchAudioContext(window.webkitAudioContext);
             patchAudioContext(window.OfflineAudioContext);

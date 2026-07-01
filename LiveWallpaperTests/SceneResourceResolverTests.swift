@@ -104,6 +104,21 @@ struct SceneResourceResolverTests {
         }
     }
 
+    @Test("Extensionless WPE TEX payload resolves as a texture")
+    func extensionlessTexPayloadResolvesAsTexture() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let particleDir = fixture.cacheRoot.appendingPathComponent("particle", isDirectory: true)
+        try FileManager.default.createDirectory(at: particleDir, withIntermediateDirectories: true)
+        try writeRGBA8888Tex(at: particleDir.appendingPathComponent("halo_2"))
+
+        let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
+        let payload = try resolver.resolveTexturePayload(relativePath: "particle/halo_2")
+
+        #expect(payload.info.width == 4)
+        #expect(payload.info.height == 4)
+    }
+
     @Test("Model wrapper JSON resolves to materials/<name>.tex via material chain")
     func materialChainResolves() throws {
         let fixture = try makeFixture()

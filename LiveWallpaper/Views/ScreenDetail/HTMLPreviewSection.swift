@@ -3,15 +3,12 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Inspector-side preview for HTML wallpapers. Snapshots come from
-/// `WallpaperThumbnailService` so the inspector and the bookmark grid share the
-/// same render pass + NSCache entry per source.
-///
-/// WPE *web* projects ship a `preview.gif` (or jpg/png) alongside
-/// `project.json`, so when `wpePreviewURL` is set we render that asset directly
-/// and skip the expensive WKWebView snapshot pass. Plain HTML wallpapers (no
-/// WPE origin) still capture a first frame.
+/// Inspector-side preview for HTML wallpapers. The selected screen's live
+/// `WKWebView` is captured first so WPE web projects show the current rendered
+/// page, matching the scene preview's live-frame behavior. Static WPE preview
+/// assets and the shared offscreen thumbnail service are fallbacks.
 struct HTMLPreviewSection: View {
+    let screen: Screen
     let source: HTMLSource?
     let config: HTMLConfig
     /// Non-nil only for WPE web projects that ship a preview asset. Always
@@ -24,36 +21,36 @@ struct HTMLPreviewSection: View {
     @State private var loadFailed = false
 
     init(
+        screen: Screen,
         source: HTMLSource?,
         config: HTMLConfig,
         wpePreviewURL: URL? = nil,
         wpePreviewBookmark: Data? = nil
     ) {
+        self.screen = screen
         self.source = source
         self.config = config
         self.wpePreviewURL = wpePreviewURL
         self.wpePreviewBookmark = wpePreviewBookmark
     }
 
-    /// When true, the snapshot pipeline and refresh button stand down.
-    private var showsWPEPreview: Bool { wpePreviewURL != nil }
-
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            cardBody
+            snapshotCard
                 .screenPreviewChrome()
 
-            VStack {
-                HStack {
-                    HTMLInformationOverlay(source: source, config: config)
-                    Spacer()
-                }
-                Spacer()
-            }
-            .padding(14)
-            .allowsHitTesting(false)
+            if source != nil {
+                HTMLInformationOverlay(source: source, config: config)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
 
-            if !showsWPEPreview {
+                HTMLRenderingDiagnosticsOverlay(screen: screen, source: source, config: config)
+                    .padding(14)
+                    .padding(.trailing, 44)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
+
                 refreshButton
                     .padding(10)
             }
@@ -68,15 +65,6 @@ struct HTMLPreviewSection: View {
         .onAppear { startLoadIfNeeded() }
     }
 
-    @ViewBuilder
-    private var cardBody: some View {
-        if let wpePreviewURL {
-            wpePreviewCard(url: wpePreviewURL)
-        } else {
-            snapshotCard
-        }
-    }
-
     /// Guarded for Lite since `WPEPreviewView` is Pro-only — but
     /// `wpePreviewURL` is always `nil` there anyway, so this branch never runs.
     @ViewBuilder
@@ -88,7 +76,7 @@ struct HTMLPreviewSection: View {
             aspectRatio: nil
         )
         #else
-        snapshotCard
+        placeholder(systemImage: "photo", title: "Preview unavailable")
         #endif
     }
 
@@ -104,6 +92,8 @@ struct HTMLPreviewSection: View {
                 Rectangle().fill(DesignTokens.Colors.pageBackground)
                 LiquidGlassSpinner()
             }
+        } else if let wpePreviewURL {
+            wpePreviewCard(url: wpePreviewURL)
         } else if loadFailed {
             placeholder(systemImage: "exclamationmark.triangle", title: "Preview unavailable")
         } else if source != nil {
@@ -129,8 +119,9 @@ struct HTMLPreviewSection: View {
 
     private var refreshButton: some View {
         Button {
-            guard let key = cacheKey else { return }
-            WallpaperThumbnailService.shared.invalidate(cacheKey: key)
+            if let key = cacheKey {
+                WallpaperThumbnailService.shared.invalidate(cacheKey: key)
+            }
             snapshot = nil
             loadFailed = false
             startLoadIfNeeded(force: true)
@@ -141,7 +132,6 @@ struct HTMLPreviewSection: View {
                 .adaptiveGlassSurface(.circle, interactive: true)
         }
         .buttonStyle(.plain)
-        .opacity(source == nil ? 0 : 1)
         .help(Text("Refresh web snapshot"))
         .accessibilityLabel(Text("Refresh web preview"))
     }
@@ -153,24 +143,34 @@ struct HTMLPreviewSection: View {
     }
 
     private func startLoadIfNeeded(force: Bool = false) {
-        guard !showsWPEPreview else { return }
         guard let source, let key = cacheKey else { return }
-        if !force, let cached = WallpaperThumbnailService.shared.cachedThumbnail(forKey: key) {
-            snapshot = cached
-            return
-        }
         guard !isLoading else { return }
         isLoading = true
         loadFailed = false
         Task { @MainActor in
-            let image = await HTMLPreviewKey.fetchSnapshot(for: source, cacheKey: key)
+            let liveImage = await captureLiveHTMLSnapshot()
+            let cachedImage = force ? nil : WallpaperThumbnailService.shared.cachedThumbnail(forKey: key)
+            let image: NSImage?
+            if let liveImage {
+                image = liveImage
+            } else if let cachedImage {
+                image = cachedImage
+            } else {
+                image = await HTMLPreviewKey.fetchSnapshot(for: source, cacheKey: key)
+            }
             isLoading = false
             if let image {
                 snapshot = image
-            } else {
+            } else if wpePreviewURL == nil {
                 loadFailed = true
             }
         }
+    }
+
+    @MainActor
+    private func captureLiveHTMLSnapshot() async -> NSImage? {
+        guard let session = screen.runtimeSession as? AmbientWallpaperSession else { return nil }
+        return await session.captureLiveHTMLSnapshot()
     }
 }
 
@@ -250,10 +250,6 @@ enum HTMLPreviewKey {
 /// Floating capsule on the web preview: source kind, identifier, and the
 /// runtime-mode badges that meaningfully change how the page is drawn (insecure
 /// URL, physical-pixel layout, JavaScript off).
-///
-/// Deliberately omits anything that already lives in a banner inside
-/// `HTMLSourceSection` (trust state for remote URLs) or the Web Rendering
-/// inspector card (viewport / DPR / scale), to avoid a duplicate diagnostic.
 struct HTMLInformationOverlay: View {
     let source: HTMLSource?
     let config: HTMLConfig
@@ -330,5 +326,61 @@ struct HTMLInformationOverlay: View {
         case .inline:
             return "Inline web content"
         }
+    }
+}
+
+/// Floating capsule on the web preview for render geometry. Kept in the preview
+/// rather than the inspector list so it is attached to the image it describes.
+struct HTMLRenderingDiagnosticsOverlay: View {
+    let screen: Screen
+    let source: HTMLSource?
+    let config: HTMLConfig
+    private let columns = [
+        GridItem(.adaptive(minimum: 104), spacing: 4, alignment: .leading)
+    ]
+
+    @ViewBuilder
+    var body: some View {
+        if source != nil {
+            let diagnostics = HTMLRenderingDiagnostics(screen: screen, source: source, config: config)
+            content(diagnostics: diagnostics)
+            .font(DesignTokens.Typography.code)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .thumbnailBadgeGlass()
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func content(diagnostics: HTMLRenderingDiagnostics) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "ruler")
+                Text("Web Rendering")
+                    .fontWeight(.semibold)
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
+                diagnosticTag("Measurement", diagnostics.measurementText)
+                diagnosticTag("Points", diagnostics.pointSizeText)
+                diagnosticTag("Backing", diagnostics.backingPixelSizeText)
+                diagnosticTag("Scale", diagnostics.scaleText)
+                diagnosticTag("Viewport", diagnostics.viewportText)
+                diagnosticTag("DPR", diagnostics.devicePixelRatioText)
+                diagnosticTag("Mode", diagnostics.modeText)
+            }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private func diagnosticTag(_ label: String, _ value: String) -> some View {
+        Text(verbatim: "\(label) \(value)")
+            .font(DesignTokens.Typography.badge)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Color.white.opacity(0.18), in: Capsule())
     }
 }

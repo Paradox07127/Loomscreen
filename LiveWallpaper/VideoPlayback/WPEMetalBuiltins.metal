@@ -117,6 +117,11 @@ struct WPEPuppetMeshUniforms {
     float4 meshCenterAndPadding; // x,y raw MDLV mesh center; z,w reserved
 };
 
+struct WPESceneModelMeshUniforms {
+    float4x4 modelViewProjectionMatrix;
+    float4 modeAndPadding; // x=bone palette count; y=skinning enabled; z,w reserved
+};
+
 // Puppet clip-composite path (WPE genericimage4 CLIPPINGUVS): carries the
 // screen-space UV used to sample the clip-mask render target alongside the atlas UV.
 struct WPEPuppetClipVertexOut {
@@ -176,6 +181,24 @@ vertex WPEVertexOut wpe_puppet_mesh_vertex(
 
     WPEVertexOut out;
     out.position = float4((position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
+    out.uv = v.uv.xy;
+    return out;
+}
+
+vertex WPEVertexOut wpe_scene_model_mesh_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEPuppetVertex* vertices [[buffer(0)]],
+    constant WPESceneModelMeshUniforms& u [[buffer(1)]],
+    constant float4x4* bonePalette [[buffer(2)]]
+) {
+    WPEPuppetVertex v = vertices[vertexID];
+    uint paletteCount = uint(max(u.modeAndPadding.x, 0.0));
+    float4 position = (u.modeAndPadding.y > 0.5 && paletteCount > 0)
+        ? wpe_skin_puppet_position(v, bonePalette, paletteCount)
+        : float4(v.position.xyz, 1.0);
+
+    WPEVertexOut out;
+    out.position = u.modelViewProjectionMatrix * position;
     out.uv = v.uv.xy;
     return out;
 }
@@ -963,7 +986,7 @@ struct WPEPulseUniforms {
 };
 
 struct WPEGodraysCombineUniforms {
-    uint blendMode;
+    uint useBase;
     uint padding0;
     uint padding1;
     uint padding2;
@@ -980,63 +1003,24 @@ fragment half4 wpe_effect_pulse_fragment(
     return half4(float4(saturate(sampled.rgb * modulation), sampled.a));
 }
 
-static inline float4 wpe_unpremultiply_sampled(float4 color) {
-    if (color.a > 0.00001) {
-        color.rgb /= color.a;
-    }
-    return color;
-}
-
-static inline float3 wpe_godrays_blend(uint blendMode, float3 base, float3 rays, float opacity) {
-    if (blendMode == 5u) {
-        return min(base, rays);
-    }
-    if (blendMode == 10u) {
-        return max(base, rays);
-    }
-    if (blendMode == 31u) {
-        return base + rays * opacity;
-    }
-
-    float3 result;
-    if (blendMode == 1u) {
-        result = min(base, rays);
-    } else if (blendMode == 2u) {
-        result = base * rays;
-    } else if (blendMode == 6u) {
-        result = max(base, rays);
-    } else if (blendMode == 7u) {
-        result = 1.0 - (1.0 - base) * (1.0 - rays);
-    } else if (blendMode == 9u) {
-        result = min(base + rays, float3(1.0));
-    } else if (blendMode == 18u) {
-        result = abs(base - rays);
-    } else if (blendMode == 19u) {
-        result = base + rays - 2.0 * base * rays;
-    } else if (blendMode == 24u) {
-        result = (base + rays) * 0.5;
-    } else if (blendMode == 25u) {
-        result = 1.0 - abs(1.0 - base - rays);
-    } else {
-        result = rays;
-    }
-    return mix(base, result, opacity);
-}
-
 fragment half4 wpe_effect_godrays_combine_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> raysTexture [[texture(0)]],
-    texture2d<half, access::sample> albedoTexture [[texture(1)]],
+    [[maybe_unused]] texture2d<half, access::sample> albedoTexture [[texture(1)]],
+    texture2d<half, access::sample> baseTexture [[texture(2)]],
     constant WPEGodraysCombineUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    return albedoTexture.sample(linearSampler, in.uv);
-    float4 rays = wpe_unpremultiply_sampled(float4(raysTexture.sample(linearSampler, in.uv)));
-    float4 albedo = wpe_unpremultiply_sampled(float4(albedoTexture.sample(linearSampler, in.uv)));
-    albedo.rgb = wpe_godrays_blend(uniforms.blendMode, albedo.rgb, rays.rgb, rays.a);
-    albedo.a = saturate(albedo.a + rays.a);
-    albedo.rgb = saturate(albedo.rgb) * albedo.a;
-    return half4(albedo);
+    float4 raysRaw = float4(raysTexture.sample(linearSampler, in.uv));
+    if (uniforms.useBase == 0u) {
+        return half4(raysRaw);
+    }
+
+    float4 albedoRaw = float4(baseTexture.sample(linearSampler, in.uv));
+    return half4(float4(
+        saturate(albedoRaw.rgb + raysRaw.rgb),
+        saturate(max(albedoRaw.a, raysRaw.a))
+    ));
 }
 
 struct WPEIrisUniforms {

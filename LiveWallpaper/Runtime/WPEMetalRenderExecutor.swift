@@ -829,6 +829,7 @@ final class WPEMetalRenderExecutor {
         var firstPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
         var lastPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
         var secondaryKeys = Set<WPEMetalRenderTargetKey>()
+        var nonAliasKeys = Set<WPEMetalRenderTargetKey>()
         var writtenTargets = Set<WPEMetalTargetID>()
 
         func touch(_ key: WPEMetalRenderTargetKey, _ index: Int) {
@@ -850,6 +851,9 @@ final class WPEMetalRenderExecutor {
                 switch reference {
                 case .fbo(let name):
                     for namedKey in keysByName[name] ?? [] { touch(namedKey, item.index) }
+                    if Self.requiresDiscreteDestinationForSourceAliasing(item.pass) {
+                        for namedKey in keysByName[name] ?? [] { nonAliasKeys.insert(namedKey) }
+                    }
                 case .previous:
                     if let targetKey { touch(targetKey, item.index) }
                 case .image, .asset:
@@ -860,7 +864,9 @@ final class WPEMetalRenderExecutor {
         }
 
         return firstPassByKey.compactMap { key, first in
-            guard !secondaryKeys.contains(key), let last = lastPassByKey[key] else { return nil }
+            guard !secondaryKeys.contains(key),
+                  !nonAliasKeys.contains(key),
+                  let last = lastPassByKey[key] else { return nil }
             return WPEMetalRenderTargetPool.AliasInterval(key: key, firstPass: first, lastPass: last)
         }
     }
@@ -2050,7 +2056,7 @@ final class WPEMetalRenderExecutor {
     private func clearColor(for targetID: WPEMetalTargetID) -> MTLClearColor {
         switch targetID {
         case .scene:
-            return MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            return MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         case .named:
             return MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         }
@@ -2135,11 +2141,20 @@ final class WPEMetalRenderExecutor {
         let targetID = WPEMetalTargetID(target: pass.pass.target)
         let initialPreviousTextureForTarget = frameState.latestTexture(for: targetID)
         let readsCurrentTarget = passReadsCurrentTarget(pass, targetID: targetID)
+        let aliasAvoidanceTexture: MTLTexture?
+        if readsCurrentTarget {
+            aliasAvoidanceTexture = initialPreviousTextureForTarget
+                ?? (Self.requiresDiscreteDestinationForSourceAliasing(pass) ? frameState.output : nil)
+        } else if Self.requiresDiscreteDestinationForSourceAliasing(pass) {
+            aliasAvoidanceTexture = frameState.output
+        } else {
+            aliasAvoidanceTexture = nil
+        }
         let destination = try targetTexture(
             for: pass.pass.target,
             layer: layer,
             frameState: &frameState,
-            avoiding: readsCurrentTarget ? initialPreviousTextureForTarget : nil
+            avoiding: aliasAvoidanceTexture
         )
 
         #if DEBUG
@@ -2262,20 +2277,36 @@ final class WPEMetalRenderExecutor {
             )
         }
 
-        let drewPuppetMaterial = try encodePuppetMaterialPassIfNeeded(
+        let drewSceneModel = try encodeSceneModelMaterialPassIfNeeded(
             pass: pass,
             layer: layer,
             puppetModel: puppetModel,
             skinningState: skinningState,
-            runtimeUniforms: runtimeUniforms,
             destination: destination,
             textures: textures,
             frameState: frameState,
             encoder: encoder,
             depthPixelFormat: needsDepth ? .depth32Float : .invalid
         )
+        let drewPuppetMaterial: Bool
+        if drewSceneModel {
+            drewPuppetMaterial = false
+        } else {
+            drewPuppetMaterial = try encodePuppetMaterialPassIfNeeded(
+                pass: pass,
+                layer: layer,
+                puppetModel: puppetModel,
+                skinningState: skinningState,
+                runtimeUniforms: runtimeUniforms,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: needsDepth ? .depth32Float : .invalid
+            )
+        }
         let drewPuppetSceneComposite: Bool
-        if drewPuppetMaterial {
+        if drewSceneModel || drewPuppetMaterial {
             drewPuppetSceneComposite = false
         } else {
             drewPuppetSceneComposite = try encodePuppetSceneCompositePassIfNeeded(
@@ -2290,7 +2321,7 @@ final class WPEMetalRenderExecutor {
                 depthPixelFormat: needsDepth ? .depth32Float : .invalid
             )
         }
-        if !drewPuppetMaterial && !drewPuppetSceneComposite {
+        if !drewSceneModel && !drewPuppetMaterial && !drewPuppetSceneComposite {
             let dispatcher = WPEMetalShaderDispatcher(executor: self)
             try dispatcher.dispatch(
                 pass: pass,
@@ -2738,6 +2769,82 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    private func encodeSceneModelMaterialPassIfNeeded(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        puppetModel: WPEPuppetModel?,
+        skinningState: PuppetSkinningState?,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat
+    ) throws -> Bool {
+        guard case .material = pass.pass.phase,
+              case .scene = pass.pass.target,
+              Self.rendersAsSceneModel(layer),
+              let model = puppetModel else {
+            return false
+        }
+        let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
+        guard !meshes.isEmpty else { return false }
+
+        let normalizedShader = WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader)
+        guard normalizedShader == "genericimage2" || normalizedShader == "genericimage4" else {
+            return false
+        }
+
+        let primaryRef = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let primary = try WPEMetalShaderInputs.resolve(
+            reference: primaryRef,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let fragmentName = normalizedShader == "genericimage4"
+            ? "wpe_genericimage4_fragment"
+            : "wpe_genericimage2_fragment"
+        encoder.setRenderPipelineState(try renderPipeline(
+            vertexName: "wpe_scene_model_mesh_vertex",
+            fragmentName: fragmentName,
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+        encoder.setFragmentTexture(primary, index: 0)
+
+        let hasMask: Bool
+        if normalizedShader == "genericimage4",
+           let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1] {
+            let mask = try WPEMetalShaderInputs.resolve(
+                reference: maskRef,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(mask, index: 1)
+            hasMask = true
+        } else {
+            encoder.setFragmentTexture(primary, index: 1)
+            hasMask = false
+        }
+
+        var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
+
+        let paletteState = puppetBonePalette(for: skinningState)
+        var meshUniforms = sceneModelMeshUniforms(for: layer, frameState: frameState, paletteState: paletteState)
+        try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
+        encoder.setVertexBytes(
+            &meshUniforms,
+            length: MemoryLayout<WPESceneModelMeshUniforms>.stride,
+            index: 1
+        )
+
+        try drawPuppetMeshes(meshes, encoder: encoder)
+        return true
+    }
+
     private func encodePuppetMaterialPassIfNeeded(
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -3107,6 +3214,115 @@ final class WPEMetalRenderExecutor {
         let width = Float(layer.geometry.size?.width ?? CGFloat(sourceTexture.width))
         let height = Float(layer.geometry.size?.height ?? CGFloat(sourceTexture.height))
         return SIMD2<Float>(max(width, 1), max(height, 1))
+    }
+
+    private static func rendersAsSceneModel(_ layer: WPERenderLayer) -> Bool {
+        guard layer.puppetPath != nil else { return false }
+        return (layer.imagePath as NSString).pathExtension.lowercased() == "mdl"
+    }
+
+    private func sceneModelMeshUniforms(
+        for layer: WPERenderLayer,
+        frameState: WPEMetalFrameState,
+        paletteState: (bonePalette: [simd_float4x4], skinningEnabled: Float)
+    ) -> WPESceneModelMeshUniforms {
+        let geometry = layer.geometry
+        let modelMatrix = Self.modelMatrix(
+            translation: SIMD3<Float>(
+                Float(geometry.origin.x),
+                Float(geometry.origin.y),
+                Float(geometry.origin.z)
+            ),
+            euler: SIMD3<Float>(
+                Float(geometry.angles.x),
+                Float(geometry.angles.y),
+                Float(geometry.angles.z)
+            ),
+            scale: SIMD3<Float>(
+                Float(geometry.scale.x),
+                Float(geometry.scale.y),
+                Float(geometry.scale.z)
+            )
+        )
+        let viewProjection = Self.matrix(fromColumnMajorDoubles: frameState.cameraUniforms.viewProjectionMatrix)
+        return WPESceneModelMeshUniforms(
+            modelViewProjectionMatrix: viewProjection * modelMatrix,
+            modeAndPadding: SIMD4<Float>(
+                Float(paletteState.bonePalette.count),
+                paletteState.skinningEnabled,
+                0,
+                0
+            )
+        )
+    }
+
+    private static func matrix(fromColumnMajorDoubles values: [Double]) -> simd_float4x4 {
+        guard values.count >= 16 else { return matrix_identity_float4x4 }
+        return simd_float4x4(
+            SIMD4<Float>(Float(values[0]), Float(values[1]), Float(values[2]), Float(values[3])),
+            SIMD4<Float>(Float(values[4]), Float(values[5]), Float(values[6]), Float(values[7])),
+            SIMD4<Float>(Float(values[8]), Float(values[9]), Float(values[10]), Float(values[11])),
+            SIMD4<Float>(Float(values[12]), Float(values[13]), Float(values[14]), Float(values[15]))
+        )
+    }
+
+    private static func modelMatrix(
+        translation: SIMD3<Float>,
+        euler: SIMD3<Float>,
+        scale: SIMD3<Float>
+    ) -> simd_float4x4 {
+        translationMatrix(translation) * rotationZ(euler.z) * rotationY(euler.y) * rotationX(euler.x) * scaleMatrix(scale)
+    }
+
+    private static func translationMatrix(_ translation: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(translation.x, translation.y, translation.z, 1)
+        )
+    }
+
+    private static func scaleMatrix(_ scale: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(scale.x, 0, 0, 0),
+            SIMD4<Float>(0, scale.y, 0, 0),
+            SIMD4<Float>(0, 0, scale.z, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationX(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle)
+        let s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, c, s, 0),
+            SIMD4<Float>(0, -s, c, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationY(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle)
+        let s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(c, 0, -s, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(s, 0, c, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationZ(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle)
+        let s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(c, s, 0, 0),
+            SIMD4<Float>(-s, c, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
     }
 
     private func bindPuppetBonePalette(
@@ -4217,7 +4433,7 @@ final class WPEMetalRenderExecutor {
         commandBuffer: MTLCommandBuffer
     ) {
         guard enabled,
-              let snapshot = try? makeOutputTexture(size: CGSize(width: output.width, height: output.height)),
+              let snapshot = makeDebugSnapshotTexture(width: output.width, height: output.height),
               let blit = commandBuffer.makeBlitCommandEncoder() else {
             return
         }
@@ -4234,6 +4450,20 @@ final class WPEMetalRenderExecutor {
         )
         blit.endEncoding()
         scenePassDumps.append((label: label, texture: snapshot))
+    }
+
+    private func makeDebugSnapshotTexture(width: Int, height: Int) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.outputPixelFormat,
+            width: max(width, 1),
+            height: max(height, 1),
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+        let texture = device.makeTexture(descriptor: descriptor)
+        texture?.label = "WPE Metal debug pass snapshot"
+        return texture
     }
     #endif
 
@@ -4681,6 +4911,12 @@ final class WPEMetalRenderExecutor {
                 0
             )
         )
+    }
+
+    private static func requiresDiscreteDestinationForSourceAliasing(_ pass: WPEPreparedRenderPass) -> Bool {
+        let shaderName = pass.pass.shader.lowercased()
+        return shaderName == "effects/godrays_combine"
+            || shaderName.hasSuffix("/effects/godrays_combine")
     }
 
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {

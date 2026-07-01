@@ -365,6 +365,12 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackC
         return target.applyHTMLConfig(config)
     }
 
+    func captureLiveHTMLSnapshot() async -> NSImage? {
+        guard wallpaperType == .html,
+              let target = performanceTarget as? HTMLWallpaperView else { return nil }
+        return await target.captureLivePreviewSnapshot()
+    }
+
     /// Bridged from `HTMLWallpaperView.onError` so the session keeps the user-visible error.
     func recordRuntimeError(_ error: WallpaperRuntimeError) {
         runtimeError = error

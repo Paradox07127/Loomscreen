@@ -706,59 +706,8 @@ struct ContentSecurityInspector: View {
     }
 }
 
-struct HTMLRenderingDiagnosticsInspector: View {
-    var screen: Screen
-    var source: HTMLSource?
-    var config: HTMLConfig
-
-    @AppStorage("Inspector.HTMLRenderingExpanded") private var isExpanded = true
-
-    var body: some View {
-        GroupBox {
-            CollapsibleSection(
-                title: "Web Rendering",
-                systemImage: "ruler",
-                isExpanded: $isExpanded
-            ) {
-                let diagnostics = HTMLRenderingDiagnostics(
-                    screen: screen,
-                    source: source,
-                    config: config
-                )
-
-                VStack(spacing: 6) {
-                    diagnosticRow("Measurement", diagnostics.measurementText)
-                    diagnosticRow("Screen points", diagnostics.pointSizeText)
-                    diagnosticRow("Backing pixels", diagnostics.backingPixelSizeText)
-                    diagnosticRow("Scale", diagnostics.scaleText)
-                    diagnosticRow("Web viewport", diagnostics.viewportText)
-                    diagnosticRow("DPR", diagnostics.devicePixelRatioText)
-                    diagnosticRow("Mode", diagnostics.modeText)
-                }
-                .help(Text("Screen points come from the live content view when available. Backing pixels use AppKit's convertToBacking path."))
-            }
-        }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-
-    private func diagnosticRow(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(verbatim: title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(verbatim: value)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-    }
-}
-
 @MainActor
-private struct HTMLRenderingDiagnostics {
+struct HTMLRenderingDiagnostics {
     let measurementText: String
     let pointSizeText: String
     let backingPixelSizeText: String

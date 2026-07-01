@@ -372,6 +372,13 @@ struct WPEPuppetMeshUniforms {
     var meshCenterAndPadding: SIMD4<Float>
 }
 
+/// Layout MUST match `WPESceneModelMeshUniforms` in `WPEMetalBuiltins.metal`.
+struct WPESceneModelMeshUniforms {
+    var modelViewProjectionMatrix: simd_float4x4
+    /// x = bone palette count, y = skinning enabled (1/0), z/w reserved.
+    var modeAndPadding: SIMD4<Float>
+}
+
 /// Layout MUST match `WPEPuppetSceneCompositeUniforms` in `WPEMetalBuiltins.metal`.
 /// Placement fields are copied 1:1 from `WPEObjectQuadUniforms` so the deferred-warp
 /// composite reproduces the current final object-quad placement exactly:
@@ -419,7 +426,7 @@ struct WPEPulseUniforms {
 }
 
 struct WPEGodraysCombineUniforms {
-    var blendMode: UInt32
+    var useBase: UInt32 = 1
     var padding0: UInt32 = 0
     var padding1: UInt32 = 0
     var padding2: UInt32 = 0

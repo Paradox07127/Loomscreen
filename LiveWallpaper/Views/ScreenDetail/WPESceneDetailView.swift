@@ -77,8 +77,8 @@ struct WPESceneDetailView: View {
 
     private var previewCard: some View {
         ZStack {
-            // Chrome (clip + shadow) sits on the image layer only — matching the
-            // video / HTML cardBody — so the info capsule overlays on top rather
+            // Chrome (clip + shadow) sits on the image layer only, matching the
+            // video / HTML previews, so the info capsule overlays on top rather
             // than being clipped or shadowed with it.
             ZStack { stateBackground }
                 .screenPreviewChrome()

@@ -969,6 +969,9 @@ struct WPEMetalShaderDispatcher {
             ?? pass.pass.binds[1]
             ?? pass.pass.textures[1]
             ?? pass.pass.source
+        let baseReference = pass.textureBindings[2]
+            ?? pass.pass.binds[2]
+            ?? pass.pass.textures[2]
         let raysTexture = try WPEMetalShaderInputs.resolve(
             reference: raysReference,
             textures: textures,
@@ -981,23 +984,34 @@ struct WPEMetalShaderDispatcher {
             frameState: frameState,
             currentTargetID: destination.id
         )
+        let baseTexture = try baseReference.map {
+            try WPEMetalShaderInputs.resolve(
+                reference: $0,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+        } ?? albedoTexture
         if WPESceneDebugArtifacts.shared.isEnabled {
             let destinationID = ObjectIdentifier(destination.texture)
             let raysID = ObjectIdentifier(raysTexture)
             let albedoID = ObjectIdentifier(albedoTexture)
+            let baseID = ObjectIdentifier(baseTexture)
             WPESceneDebugArtifacts.shared.appendLog(
                 "[godrays.combine] pass=\(pass.pass.id) "
                     + "dst=\(destination.texture.label ?? "-") \(destination.texture.width)x\(destination.texture.height) id=\(destinationID) "
                     + "rays=\(raysTexture.label ?? "-") \(raysTexture.width)x\(raysTexture.height) id=\(raysID) sameDst=\(raysTexture === destination.texture) "
-                    + "albedo=\(albedoTexture.label ?? "-") \(albedoTexture.width)x\(albedoTexture.height) id=\(albedoID) sameDst=\(albedoTexture === destination.texture)",
+                    + "albedo=\(albedoTexture.label ?? "-") \(albedoTexture.width)x\(albedoTexture.height) id=\(albedoID) sameDst=\(albedoTexture === destination.texture) "
+                    + "base=\(baseTexture.label ?? "-") \(baseTexture.width)x\(baseTexture.height) id=\(baseID) sameDst=\(baseTexture === destination.texture)",
                 level: .notice
             )
         }
         encoder.setFragmentTexture(raysTexture, index: 0)
         encoder.setFragmentTexture(albedoTexture, index: 1)
+        encoder.setFragmentTexture(baseTexture, index: 2)
 
-        let blendMode = comboValueIfPresent(named: "BLENDMODE", in: pass) ?? 9
-        var uniforms = WPEGodraysCombineUniforms(blendMode: UInt32(max(0, blendMode)))
+        let combineWithBase = baseReference == nil ? UInt32(1) : UInt32(0)
+        var uniforms = WPEGodraysCombineUniforms(useBase: combineWithBase)
         encoder.setFragmentBytes(
             &uniforms,
             length: MemoryLayout<WPEGodraysCombineUniforms>.stride,
@@ -1019,6 +1033,14 @@ struct WPEMetalShaderDispatcher {
             reference: albedoReference,
             texture: albedoTexture,
             fallbackToPrimary: false
+        )
+        WPESceneDebugArtifacts.shared.recordTextureBinding(
+            passID: pass.pass.id,
+            shader: pass.pass.shader,
+            slot: 2,
+            reference: baseReference,
+            texture: baseTexture,
+            fallbackToPrimary: baseReference == nil
         )
 
         if usesObjectQuad {

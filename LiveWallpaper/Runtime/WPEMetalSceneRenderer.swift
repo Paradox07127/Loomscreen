@@ -152,6 +152,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// drive a layer's visibility/alpha and its video texture (e.g. an intro that
     /// plays once then hides). Empty for the common no-layer-script scene.
     private var layerScriptInstances: [String: WPELayerScriptInstance] = [:]
+    private var sceneScriptSharedState: WPESharedScriptState?
     /// Image-object alpha field scripts keyed by objectID. These return an alpha
     /// scalar from `update(value)` and intentionally do not affect visibility.
     private var layerAlphaScriptInstances: [String: WPELayerScriptInstance] = [:]
@@ -159,6 +160,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// transform scripts, e.g. cursor-follow flowers that assign
     /// `origin = input.cursorWorldPosition` every frame.
     private var dynamicOriginScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    /// Image-object scale SceneScripts keyed by objectID. Used by scenes that
+    /// drive body sizes or link lengths from shared simulation state.
+    private var dynamicScaleScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    /// Image-object angles SceneScripts keyed by objectID. Used by camera/control
+    /// rigs such as drag-to-rotate scene roots.
+    private var dynamicAnglesScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    /// Non-rendered transform hosts keyed by objectID. These are WPE `solid`
+    /// groups that move/render no pixels themselves but compose into child layers.
+    private var transformHostLocalTransformsByID: [String: WPERenderObjectTransform] = [:]
     /// objectID → the `dynamicTextureSources` key of the layer's video source, so
     /// a layer script's `getVideoTexture()` commands reach the right player.
     /// Populated for ALL video-backed layers (a button script drives a different
@@ -178,6 +188,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var onDemandVideoLoading: Set<String> = []
     /// Live per-layer alpha overrides driven by layer scripts (objectID → alpha).
     private var liveLayerAlpha: [String: Double] = [:]
+    /// Runtime-created image layers keyed by renderer-unique objectID. Produced
+    /// by layer SceneScript `thisScene.createLayer(...)` handles.
+    private var liveCreatedLayers: [String: WPECreatedLayerScriptState] = [:]
+    /// Prepared one-pass templates keyed by model path. Hidden template layers
+    /// are retained by the graph builder only when a script references them.
+    private var createdLayerTemplatesByImagePath: [String: WPEPreparedRenderLayer] = [:]
     /// Intro→loop phase alignment: an intro overlay (`introPhaseSource`) and the
     /// free-running loop it reveals (`loopPhaseSource`) are often the same
     /// animation a few seconds out of phase, with nothing in the scripts wiring the
@@ -298,6 +314,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var mouseInteractionEnabled = true
     /// Previous frame's pointer UV, fed as the official `g_PointerPositionLast`.
     private var previousPointer = SIMD2<Double>(0.5, 0.5)
+    /// Previous captured pointer/button frame used to emit SceneScript cursor
+    /// down/up edges exactly once per transition.
+    private var previousLayerScriptPointerFrame = WPEPointerFrame.neutral
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
     /// whenever the renderer is not suspended. Defaults to the WPE-compatible
     /// 30 FPS until `setFrameRateLimit(_:)` overrides it.
@@ -739,6 +758,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         renderGraph = graph
         renderPipeline = pipeline
+        createdLayerTemplatesByImagePath = Self.createdLayerTemplatesByImagePath(pipeline)
         executor.invalidateStaticLayerCache()
         hasAnimatedShaderPasses = Self.pipelineHasAnimatedPasses(pipeline)
         // Seed incremental-apply state. The graph builder already baked each
@@ -765,6 +785,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
+        sceneScriptSharedState = WPESharedScriptState()
         loadDynamicOriginScripts(from: document)
 
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
@@ -1422,6 +1443,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         renderPipeline?.layers.first?.passes.count ?? 0
     }
 
+    /// Test-only: live particle instance counts after the most recent frame tick.
+    var debugParticleLiveInstanceCounts: [Int] {
+        particleSystems.map(\.liveInstanceCount)
+    }
+
     /// Test-only: render `frames` successive full frames through the real
     /// `renderCurrentFrame` path (so cross-frame `previousFrameHistory` feedback
     /// accumulates exactly like on-device), returning each frame's output texture.
@@ -1529,32 +1555,36 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // `uniforms` via the stereo initializer, which would otherwise reset
         // them. `g_PointerPositionLast` tracks motion regardless of click
         // capture; click state is neutral unless the Interactive toggle is on.
+        let layerScriptPointerFrame = mtkView.clickCaptureEnabled
+            ? mtkView.pointerFrame
+            : WPEPointerFrame(
+                position: pointer,
+                clickPosition: pointer,
+                isDown: false,
+                isRightDown: false
+            )
         uniforms.pointerPositionLast = previousPointer
-        uniforms.pointerClick = mtkView.clickCaptureEnabled ? mtkView.pointerFrame : .neutral
+        uniforms.pointerClick = mtkView.clickCaptureEnabled ? layerScriptPointerFrame : .neutral
         previousPointer = pointer
         lastRuntimeUniforms = uniforms
         var framePipeline = pipeline
-        if !dynamicOriginScriptInstances.isEmpty {
-            var origins: [String: SIMD3<Double>] = [:]
-            origins.reserveCapacity(dynamicOriginScriptInstances.count)
-            for (objectID, instance) in dynamicOriginScriptInstances {
-                if let origin = instance.tick(pointerPosition: pointer) {
-                    origins[objectID] = origin
-                }
-            }
-            framePipeline = framePipeline.applyingLayerOrigins(origins)
-        }
         // Tick layer SceneScripts (e.g. a video intro that plays once then hides):
         // each drives its layer's visibility/alpha + video playback. Gated so a
         // scene with no layer scripts pays nothing (no per-frame pipeline rebuild).
         if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty {
+            dispatchLayerCursorEvents(
+                from: previousLayerScriptPointerFrame,
+                to: layerScriptPointerFrame,
+                runtimeSeconds: uniforms.time
+            )
+            previousLayerScriptPointerFrame = layerScriptPointerFrame
             for (objectID, instance) in layerScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time) {
+                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                     applyLayerScriptOutput(output, ownObjectID: objectID)
                 }
             }
             for (objectID, instance) in layerAlphaScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time) {
+                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                     applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
                 }
             }
@@ -1562,6 +1592,44 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             framePipeline = framePipeline
                 .applyingLayerVisibility(liveLayerVisibility)
                 .applyingLayerAlpha(liveLayerAlpha)
+        }
+        if !dynamicOriginScriptInstances.isEmpty
+            || !dynamicScaleScriptInstances.isEmpty
+            || !dynamicAnglesScriptInstances.isEmpty {
+            var origins: [String: SIMD3<Double>] = [:]
+            origins.reserveCapacity(dynamicOriginScriptInstances.count)
+            for (objectID, instance) in dynamicOriginScriptInstances {
+                if let origin = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
+                    origins[objectID] = origin
+                }
+            }
+            var scales: [String: SIMD3<Double>] = [:]
+            scales.reserveCapacity(dynamicScaleScriptInstances.count)
+            for (objectID, instance) in dynamicScaleScriptInstances {
+                if let scale = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
+                    scales[objectID] = scale
+                }
+            }
+            var angles: [String: SIMD3<Double>] = [:]
+            angles.reserveCapacity(dynamicAnglesScriptInstances.count)
+            for (objectID, instance) in dynamicAnglesScriptInstances {
+                if let angle = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
+                    angles[objectID] = angle
+                }
+            }
+            framePipeline = framePipeline.applyingLayerTransforms(
+                origins: origins,
+                scales: scales,
+                angles: angles,
+                parentByID: objectParentByID,
+                hostTransforms: transformHostLocalTransformsByID
+            )
+        }
+        if !liveCreatedLayers.isEmpty {
+            framePipeline = framePipeline.addingCreatedLayers(
+                liveCreatedLayers,
+                templatesByImagePath: createdLayerTemplatesByImagePath
+            )
         }
         // Keep only currently-visible on-demand videos resident (releases hidden
         // ones, rebuilds revealed ones). No-op unless the scene has releasable
@@ -1630,7 +1698,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             size: sceneRenderSize,
             textures: currentTextures,
             dynamicTextureNames: Set(dynamicTextureSources.keys),
-            dynamicLayerIDs: Set(dynamicOriginScriptInstances.keys),
+            dynamicLayerIDs: Set(dynamicOriginScriptInstances.keys)
+                .union(dynamicScaleScriptInstances.keys)
+                .union(dynamicAnglesScriptInstances.keys)
+                .union(liveCreatedLayers.keys),
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms,
             sceneID: descriptor.workshopID,
@@ -1764,12 +1835,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             msdfTextRenderer = nil
         }
         textScriptInstances.removeAll(keepingCapacity: false)
+        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
+        sceneScriptSharedState = sharedState
         for object in textObjects {
             guard let script = object.textScript else { continue }
             if let instance = try? WPESceneScriptInstance(
                 script: script,
                 initialValue: object.text,
-                scriptProperties: object.scriptProperties
+                scriptProperties: object.scriptProperties,
+                shared: sharedState
             ) {
                 textScriptInstances[object.id] = instance
             }
@@ -1936,13 +2010,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         debugStage("layerScripts.userProperties", "count=\(userProperties.count)")
         // One `shared` store for the whole scene so WPE's cross-script `shared`
         // global coordinates across the scripts' isolated contexts.
-        let sharedState = WPESharedScriptState()
+        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
+        sceneScriptSharedState = sharedState
+        let scriptCanvasSize = SIMD2<Double>(
+            max(Double(sceneRenderSize.width), 1),
+            max(Double(sceneRenderSize.height), 1)
+        )
         for object in scriptHosts {
             do {
                 let instance = try WPELayerScriptInstance(
                     script: object.visibleScript,
                     scriptProperties: object.scriptProperties,
-                    shared: sharedState
+                    shared: sharedState,
+                    canvasSize: scriptCanvasSize
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
@@ -1959,7 +2039,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 let instance = try WPELayerScriptInstance(
                     script: script,
                     scriptProperties: object.scriptProperties,
-                    shared: sharedState
+                    shared: sharedState,
+                    canvasSize: scriptCanvasSize
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
@@ -1977,6 +2058,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     script: script,
                     scriptProperties: object.alphaScriptProperties,
                     shared: sharedState,
+                    canvasSize: scriptCanvasSize,
                     outputMode: .returnedAlpha(initialValue: object.alpha)
                 )
                 layerAlphaScriptInstances[object.id] = instance
@@ -1996,27 +2078,69 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `WPESceneDocumentParser`, so they do not reach this path.
     private func loadDynamicOriginScripts(from document: WPESceneDocument) {
         dynamicOriginScriptInstances = [:]
-        let scripted = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            guard let script = object.originScript else { return nil }
-            return (object.id, script)
+        dynamicScaleScriptInstances = [:]
+        dynamicAnglesScriptInstances = [:]
+        transformHostLocalTransformsByID = Dictionary(
+            document.transformHostObjects.map { object in
+                (
+                    object.id,
+                    WPERenderObjectTransform(
+                        origin: object.localOrigin,
+                        scale: object.localScale,
+                        angles: object.localAngles
+                    )
+                )
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let originScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.originScript.map { (object.id, $0) }
+        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.originScript.map { (object.id, $0) }
         }
-        guard !scripted.isEmpty else { return }
+        let scaleScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.scaleScript.map { (object.id, $0) }
+        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.scaleScript.map { (object.id, $0) }
+        }
+        let anglesScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.anglesScript.map { (object.id, $0) }
+        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+            object.anglesScript.map { (object.id, $0) }
+        }
+        debugStage(
+            "transformScripts.load",
+            "origin=\(originScripts.count) scale=\(scaleScripts.count) angles=\(anglesScripts.count) hosts=\(document.transformHostObjects.count)"
+        )
+        guard !originScripts.isEmpty || !scaleScripts.isEmpty || !anglesScripts.isEmpty else { return }
         let canvasSize = SIMD2<Double>(
             max(Double(sceneRenderSize.width), 1),
             max(Double(sceneRenderSize.height), 1)
         )
-        for (objectID, script) in scripted {
-            do {
-                dynamicOriginScriptInstances[objectID] = try WPEDynamicTransformScriptInstance(
-                    script: script.script,
-                    scriptProperties: script.scriptProperties,
-                    seed: script.seed,
-                    canvasSize: canvasSize
-                )
-            } catch {
-                Logger.warning("Scene \(descriptor.workshopID) [OriginScript] init failed for \(objectID): \(error)", category: .wpeRender)
+        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
+        sceneScriptSharedState = sharedState
+        func install(
+            _ scripts: [(String, WPESceneTransformScript)],
+            into instances: inout [String: WPEDynamicTransformScriptInstance],
+            label: String
+        ) {
+            for (objectID, script) in scripts {
+                do {
+                    instances[objectID] = try WPEDynamicTransformScriptInstance(
+                        script: script.script,
+                        scriptProperties: script.scriptProperties,
+                        seed: script.seed,
+                        canvasSize: canvasSize,
+                        shared: sharedState
+                    )
+                } catch {
+                    Logger.warning("Scene \(descriptor.workshopID) [\(label)] init failed for \(objectID): \(error)", category: .wpeRender)
+                }
             }
         }
+        install(originScripts, into: &dynamicOriginScriptInstances, label: "OriginScript")
+        install(scaleScripts, into: &dynamicScaleScriptInstances, label: "ScaleScript")
+        install(anglesScripts, into: &dynamicAnglesScriptInstances, label: "AnglesScript")
     }
 
     /// Index video layers whose every pass targets `.scene` (so they're never a
@@ -2036,6 +2160,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 onDemandVideoKeyByID[layer.graphLayer.objectID] = key
             }
         }
+    }
+
+    private static func createdLayerTemplatesByImagePath(
+        _ pipeline: WPEPreparedRenderPipeline
+    ) -> [String: WPEPreparedRenderLayer] {
+        var templates: [String: WPEPreparedRenderLayer] = [:]
+        for layer in pipeline.layers {
+            let path = layer.graphLayer.imagePath
+            guard !path.isEmpty,
+                  templates[path] == nil,
+                  layer.puppetModel == nil,
+                  layer.passes.count == 1 else {
+                continue
+            }
+            templates[path] = layer
+        }
+        return templates
     }
 
     /// Per-frame: an on-demand video source is resident iff some layer using it is
@@ -2158,6 +2299,40 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         if circularDrift > 0.3 { loop.alignPlayhead(to: target) }
     }
 
+    private func dispatchLayerCursorEvents(
+        from previous: WPEPointerFrame,
+        to current: WPEPointerFrame,
+        runtimeSeconds: Double
+    ) {
+        var events: [WPELayerScriptCursorEvent] = []
+        if !previous.isDown, current.isDown { events.append(.down) }
+        if previous.isDown, !current.isDown { events.append(.up) }
+        if !previous.isRightDown, current.isRightDown { events.append(.rightDown) }
+        if previous.isRightDown, !current.isRightDown { events.append(.rightUp) }
+        guard !events.isEmpty else { return }
+
+        for event in events {
+            for (objectID, instance) in layerScriptInstances {
+                if let output = instance.dispatchCursorEvent(
+                    event,
+                    pointerFrame: current,
+                    runtimeSeconds: runtimeSeconds
+                ) {
+                    applyLayerScriptOutput(output, ownObjectID: objectID)
+                }
+            }
+            for (objectID, instance) in layerAlphaScriptInstances {
+                if let output = instance.dispatchCursorEvent(
+                    event,
+                    pointerFrame: current,
+                    runtimeSeconds: runtimeSeconds
+                ) {
+                    applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
+                }
+            }
+        }
+    }
+
     /// Applies a layer script's full output: its own layer plus any layers it
     /// drove via `thisScene.getLayer(name)` (resolved name→objectID).
     private func applyLayerScriptOutput(_ output: WPELayerScriptOutput, ownObjectID: String) {
@@ -2165,6 +2340,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         for (name, state) in output.others {
             guard let targetID = layerObjectIDByName[name] else { continue }
             applyLayerScriptState(state, objectID: targetID)
+        }
+        for created in output.created {
+            guard !created.imagePath.isEmpty else { continue }
+            var state = created
+            state.key = "\(ownObjectID).\(created.key)"
+            liveCreatedLayers[state.key] = state
         }
     }
 
@@ -2519,6 +2700,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         renderPipeline = nil
         scenePropertyBindings = [:]
         liveLayerVisibility = [:]
+        liveCreatedLayers = [:]
+        createdLayerTemplatesByImagePath = [:]
+        previousLayerScriptPointerFrame = .neutral
         objectParentByID = [:]
         ownVisibilityByID = [:]
         liveTextVisibility = [:]
@@ -2534,13 +2718,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         layerScriptInstances.removeAll(keepingCapacity: false)
+        sceneScriptSharedState = nil
         layerAlphaScriptInstances.removeAll(keepingCapacity: false)
         dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
+        dynamicScaleScriptInstances.removeAll(keepingCapacity: false)
+        dynamicAnglesScriptInstances.removeAll(keepingCapacity: false)
+        transformHostLocalTransformsByID.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
         onDemandVideoLoading.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
+        liveCreatedLayers.removeAll(keepingCapacity: false)
+        createdLayerTemplatesByImagePath.removeAll(keepingCapacity: false)
         introPhaseSource = nil
         loopPhaseSource = nil
         introLoopOffset = nil
@@ -2745,6 +2935,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             || !onDemandVideoKeyByID.isEmpty
             || !particleSystems.isEmpty
             || !dynamicOriginScriptInstances.isEmpty
+            || !dynamicScaleScriptInstances.isEmpty
+            || !dynamicAnglesScriptInstances.isEmpty
             || !layerScriptInstances.isEmpty
             || !layerAlphaScriptInstances.isEmpty
             || pointerDrivenContent
@@ -2810,6 +3002,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         outputTexture = nil
         scenePropertyBindings = [:]
         liveLayerVisibility = [:]
+        liveCreatedLayers = [:]
+        createdLayerTemplatesByImagePath = [:]
         objectParentByID = [:]
         ownVisibilityByID = [:]
         liveTextVisibility = [:]
@@ -2823,13 +3017,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         layerScriptInstances.removeAll(keepingCapacity: false)
+        sceneScriptSharedState = nil
         layerAlphaScriptInstances.removeAll(keepingCapacity: false)
         dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
+        dynamicScaleScriptInstances.removeAll(keepingCapacity: false)
+        dynamicAnglesScriptInstances.removeAll(keepingCapacity: false)
+        transformHostLocalTransformsByID.removeAll(keepingCapacity: false)
         layerVideoSourceKey.removeAll(keepingCapacity: false)
         layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
         onDemandVideoLoading.removeAll(keepingCapacity: false)
         liveLayerAlpha.removeAll(keepingCapacity: false)
+        liveCreatedLayers.removeAll(keepingCapacity: false)
+        createdLayerTemplatesByImagePath.removeAll(keepingCapacity: false)
         introPhaseSource = nil
         loopPhaseSource = nil
         introLoopOffset = nil

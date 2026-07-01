@@ -209,7 +209,7 @@ struct WPECorpusScanner {
     static func classifyObject(_ entry: [String: Any]) -> WPESceneObjectKind {
         if let explicit = (entry["type"] as? String)?.lowercased(), !explicit.isEmpty {
             switch explicit {
-            case "image":    return .image
+            case "image", "model": return .image
             case "sound":    return .sound
             case "particle": return .particle
             case "text":     return .text
@@ -217,7 +217,7 @@ struct WPECorpusScanner {
             default:         break
             }
         }
-        if entry["image"] != nil    { return .image }
+        if entry["image"] != nil || entry["model"] != nil { return .image }
         if entry["sound"] != nil    { return .sound }
         if entry["particle"] != nil { return .particle }
         if entry["text"] != nil     { return .text }

@@ -134,6 +134,18 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.tickString() == "ok")
     }
 
+    @Test("engine.registerAudioBuffers returns a zeroed average buffer")
+    func engineRegisterAudioBuffersReturnsZeroedAverageBuffer() throws {
+        let script = """
+        let audioBuffer = engine.registerAudioBuffers(4);
+        export function update(value) {
+            return String(audioBuffer.average.length) + ':' + String(audioBuffer.average[2]);
+        }
+        """
+        let instance = try WPESceneScriptInstance(script: script, initialValue: "")
+        #expect(instance.tickString() == "4:0")
+    }
+
     @Test("localstorage.set/get round-trip")
     func localstorageRoundTrip() throws {
         let script = """
@@ -224,6 +236,24 @@ struct WPESceneScriptRuntimeTests {
         """
         let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
         #expect(instance.tickString() == "kept")
+    }
+
+    @Test("Text SceneScript reads the scene shared state")
+    func textSceneScriptReadsSharedState() throws {
+        let store = WPESharedScriptState()
+        store.set("ip1", "Local/1st Arm/")
+        store.set("num", 42.0)
+        let instance = try WPESceneScriptInstance(
+            script: """
+            export function update(value) {
+                return shared.ip1 + shared.num;
+            }
+            """,
+            initialValue: "",
+            shared: store
+        )
+
+        #expect(instance.tickString() == "Local/1st Arm/42")
     }
 
     @Test("Runaway update() loop is contained: tick times out and freezes at lastValue")
@@ -366,6 +396,8 @@ struct WPESceneScriptRuntimeTests {
             "export function update(v){ v.x = Math.random(); return v; }"))
         #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
             "export function update(v){ v.x = input.cursorWorldPosition.x; return v; }"))
+        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = shared.xx1; return v; }"))
         let evaluator = WPETransformScriptEvaluator(canvasWidth: 100, canvasHeight: 100)
         #expect(evaluator.resolveVec3(
             script: "export function update(v){ v.x = engine.getTimeOfDay(); return v; }",
@@ -391,6 +423,33 @@ struct WPESceneScriptRuntimeTests {
         let origin = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.25, 0.75)))
 
         #expect(origin == SIMD3<Double>(960, 540, 9))
+    }
+
+    @Test("Dynamic origin script reads the scene shared state")
+    func dynamicOriginScriptReadsSceneSharedState() throws {
+        let store = WPESharedScriptState()
+        store.set("xx1", 12.5)
+        store.set("yy1", -3.25)
+        store.set("zz1", 4.75)
+        let script = """
+        'use strict';
+        export function update(value) {
+            value.x = shared.xx1;
+            value.y = shared.yy1;
+            value.z = shared.zz1;
+            return value;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(0, 1, 0),
+            canvasSize: SIMD2<Double>(3840, 2160),
+            shared: store
+        )
+
+        let origin = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.5, 0.5)))
+
+        #expect(origin == SIMD3<Double>(12.5, -3.25, 4.75))
     }
 
     @Test("Dynamic origin script accepts WPE non-breaking keyword spaces")
@@ -750,6 +809,83 @@ struct WPESceneScriptRuntimeTests {
         #expect(abs(second.alpha - 1.25) < 0.0001)
     }
 
+    @Test("Dynamic transform script receives previous returned value")
+    func dynamicTransformScriptReceivesPreviousReturnedValue() throws {
+        let script = """
+        export function update(value) {
+            value.x = value.x + 1;
+            value.y = value.y + 2;
+            return value;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(10, 20, 30),
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+
+        let first = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.5, 0.5)))
+        let second = try #require(instance.tick(pointerPosition: SIMD2<Double>(0.5, 0.5)))
+
+        #expect(first == SIMD3<Double>(11, 22, 30))
+        #expect(second == SIMD3<Double>(12, 24, 30))
+    }
+
+    @Test("Dynamic transform script reads runtime, frametime, and screen resolution")
+    func dynamicTransformScriptReadsEngineTimeAndScreenResolution() throws {
+        let script = """
+        export function update(value) {
+            value.x = engine.runtime;
+            value.y = value.y + engine.frametime;
+            value.z = engine.screenResolution.x;
+            return value;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(0, 0, 0),
+            canvasSize: SIMD2<Double>(100, 50)
+        )
+
+        let first = try #require(instance.tick(
+            pointerPosition: SIMD2<Double>(0.5, 0.5),
+            runtimeSeconds: 1
+        ))
+        let second = try #require(instance.tick(
+            pointerPosition: SIMD2<Double>(0.5, 0.5),
+            runtimeSeconds: 1.25
+        ))
+
+        #expect(first == SIMD3<Double>(1, 1, 100))
+        #expect(second == SIMD3<Double>(1.25, 1.25, 100))
+    }
+
+    @Test("Dynamic transform script expands a scalar return to a uniform vector")
+    func dynamicTransformScriptExpandsScalarReturn() throws {
+        let script = """
+        export function update(value) {
+            return engine.runtime > 1 ? 2 : 3;
+        }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(1, 1, 1),
+            canvasSize: SIMD2<Double>(100, 50)
+        )
+
+        let first = try #require(instance.tick(
+            pointerPosition: SIMD2<Double>(0.5, 0.5),
+            runtimeSeconds: 0.5
+        ))
+        let second = try #require(instance.tick(
+            pointerPosition: SIMD2<Double>(0.5, 0.5),
+            runtimeSeconds: 2
+        ))
+
+        #expect(first == SIMD3<Double>(3, 3, 3))
+        #expect(second == SIMD3<Double>(2, 2, 2))
+    }
+
     @Test("Layer video-intro script: init hides+stops, plays once, hides after timeout")
     func layerVideoIntroPlaysOnce() throws {
         let script = """
@@ -983,5 +1119,102 @@ struct WPESceneScriptRuntimeTests {
         export function update() {}
         """, shared: WPESharedScriptState())
         #expect(instance.initialOutput.own.visible == false)
+    }
+
+    @Test("thisScene.createLayer returns a writable layer handle")
+    func createLayerStubReturnsWritableLayerHandle() throws {
+        let store = WPESharedScriptState()
+        let instance = try WPELayerScriptInstance(script: """
+        export function init() {
+            let point = thisScene.createLayer({
+                origin: new Vec3(1, 2, 3),
+                alpha: 0,
+                visible: false
+            });
+            point.color = new Vec3(1, 0, 0);
+            point.scale = new Vec3(0.1, 0.1, 0.1);
+            point.alpha = 0.5;
+            point.visible = true;
+            shared.created = point.visible && point.alpha === 0.5 ? 1 : 0;
+        }
+        export function update() {}
+        """, shared: store)
+
+        #expect(instance.initialOutput.own.visible == true)
+        #expect(instance.initialOutput.created.first?.imagePath == "")
+        #expect(store.get("created") as? Double == 1)
+    }
+
+    @Test("thisScene.createLayer exposes created layer state")
+    func createLayerExposesCreatedLayerState() throws {
+        let instance = try WPELayerScriptInstance(script: """
+        export function init() {
+            let point = thisScene.createLayer({
+                image: "models/ta.json",
+                origin: new Vec3(1, 2, 3),
+                color: new Vec3(0.25, 0.5, 0.75),
+                alpha: 0.25,
+                scale: new Vec3(0.1, 0.2, 0.3),
+                visible: true
+            });
+            point.origin = new Vec3(4, 5, 6);
+            point.alpha = 0.75;
+        }
+        export function update() {}
+        """)
+
+        let created = try #require(instance.initialOutput.created.first)
+        #expect(created.imagePath == "models/ta.json")
+        #expect(created.origin == SIMD3<Double>(4, 5, 6))
+        #expect(created.color == SIMD3<Double>(0.25, 0.5, 0.75))
+        #expect(created.scale == SIMD3<Double>(0.1, 0.2, 0.3))
+        #expect(created.alpha == 0.75)
+        #expect(created.visible == true)
+    }
+
+    @Test("Layer script receives cursor input and click handlers")
+    func layerScriptReceivesCursorInputAndClickHandlers() throws {
+        let store = WPESharedScriptState()
+        let instance = try WPELayerScriptInstance(
+            script: """
+            export function cursorDown() { shared.down = 1; }
+            export function cursorUp() { shared.up = 1; }
+            export function update() {
+                shared.x = input.cursorScreenPosition.x;
+                shared.y = input.cursorScreenPosition.y;
+                thisLayer.alpha = shared.down === 1 && shared.up !== 1 ? 0.25 : 1;
+            }
+            """,
+            shared: store,
+            canvasSize: SIMD2<Double>(200, 100)
+        )
+
+        let downFrame = WPEPointerFrame(
+            position: SIMD2<Double>(0.25, 0.75),
+            clickPosition: SIMD2<Double>(0.25, 0.75),
+            isDown: true,
+            isRightDown: false
+        )
+        _ = instance.dispatchCursorEvent(.down, pointerFrame: downFrame)
+        let downOutput = try #require(instance.tick(pointerFrame: downFrame))
+
+        #expect(store.get("down") as? Double == 1)
+        #expect(store.get("x") as? Double == 50)
+        #expect(store.get("y") as? Double == 75)
+        #expect(downOutput.own.alpha == 0.25)
+
+        let upFrame = WPEPointerFrame(
+            position: SIMD2<Double>(0.4, 0.2),
+            clickPosition: SIMD2<Double>(0.25, 0.75),
+            isDown: false,
+            isRightDown: false
+        )
+        _ = instance.dispatchCursorEvent(.up, pointerFrame: upFrame)
+        let upOutput = try #require(instance.tick(pointerFrame: upFrame))
+
+        #expect(store.get("up") as? Double == 1)
+        #expect(store.get("x") as? Double == 80)
+        #expect(store.get("y") as? Double == 20)
+        #expect(upOutput.own.alpha == 1)
     }
 }

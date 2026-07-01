@@ -91,6 +91,27 @@ struct WPEMetalSceneRendererTests {
         #expect(pixel.r > pixel.b)
     }
 
+    @Test("Renders layers created by SceneScript")
+    func rendersSceneScriptCreatedLayers() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.sceneScriptCreatedLayerScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        let pixel = try #require(renderer.renderedTexture?.readPixel(x: 32, y: 32))
+        #expect(pixel.r >= 200)
+        #expect(pixel.r > pixel.g)
+        #expect(pixel.r > pixel.b)
+    }
+
     @Test("Resolves dependency-mounted texture references")
     func resolvesDependencyMountedTextures() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -499,6 +520,75 @@ private struct MetalSceneFixture {
         try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/base.png"] }] }"#.utf8)
             .write(to: materials.appendingPathComponent("base.json"))
         try writeScene(imagePath: "models/base.json", to: root)
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
+        )
+    }
+
+    static func sceneScriptCreatedLayerScene() throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        let models = root.appendingPathComponent("models", isDirectory: true)
+        let materials = root.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: materials, withIntermediateDirectories: true)
+        try writePNG(at: materials.appendingPathComponent("base.png"), color: CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        try Data(#"{ "material": "materials/base.json" }"#.utf8)
+            .write(to: models.appendingPathComponent("base.json"))
+        try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/base.png"] }] }"#.utf8)
+            .write(to: materials.appendingPathComponent("base.json"))
+        let script = """
+        export function init() {
+            thisScene.createLayer({
+                image: "models/base.json",
+                origin: new Vec3(0.5, 0.5, 0),
+                color: new Vec3(1, 1, 1),
+                alpha: 1,
+                scale: new Vec3(1, 1, 1),
+                visible: true
+            });
+        }
+        export function update() {}
+        """
+        let escapedScript = script
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [
+            {
+              "id": "template",
+              "name": "Template",
+              "type": "image",
+              "image": "models/base.json",
+              "origin": "1000 1000 0",
+              "scale": "1 1 1",
+              "visible": false,
+              "alpha": 1
+            },
+            {
+              "id": "host",
+              "name": "MAIN",
+              "solid": true,
+              "visible": {
+                "value": true,
+                "script": "\(escapedScript)"
+              }
+            }
+          ]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
         return MetalSceneFixture(
             root: root,
             descriptor: SceneDescriptor(

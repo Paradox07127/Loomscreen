@@ -241,7 +241,9 @@ private struct WPEShaderSourceLoader: Sendable {
             if normalized.hasPrefix("effect_") {
                 return copyProgram(shaderName: shaderName, combos: combos)
             }
-            guard WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
+            guard normalized == "genericimage2"
+                || normalized == "genericimage4"
+                || WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
                 return nil
             }
             return genericImageProgram(shaderName: shaderName, combos: combos)

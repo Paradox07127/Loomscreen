@@ -36,6 +36,57 @@ struct WPEPreparedRenderPass: Equatable, Sendable, Identifiable {
     let uniformValues: [String: WPESceneShaderConstantValue]
 }
 
+struct WPERenderObjectTransform: Equatable, Sendable {
+    let origin: SIMD3<Double>
+    let scale: SIMD3<Double>
+    let angles: SIMD3<Double>
+
+    init(origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>) {
+        self.origin = origin
+        self.scale = scale
+        self.angles = angles
+    }
+
+    init(_ geometry: WPERenderLayerGeometry) {
+        self.init(origin: geometry.origin, scale: geometry.scale, angles: geometry.angles)
+    }
+
+    func applying(
+        origin: SIMD3<Double>?,
+        scale: SIMD3<Double>?,
+        angles: SIMD3<Double>?
+    ) -> WPERenderObjectTransform {
+        WPERenderObjectTransform(
+            origin: origin ?? self.origin,
+            scale: scale ?? self.scale,
+            angles: angles ?? self.angles
+        )
+    }
+
+    func combining(child: WPERenderObjectTransform) -> WPERenderObjectTransform {
+        let scaledX = child.origin.x * scale.x
+        let scaledY = child.origin.y * scale.y
+        let cosine = cos(angles.z)
+        let sine = sin(angles.z)
+        let rotatedX = scaledX * cosine - scaledY * sine
+        let rotatedY = scaledX * sine + scaledY * cosine
+
+        return WPERenderObjectTransform(
+            origin: SIMD3<Double>(
+                origin.x + rotatedX,
+                origin.y + rotatedY,
+                origin.z + child.origin.z * scale.z
+            ),
+            scale: SIMD3<Double>(
+                scale.x * child.scale.x,
+                scale.y * child.scale.y,
+                scale.z * child.scale.z
+            ),
+            angles: angles + child.angles
+        )
+    }
+}
+
 struct WPEShaderProgram: Equatable, Sendable {
     let name: String
     let vertexSource: String
@@ -80,21 +131,126 @@ extension WPEPreparedRenderPipeline {
         )
     }
 
-    /// Applies per-frame transform-script origin overrides before object-scoped
-    /// uniforms are derived. Used by cursor-follow image layers whose WPE
-    /// SceneScript writes `origin = input.cursorWorldPosition`.
-    func applyingLayerOrigins(_ origins: [String: SIMD3<Double>]) -> WPEPreparedRenderPipeline {
-        guard !origins.isEmpty else { return self }
+    /// Applies per-frame transform-script overrides before object-scoped uniforms
+    /// are derived. The maps are keyed by WPE object id and can be sparse.
+    func applyingLayerTransforms(
+        origins: [String: SIMD3<Double>],
+        scales: [String: SIMD3<Double>],
+        angles: [String: SIMD3<Double>],
+        parentByID: [String: String] = [:],
+        hostTransforms: [String: WPERenderObjectTransform] = [:]
+    ) -> WPEPreparedRenderPipeline {
+        guard !origins.isEmpty || !scales.isEmpty || !angles.isEmpty else { return self }
+        guard !parentByID.isEmpty || !hostTransforms.isEmpty else {
+            return WPEPreparedRenderPipeline(
+                layers: layers.map { layer in
+                    let objectID = layer.graphLayer.objectID
+                    let origin = origins[objectID]
+                    let scale = scales[objectID]
+                    let angle = angles[objectID]
+                    guard origin != nil || scale != nil || angle != nil else { return layer }
+                    return WPEPreparedRenderLayer(
+                        graphLayer: layer.graphLayer.applyingTransform(
+                            origin: origin,
+                            scale: scale,
+                            angles: angle
+                        ),
+                        puppetModel: layer.puppetModel,
+                        passes: layer.passes
+                    )
+                }
+            )
+        }
+
+        let layerLocalTransforms = Dictionary(
+            layers.compactMap { layer -> (String, WPERenderObjectTransform)? in
+                guard let localGeometry = layer.graphLayer.localGeometry else { return nil }
+                return (layer.graphLayer.objectID, WPERenderObjectTransform(localGeometry))
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var memo: [String: WPERenderObjectTransform] = [:]
+
+        func localTransform(for id: String) -> WPERenderObjectTransform? {
+            let base = layerLocalTransforms[id] ?? hostTransforms[id]
+            return base?.applying(
+                origin: origins[id],
+                scale: scales[id],
+                angles: angles[id]
+            )
+        }
+
+        func resolvedTransform(for id: String, stack: Set<String>) -> WPERenderObjectTransform? {
+            if let cached = memo[id] { return cached }
+            guard let local = localTransform(for: id) else { return nil }
+            guard let parentID = parentByID[id],
+                  parentID != id,
+                  !stack.contains(parentID),
+                  stack.count < 100,
+                  let parent = resolvedTransform(for: parentID, stack: stack.union([id])) else {
+                memo[id] = local
+                return local
+            }
+            let resolved = parent.combining(child: local)
+            memo[id] = resolved
+            return resolved
+        }
+
         return WPEPreparedRenderPipeline(
             layers: layers.map { layer in
-                guard let origin = origins[layer.graphLayer.objectID] else { return layer }
+                let objectID = layer.graphLayer.objectID
+                guard let resolved = resolvedTransform(for: objectID, stack: []) else { return layer }
+                let current = layer.graphLayer.geometry
+                guard current.origin != resolved.origin
+                    || current.scale != resolved.scale
+                    || current.angles != resolved.angles else {
+                    return layer
+                }
                 return WPEPreparedRenderLayer(
-                    graphLayer: layer.graphLayer.applyingOrigin(origin),
+                    graphLayer: layer.graphLayer.applyingTransform(
+                        origin: resolved.origin,
+                        scale: resolved.scale,
+                        angles: resolved.angles
+                    ),
                     puppetModel: layer.puppetModel,
                     passes: layer.passes
                 )
             }
         )
+    }
+
+    /// Adds simple image layers created at runtime via `thisScene.createLayer`.
+    /// This intentionally supports only single-pass, non-puppet templates: the
+    /// trail dots in 3509243656 use that shape, while multi-pass/effect templates
+    /// would need per-instance FBO renaming to avoid collisions.
+    func addingCreatedLayers(
+        _ createdLayers: [String: WPECreatedLayerScriptState],
+        templatesByImagePath: [String: WPEPreparedRenderLayer]
+    ) -> WPEPreparedRenderPipeline {
+        guard !createdLayers.isEmpty, !templatesByImagePath.isEmpty else { return self }
+
+        let dynamicLayers = createdLayers.values
+            .sorted { $0.key < $1.key }
+            .compactMap { state -> WPEPreparedRenderLayer? in
+                guard state.visible,
+                      state.alpha > 0.001,
+                      let template = templatesByImagePath[state.imagePath],
+                      template.puppetModel == nil,
+                      template.passes.count == 1 else {
+                    return nil
+                }
+                return template.createdLayerCopy(state: state)
+            }
+        guard !dynamicLayers.isEmpty else { return self }
+
+        var result = layers
+        for layer in dynamicLayers {
+            let insertionIndex = result.lastIndex {
+                $0.graphLayer.sortIndex <= layer.graphLayer.sortIndex
+            }.map { result.index(after: $0) } ?? result.startIndex
+            result.insert(layer, at: insertionIndex)
+        }
+        return WPEPreparedRenderPipeline(layers: result)
     }
 
     func addingMetalRuntimeUniforms(
@@ -154,9 +310,89 @@ extension WPEPreparedRenderPipeline {
     }
 }
 
+private extension WPEPreparedRenderLayer {
+    func createdLayerCopy(state: WPECreatedLayerScriptState) -> WPEPreparedRenderLayer? {
+        guard let preparedPass = passes.first else { return nil }
+        let p = preparedPass.pass
+        let renderPass = WPERenderPass(
+            id: "\(state.key).0",
+            phase: p.phase,
+            shader: p.shader,
+            source: p.source,
+            target: .scene,
+            textures: p.textures,
+            binds: p.binds,
+            constants: p.constants,
+            combos: p.combos,
+            blending: p.blending,
+            cullMode: p.cullMode,
+            depthTest: p.depthTest,
+            depthWrite: p.depthWrite
+        )
+        let dynamicPass = WPEPreparedRenderPass(
+            pass: renderPass,
+            shader: preparedPass.shader,
+            textureBindings: preparedPass.textureBindings,
+            comboValues: preparedPass.comboValues,
+            uniformValues: preparedPass.uniformValues
+        )
+        return WPEPreparedRenderLayer(
+            graphLayer: graphLayer.createdLayerCopy(state: state, pass: renderPass),
+            puppetModel: nil,
+            passes: [dynamicPass]
+        )
+    }
+}
+
 private extension WPERenderLayer {
-    func applyingOrigin(_ origin: SIMD3<Double>) -> WPERenderLayer {
-        let adjustedGeometry = geometry.applyingOrigin(origin)
+    func createdLayerCopy(
+        state: WPECreatedLayerScriptState,
+        pass: WPERenderPass
+    ) -> WPERenderLayer {
+        let g = geometry
+        let dynamicGeometry = WPERenderLayerGeometry(
+            origin: state.origin,
+            scale: state.scale,
+            angles: g.angles,
+            alignment: g.alignment,
+            size: g.size,
+            puppetMeshCenter: g.puppetMeshCenter,
+            alpha: state.alpha,
+            alphaAnimation: nil,
+            color: state.color,
+            brightness: g.brightness
+        )
+        return WPERenderLayer(
+            objectID: state.key,
+            objectName: state.key,
+            visible: state.visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: nil,
+            parentObjectID: nil,
+            attachment: nil,
+            animationLayers: [],
+            geometry: dynamicGeometry,
+            localGeometry: dynamicGeometry,
+            compositeA: "_rt_createdLayerComposite_\(state.key)_a",
+            compositeB: "_rt_createdLayerComposite_\(state.key)_b",
+            localFBOs: [],
+            passes: [pass],
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
+    func applyingTransform(
+        origin: SIMD3<Double>?,
+        scale: SIMD3<Double>?,
+        angles: SIMD3<Double>?
+    ) -> WPERenderLayer {
+        let adjustedGeometry = geometry.applyingTransform(
+            origin: origin,
+            scale: scale,
+            angles: angles
+        )
         return WPERenderLayer(
             objectID: objectID,
             objectName: objectName,
@@ -261,11 +497,15 @@ private extension WPERenderLayer {
 }
 
 private extension WPERenderLayerGeometry {
-    func applyingOrigin(_ origin: SIMD3<Double>) -> WPERenderLayerGeometry {
+    func applyingTransform(
+        origin: SIMD3<Double>?,
+        scale: SIMD3<Double>?,
+        angles: SIMD3<Double>?
+    ) -> WPERenderLayerGeometry {
         WPERenderLayerGeometry(
-            origin: origin,
-            scale: scale,
-            angles: angles,
+            origin: origin ?? self.origin,
+            scale: scale ?? self.scale,
+            angles: angles ?? self.angles,
             alignment: alignment,
             size: size,
             puppetMeshCenter: puppetMeshCenter,

@@ -110,6 +110,57 @@ enum WallpaperEngineWebPropertyBridge {
         """
     }
 
+    static func audioBootstrapOverrides(
+        schema: WallpaperEngineProjectPropertySchema,
+        projectOverrides: [String: WallpaperEngineProjectPropertyValue],
+        volume: Double,
+        muted: Bool
+    ) -> [String: WallpaperEngineProjectPropertyValue] {
+        let level = normalizedAudioLevel(volume: volume, muted: muted)
+        guard muted || level < 0.999 else { return [:] }
+        return audioPropertyOverrides(
+            schema: schema,
+            projectOverrides: projectOverrides,
+            volume: volume,
+            muted: muted,
+            restoreProjectValueAtFullVolume: false
+        )
+    }
+
+    static func audioControlScript(
+        schema: WallpaperEngineProjectPropertySchema,
+        projectOverrides: [String: WallpaperEngineProjectPropertyValue],
+        volume: Double,
+        muted: Bool
+    ) -> String? {
+        let audioOverrides = audioPropertyOverrides(
+            schema: schema,
+            projectOverrides: projectOverrides,
+            volume: volume,
+            muted: muted,
+            restoreProjectValueAtFullVolume: true
+        )
+        guard !audioOverrides.isEmpty else { return nil }
+
+        let runtimeOverrides = projectOverrides.merging(audioOverrides) { _, runtime in runtime }
+        guard let json = propertiesJSON(
+            schema: schema,
+            overrides: runtimeOverrides,
+            includingKeys: Set(audioOverrides.keys)
+        ) else {
+            return nil
+        }
+
+        return """
+        (function () {
+            var listener = window.wallpaperPropertyListener;
+            if (listener && typeof listener.applyUserProperties === 'function') {
+                listener.applyUserProperties(\(json));
+            }
+        })();
+        """
+    }
+
     /// Synchronous disk read + JSON parse. Callers on hot paths should
     /// cache the result and use the `schema:` overloads above.
     static func parseSchema(forFolder folderURL: URL) -> WallpaperEngineProjectPropertySchema? {
@@ -147,6 +198,92 @@ enum WallpaperEngineWebPropertyBridge {
         }
 
         return json
+    }
+
+    private static func audioPropertyOverrides(
+        schema: WallpaperEngineProjectPropertySchema,
+        projectOverrides: [String: WallpaperEngineProjectPropertyValue],
+        volume: Double,
+        muted: Bool,
+        restoreProjectValueAtFullVolume: Bool
+    ) -> [String: WallpaperEngineProjectPropertyValue] {
+        let candidates = audioVolumeProperties(in: schema)
+        guard !candidates.isEmpty else { return [:] }
+
+        let level = normalizedAudioLevel(volume: volume, muted: muted)
+        let masterIsActive = muted || level < 0.999
+        let effectiveValues = schema.effectiveValues(overrides: projectOverrides)
+
+        var overrides: [String: WallpaperEngineProjectPropertyValue] = [:]
+        for property in candidates {
+            if masterIsActive {
+                overrides[property.key] = .number(scaledAudioLevel(
+                    level,
+                    for: property,
+                    baseValue: effectiveValues[property.key] ?? property.defaultValue
+                ))
+            } else if restoreProjectValueAtFullVolume {
+                overrides[property.key] = effectiveValues[property.key]
+                    ?? property.defaultValue
+                    ?? .number(scaledAudioLevel(1, for: property, baseValue: nil))
+            }
+        }
+        return overrides
+    }
+
+    private static func audioVolumeProperties(
+        in schema: WallpaperEngineProjectPropertySchema
+    ) -> [WallpaperEngineProjectPropertySchema.Property] {
+        schema.properties.filter { property in
+            guard property.type == .slider else { return false }
+            let haystack = "\(property.key) \(property.displayText)".lowercased()
+            return [
+                "volume",
+                "bgm",
+                "audio",
+                "sound",
+                "music",
+                "voice",
+                "音量",
+                "音频",
+                "声音",
+                "音乐",
+                "音效"
+            ].contains { haystack.contains($0) }
+        }
+    }
+
+    private static func normalizedAudioLevel(volume: Double, muted: Bool) -> Double {
+        guard !muted, volume.isFinite else { return 0 }
+        return min(max(volume, 0), 1)
+    }
+
+    private static func scaledAudioLevel(
+        _ level: Double,
+        for property: WallpaperEngineProjectPropertySchema.Property,
+        baseValue: WallpaperEngineProjectPropertyValue?
+    ) -> Double {
+        let lower = property.minimum ?? 0
+        let fallbackUpper: Double = {
+            if property.fraction { return 1 }
+            if let defaultNumber = property.defaultValue?.numberValue,
+               defaultNumber <= 1,
+               lower <= 1 {
+                return 1
+            }
+            return 100
+        }()
+        let upper = property.maximum ?? fallbackUpper
+        let minValue = min(lower, upper)
+        let maxValue = max(lower, upper)
+        let base = min(max(baseValue?.numberValue ?? maxValue, minValue), maxValue)
+        let raw = minValue + ((base - minValue) * min(max(level, 0), 1))
+
+        guard let step = property.step, step > 0 else {
+            return raw
+        }
+        let stepped = ((raw - minValue) / step).rounded() * step + minValue
+        return min(max(stepped, minValue), maxValue)
     }
 }
 

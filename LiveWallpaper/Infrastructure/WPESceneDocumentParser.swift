@@ -73,6 +73,7 @@ enum WPESceneDocumentParser {
         let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
         var scriptHostObjects: [WPESceneScriptHostObject] = []
+        var transformHostObjects: [WPESceneTransformHostObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
         var soundObjects: [WPESceneSoundObject] = []
@@ -103,8 +104,20 @@ enum WPESceneDocumentParser {
             ) {
                 imageObjects.append(object)
             } else if entry["image"] == nil,
+                      entry["model"] == nil,
                       let object = parseScriptHostObject(entry, diagnostics: &diagnostics) {
                 scriptHostObjects.append(object)
+            }
+            if resolution.primary != .image,
+               resolution.primary != .particle,
+               resolution.primary != .text,
+               resolution.primary != .sound,
+               let object = parseTransformHostObject(
+                entry,
+                transform: transform,
+                scriptOrigins: scriptResolvedOrigins
+               ) {
+                transformHostObjects.append(object)
             }
             if resolution.primary == .particle,
                let object = parseParticleObject(
@@ -181,6 +194,7 @@ enum WPESceneDocumentParser {
             general: general,
             imageObjects: imageObjects,
             scriptHostObjects: scriptHostObjects,
+            transformHostObjects: transformHostObjects,
             particleObjects: particleObjects,
             textObjects: textObjects,
             soundObjects: soundObjects,
@@ -189,6 +203,29 @@ enum WPESceneDocumentParser {
             objectParentByID: objectParentByID,
             ownVisibilityByID: ownVisibilityByID,
             diagnostics: diagnostics
+        )
+    }
+
+    private static func parseTransformHostObject(
+        _ dict: [String: Any],
+        transform: SceneObjectTransform,
+        scriptOrigins: [String: SIMD3<Double>] = [:]
+    ) -> WPESceneTransformHostObject? {
+        guard let id = objectID(in: dict) else { return nil }
+        let local = localTransform(in: dict, scriptOrigins: scriptOrigins)
+        return WPESceneTransformHostObject(
+            id: id,
+            name: (dict["name"] as? String) ?? id,
+            parentObjectID: parentID(in: dict),
+            origin: transform.origin,
+            scale: transform.scale,
+            angles: transform.angles,
+            localOrigin: local.origin,
+            localScale: local.scale,
+            localAngles: local.angles,
+            originScript: dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false),
+            scaleScript: dynamicTransformScript(in: dict["scale"], preserveStaticallyResolvable: true),
+            anglesScript: dynamicTransformScript(in: dict["angles"], preserveStaticallyResolvable: true)
         )
     }
 
@@ -1002,7 +1039,7 @@ enum WPESceneDocumentParser {
 
     private static func objectKind(explicitType: String) -> WPESceneObjectKind {
         switch explicitType {
-        case "image": return .image
+        case "image", "model": return .image
         case "sound": return .sound
         case "particle": return .particle
         case "text": return .text
@@ -1013,7 +1050,7 @@ enum WPESceneDocumentParser {
 
     private static func shapeCandidates(in entry: [String: Any]) -> [WPESceneObjectKind] {
         var kinds: [WPESceneObjectKind] = []
-        if entry["image"] != nil { kinds.append(.image) }
+        if entry["image"] != nil || entry["model"] != nil { kinds.append(.image) }
         if entry["sound"] != nil { kinds.append(.sound) }
         if entry["particle"] != nil { kinds.append(.particle) }
         if entry["text"] != nil { kinds.append(.text) }
@@ -1095,14 +1132,11 @@ enum WPESceneDocumentParser {
         effectiveVisible: Bool? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
-        guard let imagePath = dict["image"] as? String, !imagePath.isEmpty else {
+        guard let imagePath = nonEmptyString(dict["image"]) ?? nonEmptyString(dict["model"]) else {
             let objectName = dict["name"] as? String ?? "?"
             diagnostics.append(.init(
                 severity: .warning,
-                message: String(
-                    localized: "Image object \(objectName) has no image path",
-                    comment: "Wallpaper Engine scene diagnostic. The placeholder is the image object name."
-                )
+                message: "Image/model object \(objectName) has no renderable resource path"
             ))
             return nil
         }
@@ -1135,7 +1169,9 @@ enum WPESceneDocumentParser {
         let dependencies = parseDependencyIDs(dict["dependencies"])
         let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
-        let originScript = dynamicOriginScript(in: dict["origin"])
+        let originScript = dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false)
+        let scaleScript = dynamicTransformScript(in: dict["scale"], preserveStaticallyResolvable: true)
+        let anglesScript = dynamicTransformScript(in: dict["angles"], preserveStaticallyResolvable: true)
 
         if !effects.isEmpty {
             let names = effects.map(\.name).joined(separator: ", ")
@@ -1203,20 +1239,25 @@ enum WPESceneDocumentParser {
             alphaScript: alphaScript,
             alphaScriptProperties: alphaScriptProperties,
             originScript: originScript,
+            scaleScript: scaleScript,
+            anglesScript: anglesScript,
             scriptProperties: visibleScriptProperties
         )
     }
 
-    private static func dynamicOriginScript(in raw: Any?) -> WPESceneTransformScript? {
-        guard let origin = raw as? [String: Any],
-              let script = origin["script"] as? String, !script.isEmpty,
-              !WPETransformScriptEvaluator.isStaticallyResolvable(script) else {
+    private static func dynamicTransformScript(
+        in raw: Any?,
+        preserveStaticallyResolvable: Bool
+    ) -> WPESceneTransformScript? {
+        guard let transform = raw as? [String: Any],
+              let script = transform["script"] as? String, !script.isEmpty,
+              preserveStaticallyResolvable || !WPETransformScriptEvaluator.isStaticallyResolvable(script) else {
             return nil
         }
-        let seed = parseVector3(resolveBoundTransformValue(origin["value"])) ?? SIMD3<Double>(0, 0, 0)
+        let seed = parseVector3(resolveBoundTransformValue(transform["value"])) ?? SIMD3<Double>(0, 0, 0)
         return WPESceneTransformScript(
             script: script,
-            scriptProperties: scriptPropertyValues(origin["scriptproperties"]),
+            scriptProperties: scriptPropertyValues(transform["scriptproperties"]),
             seed: seed
         )
     }

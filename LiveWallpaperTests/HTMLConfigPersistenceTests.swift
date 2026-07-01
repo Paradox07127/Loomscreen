@@ -50,10 +50,34 @@ struct HTMLConfigPersistenceTests {
         #expect(decoded.maxRetries == 3)
     }
 
+    @Test("Legacy config without useEphemeralStorage defaults clear data on exit on")
+    func legacyConfigDefaultsClearDataOnExitOn() throws {
+        let legacy = #"""
+        {
+            "allowJavaScript": true,
+            "allowMouseInteraction": false,
+            "blockTrackers": true,
+            "muteAudio": false,
+            "audioVolume": 1,
+            "refreshIntervalSeconds": 0,
+            "transformScale": 1,
+            "transformTranslateX": 0,
+            "transformTranslateY": 0,
+            "transformRotationDegrees": 0,
+            "physicalPixelLayout": false,
+            "maxRetries": 3
+        }
+        """#.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(HTMLConfig.self, from: legacy)
+        #expect(decoded.useEphemeralStorage == true)
+    }
+
     @Test("Default HTMLConfig leaves both suspension knobs off")
     func defaultConfigDisablesNewKnobs() {
         let cfg = HTMLConfig.default
         #expect(cfg.cspEnforcementEnabled == false)
         #expect(cfg.aggressiveSuspend == false)
+        #expect(cfg.useEphemeralStorage == true)
     }
 }

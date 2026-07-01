@@ -134,6 +134,372 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Godrays combine mixes rays over albedo through builtin compatibility path")
+    func godraysCombineMixesRaysOverAlbedoThroughBuiltinPath() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let albedo = try makeRGBAInputTexture(device: device, bytes: Data([
+            40, 90, 140, 255,
+            40, 90, 140, 255,
+            40, 90, 140, 255,
+            40, 90, 140, 255
+        ]))
+        let rays = try makeRGBAInputTexture(device: device, bytes: Data([
+            64, 0, 0, 128,
+            64, 0, 0, 128,
+            64, 0, 0, 128,
+            64, 0, 0, 128
+        ]))
+        let compA = "_rt_imageLayerComposite_421_a"
+        let compB = "_rt_imageLayerComposite_421_b"
+        let copyIn = copyPass(
+            id: "421.0",
+            source: .image("materials/albedo.png"),
+            target: .layerComposite(name: compA),
+            blending: "disabled"
+        )
+        let combine = WPERenderPass(
+            id: "421.5",
+            phase: .effect(file: "effects/godrays/effect.json"),
+            shader: "effects/godrays_combine",
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            textures: [
+                0: .image("materials/rays.png"),
+                1: .fbo(compA)
+            ],
+            binds: [:],
+            constants: [:],
+            combos: ["BLENDMODE": 9],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyOut = copyPass(
+            id: "421.10",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(localFBOs: [], passes: [
+            preparedBuiltinPass(copyIn),
+            WPEPreparedRenderPass(
+                pass: combine,
+                shader: WPEShaderProgram(
+                    name: "effects/godrays_combine",
+                    vertexSource: "",
+                    fragmentSource: "",
+                    isBuiltin: false
+                ),
+                textureBindings: [
+                    0: .image("materials/rays.png"),
+                    1: .fbo(compA)
+                ],
+                comboValues: ["BLENDMODE": 9],
+                uniformValues: [:]
+            ),
+            preparedBuiltinPass(copyOut)
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/albedo.png": albedo,
+                "materials/rays.png": rays
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r > 40)
+        #expect(pixel.g >= 85)
+        #expect(pixel.b >= 135)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Godrays combine keeps low-alpha rays visible when albedo is transparent")
+    func godraysCombineKeepsLowAlphaRaysVisibleWhenAlbedoIsTransparent() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let albedo = try makeRGBAInputTexture(
+            device: device,
+            bytes: Data(repeating: 0, count: 2 * 2 * 4)
+        )
+        let rays = try makeRGBAInputTexture(device: device, bytes: Data([
+            128, 128, 128, 5,
+            128, 128, 128, 5,
+            128, 128, 128, 5,
+            128, 128, 128, 5
+        ]))
+        let compA = "_rt_imageLayerComposite_421_a"
+        let compB = "_rt_imageLayerComposite_421_b"
+        let copyIn = copyPass(
+            id: "421.0",
+            source: .image("materials/albedo.png"),
+            target: .layerComposite(name: compA),
+            blending: "disabled"
+        )
+        let combine = WPERenderPass(
+            id: "421.5",
+            phase: .effect(file: "effects/godrays/effect.json"),
+            shader: "effects/godrays_combine",
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            textures: [
+                0: .image("materials/rays.png"),
+                1: .fbo(compA)
+            ],
+            binds: [:],
+            constants: [:],
+            combos: ["BLENDMODE": 9],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyOut = copyPass(
+            id: "421.10",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(localFBOs: [], passes: [
+            preparedBuiltinPass(copyIn),
+            WPEPreparedRenderPass(
+                pass: combine,
+                shader: WPEShaderProgram(
+                    name: "effects/godrays_combine",
+                    vertexSource: "",
+                    fragmentSource: "",
+                    isBuiltin: false
+                ),
+                textureBindings: [
+                    0: .image("materials/rays.png"),
+                    1: .fbo(compA)
+                ],
+                comboValues: ["BLENDMODE": 9],
+                uniformValues: [:]
+            ),
+            preparedBuiltinPass(copyOut)
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/albedo.png": albedo,
+                "materials/rays.png": rays
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r > 20)
+        #expect(pixel.g > 20)
+        #expect(pixel.b > 20)
+        #expect(pixel.a > 0)
+    }
+
+    @Test("Godrays combine explicit base slot keeps rays as visible output")
+    func godraysCombineExplicitBaseSlotKeepsRaysAsVisibleOutput() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let albedo = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 255, count: 2 * 2 * 4))
+        let base = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 255, count: 2 * 2 * 4))
+        let rays = try makeRGBAInputTexture(device: device, bytes: Data([
+            30, 60, 90, 255,
+            30, 60, 90, 255,
+            30, 60, 90, 255,
+            30, 60, 90, 255
+        ]))
+        let compA = "_rt_imageLayerComposite_421_a"
+        let compB = "_rt_imageLayerComposite_421_b"
+        let copyIn = copyPass(
+            id: "421.0",
+            source: .image("materials/albedo.png"),
+            target: .layerComposite(name: compA),
+            blending: "disabled"
+        )
+        let combine = WPERenderPass(
+            id: "421.5",
+            phase: .effect(file: "effects/godrays/effect.json"),
+            shader: "effects/godrays_combine",
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            textures: [
+                0: .image("materials/rays.png"),
+                1: .fbo(compA),
+                2: .image("materials/base.png")
+            ],
+            binds: [:],
+            constants: [:],
+            combos: ["BLENDMODE": 9],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyOut = copyPass(
+            id: "421.10",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(localFBOs: [], passes: [
+            preparedBuiltinPass(copyIn),
+            WPEPreparedRenderPass(
+                pass: combine,
+                shader: WPEShaderProgram(
+                    name: "effects/godrays_combine",
+                    vertexSource: "",
+                    fragmentSource: "",
+                    isBuiltin: false
+                ),
+                textureBindings: [
+                    0: .image("materials/rays.png"),
+                    1: .fbo(compA),
+                    2: .image("materials/base.png")
+                ],
+                comboValues: ["BLENDMODE": 9],
+                uniformValues: [:]
+            ),
+            preparedBuiltinPass(copyOut)
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/albedo.png": albedo,
+                "materials/base.png": base,
+                "materials/rays.png": rays
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r >= 85)
+        #expect(pixel.r <= 110)
+        #expect(pixel.g >= 120)
+        #expect(pixel.g <= 145)
+        #expect(pixel.b >= 145)
+        #expect(pixel.b <= 175)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Godrays combine preserves albedo captured from full-frame scene alias")
+    func godraysCombinePreservesFullFrameSceneAliasAlbedo() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        var sceneBytes = [UInt8](repeating: 0, count: 16 * 16 * 4)
+        for y in 6..<10 {
+            for x in 6..<10 {
+                let index = (y * 16 + x) * 4
+                sceneBytes[index] = 255
+                sceneBytes[index + 1] = 255
+                sceneBytes[index + 2] = 255
+                sceneBytes[index + 3] = 255
+            }
+        }
+        let scene = try makeRGBAInputTexture(
+            device: device,
+            width: 16,
+            height: 16,
+            bytes: Data(sceneBytes)
+        )
+        let rays = try makeRGBAInputTexture(
+            device: device,
+            width: 16,
+            height: 16,
+            bytes: Data(repeating: 0, count: 16 * 16 * 4)
+        )
+        let compA = "_rt_imageLayerComposite_421_a"
+        let compB = "_rt_imageLayerComposite_421_b"
+        let scenePass = WPERenderPass(
+            id: "scene.0",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/scene.png"),
+            target: .scene,
+            textures: [0: .image("materials/scene.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyIn = copyPass(
+            id: "421.0",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .layerComposite(name: compA),
+            blending: "premultiplied"
+        )
+        let combine = WPERenderPass(
+            id: "421.5",
+            phase: .effect(file: "effects/godrays/effect.json"),
+            shader: "effects/godrays_combine",
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            textures: [
+                0: .image("materials/rays.png"),
+                1: .fbo(compA)
+            ],
+            binds: [:],
+            constants: [:],
+            combos: ["BLENDMODE": 9],
+            blending: "premultiplied",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyOut = copyPass(
+            id: "421.10",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(localFBOs: [], passes: [
+            preparedBuiltinPass(scenePass, bindings: [0: .image("materials/scene.png")]),
+            preparedBuiltinPass(copyIn, bindings: [0: .fbo("_rt_FullFrameBuffer")]),
+            WPEPreparedRenderPass(
+                pass: combine,
+                shader: WPEShaderProgram(
+                    name: "effects/godrays_combine",
+                    vertexSource: "",
+                    fragmentSource: "",
+                    isBuiltin: false
+                ),
+                textureBindings: [
+                    0: .image("materials/rays.png"),
+                    1: .fbo(compA)
+                ],
+                comboValues: ["BLENDMODE": 9],
+                uniformValues: [:]
+            ),
+            preparedBuiltinPass(copyOut, bindings: [0: .fbo(compB)])
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 16),
+            textures: [
+                "materials/scene.png": scene,
+                "materials/rays.png": rays
+            ]
+        )
+        let center = try readPixel(output, x: 8, y: 8)
+        let corner = try readPixel(output, x: 0, y: 0)
+
+        #expect(center.r >= 250)
+        #expect(center.g >= 250)
+        #expect(center.b >= 250)
+        #expect(center.a >= 250)
+        #expect(corner.r <= 5)
+        #expect(corner.g <= 5)
+        #expect(corner.b <= 5)
+    }
+
     @Test("Async over-submission drops past the in-flight bound without deadlock")
     func asyncSubmissionDoesNotDeadlock() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -2006,7 +2372,7 @@ struct WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 1)
 
-        #expect(pixel.a >= 250)
+        #expect(pixel.a <= 5)
         #expect(pixel.g <= 5)
     }
 
@@ -2813,6 +3179,35 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.r <= 5)
         #expect(pixel.g <= 5)
         #expect(pixel.b <= 5)
+        #expect(pixel.a <= 5)
+    }
+
+    @Test("Scene clear is transparent so first transparent scene draw does not blend over black")
+    func sceneClearIsTransparentForFirstPremultipliedDraw() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let pass = solidPass(
+            id: "transparent.0",
+            color: [1, 0, 0, 0.5],
+            target: .scene,
+            blending: "premultiplied"
+        )
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [preparedBuiltinPass(pass, uniforms: ["g_Color": .vector([1, 0, 0, 0.5])])]
+            ),
+            size: CGSize(width: 2, height: 2),
+            textures: [:]
+        )
+
+        let pixel = try readPixel(output, x: 1, y: 1)
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 120)
+        #expect(pixel.a <= 140)
     }
 
     @Test("Routes declared non-underscore FBO target into a later FBO source")
@@ -3238,7 +3633,7 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.r <= 5)
         #expect(pixel.g <= 5)
         #expect(pixel.b <= 5)
-        #expect(pixel.a >= 250)
+        #expect(pixel.a <= 5)
     }
 
     @Test("Bootstraps missing FBO previous with a transparent cleared texture on first render")

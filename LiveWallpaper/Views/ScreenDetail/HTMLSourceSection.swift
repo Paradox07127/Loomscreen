@@ -23,19 +23,16 @@ struct HTMLSourceSection: View {
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Spacer(minLength: 0)
-                    sourceSegmentPicker
-                        .frame(maxWidth: 200)
-                    Spacer(minLength: 0)
-                }
+            HStack(alignment: .center, spacing: 10) {
+                sourceSegmentPicker
+                    .frame(width: 108)
 
                 sourcePane
+                    .frame(maxWidth: .infinity)
                     .animation(.snappy(duration: 0.18), value: selectedSegment)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
         .onAppear { scheduleBindingSync() }
@@ -97,23 +94,23 @@ struct HTMLSourceSection: View {
     }
 
     private var urlField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("https://example.com or example.com", text: $urlInput)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { commitURL() }
+        HStack(spacing: 8) {
+            TextField("https://example.com or example.com", text: $urlInput)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { commitURL() }
 
-                Button(action: pasteFromClipboard) {
-                    Image(systemName: "doc.on.clipboard")
-                }
-                .buttonStyle(.bordered)
-                .help(Text("Paste URL from clipboard"))
-                .accessibilityLabel(Text("Paste URL from clipboard"))
-
-                Button("Use") { commitURL() }
-                    .adaptiveGlassButton(.prominent)
-                    .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button(action: pasteFromClipboard) {
+                Image(systemName: "doc.on.clipboard")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(Text("Paste URL from clipboard"))
+            .accessibilityLabel(Text("Paste URL from clipboard"))
+
+            Button("Use") { commitURL() }
+                .adaptiveGlassButton(.prominent)
+                .controlSize(.small)
+                .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             urlChipsRow
         }
@@ -132,18 +129,19 @@ struct HTMLSourceSection: View {
     }
 
     private var localPickerRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                summaryLine(
-                    icon: localIconName,
-                    text: localSummary.map { Text(verbatim: $0) } ?? Text("No file or folder chosen")
-                )
-                Spacer()
-                Button("Choose…") { pickLocal() }
-                    .buttonStyle(.bordered)
-            }
+        HStack(spacing: 8) {
+            summaryLine(
+                icon: localIconName,
+                text: localSummary.map { Text(verbatim: $0) } ?? Text("No file or folder chosen")
+            )
 
             sourceChipsRow
+
+            Spacer(minLength: 0)
+
+            Button("Choose…") { pickLocal() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         }
     }
 
@@ -185,8 +183,8 @@ struct HTMLSourceSection: View {
                 }
                 trustStatusChip(for: source)
                 multiInstanceChip(for: source)
-                Spacer(minLength: 0)
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -195,8 +193,8 @@ struct HTMLSourceSection: View {
         if let source {
             HStack(spacing: 6) {
                 multiInstanceChip(for: source)
-                Spacer(minLength: 0)
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 

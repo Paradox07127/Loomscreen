@@ -252,6 +252,20 @@ struct HTMLWallpaperRuntimeScriptTests {
         #expect(script.contains("applyGeneralProperties"))
         #expect(script.contains("\"fps\":1"))
     }
+
+    @Test("Master audio script routes Web Audio destination connects through gain")
+    func masterAudioScriptRoutesWebAudioDestinationConnectsThroughGain() {
+        let script = HTMLWallpaperRuntimeScript.masterAudioController(initialVolume: 0.35, initialMuted: true)
+
+        #expect(script.contains("Object.defineProperty(HTMLMediaElement.prototype, 'volume'"))
+        #expect(script.contains("Object.defineProperty(HTMLMediaElement.prototype, 'muted'"))
+        #expect(script.contains("requestedVolume * __lwVolume__"))
+        #expect(script.contains("function ensureMasterGain"))
+        #expect(script.contains("AudioNode.prototype.connect"))
+        #expect(script.contains("AudioDestinationNode"))
+        #expect(script.contains("args[0] = ensureMasterGain(this.context, destination);"))
+        #expect(script.contains("__lwUpdateAudio__(0.350000, true)"))
+    }
 }
 
 @Suite("HTML wallpaper compatibility policy")

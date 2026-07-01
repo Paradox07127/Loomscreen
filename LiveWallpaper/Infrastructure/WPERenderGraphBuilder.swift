@@ -86,6 +86,7 @@ struct WPERenderGraphBuilder: Sendable {
         // executor skips the scene draw while `WPERenderLayer.visible` is false.
         let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
             .union(Self.layerScriptControlledVisibilityIDs(in: document))
+        let dynamicCreatedLayerTemplateIDs = Self.createLayerImageTemplateIDs(in: document)
         let visibleLayerIDs = Set(document.imageObjects
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
             .filter {
@@ -96,8 +97,8 @@ struct WPERenderGraphBuilder: Sendable {
                     || Self.hasLiveToggleableHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs)
             }
             .map(\.id))
-        var layerIDsToBuild = visibleLayerIDs
-        var pendingIDs = Array(visibleLayerIDs)
+        var layerIDsToBuild = visibleLayerIDs.union(dynamicCreatedLayerTemplateIDs)
+        var pendingIDs = Array(layerIDsToBuild)
         var layerIDsRequiredAsComposite = Set<String>()
 
         while let id = pendingIDs.popLast(), let object = objectByID[id] {
@@ -120,7 +121,6 @@ struct WPERenderGraphBuilder: Sendable {
             .map { object in
                 try buildLayer(
                     object: object,
-                    sceneSize: sceneSize,
                     finalUntargetedPassToScene: visibleLayerIDs.contains(object.id),
                     preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id),
                     sortIndex: document.objectPaintOrder[object.id] ?? 0
@@ -446,6 +446,45 @@ struct WPERenderGraphBuilder: Sendable {
         return ids
     }
 
+    /// Hidden image objects used as `thisScene.createLayer({ image: "..." })`
+    /// templates must still build their material/texture passes. They remain
+    /// invisible; the renderer clones their prepared single-pass template for
+    /// each script-created layer at frame time.
+    private static func createLayerImageTemplateIDs(in document: WPESceneDocument) -> Set<String> {
+        let scripts = document.imageObjects.compactMap(\.visibleScript)
+            + document.scriptHostObjects.map(\.visibleScript)
+        guard !scripts.isEmpty else { return [] }
+
+        var imagePaths = Set<String>()
+        for script in scripts where script.contains("createLayer") {
+            imagePaths.formUnion(createLayerImagePaths(in: script))
+        }
+        guard !imagePaths.isEmpty else { return [] }
+
+        return Set(document.imageObjects.compactMap { object in
+            imagePaths.contains(object.imageRelativePath) ? object.id : nil
+        })
+    }
+
+    private static func createLayerImagePaths(in script: String) -> Set<String> {
+        let pattern = #"(?:["']image["']|\bimage\b)\s*:\s*["']([^"']+)["']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var paths = Set<String>()
+        var searchStart = script.startIndex
+        while let createRange = script.range(of: "createLayer", range: searchStart..<script.endIndex) {
+            let windowEnd = script.index(createRange.upperBound, offsetBy: 4096, limitedBy: script.endIndex)
+                ?? script.endIndex
+            let chunk = String(script[createRange.upperBound..<windowEnd])
+            let nsRange = NSRange(chunk.startIndex..<chunk.endIndex, in: chunk)
+            for match in regex.matches(in: chunk, range: nsRange) where match.numberOfRanges > 1 {
+                guard let range = Range(match.range(at: 1), in: chunk) else { continue }
+                paths.insert(String(chunk[range]))
+            }
+            searchStart = createRange.upperBound
+        }
+        return paths
+    }
+
     private static func referencedLayerIDs(in object: WPESceneImageObject) -> Set<String> {
         var ids = Set(object.dependencies)
         for effect in object.effects where effect.visible {
@@ -557,14 +596,12 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func buildLayer(
         object: WPESceneImageObject,
-        sceneSize: CGSize,
         finalUntargetedPassToScene: Bool,
         preserveFinalCompositeForScene: Bool,
         sortIndex: Int
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let puppetPlacement = model.puppetPlacement(for: object, sceneSize: sceneSize)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -645,12 +682,12 @@ struct WPERenderGraphBuilder: Sendable {
             attachment: object.attachment,
             animationLayers: object.animationLayers,
             geometry: WPERenderLayerGeometry(
-                origin: puppetPlacement?.origin ?? object.origin,
+                origin: object.origin,
                 scale: object.scale,
                 angles: object.angles,
                 alignment: object.alignment,
-                size: puppetPlacement?.size ?? object.size,
-                puppetMeshCenter: puppetPlacement?.meshCenter ?? SIMD2<Double>(0, 0),
+                size: object.size,
+                puppetMeshCenter: SIMD2<Double>(0, 0),
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
@@ -661,8 +698,8 @@ struct WPERenderGraphBuilder: Sendable {
                 scale: object.localScale,
                 angles: object.localAngles,
                 alignment: object.alignment,
-                size: puppetPlacement?.size ?? object.size,
-                puppetMeshCenter: puppetPlacement?.meshCenter ?? SIMD2<Double>(0, 0),
+                size: object.size,
+                puppetMeshCenter: SIMD2<Double>(0, 0),
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
@@ -673,7 +710,7 @@ struct WPERenderGraphBuilder: Sendable {
             localFBOs: context.localFBOs,
             passes: context.finalizedPasses(
                 finalUntargetedPassToScene: finalUntargetedPassToScene,
-                preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.puppetPath != nil
+                preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.requiresFinalSceneComposite
             ),
             parallaxDepth: object.parallaxDepth,
             sortIndex: sortIndex
@@ -727,6 +764,20 @@ struct WPERenderGraphBuilder: Sendable {
             return WPEModelDescriptor(materialPath: explicitMaterial ?? object.imageRelativePath, puppetPath: nil)
         }
         let extensionName = (object.imageRelativePath as NSString).pathExtension.lowercased()
+        if extensionName == "mdl" {
+            let model = try WPEMdlParser.parse(data: resolver.data(relativePath: object.imageRelativePath))
+            guard let material = explicitMaterial ?? model.meshes.first(where: { !$0.materialPath.isEmpty })?.materialPath else {
+                throw WPERenderGraphError.materialUnresolved(object.imageRelativePath)
+            }
+            let clipMaskName = (Self.puppetClipCompositeEnabled ? object.imageRelativePath : nil)
+                .flatMap(loadPuppetClipMaskName(path:))
+            return WPEModelDescriptor(
+                materialPath: material,
+                puppetPath: object.imageRelativePath,
+                rendersAsSceneModel: true,
+                puppetClipMaskName: clipMaskName
+            )
+        }
         guard extensionName == "json" else {
             return WPEModelDescriptor(materialPath: explicitMaterial, puppetPath: nil)
         }
@@ -750,20 +801,8 @@ struct WPERenderGraphBuilder: Sendable {
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
             puppetPath: puppetPath,
-            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:)),
             puppetClipMaskName: clipMaskName
         )
-    }
-
-    private func loadPuppetBounds(path: String) -> WPEPuppetBounds? {
-        do {
-            let data = try resolver.data(relativePath: path)
-            let model = try WPEMdlParser.parse(data: data)
-            guard model.version >= 21 else { return nil }
-            return WPEPuppetBounds(model: model)
-        } catch {
-            return nil
-        }
     }
 
     /// Clip-mask name from the puppet's MDLV clip section (wires the genericimage4 clip-composite
@@ -788,7 +827,7 @@ struct WPERenderGraphBuilder: Sendable {
         // must not receive the clip bindings (the executor clip path only handles `.material`).
         guard case .material = phase,
               Self.puppetClipCompositeEnabled,
-              context.model.puppetPath != nil,
+              context.model.requiresFinalSceneComposite,
               let clipMaskName = context.model.puppetClipMaskName,
               WPEBuiltinShaderName.normalized(pass.shader) == "genericimage4",
               pass.textures[8] == nil else {
@@ -1145,169 +1184,23 @@ private struct LayerBuildContext {
 private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
-    let puppetBounds: WPEPuppetBounds?
+    let rendersAsSceneModel: Bool
     /// Clip-mask texture NAME from the puppet's MDLV clip section (e.g.
     /// `masks/clipping_mask_39cb32c5`), resolved like any material texture. Non-nil only when
     /// the puppet is a clip-composite candidate and the feature flag is enabled.
     let puppetClipMaskName: String?
+    var requiresFinalSceneComposite: Bool { puppetPath != nil && !rendersAsSceneModel }
 
     init(
         materialPath: String?,
         puppetPath: String?,
-        puppetBounds: WPEPuppetBounds? = nil,
+        rendersAsSceneModel: Bool = false,
         puppetClipMaskName: String? = nil
     ) {
         self.materialPath = materialPath
         self.puppetPath = puppetPath
-        self.puppetBounds = puppetBounds
+        self.rendersAsSceneModel = rendersAsSceneModel
         self.puppetClipMaskName = puppetClipMaskName
-    }
-
-    /// Re-place a puppet whose raw MDLV mesh bbox is cropped by the declared
-    /// object.size local composite. Sizes the composite AND the scene quad to
-    /// the mesh bbox (native 1:1, no shrink/stretch), centers the mesh, and
-    /// recomputes the origin so the mesh-bbox center keeps its old on-screen
-    /// position. Returns nil (no-op) for non-puppets and puppets that already
-    /// fit — protecting every working puppet/image layer.
-    func puppetPlacement(for object: WPESceneImageObject, sceneSize: CGSize) -> WPEPuppetPlacement? {
-        guard puppetPath != nil,
-              let puppetBounds,
-              let objectSize = object.size else {
-            return nil
-        }
-
-        let objectWidth = Double(objectSize.width)
-        let objectHeight = Double(objectSize.height)
-        guard objectWidth > 0, objectHeight > 0 else { return nil }
-
-        let localMinX = objectWidth * 0.5 + puppetBounds.min.x
-        let localMaxX = objectWidth * 0.5 + puppetBounds.max.x
-        let localMinY = objectHeight * 0.5 - puppetBounds.max.y
-        let localMaxY = objectHeight * 0.5 - puppetBounds.min.y
-
-        let epsilon = 1.0
-        let isCropped = localMinX < -epsilon
-            || localMaxX > objectWidth + epsilon
-            || localMinY < -epsilon
-            || localMaxY > objectHeight + epsilon
-        guard isCropped else { return nil }
-
-        let scaleX = finiteMagnitude(object.scale.x, fallback: 1)
-        let scaleY = finiteMagnitude(object.scale.y, fallback: 1)
-        let oldWidth = objectWidth * scaleX
-        let oldHeight = objectHeight * scaleY
-        let oldOffset = alignmentCenterOffset(
-            alignment: object.alignment,
-            width: oldWidth,
-            height: oldHeight
-        )
-        let sceneHeight = Double(sceneSize.height)
-        let oldCenterX = object.origin.x + oldOffset.x
-        let oldCenterY = sceneHeight - object.origin.y - oldOffset.y
-        let oldLeft = oldCenterX - oldWidth * 0.5
-        let oldTop = oldCenterY - oldHeight * 0.5
-
-        let meshWidth = max(ceil(localMaxX - localMinX), 1)
-        let meshHeight = max(ceil(localMaxY - localMinY), 1)
-        let meshScaledWidth = meshWidth * scaleX
-        let meshScaledHeight = meshHeight * scaleY
-
-        let meshCenterX = oldLeft + (localMinX + localMaxX) * 0.5 * scaleX
-        // Keep the mesh-bbox center at its original on-screen position — no
-        // bottom clamp. WPE puppet art is authored already cropped at the
-        // boots, so that natural cut edge must sit flush against the screen
-        // bottom; lifting it (to avoid the final ~50px clip) would float the
-        // whole character upward, which is wrong.
-        let meshCenterY = oldTop + (localMinY + localMaxY) * 0.5 * scaleY
-
-        let newOffset = alignmentCenterOffset(
-            alignment: object.alignment,
-            width: meshScaledWidth,
-            height: meshScaledHeight
-        )
-        let newOrigin = SIMD3<Double>(
-            meshCenterX - newOffset.x,
-            sceneHeight - meshCenterY - newOffset.y,
-            object.origin.z
-        )
-
-        return WPEPuppetPlacement(
-            origin: newOrigin,
-            size: CGSize(width: CGFloat(meshWidth), height: CGFloat(meshHeight)),
-            meshCenter: puppetBounds.center
-        )
-    }
-
-    private func finiteMagnitude(_ value: Double, fallback: Double) -> Double {
-        let magnitude = abs(value)
-        return magnitude.isFinite && magnitude > 0 ? magnitude : fallback
-    }
-
-    private func alignmentCenterOffset(
-        alignment: WPESceneAlignment,
-        width: Double,
-        height: Double
-    ) -> SIMD2<Double> {
-        switch alignment {
-        case .center:
-            return SIMD2<Double>(0, 0)
-        case .topLeft:
-            return SIMD2<Double>(width * 0.5, -height * 0.5)
-        case .topRight:
-            return SIMD2<Double>(-width * 0.5, -height * 0.5)
-        case .bottomLeft:
-            return SIMD2<Double>(width * 0.5, height * 0.5)
-        case .bottomRight:
-            return SIMD2<Double>(-width * 0.5, height * 0.5)
-        case .top:
-            return SIMD2<Double>(0, -height * 0.5)
-        case .bottom:
-            return SIMD2<Double>(0, height * 0.5)
-        case .left:
-            return SIMD2<Double>(width * 0.5, 0)
-        case .right:
-            return SIMD2<Double>(-width * 0.5, 0)
-        }
-    }
-}
-
-private struct WPEPuppetPlacement {
-    let origin: SIMD3<Double>
-    let size: CGSize
-    let meshCenter: SIMD2<Double>
-}
-
-private struct WPEPuppetBounds {
-    let min: SIMD2<Double>
-    let max: SIMD2<Double>
-
-    var center: SIMD2<Double> {
-        SIMD2<Double>(
-            (min.x + max.x) * 0.5,
-            (min.y + max.y) * 0.5
-        )
-    }
-
-    init?(model: WPEPuppetModel) {
-        let vertices = model.meshes.flatMap(\.vertices)
-        guard let first = vertices.first else { return nil }
-
-        var minX = Double(first.position.x)
-        var maxX = minX
-        var minY = Double(first.position.y)
-        var maxY = minY
-
-        for vertex in vertices.dropFirst() {
-            let x = Double(vertex.position.x)
-            let y = Double(vertex.position.y)
-            minX = Swift.min(minX, x)
-            maxX = Swift.max(maxX, x)
-            minY = Swift.min(minY, y)
-            maxY = Swift.max(maxY, y)
-        }
-
-        self.min = SIMD2<Double>(minX, minY)
-        self.max = SIMD2<Double>(maxX, maxY)
     }
 }
 

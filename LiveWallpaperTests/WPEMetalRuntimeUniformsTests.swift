@@ -277,7 +277,11 @@ struct WPEMetalRuntimeUniformsTests {
             pointerPosition: SIMD2<Double>(0.25, 0.75)
         )
         let prepared = pipeline
-            .applyingLayerOrigins(["154": SIMD3<Double>(960, 1620, 0)])
+            .applyingLayerTransforms(
+                origins: ["154": SIMD3<Double>(960, 1620, 0)],
+                scales: [:],
+                angles: [:]
+            )
             .addingMetalRuntimeUniforms(
                 runtime,
                 camera: WPEMetalCameraUniforms(

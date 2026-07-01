@@ -11,6 +11,7 @@ public struct WPESceneDocument: Equatable, Sendable {
     public let general: WPESceneGeneral
     public let imageObjects: [WPESceneImageObject]
     public let scriptHostObjects: [WPESceneScriptHostObject]
+    public let transformHostObjects: [WPESceneTransformHostObject]
     public let particleObjects: [WPESceneParticleObject]
     public let textObjects: [WPESceneTextObject]
     public let soundObjects: [WPESceneSoundObject]
@@ -35,6 +36,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         general: WPESceneGeneral,
         imageObjects: [WPESceneImageObject],
         scriptHostObjects: [WPESceneScriptHostObject] = [],
+        transformHostObjects: [WPESceneTransformHostObject] = [],
         particleObjects: [WPESceneParticleObject] = [],
         textObjects: [WPESceneTextObject] = [],
         soundObjects: [WPESceneSoundObject] = [],
@@ -48,6 +50,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.general = general
         self.imageObjects = imageObjects
         self.scriptHostObjects = scriptHostObjects
+        self.transformHostObjects = transformHostObjects
         self.particleObjects = particleObjects
         self.textObjects = textObjects
         self.soundObjects = soundObjects
@@ -56,6 +59,53 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.objectParentByID = objectParentByID
         self.ownVisibilityByID = ownVisibilityByID
         self.diagnostics = diagnostics
+    }
+}
+
+/// A non-rendered transform container. WPE commonly puts `origin`/`scale`/
+/// `angles` scripts on `solid:true` groups that only exist to move visible
+/// children. These hosts do not draw, but their local transforms must be ticked
+/// and composed into descendant render layers.
+public struct WPESceneTransformHostObject: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let parentObjectID: String?
+    public let origin: SIMD3<Double>
+    public let scale: SIMD3<Double>
+    public let angles: SIMD3<Double>
+    public let localOrigin: SIMD3<Double>
+    public let localScale: SIMD3<Double>
+    public let localAngles: SIMD3<Double>
+    public let originScript: WPESceneTransformScript?
+    public let scaleScript: WPESceneTransformScript?
+    public let anglesScript: WPESceneTransformScript?
+
+    public init(
+        id: String,
+        name: String,
+        parentObjectID: String? = nil,
+        origin: SIMD3<Double>,
+        scale: SIMD3<Double>,
+        angles: SIMD3<Double>,
+        localOrigin: SIMD3<Double>? = nil,
+        localScale: SIMD3<Double>? = nil,
+        localAngles: SIMD3<Double>? = nil,
+        originScript: WPESceneTransformScript? = nil,
+        scaleScript: WPESceneTransformScript? = nil,
+        anglesScript: WPESceneTransformScript? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.parentObjectID = parentObjectID
+        self.origin = origin
+        self.scale = scale
+        self.angles = angles
+        self.localOrigin = localOrigin ?? origin
+        self.localScale = localScale ?? scale
+        self.localAngles = localAngles ?? angles
+        self.originScript = originScript
+        self.scaleScript = scaleScript
+        self.anglesScript = anglesScript
     }
 }
 
@@ -568,6 +618,13 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     /// Dynamic WPE SceneScript attached to this layer's `origin` field. Static
     /// origin scripts are resolved at parse time and leave this nil.
     public let originScript: WPESceneTransformScript?
+    /// WPE SceneScript attached to this layer's `scale` field. Scale scripts are
+    /// evaluated at runtime because authored scenes often use shared state or
+    /// frame-local state even when the serialized fallback value looks static.
+    public let scaleScript: WPESceneTransformScript?
+    /// WPE SceneScript attached to this layer's `angles` field. Runtime
+    /// evaluation drives scene-control rigs such as mouse drag rotation.
+    public let anglesScript: WPESceneTransformScript?
     /// Resolved scriptProperty overrides for `visibleScript` (user-bound values
     /// like `ruchang` overlaid on the script's declared defaults).
     public let scriptProperties: [String: WPESceneScriptPropertyValue]
@@ -601,6 +658,8 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         alphaScript: String? = nil,
         alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:],
         originScript: WPESceneTransformScript? = nil,
+        scaleScript: WPESceneTransformScript? = nil,
+        anglesScript: WPESceneTransformScript? = nil,
         scriptProperties: [String: WPESceneScriptPropertyValue] = [:]
     ) {
         self.id = id
@@ -631,6 +690,8 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.alphaScript = alphaScript
         self.alphaScriptProperties = alphaScriptProperties
         self.originScript = originScript
+        self.scaleScript = scaleScript
+        self.anglesScript = anglesScript
         self.scriptProperties = scriptProperties
     }
 

@@ -16,10 +16,10 @@ struct InspectorResizeHandle: View {
     let maxWidth: CGFloat
     let onPreviewWidthChange: (CGFloat) -> Void
     let onCommitWidth: (CGFloat) -> Void
-    /// When non-nil, dragging until the (clamped) candidate width drops below
+    /// When non-nil, dragging until the raw candidate width drops below
     /// this value arms a close: releasing there fires `onRequestClose` instead
-    /// of committing a width. Pairs with a lower `minWidth` from the parent so
-    /// the panel can visibly shrink into a sliver before it lets go.
+    /// of committing a width. The preview width remains clamped at `minWidth`
+    /// so the panel does not crop its contents while the close is armed.
     var closeThreshold: CGFloat? = nil
     var onRequestClose: (() -> Void)? = nil
 
@@ -75,17 +75,17 @@ struct InspectorResizeHandle: View {
                         dragStartWidth = start
                     }
                     isDragging = true
-                    let candidate = clamped(start - value.translation.width)
-                    setClosingArmed(armed(for: candidate))
-                    onPreviewWidthChange(candidate)
+                    let rawCandidate = rawCandidate(start: start, translationWidth: value.translation.width)
+                    setClosingArmed(armed(for: rawCandidate))
+                    onPreviewWidthChange(clamped(rawCandidate))
                 }
                 .onEnded { value in
                     let start = dragStartWidth ?? width
-                    let candidate = clamped(start - value.translation.width)
-                    if armed(for: candidate), let onRequestClose {
+                    let rawCandidate = rawCandidate(start: start, translationWidth: value.translation.width)
+                    if armed(for: rawCandidate), let onRequestClose {
                         onRequestClose()
                     } else {
-                        onCommitWidth(candidate)
+                        onCommitWidth(clamped(rawCandidate))
                     }
                     dragStartWidth = nil
                     isDragging = false
@@ -125,6 +125,10 @@ struct InspectorResizeHandle: View {
     private func setClosingArmed(_ value: Bool) {
         guard isClosingArmed != value else { return }
         isClosingArmed = value
+    }
+
+    private func rawCandidate(start: CGFloat, translationWidth: CGFloat) -> CGFloat {
+        start - translationWidth
     }
 
     private func clamped(_ candidate: CGFloat) -> CGFloat {

@@ -37,6 +37,11 @@ struct SceneResourceResolver: Sendable {
         "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
     ]
 
+    private static func isTexturePayloadPath(_ relativePath: String) -> Bool {
+        let extensionName = (relativePath as NSString).pathExtension.lowercased()
+        return extensionName == "tex" || extensionName.isEmpty
+    }
+
     init(cacheRootURL: URL, decoder: WPETexDecoder = WPETexDecoder()) {
         let normalized = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
         self.cacheRootURL = normalized
@@ -147,7 +152,7 @@ struct SceneResourceResolver: Sendable {
     func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
-        guard (resolvedPath as NSString).pathExtension.lowercased() == "tex" else {
+        guard Self.isTexturePayloadPath(resolvedPath) else {
             throw ResolveError.unsupportedTexture
         }
 
@@ -168,7 +173,7 @@ struct SceneResourceResolver: Sendable {
     func resolveStreamingTexturePayload(relativePath: String) throws -> WPETexStreamingPayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
-        guard (resolvedPath as NSString).pathExtension.lowercased() == "tex" else {
+        guard Self.isTexturePayloadPath(resolvedPath) else {
             throw ResolveError.unsupportedTexture
         }
 

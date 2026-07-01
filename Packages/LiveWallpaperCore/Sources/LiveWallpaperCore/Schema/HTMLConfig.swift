@@ -72,7 +72,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     ///
     /// `originKind == .workshopImport` overrides this to `true` regardless of
     /// the stored value; the toggle is honored only for `userLocal` content.
-    public var useEphemeralStorage: Bool = false
+    public var useEphemeralStorage: Bool = true
 
     /// Origin of the HTML payload; gates ephemeral-storage forcing (see
     /// `HTMLOriginKind`). See [HTMLWallpaperView.apply].
@@ -183,7 +183,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         transformTranslateY: Double = 0,
         transformRotationDegrees: Double = 0,
         physicalPixelLayout: Bool = false,
-        useEphemeralStorage: Bool = false,
+        useEphemeralStorage: Bool = true,
         originKind: HTMLOriginKind = .userLocal,
         maxRetries: Int = 3,
         cspEnforcementEnabled: Bool = false,
@@ -232,7 +232,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         let decodedRotation = try c.decodeIfPresent(Double.self, forKey: .transformRotationDegrees) ?? 0
         transformRotationDegrees = Self.clampedTransformRotation(decodedRotation)
         physicalPixelLayout = try c.decodeIfPresent(Bool.self, forKey: .physicalPixelLayout) ?? false
-        useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? false
+        useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? true
         originKind = try c.decodeIfPresent(HTMLOriginKind.self, forKey: .originKind) ?? .userLocal
         let decodedRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries) ?? 3
         maxRetries = min(max(0, decodedRetries), 10)

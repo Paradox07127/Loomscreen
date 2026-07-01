@@ -61,6 +61,7 @@ struct WPEEndToEndCorpusTests {
         var diagnosticOnly = 0
         var hardFailures = 0
         var skippedNonScene = 0
+        let engineAssetsRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
 
         for folder in folders.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let workshopID = folder.lastPathComponent
@@ -112,6 +113,7 @@ struct WPEEndToEndCorpusTests {
                     descriptor: descriptor,
                     cacheRootURL: stage,
                     dependencyMounts: [],
+                    engineAssetsRootURL: engineAssetsRoot,
                     frame: CGRect(x: 0, y: 0, width: 64, height: 64),
                     device: device,
                     pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
@@ -281,6 +283,77 @@ struct WPEEndToEndCorpusTests {
     }
 
     @MainActor
+    @Test("Selected packaged corpus scene advances continuous particle frames")
+    func selectedPackagedCorpusSceneAdvancesContinuousParticleFrames() async throws {
+        guard let rootPath = Self.configuredString(
+            environmentKey: "WPE_CORPUS_ROOT",
+            fileName: "loomscreen-wpe-corpus-root"
+        ) else {
+            print("[corpus.package.continuous] root not configured — skipping selected-scene continuous gate")
+            return
+        }
+        let workshopID = Self.configuredString(
+            environmentKey: "WPE_CORPUS_VISUAL_WORKSHOP_ID",
+            fileName: "loomscreen-wpe-corpus-visual-workshop-id"
+        ) ?? Self.configuredString(
+            environmentKey: "WPE_CORPUS_WORKSHOP_ID",
+            fileName: "loomscreen-wpe-corpus-workshop-id"
+        ) ?? "3287199039"
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+        let folder = root.appendingPathComponent(workshopID, isDirectory: true)
+        let pkgURL = folder.appendingPathComponent("scene.pkg")
+        guard FileManager.default.fileExists(atPath: pkgURL.path) else {
+            print("[corpus.package.continuous] selected scene \(workshopID) has no scene.pkg — skipping")
+            return
+        }
+        let project = try WallpaperEngineProject.read(from: folder)
+        #expect(project.type == .scene)
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
+        let mediaClock = CorpusMediaTimeCounter()
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: SceneDescriptor(
+                workshopID: workshopID,
+                cacheRelativePath: "wpe-package-continuous-cache/\(workshopID)",
+                entryFile: project.entryFile.isEmpty ? "scene.json" : project.entryFile,
+                capabilityTier: .imageOnly,
+                assetStorage: .packageSource(fileName: "scene.pkg")
+            ),
+            cacheRootURL: folder,
+            assetProvider: provider,
+            projectManifestRootURL: folder,
+            dependencyMounts: [],
+            engineAssetsRootURL: WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot(),
+            frame: CGRect(x: 0, y: 0, width: 128, height: 128),
+            device: device,
+            frameClock: WPEMetalFrameClock(
+                loadTime: 100,
+                currentMediaTime: { mediaClock.next() }
+            ),
+            pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
+        )
+
+        try await renderer.load()
+        let first = try #require(renderer.renderedTexture)
+        let firstStats = try #require(WPEMetalTextureVisualStats.analyze(texture: first))
+        let firstParticleCounts = renderer.debugParticleLiveInstanceCounts
+        guard !firstParticleCounts.isEmpty else {
+            print("[corpus.package.continuous] selected scene \(workshopID) has no particle systems — skipping")
+            return
+        }
+        let frames = try renderer.debugRenderSuccessiveFrameTextures(45)
+        let last = try #require(frames.last)
+        let lastStats = try #require(WPEMetalTextureVisualStats.analyze(texture: last))
+        let lastParticleCounts = renderer.debugParticleLiveInstanceCounts
+        let firstParticleTotal = firstParticleCounts.reduce(0, +)
+        let lastParticleTotal = lastParticleCounts.reduce(0, +)
+
+        print("[corpus.package.continuous] \(workshopID) first=\(firstStats.oneLineDescription) particles=\(firstParticleCounts) last=\(lastStats.oneLineDescription) particles=\(lastParticleCounts)")
+        #expect(lastParticleTotal > firstParticleTotal)
+        #expect(renderer.resolutionDiagnostics.missedRefs.isEmpty)
+    }
+
+    @MainActor
     private func assertSelectedPackagedCorpusSceneRendersNonBlack(atTime sceneTime: CFTimeInterval, label: String) async throws {
         guard let rootPath = Self.configuredString(
             environmentKey: "WPE_CORPUS_ROOT",
@@ -319,6 +392,7 @@ struct WPEEndToEndCorpusTests {
             assetProvider: provider,
             projectManifestRootURL: folder,
             dependencyMounts: [],
+            engineAssetsRootURL: WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot(),
             frame: CGRect(x: 0, y: 0, width: 128, height: 128),
             device: device,
             frameClock: WPEMetalFrameClock(
@@ -418,6 +492,7 @@ struct WPEEndToEndCorpusTests {
             ),
             cacheRootURL: stage,
             dependencyMounts: [],
+            engineAssetsRootURL: WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot(),
             frame: CGRect(x: 0, y: 0, width: 128, height: 128),
             device: device,
             pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
@@ -573,5 +648,18 @@ struct WPEEndToEndCorpusTests {
             }
         }
         return count
+    }
+}
+
+private final class CorpusMediaTimeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sample = 0
+
+    func next() -> CFTimeInterval {
+        lock.lock()
+        let value = sample
+        sample += 1
+        lock.unlock()
+        return 100 + Double(value) / 30.0
     }
 }

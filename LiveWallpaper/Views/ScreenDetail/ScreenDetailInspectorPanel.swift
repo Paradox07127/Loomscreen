@@ -74,12 +74,6 @@ struct ScreenDetailInspectorPanel: View {
                             screen: screen,
                             config: $draft.htmlConfig
                         )
-
-                        HTMLRenderingDiagnosticsInspector(
-                            screen: screen,
-                            source: draft.htmlSource,
-                            config: draft.htmlConfig
-                        )
                     }
 
                     if draft.selectedWallpaperType == .video,

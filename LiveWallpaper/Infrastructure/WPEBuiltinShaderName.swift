@@ -40,6 +40,8 @@ enum WPEBuiltinShaderName {
             return "compose"
         case "genericparticle", "particle/genericparticle":
             return "genericparticle"
+        case "generic4":
+            return "genericimage4"
         default:
             if isEffectAlias(stripped, family: "colorbalance") {
                 return "effect_colorbalance"

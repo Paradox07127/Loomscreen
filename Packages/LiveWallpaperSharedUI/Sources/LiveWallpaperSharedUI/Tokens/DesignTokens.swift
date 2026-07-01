@@ -83,7 +83,7 @@ public enum DesignTokens {
     public enum Inspector {
         public static let minWidth: CGFloat = 268
         public static let idealWidth: CGFloat = 292
-        public static let maxWidth: CGFloat = 340
+        public static let maxWidth: CGFloat = 392
         public static let defaultWidth: CGFloat = idealWidth
         public static let horizontalPadding: CGFloat = Spacing.md
         public static let verticalPadding: CGFloat = Spacing.lg

@@ -444,6 +444,23 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         applyRuntimeState(previous: previous, current: config)
 
+        if wallpaperEnginePropertySchema != nil {
+            let previousProjectOverrides = previous?.projectWallpaperEngineProperties(
+                forProjectKey: wallpaperEngineProjectKey
+            ) ?? [:]
+            let currentProjectOverrides = config.projectWallpaperEngineProperties(
+                forProjectKey: wallpaperEngineProjectKey
+            )
+            if previous?.muteAudio != config.muteAudio
+                || previous?.audioVolume != config.audioVolume
+                || previousProjectOverrides != currentProjectOverrides {
+                updateWallpaperEnginePropertyBridge(
+                    for: wallpaperEnginePropertySchemaFolder,
+                    config: config
+                )
+            }
+        }
+
         let needsScriptRebuild = (previous?.customCSS != config.customCSS)
             || (previous?.allowMouseInteraction != config.allowMouseInteraction)
             || (previous?.allowJavaScript != config.allowJavaScript)
@@ -501,9 +518,38 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         return true
     }
 
+    func captureLivePreviewSnapshot(maxWidth: CGFloat = 960) async -> NSImage? {
+        if !snapshotOverlay.isHidden, let image = snapshotOverlay.image {
+            return image
+        }
+
+        let snapshotBounds = webView.bounds
+        guard snapshotBounds.width > 0, snapshotBounds.height > 0 else { return nil }
+
+        let snapshotConfig = WKSnapshotConfiguration()
+        snapshotConfig.rect = snapshotBounds
+        snapshotConfig.snapshotWidth = NSNumber(value: Double(min(maxWidth, snapshotBounds.width)))
+        snapshotConfig.afterScreenUpdates = false
+
+        return await withCheckedContinuation { continuation in
+            webView.takeSnapshot(with: snapshotConfig) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
     /// 当前页面已经渲染时的热更新路径：直接改 DOM，不动 user script。
     private func applyRuntimeState(previous: HTMLConfig?, current: HTMLConfig) {
         var statements: [String] = []
+        let audioChanged = previous?.muteAudio != current.muteAudio
+            || previous?.audioVolume != current.audioVolume
+        let previousProjectOverrides = previous?.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        ) ?? [:]
+        let currentProjectOverrides = current.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        )
+        let projectOverridesChanged = previousProjectOverrides != currentProjectOverrides
 
         if previous?.customCSS != current.customCSS {
             let literal = jsStringLiteral(current.customCSS ?? "")
@@ -519,7 +565,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
-        if previous?.muteAudio != current.muteAudio || previous?.audioVolume != current.audioVolume {
+        if audioChanged {
             let volumeLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.audioVolume)
             let mutedLiteral = current.muteAudio ? "true" : "false"
             statements.append("""
@@ -540,19 +586,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
-        let previousProjectOverrides = previous?.projectWallpaperEngineProperties(
-            forProjectKey: wallpaperEngineProjectKey
-        ) ?? [:]
-        let currentProjectOverrides = current.projectWallpaperEngineProperties(
-            forProjectKey: wallpaperEngineProjectKey
-        )
-        if previousProjectOverrides != currentProjectOverrides,
+        if projectOverridesChanged,
            let schema = wallpaperEnginePropertySchema,
            let script = WallpaperEngineWebPropertyBridge.applyScript(
                schema: schema,
                previousOverrides: previousProjectOverrides,
                overrides: currentProjectOverrides
-           ) {
+        ) {
+            statements.append(script)
+        }
+        if (audioChanged || (projectOverridesChanged && (current.muteAudio || current.audioVolume < 0.999))),
+           let script = wallpaperEngineAudioControlScript(for: current) {
             statements.append(script)
         }
 
@@ -678,7 +722,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    private func updateWallpaperEnginePropertyBridge(for folderURL: URL?) {
+    private func updateWallpaperEnginePropertyBridge(for folderURL: URL?, config: HTMLConfig? = nil) {
         // Re-parse the manifest only when the active folder actually
         // changes; subsequent override edits reuse the cached schema and
         // hit zero disk I/O on the runtime apply path.
@@ -689,11 +733,20 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
         }
 
-        let overrides = lastAppliedConfig?.projectWallpaperEngineProperties(
-            forProjectKey: wallpaperEngineProjectKey
-        ) ?? [:]
+        let activeConfig = config ?? lastAppliedConfig
         let nextScript: String? = {
             guard let schema = wallpaperEnginePropertySchema else { return nil }
+            var overrides = activeConfig?.projectWallpaperEngineProperties(
+                forProjectKey: wallpaperEngineProjectKey
+            ) ?? [:]
+            if let activeConfig {
+                overrides.merge(WallpaperEngineWebPropertyBridge.audioBootstrapOverrides(
+                    schema: schema,
+                    projectOverrides: overrides,
+                    volume: activeConfig.audioVolume,
+                    muted: activeConfig.muteAudio
+                )) { _, audioOverride in audioOverride }
+            }
             return WallpaperEngineWebPropertyBridge.bootstrapScript(
                 schema: schema,
                 overrides: overrides
@@ -701,7 +754,20 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }()
         guard wallpaperEnginePropertyBootstrapScript != nextScript else { return }
         wallpaperEnginePropertyBootstrapScript = nextScript
-        installBaselineUserScripts(for: lastAppliedConfig)
+        installBaselineUserScripts(for: activeConfig)
+    }
+
+    private func wallpaperEngineAudioControlScript(for config: HTMLConfig?) -> String? {
+        guard let config,
+              let schema = wallpaperEnginePropertySchema else { return nil }
+        return WallpaperEngineWebPropertyBridge.audioControlScript(
+            schema: schema,
+            projectOverrides: config.projectWallpaperEngineProperties(
+                forProjectKey: wallpaperEngineProjectKey
+            ),
+            volume: config.audioVolume,
+            muted: config.muteAudio
+        )
     }
 
     func reloadCurrentSource() {
@@ -1239,6 +1305,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         resetNavigationFailureState()
         let volume = HTMLWallpaperRuntimeScript.jsNumber(lastAppliedConfig?.audioVolume ?? 1.0)
         let muted = lastAppliedConfig?.muteAudio == true ? "true" : "false"
+        let wallpaperEngineAudioNudge = wallpaperEngineAudioControlScript(for: lastAppliedConfig) ?? ""
         let nudge = """
         (function() {
             if (typeof window.__lwUpdateAudio__ === 'function') {
@@ -1256,6 +1323,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
                 }
             });
         })();
+        \(wallpaperEngineAudioNudge)
         """
         webView.evaluateJavaScript(nudge, completionHandler: nil)
         notifyWallpaperEngineGeneralProperties(fps: mediaPlaybackSuspended ? 1 : 60)

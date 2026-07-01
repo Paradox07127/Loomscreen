@@ -225,6 +225,93 @@ struct WPESceneDocumentParserTests {
         #expect(layer.originScript?.seed == SIMD3<Double>(860.29364, 133.27734, 0))
     }
 
+    @Test("Image origin script reading shared state is preserved for runtime")
+    func sharedOriginScriptIsPreservedForRuntime() throws {
+        let script = """
+        'use strict';
+        export function update(value) {
+            value.x = shared.xx1;
+            value.y = shared.yy1;
+            value.z = shared.zz1;
+            return value;
+        }
+        """
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": "188",
+                "name": "Star1 model1",
+                "type": "image",
+                "image": "models/star.json",
+                "origin": [
+                    "script": script,
+                    "value": "0 1 0"
+                ],
+                "size": "100 100 0"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+
+        #expect(layer.origin == SIMD3<Double>(0, 1, 0))
+        #expect(layer.originScript?.script == script)
+        #expect(layer.originScript?.seed == SIMD3<Double>(0, 1, 0))
+    }
+
+    @Test("Image scale and angles scripts reading shared state are preserved for runtime")
+    func sharedScaleAndAnglesScriptsArePreservedForRuntime() throws {
+        let scaleScript = """
+        export function update(value) {
+            value.x = shared.sx;
+            value.y = shared.sy;
+            value.z = shared.sz;
+            return value;
+        }
+        """
+        let anglesScript = """
+        export function update(value) {
+            value.x = shared.rx;
+            value.y = shared.ry;
+            value.z = shared.rz;
+            return value;
+        }
+        """
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": "300",
+                "name": "sa3",
+                "type": "image",
+                "image": "models/sa3.json",
+                "origin": "0 0 0",
+                "scale": [
+                    "script": scaleScript,
+                    "value": "0.003 0.003 0.003"
+                ],
+                "angles": [
+                    "script": anglesScript,
+                    "value": "0 0 0"
+                ],
+                "size": "512 512 0"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+
+        #expect(layer.scale == SIMD3<Double>(0.003, 0.003, 0.003))
+        #expect(layer.scaleScript?.script == scaleScript)
+        #expect(layer.scaleScript?.seed == SIMD3<Double>(0.003, 0.003, 0.003))
+        #expect(layer.angles == SIMD3<Double>(0, 0, 0))
+        #expect(layer.anglesScript?.script == anglesScript)
+        #expect(layer.anglesScript?.seed == SIMD3<Double>(0, 0, 0))
+    }
+
     @Test("Image and text alpha animations are preserved and resolve single-shot fades")
     func alphaAnimationsPreserved() throws {
         let alphaFade: [String: Any] = [
@@ -444,6 +531,75 @@ struct WPESceneDocumentParserTests {
         let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
         #expect(byID["269"]?.visible == true)
         #expect(byID["488"]?.visible == false)
+    }
+
+    @Test("Solid MDL model objects are parsed as renderable layers")
+    func solidModelObjectsAreRenderableLayers() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                ["id": 10, "name": "Group", "origin": "1 2 3"],
+                [
+                    "id": 11,
+                    "name": "Skybox",
+                    "solid": true,
+                    "model": "models/sky/sky.mdl",
+                    "parent": 10,
+                    "scale": "8 12 8",
+                    "visible": ["user": ["condition": "4", "name": "background"], "value": true]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data, userValues: ["background": .string("4")])
+
+        let object = try #require(document.imageObjects.first)
+        #expect(object.id == "11")
+        #expect(object.imageRelativePath == "models/sky/sky.mdl")
+        #expect(object.parentObjectID == "10")
+        #expect(object.visible == true)
+        #expect(object.localScale == SIMD3<Double>(8, 12, 8))
+        #expect(object.scale == SIMD3<Double>(8, 12, 8))
+    }
+
+    @Test("Non-rendered solid transform scripts are preserved as transform hosts")
+    func solidTransformScriptsArePreservedAsTransformHosts() throws {
+        let angleScript = """
+        export function update(value) {
+            value.z = engine.runtime;
+            return value;
+        }
+        """
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 20,
+                    "name": "Runtime Group",
+                    "solid": true,
+                    "origin": "4 5 6",
+                    "scale": "2 3 4",
+                    "angles": ["script": angleScript, "value": "0 0 0"]
+                ],
+                [
+                    "id": 21,
+                    "name": "Child",
+                    "image": "models/child.json",
+                    "parent": 20,
+                    "origin": "1 0 0"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let host = try #require(document.transformHostObjects.first)
+        #expect(host.id == "20")
+        #expect(host.localOrigin == SIMD3<Double>(4, 5, 6))
+        #expect(host.localScale == SIMD3<Double>(2, 3, 4))
+        #expect(host.anglesScript?.script == angleScript)
     }
 
     /// Builds scene 3461168300's two-layer style selector: `newproperty14`

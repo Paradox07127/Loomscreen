@@ -76,7 +76,7 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
                         if isVisible {
                             InspectorResizeHandle(
                                 width: fullWidth,
-                                minWidth: dragLowerBound,
+                                minWidth: minWidth,
                                 maxWidth: maxWidthCap(available: available),
                                 onPreviewWidthChange: { liveWidth = Double(clampLive($0, available: available)) },
                                 onCommitWidth: {
@@ -111,12 +111,9 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     /// narrow-down — is what closes it.
     private var closeArmWidth: CGFloat { max(48, minWidth - 56) }
 
-    /// Lowest width the live drag may preview. With drag-to-close on, the panel
-    /// can shrink into a thin sliver to telegraph the collapse; otherwise it
-    /// stops at the design minimum.
-    private var dragLowerBound: CGFloat {
-        dragToCloseEnabled ? min(closeArmWidth - 12, 60) : minWidth
-    }
+    /// Lowest width the live drag may preview. Drag-to-close is evaluated from
+    /// the handle's raw cursor travel; the rendered panel itself stops here.
+    private var dragLowerBound: CGFloat { minWidth }
 
     /// Largest inspector width a *drag* may reach — still leaving the main
     /// column its floor at the current container width. Only the resize handle
@@ -126,8 +123,8 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
         return min(maxWidth, max(minWidth, room))
     }
 
-    /// Clamp during a live drag: lower bound is `dragLowerBound` (a sliver when
-    /// drag-to-close is on) so the panel can visibly narrow past its minimum.
+    /// Clamp during a live drag: the rendered panel stops at its design minimum.
+    /// Continuing to drag past that point arms close in `InspectorResizeHandle`.
     private func clampLive(_ candidate: CGFloat, available: CGFloat) -> CGFloat {
         min(max(candidate, dragLowerBound), maxWidthCap(available: available))
     }
@@ -144,11 +141,11 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     /// absorb the change. `maxWidth` is small enough that even at the minimum
     /// window the main column keeps ample room, so this never overflows.
     ///
-    /// During a live drag the lower bound drops to `dragLowerBound` so the panel
-    /// follows the cursor into the sliver zone while dragging to close.
+    /// During a live drag the lower bound remains the design minimum; the
+    /// resize handle separately tracks raw over-drag for drag-to-close.
     private func resolvedWidth() -> CGFloat {
         if let liveWidth {
-            return min(max(CGFloat(liveWidth), dragLowerBound), maxWidth)
+            return min(max(CGFloat(liveWidth), minWidth), maxWidth)
         }
         return min(max(CGFloat(storedWidth), minWidth), maxWidth)
     }

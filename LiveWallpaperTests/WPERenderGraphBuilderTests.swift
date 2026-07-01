@@ -252,6 +252,52 @@ struct WPERenderGraphBuilderTests {
         #expect(scenePass.source == .fbo("_rt_imageLayerComposite_layer_a"))
     }
 
+    @Test("Top-level solid MDL objects build mesh-backed render layers")
+    func topLevelSolidModelBuildsMeshBackedRenderLayer() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -10, minY: -10, maxX: 10, maxY: 10),
+            to: root.appendingPathComponent("models/sky/sky.mdl")
+        )
+        try writeJSON([
+            "passes": [[
+                "shader": "generic4",
+                "textures": ["sky_albedo"],
+                "depthtest": "enabled",
+                "depthwrite": "enabled"
+            ]]
+        ], to: root.appendingPathComponent("materials/test.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "sky",
+                "name": "Sky",
+                "solid": true,
+                "model": "models/sky/sky.mdl",
+                "scale": "2 2 2"
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.objectID == "sky")
+        #expect(layer.imagePath == "models/sky/sky.mdl")
+        #expect(layer.materialPath == "materials/test.json")
+        #expect(layer.puppetPath == "models/sky/sky.mdl")
+        #expect(layer.geometry.scale == SIMD3<Double>(2, 2, 2))
+        #expect(layer.passes.map(\.shader) == ["generic4"])
+        #expect(layer.passes[0].target == .scene)
+    }
+
     @Test("Hidden image dependencies still write composites without drawing to scene")
     func hiddenImageDependenciesWriteCompositeOnly() throws {
         let root = FileManager.default.temporaryDirectory
@@ -1169,10 +1215,10 @@ struct WPERenderGraphBuilderTests {
         try data.write(to: url)
     }
 
-    // MARK: - Puppet placement (mesh-bbox sizing + position-preserving re-origin)
+    // MARK: - Puppet placement (preserve authored canvas)
 
-    @Test("Cropped puppet (Frieren) is re-placed to its mesh bbox at native size")
-    func croppedPuppetReplacedToMeshBboxFrieren() throws {
+    @Test("Cropped puppet (Frieren) keeps its authored canvas")
+    func croppedPuppetKeepsAuthoredCanvasFrieren() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1192,21 +1238,15 @@ struct WPERenderGraphBuilderTests {
         let layer = try #require(graph.layers.first)
         let size = try #require(layer.geometry.size)
 
-        // Composite + scene quad sized to the mesh bbox (native 1:1, no shrink).
-        #expect(abs(Double(size.width) - 1805) < 0.5)
-        #expect(abs(Double(size.height) - 2115) < 0.5)
-        // Mesh centered in its composite.
-        #expect(abs(layer.geometry.puppetMeshCenter.x - (-962.5)) < 0.01)
-        #expect(abs(layer.geometry.puppetMeshCenter.y - (-508.5)) < 0.01)
-        // Origin recomputed to preserve the mesh-bbox center's screen position
-        // (no bottom clamp — the authored boot cut edge stays flush at the
-        // screen bottom rather than floating up).
-        #expect(abs(layer.geometry.origin.x - 1280.695) < 1.0)
-        #expect(abs(layer.geometry.origin.y - 996.211) < 1.0)
+        #expect(abs(Double(size.width) - 4028) < 0.5)
+        #expect(abs(Double(size.height) - 2263) < 0.5)
+        #expect(layer.geometry.puppetMeshCenter == SIMD2<Double>(0, 0))
+        #expect(abs(layer.geometry.origin.x - 2233.56958) < 0.01)
+        #expect(abs(layer.geometry.origin.y - 1499.62573) < 0.01)
     }
 
-    @Test("Cropped puppet (Himmel) cross-validates the placement formula")
-    func croppedPuppetReplacedToMeshBboxHimmel() throws {
+    @Test("Cropped puppet (Himmel) keeps its authored canvas")
+    func croppedPuppetKeepsAuthoredCanvasHimmel() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1226,12 +1266,39 @@ struct WPERenderGraphBuilderTests {
         let layer = try #require(graph.layers.first)
         let size = try #require(layer.geometry.size)
 
-        #expect(abs(Double(size.width) - 1670) < 0.5)
-        #expect(abs(Double(size.height) - 1882) < 0.5)
-        #expect(abs(layer.geometry.puppetMeshCenter.x - 739) < 0.01)
-        #expect(abs(layer.geometry.puppetMeshCenter.y - (-176)) < 0.01)
-        #expect(abs(layer.geometry.origin.x - 2778.802) < 1.0)
-        #expect(abs(layer.geometry.origin.y - 1015.176) < 1.0)
+        #expect(abs(Double(size.width) - 2808) < 0.5)
+        #expect(abs(Double(size.height) - 2268) < 0.5)
+        #expect(layer.geometry.puppetMeshCenter == SIMD2<Double>(0, 0))
+        #expect(abs(layer.geometry.origin.x - 2047.19226) < 0.01)
+        #expect(abs(layer.geometry.origin.y - 1189.41614) < 0.01)
+    }
+
+    @Test("Puppet body with smaller MDLV bbox keeps scene and texture canvas (scene 3462491575)")
+    func puppetBodyWithSmallerMeshBoundsKeepsCanvas() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(root: root, path: "models/body.json", puppetPath: "models/body_puppet.mdl")
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -715, minY: -917, maxX: 711, maxY: 861),
+            to: root.appendingPathComponent("models/body_puppet.mdl")
+        )
+
+        let graph = try buildPuppetGraph(
+            root: root, modelPath: "models/body.json", objectID: "1607",
+            size: "1490 1792", scale: "1 1 1", origin: "500 -304 0",
+            projectionWidth: 3840, projectionHeight: 2160
+        )
+        let layer = try #require(graph.layers.first)
+        let size = try #require(layer.geometry.size)
+
+        #expect(abs(Double(size.width) - 1490) < 0.5)
+        #expect(abs(Double(size.height) - 1792) < 0.5)
+        #expect(layer.geometry.puppetMeshCenter == SIMD2<Double>(0, 0))
+        #expect(abs(layer.geometry.origin.x - 500) < 0.01)
+        #expect(abs(layer.geometry.origin.y - (-304)) < 0.01)
     }
 
     @Test("Puppet whose mesh fits the declared size keeps its geometry (no-op)")
