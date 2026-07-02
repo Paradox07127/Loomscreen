@@ -104,6 +104,60 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Audio oscilloscope perspective/view varyings keep valid homogeneous z")
+    func reconstructsAudioOscilloscopePerspectiveAndViewVaryings() throws {
+        // Scene 3462491575 uses workshop/2799421411/effects/audio_responsive_oscilloscope.
+        // Its fragment gates transparency with step(0.0, v_PerspCoord.z); the old
+        // float3(in.uv, 0.0) fallback made a transparent solidlayer become an opaque
+        // black rectangle after the scroll pass.
+        let source = """
+        // stage: fragment
+        #version 410 core
+        #define RESOLUTION 32
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture2;
+        uniform vec2 g_Point0;
+        uniform vec2 g_Point1;
+        uniform vec2 g_Point2;
+        uniform vec2 g_Point3;
+        uniform float u_ampExponent;
+        uniform float u_FreqBalance;
+        uniform float u_LRBalance;
+        uniform float g_AudioSpectrum32Left[32];
+        uniform float g_AudioSpectrum32Right[32];
+        in vec2 v_TexCoord;
+        in vec3 v_PerspCoord;
+        in vec3 v_ViewCoord;
+        in vec4 audioValue[RESOLUTION];
+        void main() {
+            vec2 perspCoord = v_PerspCoord.xy / max(0.001, v_PerspCoord.z);
+            vec2 viewCoord = v_ViewCoord.xy / v_ViewCoord.z * 0.5 + 0.5;
+            vec4 albedo = texture(g_Texture0, v_TexCoord);
+            albedo.rgb += texture(g_Texture2, viewCoord).rgb * audioValue[0].x;
+            albedo.a = mix(albedo.a, 1.0, step(0.0, v_PerspCoord.z));
+            gl_FragColor = albedo + vec4(perspCoord, 0.0, 0.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2799421411/effects/audio_responsive_oscilloscope",
+            preprocessedSource: source,
+            comboValues: ["RESOLUTION": 32, "PERSPECTIVE": 0, "EQUALIZE": 0]
+        )
+        #expect(result.mslSource.contains("v_PerspCoord = float3(in.uv, 1.0)"))
+        #expect(result.mslSource.contains("v_ViewCoord = float3(in.uv * 2.0 - 1.0, 1.0)"))
+        #expect(result.mslSource.contains("audioValue[wpeAudioIndex / 4] = float4("))
+        #expect(result.mslSource.contains("wpe_audio_oscilloscope_value(g_AudioSpectrum32Left"))
+        #expect(!result.mslSource.contains("v_PerspCoord = float3(in.uv, 0.0)"))
+        #expect(!result.mslSource.contains("v_ViewCoord = float3(in.uv, 0.0)"))
+        #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_PerspCoord'"))
+        #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_ViewCoord'"))
+        #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'audioValue'"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("waterflow v_Cycles / v_Blend varyings reconstruct from time uniforms (not screen UV)")
     func reconstructsWaterflowFlowVaryings() throws {
         // waterflow.vert computes v_Cycles = frac(t·speed)−0.5 (bounded ±0.5) and

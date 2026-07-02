@@ -50,7 +50,7 @@ enum WPESceneDocumentParser {
             throw WPESceneDocumentError.missingGeneral
         }
 
-        let camera = parseCamera(cameraDict, diagnostics: &diagnostics)
+        let camera = parseCamera(cameraDict, general: generalDict, diagnostics: &diagnostics)
         let general = parseGeneral(generalDict, diagnostics: &diagnostics)
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
@@ -1060,13 +1060,23 @@ enum WPESceneDocumentParser {
 
     // MARK: - Camera
 
-    private static func parseCamera(_ dict: [String: Any], diagnostics: inout [WPESceneDiagnostic]) -> WPESceneCamera {
+    private static func parseCamera(
+        _ dict: [String: Any],
+        general: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneCamera {
         let center = parseVector3(dict["center"]) ?? WPESceneCamera.defaultCamera.center
         let eye = parseVector3(dict["eye"]) ?? WPESceneCamera.defaultCamera.eye
         let up = parseVector3(dict["up"]) ?? WPESceneCamera.defaultCamera.up
-        let nearZ = parseDouble(dict["nearz"]) ?? WPESceneCamera.defaultCamera.nearZ
-        let farZ = parseDouble(dict["farz"]) ?? WPESceneCamera.defaultCamera.farZ
-        let fov = parseDouble(dict["fov"]) ?? WPESceneCamera.defaultCamera.fov
+        let nearZ = parseDouble(dict["nearz"])
+            ?? parseDouble(general["nearz"])
+            ?? WPESceneCamera.defaultCamera.nearZ
+        let farZ = parseDouble(dict["farz"])
+            ?? parseDouble(general["farz"])
+            ?? WPESceneCamera.defaultCamera.farZ
+        let fov = parseDouble(dict["fov"])
+            ?? parseDouble(general["fov"])
+            ?? WPESceneCamera.defaultCamera.fov
         return WPESceneCamera(center: center, eye: eye, up: up, nearZ: nearZ, farZ: farZ, fov: fov)
     }
 
@@ -1153,7 +1163,13 @@ enum WPESceneDocumentParser {
         let parentObjectID = parentID(in: dict)
         let attachment = nonEmptyString(dict["attachment"]) ?? nonEmptyString(dict["anchor"])
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
-        let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
+        let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
+        let alphaFallback = imageAlphaFallback(
+            imagePath: imagePath,
+            rawAlpha: dict["alpha"],
+            effects: effects
+        )
+        let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: alphaFallback)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let brightness = parseDouble(dict["brightness"]) ?? 1.0
         let blend = WPESceneBlendMode(rawWPEValue: dict["blendmode"] as? String)
@@ -1167,7 +1183,6 @@ enum WPESceneDocumentParser {
 
         let materialRelativePath = dict["material"] as? String
         let dependencies = parseDependencyIDs(dict["dependencies"])
-        let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
         let originScript = dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false)
         let scaleScript = dynamicTransformScript(in: dict["scale"], preserveStaticallyResolvable: true)
@@ -1243,6 +1258,27 @@ enum WPESceneDocumentParser {
             anglesScript: anglesScript,
             scriptProperties: visibleScriptProperties
         )
+    }
+
+    private static func imageAlphaFallback(
+        imagePath: String,
+        rawAlpha: Any?,
+        effects: [WPESceneImageEffect]
+    ) -> Double {
+        guard rawAlpha == nil,
+              effects.contains(where: \.visible) else {
+            return 1
+        }
+
+        switch imagePath.lowercased() {
+        case "models/util/solidlayer.json", "models/util/solidlayer_depthtest.json":
+            // Solid layers are commonly used as transparent effect surfaces. If
+            // the scene did not author an alpha, keep the base transparent so the
+            // effect draws its own alpha instead of filling the target rectangle.
+            return 0
+        default:
+            return 1
+        }
     }
 
     private static func dynamicTransformScript(
@@ -1482,18 +1518,18 @@ private struct SceneObjectTransform {
     )
 
     func combining(child: SceneObjectTransform) -> SceneObjectTransform {
-        let scaledX = child.origin.x * scale.x
-        let scaledY = child.origin.y * scale.y
-        let cosine = cos(angles.z)
-        let sine = sin(angles.z)
-        let rotatedX = scaledX * cosine - scaledY * sine
-        let rotatedY = scaledX * sine + scaledY * cosine
+        let scaled = SIMD3<Double>(
+            child.origin.x * scale.x,
+            child.origin.y * scale.y,
+            child.origin.z * scale.z
+        )
+        let rotated = Self.rotate(scaled, by: angles)
 
         return SceneObjectTransform(
             origin: SIMD3<Double>(
-                origin.x + rotatedX,
-                origin.y + rotatedY,
-                origin.z + child.origin.z * scale.z
+                origin.x + rotated.x,
+                origin.y + rotated.y,
+                origin.z + rotated.z
             ),
             scale: SIMD3<Double>(
                 scale.x * child.scale.x,
@@ -1502,6 +1538,40 @@ private struct SceneObjectTransform {
             ),
             angles: angles + child.angles
         )
+    }
+
+    private static func rotate(_ value: SIMD3<Double>, by angles: SIMD3<Double>) -> SIMD3<Double> {
+        var result = value
+
+        if angles.x != 0 {
+            let c = cos(angles.x)
+            let s = sin(angles.x)
+            result = SIMD3<Double>(
+                result.x,
+                result.y * c - result.z * s,
+                result.y * s + result.z * c
+            )
+        }
+        if angles.y != 0 {
+            let c = cos(angles.y)
+            let s = sin(angles.y)
+            result = SIMD3<Double>(
+                result.x * c + result.z * s,
+                result.y,
+                -result.x * s + result.z * c
+            )
+        }
+        if angles.z != 0 {
+            let c = cos(angles.z)
+            let s = sin(angles.z)
+            result = SIMD3<Double>(
+                result.x * c - result.y * s,
+                result.x * s + result.y * c,
+                result.z
+            )
+        }
+
+        return result
     }
 }
 #endif

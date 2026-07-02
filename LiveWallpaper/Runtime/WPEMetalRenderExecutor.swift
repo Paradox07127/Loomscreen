@@ -2085,6 +2085,10 @@ final class WPEMetalRenderExecutor {
         if case .scene = targetID {
             return true
         }
+        if case .named(let name) = targetID,
+           Self.isLayerGroupTargetName(name) {
+            return true
+        }
         return blendModeRequiresExistingDestination(pass.pass.blending)
     }
 
@@ -2156,6 +2160,7 @@ final class WPEMetalRenderExecutor {
             frameState: &frameState,
             avoiding: aliasAvoidanceTexture
         )
+        let drawLayer = layerForDrawing(pass: pass.pass, layer: layer)
 
         #if DEBUG
         // Per-pass FBO isolation for one layer: snapshot this pass's destination
@@ -2219,7 +2224,7 @@ final class WPEMetalRenderExecutor {
 
         if try encodePuppetClipCompositePassIfNeeded(
             pass: pass,
-            layer: layer,
+            layer: drawLayer,
             puppetModel: puppetModel,
             skinningState: skinningState,
             destination: destination,
@@ -2279,7 +2284,7 @@ final class WPEMetalRenderExecutor {
 
         let drewSceneModel = try encodeSceneModelMaterialPassIfNeeded(
             pass: pass,
-            layer: layer,
+            layer: drawLayer,
             puppetModel: puppetModel,
             skinningState: skinningState,
             destination: destination,
@@ -2293,11 +2298,11 @@ final class WPEMetalRenderExecutor {
             drewPuppetMaterial = false
         } else {
             drewPuppetMaterial = try encodePuppetMaterialPassIfNeeded(
-                pass: pass,
-                layer: layer,
-                puppetModel: puppetModel,
-                skinningState: skinningState,
-                runtimeUniforms: runtimeUniforms,
+            pass: pass,
+            layer: drawLayer,
+            puppetModel: puppetModel,
+            skinningState: skinningState,
+            runtimeUniforms: runtimeUniforms,
                 destination: destination,
                 textures: textures,
                 frameState: frameState,
@@ -2311,7 +2316,7 @@ final class WPEMetalRenderExecutor {
         } else {
             drewPuppetSceneComposite = try encodePuppetSceneCompositePassIfNeeded(
                 pass: pass,
-                layer: layer,
+                layer: drawLayer,
                 puppetModel: puppetModel,
                 skinningState: skinningState,
                 destination: destination,
@@ -2325,7 +2330,7 @@ final class WPEMetalRenderExecutor {
             let dispatcher = WPEMetalShaderDispatcher(executor: self)
             try dispatcher.dispatch(
                 pass: pass,
-                layer: layer,
+                layer: drawLayer,
                 destination: destination,
                 textures: textures,
                 frameState: frameState,
@@ -2764,9 +2769,20 @@ final class WPEMetalRenderExecutor {
             compositeB: layer.compositeB,
             localFBOs: layer.localFBOs,
             passes: layer.passes,
+            groupRenderTarget: layer.groupRenderTarget,
+            groupLocalGeometry: layer.groupLocalGeometry,
+            groupCompositeSource: layer.groupCompositeSource,
             parallaxDepth: layer.parallaxDepth,
             sortIndex: layer.sortIndex
         )
+    }
+
+    private func layerForDrawing(pass: WPERenderPass, layer: WPERenderLayer) -> WPERenderLayer {
+        guard isGroupRenderTarget(pass.target, layer: layer),
+              let groupLocalGeometry = layer.groupLocalGeometry else {
+            return layer
+        }
+        return layer.replacingDrawGeometry(groupLocalGeometry, parallaxDepth: SIMD2<Double>(0, 0))
     }
 
     private func encodeSceneModelMaterialPassIfNeeded(
@@ -2814,6 +2830,7 @@ final class WPEMetalRenderExecutor {
         encoder.setFragmentTexture(primary, index: 0)
 
         let hasMask: Bool
+        let maskForUniforms: MTLTexture?
         if normalizedShader == "genericimage4",
            let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1] {
             let mask = try WPEMetalShaderInputs.resolve(
@@ -2824,12 +2841,20 @@ final class WPEMetalRenderExecutor {
             )
             encoder.setFragmentTexture(mask, index: 1)
             hasMask = true
+            maskForUniforms = mask
         } else {
             encoder.setFragmentTexture(primary, index: 1)
             hasMask = false
+            maskForUniforms = nil
         }
 
-        var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
+        var uniforms = genericImageUniforms(
+            for: pass,
+            layer: layer,
+            hasMask: hasMask,
+            sourceTexture: primary,
+            maskTexture: maskForUniforms
+        )
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
         let paletteState = puppetBonePalette(for: skinningState)
@@ -2900,6 +2925,7 @@ final class WPEMetalRenderExecutor {
         encoder.setFragmentTexture(primary, index: 0)
 
         let hasMask: Bool
+        let maskForUniforms: MTLTexture?
         #if !LITE_BUILD && DEBUG
         let maskBindingReference: WPETextureReference?
         let maskBindingTexture: MTLTexture?
@@ -2921,6 +2947,7 @@ final class WPEMetalRenderExecutor {
                 )
                 encoder.setFragmentTexture(mask, index: 1)
                 hasMask = true
+                maskForUniforms = mask
                 #if !LITE_BUILD && DEBUG
                 maskBindingReference = maskRef
                 maskBindingTexture = mask
@@ -2930,6 +2957,7 @@ final class WPEMetalRenderExecutor {
             } else {
                 encoder.setFragmentTexture(primary, index: 1)
                 hasMask = false
+                maskForUniforms = nil
                 #if !LITE_BUILD && DEBUG
                 maskBindingReference = nil
                 maskBindingTexture = primary
@@ -2942,6 +2970,7 @@ final class WPEMetalRenderExecutor {
             }
         } else {
             hasMask = false
+            maskForUniforms = nil
             #if !LITE_BUILD && DEBUG
             maskBindingReference = nil
             maskBindingTexture = nil
@@ -2950,7 +2979,13 @@ final class WPEMetalRenderExecutor {
             #endif
         }
 
-        var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
+        var uniforms = genericImageUniforms(
+            for: pass,
+            layer: layer,
+            hasMask: hasMask,
+            sourceTexture: primary,
+            maskTexture: maskForUniforms
+        )
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
         // Skinning is resolved via `puppetBonePalette` (validated/cached once per frame in
@@ -3009,7 +3044,12 @@ final class WPEMetalRenderExecutor {
             fragmentShaderName: fragmentName,
             fragmentUniforms: [
                 WPECanonicalTraceRecorder.PuppetUniformInput(name: "color", type: "vec4", value: uniforms.color),
-                WPECanonicalTraceRecorder.PuppetUniformInput(name: "alphaMaskUV", type: "vec4", value: uniforms.alphaMaskUV)
+                WPECanonicalTraceRecorder.PuppetUniformInput(name: "alphaMaskUV", type: "vec4", value: uniforms.alphaMaskUV),
+                WPECanonicalTraceRecorder.PuppetUniformInput(
+                    name: "textureUVScale",
+                    type: "vec4",
+                    value: uniforms.textureUVScale
+                )
             ],
             vertexUniforms: [
                 WPECanonicalTraceRecorder.PuppetUniformInput(
@@ -3050,7 +3090,7 @@ final class WPEMetalRenderExecutor {
         encoder: MTLRenderCommandEncoder,
         depthPixelFormat: MTLPixelFormat
     ) throws -> Bool {
-        guard case .scene = pass.pass.target,
+        guard isDeferredWarpTarget(pass.pass.target, layer: layer),
               let model = puppetModel,
               // Mirrors the material-pass deferral decision (clip puppets already warped+clipped at
               // material time → false here → plain rectangular copy; no-effect puppets → false → the
@@ -3073,10 +3113,10 @@ final class WPEMetalRenderExecutor {
         )
         let quadUniforms = objectQuadUniforms(
             for: layer,
-            sceneSize: frameState.sceneSize,
+            sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
             cameraParallax: frameState.cameraParallax,
             sourceTexture: sourceTexture,
-            cameraUniforms: frameState.cameraUniforms
+            cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
         )
         let localSize = puppetCompositeLocalSize(for: layer, sourceTexture: sourceTexture)
         let paletteState = puppetBonePalette(for: skinningState)
@@ -3452,13 +3492,18 @@ final class WPEMetalRenderExecutor {
         return layerHasEffectChain(layer)
     }
 
-    /// The deferred warp is applied by `encodePuppetSceneCompositePassIfNeeded`, which only runs on a
-    /// `.scene`-target `copy` pass. A layer without one cannot receive a deferred warp.
+    /// The deferred warp is applied by `encodePuppetSceneCompositePassIfNeeded`, which runs on a
+    /// scene-target or composelayer-group-target `copy` pass. A layer without one cannot receive it.
     private func layerHasDeferredWarpTarget(_ layer: WPERenderLayer) -> Bool {
         layer.passes.contains { pass in
-            guard case .scene = pass.target else { return false }
+            guard isDeferredWarpTarget(pass.target, layer: layer) else { return false }
             return WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "copy"
         }
+    }
+
+    private func isDeferredWarpTarget(_ target: WPERenderTarget, layer: WPERenderLayer) -> Bool {
+        if case .scene = target { return true }
+        return isGroupRenderTarget(target, layer: layer)
     }
 
     /// True when the puppet layer runs an effect — a material-kind effect (`.effect`) OR a command-kind
@@ -3923,7 +3968,13 @@ final class WPEMetalRenderExecutor {
             encoder.setFragmentTexture(clipTexture, index: 8)
         }
 
-        var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
+        var uniforms = genericImageUniforms(
+            for: pass,
+            layer: layer,
+            hasMask: hasMask,
+            sourceTexture: primary,
+            maskTexture: mask
+        )
         uniforms.alphaMaskUV.w = clipMode
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
         try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
@@ -4175,6 +4226,9 @@ final class WPEMetalRenderExecutor {
         layer: WPERenderLayer,
         cameraParallax: WPECameraParallaxFrame = .neutral
     ) -> Bool {
+        if isGroupRenderTarget(pass.pass.target, layer: layer) {
+            return true
+        }
         guard case .scene = pass.pass.target else { return false }
         if layer.geometry == .identity {
             // Identity full-frame layers normally take the fullscreen copy path.
@@ -4191,6 +4245,7 @@ final class WPEMetalRenderExecutor {
         // layer composite (not `.scene`), so they were already excluded by the
         // `guard case .scene` above and remain fullscreen.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
+            if layer.groupCompositeSource != nil { return true }
             guard Self.subregionComposeOutputEnabled else { return false }
             // A compose layer that parents children is a layer-group container, not
             // a scene-effect box: its children render flat, so confining its own
@@ -4204,6 +4259,35 @@ final class WPEMetalRenderExecutor {
             ) == .subregion
         }
         return true
+    }
+
+    private func isGroupRenderTarget(_ target: WPERenderTarget, layer: WPERenderLayer) -> Bool {
+        guard case .fbo(let name) = target else { return false }
+        return name == layer.groupRenderTarget
+    }
+
+    private static func isLayerGroupTargetName(_ name: String) -> Bool {
+        name.hasPrefix("_rt_layerGroup_")
+    }
+
+    func objectQuadSceneSize(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        frameState: WPEMetalFrameState
+    ) -> CGSize {
+        guard isGroupRenderTarget(pass.pass.target, layer: layer) else {
+            return frameState.sceneSize
+        }
+        return CGSize(width: destination.texture.width, height: destination.texture.height)
+    }
+
+    func objectQuadCameraUniforms(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        frameState: WPEMetalFrameState
+    ) -> WPEMetalCameraUniforms {
+        isGroupRenderTarget(pass.pass.target, layer: layer) ? .identity : frameState.cameraUniforms
     }
 
     func objectQuadUniforms(
@@ -4678,10 +4762,10 @@ final class WPEMetalRenderExecutor {
         if usesObjectQuad {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
-                sceneSize: frameState.sceneSize,
+                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
                 cameraParallax: frameState.cameraParallax,
                 sourceTexture: texture,
-                cameraUniforms: frameState.cameraUniforms
+                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4775,9 +4859,9 @@ final class WPEMetalRenderExecutor {
         if usesObjectQuad {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
-                sceneSize: frameState.sceneSize,
+                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
                 sourceTexture: sourceTexture,
-                cameraUniforms: frameState.cameraUniforms
+                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4846,10 +4930,10 @@ final class WPEMetalRenderExecutor {
         if usesObjectQuad {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
-                sceneSize: frameState.sceneSize,
+                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
                 cameraParallax: frameState.cameraParallax,
                 sourceTexture: sourceTexture,
-                cameraUniforms: frameState.cameraUniforms
+                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
             )
             encoder.setVertexBytes(
                 &quadUniforms,
@@ -4866,20 +4950,26 @@ final class WPEMetalRenderExecutor {
     func genericImageUniforms(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
-        hasMask: Bool
+        hasMask: Bool,
+        sourceTexture: MTLTexture? = nil,
+        maskTexture: MTLTexture? = nil
     ) -> WPEGenericImageUniforms {
         let color = WPEMetalShaderInputs.colorVector(for: pass)
         let gAlpha = WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1)
         let gBrightness = WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
         let alpha = gAlpha * Float(layer.geometry.alpha)
         let brightness = gBrightness * Float(layer.geometry.brightness)
+        let sourceUVScale = Self.logicalUVScale(for: sourceTexture)
+        let maskUVScale = Self.logicalUVScale(for: maskTexture)
         if WPESceneDebugArtifacts.shared.isEnabled {
             WPESceneDebugArtifacts.shared.appendLog(
                 "[imageUniform] layer=\(layer.objectName) id=\(layer.objectID) shader=\(pass.pass.shader) "
                     + "color=(\(color.x),\(color.y),\(color.z),\(color.w)) "
                     + "gAlpha=\(gAlpha) layerAlpha=\(layer.geometry.alpha) alpha=\(alpha) "
                     + "gBrightness=\(gBrightness) layerBrightness=\(layer.geometry.brightness) brightness=\(brightness) "
-                    + "hasMask=\(hasMask)",
+                    + "hasMask=\(hasMask) "
+                    + "uvScale0=(\(sourceUVScale.x),\(sourceUVScale.y)) "
+                    + "uvScale1=(\(maskUVScale.x),\(maskUVScale.y))",
                 level: .notice
             )
         }
@@ -4896,7 +4986,24 @@ final class WPEMetalRenderExecutor {
         }
         return WPEGenericImageUniforms(
             color: color,
-            alphaMaskUV: SIMD4<Float>(alpha, brightness, hasMask ? 1 : 0, 0)
+            alphaMaskUV: SIMD4<Float>(alpha, brightness, hasMask ? 1 : 0, 0),
+            textureUVScale: SIMD4<Float>(
+                sourceUVScale.x,
+                sourceUVScale.y,
+                maskUVScale.x,
+                maskUVScale.y
+            )
+        )
+    }
+
+    private static func logicalUVScale(for texture: MTLTexture?) -> SIMD2<Float> {
+        guard let texture else { return SIMD2<Float>(1, 1) }
+        let resolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: texture)
+        let scaleX = Float(resolution.imageWidth) / Float(max(resolution.textureWidth, 1))
+        let scaleY = Float(resolution.imageHeight) / Float(max(resolution.textureHeight, 1))
+        return SIMD2<Float>(
+            min(max(scaleX, 0), 1),
+            min(max(scaleY, 0), 1)
         )
     }
 
@@ -5390,6 +5497,36 @@ final class WPEMetalRenderExecutor {
             shaderErrorSink.record(shader: program.name, reason: reason)
             throw error
         }
+    }
+}
+
+private extension WPERenderLayer {
+    func replacingDrawGeometry(
+        _ geometry: WPERenderLayerGeometry,
+        parallaxDepth: SIMD2<Double>
+    ) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
     }
 }
 #endif

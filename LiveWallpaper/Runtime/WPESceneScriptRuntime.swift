@@ -1254,7 +1254,7 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     /// purpose — `update` contains a lowercase "date", so a case-insensitive
     /// `Date` check would wrongly classify every origin script as dynamic.
     private static let dynamicTokens = [
-        "getTimeOfDay", "frametime", "frameTime", "getTime", "Date",
+        "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
         "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
         "input.cursorWorldPosition", "shared.", "shared["
     ]

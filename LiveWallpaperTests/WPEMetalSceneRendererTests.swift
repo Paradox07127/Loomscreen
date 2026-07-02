@@ -11,6 +11,18 @@ import UniformTypeIdentifiers
 @Suite("WPE Metal scene renderer")
 struct WPEMetalSceneRendererTests {
 
+    @Test("Interactive Metal view accepts first mouse while click capture is enabled")
+    func interactiveMetalViewAcceptsFirstMouseWhenCapturingClicks() {
+        let view = WPEInteractiveMTKView(
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16),
+            device: nil
+        )
+
+        #expect(view.acceptsFirstMouse(for: nil) == false)
+        view.clickCaptureEnabled = true
+        #expect(view.acceptsFirstMouse(for: nil) == true)
+    }
+
     @Test("Initializes with an MTKView when Metal is available")
     func initializesWithMTKView() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

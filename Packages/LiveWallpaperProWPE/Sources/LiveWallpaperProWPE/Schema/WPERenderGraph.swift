@@ -41,6 +41,14 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public let compositeB: String
     public let localFBOs: [WPERenderFBO]
     public let passes: [WPERenderPass]
+    /// Offscreen group target this layer's final scene pass is redirected into. The executor uses
+    /// `groupLocalGeometry` when drawing to this target, so child layers are placed inside the
+    /// composelayer-local render target instead of the global scene.
+    public let groupRenderTarget: String?
+    public let groupLocalGeometry: WPERenderLayerGeometry?
+    /// For a composelayer that owns a child group, this names the group target sampled by its
+    /// material pass before the composelayer's own effects and final scene composite.
+    public let groupCompositeSource: String?
     /// Per-axis camera-parallax depth (WPE Vec2). Each axis scales independently;
     /// `.zero` pins the layer. Inherited from the root attachment ancestor by the
     /// graph builder so a rigid puppet subtree shifts as one unit.
@@ -65,6 +73,9 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         compositeB: String,
         localFBOs: [WPERenderFBO],
         passes: [WPERenderPass],
+        groupRenderTarget: String? = nil,
+        groupLocalGeometry: WPERenderLayerGeometry? = nil,
+        groupCompositeSource: String? = nil,
         parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0),
         sortIndex: Int = 0
     ) {
@@ -83,6 +94,9 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         self.compositeB = compositeB
         self.localFBOs = localFBOs
         self.passes = passes
+        self.groupRenderTarget = groupRenderTarget
+        self.groupLocalGeometry = groupLocalGeometry
+        self.groupCompositeSource = groupCompositeSource
         self.parallaxDepth = parallaxDepth
         self.sortIndex = sortIndex
     }
@@ -161,12 +175,14 @@ public struct WPERenderFBO: Equatable, Sendable {
     public let scale: Double
     public let format: String
     public let unique: Bool
+    public let pixelSize: CGSize?
 
-    public init(name: String, scale: Double, format: String, unique: Bool = false) {
+    public init(name: String, scale: Double, format: String, unique: Bool = false, pixelSize: CGSize? = nil) {
         self.name = name
         self.scale = scale
         self.format = format
         self.unique = unique
+        self.pixelSize = pixelSize
     }
 }
 

@@ -155,6 +155,31 @@ struct WPESceneDocumentParserTests {
         #expect(document.camera.up == SIMD3<Double>(0, 1, 0))
     }
 
+    @Test("Perspective camera reads fov and clipping planes from general")
+    func perspectiveCameraReadsFovAndClippingPlanesFromGeneral() throws {
+        let payload: [String: Any] = [
+            "camera": [
+                "center": "-1.83970 0.51670 9.15603",
+                "eye": "-2.05772 0.85240 10.07242",
+                "up": "0 1 0"
+            ],
+            "general": [
+                "orthogonalprojection": NSNull(),
+                "fov": 50,
+                "nearz": 0.01,
+                "farz": 10000
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.general.usesPerspectiveProjection)
+        #expect(document.camera.fov == 50)
+        #expect(document.camera.nearZ == 0.01)
+        #expect(document.camera.farZ == 10000)
+    }
+
     // MARK: - Image objects
 
     @Test("Image object with happy-path fields populates imageObjects")
@@ -242,6 +267,39 @@ struct WPESceneDocumentParserTests {
             "objects": [[
                 "id": "188",
                 "name": "Star1 model1",
+                "type": "image",
+                "image": "models/star.json",
+                "origin": [
+                    "script": script,
+                    "value": "0 1 0"
+                ],
+                "size": "100 100 0"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+
+        #expect(layer.origin == SIMD3<Double>(0, 1, 0))
+        #expect(layer.originScript?.script == script)
+        #expect(layer.originScript?.seed == SIMD3<Double>(0, 1, 0))
+    }
+
+    @Test("Image origin script reading engine runtime is preserved for runtime")
+    func runtimeOriginScriptIsPreservedForRuntime() throws {
+        let script = """
+        export function update(value) {
+            value.x = engine.runtime;
+            return value;
+        }
+        """
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": "189",
+                "name": "RuntimeMover",
                 "type": "image",
                 "image": "models/star.json",
                 "origin": [
@@ -448,6 +506,42 @@ struct WPESceneDocumentParserTests {
         #expect(abs(layer.angles.z - 1.8707963267948966) < 0.0001)
     }
 
+    @Test("Image object inherits parent X rotation in 3D")
+    func imageObjectInheritsParentXRotationIn3D() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 10,
+                    "name": "Group",
+                    "origin": "1 2 3",
+                    "scale": "2 3 4",
+                    "angles": "1.5707963267948966 0 0"
+                ],
+                [
+                    "id": 11,
+                    "name": "Child",
+                    "image": "materials/child.png",
+                    "parent": 10,
+                    "origin": "0 1 0",
+                    "scale": "1 1 1",
+                    "angles": "0 0 0"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(abs(layer.origin.x - 1) < 0.0001)
+        #expect(abs(layer.origin.y - 2) < 0.0001)
+        #expect(abs(layer.origin.z - 6) < 0.0001)
+        #expect(layer.scale == SIMD3<Double>(2, 3, 4))
+        #expect(abs(layer.angles.x - 1.5707963267948966) < 0.0001)
+    }
+
     @Test("Property-bound {user,value} scale resolves (not default 1.0) through parent composition")
     func propertyBoundScaleResolvesThroughParentComposition() throws {
         // Mirrors scene 3460973721's audio-bar layer: a child composelayer whose
@@ -531,6 +625,43 @@ struct WPESceneDocumentParserTests {
         let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
         #expect(byID["269"]?.visible == true)
         #expect(byID["488"]?.visible == false)
+    }
+
+    @Test("Solidlayer with a visible effect and no authored alpha defaults to a transparent base")
+    func solidlayerEffectBaseDefaultsTransparent() throws {
+        // Scene 3462491575 layer 704 uses a black solidlayer only as the input
+        // surface for audio_responsive_oscilloscope. WPE keeps that base
+        // transparent; otherwise the effect pass composites a black rectangle.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 704,
+                    "name": "纯色",
+                    "image": "models/util/solidlayer.json",
+                    "color": "0 0 0",
+                    "effects": [
+                        [
+                            "file": "effects/workshop/2799421411/audio_responsive_oscilloscope/effect.json",
+                            "visible": true
+                        ]
+                    ]
+                ],
+                [
+                    "id": 705,
+                    "name": "Plain",
+                    "image": "models/util/solidlayer.json",
+                    "color": "0 0 0"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
+
+        #expect(byID["704"]?.alpha == 0)
+        #expect(byID["705"]?.alpha == 1)
     }
 
     @Test("Solid MDL model objects are parsed as renderable layers")

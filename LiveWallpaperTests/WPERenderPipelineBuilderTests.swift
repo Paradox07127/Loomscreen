@@ -266,6 +266,51 @@ struct WPERenderPipelineBuilderTests {
         }
     }
 
+    @Test("MDLV16 direct scene model loads as static mesh instead of legacy puppet")
+    func mdlv16DirectSceneModelLoadsAsStaticMesh() throws {
+        let fixture = try makeFixture(dataFiles: [
+            "models/ring.mdl": makeSingleTriangleMDLV16SceneModel()
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "ring",
+                objectName: "Ring",
+                imagePath: "models/ring.mdl",
+                materialPath: "materials/ring.json",
+                puppetPath: "models/ring.mdl",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_ring_a",
+                compositeB: "_rt_imageLayerComposite_ring_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "ring.0",
+                        phase: .material,
+                        shader: "generic4",
+                        source: .image("models/ring.mdl"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "enabled",
+                        depthWrite: "enabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let model = try #require(pipeline.layers.first?.puppetModel)
+
+        #expect(model.version == 16)
+        #expect(model.meshes.first?.materialPath == "materials/models/Hollow Cylinder/diffuse_0.json")
+    }
+
     @Test("Loads puppet model through dependency mounts")
     func loadsPuppetModelThroughDependencyMounts() throws {
         let fixture = try makeFixture()
@@ -733,6 +778,76 @@ struct WPERenderPipelineBuilderTests {
         #expect(abs(geometry.origin.x) < 0.0001)
         #expect(abs(geometry.origin.y - 10) < 0.0001)
         #expect(abs(geometry.angles.z - Double.pi / 2) < 0.0001)
+    }
+
+    @Test("Dynamic parent transform rotates child origin around X and Y")
+    func dynamicParentTransformRotatesChildOriginAroundXAndY() {
+        func makePipeline(childOrigin: SIMD3<Double>) -> WPEPreparedRenderPipeline {
+            let childGeometry = WPERenderLayerGeometry(
+                origin: childOrigin,
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 10, height: 10),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            )
+            let graphLayer = WPERenderLayer(
+                objectID: "child",
+                objectName: "Child",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                parentObjectID: "group",
+                geometry: childGeometry,
+                localGeometry: childGeometry,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: []
+            )
+            return WPEPreparedRenderPipeline(layers: [
+                WPEPreparedRenderLayer(graphLayer: graphLayer, passes: [])
+            ])
+        }
+
+        let xRotated = makePipeline(childOrigin: SIMD3<Double>(0, 1, 0)).applyingLayerTransforms(
+            origins: [:],
+            scales: [:],
+            angles: ["group": SIMD3<Double>(Double.pi / 2, 0, 0)],
+            parentByID: ["child": "group"],
+            hostTransforms: [
+                "group": WPERenderObjectTransform(
+                    origin: SIMD3<Double>(1, 2, 3),
+                    scale: SIMD3<Double>(2, 3, 4),
+                    angles: SIMD3<Double>(0, 0, 0)
+                )
+            ]
+        ).layers[0].graphLayer.geometry
+
+        #expect(abs(xRotated.origin.x - 1) < 0.0001)
+        #expect(abs(xRotated.origin.y - 2) < 0.0001)
+        #expect(abs(xRotated.origin.z - 6) < 0.0001)
+        #expect(abs(xRotated.angles.x - Double.pi / 2) < 0.0001)
+
+        let yRotated = makePipeline(childOrigin: SIMD3<Double>(0, 0, 1)).applyingLayerTransforms(
+            origins: [:],
+            scales: [:],
+            angles: ["group": SIMD3<Double>(0, Double.pi / 2, 0)],
+            parentByID: ["child": "group"],
+            hostTransforms: [
+                "group": WPERenderObjectTransform(
+                    origin: SIMD3<Double>(1, 2, 3),
+                    scale: SIMD3<Double>(2, 3, 4),
+                    angles: SIMD3<Double>(0, 0, 0)
+                )
+            ]
+        ).layers[0].graphLayer.geometry
+
+        #expect(abs(yRotated.origin.x - 5) < 0.0001)
+        #expect(abs(yRotated.origin.y - 2) < 0.0001)
+        #expect(abs(yRotated.origin.z - 3) < 0.0001)
+        #expect(abs(yRotated.angles.y - Double.pi / 2) < 0.0001)
     }
 
     @Test("Prefers scene-provided source for WPE effect aliases")
@@ -1357,6 +1472,33 @@ struct WPERenderPipelineBuilderTests {
 
         return data
     }
+
+    private func makeSingleTriangleMDLV16SceneModel() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0016".utf8))
+        data.appendLE(UInt32(0x00000f00))
+        data.append(UInt8(0))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/models/Hollow Cylinder/diffuse_0.json")
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(0x0000000f))
+
+        var vertices = Data()
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(-1, -1, 0), uv: SIMD2<Float>(0, 1))
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(1, -1, 0), uv: SIMD2<Float>(1, 1))
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(0, 1, 0), uv: SIMD2<Float>(0.5, 0))
+        data.appendLE(UInt32(vertices.count))
+        data.append(vertices)
+
+        data.appendLE(UInt32(3 * MemoryLayout<UInt16>.size))
+        data.appendLE(UInt16(0))
+        data.appendLE(UInt16(1))
+        data.appendLE(UInt16(2))
+
+        return data
+    }
 }
 
 private extension Data {
@@ -1404,5 +1546,20 @@ private extension Data {
             data.appendLE(vertex.uv.y)
         }
         return data
+    }
+
+    mutating func appendSceneModelVertex(position: SIMD3<Float>, uv: SIMD2<Float>) {
+        appendLE(position.x)
+        appendLE(position.y)
+        appendLE(position.z)
+        appendLE(Float(0))
+        appendLE(Float(0))
+        appendLE(Float(1))
+        appendLE(Float(1))
+        appendLE(Float(0))
+        appendLE(Float(0))
+        appendLE(Float(1))
+        appendLE(uv.x)
+        appendLE(uv.y)
     }
 }

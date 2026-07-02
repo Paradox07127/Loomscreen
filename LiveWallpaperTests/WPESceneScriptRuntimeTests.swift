@@ -393,6 +393,8 @@ struct WPESceneScriptRuntimeTests {
         #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
             "export function update(v){ v.x = engine.getFrequency(0); return v; }"))
         #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = engine.runtime; return v; }"))
+        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
             "export function update(v){ v.x = Math.random(); return v; }"))
         #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
             "export function update(v){ v.x = input.cursorWorldPosition.x; return v; }"))

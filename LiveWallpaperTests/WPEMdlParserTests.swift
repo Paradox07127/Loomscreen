@@ -184,6 +184,25 @@ struct WPEMdlParserTests {
         #expect(vertex.uv == SIMD2<Float>(0.65, 0.198))
     }
 
+    @Test("Parses MDLV16 scene model header with the leading meshCount byte")
+    func parsesMDLV16SceneModelHeaderWithLeadingByte() throws {
+        // Scene 3509243656 ships a static scene model (`models/Hollow Cylinder/...mdl`)
+        // as MDLV0016 with the same leading-byte header as modern puppets. Reading
+        // it through the legacy v14 layout shifts the material string by one byte
+        // and turns the vertex byte count into garbage, aborting the entire scene.
+        let model = try WPEMdlParser.parse(data: makeSingleTriangleMDLV16SceneModel())
+        let mesh = try #require(model.meshes.first)
+
+        #expect(model.version == 16)
+        #expect(model.meshes.count == 1)
+        #expect(mesh.materialPath == "materials/models/Hollow Cylinder/diffuse_0.json")
+        #expect(mesh.vertices.count == 3)
+        #expect(mesh.vertices[0].position == SIMD3<Float>(-1, -1, 0))
+        #expect(mesh.vertices[1].position == SIMD3<Float>(1, -1, 0))
+        #expect(mesh.vertices[2].position == SIMD3<Float>(0, 1, 0))
+        #expect(mesh.indices == [0, 1, 2])
+    }
+
     @Test("Preserves MDLV vertex positions when MDLS skeleton metadata is present")
     func preservesVertexPositionsWithSkeletonMetadata() throws {
         let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithSkeleton())
@@ -641,6 +660,33 @@ struct WPEMdlParserTests {
         return data
     }
 
+    private func makeSingleTriangleMDLV16SceneModel() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0016".utf8))
+        data.appendLE(UInt32(0x00000f00))
+        data.append(UInt8(0))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/models/Hollow Cylinder/diffuse_0.json")
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(0x0000000f))
+
+        var vertices = Data()
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(-1, -1, 0), uv: SIMD2<Float>(0, 1))
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(1, -1, 0), uv: SIMD2<Float>(1, 1))
+        vertices.appendSceneModelVertex(position: SIMD3<Float>(0, 1, 0), uv: SIMD2<Float>(0.5, 0))
+        data.appendLE(UInt32(vertices.count))
+        data.append(vertices)
+
+        data.appendLE(UInt32(3 * MemoryLayout<UInt16>.size))
+        data.appendLE(UInt16(0))
+        data.appendLE(UInt16(1))
+        data.appendLE(UInt16(2))
+
+        return data
+    }
+
     private func makeSkinnedMDLV23WithSkeletonTrailingMarker() -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0023".utf8))
@@ -810,6 +856,21 @@ private extension Data {
             data.appendLE(vertex.uv.y)
         }
         return data
+    }
+
+    mutating func appendSceneModelVertex(position: SIMD3<Float>, uv: SIMD2<Float>) {
+        appendLE(position.x)
+        appendLE(position.y)
+        appendLE(position.z)
+        appendLE(Float(0))
+        appendLE(Float(0))
+        appendLE(Float(1))
+        appendLE(Float(1))
+        appendLE(Float(0))
+        appendLE(Float(0))
+        appendLE(Float(1))
+        appendLE(uv.x)
+        appendLE(uv.y)
     }
 
     static func appendMatrix(to data: inout Data, rows: [[Float]]) {

@@ -64,18 +64,18 @@ struct WPERenderObjectTransform: Equatable, Sendable {
     }
 
     func combining(child: WPERenderObjectTransform) -> WPERenderObjectTransform {
-        let scaledX = child.origin.x * scale.x
-        let scaledY = child.origin.y * scale.y
-        let cosine = cos(angles.z)
-        let sine = sin(angles.z)
-        let rotatedX = scaledX * cosine - scaledY * sine
-        let rotatedY = scaledX * sine + scaledY * cosine
+        let scaled = SIMD3<Double>(
+            child.origin.x * scale.x,
+            child.origin.y * scale.y,
+            child.origin.z * scale.z
+        )
+        let rotated = Self.rotate(scaled, by: angles)
 
         return WPERenderObjectTransform(
             origin: SIMD3<Double>(
-                origin.x + rotatedX,
-                origin.y + rotatedY,
-                origin.z + child.origin.z * scale.z
+                origin.x + rotated.x,
+                origin.y + rotated.y,
+                origin.z + rotated.z
             ),
             scale: SIMD3<Double>(
                 scale.x * child.scale.x,
@@ -84,6 +84,40 @@ struct WPERenderObjectTransform: Equatable, Sendable {
             ),
             angles: angles + child.angles
         )
+    }
+
+    private static func rotate(_ value: SIMD3<Double>, by angles: SIMD3<Double>) -> SIMD3<Double> {
+        var result = value
+
+        if angles.x != 0 {
+            let c = cos(angles.x)
+            let s = sin(angles.x)
+            result = SIMD3<Double>(
+                result.x,
+                result.y * c - result.z * s,
+                result.y * s + result.z * c
+            )
+        }
+        if angles.y != 0 {
+            let c = cos(angles.y)
+            let s = sin(angles.y)
+            result = SIMD3<Double>(
+                result.x * c + result.z * s,
+                result.y,
+                -result.x * s + result.z * c
+            )
+        }
+        if angles.z != 0 {
+            let c = cos(angles.z)
+            let s = sin(angles.z)
+            result = SIMD3<Double>(
+                result.x * c - result.y * s,
+                result.x * s + result.y * c,
+                result.z
+            )
+        }
+
+        return result
     }
 }
 
@@ -378,6 +412,9 @@ private extension WPERenderLayer {
             compositeB: "_rt_createdLayerComposite_\(state.key)_b",
             localFBOs: [],
             passes: [pass],
+            groupRenderTarget: nil,
+            groupLocalGeometry: nil,
+            groupCompositeSource: nil,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )
@@ -409,6 +446,9 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )
@@ -431,6 +471,9 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )
@@ -468,6 +511,9 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )
@@ -490,6 +536,9 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry?.resolved(at: time),
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )

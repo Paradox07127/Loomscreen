@@ -104,6 +104,7 @@ Temporary Items
 cache/
 tools/
 trace/
+scripts/
 
 # Python bytecode
 __pycache__/

@@ -23,6 +23,7 @@ final class WPEInteractiveMTKView: MTKView {
     private(set) var pointerFrame: WPEPointerFrame = .neutral
 
     override var acceptsFirstResponder: Bool { clickCaptureEnabled }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { clickCaptureEnabled }
 
     /// AppKit only delivers `mouseMoved(with:)` to a view that owns a tracking
     /// area with `.mouseMoved`. Without this, hovering (no button down) never

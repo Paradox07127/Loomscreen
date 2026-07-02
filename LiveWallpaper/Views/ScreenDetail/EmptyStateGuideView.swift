@@ -91,12 +91,6 @@ struct EmptyStateGuideView: View {
             Text("Choose a wallpaper type")
                 .font(DesignTokens.Typography.pageTitle)
                 .accessibilityAddTraits(.isHeader)
-
-            Text("Pick a type for this display. You can switch later.")
-                .font(DesignTokens.Typography.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 540)
         }
     }
 

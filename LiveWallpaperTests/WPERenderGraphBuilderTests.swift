@@ -206,6 +206,84 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[1].target == .scene)
     }
 
+    @Test("Composelayer with children renders subtree into a local group target")
+    func composelayerWithChildrenBuildsLocalGroupTarget() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["child_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                [
+                    "id": "group",
+                    "name": "Group",
+                    "type": "image",
+                    "image": "models/util/composelayer.json",
+                    "origin": "500 400 0",
+                    "size": "200 100 0"
+                ],
+                [
+                    "id": "container",
+                    "name": "Container",
+                    "type": "group",
+                    "parent": "group",
+                    "origin": "20 10 0"
+                ],
+                [
+                    "id": "child",
+                    "name": "Child",
+                    "type": "image",
+                    "image": "models/child.json",
+                    "parent": "container",
+                    "origin": "5 7 0",
+                    "size": "40 30 0"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(graph.layers.map(\.objectID) == ["child", "group"])
+        let child = try #require(graph.layers.first { $0.objectID == "child" })
+        let group = try #require(graph.layers.first { $0.objectID == "group" })
+        let groupTarget = "_rt_layerGroup_group"
+
+        #expect(child.groupRenderTarget == groupTarget)
+        #expect(child.passes.last?.target == .fbo(name: groupTarget))
+        #expect(child.groupLocalGeometry?.origin == SIMD3<Double>(125, 67, 0))
+
+        #expect(group.groupCompositeSource == groupTarget)
+        #expect(group.localFBOs.contains(WPERenderFBO(
+            name: groupTarget,
+            scale: 1,
+            format: "rgba8888",
+            pixelSize: CGSize(width: 200, height: 100)
+        )))
+        #expect(group.passes.first?.source == .fbo(groupTarget))
+        #expect(group.passes.first?.textures[0] == .fbo(groupTarget))
+        #expect(group.passes.last?.target == .scene)
+    }
+
     @Test("Model puppet path is preserved on render layer")
     func modelPuppetPathIsPreservedOnRenderLayer() throws {
         let root = FileManager.default.temporaryDirectory
@@ -1327,6 +1405,37 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.geometry.origin == SIMD3<Double>(1000, 1000, 0))
     }
 
+    @Test("Cropped puppet whose MDLV bbox is outside its local FBO uses mesh bbox center")
+    func offCanvasCroppedPuppetUsesMeshBoundsCenter() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(
+            root: root,
+            path: "models/eyes.json",
+            puppetPath: "models/eyes_puppet.mdl",
+            cropOffset: "564.00000 494.50000"
+        )
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -1001, minY: -146, maxX: -696, maxY: 107),
+            to: root.appendingPathComponent("models/eyes_puppet.mdl")
+        )
+
+        let graph = try buildPuppetGraph(
+            root: root, modelPath: "models/eyes.json", objectID: "115",
+            size: "584 759", scale: "1 1 1", origin: "630 -1 0",
+            projectionWidth: 3840, projectionHeight: 2160
+        )
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.geometry.puppetMeshCenter == SIMD2<Double>(-848.5, -19.5))
+        #expect(layer.localGeometry?.puppetMeshCenter == SIMD2<Double>(-848.5, -19.5))
+        #expect(layer.geometry.origin == SIMD3<Double>(-218.5, -20.5, 0))
+        #expect(layer.localGeometry?.origin == SIMD3<Double>(-218.5, -20.5, 0))
+    }
+
     private func buildPuppetGraph(
         root: URL, modelPath: String, objectID: String,
         size: String, scale: String, origin: String,
@@ -1345,12 +1454,21 @@ struct WPERenderGraphBuilderTests {
         return try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
     }
 
-    private func writePuppetModelJSON(root: URL, path: String, puppetPath: String) throws {
-        try writeJSON([
+    private func writePuppetModelJSON(
+        root: URL,
+        path: String,
+        puppetPath: String,
+        cropOffset: String? = nil
+    ) throws {
+        var model: [String: Any] = [
             "material": "materials/puppet.json",
             "puppet": puppetPath,
             "autosize": true
-        ], to: root.appendingPathComponent(path))
+        ]
+        if let cropOffset {
+            model["cropoffset"] = cropOffset
+        }
+        try writeJSON(model, to: root.appendingPathComponent(path))
         try writeJSON([
             "passes": [["shader": "genericimage4", "textures": ["models/puppet_d"]]]
         ], to: root.appendingPathComponent("materials/puppet.json"))

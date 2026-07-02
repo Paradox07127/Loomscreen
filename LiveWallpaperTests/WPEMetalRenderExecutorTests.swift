@@ -1337,6 +1337,61 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("genericimage2 samples TEX logical area without physical padding")
+    func genericImage2UsesTexLogicalUVScale() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 2,
+            bytes: Data([
+                255, 0, 0, 255,   255, 0, 0, 255,   0, 0, 0, 255,   0, 0, 0, 255,
+                255, 0, 0, 255,   255, 0, 0, 255,   0, 0, 0, 255,   0, 0, 0, 255
+            ])
+        )
+        WPEMetalTextureMetadataRegistry.shared.register(texture: input, imageWidth: 2, imageHeight: 2)
+        let pass = WPERenderPass(
+            id: "img2.logical.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/padded.png"),
+            target: .scene,
+            textures: [0: .image("materials/padded.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/padded.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/padded.png": input]
+        )
+        let rightPixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(rightPixel.r >= 200)
+        #expect(rightPixel.g <= 8)
+        #expect(rightPixel.b <= 8)
+        #expect(rightPixel.a >= 250)
+    }
+
     @Test("Material image pass renders with object quad geometry instead of fullscreen")
     func materialImagePassUsesObjectQuadGeometry() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -3366,6 +3421,101 @@ private extension WPEMetalRenderExecutorTests {
 
         #expect(texture.width == 1024)
         #expect(texture.height == 768)
+    }
+
+    @Test("Composelayer group composite target uses group footprint")
+    func composelayerGroupCompositeTargetUsesFootprint() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "compose",
+            objectName: "Compose",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(512, 384, 0),
+                scale: SIMD3<Double>(2, 3, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 128, height: 64),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_compose_a",
+            compositeB: "_rt_imageLayerComposite_compose_b",
+            localFBOs: [],
+            passes: [],
+            groupCompositeSource: "_rt_layerGroup_compose"
+        )
+
+        let texture = try pool.texture(
+            for: .layerComposite(name: layer.compositeA),
+            layer: layer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 128)
+        #expect(texture.height == 64)
+    }
+
+    @Test("Declared fixed-size FBO keeps group render target dimensions across layers")
+    func fixedDeclaredFBOKeepsGroupTargetDimensionsAcrossLayers() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let groupTarget = "_rt_layerGroup_group"
+        let groupLayer = WPERenderLayer(
+            objectID: "group",
+            objectName: "Group",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: .identity,
+            compositeA: "_rt_imageLayerComposite_group_a",
+            compositeB: "_rt_imageLayerComposite_group_b",
+            localFBOs: [WPERenderFBO(
+                name: groupTarget,
+                scale: 1,
+                format: "rgba8888",
+                pixelSize: CGSize(width: 200, height: 100)
+            )],
+            passes: []
+        )
+        let childLayer = WPERenderLayer(
+            objectID: "child",
+            objectName: "Child",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(0, 0, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 20, height: 20),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_child_a",
+            compositeB: "_rt_imageLayerComposite_child_b",
+            localFBOs: [],
+            passes: [],
+            groupRenderTarget: groupTarget
+        )
+        pool.prepare(pipeline: WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(graphLayer: groupLayer, passes: []),
+            WPEPreparedRenderLayer(graphLayer: childLayer, passes: [])
+        ]))
+
+        let texture = try pool.texture(
+            for: .fbo(name: groupTarget),
+            layer: childLayer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 200)
+        #expect(texture.height == 100)
     }
 
     @Test("Layer-local effect FBO sizes to the layer footprint only when enabled")

@@ -2231,9 +2231,16 @@ struct WPEShaderTranspiler {
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
             } else if let arrayDimension = varying.arrayDimension {
                 // Symbolic, #define-sized array: we can't expand a literal initializer list at
-                // transpile time, so zero-init. These varyings (e.g. an oscilloscope's per-sample
-                // audio array) have no vertex-stage source on the fullscreen-quad path anyway.
+                // transpile time, so zero-init, then let known vertex-varying reconstructions
+                // fill the slots they need.
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayDimension)] = {};")
+                out.append(
+                    contentsOf: symbolicArrayReconstructionLines(
+                        for: varying,
+                        availableUniforms: uniformNames,
+                        comboValues: comboValues
+                    )
+                )
             } else {
                 out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name) = \(initializer);")
             }
@@ -2458,6 +2465,22 @@ struct WPEShaderTranspiler {
                 response = smoothstep(bounds.x, bounds.y, response);
                 return clamp(pow(response, power), 0.0, 1.0) * multiply;
             }
+            inline float wpe_audio_oscilloscope_value(
+                float left, float right, int index, int resolution,
+                int equalize, float lrBalance, float freqBalanceUniform, float ampExponent
+            ) {
+                float leftBalance = equalize != 0 ? (1.0 - lrBalance) * 0.5 : 0.5;
+                float rightBalance = equalize != 0 ? (lrBalance + 1.0) * 0.5 : 0.5;
+                float normalizedFrequency = float(index) / max(float(resolution), 1.0);
+                float freqBalance = 1.0;
+                if (equalize != 0) {
+                    float bassBalance = (1.0 - freqBalanceUniform) * (1.0 - normalizedFrequency);
+                    float trebleBalance = freqBalanceUniform * normalizedFrequency;
+                    freqBalance = mix(bassBalance, trebleBalance, normalizedFrequency) * 2.5;
+                }
+                float amplitude = left * leftBalance + right * rightBalance;
+                return pow(max(freqBalance * (amplitude + amplitude), 0.0), ampExponent + 0.01);
+            }
             inline float4 wpe_waterflow_cycles(float time, float speed) {
                 float t = time * speed;
                 float4 cycles = float4(fract(t), fract(t + 0.5), fract(0.25 + t), fract(0.25 + t + 0.5));
@@ -2588,6 +2611,33 @@ struct WPEShaderTranspiler {
             if varying.metalType == "float3",
                hasUniforms("g_Point0", "g_Point1", "g_Point2", "g_Point3", in: availableUniforms) {
                 return "wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"
+            }
+            if varying.metalType == "float3" {
+                return "float3(in.uv, 1.0)"
+            }
+        case "v_PerspCoord":
+            // audio_responsive_oscilloscope.vert only applies squareToQuad under
+            // PERSPECTIVE=1; default PERSPECTIVE=0 is the raw texture coordinate
+            // with homogeneous z=1. Using the perspective path unconditionally can
+            // make the linear waveform clamp out and leave an opaque solid layer.
+            if varying.metalType == "float3" {
+                if comboValues["PERSPECTIVE"] == 1,
+                   hasUniforms("g_Point0", "g_Point1", "g_Point2", "g_Point3", in: availableUniforms) {
+                    return "wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"
+                }
+                return "float3(in.uv, 1.0)"
+            }
+        case "v_ViewCoord":
+            // Effects that sample the current full-frame buffer often use
+            // `v_ViewCoord.xy / v_ViewCoord.z * 0.5 + 0.5`. Preserve a valid
+            // homogeneous z and map back to the current quad UV as a conservative
+            // fragment-side reconstruction.
+            if varying.metalType == "float3" {
+                return "float3(in.uv * 2.0 - 1.0, 1.0)"
+            }
+        case "audioValue":
+            if varying.metalType == "float4" {
+                return "float4(0.0)"
             }
         case "v_TexCoordRipple":
             if varying.metalType == "float4",
@@ -2747,6 +2797,48 @@ struct WPEShaderTranspiler {
         default:
             return "\(varying.metalType)(0)"
         }
+    }
+
+    private static func symbolicArrayReconstructionLines(
+        for varying: WPEVaryingDecl,
+        availableUniforms: Set<String>,
+        comboValues: [String: Int]
+    ) -> [String] {
+        guard varying.name == "audioValue",
+              varying.metalType == "float4" else {
+            return []
+        }
+
+        let resolution = comboValues["RESOLUTION"] ?? 32
+        let leftName: String
+        let rightName: String
+        switch resolution {
+        case 16:
+            leftName = "g_AudioSpectrum16Left"
+            rightName = "g_AudioSpectrum16Right"
+        case 64:
+            leftName = "g_AudioSpectrum64Left"
+            rightName = "g_AudioSpectrum64Right"
+        default:
+            leftName = "g_AudioSpectrum32Left"
+            rightName = "g_AudioSpectrum32Right"
+        }
+
+        guard hasUniforms(leftName, rightName, "u_ampExponent", "u_FreqBalance", "u_LRBalance", in: availableUniforms) else {
+            return []
+        }
+
+        let equalize = comboValues["EQUALIZE"] ?? 0
+        return [
+            "    for (int wpeAudioIndex = 0; wpeAudioIndex < \(resolution); wpeAudioIndex += 4) {",
+            "        \(varying.name)[wpeAudioIndex / 4] = float4(",
+            "            wpe_audio_oscilloscope_value(\(leftName)[wpeAudioIndex + 0], \(rightName)[wpeAudioIndex + 0], wpeAudioIndex + 0, \(resolution), \(equalize), u_LRBalance, u_FreqBalance, u_ampExponent),",
+            "            wpe_audio_oscilloscope_value(\(leftName)[wpeAudioIndex + 1], \(rightName)[wpeAudioIndex + 1], wpeAudioIndex + 1, \(resolution), \(equalize), u_LRBalance, u_FreqBalance, u_ampExponent),",
+            "            wpe_audio_oscilloscope_value(\(leftName)[wpeAudioIndex + 2], \(rightName)[wpeAudioIndex + 2], wpeAudioIndex + 2, \(resolution), \(equalize), u_LRBalance, u_FreqBalance, u_ampExponent),",
+            "            wpe_audio_oscilloscope_value(\(leftName)[wpeAudioIndex + 3], \(rightName)[wpeAudioIndex + 3], wpeAudioIndex + 3, \(resolution), \(equalize), u_LRBalance, u_FreqBalance, u_ampExponent)",
+            "        );",
+            "    }"
+        ]
     }
 
     private static func hasUniforms(_ names: String..., in availableUniforms: Set<String>) -> Bool {

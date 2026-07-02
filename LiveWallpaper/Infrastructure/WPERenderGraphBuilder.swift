@@ -67,10 +67,6 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
-        let sceneSize = CGSize(
-            width: CGFloat(document.general.orthogonalProjection.width),
-            height: CGFloat(document.general.orthogonalProjection.height)
-        )
         var objectByID: [String: WPESceneImageObject] = [:]
         var originalIndexByID: [String: Int] = [:]
         for (index, object) in document.imageObjects.enumerated() where objectByID[object.id] == nil {
@@ -116,7 +112,7 @@ struct WPERenderGraphBuilder: Sendable {
             originalIndexByID: originalIndexByID
         )
 
-        let layers = try orderedLayerIDs
+        let rawLayers = try orderedLayerIDs
             .compactMap { objectByID[$0] }
             .map { object in
                 try buildLayer(
@@ -126,8 +122,184 @@ struct WPERenderGraphBuilder: Sendable {
                     sortIndex: document.objectPaintOrder[object.id] ?? 0
                 )
             }
-        let parallaxAligned = Self.propagatingParallaxDepthThroughParents(layers)
-        return WPERenderGraph(layers: applyAttachmentAnchorOffsets(to: parallaxAligned))
+        let parallaxAligned = Self.propagatingParallaxDepthThroughParents(rawLayers)
+        let attachmentAligned = applyAttachmentAnchorOffsets(to: parallaxAligned)
+        return WPERenderGraph(layers: applyComposelayerGroups(
+            to: attachmentAligned,
+            objectParentByID: document.objectParentByID
+        ))
+    }
+
+    private func applyComposelayerGroups(
+        to layers: [WPERenderLayer],
+        objectParentByID: [String: String]
+    ) -> [WPERenderLayer] {
+        let layerIDs = Set(layers.map(\.objectID))
+        let parentByID = objectParentByID
+        let candidateGroups = Set(layers.compactMap { layer in
+            Self.isComposelayerModelPath(layer.imagePath) ? layer.objectID : nil
+        })
+        guard !candidateGroups.isEmpty else { return layers }
+
+        var groupIDs = Set<String>()
+        for layerID in layerIDs {
+            var current = parentByID[layerID]
+            var seen: Set<String> = []
+            while let id = current, seen.insert(id).inserted {
+                if candidateGroups.contains(id) {
+                    groupIDs.insert(id)
+                    break
+                }
+                current = parentByID[id]
+            }
+        }
+        guard !groupIDs.isEmpty else { return layers }
+
+        let layersByID = Dictionary(layers.map { ($0.objectID, $0) }, uniquingKeysWith: { first, _ in first })
+        var nearestGroupByLayer: [String: String] = [:]
+        for layer in layers where !groupIDs.contains(layer.objectID) {
+            if let groupID = nearestComposelayerGroup(
+                for: layer.objectID,
+                parentByID: parentByID,
+                groupIDs: groupIDs
+            ) {
+                nearestGroupByLayer[layer.objectID] = groupID
+            }
+        }
+        guard !nearestGroupByLayer.isEmpty else { return layers }
+
+        let transformed = layers.map { layer -> WPERenderLayer in
+            if groupIDs.contains(layer.objectID) {
+                let groupTarget = Self.layerGroupTargetName(objectID: layer.objectID)
+                let groupSize = layer.geometry.size
+                let fbo = WPERenderFBO(
+                    name: groupTarget,
+                    scale: 1,
+                    format: "rgba8888",
+                    pixelSize: groupSize
+                )
+                var localFBOs = layer.localFBOs
+                if !localFBOs.contains(where: { $0.name == groupTarget }) {
+                    localFBOs.append(fbo)
+                }
+                return layer
+                    .replacingLocalFBOs(localFBOs)
+                    .replacingPasses(layer.passes.map {
+                        $0.replacingSceneAliasReferences(with: .fbo(groupTarget))
+                    })
+                    .withGroupCompositeSource(groupTarget)
+            }
+
+            guard let groupID = nearestGroupByLayer[layer.objectID],
+                  let group = layersByID[groupID] else {
+                return layer
+            }
+            let groupTarget = Self.layerGroupTargetName(objectID: groupID)
+            let groupGeometry = Self.groupLocalGeometry(for: layer.geometry, in: group.geometry)
+            return layer
+                .replacingPasses(layer.passes.map { pass in
+                    pass.target == .scene ? pass.replacingTarget(.fbo(name: groupTarget)) : pass
+                })
+                .withGroupRenderTarget(groupTarget, localGeometry: groupGeometry)
+        }
+
+        return Self.reorderedForComposelayerGroups(
+            transformed,
+            groupIDs: groupIDs,
+            nearestGroupByLayer: nearestGroupByLayer
+        )
+    }
+
+    private func nearestComposelayerGroup(
+        for objectID: String,
+        parentByID: [String: String],
+        groupIDs: Set<String>
+    ) -> String? {
+        var current = parentByID[objectID]
+        var seen: Set<String> = []
+        while let id = current, seen.insert(id).inserted {
+            if groupIDs.contains(id) { return id }
+            current = parentByID[id]
+        }
+        return nil
+    }
+
+    private static func reorderedForComposelayerGroups(
+        _ layers: [WPERenderLayer],
+        groupIDs: Set<String>,
+        nearestGroupByLayer: [String: String]
+    ) -> [WPERenderLayer] {
+        var lastDescendantIndexByGroup: [String: Int] = [:]
+        for (index, layer) in layers.enumerated() {
+            guard let groupID = nearestGroupByLayer[layer.objectID] else { continue }
+            lastDescendantIndexByGroup[groupID] = max(lastDescendantIndexByGroup[groupID] ?? index, index)
+        }
+        let groupLayerByID = Dictionary(
+            layers.filter { groupIDs.contains($0.objectID) }.map { ($0.objectID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var pendingGroups = groupIDs
+        var emitted: [WPERenderLayer] = []
+
+        for (index, layer) in layers.enumerated() {
+            if groupIDs.contains(layer.objectID) {
+                continue
+            }
+            emitted.append(layer)
+            guard let groupID = nearestGroupByLayer[layer.objectID],
+                  lastDescendantIndexByGroup[groupID] == index,
+                  pendingGroups.remove(groupID) != nil,
+                  let groupLayer = groupLayerByID[groupID] else {
+                continue
+            }
+            emitted.append(groupLayer)
+        }
+
+        for layer in layers where pendingGroups.contains(layer.objectID) {
+            emitted.append(layer)
+            pendingGroups.remove(layer.objectID)
+        }
+        return emitted
+    }
+
+    private static func groupLocalGeometry(
+        for child: WPERenderLayerGeometry,
+        in group: WPERenderLayerGeometry
+    ) -> WPERenderLayerGeometry {
+        let targetSize = group.size ?? child.size ?? CGSize(width: 1, height: 1)
+        let delta = SIMD2<Double>(
+            child.origin.x - group.origin.x,
+            child.origin.y - group.origin.y
+        )
+        let cosine = cos(-group.angles.z)
+        let sine = sin(-group.angles.z)
+        let unrotated = SIMD2<Double>(
+            delta.x * cosine - delta.y * sine,
+            delta.x * sine + delta.y * cosine
+        )
+        let scaleX = abs(group.scale.x) > 0.0001 ? group.scale.x : 1
+        let scaleY = abs(group.scale.y) > 0.0001 ? group.scale.y : 1
+        let localOrigin = SIMD3<Double>(
+            unrotated.x / scaleX + Double(targetSize.width) * 0.5,
+            unrotated.y / scaleY + Double(targetSize.height) * 0.5,
+            child.origin.z - group.origin.z
+        )
+        return WPERenderLayerGeometry(
+            origin: localOrigin,
+            scale: SIMD3<Double>(
+                child.scale.x / scaleX,
+                child.scale.y / scaleY,
+                child.scale.z / (abs(group.scale.z) > 0.0001 ? group.scale.z : 1)
+            ),
+            angles: child.angles - group.angles,
+            alignment: child.alignment,
+            size: child.size,
+            puppetMeshCenter: child.puppetMeshCenter,
+            alpha: child.alpha,
+            alphaAnimation: child.alphaAnimation,
+            color: child.color,
+            brightness: child.brightness
+        )
     }
 
     /// Camera parallax in WPE propagates DOWN the parent transform: a child layer
@@ -594,6 +766,21 @@ struct WPERenderGraphBuilder: Sendable {
         return String(name[start..<end])
     }
 
+    private static func layerGroupTargetName(objectID: String) -> String {
+        "_rt_layerGroup_\(objectID)"
+    }
+
+    private static func isComposelayerModelPath(_ path: String) -> Bool {
+        strippedUtilityPath(path) == "models/util/composelayer.json"
+    }
+
+    private static func strippedUtilityPath(_ path: String) -> String {
+        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        guard normalized.hasPrefix("../") else { return normalized }
+        let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
+    }
+
     private func buildLayer(
         object: WPESceneImageObject,
         finalUntargetedPassToScene: Bool,
@@ -671,6 +858,18 @@ struct WPERenderGraphBuilder: Sendable {
             }
         }
 
+        let puppetMeshCenter = resolvedPuppetMeshCenter(for: model, object: object)
+        let puppetOriginOffset = Self.puppetMeshOriginOffset(
+            center: puppetMeshCenter,
+            scale: object.scale,
+            angles: object.angles
+        )
+        let localPuppetOriginOffset = Self.puppetMeshOriginOffset(
+            center: puppetMeshCenter,
+            scale: object.localScale,
+            angles: object.localAngles
+        )
+
         return WPERenderLayer(
             objectID: object.id,
             objectName: object.name,
@@ -682,24 +881,24 @@ struct WPERenderGraphBuilder: Sendable {
             attachment: object.attachment,
             animationLayers: object.animationLayers,
             geometry: WPERenderLayerGeometry(
-                origin: object.origin,
+                origin: object.origin + puppetOriginOffset,
                 scale: object.scale,
                 angles: object.angles,
                 alignment: object.alignment,
                 size: object.size,
-                puppetMeshCenter: SIMD2<Double>(0, 0),
+                puppetMeshCenter: puppetMeshCenter,
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
                 brightness: object.brightness
             ),
             localGeometry: WPERenderLayerGeometry(
-                origin: object.localOrigin,
+                origin: object.localOrigin + localPuppetOriginOffset,
                 scale: object.localScale,
                 angles: object.localAngles,
                 alignment: object.alignment,
                 size: object.size,
-                puppetMeshCenter: SIMD2<Double>(0, 0),
+                puppetMeshCenter: puppetMeshCenter,
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
@@ -715,6 +914,69 @@ struct WPERenderGraphBuilder: Sendable {
             parallaxDepth: object.parallaxDepth,
             sortIndex: sortIndex
         )
+    }
+
+    private func resolvedPuppetMeshCenter(
+        for model: WPEModelDescriptor,
+        object: WPESceneImageObject
+    ) -> SIMD2<Double> {
+        guard model.autosize,
+              model.cropOffset != nil,
+              let puppetPath = model.puppetPath,
+              let size = object.size,
+              let data = try? resolver.data(relativePath: puppetPath),
+              let puppetModel = try? WPEMdlParser.parse(data: data),
+              let bounds = Self.puppetMeshBounds(in: puppetModel) else {
+            return SIMD2<Double>(0, 0)
+        }
+
+        let halfSize = SIMD2<Double>(
+            max(Double(size.width) * 0.5, 0.5),
+            max(Double(size.height) * 0.5, 0.5)
+        )
+        if bounds.intersects(center: SIMD2<Double>(0, 0), halfSize: halfSize) {
+            return SIMD2<Double>(0, 0)
+        }
+        guard bounds.width <= Double(size.width) + 0.5,
+              bounds.height <= Double(size.height) + 0.5 else {
+            return SIMD2<Double>(0, 0)
+        }
+        return bounds.center
+    }
+
+    private static func puppetMeshOriginOffset(
+        center: SIMD2<Double>,
+        scale: SIMD3<Double>,
+        angles: SIMD3<Double>
+    ) -> SIMD3<Double> {
+        guard center.x != 0 || center.y != 0 else {
+            return SIMD3<Double>(0, 0, 0)
+        }
+        let local = SIMD2<Double>(
+            center.x * abs(scale.x),
+            center.y * abs(scale.y)
+        )
+        let cosine = cos(angles.z)
+        let sine = sin(angles.z)
+        guard local.x.isFinite, local.y.isFinite, cosine.isFinite, sine.isFinite else {
+            return SIMD3<Double>(0, 0, 0)
+        }
+        return SIMD3<Double>(
+            cosine * local.x - sine * local.y,
+            sine * local.x + cosine * local.y,
+            0
+        )
+    }
+
+    private static func puppetMeshBounds(in model: WPEPuppetModel) -> WPEPuppetMeshBounds? {
+        var bounds: WPEPuppetMeshBounds?
+        for mesh in model.meshes {
+            for vertex in mesh.vertices {
+                bounds = bounds.map { $0.including(vertex.position) }
+                    ?? WPEPuppetMeshBounds(vertex.position)
+            }
+        }
+        return bounds
     }
 
     private func appendMaterialPasses(
@@ -801,8 +1063,15 @@ struct WPERenderGraphBuilder: Sendable {
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
             puppetPath: puppetPath,
+            autosize: dict["autosize"] as? Bool ?? false,
+            cropOffset: Self.parseModelCropOffset(dict["cropoffset"]),
             puppetClipMaskName: clipMaskName
         )
+    }
+
+    private static func parseModelCropOffset(_ raw: Any?) -> SIMD2<Double>? {
+        guard let vector = WPESceneDocumentParser.parseVector3(raw) else { return nil }
+        return SIMD2<Double>(vector.x, vector.y)
     }
 
     /// Clip-mask name from the puppet's MDLV clip section (wires the genericimage4 clip-composite
@@ -1185,6 +1454,8 @@ private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
     let rendersAsSceneModel: Bool
+    let autosize: Bool
+    let cropOffset: SIMD2<Double>?
     /// Clip-mask texture NAME from the puppet's MDLV clip section (e.g.
     /// `masks/clipping_mask_39cb32c5`), resolved like any material texture. Non-nil only when
     /// the puppet is a clip-composite candidate and the feature flag is enabled.
@@ -1195,16 +1466,167 @@ private struct WPEModelDescriptor {
         materialPath: String?,
         puppetPath: String?,
         rendersAsSceneModel: Bool = false,
+        autosize: Bool = false,
+        cropOffset: SIMD2<Double>? = nil,
         puppetClipMaskName: String? = nil
     ) {
         self.materialPath = materialPath
         self.puppetPath = puppetPath
         self.rendersAsSceneModel = rendersAsSceneModel
+        self.autosize = autosize
+        self.cropOffset = cropOffset
         self.puppetClipMaskName = puppetClipMaskName
     }
 }
 
+private struct WPEPuppetMeshBounds {
+    let minX: Double
+    let maxX: Double
+    let minY: Double
+    let maxY: Double
+
+    init(_ position: SIMD3<Float>) {
+        let x = Double(position.x)
+        let y = Double(position.y)
+        self.minX = x
+        self.maxX = x
+        self.minY = y
+        self.maxY = y
+    }
+
+    private init(minX: Double, maxX: Double, minY: Double, maxY: Double) {
+        self.minX = minX
+        self.maxX = maxX
+        self.minY = minY
+        self.maxY = maxY
+    }
+
+    var width: Double { maxX - minX }
+    var height: Double { maxY - minY }
+    var center: SIMD2<Double> {
+        SIMD2<Double>((minX + maxX) * 0.5, (minY + maxY) * 0.5)
+    }
+
+    func including(_ position: SIMD3<Float>) -> WPEPuppetMeshBounds {
+        let x = Double(position.x)
+        let y = Double(position.y)
+        return WPEPuppetMeshBounds(
+            minX: min(minX, x),
+            maxX: max(maxX, x),
+            minY: min(minY, y),
+            maxY: max(maxY, y)
+        )
+    }
+
+    func intersects(center: SIMD2<Double>, halfSize: SIMD2<Double>) -> Bool {
+        maxX >= center.x - halfSize.x
+            && minX <= center.x + halfSize.x
+            && maxY >= center.y - halfSize.y
+            && minY <= center.y + halfSize.y
+    }
+}
+
 private extension WPERenderLayer {
+    func replacingLocalFBOs(_ localFBOs: [WPERenderFBO]) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
+    func replacingPasses(_ passes: [WPERenderPass]) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
+    func withGroupRenderTarget(_ target: String, localGeometry: WPERenderLayerGeometry) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: self.localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            groupRenderTarget: target,
+            groupLocalGeometry: localGeometry,
+            groupCompositeSource: groupCompositeSource,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
+    func withGroupCompositeSource(_ source: String) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            parentObjectID: parentObjectID,
+            attachment: attachment,
+            animationLayers: animationLayers,
+            geometry: geometry,
+            localGeometry: localGeometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: source,
+            parallaxDepth: parallaxDepth,
+            sortIndex: sortIndex
+        )
+    }
+
     func replacingGeometryOrigin(addingSceneOffset offset: SIMD3<Double>) -> WPERenderLayer {
         let g = geometry
         let newGeometry = WPERenderLayerGeometry(
@@ -1235,6 +1657,9 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
         )
@@ -1257,9 +1682,58 @@ private extension WPERenderLayer {
             compositeB: compositeB,
             localFBOs: localFBOs,
             passes: passes,
+            groupRenderTarget: groupRenderTarget,
+            groupLocalGeometry: groupLocalGeometry,
+            groupCompositeSource: groupCompositeSource,
             parallaxDepth: depth,
             sortIndex: sortIndex
         )
+    }
+}
+
+private extension WPERenderPass {
+    func replacingSceneAliasReferences(with replacement: WPETextureReference) -> WPERenderPass {
+        let newSource = source.replacingSceneAlias(with: replacement)
+        let newTextures = textures.mapValues { $0.replacingSceneAlias(with: replacement) }
+        return WPERenderPass(
+            id: id,
+            phase: phase,
+            shader: shader,
+            source: newSource,
+            target: target,
+            textures: newTextures,
+            binds: binds,
+            constants: constants,
+            combos: combos,
+            blending: blending,
+            cullMode: cullMode,
+            depthTest: depthTest,
+            depthWrite: depthWrite
+        )
+    }
+}
+
+private extension WPETextureReference {
+    func replacingSceneAlias(with replacement: WPETextureReference) -> WPETextureReference {
+        guard case .fbo(let name) = self,
+              Self.isSceneAliasName(name) else {
+            return self
+        }
+        return replacement
+    }
+
+    private static func isSceneAliasName(_ name: String) -> Bool {
+        switch name {
+        case "_rt_FullFrameBuffer",
+             "_rt_HalfFrameBuffer",
+             "_rt_QuarterFrameBuffer",
+             "_rt_imageLayerComposite":
+            return true
+        default:
+            return name.hasPrefix("_rt_EightBuffer")
+                || name.hasPrefix("_rt_Mip")
+                || name.hasPrefix("_rt_downscaled")
+        }
     }
 }
 

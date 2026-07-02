@@ -347,6 +347,8 @@ struct WPEGenericImageUniforms {
     /// `constant` buffers rounds up to vec4 boundaries anyway, and a single
     /// vec4 slot is cheaper than three scalars + per-field padding.
     var alphaMaskUV: SIMD4<Float>
+    /// xy = texture0 logical/physical UV scale, zw = texture1 logical/physical UV scale.
+    var textureUVScale: SIMD4<Float>
 }
 
 struct WPEObjectQuadUniforms {

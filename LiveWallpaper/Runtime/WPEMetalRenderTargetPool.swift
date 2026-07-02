@@ -225,13 +225,28 @@ final class WPEMetalRenderTargetPool {
         case .fbo(let name):
             let lookupName = Self.inheritedPuppetClipBaseName(for: name) ?? name
             if let inherited = declaredFBOs[lookupName] ?? layer.localFBOs.first(where: { $0.name == lookupName }) {
-                spec = WPERenderFBO(name: name, scale: inherited.scale, format: inherited.format)
+                spec = WPERenderFBO(
+                    name: name,
+                    scale: inherited.scale,
+                    format: inherited.format,
+                    unique: inherited.unique,
+                    pixelSize: inherited.pixelSize
+                )
             } else {
                 spec = WPERenderFBO(name: name, scale: 1, format: "rgba8888")
             }
         }
 
         let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
+        if let pixelSize = spec.pixelSize {
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                width: wpeRenderTargetDimension(pixelSize.width, scale: spec.scale),
+                height: wpeRenderTargetDimension(pixelSize.height, scale: spec.scale),
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        }
         if case .layerComposite = target {
             let localSize = Self.layerCompositeSize(for: layer, sceneSize: sceneSize)
             return WPEMetalRenderTargetKey(
@@ -318,7 +333,13 @@ final class WPEMetalRenderTargetPool {
         case .fbo(let name):
             let lookupName = Self.inheritedPuppetClipBaseName(for: name) ?? name
             if let inherited = declaredFBOs[lookupName] ?? layer.localFBOs.first(where: { $0.name == lookupName }) {
-                return WPERenderFBO(name: name, scale: inherited.scale, format: inherited.format)
+                return WPERenderFBO(
+                    name: name,
+                    scale: inherited.scale,
+                    format: inherited.format,
+                    unique: inherited.unique,
+                    pixelSize: inherited.pixelSize
+                )
             }
             return WPERenderFBO(name: name, scale: 1, format: "rgba8888")
         }
@@ -333,6 +354,15 @@ final class WPEMetalRenderTargetPool {
     ) -> WPEMetalRenderTargetKey {
         switch target {
         case .layerComposite:
+            if let pixelSize = spec.pixelSize {
+                return WPEMetalRenderTargetKey(
+                    name: spec.name,
+                    width: wpeRenderTargetDimension(pixelSize.width, scale: spec.scale),
+                    height: wpeRenderTargetDimension(pixelSize.height, scale: spec.scale),
+                    format: spec.format,
+                    pixelFormat: pixelFormat
+                )
+            }
             let localSize = Self.layerCompositeSize(
                 for: layer,
                 sceneSize: sceneSize
@@ -345,6 +375,15 @@ final class WPEMetalRenderTargetPool {
                 pixelFormat: pixelFormat
             )
         case .scene, .fbo:
+            if let pixelSize = spec.pixelSize {
+                return WPEMetalRenderTargetKey(
+                    name: spec.name,
+                    width: wpeRenderTargetDimension(pixelSize.width, scale: spec.scale),
+                    height: wpeRenderTargetDimension(pixelSize.height, scale: spec.scale),
+                    format: spec.format,
+                    pixelFormat: pixelFormat
+                )
+            }
             if case .fbo(let fboName) = target,
                let localSize = Self.layerLocalFBOPixelSize(fboName: fboName, layer: layer, sceneSize: sceneSize) {
                 return WPEMetalRenderTargetKey(
@@ -372,7 +411,7 @@ final class WPEMetalRenderTargetPool {
         // WPE compose/project utility layers capture the full frame, so their
         // layer-composite target MUST be scene-sized. Sizing it to the object's
         // scaled footprint was the root of the "picture-in-picture" inset.
-        if isSceneCaptureUtilityLayer(layer) {
+        if isSceneCaptureUtilityLayer(layer), layer.groupCompositeSource == nil {
             return sceneSize
         }
 

@@ -73,6 +73,9 @@ struct WPERenderPipelineBuilder: Sendable {
             // Missing / corrupt .mdl → degrade to the flat material image.
             return nil
         }
+        if (layer.imagePath as NSString).pathExtension.lowercased() == "mdl" {
+            return model
+        }
         // Only the modern pre-assembled puppet generations (MDLV0021/0023) ship MDLV
         // vertices already in assembled object space, which the renderer can draw
         // directly. Older generations (MDLV0019 and below) store an *exploded* "pieces"

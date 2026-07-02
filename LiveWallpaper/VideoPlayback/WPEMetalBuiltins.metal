@@ -521,8 +521,13 @@ struct WPEShakeUniforms {
 
 struct WPEGenericImageUniforms {
     float4 color;        // g_Color (sRGB→linear converted by executor)
-    float4 alphaMaskUV;  // x=alpha multiplier, y=brightness, z=hasMask, w=padding
+    float4 alphaMaskUV;  // x=alpha multiplier, y=brightness, z=hasMask, w=mode/padding
+    float4 textureUVScale; // xy=texture0 logical/physical scale, zw=texture1 logical/physical scale
 };
+
+static inline float2 wpe_logical_texture_uv(float2 uv, float2 scale) {
+    return clamp(uv * max(scale, float2(0.0)), float2(0.0), float2(1.0));
+}
 
 fragment half4 wpe_genericimage2_fragment(
     WPEVertexOut in [[stage_in]],
@@ -530,7 +535,8 @@ fragment half4 wpe_genericimage2_fragment(
     constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float2 sourceUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.xy);
+    float4 sampled = float4(texture0.sample(linearSampler, sourceUV));
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * uniforms.color.a * uniforms.alphaMaskUV.x;
     // Premultiplied-alpha render target: the layer-FBO / effect-chain passes
@@ -548,10 +554,12 @@ fragment half4 wpe_genericimage4_fragment(
     constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float2 sourceUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.xy);
+    float2 maskUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.zw);
+    float4 sampled = float4(texture0.sample(linearSampler, sourceUV));
     float maskAlpha = 1.0;
     if (uniforms.alphaMaskUV.z > 0.5) {
-        maskAlpha = float(texture1.sample(linearSampler, in.uv).a);
+        maskAlpha = float(texture1.sample(linearSampler, maskUV).a);
     }
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
@@ -569,8 +577,10 @@ fragment half4 wpe_puppet_clippingmaskimage4_fragment(
     constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float albedoAlpha = float(texture0.sample(linearSampler, in.uv).a);
-    float mask = float(texture1.sample(linearSampler, in.uv).r);
+    float2 sourceUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.xy);
+    float2 maskUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.zw);
+    float albedoAlpha = float(texture0.sample(linearSampler, sourceUV).a);
+    float mask = float(texture1.sample(linearSampler, maskUV).r);
     float alpha = mix(pow(albedoAlpha, 4.0), albedoAlpha, mask);
     float red = mask * alpha;
     red = mix(red, 1.0 - red, saturate(uniforms.alphaMaskUV.w));
@@ -588,10 +598,12 @@ fragment half4 wpe_genericimage4_puppet_clip_fragment(
     constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float2 sourceUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.xy);
+    float2 maskUV = wpe_logical_texture_uv(in.uv, uniforms.textureUVScale.zw);
+    float4 sampled = float4(texture0.sample(linearSampler, sourceUV));
     float maskAlpha = 1.0;
     if (uniforms.alphaMaskUV.z > 0.5) {
-        maskAlpha = float(texture1.sample(linearSampler, in.uv).a);
+        maskAlpha = float(texture1.sample(linearSampler, maskUV).a);
     }
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
