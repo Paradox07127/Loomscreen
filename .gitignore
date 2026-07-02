@@ -108,6 +108,7 @@ scripts/
 skills/
 docs/review/
 archived/
+CLAUDE.md
 
 # Python bytecode
 __pycache__/
