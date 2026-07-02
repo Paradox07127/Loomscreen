@@ -1,6 +1,27 @@
 #if !LITE_BUILD
 import Foundation
 
+/// Backoff for failed static-texture reloads. Without it a permanently missing
+/// file would retry every frame (`ensureActiveStaticTexturesResident`
+/// re-schedules while the placeholder is up): exponential 1→2→4→…→30s gaps,
+/// giving up after `maxAttempts`; any successful load clears the path's history.
+struct WPEStaticTextureReloadThrottle: Equatable, Sendable {
+    static let maxAttempts = 5
+    private(set) var failureCount = 0
+    private(set) var nextAttemptUptime: TimeInterval = 0
+
+    var isExhausted: Bool { failureCount >= Self.maxAttempts }
+
+    func allowsAttempt(at uptime: TimeInterval) -> Bool {
+        !isExhausted && uptime >= nextAttemptUptime
+    }
+
+    mutating func recordFailure(at uptime: TimeInterval) {
+        failureCount += 1
+        nextAttemptUptime = uptime + min(pow(2, Double(failureCount - 1)), 30)
+    }
+}
+
 /// LRU bookkeeping for reloadable static source textures. The renderer owns the
 /// actual `MTLTexture` store; this only tracks resident byte estimates and
 /// recency so the frame path can evict inactive textures while protecting the

@@ -585,10 +585,16 @@ struct WPESceneDetailView: View {
 
     private static func nonDefaultRenderFlags() -> [String] {
         let defaults = UserDefaults.standard
-        return renderFlagKeys.compactMap { key in
+        var flags = renderFlagKeys.compactMap { key -> String? in
             guard let value = defaults.object(forKey: key) else { return nil }
             return "\(key.dropFirst(3))=\(value)"
         }
+        // Tier defaults apply when the budget key is unset, so an unset key no
+        // longer means "unbounded" — always report the effective value.
+        let effectiveBudget = WPEMetalSceneRenderer.textureCacheBudgetBytes
+            .map { "\($0 / 1_048_576)MiB" } ?? "unbounded"
+        flags.append("MemoryTier=\(WPEMemoryTier.current) textureBudget=\(effectiveBudget)")
+        return flags
     }
 
 

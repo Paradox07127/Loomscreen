@@ -43,18 +43,28 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// — route through `WPETexLazyAnimatedTextureSource` instead. Threshold
     /// chosen to keep small (≤2-3 frame) workshop sprite-sheets on the
     /// fast eager path while sending workshop 3725117707-class assets
-    /// (60 × 122 MB raw) to the streaming source.
-    private static let lazyAnimationRawByteThreshold = 200_000_000
+    /// (60 × 122 MB raw) to the streaming source. Tiered by physical RAM
+    /// (halved on 8 GB machines — see `WPEMemoryTier`).
+    private static let lazyAnimationRawByteThreshold = WPEMemoryTier.current.lazyAnimationRawByteThreshold
 
     static let textureCacheBudgetMiBDefaultsKey = "WPEMetalTextureCacheBudgetMiB"
-    /// Optional VRAM budget (MiB) for reloadable static source textures. Default
-    /// OFF: unset or 0 ⇒ unbounded (eager resident cache, byte-identical to the
-    /// legacy path). When set, inactive (hidden-layer) textures over budget are
-    /// LRU-evicted and reloaded on demand. `defaults write Taijia.LiveWallpaper
-    /// WPEMetalTextureCacheBudgetMiB -int 256`.
+    /// VRAM budget for reloadable static source textures. Unset ⇒ the machine's
+    /// memory-tier default (8/16 GB Macs bounded, ≥24 GB unbounded — see
+    /// `WPEMemoryTier`); explicit 0 or negative ⇒ unbounded (manual opt-out);
+    /// positive ⇒ that many MiB. Over-budget inactive (hidden-layer) textures
+    /// are LRU-evicted and reloaded on demand. Snapshot per scene load, so
+    /// `defaults write Taijia.LiveWallpaper WPEMetalTextureCacheBudgetMiB -int 256`
+    /// applies on the next (re)load.
     static var textureCacheBudgetBytes: Int? {
-        guard let raw = UserDefaults.standard.object(forKey: textureCacheBudgetMiBDefaultsKey) else { return nil }
-        let mib = (raw as? NSNumber)?.intValue ?? 0
+        resolvedTextureCacheBudgetBytes(
+            manualValue: UserDefaults.standard.object(forKey: textureCacheBudgetMiBDefaultsKey),
+            tier: .current
+        )
+    }
+
+    static func resolvedTextureCacheBudgetBytes(manualValue: Any?, tier: WPEMemoryTier) -> Int? {
+        guard let manualValue else { return tier.defaultTextureCacheBudgetBytes }
+        let mib = (manualValue as? NSNumber)?.intValue ?? 0
         guard mib > 0 else { return nil }
         return mib * 1_048_576
     }
@@ -216,8 +226,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var staticTextureCacheRecords: [String: StaticTextureCacheRecord] = [:]
     private var textureCacheLRU = WPEMetalTextureCacheLRU(budgetBytes: 0)
     private var textureCacheBudgetBytesInUse: Int?
+    /// Per-load snapshot of `Self.textureCacheBudgetBytes` — the frame path must
+    /// never read UserDefaults (per-frame defaults reads showed up hot in the C2
+    /// flag-freeze pass).
+    private var textureCacheBudgetBytesResolved: Int?
     private var staticTexturePlaceholderPaths: Set<String> = []
     private var pendingStaticTextureReloads: Set<String> = []
+    private var staticTextureReloadThrottles: [String: WPEStaticTextureReloadThrottle] = [:]
+    /// Memoizes `activeStaticTexturePaths` (the budget's only per-frame walk).
+    /// Keyed by a per-layer visibility/shape signature: script or property flips
+    /// recompute, static frames reuse. A hash collision only mis-protects for
+    /// one frame and self-heals via the placeholder+reload path.
+    private var cachedActiveStaticPaths: Set<String> = []
+    private var cachedActiveStaticSignature: Int?
+    private var staticTextureRecordsEpoch = 0
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
     /// during `performLoad()`; refreshed each render via
@@ -760,6 +782,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         renderPipeline = pipeline
         createdLayerTemplatesByImagePath = Self.createdLayerTemplatesByImagePath(pipeline)
         executor.invalidateStaticLayerCache()
+        textureCacheBudgetBytesResolved = Self.textureCacheBudgetBytes
         hasAnimatedShaderPasses = Self.pipelineHasAnimatedPasses(pipeline)
         // Seed incremental-apply state. The graph builder already baked each
         // layer's authored `visible` into the pipeline, so these baselines
@@ -3554,12 +3577,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     ) {
         loadedTextures[path] = texture
         staticTexturePlaceholderPaths.remove(path)
+        staticTextureReloadThrottles.removeValue(forKey: path)
         let bytes = Self.textureResidentBytes(for: texture)
         staticTextureCacheRecords[path] = StaticTextureCacheRecord(
             layerName: layerName,
             candidates: candidates,
             bytes: bytes
         )
+        staticTextureRecordsEpoch += 1
         if textureCacheBudgetBytesInUse != nil {
             textureCacheLRU.admit(path, bytes: bytes)
         }
@@ -3569,6 +3594,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         staticTextureCacheRecords.removeValue(forKey: path)
         staticTexturePlaceholderPaths.remove(path)
         pendingStaticTextureReloads.remove(path)
+        staticTextureReloadThrottles.removeValue(forKey: path)
+        staticTextureRecordsEpoch += 1
         textureCacheLRU.remove(path)
     }
 
@@ -3576,6 +3603,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         staticTextureCacheRecords.removeAll(keepingCapacity: false)
         staticTexturePlaceholderPaths.removeAll(keepingCapacity: false)
         pendingStaticTextureReloads.removeAll(keepingCapacity: false)
+        staticTextureReloadThrottles.removeAll(keepingCapacity: false)
+        cachedActiveStaticPaths.removeAll(keepingCapacity: false)
+        cachedActiveStaticSignature = nil
+        staticTextureRecordsEpoch += 1
         textureCacheLRU.removeAll()
         textureCacheBudgetBytesInUse = nil
     }
@@ -3602,9 +3633,27 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// External texture paths the upcoming frame actually samples, restricted to
-    /// reloadable static ones (the only eviction candidates).
+    /// reloadable static ones (the only eviction candidates). Memoized on a
+    /// cheap O(layers) signature — the full layers × passes × refs walk only
+    /// reruns when visibility/shape or the record set actually changed.
     private func activeStaticTexturePaths(for pipeline: WPEPreparedRenderPipeline) -> Set<String> {
-        activeExternalTexturePaths(for: pipeline).filter { staticTextureCacheRecords[$0] != nil }
+        var hasher = Hasher()
+        hasher.combine(loadGeneration)
+        hasher.combine(staticTextureRecordsEpoch)
+        hasher.combine(pipeline.layers.count)
+        for layer in pipeline.layers {
+            hasher.combine(layer.graphLayer.objectID)
+            hasher.combine(layer.graphLayer.visible)
+            hasher.combine(layer.passes.count)
+        }
+        let signature = hasher.finalize()
+        if signature == cachedActiveStaticSignature {
+            return cachedActiveStaticPaths
+        }
+        let paths = activeExternalTexturePaths(for: pipeline).filter { staticTextureCacheRecords[$0] != nil }
+        cachedActiveStaticPaths = paths
+        cachedActiveStaticSignature = signature
+        return paths
     }
 
     private func activeExternalTexturePaths(for pipeline: WPEPreparedRenderPipeline) -> Set<String> {
@@ -3673,8 +3722,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Reload an evicted static texture off the main thread, then republish on the
     /// main actor under a `loadGeneration` guard so a reload from a prior scene is
     /// ignored. Triggers a redraw so the placeholder is replaced once resident.
+    /// Failed attempts back off per path (`WPEStaticTextureReloadThrottle`).
     private func scheduleStaticTextureReload(for path: String) {
         guard let record = staticTextureCacheRecords[path],
+              staticTextureReloadThrottles[path, default: .init()]
+                  .allowsAttempt(at: ProcessInfo.processInfo.systemUptime),
               pendingStaticTextureReloads.insert(path).inserted else { return }
         let generation = loadGeneration
         let resolver = resourceResolver
@@ -3700,27 +3752,47 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     texture: texture
                 )
             case .needsOnActor:
-                try? await self.loadDynamicTextureOnActor(path: path, layerName: record.layerName)
+                do {
+                    try await self.loadDynamicTextureOnActor(path: path, layerName: record.layerName)
+                } catch {
+                    self.noteStaticTextureReloadFailure(path)
+                    return
+                }
             case .none:
-                Logger.warning("[WPE.texture-cache] reload failed path=\(path)", category: .wpeRender)
+                self.noteStaticTextureReloadFailure(path)
                 return
             }
             self.mtkView.setNeedsDisplay(self.mtkView.bounds)
         }
     }
 
-    private static func textureResidentBytes(for texture: MTLTexture) -> Int {
+    private func noteStaticTextureReloadFailure(_ path: String) {
+        var throttle = staticTextureReloadThrottles[path, default: .init()]
+        throttle.recordFailure(at: ProcessInfo.processInfo.systemUptime)
+        staticTextureReloadThrottles[path] = throttle
+        if throttle.isExhausted {
+            Logger.warning("[WPE.texture-cache] reload giving up after \(throttle.failureCount) failures path=\(path)", category: .wpeRender)
+        } else {
+            Logger.warning("[WPE.texture-cache] reload failed (attempt \(throttle.failureCount)) path=\(path)", category: .wpeRender)
+        }
+    }
+
+    static func textureResidentBytes(for texture: MTLTexture) -> Int {
         // BC formats are block-compressed in VRAM (the texture loader uploads them
         // compressed); per-pixel math would 4-6x over-count the budget.
+        let baseBytes: Int
         switch texture.pixelFormat {
         case .bc1_rgba, .bc1_rgba_srgb:
-            return compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 8)
+            baseBytes = compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 8)
         case .bc2_rgba, .bc2_rgba_srgb, .bc3_rgba, .bc3_rgba_srgb,
              .bc7_rgbaUnorm, .bc7_rgbaUnorm_srgb:
-            return compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 16)
+            baseBytes = compressedTextureBytes(width: texture.width, height: texture.height, bytesPerBlock: 16)
         default:
-            return texture.width * texture.height * textureCacheBytesPerPixel(for: texture.pixelFormat)
+            baseBytes = texture.width * texture.height * textureCacheBytesPerPixel(for: texture.pixelFormat)
         }
+        // No loader path generates mips today; the 4/3 mip-chain bound keeps the
+        // estimate honest if one ever does.
+        return texture.mipmapLevelCount > 1 ? baseBytes * 4 / 3 : baseBytes
     }
 
     private static func compressedTextureBytes(width: Int, height: Int, bytesPerBlock: Int) -> Int {
@@ -3755,15 +3827,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             }
         }
 
-        // Zero overhead on the default (budget never enabled, nothing evicted) path:
+        // Zero overhead on the unbounded (budget off, nothing evicted) path:
         // only walk active paths when the budget is/was active or a placeholder
         // still awaits reload.
-        if Self.textureCacheBudgetBytes != nil
+        if textureCacheBudgetBytesResolved != nil
             || textureCacheBudgetBytesInUse != nil
             || !staticTexturePlaceholderPaths.isEmpty {
             let activeStaticPaths = activeStaticTexturePaths(for: pipeline)
             try ensureActiveStaticTexturesResident(activeStaticPaths)
-            if let budgetBytes = Self.textureCacheBudgetBytes {
+            if let budgetBytes = textureCacheBudgetBytesResolved {
                 activateTextureCacheBudget(budgetBytes)
                 touchStaticTextureCache(paths: activeStaticPaths)
                 evictInactiveStaticTextures(protecting: activeStaticPaths)
