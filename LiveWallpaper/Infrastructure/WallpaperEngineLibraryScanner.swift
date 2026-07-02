@@ -56,26 +56,6 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         }.value
     }
 
-    /// No-bookmark variant for in-container roots the app already has full access
-    /// to, e.g. steamcmd's sandbox-redirected download tree (`Application Support/
-    /// Steam/steamapps/workshop/content/431960`). Discovered projects carry empty
-    /// bookmark data; the headless corpus harness reads their `folderURL` directly
-    /// and never resolves a bookmark for them.
-    func scan(
-        rootURL: URL,
-        alreadyImportedWorkshopIDs: Set<String>
-    ) async throws -> [DiscoveredProject] {
-        try await Task.detached(priority: .userInitiated) { [fileManager] in
-            try Self.performScan(
-                rootURL: rootURL,
-                effectiveRootBookmarkData: Data(),
-                manageSecurityScope: false,
-                alreadyImportedWorkshopIDs: alreadyImportedWorkshopIDs,
-                fileManager: fileManager
-            )
-        }.value
-    }
-
     private static func performScan(
         rootBookmarkData: Data,
         alreadyImportedWorkshopIDs: Set<String>,
@@ -96,7 +76,6 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         return try performScan(
             rootURL: rootURL,
             effectiveRootBookmarkData: effectiveRootBookmarkData,
-            manageSecurityScope: true,
             alreadyImportedWorkshopIDs: alreadyImportedWorkshopIDs,
             fileManager: fileManager
         )
@@ -105,11 +84,10 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
     private static func performScan(
         rootURL: URL,
         effectiveRootBookmarkData: Data,
-        manageSecurityScope: Bool,
         alreadyImportedWorkshopIDs: Set<String>,
         fileManager: FileManager
     ) throws -> [DiscoveredProject] {
-        let didStartScope = manageSecurityScope && rootURL.startAccessingSecurityScopedResource()
+        let didStartScope = rootURL.startAccessingSecurityScopedResource()
         defer { if didStartScope { rootURL.stopAccessingSecurityScopedResource() } }
 
         let children: [URL]

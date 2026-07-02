@@ -840,10 +840,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         onProgress?("Rendering scene")
 
         // Render the FIRST frame synchronously: it is read back on the CPU right
-        // after load() by the scene-debug snapshot, the corpus harness, and the
-        // `renderedTexture` accessor (tests) — an async submission would let those
-        // read-backs race the GPU and sample an unfinished frame. It is a one-time
-        // cost; the steady-state draw loop switches to async below.
+        // after load() by the scene-debug snapshot and the `renderedTexture`
+        // accessor (tests) — an async submission would let those read-backs race
+        // the GPU and sample an unfinished frame. It is a one-time cost; the
+        // steady-state draw loop switches to async below.
         executor.synchronizeFrameCompletion = true
         let capture = beginGPUCaptureIfRequested()
         outputTexture = try renderCurrentFrame()
@@ -1400,105 +1400,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
-    #if DEBUG
-    /// Test-only: render the loaded scene but keep only the first `passLimit`
-    /// passes of each layer, so a black-screen bug can be bisected to the exact
-    /// pass that blackens the composite. Returns the executor output texture
-    /// (no particles/text overlay). Caller must have already `load()`-ed.
-    func debugRenderTruncated(passLimit: Int) throws -> MTLTexture {
-        guard let pipeline = renderPipeline else {
-            throw WPEMetalRenderExecutorError.noRenderablePasses
-        }
-        // The returned texture is read back on the CPU for bisection, so force the
-        // synchronous path regardless of the scene's live submission mode.
-        let previousSync = executor.synchronizeFrameCompletion
-        executor.synchronizeFrameCompletion = true
-        defer { executor.synchronizeFrameCompletion = previousSync }
-        let truncated = WPEPreparedRenderPipeline(
-            layers: pipeline.layers.map { layer in
-                WPEPreparedRenderLayer(
-                    graphLayer: layer.graphLayer,
-                    puppetModel: layer.puppetModel,
-                    passes: Array(layer.passes.prefix(passLimit))
-                )
-            }
-        )
-        let uniforms = lastRuntimeUniforms ?? frameClock.runtimeUniforms(
-            profile: currentProfile,
-            pointerPosition: SIMD2<Double>(0.5, 0.5)
-        )
-        return try executor.render(
-            pipeline: truncated,
-            size: sceneRenderSize,
-            textures: try texturesForCurrentFrame(time: uniforms.time, pipeline: truncated),
-            dynamicTextureNames: Set(dynamicTextureSources.keys),
-            runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms,
-            sceneID: descriptor.workshopID
-        )
-    }
-
-    /// Test-only: total pass count of the first layer (the saber image layer).
-    var debugFirstLayerPassCount: Int {
-        renderPipeline?.layers.first?.passes.count ?? 0
-    }
-
-    /// Test-only: live particle instance counts after the most recent frame tick.
-    var debugParticleLiveInstanceCounts: [Int] {
-        particleSystems.map(\.liveInstanceCount)
-    }
-
-    /// Test-only: render `frames` successive full frames through the real
-    /// `renderCurrentFrame` path (so cross-frame `previousFrameHistory` feedback
-    /// accumulates exactly like on-device), returning each frame's output texture.
-    func debugRenderSuccessiveFrameTextures(_ frames: Int) throws -> [MTLTexture] {
-        // This diagnostic holds every frame's texture for after-the-fact pixel
-        // comparison; output recycling would alias frame N with frame N+3.
-        executor.isOutputPoolingEnabled = false
-        // Each frame's texture is held + pixel-diffed on the CPU afterwards, so it
-        // must be fully rendered before the next iteration overwrites GPU state.
-        let previousSync = executor.synchronizeFrameCompletion
-        executor.synchronizeFrameCompletion = true
-        defer {
-            executor.isOutputPoolingEnabled = true
-            executor.synchronizeFrameCompletion = previousSync
-        }
-        var out: [MTLTexture] = []
-        out.reserveCapacity(frames)
-        for _ in 0..<frames {
-            let tex = try renderCurrentFrame()
-            outputTexture = tex
-            out.append(tex)
-        }
-        return out
-    }
-
-    static func debugFrameStats(of texture: MTLTexture) -> (Double, Double, Double) {
-        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
-            return (-1, -1, -1)
-        }
-        let bpr = texture.width * 4
-        var bytes = [UInt8](repeating: 0, count: bpr * texture.height)
-        texture.getBytes(&bytes, bytesPerRow: bpr,
-                         from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
-        var nonBlack = 0, white = 0, sampled = 0
-        var lumaSum = 0.0
-        let step = max(1, texture.height / 200)
-        for y in stride(from: 0, to: texture.height, by: step) {
-            for x in stride(from: 0, to: texture.width, by: step) {
-                let i = y * bpr + x * 4
-                let r = Int(bytes[i]), g = Int(bytes[i + 1]), b = Int(bytes[i + 2])
-                lumaSum += Double(r + g + b) / 3.0
-                if r > 10 || g > 10 || b > 10 { nonBlack += 1 }
-                if r > 240 && g > 240 && b > 240 { white += 1 }
-                sampled += 1
-            }
-        }
-        let n = Double(max(sampled, 1))
-        return (Double(nonBlack) / n, Double(white) / n, lumaSum / n)
-    }
-    #endif
-
     private func renderCurrentFrame() throws -> MTLTexture {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses

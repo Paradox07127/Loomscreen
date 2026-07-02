@@ -354,11 +354,6 @@ final class WPEMetalRenderExecutor {
     private let presentTracker = PresentInFlightTracker()
     let gpuErrorSink = WPEGPUErrorSink()
     let shaderErrorSink = WPEShaderErrorSink()
-    /// Diagnostics that hold several successive frame textures at once
-    /// (`debugRenderSuccessiveFrameTextures`) disable recycling so each frame
-    /// keeps distinct storage.
-    var isOutputPoolingEnabled = true
-
     /// Max frames whose command buffers may be in flight at once when submitting
     /// asynchronously. MUST equal the `recentOutputTextureIDs` retention: a vended
     /// output target stays out of the reuse set for exactly that many subsequent
@@ -4587,12 +4582,10 @@ final class WPEMetalRenderExecutor {
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
         let width = max(Int(size.width), 1)
         let height = max(Int(size.height), 1)
-        if isOutputPoolingEnabled {
-            outputTexturePool.removeAll { $0.width != width || $0.height != height }
-            if let recycled = outputTexturePool.first(where: isOutputTextureReusable) {
-                noteVendedOutputTexture(recycled)
-                return recycled
-            }
+        outputTexturePool.removeAll { $0.width != width || $0.height != height }
+        if let recycled = outputTexturePool.first(where: isOutputTextureReusable) {
+            noteVendedOutputTexture(recycled)
+            return recycled
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.outputPixelFormat,
@@ -4606,14 +4599,12 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         texture.label = "WPE Metal executor output"
-        if isOutputPoolingEnabled {
-            outputTexturePool.append(texture)
-            // Steady state needs 3 (in-render + re-presented latest + history);
-            // anything beyond that came from transient stalls — let ARC reap
-            // the dropped one once its holders release it.
-            if outputTexturePool.count > 4 {
-                outputTexturePool.removeFirst()
-            }
+        outputTexturePool.append(texture)
+        // Steady state needs 3 (in-render + re-presented latest + history);
+        // anything beyond that came from transient stalls — let ARC reap
+        // the dropped one once its holders release it.
+        if outputTexturePool.count > 4 {
+            outputTexturePool.removeFirst()
         }
         noteVendedOutputTexture(texture)
         return texture

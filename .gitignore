@@ -105,6 +105,9 @@ cache/
 tools/
 trace/
 scripts/
+skills/
+docs/review/
+archived/
 
 # Python bytecode
 __pycache__/

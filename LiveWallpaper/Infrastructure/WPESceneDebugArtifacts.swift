@@ -10,8 +10,8 @@ import Metal
 /// compiler saw (original/processed GLSL, translated MSL, error text, first-frame.png).
 ///
 /// Gated by the `WPESceneDebugArtifactsEnabled` UserDefaults flag, off by default so
-/// a normal launch never pays for dumps / read-back / binding diagnostics; the corpus
-/// harness and trace tests flip it on explicitly.
+/// a normal launch never pays for dumps / read-back / binding diagnostics; the
+/// Developer Tools toggle and trace tests flip it on explicitly.
 ///
 /// `@unchecked Sendable`: `session` is guarded by `sessionLock`; I/O via `writeQueue`.
 final class WPESceneDebugArtifacts: @unchecked Sendable {
@@ -84,7 +84,7 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     /// DEBUG-only: hard-disabled in Release so a stray `WPESceneDebugArtifactsEnabled`
     /// flag (e.g. from `defaults write` or an imported settings bundle) can never make
     /// a shipping build write first-frame snapshots / scene-debug dumps. Disabled by
-    /// default even in DEBUG; the corpus harness flips it on for per-scene dumps.
+    /// default even in DEBUG; the Developer Tools toggle flips it on for per-scene dumps.
     var isEnabled: Bool {
         #if DEBUG
         testingEnabledOverrideLock.lock()
