@@ -2925,11 +2925,12 @@ private func makeRGBAInputTexture(
     descriptor.usage = [.shaderRead]
     descriptor.storageMode = .shared
     let texture = try #require(device.makeTexture(descriptor: descriptor))
-    bytes.withUnsafeBytes { raw in
+    try bytes.withUnsafeBytes { raw in
+        let baseAddress = try #require(raw.baseAddress)
         texture.replace(
             region: MTLRegionMake2D(0, 0, width, height),
             mipmapLevel: 0,
-            withBytes: raw.baseAddress!,
+            withBytes: baseAddress,
             bytesPerRow: width * 4
         )
     }

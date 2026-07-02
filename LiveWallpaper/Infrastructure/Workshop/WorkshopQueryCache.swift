@@ -8,43 +8,104 @@ import Foundation
 /// expiry on 5-minute TTL with a 100 MB hard cap.
 actor WorkshopQueryCache {
 
-    private static let ttl: TimeInterval = 300
-    private static let hardCapBytes: Int64 = 100 * 1024 * 1024
-
-    private let directoryURL: URL
-    private let fileManager: FileManager
-    private let now: @Sendable () -> Date
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    private let disk: WorkshopQueryCacheDisk
 
     init(
         directoryURL: URL? = nil,
         fileManager: FileManager = .default,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.fileManager = fileManager
-        self.now = now
-        self.directoryURL = directoryURL ?? Self.defaultDirectoryURL(fileManager: fileManager)
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        self.encoder = encoder
-        self.decoder = JSONDecoder()
-
-        Task { [self] in await sweepExpiredAndEnforceCap() }
+        let disk = WorkshopQueryCacheDisk(
+            directoryURL: directoryURL ?? Self.defaultDirectoryURL(fileManager: fileManager),
+            now: now
+        )
+        self.disk = disk
+        Task { await disk.sweepExpiredAndEnforceCap() }
     }
 
     func read(forKey key: String) async -> WorkshopQueryPage? {
+        await disk.read(forKey: key)
+    }
+
+    func write(_ page: WorkshopQueryPage, forKey key: String) async {
+        await disk.write(page, forKey: key)
+    }
+
+    func sizeBytes() async -> Int64 {
+        await disk.sizeBytes()
+    }
+
+    func clear() async {
+        await disk.clear()
+    }
+
+    private static func defaultDirectoryURL(fileManager: FileManager) -> URL {
+        let applicationSupport = (try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        return applicationSupport
+            .appendingPathComponent("Loomscreen", isDirectory: true)
+            .appendingPathComponent("WorkshopQueryCache", isDirectory: true)
+    }
+
+}
+
+private final class WorkshopQueryCacheDisk: @unchecked Sendable {
+    private static let ttl: TimeInterval = 300
+    private static let hardCapBytes: Int64 = 100 * 1024 * 1024
+
+    private let directoryURL: URL
+    private let now: @Sendable () -> Date
+    private let queue = DispatchQueue(label: "com.livewallpaper.workshop-query-cache.disk", qos: .utility)
+
+    init(directoryURL: URL, now: @escaping @Sendable () -> Date) {
+        self.directoryURL = directoryURL
+        self.now = now
+    }
+
+    func read(forKey key: String) async -> WorkshopQueryPage? {
+        await perform { self.readSync(forKey: key) }
+    }
+
+    func write(_ page: WorkshopQueryPage, forKey key: String) async {
+        await perform { self.writeSync(page, forKey: key) }
+    }
+
+    func sizeBytes() async -> Int64 {
+        await perform { self.sizeBytesSync() }
+    }
+
+    func clear() async {
+        await perform { self.clearSync() }
+    }
+
+    func sweepExpiredAndEnforceCap() async {
+        await perform { self.sweepExpiredAndEnforceCapSync() }
+    }
+
+    private func perform<T: Sendable>(_ work: @Sendable @escaping () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: work())
+            }
+        }
+    }
+
+    private func readSync(forKey key: String) -> WorkshopQueryPage? {
         do {
-            try ensureDirectory()
+            let fileManager = FileManager.default
+            try ensureDirectory(fileManager: fileManager)
             let url = fileURL(forKey: key)
             guard fileManager.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
-            if isExpired(url) {
+            if isExpired(url, fileManager: fileManager) {
                 try? fileManager.removeItem(at: url)
                 return nil
             }
             let data = try Data(contentsOf: url)
-            let payload = try decoder.decode(CachedPagePayload.self, from: data)
+            let payload = try JSONDecoder().decode(CachedPagePayload.self, from: data)
             // Bump mtime so the hard-cap eviction approximates LRU rather
             // than pure first-write order.
             try? fileManager.setAttributes(
@@ -57,34 +118,39 @@ actor WorkshopQueryCache {
         }
     }
 
-    func write(_ page: WorkshopQueryPage, forKey key: String) async {
+    private func writeSync(_ page: WorkshopQueryPage, forKey key: String) {
         do {
-            try ensureDirectory()
+            let fileManager = FileManager.default
+            try ensureDirectory(fileManager: fileManager)
             let url = fileURL(forKey: key)
             let tmpURL = url.deletingLastPathComponent()
                 .appendingPathComponent(url.lastPathComponent + ".tmp", isDirectory: false)
             let payload = CachedPagePayload(page: page)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             let data = try encoder.encode(payload)
             try? fileManager.removeItem(at: tmpURL)
             try data.write(to: tmpURL)
             try Self.renameItem(at: tmpURL, to: url)
             try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path(percentEncoded: false))
-            try enforceHardCap()
+            try enforceHardCap(fileManager: fileManager)
         } catch {
             return
         }
     }
 
-    func sizeBytes() async -> Int64 {
+    private func sizeBytesSync() -> Int64 {
         do {
-            try ensureDirectory()
-            return try cacheEntries().reduce(Int64(0)) { $0 + $1.sizeBytes }
+            let fileManager = FileManager.default
+            try ensureDirectory(fileManager: fileManager)
+            return try cacheEntries(fileManager: fileManager).reduce(Int64(0)) { $0 + $1.sizeBytes }
         } catch {
             return 0
         }
     }
 
-    func clear() async {
+    private func clearSync() {
+        let fileManager = FileManager.default
         do {
             if fileManager.fileExists(atPath: directoryURL.path(percentEncoded: false)) {
                 let tombstone = directoryURL
@@ -94,27 +160,28 @@ actor WorkshopQueryCache {
                         isDirectory: true
                     )
                 try fileManager.moveItem(at: directoryURL, to: tombstone)
-                try ensureDirectory()
+                try ensureDirectory(fileManager: fileManager)
                 try? fileManager.removeItem(at: tombstone)
             } else {
-                try ensureDirectory()
+                try ensureDirectory(fileManager: fileManager)
             }
         } catch {
-            try? ensureDirectory()
+            try? ensureDirectory(fileManager: fileManager)
         }
     }
 
-    private func sweepExpiredAndEnforceCap() async {
+    private func sweepExpiredAndEnforceCapSync() {
         do {
-            try ensureDirectory()
-            try deleteExpiredEntries()
-            try enforceHardCap()
+            let fileManager = FileManager.default
+            try ensureDirectory(fileManager: fileManager)
+            try deleteExpiredEntries(fileManager: fileManager)
+            try enforceHardCap(fileManager: fileManager)
         } catch {
             return
         }
     }
 
-    private func ensureDirectory() throws {
+    private func ensureDirectory(fileManager: FileManager) throws {
         var isDirectory = ObjCBool(false)
         let path = directoryURL.path(percentEncoded: false)
         if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
@@ -140,7 +207,7 @@ actor WorkshopQueryCache {
         directoryURL.appendingPathComponent(Self.safeFileName(forKey: key), isDirectory: false)
     }
 
-    private func isExpired(_ url: URL) -> Bool {
+    private func isExpired(_ url: URL, fileManager: FileManager) -> Bool {
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path(percentEncoded: false)),
               let modified = attributes[.modificationDate] as? Date else {
             return true
@@ -148,15 +215,15 @@ actor WorkshopQueryCache {
         return modified < now().addingTimeInterval(-Self.ttl)
     }
 
-    private func deleteExpiredEntries() throws {
+    private func deleteExpiredEntries(fileManager: FileManager) throws {
         let cutoff = now().addingTimeInterval(-Self.ttl)
-        for entry in try cacheEntries() where entry.modifiedAt < cutoff {
+        for entry in try cacheEntries(fileManager: fileManager) where entry.modifiedAt < cutoff {
             try? fileManager.removeItem(at: entry.url)
         }
     }
 
-    private func enforceHardCap() throws {
-        var entries = try cacheEntries()
+    private func enforceHardCap(fileManager: FileManager) throws {
+        var entries = try cacheEntries(fileManager: fileManager)
         var total = entries.reduce(Int64(0)) { $0 + $1.sizeBytes }
         guard total > Self.hardCapBytes else { return }
         entries.sort { $0.modifiedAt < $1.modifiedAt }
@@ -167,7 +234,7 @@ actor WorkshopQueryCache {
         }
     }
 
-    private func cacheEntries() throws -> [CacheEntry] {
+    private func cacheEntries(fileManager: FileManager) throws -> [CacheEntry] {
         let urls = try fileManager.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
@@ -180,18 +247,6 @@ actor WorkshopQueryCache {
                   let modifiedAt = values.contentModificationDate else { return nil }
             return CacheEntry(url: url, modifiedAt: modifiedAt, sizeBytes: Int64(values.fileSize ?? 0))
         }
-    }
-
-    private static func defaultDirectoryURL(fileManager: FileManager) -> URL {
-        let applicationSupport = (try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
-        return applicationSupport
-            .appendingPathComponent("Loomscreen", isDirectory: true)
-            .appendingPathComponent("WorkshopQueryCache", isDirectory: true)
     }
 
     private static func safeFileName(forKey key: String) -> String {

@@ -129,10 +129,11 @@ struct WPEMetalSceneRendererTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try MetalSceneFixture.dependencyTextureScene()
         defer { fixture.cleanup() }
+        let dependencyRoot = try #require(fixture.dependencyRoot)
         let renderer = try WPEMetalSceneRenderer(
             descriptor: fixture.descriptor,
             cacheRootURL: fixture.root,
-            dependencyMounts: [WPEAssetMount(workshopID: "123", rootURL: fixture.dependencyRoot!)],
+            dependencyMounts: [WPEAssetMount(workshopID: "123", rootURL: dependencyRoot)],
             frame: CGRect(x: 0, y: 0, width: 64, height: 64),
             device: device
         )

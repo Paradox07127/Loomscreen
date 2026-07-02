@@ -42,6 +42,7 @@ struct ShaderWallpaperSection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
+            await store.reload()
             await loadThumbnails(for: MetalShaderPreset.allCases.map(ShaderSource.builtin))
         }
         .task(id: store.shaders.map(\.id)) {

@@ -70,7 +70,7 @@ struct WPEMSDFTextLayout {
                 whitespaceByUTF16.append(isWhitespace)
             }
         }
-        let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+        let runs = (CTLineGetGlyphRuns(line) as? [CTRun]) ?? []
         var perPage: [Int: [WPEMSDFTextVertex]] = [:]
         var isComplete = true
 
@@ -200,7 +200,10 @@ struct WPEMSDFTextLayout {
     private static func runFont(_ run: CTRun) -> CTFont? {
         let attributes = CTRunGetAttributes(run) as NSDictionary
         guard let value = attributes[kCTFontAttributeName as String] else { return nil }
-        return (value as! CTFont)
+        if CFGetTypeID(value as CFTypeRef) == CTFontGetTypeID() {
+            return (value as! CTFont)
+        }
+        return nil
     }
 
     private static func fontIdentifier(_ font: CTFont) -> String {

@@ -3,7 +3,7 @@ import LiveWallpaperCore
 import Observation
 
 @MainActor @Observable
-class Screen: Identifiable, Hashable {
+final class Screen: Identifiable, Hashable {
     let id: CGDirectDisplayID
     let name: String
     let frame: CGRect

@@ -476,19 +476,31 @@ struct WPESceneScriptRuntimeTests {
         #expect(origin == SIMD3<Double>(960, 540, 9))
     }
 
-    @Test("A runaway origin script times out and falls back to the baked value")
-    func runawayOriginScriptTimesOut() {
-        // No dynamic token, so it passes the static filter and actually runs;
-        // the budget guard must stop it instead of hanging the parser.
+    @Test("Static origin evaluator rejects loop constructs before JS evaluation")
+    func staticOriginScriptsRejectLoopConstructs() throws {
+        let loopScripts = [
+            "export function update(v){ while (true) {} return v; }",
+            "export function update(v){ for (;;) {} return v; }",
+            "export function update(v){ do {} while (true); return v; }"
+        ]
+
+        for script in loopScripts {
+            #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(script))
+        }
+
         let evaluator = WPETransformScriptEvaluator(
-            canvasWidth: 100, canvasHeight: 100, evaluationBudget: 0.1)
-        let runaway = "export function update(v){ while (true) {} return v; }"
-        #expect(evaluator.resolveVec3(script: runaway, properties: [:], seed: .init(5, 6, 7)) == nil)
-        // Poisoned: even a well-behaved script now short-circuits to baked.
-        #expect(evaluator.resolveVec3(
+            canvasWidth: 100,
+            canvasHeight: 100,
+            evaluationBudget: 0.1
+        )
+        #expect(evaluator.resolveVec3(script: loopScripts[0], properties: [:], seed: .init(5, 6, 7)) == nil)
+
+        let origin = try #require(evaluator.resolveVec3(
             script: Self.originScript,
             properties: ["x": .number(0.5), "y": .number(0.5)],
-            seed: .init(1, 2, 3)) == nil)
+            seed: .init(1, 2, 3)
+        ))
+        #expect(origin == SIMD3<Double>(50, 50, 3))
     }
 
     @Test("Origin script can branch on a bool scriptProperty")

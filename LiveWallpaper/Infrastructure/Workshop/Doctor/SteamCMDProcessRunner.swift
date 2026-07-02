@@ -227,7 +227,10 @@ actor SteamCMDProcessRunner {
             }
         }
         return try cStrings.withUnsafeMutableBufferPointer { buffer in
-            try body(buffer.baseAddress!)
+            guard let baseAddress = buffer.baseAddress else {
+                fatalError("Invalid process argument buffer address")
+            }
+            return try body(baseAddress)
         }
     }
 

@@ -1259,6 +1259,18 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         "input.cursorWorldPosition", "shared.", "shared["
     ]
 
+    /// Static transform resolution runs during parsing, where retaining a hung
+    /// JSContext is worse than falling back to the baked value. Conservative
+    /// rejection is acceptable here: these scripts can still be handled by the
+    /// dynamic transform path when they genuinely need live evaluation.
+    private static let staticExecutionBlocklistPatterns = [
+        #"\bwhile\s*\("#,
+        #"\bfor\s*\("#,
+        #"\bdo\s*\{"#,
+        #"\beval\s*\("#,
+        #"\bFunction\s*\("#
+    ]
+
     /// `evaluationBudget` covers the first call's cold context bootstrap
     /// (installSandbox + base classes + module eval) plus `update()`, so it is
     /// generous enough never to falsely time out a legitimate script while still
@@ -1269,7 +1281,10 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     }
 
     static func isStaticallyResolvable(_ script: String) -> Bool {
-        !dynamicTokens.contains { script.contains($0) }
+        guard !dynamicTokens.contains(where: { script.contains($0) }) else { return false }
+        return !staticExecutionBlocklistPatterns.contains {
+            script.range(of: $0, options: .regularExpression) != nil
+        }
     }
 
     /// Returns the script-computed vec3, or nil if the script is dynamic, fails to

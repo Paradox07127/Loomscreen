@@ -157,7 +157,7 @@ public final class Logger {
 
 // MARK: - Performance Measuring
 
-public class PerformanceTimer {
+public final class PerformanceTimer {
     private let startTime: CFAbsoluteTime
     private let description: String
     private let category: Logger.Category

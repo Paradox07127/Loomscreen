@@ -105,7 +105,7 @@ final class PlayerHostView: NSView {
 // MARK: - VideoContainerView
 
 /// Keeps the video layer and particle overlay in one local coordinate space.
-class VideoContainerView: NSView {
+final class VideoContainerView: NSView {
 
     // MARK: - Subviews
 

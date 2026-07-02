@@ -151,7 +151,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             return
         }
 
-        guard activeFolderURL != nil else {
+        guard let folderURL = activeFolderURL else {
             urlSchemeTask.didFailWithError(Self.makeError(.notConnectedToInternet, "No active folder"))
             return
         }
@@ -163,7 +163,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         // an in-place package entry (that's the packaged web payload).
         let primaryURL: URL
         do {
-            primaryURL = try Self.resolvedFileURL(for: url, inside: activeFolderURL!)
+            primaryURL = try Self.resolvedFileURL(for: url, inside: folderURL)
         } catch {
             urlSchemeTask.didFailWithError(error)
             return

@@ -23,11 +23,6 @@ public final class CustomShaderStore {
     public init(directory: URL? = nil, fileManager: FileManager = .default) {
         self.fileManager = fileManager
         self.directory = directory ?? Self.defaultDirectory(using: fileManager)
-        try? Self.ensureDirectoryExists(self.directory, using: fileManager)
-        // Initial population is sync because the singleton is built once at
-        // startup before any UI binds to `shaders`. Subsequent reloads go
-        // through the async `reload()` to keep the MainActor free.
-        self.shaders = Self.readShaders(at: self.directory, using: fileManager)
     }
 
     // MARK: - Public API
@@ -35,7 +30,9 @@ public final class CustomShaderStore {
     public func reload() async {
         let directory = self.directory
         let loaded = await Task.detached(priority: .userInitiated) {
-            Self.readShaders(at: directory, using: .default)
+            let fileManager = FileManager.default
+            try? Self.ensureDirectoryExists(directory, using: fileManager)
+            return Self.readShaders(at: directory, using: fileManager)
         }.value
         shaders = loaded
     }
@@ -51,6 +48,7 @@ public final class CustomShaderStore {
         let url = fileURL(for: entry.id)
         let payload = entry
         try await Task.detached(priority: .userInitiated) {
+            try Self.ensureDirectoryExists(url.deletingLastPathComponent(), using: .default)
             try Self.writeShader(payload, to: url)
         }.value
         if let index = shaders.firstIndex(where: { $0.id == entry.id }) {
@@ -124,7 +122,7 @@ public final class CustomShaderStore {
             .appendingPathComponent("shaders", isDirectory: true)
     }
 
-    private static func ensureDirectoryExists(_ url: URL, using fileManager: FileManager) throws {
+    private nonisolated static func ensureDirectoryExists(_ url: URL, using fileManager: FileManager) throws {
         if !fileManager.fileExists(atPath: url.path) {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         }

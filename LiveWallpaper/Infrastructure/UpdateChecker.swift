@@ -47,10 +47,10 @@ final class UpdateChecker {
 
     static let releasesAPI = URL(
         string: "https://api.github.com/repos/Paradox07127/Loomscreen/releases?per_page=10"
-    )!
+    ) ?? URL(fileURLWithPath: "/")
     static let releasesPage = URL(
         string: "https://github.com/Paradox07127/Loomscreen/releases"
-    )!
+    ) ?? URL(fileURLWithPath: "/")
 
     static let tagPrefix = "loomscreen-v"
     static let throttleInterval: TimeInterval = 60 * 60 * 12

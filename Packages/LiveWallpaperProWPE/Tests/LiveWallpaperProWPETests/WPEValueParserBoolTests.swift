@@ -13,9 +13,12 @@ struct WPEValueParserBoolTests {
     /// Booleans exactly as JSONSerialization produces them (`__NSCFBoolean`), which is
     /// the path real scene data takes — the most faithful reproduction of the bug.
     private func jsonBool(_ value: Bool) -> Any {
-        let json = "{\"v\": \(value)}".data(using: .utf8)!
-        let object = try! JSONSerialization.jsonObject(with: json) as! [String: Any]
-        return object["v"]!
+        let json = "{\"v\": \(value)}".data(using: .utf8) ?? Data()
+        guard let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+              let val = object["v"] else {
+            fatalError("Failed to parse mock JSON bool")
+        }
+        return val
     }
 
     // MARK: - double
@@ -71,8 +74,11 @@ struct WPEValueParserBoolTests {
     }
 
     private func jsonNumber(_ literal: String) -> Any {
-        let json = "{\"v\": \(literal)}".data(using: .utf8)!
-        let object = try! JSONSerialization.jsonObject(with: json) as! [String: Any]
-        return object["v"]!
+        let json = "{\"v\": \(literal)}".data(using: .utf8) ?? Data()
+        guard let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+              let val = object["v"] else {
+            fatalError("Failed to parse mock JSON number")
+        }
+        return val
     }
 }

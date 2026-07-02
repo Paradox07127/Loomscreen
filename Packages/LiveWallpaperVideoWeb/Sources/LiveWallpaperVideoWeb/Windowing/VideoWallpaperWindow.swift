@@ -1,7 +1,7 @@
 import AppKit
 import LiveWallpaperCore
 
-public class VideoWallpaperWindow: NSWindow {
+public final class VideoWallpaperWindow: NSWindow {
     private static let desktopWindowLevel = Int(CGWindowLevelForKey(.desktopWindow))
     private static let desktopIconWindowLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
     private static let passiveWallpaperWindowLevel = desktopWindowLevel - 1

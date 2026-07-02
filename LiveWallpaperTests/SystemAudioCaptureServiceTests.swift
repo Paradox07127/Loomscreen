@@ -15,12 +15,17 @@ struct SystemAudioCaptureServiceTests {
         source.withUnsafeBufferPointer { src in
             left.withUnsafeMutableBufferPointer { l in
                 right.withUnsafeMutableBufferPointer { r in
+                    guard let srcBase = src.baseAddress,
+                          let leftBase = l.baseAddress,
+                          let rightBase = r.baseAddress else {
+                        fatalError("Failed to unwrap interleaved base addresses")
+                    }
                     SystemAudioCaptureService.writeInterleavedStereo(
-                        src.baseAddress!,
+                        srcBase,
                         channelCount: channelCount,
                         frameCount: frameCount,
-                        left: l.baseAddress!,
-                        right: r.baseAddress!
+                        left: leftBase,
+                        right: rightBase
                     )
                 }
             }
@@ -69,12 +74,19 @@ struct SystemAudioCaptureServiceTests {
             rightSource.withUnsafeBufferPointer { r0 in
                 left.withUnsafeMutableBufferPointer { l in
                     right.withUnsafeMutableBufferPointer { r in
+                        guard let l0Base = l0.baseAddress,
+                              let r0Base = r0.baseAddress,
+                              let lBase = l.baseAddress,
+                              let rBase = r.baseAddress else {
+                            Issue.record("Failed to unwrap planar base addresses")
+                            return
+                        }
                         SystemAudioCaptureService.writePlanarStereo(
-                            left: l0.baseAddress!,
-                            right: r0.baseAddress!,
+                            left: l0Base,
+                            right: r0Base,
                             frameCount: 3,
-                            left: l.baseAddress!,
-                            right: r.baseAddress!
+                            left: lBase,
+                            right: rBase
                         )
                     }
                 }
@@ -93,12 +105,18 @@ struct SystemAudioCaptureServiceTests {
         leftSource.withUnsafeBufferPointer { l0 in
             left.withUnsafeMutableBufferPointer { l in
                 right.withUnsafeMutableBufferPointer { r in
+                    guard let l0Base = l0.baseAddress,
+                          let lBase = l.baseAddress,
+                          let rBase = r.baseAddress else {
+                        Issue.record("Failed to unwrap planar base addresses")
+                        return
+                    }
                     SystemAudioCaptureService.writePlanarStereo(
-                        left: l0.baseAddress!,
+                        left: l0Base,
                         right: nil,
                         frameCount: 3,
-                        left: l.baseAddress!,
-                        right: r.baseAddress!
+                        left: lBase,
+                        right: rBase
                     )
                 }
             }

@@ -149,23 +149,43 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
             currentPreset = preset
             rebuildBuiltinPipeline()
         case .custom(let id):
-            guard let entry = CustomShaderStore.shared.shader(for: id) else {
-                Logger.warning("Custom shader \(id) not found in store — falling back to Waves", category: .videoPlayer)
-                currentPreset = .waves
-                rebuildBuiltinPipeline()
+            if let entry = CustomShaderStore.shared.shader(for: id) {
+                scheduleCustomShaderInstall(source: entry.source, name: entry.displayName)
                 return
             }
-            scheduleCustomShaderInstall(source: entry.source, name: entry.displayName)
+
+            let generation = nextCompileGeneration()
+            Task { @MainActor [weak self] in
+                await CustomShaderStore.shared.reload()
+                guard let self, generation == self.compileGeneration else { return }
+                guard let entry = CustomShaderStore.shared.shader(for: id) else {
+                    Logger.warning("Custom shader \(id) not found in store — falling back to Waves", category: .videoPlayer)
+                    self.fallbackToWaves(generation: generation)
+                    return
+                }
+                self.scheduleCustomShaderInstall(
+                    source: entry.source,
+                    name: entry.displayName,
+                    generation: generation
+                )
+            }
         }
     }
 
     private func scheduleCustomShaderInstall(source: String, name: String) {
+        scheduleCustomShaderInstall(
+            source: source,
+            name: name,
+            generation: nextCompileGeneration()
+        )
+    }
+
+    private func scheduleCustomShaderInstall(source: String, name: String, generation compileGeneration: Int) {
         guard let device else {
             currentPreset = .waves
             rebuildBuiltinPipeline()
             return
         }
-        let compileGeneration = nextCompileGeneration()
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let library = try Self.compileCustomShader(source: source, on: device)

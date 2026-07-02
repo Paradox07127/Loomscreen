@@ -201,8 +201,8 @@ struct FolderURLSchemeHandlerLifecycleTests {
         try await waitUntil(timeout: timeout) {
             task.didFinishCalled || task.failedError != nil
         }
-        if task.failedError != nil {
-            Issue.record("Expected success but task failed: \(task.failedError!)")
+        if let error = task.failedError {
+            Issue.record("Expected success but task failed: \(error)")
         }
     }
 

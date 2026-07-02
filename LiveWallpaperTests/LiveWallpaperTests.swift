@@ -985,7 +985,8 @@ struct ScreenConfigurationDecoderTests {
             scheduleSlots: [ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")]
         )
         let encoded = try JSONEncoder().encode(config)
-        var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        let jsonObject = try JSONSerialization.jsonObject(with: encoded)
+        var dict = try #require(jsonObject as? [String: Any])
         dict.removeValue(forKey: "wallpaperMode")
         let stripped = try JSONSerialization.data(withJSONObject: dict)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
@@ -999,7 +1000,8 @@ struct ScreenConfigurationDecoderTests {
             videoBookmarkData: Data([0x01])
         )
         let encoded = try JSONEncoder().encode(config)
-        var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        let jsonObject = try JSONSerialization.jsonObject(with: encoded)
+        var dict = try #require(jsonObject as? [String: Any])
         dict.removeValue(forKey: "wallpaperMode")
         let stripped = try JSONSerialization.data(withJSONObject: dict)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
@@ -1013,7 +1015,8 @@ struct ScreenConfigurationDecoderTests {
             videoBookmarkData: Data([0x01])
         )
         let encoded = try JSONEncoder().encode(config)
-        var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        let jsonObject = try JSONSerialization.jsonObject(with: encoded)
+        var dict = try #require(jsonObject as? [String: Any])
         dict["wallpaperMode"] = "single"
         let mutated = try JSONSerialization.data(withJSONObject: dict)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: mutated)

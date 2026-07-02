@@ -83,7 +83,11 @@ final class WPEMSDFAtlas {
             for index in skyline.indices {
                 let x = skyline[index].x
                 guard let y = fitY(index: index, width: width, height: height) else { continue }
-                if best == nil || y < best!.y || (y == best!.y && x < best!.x) {
+                if let currentBest = best {
+                    if y < currentBest.y || (y == currentBest.y && x < currentBest.x) {
+                        best = (index: index, x: x, y: y)
+                    }
+                } else {
                     best = (index: index, x: x, y: y)
                 }
             }

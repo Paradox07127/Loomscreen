@@ -18,7 +18,7 @@ enum BugReporter {
     /// must survive even if `Bundle` lookups fail.
     private static let issueTemplateURL = URL(
         string: "https://github.com/Paradox07127/Loomscreen/issues/new?template=bug_report.yml"
-    )!
+    ) ?? URL(fileURLWithPath: "/")
 
     /// How many recent warning/error lines we lift from the runtime log into
     /// the markdown preview. Five is enough to convey what crashed without
@@ -123,11 +123,12 @@ enum BugReporter {
 
     private static func capped(_ text: String, to maxBytes: Int) -> String {
         guard text.utf8.count > maxBytes else { return text }
-        var truncated = text
-        while truncated.utf8.count > maxBytes - 32 && !truncated.isEmpty {
-            truncated.removeLast()
+        let limit = maxBytes - 32
+        var index = text.index(text.startIndex, offsetBy: limit, limitedBy: text.endIndex) ?? text.endIndex
+        while index > text.startIndex && text[..<index].utf8.count > limit {
+            index = text.index(before: index)
         }
-        return truncated + "\n\n…(diagnostic truncated)"
+        return String(text[..<index]) + "\n\n…(diagnostic truncated)"
     }
 
     // MARK: - GitHub URL

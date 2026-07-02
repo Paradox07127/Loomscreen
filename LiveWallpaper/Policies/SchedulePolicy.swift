@@ -114,7 +114,11 @@ enum SchedulePolicy {
         for run in runs {
             let length = run.end - run.start
             if length < minHours { continue }
-            if best == nil || length > (best!.end - best!.start) {
+            if let currentBest = best {
+                if length > (currentBest.end - currentBest.start) {
+                    best = run
+                }
+            } else {
                 best = run
             }
         }

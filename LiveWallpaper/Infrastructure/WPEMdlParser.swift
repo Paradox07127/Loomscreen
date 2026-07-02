@@ -442,7 +442,7 @@ enum WPEPuppetAnimationEvaluator {
                     cache[index] = matrix_identity_float4x4
                 }
             }
-            return cache.map { $0! }
+            return cache.compactMap { $0 }
         }
 
         let bindWorld = worldMatrices(bind: true)

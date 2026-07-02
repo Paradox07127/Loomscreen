@@ -804,9 +804,12 @@ struct WPETexDecoder: Sendable {
         let frames: [WPETexAnimationFrame] = try descriptors.map { descriptor in
             let requestedID = descriptor.frameInfo?.imageID ?? descriptor.fallbackIndex
             let mip = try atlas(for: requestedID)
-            let duration = (descriptor.frameInfo?.frameTime ?? 0) > 0
-                ? descriptor.frameInfo!.frameTime
-                : defaultDuration
+            let duration: TimeInterval
+            if let frameInfo = descriptor.frameInfo, frameInfo.frameTime > 0 {
+                duration = frameInfo.frameTime
+            } else {
+                duration = defaultDuration
+            }
             let subRect = descriptor.frameInfo?.subRect(
                 textureWidth: mip.width,
                 textureHeight: mip.height

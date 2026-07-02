@@ -207,11 +207,14 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         }
         let bytesPerRow = try bytesPerRow(width: mip.width, mapping: mapping)
 
-        mip.bytes.withUnsafeBytes { raw in
+        try mip.bytes.withUnsafeBytes { raw in
+            guard let baseAddress = raw.baseAddress else {
+                throw WPEMetalTextureLoaderError.malformedPayload("Empty mipmap bytes baseAddress")
+            }
             texture.replace(
                 region: MTLRegionMake2D(0, 0, mip.width, mip.height),
                 mipmapLevel: 0,
-                withBytes: raw.baseAddress!,
+                withBytes: baseAddress,
                 bytesPerRow: bytesPerRow
             )
         }

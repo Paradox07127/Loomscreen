@@ -166,9 +166,10 @@ struct WPETextRendererTests {
         let tex = try #require(renderer.rasterize(object)).texture
         let bytesPerRow = tex.width * 4
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * tex.height)
-        bytes.withUnsafeMutableBytes { ptr in
+        try bytes.withUnsafeMutableBytes { ptr in
+            let baseAddress = try #require(ptr.baseAddress)
             tex.getBytes(
-                ptr.baseAddress!,
+                baseAddress,
                 bytesPerRow: bytesPerRow,
                 from: MTLRegionMake2D(0, 0, tex.width, tex.height),
                 mipmapLevel: 0

@@ -37,9 +37,6 @@ enum PIISanitizer {
         let template: String
 
         init(pattern: String, template: String) {
-            // Force-try is acceptable here: every pattern is a compile-time
-            // literal validated by `PIISanitizerTests`; a regex parse failure
-            // would surface immediately in test, not in production.
             self.regex = try! NSRegularExpression(pattern: pattern)
             self.template = template
         }

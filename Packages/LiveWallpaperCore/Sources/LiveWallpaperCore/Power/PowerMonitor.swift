@@ -2,11 +2,12 @@ import Foundation
 import IOKit.ps
 import Combine
 
-public final class PowerMonitor: @unchecked Sendable {
+@MainActor
+public final class PowerMonitor {
     // MARK: - Singleton & Notifications
 
     public static let shared = PowerMonitor()
-    public static let powerSourceDidChangeNotification = Notification.Name("com.livewallpaper.powerSourceDidChange")
+    public nonisolated static let powerSourceDidChangeNotification = Notification.Name("com.livewallpaper.powerSourceDidChange")
 
     // MARK: - Power Source Types
 
@@ -59,7 +60,9 @@ public final class PowerMonitor: @unchecked Sendable {
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let monitor = Unmanaged<PowerMonitor>.fromOpaque(context).takeUnretainedValue()
-            monitor.handlePowerSourceChange()
+            Task { @MainActor in
+                monitor.handlePowerSourceChange()
+            }
         }
 
         guard let source = IOPSCreateLimitedPowerNotification(
@@ -112,7 +115,7 @@ public final class PowerMonitor: @unchecked Sendable {
 
     // MARK: - Battery Level Monitoring
 
-    private static func getCurrentBatteryLevel() -> Double {
+    private nonisolated static func getCurrentBatteryLevel() -> Double {
         let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue()
         let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
 
@@ -168,12 +171,4 @@ public final class PowerMonitor: @unchecked Sendable {
         }
     }
 
-    // MARK: - Cleanup
-
-    deinit {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
-        }
-        stopBatteryMonitoring()
-    }
 }

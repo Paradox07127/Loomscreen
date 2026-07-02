@@ -30,16 +30,16 @@ struct WPEMetalObjectUniformsTests {
     }
 
     @Test("Non-uniform scale yields reciprocal normal-matrix diagonal")
-    func nonUniformScaleNormalMatrix() {
+    func nonUniformScaleNormalMatrix() throws {
         let values = WPEMetalObjectUniforms.uniformValues(
             origin: SIMD3<Double>(0, 0, 0),
             scale: SIMD3<Double>(2, 4, 1),
             angles: SIMD3<Double>(0, 0, 0)
         )
-        let model = try! #require(values["g_ModelMatrix"]?.vectorValue)
+        let model = try #require(values["g_ModelMatrix"]?.vectorValue)
         #expect(model[0] == 2 && model[5] == 4 && model[10] == 1)
 
-        let normal = try! #require(values["g_NormalModelMatrix"]?.vectorValue)
+        let normal = try #require(values["g_NormalModelMatrix"]?.vectorValue)
         // normal = transpose(inverse(diag(2,4,1))) = diag(0.5, 0.25, 1).
         #expect(abs(normal[0] - 0.5) < 1e-9)
         #expect(abs(normal[4] - 0.25) < 1e-9)
@@ -47,13 +47,13 @@ struct WPEMetalObjectUniformsTests {
     }
 
     @Test("Degenerate (zero) scale falls back to identity normal matrix without NaN")
-    func zeroScaleFallsBackToIdentityNormal() {
+    func zeroScaleFallsBackToIdentityNormal() throws {
         let values = WPEMetalObjectUniforms.uniformValues(
             origin: SIMD3<Double>(0, 0, 0),
             scale: SIMD3<Double>(0, 0, 0),
             angles: SIMD3<Double>(0, 0, 0)
         )
-        let normal = try! #require(values["g_NormalModelMatrix"]?.vectorValue)
+        let normal = try #require(values["g_NormalModelMatrix"]?.vectorValue)
         #expect(normal == [1, 0, 0, 0, 1, 0, 0, 0, 1])
         #expect(normal.allSatisfy { $0.isFinite })
     }
@@ -74,7 +74,7 @@ struct WPEMetalObjectUniformsTests {
     func dispatcherObjectQuadsCarryFrameCameraUniforms() throws {
         let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalShaderDispatcher.swift")
         let quadCallCount = source.components(separatedBy: "executor.objectQuadUniforms(").count - 1
-        let cameraArgumentCount = source.components(separatedBy: "cameraUniforms: frameState.cameraUniforms").count - 1
+        let cameraArgumentCount = source.components(separatedBy: "cameraUniforms: executor.objectQuadCameraUniforms(").count - 1
 
         #expect(quadCallCount > 0)
         #expect(cameraArgumentCount == quadCallCount)
