@@ -404,12 +404,12 @@ struct HTMLOptionsInspector: View {
         SettingRow(
             icon: "cursorarrow.click",
             iconColor: .blue,
-            title: "Mouse Interaction",
+            title: "Interaction",
             info: "When on, clicks and scrolls reach the wallpaper but desktop icons and the Dock become unclickable. Off lets you use Finder normally."
         ) {
             Toggle("", isOn: configBinding(\.allowMouseInteraction))
                 .labelsHidden()
-                .accessibilityLabel(Text("Mouse Interaction"))
+                .accessibilityLabel(Text("Interaction"))
                 .toggleStyle(.switch)
                 .controlSize(.small)
         }

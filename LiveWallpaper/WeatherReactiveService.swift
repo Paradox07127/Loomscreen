@@ -120,6 +120,10 @@ final class WeatherReactiveService {
         startFetch(force: true)
     }
 
+    func requestLocationAuthorizationIfNeeded() {
+        locationProvider.requestCoreLocationAuthorizationIfNeeded()
+    }
+
     /// Single-flight fetch — supersedes any in-flight fetch so refresh taps don't pile up overlapping requests.
     private func startFetch(force: Bool) {
         fetchTask?.cancel()

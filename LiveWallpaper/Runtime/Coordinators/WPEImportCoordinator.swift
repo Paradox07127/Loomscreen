@@ -172,7 +172,7 @@ final class WPEImportCoordinator {
         var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: content
-        )
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
         config.activeWallpaper = content
         if case .html(let source, let htmlConfig) = content {
             config.savedHTMLSource = source

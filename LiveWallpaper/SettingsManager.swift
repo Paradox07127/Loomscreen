@@ -33,6 +33,7 @@ final class SettingsManager {
     private var configurationWriteGeneration: UInt64 = 0
     private var globalSettingsWriteGeneration: UInt64 = 0
     private var bookmarksWriteGeneration: UInt64 = 0
+    private var loginItemValidationGeneration: UInt64 = 0
 
     private enum Keys {
         static let screenConfigurations = "screenConfigurations"
@@ -206,6 +207,16 @@ final class SettingsManager {
         return settings
     }
 
+    func loadDisplayDefaults() -> DisplayDefaults {
+        loadGlobalSettings().displayDefaults
+    }
+
+    func saveDisplayDefaults(_ displayDefaults: DisplayDefaults) {
+        var settings = loadGlobalSettings()
+        settings.displayDefaults = displayDefaults
+        saveGlobalSettings(settings)
+    }
+
     // MARK: - Wallpaper Engine History (managed library, LRU-bounded)
 
     /// Upper bound on the managed library. Each entry embeds a security-scoped
@@ -347,6 +358,7 @@ final class SettingsManager {
 
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
         let service = SMAppService.mainApp
+        loginItemValidationGeneration &+= 1
         let statusBefore = service.status
         Logger.debug(
             "applyStartOnLoginSetting target=\(startOnLogin) statusBefore=\(describe(statusBefore)) bundlePath=\(Bundle.main.bundlePath)",
@@ -375,20 +387,11 @@ final class SettingsManager {
         let statusAfter = service.status
         Logger.debug("SMAppService statusAfter=\(describe(statusAfter))", category: .settings)
 
-        switch (startOnLogin, statusAfter) {
-        case (true, .enabled), (false, .notRegistered), (false, .notFound):
-            break  // happy paths
-        case (true, .requiresApproval):
-            Logger.warning("Login item registered but requires user approval in System Settings", category: .settings)
-            postLoginItemFailure(reason: .requiresApproval)
-        case (true, .notRegistered), (true, .notFound):
-            Logger.error("Login item register() returned without error but status is \(describe(statusAfter)); app may not be in /Applications/ or signing is rejected", category: .settings)
-            postLoginItemFailure(reason: .registrationSilentlyFailed)
-        case (false, _):
-            Logger.warning("Login item disable target=false but statusAfter=\(describe(statusAfter))", category: .settings)
-        default:
-            break
+        if loginItemStatus(statusAfter, matches: startOnLogin) {
+            return
         }
+
+        scheduleLoginItemStatusValidation(targetEnabled: startOnLogin)
     }
 
     private func describe(_ status: SMAppService.Status) -> String {
@@ -398,6 +401,42 @@ final class SettingsManager {
         case .requiresApproval: return "requiresApproval"
         case .notFound:         return "notFound"
         @unknown default:       return "unknown(\(status.rawValue))"
+        }
+    }
+
+    private func loginItemStatus(_ status: SMAppService.Status, matches targetEnabled: Bool) -> Bool {
+        switch (targetEnabled, status) {
+        case (true, .enabled), (false, .notRegistered), (false, .notFound):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func scheduleLoginItemStatusValidation(targetEnabled: Bool) {
+        loginItemValidationGeneration &+= 1
+        let generation = loginItemValidationGeneration
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_250_000_000)
+            guard let self, self.loginItemValidationGeneration == generation else { return }
+
+            let status = SMAppService.mainApp.status
+            Logger.debug("SMAppService delayedStatus=\(self.describe(status))", category: .settings)
+            guard !self.loginItemStatus(status, matches: targetEnabled) else { return }
+
+            switch (targetEnabled, status) {
+            case (true, .requiresApproval):
+                Logger.warning("Login item registered but requires user approval in System Settings", category: .settings)
+                self.postLoginItemFailure(reason: .requiresApproval)
+            case (true, .notRegistered), (true, .notFound):
+                Logger.error("Login item register() returned without error but delayed status is \(self.describe(status)); app may not be in /Applications/ or signing is rejected", category: .settings)
+                self.postLoginItemFailure(reason: .registrationSilentlyFailed)
+            case (false, _):
+                Logger.warning("Login item disable target=false but delayed status=\(self.describe(status))", category: .settings)
+            default:
+                break
+            }
         }
     }
 

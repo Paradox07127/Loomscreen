@@ -82,7 +82,7 @@ final class WallpaperAutomationOrchestrator {
         var config = existing ?? ScreenConfiguration(
             screenID: screen.id,
             videoBookmarkData: primary
-        )
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
 
         let oldCombined = config.combinedPlaylist
         let oldCursor = config.playlistCursorIndex ?? 0

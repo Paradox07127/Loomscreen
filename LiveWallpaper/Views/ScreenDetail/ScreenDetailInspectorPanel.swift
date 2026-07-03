@@ -16,6 +16,9 @@ struct ScreenDetailInspectorPanel: View {
     let onParticleDensityChange: (Double) -> Void
     let onWeatherReactiveChange: (Bool) -> Void
     let onWallpaperModeChange: (WallpaperMode) -> Void
+    let showsResetPlayback: Bool
+    let onResetPlaybackSettings: () -> Void
+    let showsResetDisplaySettings: Bool
     let onResetDisplaySettings: () -> Void
     #if !LITE_BUILD
     @State private var wpeProjectCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
@@ -43,7 +46,9 @@ struct ScreenDetailInspectorPanel: View {
                         sceneClickCaptureEnabled: $draft.sceneClickCaptureEnabled,
                         sceneFitMode: $draft.selectedFitMode,
                         htmlConfig: draft.selectedWallpaperType == .html ? $draft.htmlConfig : nil,
-                        videoColorSpace: draft.videoColorSpace
+                        videoColorSpace: draft.videoColorSpace,
+                        showsResetPlayback: showsResetPlayback,
+                        onResetPlayback: onResetPlaybackSettings
                     )
 
                     if draft.selectedWallpaperType == .html {
@@ -95,6 +100,10 @@ struct ScreenDetailInspectorPanel: View {
                         )
                     }
                     #endif
+
+                    if showsResetDisplaySettings {
+                        resetDisplayButton
+                    }
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
                 .padding(.vertical, 12)
@@ -211,7 +220,6 @@ struct ScreenDetailInspectorPanel: View {
             VStack(spacing: 12) {
                 environmentGroup
                 colorGroup
-                resetDisplayButton
             }
         }
     }
@@ -315,7 +323,7 @@ struct ScreenDetailInspectorPanel: View {
         HStack {
             Spacer()
             Button(action: onResetDisplaySettings) {
-                Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
+                Label("Reset Current Display", systemImage: "arrow.counterclockwise.circle")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

@@ -6,7 +6,7 @@ import AppKit
 /// ships in no Release binary at all, so it can never reach end users (and the
 /// scene-debug artifact writer it drives is hard-disabled in Release too).
 /// Within a DEBUG build it is still gated at runtime by the Developer Mode
-/// toggle in Settings → General → Advanced.
+/// toggle in Settings → Advanced.
 struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
     @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: "WPEMetalCaptureScene") ?? []
@@ -27,7 +27,7 @@ struct DeveloperToolsView: View {
             metadata: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Diagnostic flags — persist until toggled off or reset.", comment: "Developer Tools header subtitle on the diagnostics tab.")
-                    Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
+                    Text("Visible while Developer Mode is on. Disable it in Settings → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
                 }
                 .foregroundStyle(.secondary)
             },

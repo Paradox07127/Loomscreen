@@ -22,7 +22,7 @@ struct CommonPlaybackInspector: View {
     @Binding var frameRateLimit: FrameRateLimit
     @Binding var syncToLockScreen: Bool
     @Binding var sceneMouseInteractionEnabled: Bool
-    /// Click-capture toggle: real mouse interaction; steals desktop clicks while on.
+    /// Interaction toggle: real pointer input; steals desktop clicks while on.
     @Binding var sceneClickCaptureEnabled: Bool
     /// Reuses the shared `fitMode` field via the draft. Applies through `ScreenManager.updateSceneFitMode`.
     @Binding var sceneFitMode: VideoFitMode
@@ -36,6 +36,8 @@ struct CommonPlaybackInspector: View {
     /// When `.forceSDR`, the Rec.709 composition owns `AVPlayerItem.videoComposition`,
     /// so the frame-rate cap (same slot) is dimmed and ignored.
     var videoColorSpace: VideoColorSpace = .auto
+    var showsResetPlayback: Bool = false
+    var onResetPlayback: () -> Void = {}
 
     @AppStorage("Inspector.PlaybackExpanded") private var isPlaybackExpanded = true
     @State private var lockScreenExtracted = false
@@ -48,7 +50,8 @@ struct CommonPlaybackInspector: View {
             CollapsibleSection(
                 title: "Playback",
                 systemImage: "play.circle",
-                isExpanded: $isPlaybackExpanded
+                isExpanded: $isPlaybackExpanded,
+                trailingAccessory: { resetPlaybackAccessory }
             ) {
                 VStack(spacing: 8) {
                     audioRow
@@ -86,6 +89,19 @@ struct CommonPlaybackInspector: View {
             }
         } message: {
             Text("This lets you click elements inside the scene, but while it's on you can't click desktop icons or right-click the desktop on this display. Turn it off here to restore desktop clicks.")
+        }
+    }
+
+    @ViewBuilder
+    private var resetPlaybackAccessory: some View {
+        if showsResetPlayback {
+            Button(action: onResetPlayback) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help(Text("Reset playback to display defaults"))
+            .accessibilityLabel(Text("Reset playback"))
         }
     }
 
@@ -291,14 +307,14 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "cursorarrow.click",
             iconColor: sceneClickCaptureEnabled ? .blue : .secondary,
-            title: "Interactive",
+            title: "Interaction",
             info: "Lets the scene receive real clicks and drags (for interactive scenes). While on, clicks go to the wallpaper instead of the desktop on this display — you won't be able to click desktop icons until you turn it back off."
         ) {
             Toggle("", isOn: clickInteractionBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .accessibilityLabel(Text("Interactive"))
+                .accessibilityLabel(Text("Interaction"))
                 .accessibilityHint(Text("When on, the scene captures mouse clicks and the desktop can't be clicked on this display"))
         }
     }

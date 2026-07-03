@@ -1481,6 +1481,34 @@ final class ScreenManager {
         configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
     }
 
+    func displayPlaybackDiffersFromDefaults(for screen: Screen) -> Bool {
+        guard let config = getConfiguration(for: screen) else { return false }
+        return config.playbackDiffers(from: SettingsManager.shared.loadDisplayDefaults())
+    }
+
+    func displaySettingsDifferFromDefaults(for screen: Screen) -> Bool {
+        guard let config = getConfiguration(for: screen) else { return false }
+        if config.storedPlaybackDiffers(from: SettingsManager.shared.loadDisplayDefaults()) {
+            return true
+        }
+        return config.particleEffect != .none
+            || config.effectConfig != .default
+            || config.scheduleSlots != nil
+            || config.shufflePlaylist
+            || config.playlistRotationMinutes != nil
+            || config.setAsLockScreen
+            || config.wallpaperMode != .playlist
+    }
+
+    func resetPlaybackSettings(for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
+        config.resetPlayback(to: SettingsManager.shared.loadDisplayDefaults())
+        saveConfiguration(config)
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: true)
+        notifyWallpaperSessionChanged()
+        Logger.info("Reset playback defaults for screen \(screen.id)", category: .screenManager)
+    }
+
     /// Restores per-display playback / effect / audio / layout settings to
     /// their defaults while preserving the wallpaper content itself: video
     /// bookmarks, HTML source, scene/WPE source, playlist bookmarks, and
@@ -1490,12 +1518,8 @@ final class ScreenManager {
     func resetDisplaySettings(for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
-        config.playbackSpeed = 1.0
-        config.fitMode = .aspectFill
-        config.videoDisplayMode = .perDisplay
-        // Match the per-type natural default the constructor uses so
-        // "Reset to defaults" on a scene goes to 30 (WPE parity), not 60.
-        config.frameRateLimit = FrameRateLimit.naturalDefault(for: config.wallpaperType)
+        let displayDefaults = SettingsManager.shared.loadDisplayDefaults()
+        config.resetStoredPlayback(to: displayDefaults)
         config.particleEffect = .none
         config.effectConfig = .default
         config.scheduleSlots = nil
@@ -1503,13 +1527,11 @@ final class ScreenManager {
         config.playlistRotationMinutes = nil
         config.setAsLockScreen = false
         config.wallpaperMode = .playlist
-        config.muted = true
-        config.videoVolume = 1.0
-        config.sceneMouseInteractionEnabled = true
-        config.sceneClickCaptureEnabled = false
         config.savedHTMLConfig = .default
+        config.resetSavedHTMLPlayback(to: displayDefaults, createIfMissing: true)
         if case .html(let source, _) = config.activeWallpaper {
             config.activeWallpaper = .html(source: source, config: .default)
+            config.resetPlayback(to: displayDefaults)
         }
 
         releaseRuntimeSession(screen)
@@ -1652,7 +1674,7 @@ final class ScreenManager {
         var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .scene(descriptor)
-        )
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
         if configuration.activeWallpaper == .scene(descriptor),
            configuration.wpeOrigin == origin,
            screen.runtimeSession?.wallpaperType == .scene {
@@ -1874,7 +1896,7 @@ final class ScreenManager {
         let previousContent = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.activeWallpaper
         var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id, wallpaper: .metalShader(source)
-        )
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
         config.setShaderWallpaper(source)
         originReconciler.reconcile(
             &config,

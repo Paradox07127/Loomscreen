@@ -5,7 +5,7 @@ import SwiftUI
 /// liquid-glass capsule with a live health dot; tapping reveals the full
 /// `SystemMonitorView` gauges in a popover. Holding a monitoring reference while
 /// visible keeps the dot live, while avoiding the always-on render of four
-/// animated rings that the inline dashboard incurred.
+/// animated rings and keeping the sidebar footer height fixed.
 public struct SystemMonitorPill: View {
     private var monitor = SystemMonitor.shared
     @State private var isExpanded = false
@@ -20,20 +20,17 @@ public struct SystemMonitorPill: View {
     }
 
     public var body: some View {
-        VStack(spacing: DesignTokens.Spacing.sm) {
-            // Expands in place above the header — the sidebar footer grows
-            // upward and pushes the nav list, rather than floating a popover.
-            if isExpanded {
+        header
+            .popover(isPresented: $isExpanded, arrowEdge: .bottom) {
                 SystemMonitorView(
                     activeDisplayCount: activeDisplayCount,
                     totalDisplayCount: totalDisplayCount
                 )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .padding(DesignTokens.Spacing.sm)
+                .frame(width: 244)
             }
-            header
-        }
-        .onAppear { monitor.startMonitoring() }
-        .onDisappear { monitor.stopMonitoring() }
+            .onAppear { monitor.startMonitoring() }
+            .onDisappear { monitor.stopMonitoring() }
     }
 
     private var header: some View {

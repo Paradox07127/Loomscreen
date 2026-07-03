@@ -53,6 +53,11 @@ public struct GlobalSettings: Codable, Sendable {
     /// independently checks its own file against this budget.
     public var videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes
 
+    /// Baseline playback values used for newly-created display configurations
+    /// and explicit per-display resets. Editing these defaults does not mutate
+    /// any currently-running display configuration.
+    public var displayDefaults: DisplayDefaults = DisplayDefaults()
+
     /// Default for `developerModeEnabled`: ON in DEBUG builds so the Developer
     /// Tools surface is reachable during development without a manual opt-in,
     /// OFF in Release so ordinary users never see it. An explicit, persisted
@@ -123,6 +128,7 @@ public struct GlobalSettings: Codable, Sendable {
         deletedWorkshopIDs: [String] = [],
         applicationPerformanceRules: [ApplicationPerformanceRule] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
+        displayDefaults: DisplayDefaults = DisplayDefaults(),
         developerModeEnabled: Bool = GlobalSettings.defaultDeveloperModeEnabled,
         audioResponseEnabled: Bool = false,
         adaptiveFrameRateEnabled: Bool = false
@@ -141,6 +147,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.deletedWorkshopIDs = deletedWorkshopIDs
         self.applicationPerformanceRules = applicationPerformanceRules
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
+        self.displayDefaults = displayDefaults
         self.developerModeEnabled = developerModeEnabled
         self.audioResponseEnabled = audioResponseEnabled
         self.adaptiveFrameRateEnabled = adaptiveFrameRateEnabled
@@ -165,6 +172,7 @@ public struct GlobalSettings: Codable, Sendable {
         applicationPerformanceRules = (try? c.decodeIfPresent([ApplicationPerformanceRule].self, forKey: .applicationPerformanceRules)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
+        displayDefaults = (try? c.decodeIfPresent(DisplayDefaults.self, forKey: .displayDefaults)) ?? DisplayDefaults()
         developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? GlobalSettings.defaultDeveloperModeEnabled
         audioResponseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .audioResponseEnabled)) ?? false
         adaptiveFrameRateEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .adaptiveFrameRateEnabled)) ?? false

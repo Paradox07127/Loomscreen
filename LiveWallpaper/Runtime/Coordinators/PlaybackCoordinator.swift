@@ -119,7 +119,7 @@ final class PlaybackCoordinator {
         #endif
     }
 
-    /// Scene-only "Mouse Interaction" toggle: persists + pushes live.
+    /// Scene-only "Follow Cursor" toggle: persists + pushes live.
     func updateSceneMouseInteraction(_ enabled: Bool, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               enabled != configuration.sceneMouseInteractionEnabled else { return }
@@ -130,7 +130,7 @@ final class PlaybackCoordinator {
         #endif
     }
 
-    /// Scene-only "Interactive" (click capture) toggle: persists + pushes live.
+    /// Scene-only "Interaction" (click capture) toggle: persists + pushes live.
     /// Enabling makes the scene window steal desktop clicks.
     func updateSceneClickCapture(_ enabled: Bool, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
@@ -331,6 +331,7 @@ final class PlaybackCoordinator {
             // type-swap restore doesn't downgrade it to raw-package playback.
             configuration.activeWallpaper = .video(bookmarkData: bookmarkData, packageEntryName: packageEntryName)
             configuration.savedVideoPackageEntryName = packageEntryName
+            configuration.resetPlayback(to: SettingsManager.shared.loadDisplayDefaults())
         }
         originReconciler.reconcile(
             &configuration,

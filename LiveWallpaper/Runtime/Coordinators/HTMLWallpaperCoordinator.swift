@@ -115,7 +115,7 @@ final class HTMLWallpaperCoordinator {
         var configuration = existingConfiguration ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .html(source: source, config: persistedConfig)
-        )
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
         if !forceReload,
            case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
            existingSource == source,

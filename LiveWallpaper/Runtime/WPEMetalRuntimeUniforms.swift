@@ -123,7 +123,7 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     /// works with cursor-follow alone, no click capture needed.
     var pointerPositionLast: SIMD2<Double>
     /// Click state from the interactive view, meaningful only while the scene's
-    /// per-screen "Interactive" (click capture) toggle is on; neutral otherwise.
+    /// per-screen "Interaction" (click capture) toggle is on; neutral otherwise.
     var pointerClick: WPEPointerFrame = .neutral
     var cameraParallax: WPECameraParallaxFrame = .neutral
     /// Per-channel spectrum, 64 bins each, normalized 0…1, low frequency → high.

@@ -75,10 +75,10 @@ enum SettingsWindowMetrics {
     static let sidebarColumnWidth = DesignTokens.Sidebar.width
     static let sidebarColumnMaxWidth = DesignTokens.Sidebar.maxWidth
     static let defaultContentSize = CGSize(width: 1180, height: 720)
-    // Floor must fit sidebar + a compressed library grid + the detail inspector
-    // at its 300pt minimum (it opens trailing inside the detail column). 1080
-    // left the inspector clipping past the window's right edge at min width.
-    static let minimumContentSize = CGSize(width: 1160, height: 500)
+    // Floor must fit the sidebar plus the shared library-page floor. Workshop
+    // can also open an inspector inside that detail column, so width keeps the
+    // previous compressed-grid budget while height tracks the shared page token.
+    static let minimumContentSize = CGSize(width: 1160, height: DesignTokens.LibraryPage.minHeight)
 }
 
 @MainActor

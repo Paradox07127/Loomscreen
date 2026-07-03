@@ -38,7 +38,7 @@ extension ConfigurationPorter {
             // it on import so a bundle from another machine cannot silently
             // light up `WKWebView.isInspectable` or the Developer Tools
             // sidebar entry on this install. The user can flip it back on
-            // in Settings → General → Advanced if they want.
+            // in Settings → Advanced if they want.
             var sanitizedGlobal = global
             sanitizedGlobal.developerModeEnabled = false
             manager.saveGlobalSettings(sanitizedGlobal)

@@ -33,7 +33,7 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
         case .toggleMute:
             return String(localized: "Toggle Mute", defaultValue: "Toggle Mute", comment: "Global shortcut action name.")
         case .toggleMouseInteraction:
-            return String(localized: "Toggle Mouse Interaction", defaultValue: "Toggle Mouse Interaction", comment: "Global shortcut action name.")
+            return String(localized: "Toggle Interaction", defaultValue: "Toggle Interaction", comment: "Global shortcut action name.")
         case .toggleWallpapers:
             return String(localized: "Show / Hide All Wallpapers", defaultValue: "Show / Hide All Wallpapers", comment: "Global shortcut action name.")
         case .reloadWallpapers:
@@ -52,7 +52,7 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
         case .toggleMute:
             return String(localized: "Mute or unmute video and scene wallpapers.", defaultValue: "Mute or unmute video and scene wallpapers.", comment: "Global shortcut action description.")
         case .toggleMouseInteraction:
-            return String(localized: "Turn mouse reactions on or off for scene and web wallpapers.", defaultValue: "Turn mouse reactions on or off for scene and web wallpapers.", comment: "Global shortcut action description.")
+            return String(localized: "Turn pointer and click input on or off for scene and web wallpapers.", defaultValue: "Turn pointer and click input on or off for scene and web wallpapers.", comment: "Global shortcut action description.")
         case .toggleWallpapers:
             return String(localized: "Hide every wallpaper to reveal the desktop, or bring them back.", defaultValue: "Hide every wallpaper to reveal the desktop, or bring them back.", comment: "Global shortcut action description.")
         case .reloadWallpapers:

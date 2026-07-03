@@ -81,7 +81,7 @@ struct ShortcutsSettingsView: View {
     }
 
     /// Identity-set guarded binding so a noisy reconcile pass cannot fire
-    /// `persistSettings` repeatedly (CLAUDE.md §8).
+    /// `persistSettings` repeatedly while SwiftUI is reconciling the row.
     private var masterEnableBinding: Binding<Bool> {
         Binding(
             get: { globalShortcutsEnabled },

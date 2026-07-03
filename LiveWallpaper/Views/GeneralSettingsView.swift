@@ -2,14 +2,33 @@ import LiveWallpaperCore
 import ServiceManagement
 import SwiftUI
 import AppKit
+import CoreLocation
 import UniformTypeIdentifiers
+
+enum GeneralSettingsPage {
+    case general
+    case performancePower
+    case audioResponse
+    case weather
+    case backupRestore
+    case advanced
+    case about
+}
+
+private enum SystemStatusScope {
+    case loginItem
+    case audioCapture
+    case weatherLocation
+}
 
 struct GeneralSettingsView: View {
     @Environment(ScreenManager.self) private var screenManager
-    @Environment(\.featureCatalog) private var featureCatalog
     @AppStorage(AppLanguagePreference.storageKey) private var appLanguageRawValue = AppLanguagePreference.system.rawValue
     @State private var globalPauseOnBattery: Bool
     @State private var startOnLogin: Bool
+    @State private var loginItemStatus = SMAppService.mainApp.status
+    @State private var loginItemStatusRefreshPending = false
+    @State private var loginItemStatusRefreshGeneration = 0
     @State private var preservePlaybackOnLock: Bool
     @State private var pauseOnFullScreen: Bool
     @State private var pauseInGameMode: Bool
@@ -25,11 +44,18 @@ struct GeneralSettingsView: View {
 
     /// Default off — privacy-sensitive opt-in.
     @State private var audioResponseEnabled: Bool
+    #if !LITE_BUILD
+    @State private var audioCaptureState = SystemAudioCaptureManager.shared.state
+    @State private var audioStatusRefreshPending = false
+    @State private var audioStatusRefreshGeneration = 0
+    #endif
     /// Default off — Pro-only scene power saving (adaptive frame rate).
     @State private var adaptiveFrameRateEnabled: Bool
     @State private var weatherLocation: WeatherLocationPreference
+    @State private var locationAuthorizationStatus = CLLocationManager().authorizationStatus
+    @State private var weatherStatusRefreshPending = false
+    @State private var weatherStatusRefreshGeneration = 0
 
-    @State private var pendingDestructive: PendingDestructive?
     @State private var pendingBugReport: BugReport?
 
     @State private var loginItemAlert: LoginItemFailure?
@@ -40,15 +66,21 @@ struct GeneralSettingsView: View {
     @State private var importFeedback: String?
     @State private var importErrorMessage: String?
     @State private var exportErrorMessage: String?
+    @State private var diagnosticsExportErrorMessage: String?
 
     /// Drives SwiftUI's native `.fileExporter` / `.fileImporter` sheets —
     /// these handle UTType filtering, sandbox extensions, and sheet
     /// modality automatically, which `NSSavePanel.runModal()` does not.
     @State private var isPresentingExporter = false
     @State private var isPresentingImporter = false
+    @State private var isPresentingDiagnosticsExporter = false
     @State private var exportDocument: ConfigurationDocument?
+    @State private var diagnosticsDocument: DiagnosticDocument?
 
-    init() {
+    private let page: GeneralSettingsPage
+
+    init(page: GeneralSettingsPage = .general) {
+        self.page = page
         let settings = SettingsManager.shared.loadGlobalSettings()
         _globalPauseOnBattery = State(initialValue: settings.globalPauseOnBattery)
         _startOnLogin = State(initialValue: settings.startOnLogin)
@@ -66,33 +98,10 @@ struct GeneralSettingsView: View {
     }
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem { Label("General", systemImage: "gearshape") }
-
-            ShortcutsSettingsView()
-                .tabItem { Label("Shortcuts", systemImage: "command") }
-
-            #if !LITE_BUILD && DIRECT_DISTRIBUTION
-            if featureCatalog.isEnabled(.workshopOnline) {
-                WorkshopSettingsView()
-                    .tabItem { Label("Workshop", systemImage: "cube.transparent") }
-            }
-            #endif
-
-            #if !LITE_BUILD
-            if featureCatalog.isEnabled(.wpeImport) {
-                WPECacheManagementView()
-                    .tabItem { Label("Storage", systemImage: "internaldrive") }
-            }
-            #endif
-
-            aboutTab
-                .tabItem { Label("About", systemImage: "info.circle") }
-        }
+        contentForPage
         .frame(minWidth: 500, minHeight: 400)
         .background(DesignTokens.Colors.pageBackground)
-        .confirmDestructive($pendingDestructive)
+        .onAppear { refreshSystemStatusIndicators() }
         .alert(
             "Import Configuration?",
             isPresented: Binding(
@@ -121,6 +130,7 @@ struct GeneralSettingsView: View {
         }
         .errorAlert("Import Failed", message: $importErrorMessage)
         .errorAlert("Export Failed", message: $exportErrorMessage)
+        .errorAlert("Diagnostics Export Failed", message: $diagnosticsExportErrorMessage)
         .alert(
             "Login Item",
             isPresented: Binding(
@@ -143,6 +153,8 @@ struct GeneralSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loginItemRegistrationDidFail)) { note in
             if let reason = note.userInfo?["reason"] as? LoginItemFailure {
                 loginItemAlert = reason
+                loginItemStatusRefreshPending = false
+                loginItemStatus = SMAppService.mainApp.status
                 if startOnLogin {
                     startOnLogin = false
                 }
@@ -169,10 +181,27 @@ struct GeneralSettingsView: View {
         ) { result in
             handleImportResult(result)
         }
+        .fileExporter(
+            isPresented: $isPresentingDiagnosticsExporter,
+            document: diagnosticsDocument,
+            contentType: .plainText,
+            defaultFilename: "LiveWallpaper Diagnostics.txt"
+        ) { result in
+            diagnosticsDocument = nil
+            switch result {
+            case .success:
+                Logger.info("Diagnostics export completed", category: .settings)
+            case .failure(let error):
+                diagnosticsExportErrorMessage = error.localizedDescription
+            }
+        }
         .sheet(item: $pendingBugReport) { report in
             ReportBugSheet(report: report) {
                 pendingBugReport = nil
             }
+        }
+        .sheet(isPresented: $showAppExceptions) {
+            AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
         }
     }
 
@@ -270,7 +299,7 @@ struct GeneralSettingsView: View {
         }
         if summary.didRestoreGlobalSettings {
             lines.append(String(
-                localized: "Restored global preferences, schedule, and shortcuts.",
+                localized: "Restored global preferences, display defaults, schedule, and shortcuts.",
                 comment: "Import success line: global settings were restored."
             ))
         }
@@ -294,7 +323,7 @@ struct GeneralSettingsView: View {
         }
         if bundle.globalSettings != nil {
             lines.append(String(
-                localized: "• Global settings (preferences, schedule, shortcuts)",
+                localized: "• Global settings (preferences, display defaults, schedule, shortcuts)",
                 comment: "Import confirmation bullet: presence of global settings."
             ))
         }
@@ -325,78 +354,112 @@ struct GeneralSettingsView: View {
         )
     }
 
-    // MARK: - General Tab
+    // MARK: - Settings Pages
 
     @ViewBuilder
-    private var generalTab: some View {
-        settingsForm {
-            Section {
-                SettingRow(icon: "globe", iconColor: .teal, title: "Language", subtitle: "Choose the display language used by LiveWallpaper") {
-                    languagePicker
-                }
+    private var contentForPage: some View {
+        switch page {
+        case .general:
+            settingsForm {
+                behaviorSection
+            }
+        case .performancePower:
+            settingsForm {
+                performanceSection
+            }
+        case .audioResponse:
+            settingsForm {
+                audioResponseSection
+            }
+        case .weather:
+            settingsForm {
+                weatherSection
+            }
+        case .backupRestore:
+            settingsForm {
+                backupSection
+            }
+        case .advanced:
+            settingsForm {
+                advancedSection
+            }
+        case .about:
+            aboutTab
+        }
+    }
 
-                SettingRow(icon: "power.circle.fill", iconColor: .green, title: "Start at login", subtitle: "Automatically launch LiveWallpaper when you log in") {
+    @ViewBuilder
+    private var behaviorSection: some View {
+        Section {
+            SettingRow(icon: "globe", iconColor: .teal, title: "Language", subtitle: "Choose the display language used by LiveWallpaper") {
+                languagePicker
+            }
+
+            SettingRow(
+                icon: "power.circle.fill",
+                iconColor: loginItemShowsInlineStatus ? loginItemStatusColor : .green,
+                title: "Start at login",
+                subtitle: "Automatically launch LiveWallpaper when you log in"
+            ) {
+                HStack(spacing: 8) {
+                    if loginItemShowsInlineStatus {
+                        SettingsStatusPill(text: loginItemStatusText, color: loginItemStatusColor)
+                            .help(Text(verbatim: loginItemStatusSubtitle))
+                    }
+
+                    if loginItemNeedsApproval {
+                        Button("Open") {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .accessibilityLabel(Text("Open Login Items settings"))
+                    }
+
                     Toggle("", isOn: $startOnLogin)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .onChange(of: startOnLogin) { _, _ in updateGlobalSettings() }
+                        .onChange(of: startOnLogin) { _, _ in
+                            updateGlobalSettings()
+                            scheduleSystemStatusRefresh(.loginItem)
+                        }
                         .accessibilityLabel(Text("Start at login"))
                         .accessibilityHint(Text("Automatically launch LiveWallpaper when you log in"))
                 }
-
-                SettingRow(
-                    icon: "lock.display",
-                    iconColor: .blue,
-                    title: "Preserve wallpaper on the lock screen",
-                    subtitle: "Show your wallpaper's last frame when locked, instead of the default picture",
-                    info: "On lock, the current wallpaper frame is captured as the macOS desktop picture so the lock screen keeps your wallpaper's look. Only affects displays that already have a Desktop Picture set."
-                ) {
-                    Toggle("", isOn: $preservePlaybackOnLock)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Preserve wallpaper on the lock screen"))
-                        .accessibilityHint(Text("Shows your wallpaper's last frame on the lock screen instead of the default picture"))
-                }
-
-                SettingRow(
-                    icon: "dock.rectangle",
-                    iconColor: .indigo,
-                    title: "Show in Dock",
-                    subtitle: "Make the app visible in the Dock and Cmd-Tab switcher",
-                    info: "When off, the app keeps running in the background — reopen this window anytime from the menu bar icon at the top-right of your screen."
-                ) {
-                    Toggle("", isOn: $showInDock)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: showInDock) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Show in Dock"))
-                        .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
-                }
-
-            } header: {
-                Text("Behavior")
             }
 
-            performanceSection
+            SettingRow(
+                icon: "lock.display",
+                iconColor: .blue,
+                title: "Preserve wallpaper on the lock screen",
+                subtitle: "Show your wallpaper's last frame when locked, instead of the default picture",
+                info: "On lock, the current wallpaper frame is captured as the macOS desktop picture so the lock screen keeps your wallpaper's look. Only affects displays that already have a Desktop Picture set."
+            ) {
+                Toggle("", isOn: $preservePlaybackOnLock)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Preserve wallpaper on the lock screen"))
+                    .accessibilityHint(Text("Shows your wallpaper's last frame on the lock screen instead of the default picture"))
+            }
 
-            audioResponseSection
-
-            weatherSection
-
-            advancedSection
-
-            backupSection
-
-            // Loose in the Form (not a Section) so the grouped card background doesn't render around it.
-            resetDefaultsRow
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-        }
-        // Attached to the Form, not the Section: `.sheet` on a `Section` inside a
-        // Form doesn't reliably present on macOS (made "Edit…" appear to do nothing).
-        .sheet(isPresented: $showAppExceptions) {
-            AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
+            SettingRow(
+                icon: "dock.rectangle",
+                iconColor: .indigo,
+                title: "Show in Dock",
+                subtitle: "Make the app visible in the Dock and Cmd-Tab switcher",
+                info: "When off, the app keeps running in the background — reopen this window anytime from the menu bar icon at the top-right of your screen."
+            ) {
+                Toggle("", isOn: $showInDock)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: showInDock) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Show in Dock"))
+                    .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
+            }
+        } header: {
+            Text("Behavior")
         }
     }
 
@@ -407,9 +470,8 @@ struct GeneralSettingsView: View {
     /// bug report.
     @ViewBuilder
     private var advancedSection: some View {
-        #if !LITE_BUILD
         Section {
-            #if DEBUG
+            #if DEBUG && !LITE_BUILD
             SettingRow(
                 icon: "wrench.and.screwdriver",
                 iconColor: .orange,
@@ -427,6 +489,45 @@ struct GeneralSettingsView: View {
             #endif
 
             SettingRow(
+                icon: "doc.on.doc",
+                iconColor: .blue,
+                title: "Copy Diagnostic Summary",
+                subtitle: "Copy a sanitized system and runtime summary."
+            ) {
+                Button("Copy") { copyDiagnosticsSummary() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityLabel(Text("Copy diagnostic summary"))
+            }
+
+            SettingRow(
+                icon: "square.and.arrow.up",
+                iconColor: .blue,
+                title: "Export Diagnostics",
+                subtitle: "Save a sanitized diagnostic report as a text file."
+            ) {
+                Button("Export…") { beginDiagnosticsExport() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityLabel(Text("Export diagnostics"))
+            }
+
+            SettingRow(
+                icon: "ladybug",
+                iconColor: .red,
+                title: "Report a Bug",
+                subtitle: "Review diagnostics before opening a GitHub issue."
+            ) {
+                Button("Open…") { presentBugReport() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityLabel(Text("Report a bug"))
+            }
+
+            SettingRow(
                 icon: "doc.text.magnifyingglass",
                 iconColor: .orange,
                 title: "Log Files",
@@ -440,9 +541,8 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Opens the folder containing the app's log files"))
             }
         } header: {
-            Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
+            Text("Advanced", comment: "Section header for diagnostics and developer settings.")
         }
-        #endif
     }
 
     /// Flipping it drives `SystemAudioCaptureManager` directly so the tap
@@ -453,20 +553,43 @@ struct GeneralSettingsView: View {
         Section {
             SettingRow(
                 icon: "waveform",
-                iconColor: .pink,
+                iconColor: audioResponseEnabled ? audioStatusColor : .pink,
                 title: "Audio Response",
                 subtitle: "Let audio-reactive wallpapers move with the music and sound playing on your Mac.",
                 info: "Analyzes your Mac's audio output on-device to compute a frequency spectrum for audio-reactive scenes. Nothing is recorded, saved, or sent anywhere. macOS asks for permission the first time you turn this on."
             ) {
-                Toggle("", isOn: $audioResponseEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .onChange(of: audioResponseEnabled) { _, newValue in
-                        updateGlobalSettings()
-                        SystemAudioCaptureManager.shared.setEnabled(newValue)
+                HStack(spacing: 8) {
+                    if audioResponseEnabled {
+                        SettingsStatusPill(text: audioStatusText, color: audioStatusColor)
+                            .help(Text(verbatim: audioStatusSubtitle))
                     }
-                    .accessibilityLabel(Text("Audio Response"))
-                    .accessibilityHint(Text("Lets wallpapers react to the audio playing on your Mac. Off by default; requires audio-recording permission."))
+
+                    if audioShowsRegrant {
+                        Button("Re-grant Access") {
+                            regrantAudioAccess()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .accessibilityLabel(Text("Re-grant audio access"))
+                    }
+
+                    Toggle("", isOn: $audioResponseEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: audioResponseEnabled) { _, newValue in
+                            updateGlobalSettings()
+                            SystemAudioCaptureManager.shared.setEnabled(newValue)
+                            audioCaptureState = SystemAudioCaptureManager.shared.state
+                            if newValue {
+                                scheduleSystemStatusRefresh(.audioCapture)
+                            } else {
+                                audioStatusRefreshPending = false
+                            }
+                        }
+                        .accessibilityLabel(Text("Audio Response"))
+                        .accessibilityHint(Text("Lets wallpapers react to the audio playing on your Mac. Off by default; requires audio-recording permission."))
+                }
             }
         } header: {
             Text("Audio", comment: "Section header for the audio-response toggle in General settings.")
@@ -618,26 +741,40 @@ struct GeneralSettingsView: View {
         return "\(perScreenMB) MB · \(totalMB) MB total"
     }
 
-    /// Inlined here (not its own tab) so the user doesn't hunt across tabs for a tiny picker.
     @ViewBuilder
     private var weatherSection: some View {
         Section {
-            // Standard SettingRow rather than an anonymous segmented pill that breaks the form's visual rhythm.
             SettingRow(
                 icon: "cloud.sun",
-                iconColor: .cyan,
+                iconColor: weatherShowsInlineStatus ? weatherPermissionColor : .cyan,
                 title: "Weather Location",
                 subtitle: "Where weather-reactive effects read conditions"
             ) {
-                Picker("Source", selection: weatherSourceBinding) {
-                    Text("Off").tag(WeatherLocationPreference.Source.off)
-                    Text("System").tag(WeatherLocationPreference.Source.coreLocation)
-                    Text("Manual").tag(WeatherLocationPreference.Source.manual)
+                HStack(spacing: 8) {
+                    if weatherShowsInlineStatus {
+                        SettingsStatusPill(text: weatherPermissionText, color: weatherPermissionColor)
+                            .help(Text(verbatim: weatherPermissionSubtitle))
+                    }
+
+                    if weatherShowsGrantButton {
+                        Button(weatherGrantButtonTitle) {
+                            handleWeatherGrantAction()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                    }
+
+                    Picker("Source", selection: weatherSourceBinding) {
+                        Text("Off").tag(WeatherLocationPreference.Source.off)
+                        Text("System").tag(WeatherLocationPreference.Source.coreLocation)
+                        Text("Manual").tag(WeatherLocationPreference.Source.manual)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityLabel(Text("Weather location source"))
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityLabel(Text("Weather location source"))
             }
 
             if weatherLocation.source == .manual {
@@ -650,6 +787,7 @@ struct GeneralSettingsView: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+
         } header: {
             Text("Weather")
         } footer: {
@@ -666,6 +804,12 @@ struct GeneralSettingsView: View {
                 guard weatherLocation.source != newValue else { return }
                 weatherLocation.source = newValue
                 persistWeatherLocation()
+                if newValue == .coreLocation {
+                    scheduleSystemStatusRefresh(.weatherLocation)
+                } else {
+                    weatherStatusRefreshPending = false
+                    refreshLocationAuthorizationStatus()
+                }
             }
         )
     }
@@ -675,6 +819,7 @@ struct GeneralSettingsView: View {
         settings.weatherLocation = weatherLocation
         SettingsManager.shared.saveGlobalSettings(settings)
         postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
+        refreshLocationAuthorizationStatus()
     }
 
     // MARK: - About Tab
@@ -869,27 +1014,7 @@ struct GeneralSettingsView: View {
         .accessibilityHint(Text("Choose the display language used by LiveWallpaper"))
     }
 
-    private var resetDefaultsRow: some View {
-        HStack {
-            Spacer()
-            Button {
-                pendingDestructive = PendingDestructive(.resetAllSettings) {
-                    resetAllSettings()
-                }
-            } label: {
-                Label("Reset Defaults", systemImage: "arrow.counterclockwise")
-            }
-            .buttonStyle(.bordered)
-            .tint(DesignTokens.Colors.Status.danger)
-            .controlSize(.regular)
-            .accessibilityLabel(Text("Reset all settings to default"))
-            .accessibilityHint(Text("Erases all configurations and restores factory defaults"))
-            Spacer()
-        }
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Backup & Restore (General → bottom)
+    // MARK: - Backup & Restore
 
     @ViewBuilder
     private var backupSection: some View {
@@ -898,14 +1023,14 @@ struct GeneralSettingsView: View {
                 icon: "square.and.arrow.up",
                 iconColor: .blue,
                 title: "Export Configuration",
-                subtitle: "Save settings, bookmarks, and per-display setup to a .lwconfig file",
-                info: "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
+                subtitle: "Save settings, display defaults, bookmarks, and per-display setup to a .lwconfig file",
+                info: "The bundle includes global preferences, display defaults, wallpaper library bookmarks, and per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
             ) {
                 Button("Export…") { beginExport() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize()
-                    .accessibilityHint(Text("Save the current settings, bookmarks, and per-display setup to a backup file"))
+                    .accessibilityHint(Text("Save the current settings, display defaults, bookmarks, and per-display setup to a backup file"))
             }
 
             SettingRow(
@@ -913,27 +1038,45 @@ struct GeneralSettingsView: View {
                 iconColor: .blue,
                 title: "Import Configuration",
                 subtitle: "Restore from a previously exported .lwconfig file",
-                info: "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
+                info: "Importing replaces the current global preferences, display defaults, and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
             ) {
                 Button("Import…") { beginImport() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .fixedSize()
-                    .accessibilityHint(Text("Restore settings, bookmarks, and per-display setup from a backup file"))
+                    .accessibilityHint(Text("Restore settings, display defaults, bookmarks, and per-display setup from a backup file"))
             }
         } header: {
             Text("Backup & Restore")
         } footer: {
-            Text("Backups store references to your wallpaper files, not the files themselves — the originals must exist on the Mac you restore to.")
+            Text("Backups store settings and references to your wallpaper files, not the files themselves — the originals must exist on the Mac you restore to.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
 
     private func presentBugReport() {
-        let kinds: [String] = screenManager.wallpaperSessionSummaries
+        pendingBugReport = makeDiagnosticsReport()
+    }
+
+    private func copyDiagnosticsSummary() {
+        let report = makeDiagnosticsReport()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report.diagnosticMarkdown, forType: .string)
+    }
+
+    private func beginDiagnosticsExport() {
+        diagnosticsDocument = DiagnosticDocument(text: makeDiagnosticsReport().diagnosticMarkdown)
+        isPresentingDiagnosticsExporter = true
+    }
+
+    private func makeDiagnosticsReport() -> BugReport {
+        BugReporter.makeReport(activeWallpaperKinds: activeWallpaperKinds)
+    }
+
+    private var activeWallpaperKinds: [String] {
+        screenManager.wallpaperSessionSummaries
             .compactMap { $0.wallpaperType?.rawValue }
-        pendingBugReport = BugReporter.makeReport(activeWallpaperKinds: kinds)
     }
 
     private var versionString: String {
@@ -948,6 +1091,320 @@ struct GeneralSettingsView: View {
             get: { AppLanguagePreference(rawValue: appLanguageRawValue) ?? .system },
             set: { appLanguageRawValue = $0.rawValue }
         )
+    }
+
+    // MARK: - Inline Status
+
+    private var loginItemNeedsApproval: Bool {
+        startOnLogin && !loginItemStatusRefreshPending && loginItemStatus == .requiresApproval
+    }
+
+    private var loginItemShowsInlineStatus: Bool {
+        startOnLogin || loginItemNeedsApproval || loginItemStatusRefreshPending
+    }
+
+    private var loginItemStatusText: String {
+        if loginItemStatusRefreshPending {
+            return "Checking…"
+        }
+        switch loginItemStatus {
+        case .enabled:
+            return "Enabled"
+        case .requiresApproval:
+            return "Needs Approval"
+        case .notRegistered:
+            return startOnLogin ? "Not Granted" : "Off"
+        case .notFound:
+            return "Unavailable"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    private var loginItemStatusSubtitle: String {
+        if loginItemStatusRefreshPending {
+            return "Waiting for macOS to update Login Items status"
+        }
+        switch loginItemStatus {
+        case .enabled:
+            return "Launch at login is enabled"
+        case .requiresApproval:
+            return "Approve LiveWallpaper in Login Items"
+        case .notRegistered:
+            return startOnLogin ? "Registration is pending or blocked" : "Launch at login is off"
+        case .notFound:
+            return "macOS could not find the app service"
+        @unknown default:
+            return "macOS returned an unknown login item status"
+        }
+    }
+
+    private var loginItemStatusColor: Color {
+        if loginItemStatusRefreshPending {
+            return .secondary
+        }
+        switch loginItemStatus {
+        case .enabled:
+            return DesignTokens.Colors.Status.active
+        case .requiresApproval:
+            return DesignTokens.Colors.Status.warning
+        case .notRegistered:
+            return startOnLogin ? DesignTokens.Colors.Status.warning : .secondary
+        case .notFound:
+            return DesignTokens.Colors.Status.danger
+        @unknown default:
+            return .secondary
+        }
+    }
+
+    #if !LITE_BUILD
+    private var audioStatusText: String {
+        guard audioResponseEnabled else { return "Off" }
+        if audioStatusRefreshPending {
+            return "Checking…"
+        }
+        switch audioCaptureState {
+        case .capturing:
+            return "Granted"
+        case .failed:
+            return "Needs Access"
+        case .unsupported:
+            return "Unsupported"
+        case .idle:
+            return "Not Granted"
+        }
+    }
+
+    private var audioStatusSubtitle: String {
+        guard audioResponseEnabled else { return "Audio response is off" }
+        if audioStatusRefreshPending {
+            return "Waiting for macOS to update audio permission"
+        }
+        switch audioCaptureState {
+        case .capturing:
+            return "System audio capture is running"
+        case .failed(let reason):
+            return PIISanitizer.scrub(reason)
+        case .unsupported:
+            return "Requires macOS 14.2 or later"
+        case .idle:
+            return "Turn on access to start system audio capture"
+        }
+    }
+
+    private var audioStatusColor: Color {
+        guard audioResponseEnabled else { return .secondary }
+        if audioStatusRefreshPending {
+            return .secondary
+        }
+        switch audioCaptureState {
+        case .capturing:
+            return DesignTokens.Colors.Status.active
+        case .failed:
+            return DesignTokens.Colors.Status.danger
+        case .unsupported:
+            return DesignTokens.Colors.Status.warning
+        case .idle:
+            return DesignTokens.Colors.Status.warning
+        }
+    }
+
+    private var audioShowsRegrant: Bool {
+        guard audioResponseEnabled, !audioStatusRefreshPending else { return false }
+        switch audioCaptureState {
+        case .capturing, .unsupported:
+            return false
+        case .failed, .idle:
+            return true
+        }
+    }
+
+    private func regrantAudioAccess() {
+        audioResponseEnabled = true
+        updateGlobalSettings()
+        SystemAudioCaptureManager.shared.retryAccessRequest()
+        audioCaptureState = SystemAudioCaptureManager.shared.state
+        scheduleSystemStatusRefresh(.audioCapture)
+    }
+    #endif
+
+    private var weatherPermissionText: String {
+        if weatherStatusRefreshPending, weatherLocation.source == .coreLocation {
+            return "Checking…"
+        }
+        switch weatherLocation.source {
+        case .off:
+            return "Off"
+        case .manual:
+            return weatherLocation.manual == nil ? "Manual Needed" : "Manual"
+        case .coreLocation:
+            return locationAuthorizationStatus.displayTitle
+        }
+    }
+
+    private var weatherPermissionSubtitle: String {
+        if weatherStatusRefreshPending, weatherLocation.source == .coreLocation {
+            return "Waiting for macOS to update Location Services status"
+        }
+        switch weatherLocation.source {
+        case .off:
+            return "Weather effects are disabled"
+        case .manual:
+            return weatherLocation.manual == nil ? "Choose a manual location" : "Using manual location"
+        case .coreLocation:
+            return locationAuthorizationStatus.displaySubtitle
+        }
+    }
+
+    private var weatherPermissionColor: Color {
+        if weatherStatusRefreshPending, weatherLocation.source == .coreLocation {
+            return .secondary
+        }
+        switch weatherLocation.source {
+        case .off, .manual:
+            return .secondary
+        case .coreLocation:
+            return locationAuthorizationStatus.displayColor
+        }
+    }
+
+    private var weatherShowsGrantButton: Bool {
+        guard weatherLocation.source == .coreLocation, !weatherStatusRefreshPending else { return false }
+        switch locationAuthorizationStatus {
+        case .notDetermined, .denied, .restricted:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var weatherGrantButtonTitle: String {
+        switch locationAuthorizationStatus {
+        case .notDetermined:
+            return "Re-grant Access"
+        default:
+            return "Open"
+        }
+    }
+
+    private var weatherShowsInlineStatus: Bool {
+        switch weatherLocation.source {
+        case .off:
+            false
+        case .manual:
+            weatherLocation.manual == nil
+        case .coreLocation:
+            true
+        }
+    }
+
+    private func handleWeatherGrantAction() {
+        switch locationAuthorizationStatus {
+        case .notDetermined:
+            screenManager.weatherService.requestLocationAuthorizationIfNeeded()
+            screenManager.weatherService.refresh()
+            scheduleSystemStatusRefresh(.weatherLocation)
+        default:
+            openLocationServicesSettings()
+            scheduleSystemStatusRefresh(.weatherLocation)
+        }
+    }
+
+    private func refreshLocationAuthorizationStatus() {
+        locationAuthorizationStatus = CLLocationManager().authorizationStatus
+    }
+
+    private func refreshSystemStatusIndicators() {
+        loginItemStatus = SMAppService.mainApp.status
+        #if !LITE_BUILD
+        audioCaptureState = SystemAudioCaptureManager.shared.state
+        #endif
+        refreshLocationAuthorizationStatus()
+    }
+
+    private func scheduleSystemStatusRefresh(_ scope: SystemStatusScope) {
+        let generation = nextStatusRefreshGeneration(for: scope)
+        setStatusRefreshPending(true, for: scope)
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            refreshSystemStatus(for: scope)
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            refreshSystemStatus(for: scope)
+            finishStatusRefresh(generation: generation, for: scope)
+        }
+    }
+
+    private func nextStatusRefreshGeneration(for scope: SystemStatusScope) -> Int {
+        switch scope {
+        case .loginItem:
+            loginItemStatusRefreshGeneration += 1
+            return loginItemStatusRefreshGeneration
+        case .audioCapture:
+            #if !LITE_BUILD
+            audioStatusRefreshGeneration += 1
+            return audioStatusRefreshGeneration
+            #else
+            return 0
+            #endif
+        case .weatherLocation:
+            weatherStatusRefreshGeneration += 1
+            return weatherStatusRefreshGeneration
+        }
+    }
+
+    private func setStatusRefreshPending(_ pending: Bool, for scope: SystemStatusScope) {
+        switch scope {
+        case .loginItem:
+            loginItemStatusRefreshPending = pending
+        case .audioCapture:
+            #if !LITE_BUILD
+            audioStatusRefreshPending = pending
+            #endif
+        case .weatherLocation:
+            weatherStatusRefreshPending = pending
+        }
+    }
+
+    private func refreshSystemStatus(for scope: SystemStatusScope) {
+        switch scope {
+        case .loginItem:
+            loginItemStatus = SMAppService.mainApp.status
+        case .audioCapture:
+            #if !LITE_BUILD
+            if audioResponseEnabled, SystemAudioCaptureManager.shared.state != .capturing {
+                SystemAudioCaptureManager.shared.retryAccessRequest()
+            }
+            audioCaptureState = SystemAudioCaptureManager.shared.state
+            #endif
+        case .weatherLocation:
+            refreshLocationAuthorizationStatus()
+        }
+    }
+
+    private func finishStatusRefresh(generation: Int, for scope: SystemStatusScope) {
+        switch scope {
+        case .loginItem:
+            guard loginItemStatusRefreshGeneration == generation else { return }
+            loginItemStatusRefreshPending = false
+            loginItemStatus = SMAppService.mainApp.status
+        case .audioCapture:
+            #if !LITE_BUILD
+            guard audioStatusRefreshGeneration == generation else { return }
+            audioStatusRefreshPending = false
+            audioCaptureState = SystemAudioCaptureManager.shared.state
+            #endif
+        case .weatherLocation:
+            guard weatherStatusRefreshGeneration == generation else { return }
+            weatherStatusRefreshPending = false
+            refreshLocationAuthorizationStatus()
+        }
+    }
+
+    private func openLocationServicesSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Settings Persistence
@@ -979,7 +1436,7 @@ struct GeneralSettingsView: View {
     }
 
     /// Defers the post to the next MainActor turn so it does not fire inside
-    /// the SwiftUI reconcile pass that triggered the save (CLAUDE.md §3).
+    /// the SwiftUI reconcile pass that triggered the save.
     private func postSettingsNotificationAsync(_ name: Notification.Name) {
         Task { @MainActor in
             NotificationCenter.default.post(name: name, object: nil)
@@ -997,27 +1454,65 @@ struct GeneralSettingsView: View {
         NSWorkspace.shared.open(dir)
     }
 
-    private func resetAllSettings() {
-        SettingsManager.shared.cleanAllSettings()
+}
 
-        globalPauseOnBattery = false
-        startOnLogin = false
-        preservePlaybackOnLock = false
-        pauseOnFullScreen = true
-        pauseInGameMode = true
-        pauseOnWindowOcclusion = false
-        applicationRules = []
-        showInDock = false
-        developerModeEnabled = false
-        weatherLocation = .default
+private struct SettingsStatusPill: View {
+    let text: String
+    let color: Color
 
-        postSettingsNotificationAsync(.dockVisibilityDidChange)
-        postSettingsNotificationAsync(.globalShortcutsDidChange)
-        postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
-        postSettingsNotificationAsync(.developerModeDidChange)
-        screenManager.handleGlobalSettingsChanged()
-        screenManager.resetAllWallpaperSessions()
-        screenManager.refreshScreens(preserveRuntimeSessions: false)
+    var body: some View {
+        Text(verbatim: text)
+            .font(DesignTokens.Typography.captionEmphasized)
+            .foregroundStyle(color)
+            .padding(.horizontal, DesignTokens.Spacing.sm)
+            .padding(.vertical, DesignTokens.Spacing.xxs)
+            .background(color.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.24), lineWidth: 0.5))
+            .fixedSize()
+    }
+}
+
+private extension CLAuthorizationStatus {
+    var displayTitle: String {
+        switch self {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return "Granted"
+        case .denied:
+            return "Denied"
+        case .restricted:
+            return "Restricted"
+        case .notDetermined:
+            return "Not Determined"
+        @unknown default:
+            return "Unknown"
+        }
     }
 
+    var displaySubtitle: String {
+        switch self {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return "Location Services access is granted"
+        case .denied:
+            return "Allow access in Location Services"
+        case .restricted:
+            return "Location Services is restricted on this Mac"
+        case .notDetermined:
+            return "macOS has not asked for Location Services yet"
+        @unknown default:
+            return "macOS returned an unknown location status"
+        }
+    }
+
+    var displayColor: Color {
+        switch self {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return DesignTokens.Colors.Status.active
+        case .denied, .restricted:
+            return DesignTokens.Colors.Status.danger
+        case .notDetermined:
+            return DesignTokens.Colors.Status.warning
+        @unknown default:
+            return .secondary
+        }
+    }
 }

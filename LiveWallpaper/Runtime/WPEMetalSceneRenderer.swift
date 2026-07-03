@@ -331,7 +331,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var currentProfile: WallpaperPerformanceProfile = .quality
     /// When false, the per-frame pointer is pinned to the screen center so the
     /// scene stops reacting to the cursor (camera parallax freezes, pointer
-    /// shaders see a constant). Driven by the per-screen "Mouse Interaction"
+    /// shaders see a constant). Driven by the per-screen "Follow Cursor"
     /// playback toggle; default on preserves the historical behavior.
     private var mouseInteractionEnabled = true
     /// Previous frame's pointer UV, fed as the official `g_PointerPositionLast`.
@@ -1478,7 +1478,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // Re-apply pointer fields here: the audio path above may have rebuilt
         // `uniforms` via the stereo initializer, which would otherwise reset
         // them. `g_PointerPositionLast` tracks motion regardless of click
-        // capture; click state is neutral unless the Interactive toggle is on.
+        // capture; click state is neutral unless the Interaction toggle is on.
         let layerScriptPointerFrame = mtkView.clickCaptureEnabled
             ? mtkView.pointerFrame
             : WPEPointerFrame(
@@ -2955,7 +2955,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     /// Re-evaluates the paused/continuous state after a mouse-interaction toggle
-    /// flips at runtime, so turning Follow Cursor / Interactive on un-pauses a
+    /// flips at runtime, so turning Follow Cursor / Interaction on un-pauses a
     /// previously-static scene (and turning them off lets it re-pause).
     private func refreshLiveness() {
         guard currentProfile == .quality else { return }

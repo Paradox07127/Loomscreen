@@ -9,6 +9,10 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.featureCatalog) private var featureCatalog
     @State private var selectedNavigation: Navigation?
+    @State private var isSettingsMode: Bool
+    @State private var selectedSettingsNavigation: SettingsNavigation?
+    @State private var settingsSearchText = ""
+    @State private var lastAppNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
     /// Drives a one-shot prewarm cycle that emulates the user-discovered "drag
     /// the sidebar closed, then open" gesture, warming NSSplitView state so the
@@ -23,7 +27,11 @@ struct ContentView: View {
     private let initialAddWallpaperPromptKind: String?
 
     init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
-        _selectedNavigation = State(initialValue: initialNavigation)
+        let startsInSettings = initialNavigation == .general
+        _selectedNavigation = State(initialValue: startsInSettings ? nil : initialNavigation)
+        _isSettingsMode = State(initialValue: startsInSettings)
+        _selectedSettingsNavigation = State(initialValue: startsInSettings ? .general : nil)
+        _lastAppNavigation = State(initialValue: startsInSettings ? nil : initialNavigation)
         self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
@@ -50,7 +58,11 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
         } detail: {
-            DetailContent(selection: $selectedNavigation, canShowDeveloperTools: canShowDeveloperTools)
+            if isSettingsMode {
+                SettingsDetailContent(selection: $selectedSettingsNavigation)
+            } else {
+                DetailContent(selection: $selectedNavigation, canShowDeveloperTools: canShowDeveloperTools)
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
@@ -59,13 +71,13 @@ struct ContentView: View {
             minHeight: SettingsWindowMetrics.minimumContentSize.height
         )
         .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
-            scheduleNavigationChange { selectedNavigation = .general }
+            scheduleNavigationChange { enterSettingsMode(.general) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
-            scheduleNavigationChange { selectedNavigation = .workshop }
+            scheduleNavigationChange { selectAppNavigation(.workshop) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
-            scheduleNavigationChange { selectedNavigation = .appleAerials }
+            scheduleNavigationChange { selectAppNavigation(.appleAerials) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             scheduleDefaultDisplaySelection()
@@ -83,13 +95,23 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebar: some View {
-        Sidebar(
-            selection: $selectedNavigation,
-            developerModeEnabled: developerModeEnabled
-        )
+        Group {
+            if isSettingsMode {
+                SettingsSidebar(
+                    selection: $selectedSettingsNavigation,
+                    searchText: $settingsSearchText,
+                    onBack: exitSettingsMode
+                )
+            } else {
+                Sidebar(
+                    selection: $selectedNavigation,
+                    developerModeEnabled: developerModeEnabled
+                )
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
             guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
-            scheduleNavigationChange { selectedNavigation = .screen(screenID) }
+            scheduleNavigationChange { selectAppNavigation(.screen(screenID)) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
             handleAddWallpaperPrompt(notification: notification)
@@ -98,39 +120,41 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button {
-                scheduleNavigationChange { selectedNavigation = .general }
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .help(Text(L10n.Toolbar.preferences))
-            .accessibilityLabel(Text(L10n.Toolbar.preferences))
-            .accessibilityHint(Text("Open application preferences"))
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Button(action: invokeAddWallpaper) {
-                Image(systemName: "plus")
-            }
-            .help(Text(L10n.Toolbar.addWallpaper))
-            .accessibilityLabel(Text(L10n.Toolbar.addWallpaper))
-            .accessibilityHint(Text("Pick a video for the selected display"))
-            .disabled(screenManager.screens.isEmpty)
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Button(action: invokeReload) {
-                if #available(macOS 15.0, *) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .symbolEffect(.rotate, options: .continuouslyRepeating, isActive: isReloading)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
+        if !isSettingsMode {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    scheduleNavigationChange { enterSettingsMode(.general) }
+                } label: {
+                    Image(systemName: "gearshape")
                 }
+                .help(Text(L10n.Toolbar.preferences))
+                .accessibilityLabel(Text(L10n.Toolbar.preferences))
+                .accessibilityHint(Text("Open application preferences"))
             }
-            .help(Text("Reload all wallpapers"))
-            .accessibilityLabel(Text("Reload all wallpapers"))
-            .accessibilityHint(Text("Reapplies the active wallpaper on every display"))
-            .disabled(screenManager.screens.isEmpty)
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: invokeAddWallpaper) {
+                    Image(systemName: "plus")
+                }
+                .help(Text(L10n.Toolbar.addWallpaper))
+                .accessibilityLabel(Text(L10n.Toolbar.addWallpaper))
+                .accessibilityHint(Text("Pick a video for the selected display"))
+                .disabled(screenManager.screens.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: invokeReload) {
+                    if #available(macOS 15.0, *) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .symbolEffect(.rotate, options: .continuouslyRepeating, isActive: isReloading)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
+                    }
+                }
+                .help(Text("Reload all wallpapers"))
+                .accessibilityLabel(Text("Reload all wallpapers"))
+                .accessibilityHint(Text("Reapplies the active wallpaper on every display"))
+                .disabled(screenManager.screens.isEmpty)
+            }
         }
     }
 
@@ -171,18 +195,47 @@ struct ContentView: View {
         }
     }
 
+    private func enterSettingsMode(_ destination: SettingsNavigation) {
+        if !isSettingsMode {
+            lastAppNavigation = selectedNavigation
+        }
+        isSettingsMode = true
+        selectedSettingsNavigation = destination
+        settingsSearchText = ""
+    }
+
+    private func exitSettingsMode() {
+        isSettingsMode = false
+        if selectedNavigation == nil, lastAppNavigation != .general {
+            selectedNavigation = lastAppNavigation
+        }
+        scheduleDefaultDisplaySelection()
+    }
+
+    private func selectAppNavigation(_ navigation: Navigation?) {
+        isSettingsMode = false
+        selectedNavigation = navigation
+        if navigation != .general {
+            lastAppNavigation = navigation
+        }
+    }
+
     /// Re-reads Developer Mode and falls the selection back to `.general` if the
     /// user just disabled the toggle while sitting on the Developer Tools page.
     private func refreshDeveloperModeStateAndSelection() {
         developerModeEnabled = ContentView.loadDeveloperModeEnabled()
         #if DEBUG && !LITE_BUILD
         if !canShowDeveloperTools, selectedNavigation == .developerTools {
-            scheduleNavigationChange { selectedNavigation = .general }
+            scheduleNavigationChange {
+                selectedNavigation = nil
+                enterSettingsMode(.advanced)
+            }
         }
         #endif
     }
 
     private func selectDefaultDisplayIfNeeded() {
+        guard !isSettingsMode else { return }
         guard screenManager.screens.count == 1, let screen = screenManager.screens.first else { return }
 
         switch selectedNavigation {
@@ -210,7 +263,7 @@ struct ContentView: View {
 
     private func handleAddWallpaperPrompt(kind: String) {
         guard let target = preferredAddWallpaperTarget() else { return }
-        selectedNavigation = .screen(target.id)
+        selectAppNavigation(.screen(target.id))
 
         switch kind {
         case "video":
@@ -420,7 +473,7 @@ struct Sidebar: View {
     }
 }
 
-private struct SidebarSectionHeader: View {
+struct SidebarSectionHeader: View {
     let title: LocalizedStringKey
 
     var body: some View {
@@ -558,7 +611,7 @@ struct DetailContent: View {
                 } else {
                     EmptyStateView(
                         icon: "wrench.and.screwdriver",
-                        message: "Developer Mode is off. Enable it in Settings → General → Advanced."
+                        message: "Developer Mode is off. Enable it in Settings → Advanced."
                     )
                 }
             #endif

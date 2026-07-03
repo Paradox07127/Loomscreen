@@ -8,10 +8,15 @@ import SwiftUI
 struct SettingsWindowLayoutTests {
     @Test("Settings window defaults fit the minimum composed layout")
     func settingsWindowDefaultsFitMinimumComposedLayout() {
+        let resizableInspectorMainFloor: CGFloat = 360
+
         #expect(SettingsWindowMetrics.defaultContentSize.width >= SettingsWindowMetrics.minimumContentSize.width)
         #expect(SettingsWindowMetrics.defaultContentSize.height >= SettingsWindowMetrics.minimumContentSize.height)
-        #expect(SettingsWindowMetrics.minimumContentSize.height <= 500)
+        #expect(SettingsWindowMetrics.minimumContentSize.width >= SettingsWindowMetrics.sidebarColumnMaxWidth + DesignTokens.LibraryPage.minWidth)
+        #expect(SettingsWindowMetrics.minimumContentSize.height >= DesignTokens.LibraryPage.minHeight)
         #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.2)
+        #expect(DesignTokens.LibraryPage.minWidth >= DesignTokens.Inspector.minWidth)
+        #expect(DesignTokens.LibraryPage.minWidth >= resizableInspectorMainFloor + DesignTokens.Inspector.maxWidth)
         #expect(DesignTokens.Inspector.idealWidth >= DesignTokens.Inspector.minWidth)
         #expect(DesignTokens.Inspector.idealWidth <= DesignTokens.Inspector.maxWidth)
         #expect(DesignTokens.Inspector.maxWidth >= 384)

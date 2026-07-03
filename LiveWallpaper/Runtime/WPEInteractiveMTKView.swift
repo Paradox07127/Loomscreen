@@ -16,7 +16,7 @@ import simd
 /// never arrive anyway).
 @MainActor
 final class WPEInteractiveMTKView: MTKView {
-    /// Flipped by the renderer from the per-screen "Interactive" toggle. Only
+    /// Flipped by the renderer from the per-screen "Interaction" toggle. Only
     /// while true does this view consume mouse events.
     var clickCaptureEnabled = false
 

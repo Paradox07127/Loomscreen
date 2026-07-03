@@ -28,10 +28,9 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     var videoColorSpace: VideoColorSpace
     var particleDensity: Double
     var selectedFrameRateLimit: FrameRateLimit
-    /// Scene-only "Mouse Interaction" toggle (cursor-driven parallax / pointer
-    /// shaders).
+    /// Scene-only "Follow Cursor" toggle (cursor-driven parallax / pointer shaders).
     var sceneMouseInteractionEnabled: Bool
-    /// Scene-only "Interactive" toggle (real click capture).
+    /// Scene-only "Interaction" toggle (real click capture).
     var sceneClickCaptureEnabled: Bool
     var hasPreviewSource: Bool
     /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand

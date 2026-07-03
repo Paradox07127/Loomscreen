@@ -52,6 +52,14 @@ final class SystemAudioCaptureManager {
         reconcile()
     }
 
+    func retryAccessRequest() {
+        if !isEnabled {
+            isEnabled = true
+        }
+        stopIfNeeded()
+        startIfNeeded()
+    }
+
     /// Active audio-reactive wallpapers retain/release the capture so the tap
     /// only runs while something consumes it. (Sinks call these in a later step;
     /// until then capture follows `isEnabled` alone.)

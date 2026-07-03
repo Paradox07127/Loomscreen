@@ -123,7 +123,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         renderer?.setMouseInteractionEnabled(enabled)
     }
 
-    /// Per-screen "Interactive" toggle: makes the wallpaper window capture real
+    /// Per-screen "Interaction" toggle: makes the wallpaper window capture real
     /// clicks (steals desktop clicks while on) and routes them to the renderer.
     func setClickCaptureEnabled(_ enabled: Bool) {
         (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(enabled)

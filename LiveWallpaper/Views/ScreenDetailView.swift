@@ -326,6 +326,9 @@ struct ScreenDetailView: View {
             onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
             onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
             onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
+            showsResetPlayback: screenManager.displayPlaybackDiffersFromDefaults(for: screen),
+            onResetPlaybackSettings: resetPlaybackSettings,
+            showsResetDisplaySettings: screenManager.displaySettingsDifferFromDefaults(for: screen),
             onResetDisplaySettings: requestResetDisplaySettings
         )
     }
@@ -367,6 +370,11 @@ struct ScreenDetailView: View {
         ) {
             screenManager.resetDisplaySettings(for: screen)
         }
+    }
+
+    private func resetPlaybackSettings() {
+        screenManager.resetPlaybackSettings(for: screen)
+        loadScreenConfiguration()
     }
 
     // MARK: - Drag and Drop
