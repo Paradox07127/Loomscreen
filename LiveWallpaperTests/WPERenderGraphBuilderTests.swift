@@ -284,6 +284,112 @@ struct WPERenderGraphBuilderTests {
         #expect(group.passes.last?.target == .scene)
     }
 
+    @Test("Composelayer wrapping only a particle is dropped from the graph")
+    func composelayerWrappingOnlyParticleIsDropped() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [["shader": "compose", "textures": ["_rt_FullFrameBuffer"]]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+
+        // A composelayer whose ONLY child is a particle system is an isolated
+        // effect wrapper (tint/opacity baked onto the particle in the renderer),
+        // so it must not emit a full-frame-capture layer. Mirrors 3462491575's
+        // matrix-rain compose group 1322.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                [
+                    "id": "rainGroup",
+                    "name": "Rain Group",
+                    "type": "image",
+                    "image": "models/util/composelayer.json",
+                    "origin": "500 400 0",
+                    "size": "1000 800 0",
+                    "effects": [[
+                        "file": "effects/opacity/effect.json",
+                        "passes": [["textures": [NSNull(), "masks/rain_mask"]]]
+                    ]]
+                ],
+                [
+                    "id": "rain",
+                    "name": "Matrix Rain",
+                    "type": "particle",
+                    "particle": "particles/rain.json",
+                    "parent": "rainGroup",
+                    "origin": "0 0 0"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(!graph.layers.contains { $0.objectID == "rainGroup" })
+    }
+
+    @Test("copybackground false composelayer with only scroll visible does not capture scene")
+    func copyBackgroundFalseComposelayerWithOnlyScrollVisibleDoesNotCaptureScene() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/workshop/3302578859/effects/scroll.json"
+            ]]
+        ], to: root.appendingPathComponent("effects/workshop/3302578859/scroll/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "workshop/3302578859/effects/scroll"
+            ]]
+        ], to: root.appendingPathComponent("materials/workshop/3302578859/effects/scroll.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 387,
+                "name": "Bar 3",
+                "type": "image",
+                "image": "models/util/composelayer.json",
+                "config": ["passthrough": true],
+                "copybackground": false,
+                "effects": [
+                    [
+                        "id": 388,
+                        "file": "effects/workshop/3299008209/workshop/2084198056/Simple_Audio_Bars/effect.json",
+                        "visible": false
+                    ],
+                    [
+                        "id": 3051,
+                        "file": "effects/workshop/3302578859/scroll/effect.json",
+                        "visible": true
+                    ]
+                ]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(graph.layers.isEmpty)
+    }
+
     @Test("Model puppet path is preserved on render layer")
     func modelPuppetPathIsPreservedOnRenderLayer() throws {
         let root = FileManager.default.temporaryDirectory
@@ -871,6 +977,62 @@ struct WPERenderGraphBuilderTests {
 
         #expect(layer.passes.map(\.blending) == ["premultiplied", "premultiplied"])
         #expect(layer.passes[1].target == .scene)
+    }
+
+    @Test("Object additive blend overrides final scene composite blend")
+    func objectAdditiveBlendOverridesFinalSceneCompositeBlend() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/ripple.json"], to: root.appendingPathComponent("models/ripple.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "blending": "translucent"
+            ]]
+        ], to: root.appendingPathComponent("materials/ripple.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/pulse.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/pulse/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "workshop/2655151285/effects/pulse",
+                "blending": "normal"
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/pulse.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "88",
+                "name": "ripple1440p",
+                "type": "image",
+                "image": "models/ripple.json",
+                "colorBlendMode": 9,
+                "effects": [[
+                    "id": 92,
+                    "file": "effects/pulse/effect.json"
+                ]]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.passes.map(\.blending) == [
+            "premultiplied",
+            "premultiplied",
+            "premultipliedAdditive"
+        ])
+        #expect(layer.passes.last?.target == .scene)
     }
 
     @Test("Render graph preserves image object parallax depth on layer")

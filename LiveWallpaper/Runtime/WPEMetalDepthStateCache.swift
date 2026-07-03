@@ -102,9 +102,20 @@ final class WPEMetalDepthStateCache {
         return texture
     }
 
-    private static func compareFunction(for raw: String) -> MTLCompareFunction {
+    static func compareFunction(for raw: String) -> MTLCompareFunction {
         switch raw.lowercased() {
-        case "always":
+        // WPE materials express depth testing as a boolean string: every
+        // `depthtest` in the corpus is "enabled" (33) or "disabled" (799), never a
+        // GL compare name. "enabled" means "occlude by depth", so it must map to a
+        // real comparison — the old `default: .always` silently disabled depth
+        // testing while depth WRITE stayed on, so a no-cull mesh (a sphere) drew in
+        // index order (front/back faces interleaved → half the surface "fault"ed)
+        // and a nearer object (three-body stars) was overwritten by a later, farther
+        // one (the skybox). "disabled" correctly keeps `.always`: those passes carry
+        // no depth attachment, so the compare is moot.
+        case "enabled", "true":
+            return .lessEqual
+        case "always", "disabled", "false":
             return .always
         case "never":
             return .never

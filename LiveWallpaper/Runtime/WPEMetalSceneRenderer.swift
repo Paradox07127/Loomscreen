@@ -1538,7 +1538,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             angles.reserveCapacity(dynamicAnglesScriptInstances.count)
             for (objectID, instance) in dynamicAnglesScriptInstances {
                 if let angle = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
-                    angles[objectID] = angle
+                    // WPE's script API exposes `angles` in degrees; scene.json and the
+                    // rotation math are radians (corpus-verified: all 353 nonzero static
+                    // angles ≤ 2π). Convert only at this boundary — the instance's
+                    // lastValue stays in script-space degrees so `value.y += k`
+                    // accumulation matches WPE (3509243656 universe spin was 57.3× fast).
+                    angles[objectID] = angle * (.pi / 180)
                 }
             }
             framePipeline = framePipeline.applyingLayerTransforms(
@@ -1656,23 +1661,40 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 let liveText = textScriptInstances[object.id]?.tickString() ?? object.text
                 let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
-                let halfWidth = Double(sceneRenderSize.width) * 0.5
-                let halfHeight = Double(sceneRenderSize.height) * 0.5
                 let textParallax = parallaxFrame.pixelOffset(
                     depth: liveObject.parallaxDepth,
                     sceneSize: sceneRenderSize
-                )
-                let center = SIMD2<Float>(
-                    Float(liveObject.origin.x - halfWidth) + textParallax.x,
-                    Float(liveObject.origin.y - halfHeight) + textParallax.y
                 )
                 let scale = SIMD2<Float>(
                     Float(max(liveObject.scale.x, 0.0001)),
                     Float(max(liveObject.scale.y, 0.0001))
                 )
+                // Perspective scenes (orthogonalprojection:null) author text
+                // origins in world units, so they must project through the same
+                // camera as image quads (WPEMetalRenderExecutor.perspectiveObjectQuadUniforms).
+                // Treating them as pixels pushed every x≈0 label ~960px off-screen.
+                // Ortho scenes keep the pixel-space placement clocks/date overlays rely on.
+                let center: SIMD2<Float>
+                let perspectiveSizeScale: Float
+                if cameraUniforms.usesPerspectiveProjection {
+                    guard let projection = cameraUniforms.projectedCenterInScenePixels(
+                        worldPoint: liveObject.origin,
+                        sceneSize: sceneRenderSize
+                    ) else { continue }
+                    center = projection.center + SIMD2<Float>(textParallax.x, textParallax.y)
+                    perspectiveSizeScale = projection.depthScale
+                } else {
+                    let halfWidth = Double(sceneRenderSize.width) * 0.5
+                    let halfHeight = Double(sceneRenderSize.height) * 0.5
+                    center = SIMD2<Float>(
+                        Float(liveObject.origin.x - halfWidth) + textParallax.x,
+                        Float(liveObject.origin.y - halfHeight) + textParallax.y
+                    )
+                    perspectiveSizeScale = 1
+                }
                 let scaledSize = CGSize(
-                    width: entry.size.width * CGFloat(scale.x),
-                    height: entry.size.height * CGFloat(scale.y)
+                    width: entry.size.width * CGFloat(scale.x) * CGFloat(perspectiveSizeScale),
+                    height: entry.size.height * CGFloat(scale.y) * CGFloat(perspectiveSizeScale)
                 )
                 let fallbackDraw = WPETextOverlayDraw(
                     texture: entry.texture,
@@ -1688,10 +1710,24 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 allFallbackDraws.append(fallbackDraw)
                 // Prefer the GPU MSDF path; if it can't build a payload for this
                 // object, render it via the CoreText overlay this frame.
+                // In perspective the projected `center` (scene-centered, +Y up)
+                // already carries parallax; convert it into the MSDF path's
+                // absolute top-left pixel space so both text paths land at the
+                // same screen point. Ortho keeps the object-origin + parallax path.
+                let msdfOriginOverride: SIMD2<Double>? = cameraUniforms.usesPerspectiveProjection
+                    ? SIMD2<Double>(
+                        Double(center.x) + Double(sceneRenderSize.width) * 0.5,
+                        Double(sceneRenderSize.height) * 0.5 - Double(center.y)
+                    )
+                    : nil
                 if let payload = msdfTextRenderer?.drawPayload(
                     for: liveObject,
                     sceneSize: sceneRenderSize,
-                    parallaxOffset: SIMD2<Float>(textParallax.x, textParallax.y)
+                    parallaxOffset: cameraUniforms.usesPerspectiveProjection
+                        ? .zero
+                        : SIMD2<Float>(textParallax.x, textParallax.y),
+                    originOverride: msdfOriginOverride,
+                    sizeScale: Double(perspectiveSizeScale)
                 ) {
                     msdfPayloads.append(payload)
                 } else {
@@ -1883,6 +1919,53 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return nil
     }
 
+    /// Largest exact square-cell grid over the LOGICAL image (cell = gcd of the
+    /// logical sides), emitted as explicit frame rects normalized over the padded
+    /// atlas. Square/equal-sided images yield one cell (`nil` — stays a static
+    /// sprite), so this only ever slices genuinely rectangular sheets. Bounds
+    /// (cell ≥ 16px, ≤ 512 frames) reject degenerate grids from odd image sizes.
+    static func squareCellGridSpriteSheet(
+        logicalWidth: Int,
+        logicalHeight: Int,
+        atlasWidth: Int,
+        atlasHeight: Int,
+        isAlphaMask: Bool
+    ) -> WPEParticleSpriteSheet? {
+        guard logicalWidth > 0, logicalHeight > 0, atlasWidth > 0, atlasHeight > 0 else { return nil }
+        func gcd(_ a: Int, _ b: Int) -> Int {
+            var (a, b) = (a, b)
+            while b != 0 { (a, b) = (b, a % b) }
+            return a
+        }
+        let cell = gcd(logicalWidth, logicalHeight)
+        let cols = logicalWidth / cell
+        let rows = logicalHeight / cell
+        let frames = cols * rows
+        guard cell >= 16, frames > 1, frames <= 512 else { return nil }
+        var rects: [SIMD4<Float>] = []
+        rects.reserveCapacity(frames)
+        let w = Float(atlasWidth)
+        let h = Float(atlasHeight)
+        for row in 0..<rows {
+            for col in 0..<cols {
+                rects.append(SIMD4<Float>(
+                    Float(col * cell) / w,
+                    Float(row * cell) / h,
+                    Float((col + 1) * cell) / w,
+                    Float((row + 1) * cell) / h
+                ))
+            }
+        }
+        return WPEParticleSpriteSheet(
+            cols: cols,
+            rows: rows,
+            frameCount: frames,
+            baseFrameRate: 0,
+            isAlphaMask: isAlphaMask,
+            frameRects: rects
+        )
+    }
+
     private func makeParticleSceneTransform(for object: WPESceneParticleObject) -> WPEParticleSceneTransform {
         WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(Float(sceneRenderSize.width), Float(sceneRenderSize.height)),
@@ -2027,10 +2110,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
             object.scaleScript.map { (object.id, $0) }
         }
-        let anglesScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
+        // Angles seeds come from scene.json in radians; the script sees degrees
+        // (same boundary as the deg→rad conversion in the per-frame tick).
+        let anglesScripts = (document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
             object.anglesScript.map { (object.id, $0) }
         } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
             object.anglesScript.map { (object.id, $0) }
+        }).map { (id, script) in
+            (id, WPESceneTransformScript(
+                script: script.script,
+                scriptProperties: script.scriptProperties,
+                seed: script.seed * (180 / .pi)
+            ))
         }
         debugStage(
             "transformScripts.load",
@@ -2364,7 +2455,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
         particleNormalTextures.removeAll(keepingCapacity: true)
+        let imageObjectsByID = Dictionary(
+            document.imageObjects.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         for object in document.particleObjects where object.visible {
+            let groupEffect = await resolveParticleGroupEffect(
+                for: object,
+                objectParentByID: document.objectParentByID,
+                imageObjectsByID: imageObjectsByID
+            )
             await expandParticleTree(
                 path: object.particleRelativePath,
                 parentPath: nil,
@@ -2373,9 +2473,54 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 parentSystem: nil,
                 followFromParent: false,
                 object: object,
-                sortIndex: document.objectPaintOrder[object.id] ?? 0
+                sortIndex: document.objectPaintOrder[object.id] ?? 0,
+                groupEffect: groupEffect
             )
         }
+    }
+
+    /// A particle whose parent chain runs through a `composelayer` group inherits
+    /// that group's tint + opacity-mask effects: WPE renders the system into the
+    /// group's isolated buffer, then the group recolours and spatially confines it
+    /// (3462491575's matrix rain → cyan-tinted, masked to an upper-centre blob).
+    /// The particle pipeline draws straight to scene, so bake those two effects
+    /// onto the system instead. Returns the loaded mask texture + tint, or nil.
+    private func resolveParticleGroupEffect(
+        for object: WPESceneParticleObject,
+        objectParentByID: [String: String],
+        imageObjectsByID: [String: WPESceneImageObject]
+    ) async -> (mask: MTLTexture?, tint: SIMD3<Float>)? {
+        var tint = SIMD3<Float>(1, 1, 1)
+        var maskPath: String?
+        var current = objectParentByID[object.id]
+        var seen: Set<String> = []
+        while let id = current, seen.insert(id).inserted {
+            if let ancestor = imageObjectsByID[id],
+               ancestor.imageRelativePath.lowercased().contains("composelayer") {
+                for effect in ancestor.effects where effect.visible {
+                    let file = effect.fileRelativePath.lowercased()
+                    let pass = effect.passOverrides.first
+                    if file.contains("/tint/"),
+                       let color = pass?.constants["color"]?.vectorValue, color.count >= 3 {
+                        tint = SIMD3<Float>(Float(color[0]), Float(color[1]), Float(color[2]))
+                    }
+                    if file.contains("/opacity/"),
+                       let mask = pass?.textures[1] {
+                        maskPath = mask
+                    }
+                }
+            }
+            current = objectParentByID[id]
+        }
+        guard maskPath != nil || tint != SIMD3<Float>(1, 1, 1) else { return nil }
+        var maskTexture: MTLTexture?
+        if let maskPath,
+           let payload = try? await makeTextureResource(
+               relativePath: maskPath, label: "particle group mask \(maskPath)"),
+           case .staticTexture(let t) = payload {
+            maskTexture = t
+        }
+        return (maskTexture, tint)
     }
 
     /// Recursively expand a nested particle `children` tree into drawable
@@ -2392,7 +2537,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         parentSystem: WPEParticleSystem?,
         followFromParent: Bool,
         object: WPESceneParticleObject,
-        sortIndex: Int
+        sortIndex: Int,
+        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil
     ) async {
         // Reload/cleanup cancels the owning load task cooperatively; bail
         // before doing any work (or recursing) on behalf of a dead load.
@@ -2421,7 +2567,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 particlePath: particlePath,
                 followParent: followFromParent ? parentSystem : nil,
                 requiresFollowParent: followFromParent,
-                sortIndex: sortIndex
+                sortIndex: sortIndex,
+                isNestedChild: !ancestry.isEmpty,
+                groupEffect: groupEffect
             )
         } else {
             registered = nil
@@ -2442,7 +2590,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 parentSystem: childParentSystem,
                 followFromParent: child.isEventFollow,
                 object: object,
-                sortIndex: sortIndex
+                sortIndex: sortIndex,
+                groupEffect: groupEffect
             )
         }
     }
@@ -2469,7 +2618,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         particlePath: String,
         followParent: WPEParticleSystem? = nil,
         requiresFollowParent: Bool = false,
-        sortIndex: Int = 0
+        sortIndex: Int = 0,
+        isNestedChild: Bool = false,
+        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil
     ) async -> WPEParticleSystem? {
         let material = definition.materialRelativePath
             .flatMap(parseParticleMaterial(at:))
@@ -2527,6 +2678,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
             }
         }
+        // A repacked scene can strip the TEXS frame table from a sequence atlas
+        // (3462491575's matrix glyph sheet: single-frame 512×512 .tex, logical
+        // 450×400, no sidecar). WPE still slices the LOGICAL image into its
+        // largest exact square-cell grid (gcd 50 → 9×8 = 72 frames, matching the
+        // authored "spritesheet 72"), so derive the same grid — but only for
+        // particles that explicitly opted into sequence animation; a defaulted
+        // `animationmode` must not slice single-image sprites.
+        if spriteSheet == nil, definition.declaresSequenceAnimation {
+            let resolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: resolved)
+            spriteSheet = Self.squareCellGridSpriteSheet(
+                logicalWidth: resolution.imageWidth,
+                logicalHeight: resolution.imageHeight,
+                atlasWidth: resolved.width,
+                atlasHeight: resolved.height,
+                isAlphaMask: resolved.pixelFormat == .r8Unorm
+            )
+        }
         // Defensive: an R8 particle texture whose `.tex-json` sidecar is
         // missing/invalid would otherwise fall through to the non-mask path
         // and sample `.r8Unorm` alpha as 1 → an opaque quad (the RG88
@@ -2547,6 +2715,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
         system.overbright = material?.overbright ?? 1.0
+        system.isNestedChildSystem = isNestedChild
+        if let groupEffect {
+            system.groupOpacityMask = groupEffect.mask
+            system.groupTint = groupEffect.tint
+        }
         // REFRACT (lens water droplets / heat haze): needs the normal map too.
         // If it fails to load, fall back to the flat-sprite path rather than a
         // refraction that samples nothing.

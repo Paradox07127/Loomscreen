@@ -579,6 +579,8 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let name: String
     public let imageRelativePath: String
     public let materialRelativePath: String?
+    /// Whether utility composition layers should seed their pass chain from the current scene.
+    public let copyBackground: Bool
     /// Scene object this layer attaches to (the parent puppet for body-split rigs). `nil` for roots.
     public let parentObjectID: String?
     /// Named MDAT anchor on the parent puppet this layer follows (e.g. 头部/脖颈/胸部). `nil` when unattached.
@@ -634,6 +636,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         name: String,
         imageRelativePath: String,
         materialRelativePath: String?,
+        copyBackground: Bool = true,
         parentObjectID: String? = nil,
         attachment: String? = nil,
         origin: SIMD3<Double>,
@@ -666,6 +669,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.name = name
         self.imageRelativePath = imageRelativePath
         self.materialRelativePath = materialRelativePath
+        self.copyBackground = copyBackground
         self.parentObjectID = parentObjectID
         self.attachment = attachment
         self.origin = origin

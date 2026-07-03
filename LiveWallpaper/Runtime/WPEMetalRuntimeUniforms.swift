@@ -377,6 +377,37 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         ]
     }
 
+    /// Project a world-space point through the scene camera into scene-centered
+    /// pixel space (origin = screen center, +Y up) — the convention the
+    /// object-quad perspective path (`perspectiveObjectQuadUniforms`) produces
+    /// and both object/text overlay vertex shaders consume as their `center`.
+    /// Returns the projected center plus `depthScale` (focal ÷ depth, the factor
+    /// distant content shrinks by), or nil when the point is at/behind the eye
+    /// plane. This is the single source of truth shared by the image quad and
+    /// text overlay paths so perspective text lands exactly where an image at the
+    /// same world origin would.
+    func projectedCenterInScenePixels(
+        worldPoint: SIMD3<Double>,
+        sceneSize: CGSize
+    ) -> (center: SIMD2<Float>, depthScale: Float)? {
+        let eye = sceneCamera.eye
+        let forward = Self.normalized(sceneCamera.center - eye, fallback: SIMD3<Double>(0, 0, -1))
+        let right = Self.normalized(simd_cross(forward, sceneCamera.up), fallback: SIMD3<Double>(1, 0, 0))
+        let up = Self.normalized(simd_cross(right, forward), fallback: SIMD3<Double>(0, 1, 0))
+        let relative = worldPoint - eye
+        let depth = simd_dot(relative, forward)
+        guard depth.isFinite, depth > 0.0001 else { return nil }
+        let sceneHeight = Double(max(sceneSize.height, 1))
+        let fov = max(min(sceneCamera.fov, 179), 1) * .pi / 180
+        let focal = sceneHeight / max(2 * tan(fov * 0.5), 0.0001)
+        let depthScale = focal / depth
+        let projected = SIMD2<Double>(
+            simd_dot(relative, right) * depthScale,
+            simd_dot(relative, up) * depthScale
+        )
+        return (SIMD2<Float>(Float(projected.x), Float(projected.y)), Float(depthScale))
+    }
+
     private static func topLeftOrthographicMatrix(
         width: Double,
         height: Double,

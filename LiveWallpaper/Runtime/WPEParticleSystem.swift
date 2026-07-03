@@ -180,6 +180,22 @@ final class WPEParticleSystem {
     var isRefract: Bool = false
     /// `g_RefractAmount` — screen-UV refraction offset scale (WPE default 0.05).
     var refractAmount: Float = 0.05
+    /// True for a system expanded from a `children` reference. WPE scales a
+    /// nested child's sprites by the CHILD's own scale (its reference carries
+    /// `scale`, here always 1), not the owning layer's: 3462491575's matrix
+    /// glyphs (size 100 on a 2× layer) measure ~100px on Windows, not 200px.
+    /// The layer scale still spreads child spawn POSITIONS via
+    /// `applyModelMatrix` — only the per-sprite quad size opts out.
+    var isNestedChildSystem: Bool = false
+    /// Full-frame R8 opacity mask baked from the particle's parent composelayer
+    /// (WPE isolates the system into that group and applies its opacity effect).
+    /// When set, the fragment multiplies each sprite's alpha by the mask sampled
+    /// at screen position — confining the system to the authored region (matrix
+    /// rain → upper-centre blob). `nil` = no spatial confine.
+    var groupOpacityMask: MTLTexture?
+    /// Colour multiplier baked from the parent composelayer's tint effect
+    /// (1,1,1 = no tint). Applied in the particle fragment.
+    var groupTint: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
     /// Live cursor position in the centered render frame (Y-up), or `nil` when
     /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
     /// by the renderer each frame; drives pointer-locked control points
@@ -907,7 +923,7 @@ final class WPEParticleSystem {
         // lenses. Keep the authored size; the screen-wide scatter still comes from
         // objectScale via `applyModelMatrix` on the spawn position. (Targeted to
         // refract pending a Windows-WPE oracle size comparison.)
-        let sizeScale = isRefract ? 1.0 : sceneTransform.worldSizeMultiplier()
+        let sizeScale = (isRefract || isNestedChildSystem) ? 1.0 : sceneTransform.worldSizeMultiplier()
         // `sizerandom` exponent: WPE samples min + (max-min)·rand^exp (exp>1
         // biases toward min). `uniform` is exp==1; only pay `pow` when it differs.
         let sizeSample: Double

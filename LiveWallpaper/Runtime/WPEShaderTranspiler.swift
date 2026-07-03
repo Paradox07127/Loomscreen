@@ -165,11 +165,13 @@ struct WPEShaderTranspiler {
             premultiplyOutput: premultipliedOutput,
             repeatSamplers: repeatSamplers
         )
+        let helperMutableGlobals = extractProgramScopeMutableDeclarations(from: translatedHelpers)
         let helperResources = rewriteHelperResourceAccess(
-            helpers: translatedHelpers,
+            helpers: helperMutableGlobals.source,
             mainBody: translatedMain,
             uniforms: uniforms,
-            samplers: sortedSamplers
+            samplers: sortedSamplers,
+            mutableGlobals: helperMutableGlobals.declarations
         )
 
         let msl = renderMSL(
@@ -179,6 +181,7 @@ struct WPEShaderTranspiler {
             varyings: varyings,
             helpers: helperResources.helpers,
             mainBody: helperResources.mainBody,
+            mutableGlobals: helperMutableGlobals.declarations,
             comboValues: comboValues,
             premultipliedInputSlots: premultipliedInputSlots,
             premultipliedOutput: premultipliedOutput
@@ -233,6 +236,14 @@ struct WPEShaderTranspiler {
         let parentActive: Bool
         var active: Bool
         var branchTaken: Bool
+    }
+
+    /// Exposed for the vertex-uniform merge: a uniform declared only inside an
+    /// INACTIVE `#if` branch of the fragment must not count as "already
+    /// declared", or the merge skips it and the strip then removes it entirely
+    /// (auto_sway declares g_Speed/g_Inertia only under `AA_VERSION == 1`).
+    static func sourceWithInactiveBranchesStripped(_ source: String) -> String {
+        stripInactivePreprocessorBranches(in: source)
     }
 
     private static func stripInactivePreprocessorBranches(in source: String) -> String {
@@ -752,6 +763,7 @@ struct WPEShaderTranspiler {
         // map straight to dfdx/dfdy; the GL-only ddy(-x) negation is not wanted).
         s = wordReplace(s, find: "dFdx", replace: "dfdx")
         s = wordReplace(s, find: "dFdy", replace: "dfdy")
+        s = rewriteSmoothstepCalls(s)
 
         if rewriteProgramScopeConsts {
             s = rewriteProgramScopeConstDeclarations(s)
@@ -784,6 +796,23 @@ struct WPEShaderTranspiler {
         s = stripInParameterQualifier(s)
 
         return s
+    }
+
+    /// GLSL leaves `smoothstep(edge0, edge1, x)` undefined when the two edges
+    /// are equal. Several WPE audio shaders intentionally collapse smoothing to
+    /// zero at rest; Metal can turn the resulting division by zero into NaNs
+    /// that then pollute premultiplied alpha. Route calls through a finite helper
+    /// that behaves like a hard threshold for degenerate edges.
+    private static func rewriteSmoothstepCalls(_ source: String) -> String {
+        let pattern = #"(?<![:A-Za-z0-9_])smoothstep\s*\("#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source),
+            withTemplate: "wpe_smoothstep("
+        )
     }
 
     private static func canonicalizeTextureSampleAliases(_ source: String) -> String {
@@ -874,6 +903,80 @@ struct WPEShaderTranspiler {
         let joined = functionNames.joined(separator: "|")
         let pattern = #"(?<![A-Za-z0-9_])(\#(joined))\s*\("#
         return rhs.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private struct ProgramScopeMutableDecl: Hashable {
+        let metalType: String
+        let name: String
+        let initializer: String
+
+        var helperParameterType: String {
+            "thread \(metalType)&"
+        }
+    }
+
+    /// GLSL permits writable globals as per-fragment scratch state; MSL rejects
+    /// non-`constant` program-scope variables. Move simple scratch declarations
+    /// into `wpe_translated_fragment` and thread them through helper references.
+    private static func extractProgramScopeMutableDeclarations(
+        from source: String
+    ) -> (source: String, declarations: [ProgramScopeMutableDecl]) {
+        var declarations: [ProgramScopeMutableDecl] = []
+        var output: [String] = []
+        var depth = 0
+
+        for line in source.components(separatedBy: "\n") {
+            if depth == 0, let declaration = parseProgramScopeMutableDeclarationLine(line) {
+                declarations.append(declaration)
+            } else {
+                output.append(line)
+            }
+
+            for ch in line {
+                if ch == "{" {
+                    depth += 1
+                } else if ch == "}" {
+                    depth = max(0, depth - 1)
+                }
+            }
+        }
+
+        return (output.joined(separator: "\n"), declarations)
+    }
+
+    private static func parseProgramScopeMutableDeclarationLine(_ line: String) -> ProgramScopeMutableDecl? {
+        let typePattern = #"(?:float|half|int|uint|bool)(?:[234](?:x[234])?)?"#
+        let pattern = #"^\s*(?!const\b)(?!constant\b)(\#(typePattern))\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(.*?))?\s*;\s*(?://.*)?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let typeRange = Range(match.range(at: 1), in: line),
+              let nameRange = Range(match.range(at: 2), in: line) else {
+            return nil
+        }
+
+        let metalType = String(line[typeRange])
+        let initializer: String
+        if match.range(at: 3).location != NSNotFound,
+           let initializerRange = Range(match.range(at: 3), in: line) {
+            initializer = String(line[initializerRange]).trimmingCharacters(in: .whitespaces)
+        } else {
+            initializer = zeroInitializer(forMetalType: metalType)
+        }
+
+        return ProgramScopeMutableDecl(
+            metalType: metalType,
+            name: String(line[nameRange]),
+            initializer: initializer.isEmpty ? zeroInitializer(forMetalType: metalType) : initializer
+        )
+    }
+
+    private static func zeroInitializer(forMetalType metalType: String) -> String {
+        if metalType == "bool" { return "false" }
+        if metalType.hasPrefix("bool") { return "\(metalType)(false)" }
+        if metalType == "int" || metalType == "uint" { return "0" }
+        if metalType.hasPrefix("int") || metalType.hasPrefix("uint") { return "\(metalType)(0)" }
+        if metalType == "float" || metalType == "half" { return "0.0" }
+        return "\(metalType)(0.0)"
     }
 
     /// Rewrite WPE shaders that use GLSL-style float modulo for an unsigned bucket index.
@@ -1646,14 +1749,19 @@ struct WPEShaderTranspiler {
         helpers: String,
         mainBody: String,
         uniforms: [WPEUniformDecl],
-        samplers: [WPESamplerDecl]
+        samplers: [WPESamplerDecl],
+        mutableGlobals: [ProgramScopeMutableDecl] = []
     ) -> (helpers: String, mainBody: String) {
         let functions = parseHelperFunctions(in: helpers)
         guard !functions.isEmpty else {
             return (helpers, mainBody)
         }
 
-        let resources = helperResources(uniforms: uniforms, samplers: samplers)
+        let resources = helperResources(
+            uniforms: uniforms,
+            samplers: samplers,
+            mutableGlobals: mutableGlobals
+        )
         guard !resources.isEmpty else {
             return (helpers, mainBody)
         }
@@ -1737,7 +1845,8 @@ struct WPEShaderTranspiler {
 
     private static func helperResources(
         uniforms: [WPEUniformDecl],
-        samplers: [WPESamplerDecl]
+        samplers: [WPESamplerDecl],
+        mutableGlobals: [ProgramScopeMutableDecl] = []
     ) -> [HelperResource] {
         let samplerResources = samplers.map {
             HelperResource(name: $0.name, parameterType: "texture2d<float>")
@@ -1745,7 +1854,10 @@ struct WPEShaderTranspiler {
         let uniformResources = uniforms.map {
             HelperResource(name: $0.name, parameterType: helperParameterType(for: $0))
         }
-        return samplerResources + uniformResources
+        let mutableGlobalResources = mutableGlobals.map {
+            HelperResource(name: $0.name, parameterType: $0.helperParameterType)
+        }
+        return samplerResources + uniformResources + mutableGlobalResources
     }
 
     private static func helperMacroDependencies(
@@ -2050,6 +2162,7 @@ struct WPEShaderTranspiler {
         varyings: [WPEVaryingDecl],
         helpers: String,
         mainBody: String,
+        mutableGlobals: [ProgramScopeMutableDecl] = [],
         comboValues: [String: Int] = [:],
         premultipliedInputSlots: Set<Int> = [],
         premultipliedOutput: Bool = false
@@ -2092,6 +2205,18 @@ struct WPEShaderTranspiler {
         out.append("inline float clamp(int value, int lower, float upper) { return metal::clamp(float(value), float(lower), upper); }")
         out.append("inline float clamp(int value, float lower, int upper) { return metal::clamp(float(value), lower, float(upper)); }")
         out.append("inline float clamp(float value, int lower, int upper) { return metal::clamp(value, float(lower), float(upper)); }")
+        out.append("inline float wpe_smoothstep(float edge0, float edge1, float x) {")
+        out.append("    float width = edge1 - edge0;")
+        out.append("    if (abs(width) <= 1.0e-7) { return x < edge0 ? 0.0 : 1.0; }")
+        out.append("    float t = metal::clamp((x - edge0) / width, 0.0, 1.0);")
+        out.append("    return t * t * (3.0 - 2.0 * t);")
+        out.append("}")
+        out.append("inline float2 wpe_smoothstep(float2 edge0, float2 edge1, float2 x) { return float2(wpe_smoothstep(edge0.x, edge1.x, x.x), wpe_smoothstep(edge0.y, edge1.y, x.y)); }")
+        out.append("inline float3 wpe_smoothstep(float3 edge0, float3 edge1, float3 x) { return float3(wpe_smoothstep(edge0.x, edge1.x, x.x), wpe_smoothstep(edge0.y, edge1.y, x.y), wpe_smoothstep(edge0.z, edge1.z, x.z)); }")
+        out.append("inline float4 wpe_smoothstep(float4 edge0, float4 edge1, float4 x) { return float4(wpe_smoothstep(edge0.x, edge1.x, x.x), wpe_smoothstep(edge0.y, edge1.y, x.y), wpe_smoothstep(edge0.z, edge1.z, x.z), wpe_smoothstep(edge0.w, edge1.w, x.w)); }")
+        out.append("inline float2 wpe_smoothstep(float edge0, float edge1, float2 x) { return wpe_smoothstep(float2(edge0), float2(edge1), x); }")
+        out.append("inline float3 wpe_smoothstep(float edge0, float edge1, float3 x) { return wpe_smoothstep(float3(edge0), float3(edge1), x); }")
+        out.append("inline float4 wpe_smoothstep(float edge0, float edge1, float4 x) { return wpe_smoothstep(float4(edge0), float4(edge1), x); }")
         if !premultipliedInputSlots.isEmpty {
             // Recover straight-alpha color from a premultiplied render-target
             // sample so the original WPE shader math operates in straight space.
@@ -2206,6 +2331,11 @@ struct WPEShaderTranspiler {
         }
 
         let uniformNames = Set(uniforms.map(\.name))
+        let autoSwayReconstruction = autoSwayVaryingReconstructionLines(
+            varyings: varyings,
+            availableUniforms: uniformNames,
+            comboValues: comboValues
+        )
         // Screen-UV fallbacks produced when no reconstruction rule matched a varying.
         // A non-v_TexCoord varying that the fragment actually uses but lands here renders
         // incorrectly (a 0→1 UV ramp standing in for vertex-computed data) — emit a marker
@@ -2223,6 +2353,7 @@ struct WPEShaderTranspiler {
             )
             if varying.name != "v_TexCoord",
                uvFallbackInitializers.contains(initializer),
+               !autoSwayReconstruction.contains(where: { $0.contains(" \(varying.name) = ") }),
                warningCleanMainBody.range(of: "\\b\(NSRegularExpression.escapedPattern(for: varying.name))\\b", options: .regularExpression) != nil {
                 out.append("    // WPE-DIAGNOSTIC: varying '\(varying.name)' has no reconstruction rule and fell back to a screen-UV default; this likely renders incorrectly.")
             }
@@ -2246,11 +2377,157 @@ struct WPEShaderTranspiler {
             }
         }
 
+        for declaration in mutableGlobals {
+            out.append("    [[maybe_unused]] \(declaration.metalType) \(declaration.name) = \(declaration.initializer);")
+        }
+
+        out.append(contentsOf: autoSwayReconstruction)
+
         out.append("    {")
         out.append(warningCleanMainBody)
         out.append("    }")
         out.append("}")
         return out.joined(separator: "\n")
+    }
+
+    /// Fragment-side reconstruction of `auto_sway.vert` (workshop 3235948233,
+    /// `AA_VERSION == 2`) — the per-node sway state the fragment consumes. All
+    /// of it is uniform-only except the `v_PosX`/`v_EndpointPosX` dot products,
+    /// which are affine in the texcoord and therefore identical when recomputed
+    /// per-pixel from the interpolated UV. Without this the varyings fell back
+    /// to screen-UV ramps and the swaying hair locks smeared across the layer
+    /// (3462491575: bangs rotated over the eyes on both characters).
+    /// Matched structurally (v2 varying signature + the shader's distinctive
+    /// uniforms) so repacks under other workshop IDs reconstruct too; the v1/v3
+    /// variants keep today's fallback.
+    private static func autoSwayVaryingReconstructionLines(
+        varyings: [WPEVaryingDecl],
+        availableUniforms: Set<String>,
+        comboValues: [String: Int]
+    ) -> [String] {
+        let varyingNames = Set(varyings.map(\.name))
+        guard varyingNames.contains("v_MotionRadian1"),
+              varyingNames.contains("v_EndpointDirection1"),
+              varyingNames.contains("v_TexCoord"),
+              varyingNames.contains("v_aspect"),
+              hasUniforms(
+                "g_SpinCenter1", "g_SpinCenter2", "g_WindDirection2",
+                "g_Inertia", "g_SigmentCount", "g_Speed", "g_GlobalTimeOffset",
+                "g_GlobalWindOffset", "g_Time", "g_Texture0Resolution",
+                "g_SmoothDistance", "g_DirectionalCompensation",
+                in: availableUniforms
+              ) else {
+            return []
+        }
+        let nodeCount = min(max(comboValues["NODE_COUNT"] ?? 2, 2), 11)
+        let autoTimeoffset = (comboValues["AUTO_TIMEOFFSET"] ?? 1) == 1
+        let interpolation = comboValues["AUTO_TIMEOFFSET_INTERPOLATION"] ?? 0
+        let usesExponent = (comboValues["EXPONENT"] ?? 0) == 1 && availableUniforms.contains("g_Exponent")
+        let usesNoise = (comboValues["NOISE"] ?? 0) == 1
+            && hasUniforms("g_NoiseSpeed", "g_Friction", "g_NoiseAmount", in: availableUniforms)
+        let halfPi = "1.5707963267948966"
+
+        // `linearStep` & friends over compile-time constants (lower=2,
+        // upper=NODE_COUNT, x=nodeNum): fold to a literal. Division by a zero
+        // span mirrors D3D saturate: 0/0 (NaN) → 0, k/0 (+inf) → 1.
+        func stepValue(_ x: Double) -> Double {
+            let span = Double(nodeCount) - 2
+            let raw = (x - 2) / span
+            let t = raw.isNaN ? 0 : min(max(raw, 0), 1)
+            switch interpolation {
+            case 1: return pow(t, 3)
+            case 2: return pow(t, 4)
+            case 3: return pow(t, 5)
+            case 4: return 1 - (1 - pow(t, 2)).squareRoot()
+            case 5: return 1 - cos(t * Double.pi * 0.5)
+            case 6: return 1 - pow(1 - t, 3)
+            case 7: return 1 - pow(1 - t, 4)
+            case 8: return 1 - pow(1 - t, 5)
+            case 9: return (1 - pow(t - 1, 2)).squareRoot()
+            case 10: return sin(t * Double.pi * 0.5)
+            default: return t
+            }
+        }
+
+        var lines: [String] = []
+        lines.append("    // auto_sway v2 vertex-stage state, reconstructed per-pixel (uniform-only + UV-affine).")
+        lines.append("    v_aspect = g_Texture0Resolution.z / g_Texture0Resolution.w;")
+        if varyingNames.contains("v_reciprocalAspect") {
+            lines.append("    v_reciprocalAspect = 1.0 / v_aspect;")
+        }
+        lines.append("    v_TexCoord = float4(in.uv.x * v_aspect, in.uv.y, in.uv.x * v_aspect, in.uv.y);")
+        lines.append("    {")
+        lines.append("        float2 wpeAS_endpointC = float2(g_SpinCenter1.x * v_aspect, g_SpinCenter1.y);")
+        lines.append("        float wpeAS_baseTime = g_GlobalTimeOffset + g_Time * g_Speed;")
+        if autoTimeoffset {
+            lines.append("        float wpeAS_motionOffset = g_Inertia * g_SigmentCount;")
+        }
+        if usesNoise {
+            lines.append("        float2 wpeAS_friction = g_Friction;")
+        }
+
+        for node in 2...nodeCount {
+            let i = node - 1
+            let requiredVaryings = [
+                "v_Direction\(i)", "v_EndpointDirection\(i)", "v_Len\(i)",
+                "v_EndpointLen\(i)", "v_PosX\(i)", "v_EndpointPosX\(i)", "v_MotionRadian\(i)",
+            ]
+            guard requiredVaryings.allSatisfy(varyingNames.contains),
+                  hasUniforms("g_SpinCenter\(node - 1)", "g_SpinCenter\(node)", "g_WindDirection\(node)", in: availableUniforms) else {
+                continue
+            }
+            let nextWind = node == 11 ? halfPi
+                : (availableUniforms.contains("g_WindDirection\(node + 1)") ? "g_WindDirection\(node + 1)" : "\(halfPi)")
+            let thisTimeTerm: String
+            let prevTimeTerm: String
+            if autoTimeoffset {
+                thisTimeTerm = "wpeAS_motionOffset * \(stepValue(Double(node)))"
+                prevTimeTerm = "wpeAS_motionOffset * \(stepValue(Double(node + 1)))"
+            } else {
+                thisTimeTerm = availableUniforms.contains("g_TimeOffset\(node - 1)") ? "g_TimeOffset\(node - 1)" : "0.0"
+                prevTimeTerm = node == 11 ? "0.0"
+                    : (availableUniforms.contains("g_TimeOffset\(node)") ? "g_TimeOffset\(node)" : "0.0")
+            }
+            lines.append("        {")
+            lines.append("            float2 wpeAS_thisC = float2(g_SpinCenter\(node - 1).x * v_aspect, g_SpinCenter\(node - 1).y);")
+            lines.append("            float2 wpeAS_nextC = float2(g_SpinCenter\(node).x * v_aspect, g_SpinCenter\(node).y);")
+            lines.append("            float2 wpeAS_nodeVec = wpeAS_thisC - wpeAS_nextC;")
+            lines.append("            float2 wpeAS_eNodeVec = wpeAS_endpointC - wpeAS_nextC;")
+            lines.append("            v_Direction\(i) = wpe_safe_normalize(wpeAS_nodeVec);")
+            lines.append("            v_EndpointDirection\(i) = mix(wpe_safe_normalize(wpeAS_eNodeVec), v_Direction\(i), g_DirectionalCompensation);")
+            lines.append("            v_Len\(i) = dot(wpeAS_nodeVec, v_Direction\(i));")
+            lines.append("            v_EndpointLen\(i) = mix(v_Len\(i), dot(wpeAS_eNodeVec, v_EndpointDirection\(i)), g_SmoothDistance);")
+            lines.append("            float2 wpeAS_relTC = v_TexCoord.zw - wpeAS_nextC;")
+            lines.append("            v_EndpointPosX\(i) = dot(wpeAS_relTC, v_EndpointDirection\(i));")
+            lines.append("            v_PosX\(i) = v_EndpointPosX\(i);")
+            lines.append("            float wpeAS_thisT = wpeAS_baseTime + \(thisTimeTerm);")
+            lines.append("            float wpeAS_prevT = wpeAS_baseTime + \(prevTimeTerm);")
+            lines.append("            float wpeAS_thisRad = sin(wpeAS_thisT * \(halfPi));")
+            lines.append("            float wpeAS_prevRad = sin(wpeAS_prevT * \(halfPi)) * g_Inertia;")
+            if usesExponent {
+                lines.append("            wpeAS_thisRad = sign(wpeAS_thisRad) * pow(abs(wpeAS_thisRad), g_Exponent);")
+                lines.append("            wpeAS_prevRad = sign(wpeAS_prevRad) * pow(abs(wpeAS_prevRad), g_Exponent);")
+            }
+            lines.append("            wpeAS_thisRad += sin(g_WindDirection\(node) + \(halfPi)) + sin(g_GlobalWindOffset);")
+            lines.append("            wpeAS_prevRad += sin(\(nextWind) + \(halfPi));")
+            if usesNoise {
+                for (radVar, timeVar) in [("wpeAS_thisRad", "wpeAS_thisT"), ("wpeAS_prevRad", "wpeAS_prevT")] {
+                    lines.append("            {")
+                    lines.append("                float4 wpeAS_sines = fract(g_NoiseSpeed * \(timeVar) / \(halfPi) * float4(1.0, -0.16161616, 0.0083333, -0.00019841)) * \(halfPi);")
+                    lines.append("                float4 wpeAS_csines = cos(wpeAS_sines);")
+                    lines.append("                wpeAS_sines = sin(wpeAS_sines);")
+                    lines.append("                float4 wpeAS_base = step(float4(0.0), wpeAS_csines);")
+                    lines.append("                wpeAS_sines = wpeAS_sines * 0.498 + 0.5;")
+                    lines.append("                wpeAS_sines = mix(1.0 - pow(1.0 - wpeAS_sines, float4(wpeAS_friction.x)), pow(wpeAS_sines, float4(wpeAS_friction.y)), wpeAS_base);")
+                    lines.append("                \(radVar) += (dot(float4(0.5), wpeAS_sines) - 1.0) * g_NoiseAmount;")
+                    lines.append("            }")
+                }
+            }
+            lines.append("            v_MotionRadian\(i) = wpeAS_thisRad - wpeAS_prevRad;")
+            lines.append("        }")
+        }
+        lines.append("    }")
+        return lines
     }
 
     private static let metalStdlibMacroDefinitions: Set<String> = [
@@ -2398,7 +2675,7 @@ struct WPEShaderTranspiler {
                 float4 motion4 = sin(2.5 * (lowDt + float4(0.0, 0.0, 1.0, 1.0)) + float4(1.0, 2.0, 1.0, 2.0));
                 float2 moveStart = motion2.xx + motion4.xy;
                 float2 moveEnd = motion2.yy + motion4.zw;
-                float eased = smoothstep(1.0 - rough, 1.0, cos(fract(time) * 3.14159265359) * -0.5 + 0.5);
+                float eased = wpe_smoothstep(1.0 - rough, 1.0, cos(fract(time) * 3.14159265359) * -0.5 + 0.5);
                 float2 da = mix(moveStart, moveEnd, eased);
                 da.x += sin(time) * noiseAmount;
                 da.y += cos(time) * noiseAmount;
@@ -2435,7 +2712,7 @@ struct WPEShaderTranspiler {
             // brightness/alpha ramp instead of a uniform full-screen pulse.
             inline float wpe_pulse_response(float time, float2 thresholds, float speed, float phase, float amount) {
                 float wave = sin(time * speed + (phase - 0.25) * 6.28318530717958647692) * 0.5 + 0.5;
-                return smoothstep(thresholds.x, thresholds.y, wave) * amount;
+                return wpe_smoothstep(thresholds.x, thresholds.y, wave) * amount;
             }
             // Vertex-stage `v_AudioShift` (WPE common.h CreateAudioResponse): the
             // FFT bins in [freqMin, freqMax] are averaged, smoothstepped against
@@ -2462,7 +2739,7 @@ struct WPEShaderTranspiler {
                 float denom = max(freqMax - freqMin + 1.0, 1.0);
                 if (mode == 3) { denom *= 2.0; }
                 response /= denom;
-                response = smoothstep(bounds.x, bounds.y, response);
+                response = wpe_smoothstep(bounds.x, bounds.y, response);
                 return clamp(pow(response, power), 0.0, 1.0) * multiply;
             }
             inline float wpe_audio_oscilloscope_value(
@@ -2491,7 +2768,7 @@ struct WPEShaderTranspiler {
                 float bx = 2.0 * abs(fract(t) - 0.5);
                 float bz = 2.0 * abs(fract(0.25 + t) - 0.5);
                 float lo = 0.5 - feather, hi = 0.5 + feather;
-                return float2(smoothstep(lo, hi, bx), smoothstep(lo, hi, bz));
+                return float2(wpe_smoothstep(lo, hi, bx), wpe_smoothstep(lo, hi, bz));
             }
             inline float3x3 wpe_square_to_quad(float2 p0, float2 p1, float2 p2, float2 p3) {
                 float dx0 = p0.x, dy0 = p0.y;

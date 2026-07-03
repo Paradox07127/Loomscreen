@@ -158,8 +158,14 @@ struct WPEParticleSystemTests {
         #expect(abs(scaled.turbulenceSpeedMax - 132) < 0.0001)
         #expect(abs(scaled.alphaMin - 0.03) < 0.0001)
         #expect(abs(scaled.alphaMax - 0.03) < 0.0001)
+        // `colorn` multiplies the authored colour (÷255) instead of replacing it:
+        // 3462491575's matrix glyphs keep their green `colorrandom` under a white
+        // `colorn` on Windows, which replacement would have bleached.
         #expect(scaled.colorMin == SIMD3<Double>(192, 192, 192))
-        #expect(scaled.colorMax == SIMD3<Double>(192, 192, 192))
+        let expectedColorMax = SIMD3<Double>(192, 236.0 * 192.0 / 255.0, 0)
+        #expect(abs(scaled.colorMax.x - expectedColorMax.x) < 0.0001)
+        #expect(abs(scaled.colorMax.y - expectedColorMax.y) < 0.0001)
+        #expect(abs(scaled.colorMax.z - expectedColorMax.z) < 0.0001)
     }
 
     @Test("Emitter respects start delay before spawning")

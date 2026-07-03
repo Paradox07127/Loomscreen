@@ -83,7 +83,17 @@ struct WPERenderGraphBuilder: Sendable {
         let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
             .union(Self.layerScriptControlledVisibilityIDs(in: document))
         let dynamicCreatedLayerTemplateIDs = Self.createLayerImageTemplateIDs(in: document)
+        // A `composelayer` whose only children are particle systems is an isolated
+        // effect wrapper for those particles (WPE renders them into its buffer,
+        // then applies its tint/opacity). The particle pipeline draws straight to
+        // scene and bakes those effects onto the system (WPEMetalSceneRenderer),
+        // so the wrapper layer must NOT also run — otherwise it captures the whole
+        // frame and tints the background in the mask region (3462491575's rain).
+        let particleOnlyComposeWrappers = Self.particleOnlyComposeWrapperIDs(
+            in: document, objectByID: objectByID
+        )
         let visibleLayerIDs = Set(document.imageObjects
+            .filter { !particleOnlyComposeWrappers.contains($0.id) }
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
             .filter {
                 // Composite normally, OR keep a layer whose only reason for being hidden is a
@@ -524,10 +534,25 @@ struct WPERenderGraphBuilder: Sendable {
         // spectrum line: an alpha-0 solidlayer whose `audioline` effect renders
         // the visible curve). Dropping such layers hid the entire effect.
         let hasVisibleEffect = object.effects.contains { $0.visible }
+        if !object.copyBackground,
+           isComposelayerModelPath(object.imageRelativePath),
+           hasVisibleEffect,
+           object.effects.filter(\.visible).allSatisfy(isInputOnlyScrollEffect) {
+            return false
+        }
         guard object.alpha > 0.001 || object.alphaAnimation != nil || hasVisibleEffect else {
             return false
         }
         return object.visible || liveVisibilityIDs.contains(object.id)
+    }
+
+    private static func isInputOnlyScrollEffect(_ effect: WPESceneImageEffect) -> Bool {
+        let normalizedFile = effect.fileRelativePath
+            .replacingOccurrences(of: "\\", with: "/")
+            .lowercased()
+        return effect.name.lowercased() == "scroll"
+            || normalizedFile.hasSuffix("/scroll/effect.json")
+            || normalizedFile.contains("/effects/scroll/effect.json")
     }
 
     /// True when any ancestor up the `parentObjectID` chain is explicitly hidden
@@ -772,6 +797,50 @@ struct WPERenderGraphBuilder: Sendable {
 
     private static func isComposelayerModelPath(_ path: String) -> Bool {
         strippedUtilityPath(path) == "models/util/composelayer.json"
+    }
+
+    /// IDs of `composelayer` objects whose descendants include a particle system
+    /// but NO renderable image layer. Such a compose layer exists solely to wrap
+    /// its particle child in an isolated buffer + effects; the particle pipeline
+    /// bakes those effects on directly, so the wrapper layer is dropped from the
+    /// graph. A compose layer with any image descendant is a real group and is
+    /// left untouched.
+    private static func particleOnlyComposeWrapperIDs(
+        in document: WPESceneDocument,
+        objectByID: [String: WPESceneImageObject]
+    ) -> Set<String> {
+        let composeLayerIDs = Set(
+            document.imageObjects
+                .filter { isComposelayerModelPath($0.imageRelativePath) }
+                .map(\.id)
+        )
+        guard !composeLayerIDs.isEmpty else { return [] }
+        let parentByID = document.objectParentByID
+        func nearestComposeAncestor(of startID: String) -> String? {
+            var current = parentByID[startID]
+            var seen: Set<String> = []
+            while let id = current, seen.insert(id).inserted {
+                if composeLayerIDs.contains(id) { return id }
+                current = parentByID[id]
+            }
+            return nil
+        }
+        var wrappersWithParticle: Set<String> = []
+        for particle in document.particleObjects {
+            if let compose = nearestComposeAncestor(of: particle.id) {
+                wrappersWithParticle.insert(compose)
+            }
+        }
+        guard !wrappersWithParticle.isEmpty else { return [] }
+        // Disqualify any wrapper that also has a renderable image descendant —
+        // that makes it a genuine mixed group, not a particle-only wrapper.
+        var wrappersWithImageChild: Set<String> = []
+        for image in document.imageObjects where !composeLayerIDs.contains(image.id) {
+            if let compose = nearestComposeAncestor(of: image.id) {
+                wrappersWithImageChild.insert(compose)
+            }
+        }
+        return wrappersWithParticle.subtracting(wrappersWithImageChild)
     }
 
     private static func strippedUtilityPath(_ path: String) -> String {
@@ -1409,6 +1478,9 @@ private struct LayerBuildContext {
         finalUntargetedPassToScene: Bool,
         preserveFinalCompositeForScene: Bool
     ) -> [WPERenderPass] {
+        let finalSceneBlendMode = object.blendMode == .normal
+            ? nil
+            : object.blendMode.rawValue.premultipliedRenderTargetBlendMode
         guard let lastPass = passes.last,
               finalUntargetedPassToScene,
               passTargetsWereExplicit.indices.contains(passes.count - 1),
@@ -1441,12 +1513,12 @@ private struct LayerBuildContext {
                 depthTest: "disabled",
                 depthWrite: "disabled"
             ))
-            return finalized.movingFirstBlendModeToFinalPass()
+            return finalized.movingFirstBlendModeToFinalPass(finalBlendMode: finalSceneBlendMode)
         }
 
         var finalized = passes
         finalized[finalized.count - 1] = lastPass.replacingTarget(.scene)
-        return finalized.movingFirstBlendModeToFinalPass()
+        return finalized.movingFirstBlendModeToFinalPass(finalBlendMode: finalSceneBlendMode)
     }
 }
 
@@ -1793,7 +1865,7 @@ private extension String {
 }
 
 private extension Array where Element == WPERenderPass {
-    func movingFirstBlendModeToFinalPass() -> [WPERenderPass] {
+    func movingFirstBlendModeToFinalPass(finalBlendMode: String? = nil) -> [WPERenderPass] {
         guard count > 1,
               let first = first,
               let last = last else {
@@ -1802,7 +1874,7 @@ private extension Array where Element == WPERenderPass {
 
         var result = self
         result[0] = first.replacingBlending(first.blending.premultipliedIntermediateBlendMode)
-        result[result.count - 1] = last.replacingBlending(first.blending)
+        result[result.count - 1] = last.replacingBlending(finalBlendMode ?? first.blending)
         return result
     }
 }

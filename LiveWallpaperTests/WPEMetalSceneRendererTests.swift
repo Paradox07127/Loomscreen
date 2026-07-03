@@ -124,6 +124,61 @@ struct WPEMetalSceneRendererTests {
         #expect(pixel.r > pixel.b)
     }
 
+    @Test("Angles scripts are WPE degrees: returning 90 turns a horizontal bar vertical")
+    func anglesScriptOutputConvertsDegreesToRadians() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.anglesScriptScene(
+            anglesValue: "0 0 0",
+            anglesScript: "'use strict';\nexport function update(value) { value.z = 90; return value; }"
+        )
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        // 48×10 bar at scene center, rotated to vertical. Treating the script's
+        // 90 as radians (≡116.6°) leaves (32,12)/(32,52) uncovered.
+        let texture = try #require(renderer.renderedTexture)
+        #expect(try #require(texture.readPixel(x: 32, y: 12)).r >= 200)
+        #expect(try #require(texture.readPixel(x: 32, y: 52)).r >= 200)
+        #expect(try #require(texture.readPixel(x: 12, y: 32)).r < 100)
+        #expect(try #require(texture.readPixel(x: 52, y: 32)).r < 100)
+    }
+
+    @Test("Angles script seeds convert from scene radians to script degrees")
+    func anglesScriptSeedConvertsRadiansToDegrees() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Seed π/2 rad must reach the script as 90 (degrees): the threshold picks
+        // the vertical branch. An unconverted seed (1.57 < 45) leaves the bar
+        // horizontal. Idempotent on purpose — immune to how many frames load renders.
+        let fixture = try MetalSceneFixture.anglesScriptScene(
+            anglesValue: "0 0 1.5707963",
+            anglesScript: "'use strict';\nexport function update(value) { value.z = (value.z > 45) ? 90 : 0; return value; }"
+        )
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        let texture = try #require(renderer.renderedTexture)
+        #expect(try #require(texture.readPixel(x: 32, y: 12)).r >= 200)
+        #expect(try #require(texture.readPixel(x: 32, y: 52)).r >= 200)
+        #expect(try #require(texture.readPixel(x: 12, y: 32)).r < 100)
+        #expect(try #require(texture.readPixel(x: 52, y: 32)).r < 100)
+    }
+
     @Test("Resolves dependency-mounted texture references")
     func resolvesDependencyMountedTextures() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -599,6 +654,57 @@ private struct MetalSceneFixture {
               }
             }
           ]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
+        )
+    }
+
+    /// 48×10 red bar centered in a 64×64 ortho scene with a scripted `angles`
+    /// field — pixel-verifies the WPE degrees ↔ renderer radians boundary.
+    static func anglesScriptScene(anglesValue: String, anglesScript: String) throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        let models = root.appendingPathComponent("models", isDirectory: true)
+        let materials = root.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: materials, withIntermediateDirectories: true)
+        try writePNG(at: materials.appendingPathComponent("base.png"), color: CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        try Data(#"{ "material": "materials/base.json" }"#.utf8)
+            .write(to: models.appendingPathComponent("base.json"))
+        try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/base.png"] }] }"#.utf8)
+            .write(to: materials.appendingPathComponent("base.json"))
+        let escapedScript = anglesScript
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [{
+            "id": "bar",
+            "name": "Bar",
+            "type": "image",
+            "image": "models/base.json",
+            "origin": "0.5 0.5 0",
+            "size": "48 10",
+            "scale": "1 1 1",
+            "alpha": 1,
+            "angles": {
+              "value": "\(anglesValue)",
+              "script": "\(escapedScript)"
+            }
+          }]
         }
         """
         try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))

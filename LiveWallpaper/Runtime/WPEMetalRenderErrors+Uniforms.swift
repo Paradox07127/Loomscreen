@@ -356,7 +356,7 @@ struct WPEObjectQuadUniforms {
     var centerAndSize: SIMD4<Float>
     /// x/y = scene width/height, z = z-axis rotation in radians, w reserved.
     var sceneSizeAndRotation: SIMD4<Float>
-    /// x/y = UV sign for preserving negative WPE scale mirroring, z/w reserved.
+    /// x/y = UV sign for preserving negative WPE scale mirroring, z = local capture CLEARALPHA, w reserved.
     var uvSignAndPadding: SIMD4<Float>
 }
 

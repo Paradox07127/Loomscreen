@@ -25,20 +25,22 @@ enum WPEMetalSceneCaptureUtilityModels {
             || stripped == "models/util/fullscreenlayer.json"
     }
 
-    /// Output geometry for a scene-capture utility (passthrough) layer's FINAL
-    /// scene composite. The capture / `previous` sampling always stays
-    /// full-frame 1:1 (the 98f79b5 lesson); only the output composite of a
-    /// plain `composelayer.json` that hosts a *spatial* effect authored into a
-    /// real sub-rect (e.g. an audio-bar visualizer box) is confined to that box.
+    /// Output geometry for a scene-capture utility (passthrough) layer's scene
+    /// composite. Fullscreen/project utility layers capture 1:1 full-frame (the
+    /// 98f79b5 lesson); a plain `composelayer.json` that hosts a spatial effect
+    /// authored into a real sub-rect captures the matching scene area into its
+    /// local target and is confined to that box.
     enum OutputGeometry { case fullscreen, subregion }
 
     /// `fullscreenlayer.json` (DoF/post-process) and `projectlayer.json`
     /// (projection/autosize) always cover the frame. A `composelayer.json`
     /// stays fullscreen too unless its authored footprint is a safe sub-scene
-    /// rectangle: axis-aligned, positive-scale, finite, and clearly smaller
-    /// than the scene. Rotated / mirrored / oversized / full-coverage compose
-    /// layers stay fullscreen — this preserves 98f79b5's decision for scene
-    /// 3479521040's 5000×2300 rotated passthrough layer.
+    /// rectangle: finite, mirrorable by the object-quad path, and clearly
+    /// smaller than the scene. Oversized / full-coverage compose layers stay
+    /// fullscreen — this preserves 98f79b5's decision for scene 3479521040's
+    /// 5000×2300 rotated passthrough layer. Small z-rotated local compose
+    /// layers (scene 2986828130's prism/audio box) stay subregion and capture
+    /// the matching scene area into their local target.
     static func outputGeometry(
         path: String,
         geometry: WPERenderLayerGeometry,
@@ -51,16 +53,24 @@ enum WPEMetalSceneCaptureUtilityModels {
         let width = Float(size.width) * max(abs(Float(geometry.scale.x)), 0.0001)
         let height = Float(size.height) * max(abs(Float(geometry.scale.y)), 0.0001)
         guard width.isFinite, height.isFinite, width > 1, height > 1 else { return .fullscreen }
-        let rotationEpsilon = 0.001
-        if abs(geometry.angles.x) > rotationEpsilon
-            || abs(geometry.angles.y) > rotationEpsilon
-            || abs(geometry.angles.z) > rotationEpsilon {
+        let rotationEpsilon: Float = 0.001
+        let zAxisTurn = normalizedAbsoluteZTurn(Float(geometry.angles.z))
+        let isHalfTurn = abs(zAxisTurn - .pi) <= rotationEpsilon
+        if abs(Float(geometry.angles.x)) > rotationEpsilon
+            || abs(Float(geometry.angles.y)) > rotationEpsilon {
             return .fullscreen
         }
-        if geometry.scale.x < 0 || geometry.scale.y < 0 { return .fullscreen }
+        let flipsX = geometry.scale.x < 0
+        let flipsY = geometry.scale.y < 0
+        if flipsX != flipsY && !isHalfTurn { return .fullscreen }
         let fullCoverage: Float = 0.95
         if width >= sceneW * fullCoverage && height >= sceneH * fullCoverage { return .fullscreen }
         return .subregion
+    }
+
+    private static func normalizedAbsoluteZTurn(_ radians: Float) -> Float {
+        guard radians.isFinite else { return .infinity }
+        return abs(radians.remainder(dividingBy: 2 * .pi))
     }
 
     /// `compute…` allocates 2–3 throwaway strings (replace + lowercase + split/join)
@@ -1492,11 +1502,22 @@ final class WPEMetalRenderExecutor {
                 isRefract ? system.refractAmount : 0   // .w = g_RefractAmount (0 ⇒ non-refract)
             )
         )
+        // Compose-group opacity mask (region confine) + tint, baked from the
+        // particle's parent composelayer. Refract binds texture(1)/(2) itself;
+        // the two never co-occur (matrix rain is additive-sprite, not refract).
+        let groupMask = isRefract ? nil : system.groupOpacityMask
+        sprite.tintAndMask = SIMD4<Float>(
+            system.groupTint.x, system.groupTint.y, system.groupTint.z,
+            groupMask != nil ? 1 : 0
+        )
 
         encoder.setRenderPipelineState(state)
         encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
         encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
         encoder.setFragmentTexture(texture, index: 0)
+        if let groupMask {
+            encoder.setFragmentTexture(groupMask, index: 1)
+        }
         if isRefract {
             // g_Texture1 = refraction normal map ; g_Texture3-equivalent = the
             // scene-so-far snapshot. sceneSize (projection) lets the fragment turn
@@ -1575,6 +1596,10 @@ final class WPEMetalRenderExecutor {
     struct WPEParticleSpriteParams {
         var grid: SIMD4<Float>
         var frameRectMode: SIMD4<Float>
+        /// Compose-group effect baked from the particle's parent composelayer:
+        /// `.xyz` = tint colour multiplier (1,1,1 = none), `.w` = 1 when an
+        /// opacity mask is bound at fragment texture(1).
+        var tintAndMask: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 0)
     }
 
     /// Phase 2D-N: composite a list of pre-rasterized text overlays on top of the supplied output texture.
@@ -4232,28 +4257,35 @@ final class WPEMetalRenderExecutor {
             // common no-parallax path byte-for-byte unchanged.
             return layer.parallaxDepth != SIMD2<Double>(0, 0) && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
-        // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
-        // capture + copy the full frame 1:1. Their FINAL scene composite stays
-        // fullscreen too, EXCEPT a plain `composelayer.json` authored into a
-        // safe sub-rect (an audio-bar visualizer box), whose output is confined
-        // to that box via the object quad. Capture/effect passes target the
-        // layer composite (not `.scene`), so they were already excluded by the
-        // `guard case .scene` above and remain fullscreen.
+        // WPE fullscreen/passthrough utility layers (project/fullscreen and
+        // oversized compose) capture + copy the full frame 1:1. A plain
+        // `composelayer.json` authored into a safe sub-rect captures the
+        // matching scene area into its layer composite, then its final scene
+        // output is confined to that box via the object quad.
         if WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) {
             if layer.groupCompositeSource != nil { return true }
-            guard Self.subregionComposeOutputEnabled else { return false }
-            // A compose layer that parents children is a layer-group container, not
-            // a scene-effect box: its children render flat, so confining its own
-            // passthrough to the authored box would paint a scene-copy PiP. Keep it
-            // fullscreen (identity passthrough = invisible).
-            if groupingContainerObjectIDs.contains(layer.objectID) { return false }
-            return WPEMetalSceneCaptureUtilityModels.outputGeometry(
-                path: layer.imagePath,
-                geometry: layer.geometry,
-                sceneSize: currentSceneSize
-            ) == .subregion
+            return sceneCaptureUtilityOutputGeometry(for: layer) == .subregion
         }
         return true
+    }
+
+    func sceneCaptureUtilityOutputGeometry(
+        for layer: WPERenderLayer
+    ) -> WPEMetalSceneCaptureUtilityModels.OutputGeometry {
+        guard WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) else {
+            return .fullscreen
+        }
+        guard Self.subregionComposeOutputEnabled else { return .fullscreen }
+        // A compose layer that parents children is a layer-group container, not
+        // a scene-effect box: its children render flat, so confining its own
+        // passthrough to the authored box would paint a scene-copy PiP. Keep it
+        // fullscreen (identity passthrough = invisible).
+        if groupingContainerObjectIDs.contains(layer.objectID) { return .fullscreen }
+        return WPEMetalSceneCaptureUtilityModels.outputGeometry(
+            path: layer.imagePath,
+            geometry: layer.geometry,
+            sceneSize: currentSceneSize
+        )
     }
 
     private func isGroupRenderTarget(_ target: WPERenderTarget, layer: WPERenderLayer) -> Bool {
@@ -4393,40 +4425,20 @@ final class WPEMetalRenderExecutor {
         cameraUniforms: WPEMetalCameraUniforms
     ) -> WPEObjectQuadUniforms? {
         let geometry = layer.geometry
-        let camera = cameraUniforms.sceneCamera
-        let eye = SIMD3<Float>(Float(camera.eye.x), Float(camera.eye.y), Float(camera.eye.z))
-        let cameraCenter = SIMD3<Float>(Float(camera.center.x), Float(camera.center.y), Float(camera.center.z))
-        let upSeed = SIMD3<Float>(Float(camera.up.x), Float(camera.up.y), Float(camera.up.z))
-        let forward = Self.normalized(cameraCenter - eye, fallback: SIMD3<Float>(0, 0, -1))
-        let right = Self.normalized(simd_cross(forward, upSeed), fallback: SIMD3<Float>(1, 0, 0))
-        let up = Self.normalized(simd_cross(right, forward), fallback: SIMD3<Float>(0, 1, 0))
-        let origin = SIMD3<Float>(
-            Float(geometry.origin.x),
-            Float(geometry.origin.y),
-            Float(geometry.origin.z)
-        )
-        let relative = origin - eye
-        let depth = simd_dot(relative, forward)
-        guard depth.isFinite, depth > 0.0001 else { return nil }
-
-        let fov = Float(max(min(camera.fov, 179), 1)) * .pi / 180
-        let focal = sceneHeight / max(2 * tan(fov * 0.5), 0.0001)
-        let projectedCenter = SIMD2<Float>(
-            simd_dot(relative, right) / depth * focal,
-            simd_dot(relative, up) / depth * focal
-        )
+        let sceneSize = CGSize(width: CGFloat(sceneWidth), height: CGFloat(sceneHeight))
+        guard let projection = cameraUniforms.projectedCenterInScenePixels(
+            worldPoint: geometry.origin,
+            sceneSize: sceneSize
+        ) else { return nil }
         let baseWidth = Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
         let baseHeight = Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
         let scaleX = Float(geometry.scale.x)
         let scaleY = Float(geometry.scale.y)
-        let width = max(baseWidth * max(abs(scaleX), 0.0001) / depth * focal, 0.0001)
-        let height = max(baseHeight * max(abs(scaleY), 0.0001) / depth * focal, 0.0001)
-        let quadCenter = projectedCenter
+        let width = max(baseWidth * max(abs(scaleX), 0.0001) * projection.depthScale, 0.0001)
+        let height = max(baseHeight * max(abs(scaleY), 0.0001) * projection.depthScale, 0.0001)
+        let quadCenter = projection.center
             + Self.alignmentCenterOffset(alignment: geometry.alignment, width: width, height: height)
-            + cameraParallax.pixelOffset(
-                depth: layer.parallaxDepth,
-                sceneSize: CGSize(width: CGFloat(sceneWidth), height: CGFloat(sceneHeight))
-            )
+            + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(quadCenter.x, quadCenter.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(
@@ -4442,15 +4454,6 @@ final class WPEMetalRenderExecutor {
                 0
             )
         )
-    }
-
-    private static func normalized(
-        _ value: SIMD3<Float>,
-        fallback: SIMD3<Float>
-    ) -> SIMD3<Float> {
-        let length = simd_length(value)
-        guard length.isFinite, length > 0.000001 else { return fallback }
-        return value / length
     }
 
     private func recordObjectQuadDebug(

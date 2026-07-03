@@ -71,6 +71,7 @@ enum WPESceneDocumentParser {
         // groups', so a child of a condition-hidden group is hidden too.
         let objectVisibility = resolvedObjectVisibility(rawObjects)
         let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
+        let inheritedAttachments = inheritedGroupAttachments(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
         var scriptHostObjects: [WPESceneScriptHostObject] = []
         var transformHostObjects: [WPESceneTransformHostObject] = []
@@ -100,6 +101,7 @@ enum WPESceneDocumentParser {
                    transform: transform,
                    scriptOrigins: scriptResolvedOrigins,
                    effectiveVisible: effectiveVisible,
+                   inheritedAttachment: entryID.flatMap { inheritedAttachments[$0] },
                    diagnostics: &diagnostics
             ) {
                 imageObjects.append(object)
@@ -270,6 +272,43 @@ enum WPESceneDocumentParser {
             }
         }
         return (parents, ownVisibility)
+    }
+
+    /// WPE allows `attachment` on a pure GROUP object: the whole subtree rides the
+    /// named MDAT anchor of the group's parent puppet. Groups are baked away at parse
+    /// time, so lower the group's attachment onto each renderable descendant — the
+    /// child inherits the anchor name and re-parents to the group's parent (the puppet
+    /// layer), the exact shape the static anchor-offset and runtime attachment-follow
+    /// paths already handle for directly-attached layers.
+    private static func inheritedGroupAttachments(
+        _ rawObjects: [[String: Any]]
+    ) -> [String: (name: String, parentID: String)] {
+        var byID: [String: [String: Any]] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object), byID[id] == nil else { continue }
+            byID[id] = object
+        }
+        var result: [String: (name: String, parentID: String)] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object),
+                  objectKindResolution(for: object).primary == .image,
+                  nonEmptyString(object["attachment"]) == nil,
+                  nonEmptyString(object["anchor"]) == nil else { continue }
+            var current = parentID(in: object)
+            var seen: Set<String> = []
+            while let ancestorID = current,
+                  seen.insert(ancestorID).inserted,
+                  let ancestor = byID[ancestorID] {
+                guard objectKindResolution(for: ancestor).primary == .unknown else { break }
+                if let attachment = nonEmptyString(ancestor["attachment"]) ?? nonEmptyString(ancestor["anchor"]),
+                   let groupParentID = parentID(in: ancestor) {
+                    result[id] = (attachment, groupParentID)
+                    break
+                }
+                current = parentID(in: ancestor)
+            }
+        }
+        return result
     }
 
     /// Records, per user-property key, the render targets it drives and whether
@@ -1140,6 +1179,7 @@ enum WPESceneDocumentParser {
         transform: SceneObjectTransform,
         scriptOrigins: [String: SIMD3<Double>] = [:],
         effectiveVisible: Bool? = nil,
+        inheritedAttachment: (name: String, parentID: String)? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
         guard let imagePath = nonEmptyString(dict["image"]) ?? nonEmptyString(dict["model"]) else {
@@ -1160,8 +1200,11 @@ enum WPESceneDocumentParser {
         let scale = transform.scale
         let angles = transform.angles
         let local = localTransform(in: dict, scriptOrigins: scriptOrigins)
-        let parentObjectID = parentID(in: dict)
-        let attachment = nonEmptyString(dict["attachment"]) ?? nonEmptyString(dict["anchor"])
+        let ownAttachment = nonEmptyString(dict["attachment"]) ?? nonEmptyString(dict["anchor"])
+        let attachment = ownAttachment ?? inheritedAttachment?.name
+        let parentObjectID = (ownAttachment == nil && inheritedAttachment != nil)
+            ? inheritedAttachment?.parentID
+            : parentID(in: dict)
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let alphaFallback = imageAlphaFallback(
@@ -1172,7 +1215,7 @@ enum WPESceneDocumentParser {
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: alphaFallback)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let brightness = parseDouble(dict["brightness"]) ?? 1.0
-        let blend = WPESceneBlendMode(rawWPEValue: dict["blendmode"] as? String)
+        let blend = parseImageBlendMode(dict)
         let alignment = WPESceneAlignment(rawWPEValue: dict["alignment"] as? String)
         let size: CGSize?
         if let vec = parseVector3(dict["size"]) {
@@ -1182,6 +1225,7 @@ enum WPESceneDocumentParser {
         }
 
         let materialRelativePath = dict["material"] as? String
+        let copyBackground = parseBool(dict["copybackground"]) ?? true
         let dependencies = parseDependencyIDs(dict["dependencies"])
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
         let originScript = dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false)
@@ -1230,6 +1274,7 @@ enum WPESceneDocumentParser {
             name: name,
             imageRelativePath: imagePath,
             materialRelativePath: materialRelativePath,
+            copyBackground: copyBackground,
             parentObjectID: parentObjectID,
             attachment: attachment,
             origin: origin,
@@ -1278,6 +1323,23 @@ enum WPESceneDocumentParser {
             return 0
         default:
             return 1
+        }
+    }
+
+    private static func parseImageBlendMode(_ dict: [String: Any]) -> WPESceneBlendMode {
+        if let rawBlend = dict["blendmode"] as? String {
+            return WPESceneBlendMode(rawWPEValue: rawBlend)
+        }
+
+        switch parseInt(dict["colorBlendMode"] ?? dict["colorblendmode"]) {
+        case 2:
+            return .multiply
+        case 7:
+            return .screen
+        case 9, 31:
+            return .additive
+        default:
+            return .normal
         }
     }
 

@@ -105,15 +105,27 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         fragmentSource: String,
         vertexSource: String
     ) -> String {
-        let existing = Set(uniformDeclarations(in: fragmentSource).map(\.name))
-        let missing = uniformDeclarations(in: vertexSource).filter { uniform in
-            !existing.contains(uniform.name) && shouldExposeVertexUniformToFragment(uniform)
+        // Scan the fragment AFTER branch stripping: a uniform declared only in an
+        // inactive `#if` (auto_sway's g_Speed/g_Inertia/g_SigmentCount under
+        // AA_VERSION == 1) would otherwise count as existing, get skipped here,
+        // and then vanish with its branch — leaving the active code without it.
+        let activeFragment = WPEShaderTranspiler.sourceWithInactiveBranchesStripped(fragmentSource)
+        let existing = Set(uniformDeclarations(in: activeFragment).map(\.name))
+        let activeVertex = WPEShaderTranspiler.sourceWithInactiveBranchesStripped(vertexSource)
+        var seen = Set<String>()
+        // Inject the ORIGINAL declaration lines: the trailing `// {"material":…}`
+        // annotation is what binds the scene's constantshadervalues (and carries
+        // the shader default) — a bare re-declaration would silently unbind them.
+        let missingLines = activeVertex.components(separatedBy: .newlines).compactMap { raw -> String? in
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard let uniform = WPEUniformDecl.parse(line: trimmed),
+                  !existing.contains(uniform.name),
+                  seen.insert(uniform.name).inserted,
+                  shouldExposeVertexUniformToFragment(uniform) else { return nil }
+            return trimmed
         }
-        guard !missing.isEmpty else { return fragmentSource }
-        let declarations = missing
-            .map { "uniform \($0.type) \($0.name)\(arraySuffix(for: $0));" }
-            .joined(separator: "\n")
-        return declarations + "\n" + fragmentSource
+        guard !missingLines.isEmpty else { return fragmentSource }
+        return missingLines.joined(separator: "\n") + "\n" + fragmentSource
     }
 
     private static func uniformDeclarations(in source: String) -> [WPEUniformDecl] {

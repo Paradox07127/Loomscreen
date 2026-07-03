@@ -408,10 +408,19 @@ final class WPEMetalRenderTargetPool {
         for layer: WPERenderLayer,
         sceneSize: CGSize
     ) -> CGSize {
-        // WPE compose/project utility layers capture the full frame, so their
-        // layer-composite target MUST be scene-sized. Sizing it to the object's
-        // scaled footprint was the root of the "picture-in-picture" inset.
-        if isSceneCaptureUtilityLayer(layer), layer.groupCompositeSource == nil {
+        // Fullscreen WPE compose/project utility layers capture the full frame,
+        // so their layer-composite target MUST be scene-sized. Local
+        // composelayer boxes still use their authored local texture size; their
+        // capture shader samples the matching scene subregion before downstream
+        // effects run in layer-local UV space.
+        if isSceneCaptureUtilityLayer(layer),
+           layer.groupCompositeSource == nil,
+           (!WPEMetalRenderExecutor.subregionComposeOutputEnabled
+                || WPEMetalSceneCaptureUtilityModels.outputGeometry(
+                    path: layer.imagePath,
+                    geometry: layer.geometry,
+                    sceneSize: sceneSize
+                ) == .fullscreen) {
             return sceneSize
         }
 

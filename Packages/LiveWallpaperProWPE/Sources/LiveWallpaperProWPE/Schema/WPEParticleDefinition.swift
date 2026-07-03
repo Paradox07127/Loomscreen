@@ -318,6 +318,13 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// Regression guard: 3460973721's wildfire is a white `r8` smoke with no colour
     /// initializer; applying its `colorchange`(橙→纯红) ramped the faint smoke to red.
     public let hasColorInitializer: Bool
+    /// Whether the particle JSON explicitly opted into sprite-sheet sequence
+    /// animation (`"animationmode": "sequence"` or a non-null
+    /// `sequencemultiplier`). `animationMode` alone can't distinguish this —
+    /// an omitted `animationmode` also defaults to `.sequence` — and the
+    /// distinction gates the derived-grid atlas fallback, which must not
+    /// slice single-image sprites that merely inherited the default.
+    public let declaresSequenceAnimation: Bool
     /// Per-particle base alpha sampled on spawn (alpharandom). The
     /// fade-in/out envelope multiplies this value at draw time.
     public let alphaMin: Double
@@ -440,7 +447,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         animationMode: WPEParticleAnimationMode = .sequence,
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = [],
-        hasColorInitializer: Bool = false
+        hasColorInitializer: Bool = false,
+        declaresSequenceAnimation: Bool = false
     ) {
         self.init(
             materialRelativePath: materialRelativePath,
@@ -495,7 +503,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
-            hasColorInitializer: hasColorInitializer
+            hasColorInitializer: hasColorInitializer,
+            declaresSequenceAnimation: declaresSequenceAnimation
         )
     }
 
@@ -552,7 +561,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         animationMode: WPEParticleAnimationMode = .sequence,
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = [],
-        hasColorInitializer: Bool = false
+        hasColorInitializer: Bool = false,
+        declaresSequenceAnimation: Bool = false
     ) {
         self.materialRelativePath = materialRelativePath
         // Prefer explicit child references; fall back to bare paths (origin 0)
@@ -581,6 +591,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.colorMin = colorMin
         self.colorMax = colorMax
         self.hasColorInitializer = hasColorInitializer
+        self.declaresSequenceAnimation = declaresSequenceAnimation
         self.alphaMin = alphaMin
         self.alphaMax = alphaMax
         self.rotationMin = rotationMin
@@ -614,6 +625,20 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.animationMode = animationMode
         self.controlPoints = controlPoints
         self.attractors = attractors
+    }
+
+    /// `colorn` arrives ×255 (see `parseNormalizedParticleColor`); treat it as a
+    /// 0…1 fraction multiplying the 0…255 base colour channel-wise.
+    private static func multiplyingColor(
+        _ base: SIMD3<Double>,
+        byNormalizedOverride override: SIMD3<Double>?
+    ) -> SIMD3<Double> {
+        guard let override else { return base }
+        return SIMD3<Double>(
+            base.x * max(0, override.x) / 255,
+            base.y * max(0, override.y) / 255,
+            base.z * max(0, override.z) / 255
+        )
     }
 
     public func applying(instanceOverride: WPESceneParticleInstanceOverride?) -> WPEParticleDefinition {
@@ -658,12 +683,14 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             dispersalMax: dispersalMax,
             velocityMin: velocityMin * speedScale,
             velocityMax: velocityMax * speedScale,
-            // `colorn` instance override always applies — it's the author setting
-            // the particle's colour directly (wildfire's `0.24,0.16,0.27` dims the
-            // white smoke to a faint haze; dust's `0.84,0.74,0.69` warms it). Only
-            // `colorchange` is gated (below), since that's what ramped it to red.
-            colorMin: instanceOverride.color ?? colorMin,
-            colorMax: instanceOverride.color ?? colorMax,
+            // `colorn` is a per-instance colour MULTIPLIER, not a replacement.
+            // Replace-vs-multiply only diverges when the base colour isn't white:
+            // wildfire's smoke (no initializer, white base) dims to `0.24,0.16,0.27`
+            // either way, but 3462491575's matrix glyphs pair a GREEN `colorrandom`
+            // with a white `colorn` — replacement bleached them white; Windows keeps
+            // them green. Only `colorchange` is gated (below).
+            colorMin: Self.multiplyingColor(colorMin, byNormalizedOverride: instanceOverride.color),
+            colorMax: Self.multiplyingColor(colorMax, byNormalizedOverride: instanceOverride.color),
             fadeInSeconds: fadeInSeconds,
             directionMask: directionMask,
             alphaMin: alphaMin * alphaScale,
@@ -694,7 +721,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
-            hasColorInitializer: hasColorInitializer
+            hasColorInitializer: hasColorInitializer,
+            declaresSequenceAnimation: declaresSequenceAnimation
         )
     }
 
@@ -755,7 +783,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
-            hasColorInitializer: hasColorInitializer
+            hasColorInitializer: hasColorInitializer,
+            declaresSequenceAnimation: declaresSequenceAnimation
         )
     }
 
@@ -825,6 +854,9 @@ public enum WPEParticleDefinitionParser {
         let startDelay = WPEValueParser.double(json["starttime"]) ?? 0
         let sequenceMultiplier = WPEValueParser.double(json["sequencemultiplier"]) ?? 1
         let animationMode = WPEParticleAnimationMode(wpeString: json["animationmode"] as? String)
+        let declaresSequenceAnimation =
+            (json["animationmode"] as? String)?.lowercased() == "sequence"
+            || WPEValueParser.double(json["sequencemultiplier"]) != nil
 
         var rate: Double = 0
         var instantaneousCount: Int = 0
@@ -1134,7 +1166,8 @@ public enum WPEParticleDefinitionParser {
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
-            hasColorInitializer: hasColorInitializer
+            hasColorInitializer: hasColorInitializer,
+            declaresSequenceAnimation: declaresSequenceAnimation
         )
     }
 

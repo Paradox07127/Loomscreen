@@ -142,7 +142,38 @@ struct WPEMetalShaderDispatcher {
             let isSingleTextureComposeLayer = isSceneCaptureUtilityLayer(layer)
                 && isLayerCompositeTarget(pass.pass.target)
                 && (isSceneAliasReference(firstReference) || isGroupCompositeSourceReference(firstReference, layer: layer))
-            if isSingleTextureComposeLayer {
+            let isLocalSceneCaptureComposeLayer = isSingleTextureComposeLayer
+                && layer.groupCompositeSource == nil
+                && isSceneAliasReference(firstReference)
+                && executor.sceneCaptureUtilityOutputGeometry(for: layer) == .subregion
+            if isLocalSceneCaptureComposeLayer {
+                encoder.setRenderPipelineState(try executor.renderPipeline(
+                    fragmentName: "wpe_local_scene_capture_fragment",
+                    blendMode: pass.pass.blending,
+                    colorPixelFormat: destination.texture.pixelFormat,
+                    depthPixelFormat: depthPixelFormat
+                ))
+                let firstTexture = try WPEMetalShaderInputs.resolve(
+                    reference: firstReference,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+                encoder.setFragmentTexture(firstTexture, index: 0)
+                var uniforms = executor.objectQuadUniforms(
+                    for: layer,
+                    sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
+                    sourceTexture: firstTexture,
+                    cameraUniforms: executor.objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
+                )
+                uniforms.uvSignAndPadding.z = clearAlphaValue(for: pass)
+                encoder.setFragmentBytes(
+                    &uniforms,
+                    length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                    index: 0
+                )
+            } else if isSingleTextureComposeLayer {
                 // WPE passthrough utility parity: draw a fullscreen quad and copy
                 // the captured full-frame buffer 1:1 at screen UV (+ CLEARALPHA),
                 // ignoring the layer transform (which positions downstream effects).
@@ -168,12 +199,6 @@ struct WPEMetalShaderDispatcher {
                     index: 0
                 )
             } else {
-                encoder.setRenderPipelineState(try executor.renderPipeline(
-                    fragmentName: "wpe_compose_fragment",
-                    blendMode: pass.pass.blending,
-                    colorPixelFormat: destination.texture.pixelFormat,
-                    depthPixelFormat: depthPixelFormat
-                ))
                 let firstTexture = try WPEMetalShaderInputs.resolve(
                     reference: firstReference,
                     textures: textures,
@@ -186,10 +211,37 @@ struct WPEMetalShaderDispatcher {
                     frameState: frameState,
                     currentTargetID: destination.id
                 )
+                let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
+                encoder.setRenderPipelineState(try executor.renderPipeline(
+                    vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
+                    fragmentName: "wpe_compose_fragment",
+                    blendMode: pass.pass.blending,
+                    colorPixelFormat: destination.texture.pixelFormat,
+                    depthPixelFormat: depthPixelFormat
+                ))
                 encoder.setFragmentTexture(firstTexture, index: 0)
                 encoder.setFragmentTexture(secondTexture, index: 1)
                 var uniforms = WPESolidUniforms(color: WPEMetalShaderInputs.colorVector(for: pass))
                 encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESolidUniforms>.stride, index: 0)
+                if usesObjectQuad {
+                    var quadUniforms = executor.objectQuadUniforms(
+                        for: layer,
+                        sceneSize: executor.objectQuadSceneSize(
+                            for: pass,
+                            layer: layer,
+                            destination: destination,
+                            frameState: frameState
+                        ),
+                        cameraParallax: frameState.cameraParallax,
+                        sourceTexture: firstTexture,
+                        cameraUniforms: executor.objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
+                    )
+                    encoder.setVertexBytes(
+                        &quadUniforms,
+                        length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                        index: 1
+                    )
+                }
             }
 
         case "effect_colorbalance":

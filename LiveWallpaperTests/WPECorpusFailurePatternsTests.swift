@@ -706,4 +706,60 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Program-scope mutable scratch variables compile as fragment thread state")
+    func programScopeMutableScratchVariablesCompileAsFragmentThreadState() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float g_Time;
+        in vec2 v_TexCoord;
+        float t;
+        float glitch(vec2 uv) {
+            t += uv.x * 0.01;
+            return sin(t + uv.y);
+        }
+        void main() {
+            t = g_Time;
+            float amount = glitch(v_TexCoord);
+            gl_FragColor = texture(g_Texture0, v_TexCoord + vec2(amount * 0.01, 0.0));
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2491176897/effects/distortion_glitch",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(!result.mslSource.contains("\nfloat t;\n"))
+        #expect(result.mslSource.contains("[[maybe_unused]] float t = 0.0;"))
+        #expect(result.mslSource.contains("float glitch(float2 uv, thread float& t)"))
+        #expect(result.mslSource.contains("float amount = glitch(v_TexCoord, t);"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Degenerate smoothstep edges are routed through a finite compatibility helper")
+    func degenerateSmoothstepEdgesUseCompatibilityHelper() throws {
+        let source = """
+        #version 410 core
+        in vec2 v_TexCoord;
+        void main() {
+            float bar = smoothstep(v_TexCoord.y, v_TexCoord.y, 0.0);
+            gl_FragColor = vec4(bar, bar, bar, bar);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2491176897/effects/Simple_Audio_Bars",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("wpe_smoothstep(v_TexCoord.y, v_TexCoord.y, 0.0)"))
+        #expect(!result.mslSource.contains("bar = smoothstep(v_TexCoord.y, v_TexCoord.y, 0.0)"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }

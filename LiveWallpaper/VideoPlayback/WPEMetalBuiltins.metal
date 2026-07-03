@@ -63,7 +63,7 @@ vertex WPEVertexOut wpe_fullscreen_vertex(uint vertexID [[vertex_id]]) {
 struct WPEObjectQuadUniforms {
     float4 centerAndSize;        // x,y center in scene-centered pixels; z,w size in pixels
     float4 sceneSizeAndRotation; // x,y scene size; z rotation around quad center
-    float4 uvSignAndPadding;     // x,y UV sign for negative WPE scale mirroring
+    float4 uvSignAndPadding;     // x,y UV sign for negative WPE scale mirroring; z = local capture CLEARALPHA
 };
 
 vertex WPEVertexOut wpe_object_quad_vertex(
@@ -377,6 +377,45 @@ fragment half4 wpe_composelayer_fragment(
     return half4(color);
 }
 
+// Local composelayer scene capture: fill the layer-sized composite target with
+// the scene pixels that sit under the object's authored quad. The final scene
+// pass will draw that local target through wpe_object_quad_vertex, so this path
+// pre-applies the inverse UV mirroring and the same z-rotation/placement math.
+fragment half4 wpe_local_scene_capture_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEObjectQuadUniforms& u [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    if (u.uvSignAndPadding.z > 0.5) {
+        return half4(0.0);
+    }
+
+    float2 baseUV = float2(
+        u.uvSignAndPadding.x < 0.0 ? 1.0 - in.uv.x : in.uv.x,
+        u.uvSignAndPadding.y < 0.0 ? 1.0 - in.uv.y : in.uv.y
+    );
+    float2 localPixels = float2(
+        (baseUV.x - 0.5) * u.centerAndSize.z,
+        (0.5 - baseUV.y) * u.centerAndSize.w
+    );
+    float rot = u.sceneSizeAndRotation.z;
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 rotated = float2(
+        c * localPixels.x - s * localPixels.y,
+        s * localPixels.x + c * localPixels.y
+    );
+    float sceneW = max(u.sceneSizeAndRotation.x, 1.0);
+    float sceneH = max(u.sceneSizeAndRotation.y, 1.0);
+    float2 scenePixels = u.centerAndSize.xy + rotated;
+    float2 uv = float2(
+        (scenePixels.x + sceneW * 0.5) / sceneW,
+        (sceneH * 0.5 - scenePixels.y) / sceneH
+    );
+    return texture0.sample(linearSampler, clamp(uv, float2(0.0), float2(1.0)));
+}
+
 fragment half4 wpe_compose_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
@@ -649,6 +688,10 @@ struct WPEParticleVertexOut {
     // quad's rotated right/up axes in screen-UV, pre-scaled by g_RefractAmount.
     // .xy = right, .zw = up. Zero for non-refract systems.
     float4 screenTangents;
+    // Screen-space UV (top-left origin) of this fragment, for sampling a
+    // compose-group opacity mask that spatially confines the system (e.g. the
+    // matrix-rain layer masked to an upper-centre blob). Full-frame 0..1.
+    float2 maskUV;
 };
 
 struct WPEParticleProjection {
@@ -661,7 +704,11 @@ struct WPEParticleProjection {
 // reads colour from the per-particle tint instead of the texture.
 struct WPEParticleSpriteParams {
     float4 grid;              // x=cols, y=rows, z=frameCount, w=isAlphaMask
-    float4 frameRectMode;     // x=use explicit rects, y=rect count, z=overbright color scale
+    float4 frameRectMode;     // x=use explicit rects, y=rect count, z=overbright color scale, w=refractAmount
+    // Compose-group effect baked from a particle's parent composelayer:
+    // .xyz = tint colour multiplier (1,1,1 = no tint), .w = 1 when an opacity
+    // mask is bound at texture(1) (0 = no mask).
+    float4 tintAndMask;
 };
 
 vertex WPEParticleVertexOut wpe_particle_vertex(
@@ -731,7 +778,10 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     uint frameHiI = min(uint(frameHi), frameCountI - 1u);
 
     WPEParticleVertexOut out;
-    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    float2 screenNDC = centerNDC + cornerNDC;
+    out.position = float4(screenNDC, 0.0, 1.0);
+    // NDC (y up, -1..1) → full-frame UV (y down, 0..1) for the group opacity mask.
+    out.maskUV = float2(screenNDC.x * 0.5 + 0.5, 0.5 - screenNDC.y * 0.5);
     if (useFrameRects) {
         // Explicit TEXS sub-rects (x0,y0,x1,y1) in normalized UV. mix() maps
         // the quad's unit corners into the frame's rect.
@@ -763,7 +813,8 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
 fragment half4 wpe_particle_instanced_fragment(
     WPEParticleVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
-    constant WPEParticleSpriteParams& sprite [[buffer(0)]]
+    constant WPEParticleSpriteParams& sprite [[buffer(0)]],
+    texture2d<half, access::sample> groupOpacityMask [[texture(1)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     half4 sLo = texture0.sample(linearSampler, in.uvCurrent);
@@ -783,6 +834,14 @@ fragment half4 wpe_particle_instanced_fragment(
     // common additive blend this drives the glow intensity. Defaults to 1.
     half overbright = max(half(sprite.frameRectMode.z), half(0));
     rgb *= overbright;
+    // Compose-group effect baked from the particle's parent composelayer:
+    // a colour tint (recolours the sprite) and an opacity mask that spatially
+    // confines the whole system to the authored region (matrix rain → upper
+    // centre). Sampled in full-frame screen UV so it tracks the mask texture.
+    rgb *= half3(sprite.tintAndMask.rgb);
+    if (sprite.tintAndMask.w > 0.5) {
+        alpha *= groupOpacityMask.sample(linearSampler, in.maskUV).r;
+    }
     // Straight (non-premultiplied) alpha. The Metal pipeline state's
     // blend factors handle the translucent/additive/normal split set
     // up by `particlePipelineState`.
@@ -859,6 +918,7 @@ vertex WPEParticleVertexOut wpe_particle_rope_vertex(
     out.frameBlend = 0.0;
     out.color = v.color;
     out.screenTangents = float4(0.0);   // rope never refracts
+    out.maskUV = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     return out;
 }
 

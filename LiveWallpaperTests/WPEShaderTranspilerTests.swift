@@ -1131,6 +1131,79 @@ struct WPEShaderTranspilerTests {
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
     }
 
+    @Test("auto_sway v2 varyings reconstruct vertex sway state (not screen-UV) and compile")
+    func autoSwayV2VaryingsReconstructAndCompile() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        // Mirrors workshop 3235948233 auto_sway under AA_VERSION == 2:
+        // the sway drivers (g_Speed/g_Inertia/g_SigmentCount/g_GlobalTimeOffset)
+        // exist in the FRAGMENT only inside the inactive AA_VERSION == 1 branch,
+        // so they must be adopted from the vertex stage — with their material
+        // annotations — for the reconstruction to bind the scene's values.
+        let request = WPEShaderCompileRequest(
+            shaderName: "workshop/3235948233/effects/auto_sway",
+            processedVertexSource: """
+            #define AA_VERSION 2
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform float g_GlobalTimeOffset; // {"material":"timeoffset","default":0}
+            uniform float g_Speed; // {"material":"speed","default":0.75}
+            uniform float g_Inertia; // {"material":"inertia","default":0.3}
+            uniform float g_SigmentCount; // {"material":"sigment","default":1}
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); }
+            """,
+            processedFragmentSource: """
+            #define AA_VERSION 2
+            #define NODE_COUNT 2
+            uniform sampler2D g_Texture0;
+            uniform vec4 g_Texture0Resolution;
+            uniform float g_Time;
+            uniform vec2 g_SpinCenter1; // {"material":"center1","position":true}
+            uniform vec2 g_SpinCenter2; // {"material":"center2","position":true}
+            uniform float g_WindDirection2; // {"material":"angle2","default":-1.57075}
+            uniform float g_GlobalWindOffset; // {"material":"windDirectionOffset","default":0}
+            uniform float g_SmoothDistance; // {"material":"smoothDistance","default":1}
+            uniform float g_DirectionalCompensation; // {"material":"directionalCompensation","default":0}
+            #if AA_VERSION == 1
+            uniform float g_Speed; // {"material":"speed","default":0.75}
+            uniform float g_Inertia; // {"material":"inertia","default":0.3}
+            uniform float g_SigmentCount; // {"material":"sigment","default":1}
+            uniform float g_GlobalTimeOffset; // {"material":"timeoffset","default":0}
+            #endif
+            varying vec4 v_TexCoord;
+            varying float v_aspect;
+            varying float v_reciprocalAspect;
+            varying float v_Len1;
+            varying vec2 v_Direction1;
+            varying float v_EndpointLen1;
+            varying vec2 v_EndpointDirection1;
+            varying float v_PosX1;
+            varying float v_EndpointPosX1;
+            varying float v_MotionRadian1;
+            void main() {
+                vec2 uv = v_TexCoord.xy;
+                uv += v_Direction1 * v_MotionRadian1 * 0.01 * v_Len1 * v_EndpointLen1;
+                uv += v_EndpointDirection1 * (v_PosX1 + v_EndpointPosX1) * 0.001;
+                uv.x *= v_reciprocalAspect;
+                gl_FragColor = texture(g_Texture0, uv) * v_aspect;
+            }
+            """,
+            sourceHash: "auto-sway-v2-test",
+            comboValues: ["AA_VERSION": 2, "NODE_COUNT": 2],
+            textureBindings: [:]
+        )
+        let result = try compiler.compile(request)
+        let msl = result.mslSource
+        #expect(msl.contains("v_MotionRadian1 = wpeAS_thisRad - wpeAS_prevRad"))
+        #expect(msl.contains("v_TexCoord = float4(in.uv.x * v_aspect, in.uv.y, in.uv.x * v_aspect, in.uv.y)"))
+        #expect(!msl.contains("WPE-DIAGNOSTIC: varying 'v_MotionRadian1'"))
+        // The vertex-only sway drivers were adopted into the fragment layout.
+        #expect(result.uniformLayout.contains { $0.name == "g_Speed" })
+        #expect(result.uniformLayout.contains { $0.name == "g_SigmentCount" })
+        #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
+    }
+
     @Test("Project scroll shader uses vertex-computed scroll varying")
     func projectScrollShaderUsesVertexComputedScrollVarying() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

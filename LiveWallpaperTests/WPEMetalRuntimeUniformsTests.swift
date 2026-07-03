@@ -145,6 +145,57 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(abs(camera.viewProjectionMatrix[13] - 1.0) < 0.0001)
     }
 
+    @Test("Perspective projection maps world text/image origins to scene-centered pixels")
+    func projectedCenterInScenePixelsMatchesObjectQuadCamera() throws {
+        // Same camera as the perspective object-quad executor test: eye 10 units
+        // back, fov 90, 100×100 scene → focal = 100 / (2·tan45°) = 50.
+        let camera = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 100, height: 100, auto: true),
+            sceneCamera: WPESceneCamera(
+                center: SIMD3<Double>(0, 0, 0),
+                eye: SIMD3<Double>(0, 0, 10),
+                up: SIMD3<Double>(0, 1, 0),
+                nearZ: 0.1,
+                farZ: 100,
+                fov: 90
+            ),
+            usesPerspectiveProjection: true
+        )
+        let sceneSize = CGSize(width: 100, height: 100)
+
+        // On-axis world origin → screen center; depthScale = focal(50)/depth(10) = 5,
+        // matching the object-quad test where a size-10 quad renders 5px wide.
+        let onAxis = try #require(camera.projectedCenterInScenePixels(
+            worldPoint: SIMD3<Double>(0, 0, 0), sceneSize: sceneSize
+        ))
+        #expect(abs(onAxis.center.x) < 0.01)
+        #expect(abs(onAxis.center.y) < 0.01)
+        #expect(abs(onAxis.depthScale - 5) < 0.01)
+
+        // Off-axis: right/up world offsets project by depthScale, +Y up.
+        let offAxis = try #require(camera.projectedCenterInScenePixels(
+            worldPoint: SIMD3<Double>(2, 3, 0), sceneSize: sceneSize
+        ))
+        #expect(abs(offAxis.center.x - 10) < 0.01)
+        #expect(abs(offAxis.center.y - 15) < 0.01)
+
+        // Regression: a three-body-style text origin (x≈0, small world units, in
+        // front of the eye) projects to near screen-center — NOT to (origin −
+        // halfExtent), which the old pixel interpretation used to push ~50px
+        // (≈960px at 1080p) off-screen so every label vanished.
+        let label = try #require(camera.projectedCenterInScenePixels(
+            worldPoint: SIMD3<Double>(0, -0.54, 4), sceneSize: sceneSize
+        ))
+        #expect(abs(label.center.x) < 50)
+        #expect(abs(label.center.y) < 50)
+
+        // Points at/behind the eye plane are unprojectable → the renderer skips
+        // them instead of drawing at a garbage location.
+        #expect(camera.projectedCenterInScenePixels(
+            worldPoint: SIMD3<Double>(0, 0, 20), sceneSize: sceneSize
+        ) == nil)
+    }
+
     @Test("Prepared pipeline receives runtime and camera uniforms without losing material uniforms")
     func preparedPipelineReceivesRuntimeAndCameraUniforms() {
         let pass = WPERenderPass(

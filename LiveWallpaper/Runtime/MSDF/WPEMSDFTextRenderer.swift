@@ -45,10 +45,19 @@ final class WPEMSDFTextRenderer {
         self.generator = WPEMSDFGlyphGenerator(parameters: parameters)
     }
 
+    /// - Parameters:
+    ///   - originOverride: When non-nil, the text-box center in absolute top-left
+    ///     scene pixels, used instead of `object.origin + parallaxOffset`. The
+    ///     renderer supplies this for perspective scenes, where the world-unit
+    ///     origin has already been camera-projected into screen pixels.
+    ///   - sizeScale: Extra uniform scale applied on top of `object.scale`
+    ///     (focal ÷ depth for perspective; 1 for ortho) so distant text shrinks.
     func drawPayload(
         for object: WPESceneTextObject,
         sceneSize: CGSize,
-        parallaxOffset: SIMD2<Float>
+        parallaxOffset: SIMD2<Float>,
+        originOverride: SIMD2<Double>? = nil,
+        sizeScale: Double = 1
     ) -> WPEMSDFTextDrawPayload? {
         let font = resolveFont(for: object)
         let material = WPEMSDFFontMaterial.make(object: object, parameters: parameters)
@@ -60,7 +69,13 @@ final class WPEMSDFTextRenderer {
             generator: generator
         ) else { return nil }
 
-        let transformed = transform(mesh: mesh, object: object, parallaxOffset: parallaxOffset)
+        let transformed = transform(
+            mesh: mesh,
+            object: object,
+            parallaxOffset: parallaxOffset,
+            originOverride: originOverride,
+            sizeScale: sizeScale
+        )
         let pages = transformed.perPage.keys.sorted().compactMap { page -> WPEMSDFTextPageDraw? in
             guard let vertices = transformed.perPage[page], !vertices.isEmpty,
                   let texture = atlas.texture(page: page) else {
@@ -91,19 +106,25 @@ final class WPEMSDFTextRenderer {
     private func transform(
         mesh: WPEMSDFTextMesh,
         object: WPESceneTextObject,
-        parallaxOffset: SIMD2<Float>
+        parallaxOffset: SIMD2<Float>,
+        originOverride: SIMD2<Double>?,
+        sizeScale: Double
     ) -> WPEMSDFTextMesh {
         let scale = SIMD2<Double>(
-            max(object.scale.x, 0.0001),
-            max(object.scale.y, 0.0001)
+            max(object.scale.x, 0.0001) * sizeScale,
+            max(object.scale.y, 0.0001) * sizeScale
         )
         let scaledSize = SIMD2<Double>(
             Double(mesh.size.width) * scale.x,
             Double(mesh.size.height) * scale.y
         )
+        let boxCenter = originOverride ?? SIMD2<Double>(
+            object.origin.x + Double(parallaxOffset.x),
+            object.origin.y + Double(parallaxOffset.y)
+        )
         let topLeft = SIMD2<Double>(
-            object.origin.x + Double(parallaxOffset.x) - scaledSize.x * 0.5,
-            object.origin.y + Double(parallaxOffset.y) - scaledSize.y * 0.5
+            boxCenter.x - scaledSize.x * 0.5,
+            boxCenter.y - scaledSize.y * 0.5
         )
         var transformed: [Int: [WPEMSDFTextVertex]] = [:]
         for (page, vertices) in mesh.perPage {

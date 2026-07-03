@@ -6,6 +6,67 @@ import Testing
 @Suite("WPESceneDocumentParser")
 struct WPESceneDocumentParserTests {
 
+    @Test("Attachment on a pure group lowers onto its renderable children")
+    func groupAttachmentLowersOntoChildren() throws {
+        // 3462491575's Kal'tsit rig: every head-hair layer hangs from a null
+        // GROUP that carries `attachment: "头发"` on the puppet body. The group
+        // is baked away at parse time, so the children must inherit the anchor
+        // and re-parent to the puppet — otherwise the whole hair subtree misses
+        // the anchor offset and renders on the torso.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
+            "objects": [
+                [
+                    "id": 100,
+                    "name": "身体",
+                    "image": "models/body.json",
+                    "origin": "500 -300 0",
+                ],
+                [
+                    "id": 200,
+                    "name": "头发组",
+                    "attachment": "头发",
+                    "parent": 100,
+                    "origin": "-1 -220 0",
+                ],
+                [
+                    "id": 300,
+                    "name": "主发",
+                    "image": "models/hair.json",
+                    "parent": 200,
+                    "origin": "89 -31 0",
+                ],
+                [
+                    "id": 400,
+                    "name": "眼睛",
+                    "image": "models/eye.json",
+                    "attachment": "头发",
+                    "parent": 100,
+                    "origin": "-112 -281 0",
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
+
+        let hair = try #require(byID["300"])
+        #expect(hair.attachment == "头发")
+        #expect(hair.parentObjectID == "100")
+        // The group's origin still contributes to the baked transform chain.
+        #expect(abs(hair.origin.x - (500 - 1 + 89)) < 0.001)
+
+        // A directly-attached layer keeps its own attachment untouched.
+        let eye = try #require(byID["400"])
+        #expect(eye.attachment == "头发")
+        #expect(eye.parentObjectID == "100")
+
+        // The puppet body itself is unaffected.
+        let body = try #require(byID["100"])
+        #expect(body.attachment == nil)
+    }
+
     @Test("User-property envelope on visible resolves from supplied user values")
     func userPropertyVisibleResolvesFromUserValues() throws {
         let payload: [String: Any] = [
@@ -213,6 +274,27 @@ struct WPESceneDocumentParserTests {
         #expect(layer.blendMode == .additive)
         #expect(layer.alignment == .center)
         #expect(layer.size == CGSize(width: 512, height: 512))
+    }
+
+    @Test("Image numeric colorBlendMode maps to layer additive blend")
+    func imageNumericColorBlendModeMapsToLayerBlend() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "ripple",
+                "name": "ripple1440p",
+                "type": "image",
+                "image": "models/workshop/2655151285/ripple.json",
+                "colorBlendMode": 9
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.blendMode == .additive)
     }
 
     @Test("Image origin script using cursorWorldPosition is preserved for runtime")
@@ -625,6 +707,25 @@ struct WPESceneDocumentParserTests {
         let byID = Dictionary(uniqueKeysWithValues: document.imageObjects.map { ($0.id, $0) })
         #expect(byID["269"]?.visible == true)
         #expect(byID["488"]?.visible == false)
+    }
+
+    @Test("Image copybackground false is preserved")
+    func imageCopyBackgroundFalseIsPreserved() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 387,
+                "name": "Bar 3",
+                "image": "models/util/composelayer.json",
+                "config": ["passthrough": true],
+                "copybackground": false
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.copyBackground == false)
     }
 
     @Test("Solidlayer with a visible effect and no authored alpha defaults to a transparent base")

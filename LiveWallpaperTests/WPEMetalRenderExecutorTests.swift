@@ -8,6 +8,21 @@ import Testing
 @Suite("WPE Metal render executor")
 struct WPEMetalRenderExecutorTests {
 
+    @Test("WPE depthtest:enabled maps to a real depth comparison, not always-pass")
+    func depthTestEnabledMapsToRealComparison() throws {
+        // WPE materials write depthtest as "enabled"/"disabled" (never a GL compare
+        // name). "enabled" must occlude by depth — the old `default: .always` left a
+        // no-cull sphere half-broken and let a far skybox overwrite nearer stars.
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "enabled") == .lessEqual)
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "true") == .lessEqual)
+        // "disabled" passes carry no depth attachment, so always-pass is correct.
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "disabled") == .always)
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "always") == .always)
+        // Explicit GL compare names still round-trip for any material that uses them.
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "less") == .less)
+        #expect(WPEMetalDepthStateCache.compareFunction(for: "lequal") == .lessEqual)
+    }
+
     @Test("Refraction snapshot freshness tracks output texture identity")
     func refractionSnapshotFreshnessTracksOutputIdentity() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -1036,7 +1051,7 @@ struct WPEMetalRenderExecutorTests {
         }
     }
 
-    @Test("Scene-capture utility output geometry: only a small axis-aligned composelayer is subregion")
+    @Test("Scene-capture utility output geometry: local composelayer is subregion")
     func sceneCaptureUtilityOutputGeometryClassifier() throws {
         let scene = CGSize(width: 3840, height: 2160)
         func geo(
@@ -1069,6 +1084,31 @@ struct WPEMetalRenderExecutorTests {
             geometry: geo(size: CGSize(width: 2560, height: 1440), scale: SIMD3<Double>(0.5, 0.5, 0.5)),
             sceneSize: scene
         ) == .subregion)
+        // Scene 3299228616's Bar 1 is a small audio visualizer box authored with
+        // a half-turn and X mirror. Its footprint is still a local, axis-aligned
+        // subregion; treating it as fullscreen paints a black panel over the cat.
+        #expect(Models.outputGeometry(
+            path: "models/util/composelayer.json",
+            geometry: geo(
+                size: CGSize(width: 1920, height: 1080),
+                scale: SIMD3<Double>(-0.30868, 0.21645, 0.26815),
+                angles: SIMD3<Double>(0, 0, -Double.pi)
+            ),
+            sceneSize: scene
+        ) == .subregion)
+        // Scene 2986828130's prism/glitch compose layer is a local audio-effect
+        // box. It is rotated and mirrored on both axes, but its footprint is far
+        // smaller than the scene, so it must stay a subregion; the capture pass
+        // samples the matching scene area instead of shrinking the whole frame.
+        #expect(Models.outputGeometry(
+            path: "models/util/composelayer.json",
+            geometry: geo(
+                size: CGSize(width: 2560, height: 1440),
+                scale: SIMD3<Double>(-0.27404, -1.15671, 1.15671),
+                angles: SIMD3<Double>(0, 0, -0.18622)
+            ),
+            sceneSize: scene
+        ) == .subregion)
 
         // fullscreenlayer (DoF) and projectlayer (projection) always fullscreen.
         #expect(Models.outputGeometry(path: "models/util/fullscreenlayer.json",
@@ -1076,18 +1116,283 @@ struct WPEMetalRenderExecutorTests {
         #expect(Models.outputGeometry(path: "models/util/projectlayer.json",
             geometry: geo(size: CGSize(width: 1280, height: 720)), sceneSize: scene) == .fullscreen)
 
-        // Scene 3479521040 regression guards: rotated and oversized compose stay fullscreen.
+        // Scene 3479521040 regression guards: rotated oversized compose stays fullscreen.
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
-            geometry: geo(size: CGSize(width: 1280, height: 720), angles: SIMD3<Double>(0, 0, 0.4)),
+            geometry: geo(size: CGSize(width: 5000, height: 2300), angles: SIMD3<Double>(0, 0, 0.4)),
             sceneSize: scene) == .fullscreen)
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 5000, height: 2300)), sceneSize: scene) == .fullscreen)
-        // Mirrored (negative scale) and missing size also stay fullscreen.
+        // Single-axis mirror and missing size stay fullscreen.
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 1280, height: 720), scale: SIMD3<Double>(-1, 1, 1)),
             sceneSize: scene) == .fullscreen)
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: nil), sceneSize: scene) == .fullscreen)
+    }
+
+    @Test("Rotated local composelayer scene composite stays in its object quad")
+    func rotatedLocalComposelayerSceneCompositeStaysInObjectQuad() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let red = try makeRGBAInputTexture(device: device, bytes: Data([
+            255, 0, 0, 255, 255, 0, 0, 255,
+            255, 0, 0, 255, 255, 0, 0, 255
+        ]))
+        let pass = copyPass(
+            id: "compose.7",
+            source: .image("materials/red.png"),
+            target: .scene,
+            blending: "normal"
+        )
+        let layer = composelayerTestLayer(
+            objectID: "compose",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(4, 4, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0.5),
+                alignment: .center,
+                size: CGSize(width: 4, height: 4),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            passes: [pass]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [preparedBuiltinPass(pass, bindings: [0: .image("materials/red.png")])]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 8, height: 8),
+            textures: ["materials/red.png": red]
+        )
+
+        let center = try readPixel(output, x: 4, y: 4)
+        let corner = try readPixel(output, x: 0, y: 0)
+        #expect(center.r >= 240)
+        #expect(center.a >= 240)
+        #expect(corner.r <= 5)
+        #expect(corner.a <= 5)
+    }
+
+    @Test("Local composelayer captures matching scene area before object-quad composite")
+    func localComposelayerCapturesMatchingSceneAreaBeforeObjectQuadComposite() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        var sceneBytes = Data()
+        for _ in 0..<4 {
+            for x in 0..<8 {
+                switch x {
+                case 0...1: sceneBytes.append(contentsOf: [255, 0, 0, 255])
+                case 2...3: sceneBytes.append(contentsOf: [0, 255, 0, 255])
+                case 4...5: sceneBytes.append(contentsOf: [0, 0, 255, 255])
+                default:    sceneBytes.append(contentsOf: [255, 255, 0, 255])
+                }
+            }
+        }
+        let scene = try makeRGBAInputTexture(device: device, width: 8, height: 4, bytes: sceneBytes)
+        let seedScene = WPERenderPass(
+            id: "scene.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/scene.png"),
+            target: .scene,
+            textures: [0: .image("materials/scene.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let compositeName = "_rt_imageLayerComposite_local_a"
+        let capture = WPERenderPass(
+            id: "compose.0",
+            phase: .material,
+            shader: "compose",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .layerComposite(name: compositeName),
+            textures: [0: .fbo("_rt_FullFrameBuffer")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let draw = copyPass(
+            id: "compose.1",
+            source: .fbo(compositeName),
+            target: .scene,
+            blending: "disabled"
+        )
+        let compose = composelayerTestLayer(
+            objectID: "local",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(6, 2, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 4, height: 4),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            passes: [capture, draw]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: seedScene),
+                passes: [preparedBuiltinPass(seedScene, bindings: [0: .image("materials/scene.png")])]
+            ),
+            WPEPreparedRenderLayer(
+                graphLayer: compose,
+                passes: [
+                    preparedBuiltinPass(capture, bindings: [0: .fbo("_rt_FullFrameBuffer")]),
+                    preparedBuiltinPass(draw, bindings: [0: .fbo(compositeName)])
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 8, height: 4),
+            textures: ["materials/scene.png": scene]
+        )
+
+        let untouchedLeft = try readPixel(output, x: 1, y: 2)
+        let localLeft = try readPixel(output, x: 4, y: 2)
+        let localRight = try readPixel(output, x: 7, y: 2)
+        #expect(untouchedLeft.r >= 240)
+        #expect(untouchedLeft.g <= 5)
+        #expect(localLeft.b >= 240)
+        #expect(localLeft.r <= 5)
+        #expect(localRight.r >= 240)
+        #expect(localRight.g >= 240)
+        #expect(localRight.b <= 5)
+    }
+
+    @Test("Local composelayer compose scene pass stays in object quad")
+    func localComposelayerComposeScenePassStaysInObjectQuad() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let red = try makeRGBAInputTexture(device: device, bytes: Data([
+            255, 0, 0, 255, 255, 0, 0, 255,
+            255, 0, 0, 255, 255, 0, 0, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "compose.0",
+            phase: .material,
+            shader: "compose",
+            source: .image("materials/red.png"),
+            target: .scene,
+            textures: [0: .image("materials/red.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let compose = composelayerTestLayer(
+            objectID: "compose",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(4, 4, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 4, height: 4),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            passes: [pass]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: compose,
+                passes: [preparedBuiltinPass(pass, bindings: [0: .image("materials/red.png")])]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 8, height: 8),
+            textures: ["materials/red.png": red]
+        )
+
+        let center = try readPixel(output, x: 4, y: 4)
+        let corner = try readPixel(output, x: 0, y: 0)
+        #expect(center.r >= 240)
+        #expect(center.a >= 240)
+        #expect(corner.r <= 5)
+        #expect(corner.a <= 5)
+    }
+
+    @Test("Composelayer grouping container scene composite stays fullscreen")
+    func composelayerGroupingContainerSceneCompositeStaysFullscreen() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let red = try makeRGBAInputTexture(device: device, bytes: Data([
+            255, 0, 0, 255, 255, 0, 0, 255,
+            255, 0, 0, 255, 255, 0, 0, 255
+        ]))
+        let pass = copyPass(
+            id: "compose.7",
+            source: .image("materials/red.png"),
+            target: .scene,
+            blending: "normal"
+        )
+        let compose = composelayerTestLayer(
+            objectID: "compose",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(4, 4, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0.5),
+                alignment: .center,
+                size: CGSize(width: 4, height: 4),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            passes: [pass]
+        )
+        let child = WPERenderLayer(
+            objectID: "child",
+            objectName: "Child",
+            imagePath: "materials/red.png",
+            materialPath: nil,
+            parentObjectID: "compose",
+            geometry: .identity,
+            compositeA: "_rt_imageLayerComposite_child_a",
+            compositeB: "_rt_imageLayerComposite_child_b",
+            localFBOs: [],
+            passes: []
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: compose,
+                passes: [preparedBuiltinPass(pass, bindings: [0: .image("materials/red.png")])]
+            ),
+            WPEPreparedRenderLayer(graphLayer: child, passes: [])
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 8, height: 8),
+            textures: ["materials/red.png": red]
+        )
+
+        let corner = try readPixel(output, x: 0, y: 0)
+        #expect(corner.r >= 240)
+        #expect(corner.a >= 240)
     }
 
     @Test("Subregion composelayer object quad uses the normal placed-layer anchor")
@@ -2956,6 +3261,24 @@ private func graphLayer(
     )
 }
 
+private func composelayerTestLayer(
+    objectID: String,
+    geometry: WPERenderLayerGeometry,
+    passes: [WPERenderPass]
+) -> WPERenderLayer {
+    WPERenderLayer(
+        objectID: objectID,
+        objectName: "Compose",
+        imagePath: "models/util/composelayer.json",
+        materialPath: "materials/util/composelayer.json",
+        geometry: geometry,
+        compositeA: "_rt_imageLayerComposite_\(objectID)_a",
+        compositeB: "_rt_imageLayerComposite_\(objectID)_b",
+        localFBOs: [],
+        passes: passes
+    )
+}
+
 // MARK: - Phase 2C helpers and tests
 
 private func solidPass(
@@ -3388,8 +3711,8 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 1)
     }
 
-    @Test("Composelayer composite target uses full scene size, not the object footprint")
-    func composelayerCompositeTargetUsesFullSceneSize() throws {
+    @Test("Local composelayer composite target uses object footprint")
+    func localComposelayerCompositeTargetUsesObjectFootprint() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let pool = WPEMetalRenderTargetPool(device: device)
         let layer = WPERenderLayer(
@@ -3409,6 +3732,42 @@ private extension WPEMetalRenderExecutorTests {
             ),
             compositeA: "_rt_imageLayerComposite_compose_a",
             compositeB: "_rt_imageLayerComposite_compose_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .layerComposite(name: layer.compositeA),
+            layer: layer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 128)
+        #expect(texture.height == 64)
+    }
+
+    @Test("Fullscreen composelayer composite target uses full scene size")
+    func fullscreenComposelayerCompositeTargetUsesFullSceneSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "compose",
+            objectName: "Compose",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(512, 384, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 1024, height: 768),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_compose_full_a",
+            compositeB: "_rt_imageLayerComposite_compose_full_b",
             localFBOs: [],
             passes: []
         )
