@@ -459,7 +459,7 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
             }
         } header: {
-            SettingsStickySectionHeader("Behavior")
+            Text("Behavior")
         }
     }
 
@@ -541,7 +541,7 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Opens the folder containing the app's log files"))
             }
         } header: {
-            SettingsStickySectionHeader("Advanced")
+            Text("Advanced", comment: "Section header for diagnostics and developer settings.")
         }
     }
 
@@ -592,7 +592,7 @@ struct GeneralSettingsView: View {
                 }
             }
         } header: {
-            SettingsStickySectionHeader("Audio")
+            Text("Audio", comment: "Section header for the audio-response toggle in General settings.")
         }
         #endif
     }
@@ -723,7 +723,7 @@ struct GeneralSettingsView: View {
                 }
             }
         } header: {
-            SettingsStickySectionHeader("Performance & Battery")
+            Text("Performance & Battery")
         }
     }
 
@@ -789,7 +789,7 @@ struct GeneralSettingsView: View {
             }
 
         } header: {
-            SettingsStickySectionHeader("Weather")
+            Text("Weather")
         } footer: {
             Text("System uses Location Services; Manual lets you pick a city. Powers rain, snow, and fog effects.")
                 .font(.caption)
@@ -1050,7 +1050,7 @@ struct GeneralSettingsView: View {
                     .accessibilityHint(Text("Restore settings, display defaults, bookmarks, and per-display setup from a backup file"))
             }
         } header: {
-            SettingsStickySectionHeader("Backup & Restore")
+            Text("Backup & Restore")
         } footer: {
             Text("Backups store settings and references to your wallpaper files, not the files themselves — the originals must exist on the Mac you restore to.")
                 .font(.caption)

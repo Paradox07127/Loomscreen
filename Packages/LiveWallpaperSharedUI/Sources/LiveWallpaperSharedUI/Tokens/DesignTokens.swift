@@ -169,8 +169,6 @@ public enum DesignTokens {
     public enum Settings {
         public static let formHorizontalMargin: CGFloat = 18
         public static let formVerticalMargin: CGFloat = 12
-        public static let stickyHeaderHeight: CGFloat = 38
-        public static let stickyHeaderTopThreshold: CGFloat = 16
         public static let actionGridSpacing: CGFloat = 10
     }
 

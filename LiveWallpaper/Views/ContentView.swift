@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var isSettingsMode: Bool
     @State private var selectedSettingsNavigation: SettingsNavigation?
     @State private var settingsSearchText = ""
+    @State private var pendingSettingsSearchAnchor: SettingsSearchAnchor?
     @State private var lastAppNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
     /// Drives a one-shot prewarm cycle that emulates the user-discovered "drag
@@ -59,7 +60,10 @@ struct ContentView: View {
             sidebar
         } detail: {
             if isSettingsMode {
-                SettingsDetailContent(selection: $selectedSettingsNavigation)
+                SettingsDetailContent(
+                    selection: $selectedSettingsNavigation,
+                    pendingSearchAnchor: $pendingSettingsSearchAnchor
+                )
             } else {
                 DetailContent(selection: $selectedNavigation, canShowDeveloperTools: canShowDeveloperTools)
             }
@@ -100,6 +104,7 @@ struct ContentView: View {
                 SettingsSidebar(
                     selection: $selectedSettingsNavigation,
                     searchText: $settingsSearchText,
+                    pendingSearchAnchor: $pendingSettingsSearchAnchor,
                     onBack: exitSettingsMode
                 )
             } else {

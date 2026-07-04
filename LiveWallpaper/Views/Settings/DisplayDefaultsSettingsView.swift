@@ -12,6 +12,11 @@ private enum DisplayDefaultsKind {
 struct DisplayDefaultsSettingsView: View {
     @Environment(\.featureCatalog) private var featureCatalog
     @State private var displayDefaults = SettingsManager.shared.loadDisplayDefaults()
+    @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
+
+    init(pendingSearchAnchor: Binding<SettingsSearchAnchor?> = .constant(nil)) {
+        _pendingSearchAnchor = pendingSearchAnchor
+    }
 
     var body: some View {
         Form {
@@ -29,6 +34,15 @@ struct DisplayDefaultsSettingsView: View {
             }
         }
         .settingsFormChrome()
+        .settingsSearchAnchorScroller(
+            pendingSearchAnchor: $pendingSearchAnchor,
+            anchors: [
+                .displayDefaultsVideo,
+                .displayDefaultsWeb,
+                .displayDefaultsShader,
+                .displayDefaultsScene
+            ]
+        )
     }
 
     private var videoSection: some View {
@@ -39,7 +53,7 @@ struct DisplayDefaultsSettingsView: View {
             spanDisplaysRow
             colorSpaceRow
         } header: {
-            SettingsStickySectionHeader("Video")
+            SettingsSearchSectionHeader("Video", anchor: .displayDefaultsVideo)
         }
     }
 
@@ -48,7 +62,7 @@ struct DisplayDefaultsSettingsView: View {
             audioRows(for: .html)
             interactionRow(for: .html, subtitle: "Default pointer and click input")
         } header: {
-            SettingsStickySectionHeader("Web")
+            SettingsSearchSectionHeader("Web", anchor: .displayDefaultsWeb)
         }
     }
 
@@ -56,7 +70,7 @@ struct DisplayDefaultsSettingsView: View {
         Section {
             frameRateRow(for: .metalShader)
         } header: {
-            SettingsStickySectionHeader("Shader")
+            SettingsSearchSectionHeader("Shader", anchor: .displayDefaultsShader)
         }
     }
 
@@ -67,7 +81,7 @@ struct DisplayDefaultsSettingsView: View {
             scalingRow(for: .scene, modes: VideoFitMode.sceneModes)
             sceneInteractionRows
         } header: {
-            SettingsStickySectionHeader("Scene")
+            SettingsSearchSectionHeader("Scene", anchor: .displayDefaultsScene)
         }
     }
 

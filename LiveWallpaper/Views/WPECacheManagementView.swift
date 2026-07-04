@@ -32,6 +32,7 @@ struct WPECacheManagementView: View {
     /// reads settings) and fed straight to the compact table.
     @State private var projectItems: [WPEStorageRowItem] = []
     @State private var showingProjectsSheet = false
+    @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
 
     #if DIRECT_DISTRIBUTION
     /// The Workshop online-browse JSON cache (self-capped at 5-min TTL + 100 MB),
@@ -46,8 +47,12 @@ struct WPECacheManagementView: View {
         GridItem(.flexible(minimum: 220), spacing: DesignTokens.Spacing.md)
     ]
 
-    init(cache: WallpaperEngineCache = .shared) {
+    init(
+        cache: WallpaperEngineCache = .shared,
+        pendingSearchAnchor: Binding<SettingsSearchAnchor?> = .constant(nil)
+    ) {
         self.cache = cache
+        _pendingSearchAnchor = pendingSearchAnchor
     }
 
     var body: some View {
@@ -59,6 +64,13 @@ struct WPECacheManagementView: View {
             reclaimArchivesSection
         }
         .settingsFormChrome()
+        .settingsSearchAnchorScroller(
+            pendingSearchAnchor: $pendingSearchAnchor,
+            anchors: [
+                .storageDashboard,
+                .storageCaches
+            ]
+        )
         .onAppear { Task { await refreshStats() } }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             Task { await refreshStats() }
@@ -205,6 +217,7 @@ struct WPECacheManagementView: View {
                         infoNote("Caches are bounded and cleared automatically — use these only to reclaim space now.")
                     }
                 }
+                .settingsSearchAnchorTarget(.storageCaches)
 
                 StorageDashboardTile(
                     title: "Scene Video Texture Cache",
@@ -234,7 +247,7 @@ struct WPECacheManagementView: View {
             }
             .sheet(isPresented: $showingProjectsSheet) { projectsSheet }
         } header: {
-            SettingsStickySectionHeader("Storage")
+            SettingsSearchSectionHeader("Storage", anchor: .storageDashboard)
         }
     }
 
@@ -375,7 +388,7 @@ struct WPECacheManagementView: View {
                     }
                 }
             } header: {
-                SettingsStickySectionHeader("Imported Project Cache")
+                Text("Imported Project Cache")
             } footer: {
                 if let last = lastFreedBytes, last > 0 {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
@@ -389,7 +402,7 @@ struct WPECacheManagementView: View {
                     cacheRow(for: entry)
                 }
             } header: {
-                SettingsStickySectionHeader(verbatim: "Cached Projects (\(stats.entries.count))")
+                Text(verbatim: "Cached Projects (\(stats.entries.count))")
             }
 
             Section {
@@ -454,7 +467,7 @@ struct WPECacheManagementView: View {
                     }
                 }
             } header: {
-                SettingsStickySectionHeader("Reclaimable Download Archives")
+                Text("Reclaimable Download Archives")
             } footer: {
                 if let last = lastReclaimedBytes, last > 0 {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE download-archive reclaim footer after freeing space. Placeholder is the freed byte total.")

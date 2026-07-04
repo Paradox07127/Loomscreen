@@ -9,11 +9,13 @@ struct ShortcutsSettingsView: View {
     @State private var bindings: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:]
     @State private var rejectionMessage: String?
     @State private var globalShortcutsEnabled: Bool
+    @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
 
-    init() {
+    init(pendingSearchAnchor: Binding<SettingsSearchAnchor?> = .constant(nil)) {
         let settings = SettingsManager.shared.loadGlobalSettings()
         _bindings = State(initialValue: settings.globalShortcuts)
         _globalShortcutsEnabled = State(initialValue: settings.globalShortcutsEnabled)
+        _pendingSearchAnchor = pendingSearchAnchor
     }
 
     var body: some View {
@@ -38,13 +40,20 @@ struct ShortcutsSettingsView: View {
                         .accessibilityLabel(Text("Shortcut rejected: \(rejectionMessage)"))
                 }
             } header: {
-                SettingsStickySectionHeader("Global Shortcuts")
+                SettingsSearchSectionHeader("Global Shortcuts", anchor: .shortcutsGlobal)
             } footer: {
                 shortcutFooter
             }
             .disabled(!globalShortcutsEnabled)
         }
         .settingsFormChrome(minWidth: 500, minHeight: 400)
+        .settingsSearchAnchorScroller(
+            pendingSearchAnchor: $pendingSearchAnchor,
+            anchors: [
+                .shortcutsMaster,
+                .shortcutsGlobal
+            ]
+        )
         .onReceive(NotificationCenter.default.publisher(for: .globalShortcutsDidChange)) { _ in
             // Pick up reset / import side-effects fired from elsewhere in
             // the app so neither the toggle nor the row bindings get
@@ -78,7 +87,7 @@ struct ShortcutsSettingsView: View {
                     .accessibilityHint(Text("Master switch for every global shortcut. Bindings are preserved while off."))
             }
         } header: {
-            SettingsStickySectionHeader("Shortcuts")
+            SettingsSearchSectionHeader("Shortcuts", anchor: .shortcutsMaster)
         }
     }
 

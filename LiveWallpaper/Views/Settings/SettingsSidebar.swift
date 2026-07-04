@@ -3,12 +3,13 @@ import SwiftUI
 struct SettingsSidebar: View {
     @Binding var selection: SettingsNavigation?
     @Binding var searchText: String
+    @Binding var pendingSearchAnchor: SettingsSearchAnchor?
     let onBack: () -> Void
 
     @Environment(\.featureCatalog) private var featureCatalog
 
-    private var items: [SettingsNavigationItem] {
-        SettingsNavigation.filteredItems(
+    private var results: [SettingsNavigationSearchResult] {
+        SettingsNavigation.filteredResults(
             matching: searchText,
             capabilities: featureCatalog.capabilities,
             includeWorkshopOnline: featureCatalog.isEnabled(.workshopOnline)
@@ -17,6 +18,18 @@ struct SettingsSidebar: View {
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var sidebarSelection: Binding<SettingsNavigation?> {
+        Binding(
+            get: { isSearching ? nil : selection },
+            set: { newSelection in
+                if isSearching, let newSelection {
+                    pendingSearchAnchor = results.first { $0.destination == newSelection }?.anchor
+                }
+                selection = newSelection
+            }
+        )
     }
 
     var body: some View {
@@ -28,14 +41,14 @@ struct SettingsSidebar: View {
             .padding(.horizontal, DesignTokens.Spacing.md)
             .padding(.bottom, DesignTokens.Spacing.sm)
 
-            List(selection: $selection) {
+            List(selection: sidebarSelection) {
                 Section {
-                    if items.isEmpty {
+                    if results.isEmpty {
                         emptySearchRow
                     } else {
-                        ForEach(items) { item in
-                            NavigationLink(value: item.destination) {
-                                SettingsSidebarRow(item: item, searchText: searchText)
+                        ForEach(results) { result in
+                            NavigationLink(value: result.destination) {
+                                SettingsSidebarRow(result: result, searchText: searchText)
                             }
                             .accessibilityHint(Text("Open settings category"))
                         }
@@ -53,7 +66,7 @@ struct SettingsSidebar: View {
         )
         .onAppear {
             if selection == nil {
-                selection = items.first?.destination ?? .general
+                selection = results.first?.destination ?? .general
             }
         }
     }
@@ -121,22 +134,22 @@ private struct SettingsSidebarSearchField: View {
 }
 
 private struct SettingsSidebarRow: View {
-    let item: SettingsNavigationItem
+    let result: SettingsNavigationSearchResult
     let searchText: String
 
     private var matchHint: String? {
-        item.searchMatchHint(matching: searchText)
+        result.matchHint ?? result.item.searchMatchHint(matching: searchText)
     }
 
     var body: some View {
         HStack(spacing: SettingsSidebarMetrics.rowContentSpacing) {
-            Image(systemName: item.systemImage)
+            Image(systemName: result.systemImage)
                 .foregroundStyle(.secondary)
                 .frame(width: SettingsSidebarMetrics.rowIconWidth)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                Text(LocalizedStringKey(item.title))
+                Text(LocalizedStringKey(result.title))
                     .lineLimit(1)
 
                 if let matchHint {

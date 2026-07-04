@@ -17,6 +17,11 @@ struct WorkshopSettingsView: View {
     @State private var showingDoctor = false
     @State private var showingRemoveConfirm = false
     @State private var showingKeyEntry = false
+    @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
+
+    init(pendingSearchAnchor: Binding<SettingsSearchAnchor?> = .constant(nil)) {
+        _pendingSearchAnchor = pendingSearchAnchor
+    }
 
     var body: some View {
         Form {
@@ -87,7 +92,7 @@ struct WorkshopSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } header: {
-                SettingsStickySectionHeader("Setup")
+                SettingsSearchSectionHeader("Setup", anchor: .workshopSetup)
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.")
@@ -122,13 +127,20 @@ struct WorkshopSettingsView: View {
                         .accessibilityLabel(Text("Hide items already in my library when browsing"))
                 }
             } header: {
-                SettingsStickySectionHeader("Content")
+                SettingsSearchSectionHeader("Content", anchor: .workshopContent)
             }
         }
         // Shared settings chrome hides the Form's default system background
         // (.scrollContentBackground) + insets (.contentMargins) so this tab
         // doesn't show a different-colored inset panel than other tabs.
         .settingsFormChrome()
+        .settingsSearchAnchorScroller(
+            pendingSearchAnchor: $pendingSearchAnchor,
+            anchors: [
+                .workshopSetup,
+                .workshopContent
+            ]
+        )
         .overlay(alignment: .bottomTrailing) {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)

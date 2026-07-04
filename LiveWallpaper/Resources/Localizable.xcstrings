@@ -4660,6 +4660,7 @@
       }
     },
     "Cached Projects (%lld)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

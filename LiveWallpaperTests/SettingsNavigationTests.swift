@@ -119,4 +119,73 @@ struct SettingsNavigationTests {
 
         #expect(item?.searchMatchHint(matching: "frame rate") == "Frame Rate")
     }
+
+    @Test("Search results expose section anchors for deep links")
+    func searchResultsExposeSectionAnchorsForDeepLinks() {
+        let displayResults = SettingsNavigation.filteredResults(
+            matching: "frame rate",
+            capabilities: .pro,
+            includeWorkshopOnline: false
+        )
+        let workshopResults = SettingsNavigation.filteredResults(
+            matching: "steamcmd",
+            capabilities: .pro,
+            includeWorkshopOnline: true
+        )
+        let storageResults = SettingsNavigation.filteredResults(
+            matching: "video cache",
+            capabilities: .pro,
+            includeWorkshopOnline: false
+        )
+
+        #expect(displayResults.first { $0.destination == .displayDefaults }?.anchor == .displayDefaultsVideo)
+        #expect(workshopResults.first { $0.destination == .workshopSetup }?.anchor == .workshopSetup)
+        #expect(storageResults.first { $0.destination == .storage }?.anchor == .storageCaches)
+    }
+
+    @Test("Search result identity includes anchor")
+    func searchResultIdentityIncludesAnchor() {
+        let result = SettingsNavigationSearchResult(
+            item: SettingsNavigationItem(
+                destination: .displayDefaults,
+                title: "Display Defaults",
+                systemImage: "rectangle.3.group",
+                keywords: []
+            ),
+            anchor: .displayDefaultsScene,
+            matchHint: "Scene"
+        )
+
+        #expect(result.id == "displayDefaults:displayDefaultsScene")
+    }
+
+    @Test("Lite search does not expose unavailable display default sections")
+    func liteSearchDoesNotExposeUnavailableDisplayDefaultSections() {
+        let shaderResults = SettingsNavigation.filteredResults(
+            matching: "shader",
+            capabilities: .lite,
+            includeWorkshopOnline: false
+        )
+        let sceneResults = SettingsNavigation.filteredResults(
+            matching: "scene",
+            capabilities: .lite,
+            includeWorkshopOnline: false
+        )
+
+        #expect(!shaderResults.contains { $0.anchor == .displayDefaultsShader })
+        #expect(!sceneResults.contains { $0.anchor == .displayDefaultsScene })
+        #expect(!shaderResults.map(\.destination).contains(.displayDefaults))
+        #expect(!sceneResults.map(\.destination).contains(.displayDefaults))
+    }
+
+    @Test("Archive search uses always visible storage anchor")
+    func archiveSearchUsesAlwaysVisibleStorageAnchor() {
+        let results = SettingsNavigation.filteredResults(
+            matching: "archives",
+            capabilities: .pro,
+            includeWorkshopOnline: false
+        )
+
+        #expect(results.first { $0.destination == .storage }?.anchor == .storageDashboard)
+    }
 }

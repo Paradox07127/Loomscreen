@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsDetailContent: View {
     @Binding var selection: SettingsNavigation?
+    @Binding var pendingSearchAnchor: SettingsSearchAnchor?
     @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
@@ -10,7 +11,7 @@ struct SettingsDetailContent: View {
             case .general:
                 GeneralSettingsView(page: .general)
             case .displayDefaults:
-                DisplayDefaultsSettingsView()
+                DisplayDefaultsSettingsView(pendingSearchAnchor: $pendingSearchAnchor)
             case .performancePower:
                 GeneralSettingsView(page: .performancePower)
             case .audioResponse:
@@ -18,11 +19,11 @@ struct SettingsDetailContent: View {
             case .weather:
                 GeneralSettingsView(page: .weather)
             case .shortcuts:
-                ShortcutsSettingsView()
+                ShortcutsSettingsView(pendingSearchAnchor: $pendingSearchAnchor)
             case .storage:
                 #if !LITE_BUILD
                 if featureCatalog.isEnabled(.wpeImport) {
-                    WPECacheManagementView()
+                    WPECacheManagementView(pendingSearchAnchor: $pendingSearchAnchor)
                 } else {
                     GeneralSettingsView(page: .general)
                 }
@@ -34,7 +35,7 @@ struct SettingsDetailContent: View {
             case .workshopSetup:
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
                 if featureCatalog.isEnabled(.workshopOnline) {
-                    WorkshopSettingsView()
+                    WorkshopSettingsView(pendingSearchAnchor: $pendingSearchAnchor)
                 } else {
                     GeneralSettingsView(page: .general)
                 }
