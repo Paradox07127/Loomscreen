@@ -87,7 +87,7 @@ struct WorkshopSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } header: {
-                Text("Setup")
+                SettingsStickySectionHeader("Setup")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.")
@@ -122,7 +122,7 @@ struct WorkshopSettingsView: View {
                         .accessibilityLabel(Text("Hide items already in my library when browsing"))
                 }
             } header: {
-                Text("Content")
+                SettingsStickySectionHeader("Content")
             }
         }
         // Shared settings chrome hides the Form's default system background

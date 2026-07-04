@@ -85,6 +85,37 @@ struct WPEMetalNamedFBOAliasTests {
         #expect(resolved == nil)
     }
 
+    @Test("Scene writes bump the generation so alias snapshots can detect staleness")
+    func sceneWriteGenerationTracksSnapshotStaleness() {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let texture = Self.makeScratchTexture(device: device) else {
+            return
+        }
+        var frameState = Self.makeFrameState(output: texture)
+
+        // Snapshot taken at generation 0 (how snapshotFullFrameBufferIfAliasingScene records it).
+        frameState.latestNamedTextures["_rt_FullFrameBuffer"] = texture
+        frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] = frameState.sceneWriteGeneration
+        #expect(frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] == frameState.sceneWriteGeneration)
+
+        // Scene draws (beams, halos) after the capture make it stale — 3521337568's
+        // filmgrain must re-capture or its full-frame redraw erases those layers.
+        frameState.registerWrite(texture: texture, targetID: .scene)
+        #expect(frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] != frameState.sceneWriteGeneration)
+
+        // FBO writes don't invalidate scene-alias snapshots…
+        frameState.registerWrite(texture: texture, targetID: .named("_rt_imageLayerComposite_x_a"))
+        let generationAfterFBOWrite = frameState.sceneWriteGeneration
+        frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] = generationAfterFBOWrite
+        #expect(frameState.sceneWriteGeneration == generationAfterFBOWrite)
+
+        // …but a REAL write to an alias-named target retires its snapshot entry,
+        // so the snapshot logic never clobbers real chain output.
+        frameState.sceneAliasSnapshotGenerations["_rt_HalfFrameBuffer"] = frameState.sceneWriteGeneration
+        frameState.registerWrite(texture: texture, targetID: .named("_rt_HalfFrameBuffer"))
+        #expect(frameState.sceneAliasSnapshotGenerations["_rt_HalfFrameBuffer"] == nil)
+    }
+
     private static func makeFrameState(output: MTLTexture) -> WPEMetalFrameState {
         WPEMetalFrameState(
             output: output,

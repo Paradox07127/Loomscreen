@@ -206,6 +206,76 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[1].target == .scene)
     }
 
+    @Test("shape:quad DIRECTDRAW layer builds a transparent base + additive scene effect carrying its points")
+    func shapeQuadLayerBuildsAdditiveEffectChain() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // solidlayer is a builtin material (no file). Only the lightshafts effect
+        // needs to resolve from disk.
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/lightshafts.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/lightshafts/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/lightshafts",
+                "blending": "normal"
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/lightshafts.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 96,
+                "name": "光束 - 线性",
+                "shape": "quad",
+                "scale": "3 3 1",
+                "effects": [[
+                    "id": 97,
+                    "file": "effects/lightshafts/effect.json",
+                    "visible": true,
+                    "passes": [[
+                        "combos": ["DIRECTDRAW": 1, "RENDERING": 1],
+                        "constantshadervalues": [
+                            "point0": "0.4 0.25",
+                            "point1": "0.6 0.25",
+                            "point2": "0.94451 0.83623",
+                            "point3": "0.09498 0.88795"
+                        ]
+                    ]]
+                ]]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first)
+
+        // Transparent solid base + the lightshafts effect drawn straight to scene.
+        #expect(layer.passes.map(\.shader) == ["solidlayer", "effects/lightshafts"])
+        let effectPass = try #require(layer.passes.last)
+        #expect(effectPass.target == .scene)
+        #expect(effectPass.blending == "premultipliedAdditive")
+        #expect(effectPass.combos["DIRECTDRAW"] == 1)
+
+        // The perspective-quad corners survive onto the layer geometry so the
+        // renderer can synthesize the 4-corner beam.
+        let points = try #require(layer.geometry.shapePoints)
+        #expect(points == [
+            SIMD2<Double>(0.4, 0.25),
+            SIMD2<Double>(0.6, 0.25),
+            SIMD2<Double>(0.94451, 0.83623),
+            SIMD2<Double>(0.09498, 0.88795)
+        ])
+    }
+
     @Test("Composelayer with children renders subtree into a local group target")
     func composelayerWithChildrenBuildsLocalGroupTarget() throws {
         let root = FileManager.default.temporaryDirectory

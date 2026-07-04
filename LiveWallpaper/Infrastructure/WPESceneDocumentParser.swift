@@ -1090,11 +1090,24 @@ enum WPESceneDocumentParser {
     private static func shapeCandidates(in entry: [String: Any]) -> [WPESceneObjectKind] {
         var kinds: [WPESceneObjectKind] = []
         if entry["image"] != nil || entry["model"] != nil { kinds.append(.image) }
+        // A `shape: "quad"` layer carries no image — it is a bare geometry surface
+        // for a DIRECTDRAW effect (e.g. lightshafts light beams). Treat it as an
+        // image-kind layer; `parseImageObject` synthesizes a transparent solid
+        // base so the effect chain still renders.
+        if isShapeQuadLayer(entry) { kinds.append(.image) }
         if entry["sound"] != nil { kinds.append(.sound) }
         if entry["particle"] != nil { kinds.append(.particle) }
         if entry["text"] != nil { kinds.append(.text) }
         if entry["light"] != nil { kinds.append(.light) }
         return kinds
+    }
+
+    /// True for a `shape: "quad"` object with no image/model of its own. WPE
+    /// draws these as a 4-corner perspective quad fed by an effect's
+    /// `EffectPerspectiveUV` points.
+    private static func isShapeQuadLayer(_ entry: [String: Any]) -> Bool {
+        guard entry["image"] == nil, entry["model"] == nil else { return false }
+        return (entry["shape"] as? String)?.lowercased() == "quad"
     }
 
     // MARK: - Camera
@@ -1182,7 +1195,12 @@ enum WPESceneDocumentParser {
         inheritedAttachment: (name: String, parentID: String)? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
-        guard let imagePath = nonEmptyString(dict["image"]) ?? nonEmptyString(dict["model"]) else {
+        // A `shape: "quad"` layer has no image; it renders a DIRECTDRAW effect on a
+        // synthesized transparent solid base (the same builtin used for other
+        // effect-only surfaces), so its effect chain still composites.
+        let isShapeQuad = isShapeQuadLayer(dict)
+        guard let imagePath = nonEmptyString(dict["image"]) ?? nonEmptyString(dict["model"])
+            ?? (isShapeQuad ? "models/util/solidlayer.json" : nil) else {
             let objectName = dict["name"] as? String ?? "?"
             diagnostics.append(.init(
                 severity: .warning,
@@ -1210,12 +1228,19 @@ enum WPESceneDocumentParser {
         let alphaFallback = imageAlphaFallback(
             imagePath: imagePath,
             rawAlpha: dict["alpha"],
-            effects: effects
+            effects: effects,
+            syntheticShapeBase: isShapeQuad
         )
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: alphaFallback)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let brightness = parseDouble(dict["brightness"]) ?? 1.0
-        let blend = parseImageBlendMode(dict)
+        // The perspective-quad corners a DIRECTDRAW effect draws through (lightshafts
+        // `point0..3`). Also picks the additive scene composite WPE uses for these
+        // beams (RenderDoc pass 65/66: SRC_ALPHA/ONE).
+        let shapePoints = isShapeQuad ? shapeQuadPoints(in: effects) : nil
+        let blend = (isShapeQuad && shapePoints != nil)
+            ? WPESceneBlendMode.additive
+            : parseImageBlendMode(dict)
         let alignment = WPESceneAlignment(rawWPEValue: dict["alignment"] as? String)
         let size: CGSize?
         if let vec = parseVector3(dict["size"]) {
@@ -1301,15 +1326,45 @@ enum WPESceneDocumentParser {
             originScript: originScript,
             scaleScript: scaleScript,
             anglesScript: anglesScript,
-            scriptProperties: visibleScriptProperties
+            scriptProperties: visibleScriptProperties,
+            shapePoints: shapePoints
         )
+    }
+
+    /// Extracts the four `point0..3` perspective corners from the first effect
+    /// pass that declares a complete set (the `EffectPerspectiveUV` gizmo WPE uses
+    /// for lightshafts / directdraw quads). Returns `nil` when no effect supplies them.
+    private static func shapeQuadPoints(in effects: [WPESceneImageEffect]) -> [SIMD2<Double>]? {
+        for effect in effects where effect.visible {
+            for override in effect.passOverrides {
+                var points: [SIMD2<Double>] = []
+                for index in 0..<4 {
+                    guard let vector = override.constants["point\(index)"]?.vectorValue,
+                          vector.count >= 2 else {
+                        points = []
+                        break
+                    }
+                    points.append(SIMD2<Double>(vector[0], vector[1]))
+                }
+                if points.count == 4 { return points }
+            }
+        }
+        return nil
     }
 
     private static func imageAlphaFallback(
         imagePath: String,
         rawAlpha: Any?,
-        effects: [WPESceneImageEffect]
+        effects: [WPESceneImageEffect],
+        syntheticShapeBase: Bool = false
     ) -> Double {
+        // A synthesized `shape:"quad"` base has no image of its own — it only
+        // exists to carry a DIRECTDRAW effect. Keep it transparent even when the
+        // effect is missing/invisible or its points didn't parse, so a bare or
+        // broken shape quad draws nothing instead of an opaque solid rectangle.
+        if syntheticShapeBase, rawAlpha == nil {
+            return 0
+        }
         guard rawAlpha == nil,
               effects.contains(where: \.visible) else {
             return 1

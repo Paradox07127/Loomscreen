@@ -1045,6 +1045,100 @@ struct WPESceneDocumentParserTests {
         #expect(!document.diagnostics.contains(where: { $0.message.contains("has no image path") }))
     }
 
+    @Test("shape:quad DIRECTDRAW layer parses as a transparent-base image layer with perspective points")
+    func shapeQuadLayerParsesAsImageWithPoints() throws {
+        // Scene 3521337568 layer 96 (光束 - 线性): a bare quad with no image that
+        // draws a DIRECTDRAW lightshafts beam. The layer must become a renderable
+        // image layer (transparent solid base), carry the effect's point0..3, and
+        // composite additively — WPE's RenderDoc pass 65 is SRC_ALPHA/ONE.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 96,
+                "name": "光束 - 线性",
+                "shape": "quad",
+                "scale": "3 3 1",
+                "angles": "0 0 0.41952",
+                "effects": [[
+                    "file": "effects/lightshafts/effect.json",
+                    "id": 97,
+                    "visible": true,
+                    "passes": [[
+                        "combos": ["DIRECTDRAW": 1, "RENDERING": 1],
+                        "constantshadervalues": [
+                            "point0": "0.4 0.25",
+                            "point1": "0.6 0.25",
+                            "point2": "0.94451 0.83623",
+                            "point3": "0.09498 0.88795"
+                        ]
+                    ]]
+                ]]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.id == "96")
+        #expect(layer.imageRelativePath == "models/util/solidlayer.json")
+        #expect(layer.alpha == 0)
+        #expect(layer.blendMode == .additive)
+        let points = try #require(layer.shapePoints)
+        #expect(points.count == 4)
+        #expect(points[0] == SIMD2<Double>(0.4, 0.25))
+        #expect(points[1] == SIMD2<Double>(0.6, 0.25))
+        #expect(points[2] == SIMD2<Double>(0.94451, 0.83623))
+        #expect(points[3] == SIMD2<Double>(0.09498, 0.88795))
+    }
+
+    @Test("shape:quad layer without perspective points stays a normal-blend surface")
+    func shapeQuadWithoutPointsFallsBack() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 5,
+                "name": "Bare",
+                "shape": "quad"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.imageRelativePath == "models/util/solidlayer.json")
+        #expect(layer.shapePoints == nil)
+        #expect(layer.blendMode == .normal)
+        // A bare shape quad (no effect/points) must stay transparent — never an
+        // opaque white solid rectangle.
+        #expect(layer.alpha == 0)
+    }
+
+    @Test("shape:quad with an invisible effect still keeps a transparent base")
+    func shapeQuadInvisibleEffectStaysTransparent() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [[
+                "id": 7,
+                "name": "Bare beam",
+                "shape": "quad",
+                "effects": [[
+                    "file": "effects/lightshafts/effect.json",
+                    "visible": false,
+                    "passes": [["combos": ["DIRECTDRAW": 1]]]
+                ]]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.alpha == 0)
+        #expect(layer.shapePoints == nil)
+    }
+
     @Test("Ambiguous WPE object emits warning and preserves renderable image layer")
     func ambiguousObjectEmitsWarningAndPreservesImage() throws {
         let payload: [String: Any] = [

@@ -38,7 +38,7 @@ struct ShortcutsSettingsView: View {
                         .accessibilityLabel(Text("Shortcut rejected: \(rejectionMessage)"))
                 }
             } header: {
-                Text("Global Shortcuts")
+                SettingsStickySectionHeader("Global Shortcuts")
             } footer: {
                 shortcutFooter
             }
@@ -77,6 +77,8 @@ struct ShortcutsSettingsView: View {
                     .accessibilityLabel(Text("Enable Global Shortcuts"))
                     .accessibilityHint(Text("Master switch for every global shortcut. Bindings are preserved while off."))
             }
+        } header: {
+            SettingsStickySectionHeader("Shortcuts")
         }
     }
 

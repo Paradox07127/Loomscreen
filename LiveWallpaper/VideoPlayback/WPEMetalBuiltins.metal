@@ -105,6 +105,43 @@ vertex WPEVertexOut wpe_object_quad_vertex(
     return out;
 }
 
+// A DIRECTDRAW shape-quad layer (e.g. lightshafts light beams) draws a 4-corner
+// perspective quad whose corners come from the effect's point0..3 gizmo — NOT an
+// axis-aligned rectangle. The CPU pre-transforms each corner into scene-centered
+// pixels (origin/scale/rotation/parallax already applied, matching the object-quad
+// NDC convention) and passes the effect's point values as the UVs so the
+// transpiled fragment reconstruction `wpe_perspective_texcoord(in.uv, g_Point0..3)`
+// reproduces WPE's per-vertex `v_TexCoordFx` (the two are equal because the
+// homography is linear in homogeneous coordinates). Corners arrive in triangle-
+// strip order (p0, p1, p3, p2).
+struct WPEShapeQuadUniforms {
+    float4 corner0; // xy = scene-centered pixels; zw = uv (point value)
+    float4 corner1;
+    float4 corner2;
+    float4 corner3;
+    float4 sceneHalfAndPad; // x,y = half scene width/height; z,w = padding
+};
+
+vertex WPEVertexOut wpe_shape_quad_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEShapeQuadUniforms& u [[buffer(1)]]
+) {
+    float4 c;
+    switch (vertexID) {
+        case 0: c = u.corner0; break;
+        case 1: c = u.corner1; break;
+        case 2: c = u.corner2; break;
+        default: c = u.corner3; break;
+    }
+    float halfWidth = max(u.sceneHalfAndPad.x, 1.0);
+    float halfHeight = max(u.sceneHalfAndPad.y, 1.0);
+
+    WPEVertexOut out;
+    out.position = float4(c.x / halfWidth, c.y / halfHeight, 0.0, 1.0);
+    out.uv = c.zw;
+    return out;
+}
+
 struct WPEPuppetVertex {
     float4 position;
     float4 uv;

@@ -19,5 +19,6 @@ private struct SettingsFormChrome: ViewModifier {
             .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
             .background(DesignTokens.Colors.pageBackground)
             .frame(minWidth: minWidth, minHeight: minHeight)
+            .settingsStickySectionChrome()
     }
 }

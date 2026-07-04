@@ -964,7 +964,8 @@ struct WPERenderGraphBuilder: Sendable {
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
-                brightness: object.brightness
+                brightness: object.brightness,
+                shapePoints: object.shapePoints
             ),
             localGeometry: WPERenderLayerGeometry(
                 origin: object.localOrigin + localPuppetOriginOffset,
@@ -976,7 +977,8 @@ struct WPERenderGraphBuilder: Sendable {
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
-                brightness: object.brightness
+                brightness: object.brightness,
+                shapePoints: object.shapePoints
             ),
             compositeA: compositeA,
             compositeB: compositeB,

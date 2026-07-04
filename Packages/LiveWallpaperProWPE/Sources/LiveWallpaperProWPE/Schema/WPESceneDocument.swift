@@ -630,6 +630,12 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     /// Resolved scriptProperty overrides for `visibleScript` (user-bound values
     /// like `ruchang` overlaid on the script's declared defaults).
     public let scriptProperties: [String: WPESceneScriptPropertyValue]
+    /// Perspective-quad corners for a `shape: "quad"` layer that has no image and
+    /// draws a DIRECTDRAW effect (e.g. lightshafts light beams). Each entry is a
+    /// normalized `point0..3` from the effect's `EffectPerspectiveUV` gizmo. When
+    /// present the renderer synthesizes a 4-corner quad from these instead of the
+    /// axis-aligned object quad. `nil` for ordinary image/model layers.
+    public let shapePoints: [SIMD2<Double>]?
 
     public init(
         id: String,
@@ -663,7 +669,8 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         originScript: WPESceneTransformScript? = nil,
         scaleScript: WPESceneTransformScript? = nil,
         anglesScript: WPESceneTransformScript? = nil,
-        scriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        shapePoints: [SIMD2<Double>]? = nil
     ) {
         self.id = id
         self.name = name
@@ -697,6 +704,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.scaleScript = scaleScript
         self.anglesScript = anglesScript
         self.scriptProperties = scriptProperties
+        self.shapePoints = shapePoints
     }
 
     public func resolvedAlpha(at time: Double) -> Double {

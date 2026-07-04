@@ -360,6 +360,18 @@ struct WPEObjectQuadUniforms {
     var uvSignAndPadding: SIMD4<Float>
 }
 
+/// Layout MUST match `WPEShapeQuadUniforms` in `WPEMetalBuiltins.metal`. Four
+/// pre-transformed perspective-quad corners (scene-centered pixels + point UVs)
+/// in triangle-strip order (p0, p1, p3, p2).
+struct WPEShapeQuadUniforms {
+    var corner0: SIMD4<Float>
+    var corner1: SIMD4<Float>
+    var corner2: SIMD4<Float>
+    var corner3: SIMD4<Float>
+    /// x/y = half scene width/height, z/w = padding.
+    var sceneHalfAndPad: SIMD4<Float>
+}
+
 struct WPEMetalPuppetVertex {
     var position: SIMD4<Float>
     var uv: SIMD4<Float>

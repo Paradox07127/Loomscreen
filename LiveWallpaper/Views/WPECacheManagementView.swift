@@ -234,7 +234,7 @@ struct WPECacheManagementView: View {
             }
             .sheet(isPresented: $showingProjectsSheet) { projectsSheet }
         } header: {
-            Text("Storage")
+            SettingsStickySectionHeader("Storage")
         }
     }
 
@@ -375,7 +375,7 @@ struct WPECacheManagementView: View {
                     }
                 }
             } header: {
-                Text("Imported Project Cache")
+                SettingsStickySectionHeader("Imported Project Cache")
             } footer: {
                 if let last = lastFreedBytes, last > 0 {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
@@ -389,7 +389,7 @@ struct WPECacheManagementView: View {
                     cacheRow(for: entry)
                 }
             } header: {
-                Text("Cached Projects (\(stats.entries.count))")
+                SettingsStickySectionHeader(verbatim: "Cached Projects (\(stats.entries.count))")
             }
 
             Section {
@@ -454,7 +454,7 @@ struct WPECacheManagementView: View {
                     }
                 }
             } header: {
-                Text("Reclaimable Download Archives")
+                SettingsStickySectionHeader("Reclaimable Download Archives")
             } footer: {
                 if let last = lastReclaimedBytes, last > 0 {
                     Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE download-archive reclaim footer after freeing space. Placeholder is the freed byte total.")

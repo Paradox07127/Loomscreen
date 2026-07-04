@@ -31,6 +31,19 @@ struct WPEMetalFrameState {
     var latestSceneTexture: MTLTexture?
     var latestNamedTextures: [String: MTLTexture] = [:]
     var writtenTargets: Set<WPEMetalTargetID> = []
+    /// Bumped on every scene-target write. Scene-alias snapshots
+    /// (`_rt_FullFrameBuffer` etc.) are stamped with this so a later
+    /// referencing pass can tell a stale capture from a current one — WPE
+    /// re-captures the frame for every sampling layer, so a snapshot taken
+    /// for one layer must not be reused after other layers drew to the scene
+    /// (3521337568's filmgrain erased the beams/halo drawn after the shine
+    /// chain's capture).
+    var sceneWriteGeneration: Int = 0
+    /// `sceneWriteGeneration` at the time each scene-alias snapshot was taken.
+    /// An entry exists ONLY for snapshot-created textures; a real write to the
+    /// same name (a chain rendering into `_rt_HalfFrameBuffer` as an actual
+    /// target) removes it so the snapshot logic never clobbers real content.
+    var sceneAliasSnapshotGenerations: [String: Int] = [:]
     /// Per-physical-texture init tracking. Phase 2C audit fix: ping-pong's
     /// secondary texture is allocated lazily and may contain garbage on
     /// first use. Tracking by texture identity (not target) lets us decide
@@ -84,8 +97,10 @@ struct WPEMetalFrameState {
         switch targetID {
         case .scene:
             latestSceneTexture = texture
+            sceneWriteGeneration += 1
         case .named(let name):
             latestNamedTextures[name] = texture
+            sceneAliasSnapshotGenerations.removeValue(forKey: name)
         }
     }
 

@@ -2172,7 +2172,6 @@ final class WPEMetalRenderExecutor {
         try snapshotFullFrameBufferIfAliasingScene(
             pass: pass,
             destinationTexture: destination.texture,
-            targetID: targetID,
             layer: layer,
             commandBuffer: commandBuffer,
             frameState: &frameState
@@ -4155,35 +4154,53 @@ final class WPEMetalRenderExecutor {
     private func snapshotFullFrameBufferIfAliasingScene(
         pass: WPEPreparedRenderPass,
         destinationTexture: MTLTexture,
-        targetID: WPEMetalTargetID,
         layer: WPERenderLayer,
         commandBuffer: MTLCommandBuffer,
         frameState: inout WPEMetalFrameState
     ) throws {
-        guard targetID == .scene else { return }
-        let aliases = textureReferences(for: pass).compactMap { reference -> String? in
-            guard case .fbo(let name) = reference,
-                  WPEMetalShaderInputs.isSceneAliasName(name),
-                  frameState.latestNamedTextures[name] == nil else {
-                return nil
+        // Any pass sampling a scene alias participates — not only scene-target
+        // draws. WPE re-captures the frame (CopyResource) for EVERY layer that
+        // samples it, so a snapshot taken for one layer goes stale as soon as
+        // later layers draw to the scene. 3521337568: the shine chain captured
+        // at pass 48, then the fullscreen filmgrain layer (a layerComposite-target
+        // copy at pass 63) reused that capture and its full-frame redraw erased
+        // the beams/halo/shine drawn in between.
+        func needsSnapshot(_ name: String) -> Bool {
+            // A real same-frame render target (has a texture but no snapshot
+            // marker — e.g. a chain rendering INTO `_rt_HalfFrameBuffer`) owns
+            // its content; never overwrite it with a scene capture.
+            if frameState.latestNamedTextures[name] != nil,
+               frameState.sceneAliasSnapshotGenerations[name] == nil {
+                return false
             }
-            return name
+            // Snapshot on the first reference this frame, or whenever a later
+            // scene write made the previous capture stale.
+            return frameState.sceneAliasSnapshotGenerations[name] != frameState.sceneWriteGeneration
         }
-        guard let alias = aliases.first else { return }
-        let snapshot = try targetPool.texture(
-            for: .fbo(name: alias),
-            layer: layer,
-            sceneSize: frameState.sceneSize,
-            avoiding: destinationTexture
-        )
-        if let source = frameState.currentFrameSceneTexture {
-            try copyTexture(source, to: snapshot, commandBuffer: commandBuffer)
+
+        var seen = Set<String>()
+        for reference in textureReferences(for: pass) {
+            guard case .fbo(let alias) = reference,
+                  WPEMetalShaderInputs.isSceneAliasName(alias),
+                  seen.insert(alias).inserted,
+                  needsSnapshot(alias) else {
+                continue
+            }
+            let snapshot = try targetPool.texture(
+                for: .fbo(name: alias),
+                layer: layer,
+                sceneSize: frameState.sceneSize,
+                avoiding: destinationTexture
+            )
+            if let source = frameState.currentFrameSceneTexture {
+                try copyTexture(source, to: snapshot, commandBuffer: commandBuffer)
+            } else {
+                try clearTexture(snapshot, color: clearColor(for: .scene), commandBuffer: commandBuffer)
+            }
             frameState.markInitialized(snapshot)
-        } else {
-            try clearTexture(snapshot, color: clearColor(for: .scene), commandBuffer: commandBuffer)
-            frameState.markInitialized(snapshot)
+            frameState.latestNamedTextures[alias] = snapshot
+            frameState.sceneAliasSnapshotGenerations[alias] = frameState.sceneWriteGeneration
         }
-        frameState.latestNamedTextures[alias] = snapshot
     }
 
     private func clearTexture(
@@ -4536,6 +4553,92 @@ final class WPEMetalRenderExecutor {
                 0,
                 0
             )
+        )
+    }
+
+    /// A DIRECTDRAW `shape: "quad"` layer draws through the 4-corner geometry
+    /// (light beams etc.), not the axis-aligned object quad. Gated to the
+    /// orthographic scene draw — the corners are pre-projected here so a live
+    /// perspective camera falls back to the object quad.
+    func usesShapeQuadGeometry(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        frameState: WPEMetalFrameState
+    ) -> Bool {
+        guard let points = layer.geometry.shapePoints, points.count == 4 else { return false }
+        guard case .scene = pass.pass.target else { return false }
+        return !frameState.cameraUniforms.usesPerspectiveProjection
+    }
+
+    /// Builds the four perspective-quad corners for a shape-quad layer. Each WPE
+    /// point maps to a model-space corner `((p.x-0.5)·H, (0.5-p.y)·H)` in a square
+    /// base of the scene height, then the layer scale/rotation/origin/parallax are
+    /// applied — identical to how the object quad places its rectangle, so a
+    /// unit-square set of points reduces to the object-quad rectangle. Corners are
+    /// emitted in triangle-strip order (p0, p1, p3, p2) and carry the point value
+    /// as the UV for the fragment perspective reconstruction.
+    func shapeQuadUniforms(
+        for layer: WPERenderLayer,
+        sceneSize: CGSize,
+        cameraParallax: WPECameraParallaxFrame = .neutral
+    ) -> WPEShapeQuadUniforms {
+        let geometry = layer.geometry
+        let sceneWidth = Float(max(sceneSize.width, 1))
+        let sceneHeight = Float(max(sceneSize.height, 1))
+        // `usesShapeQuadGeometry` gates every real call to exactly 4 points; the
+        // fallback keeps this total for a defensive/future caller (degenerate
+        // zero-area quad = draws nothing rather than crashing on an index).
+        guard let points = geometry.shapePoints, points.count == 4 else {
+            return WPEShapeQuadUniforms(
+                corner0: SIMD4<Float>(0, 0, 0, 0),
+                corner1: SIMD4<Float>(0, 0, 0, 0),
+                corner2: SIMD4<Float>(0, 0, 0, 0),
+                corner3: SIMD4<Float>(0, 0, 0, 0),
+                sceneHalfAndPad: SIMD4<Float>(sceneWidth * 0.5, sceneHeight * 0.5, 0, 0)
+            )
+        }
+        let baseSquare = sceneHeight
+        let scaleX = Float(geometry.scale.x)
+        let scaleY = Float(geometry.scale.y)
+        let rotation = Float(geometry.angles.z)
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+
+        let originX = Float(geometry.origin.x)
+        let originY = Float(geometry.origin.y)
+        let originXPixels = (originX >= 0 && originX <= 1) ? originX * sceneWidth : originX
+        let originYPixels = (originY >= 0 && originY <= 1) ? originY * sceneHeight : originY
+        let center = SIMD2<Float>(
+            originXPixels - sceneWidth * 0.5,
+            originYPixels - sceneHeight * 0.5
+        ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
+
+        func corner(_ point: SIMD2<Double>) -> SIMD4<Float> {
+            let model = SIMD2<Float>(
+                (Float(point.x) - 0.5) * baseSquare,
+                (0.5 - Float(point.y)) * baseSquare
+            )
+            let scaled = SIMD2<Float>(model.x * scaleX, model.y * scaleY)
+            let rotated = SIMD2<Float>(
+                cosR * scaled.x - sinR * scaled.y,
+                sinR * scaled.x + cosR * scaled.y
+            )
+            let scenePixels = center + rotated
+            return SIMD4<Float>(scenePixels.x, scenePixels.y, Float(point.x), Float(point.y))
+        }
+
+        // Triangle-strip order (p0, p1, p3, p2) matches `wpe_object_quad_vertex`'s
+        // TL,TR,BL,BR corner sequence so the two triangles tile the convex quad.
+        let p0 = points[0]
+        let p1 = points[1]
+        let p2 = points[2]
+        let p3 = points[3]
+        return WPEShapeQuadUniforms(
+            corner0: corner(p0),
+            corner1: corner(p1),
+            corner2: corner(p3),
+            corner3: corner(p2),
+            sceneHalfAndPad: SIMD4<Float>(sceneWidth * 0.5, sceneHeight * 0.5, 0, 0)
         )
     }
 

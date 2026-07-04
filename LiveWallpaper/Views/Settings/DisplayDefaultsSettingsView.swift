@@ -39,7 +39,7 @@ struct DisplayDefaultsSettingsView: View {
             spanDisplaysRow
             colorSpaceRow
         } header: {
-            Text("Video")
+            SettingsStickySectionHeader("Video")
         }
     }
 
@@ -48,7 +48,7 @@ struct DisplayDefaultsSettingsView: View {
             audioRows(for: .html)
             interactionRow(for: .html, subtitle: "Default pointer and click input")
         } header: {
-            Text("Web")
+            SettingsStickySectionHeader("Web")
         }
     }
 
@@ -56,7 +56,7 @@ struct DisplayDefaultsSettingsView: View {
         Section {
             frameRateRow(for: .metalShader)
         } header: {
-            Text("Shader")
+            SettingsStickySectionHeader("Shader")
         }
     }
 
@@ -67,7 +67,7 @@ struct DisplayDefaultsSettingsView: View {
             scalingRow(for: .scene, modes: VideoFitMode.sceneModes)
             sceneInteractionRows
         } header: {
-            Text("Scene")
+            SettingsStickySectionHeader("Scene")
         }
     }
 

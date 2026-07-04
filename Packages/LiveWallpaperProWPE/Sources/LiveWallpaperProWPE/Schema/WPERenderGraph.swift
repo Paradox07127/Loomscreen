@@ -116,6 +116,10 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
     public let brightness: Double
+    /// Normalized perspective-quad corners (`point0..3`) for a `shape: "quad"`
+    /// DIRECTDRAW effect layer. Non-nil routes the pass through the 4-corner
+    /// `wpe_shape_quad_vertex` geometry instead of the axis-aligned object quad.
+    public let shapePoints: [SIMD2<Double>]?
 
     public init(
         origin: SIMD3<Double>,
@@ -127,7 +131,8 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
-        brightness: Double
+        brightness: Double,
+        shapePoints: [SIMD2<Double>]? = nil
     ) {
         self.origin = origin
         self.scale = scale
@@ -139,6 +144,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         self.alphaAnimation = alphaAnimation
         self.color = color
         self.brightness = brightness
+        self.shapePoints = shapePoints
     }
 
     public func resolved(at time: Double) -> WPERenderLayerGeometry {
@@ -152,7 +158,8 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
             alpha: alphaAnimation?.scalar(at: time) ?? alpha,
             alphaAnimation: alphaAnimation,
             color: color,
-            brightness: brightness
+            brightness: brightness,
+            shapePoints: shapePoints
         )
     }
 

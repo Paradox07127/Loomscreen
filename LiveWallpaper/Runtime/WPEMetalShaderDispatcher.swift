@@ -867,7 +867,9 @@ struct WPEMetalShaderDispatcher {
                 contents: iface
             )
         }
-        let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
+        let usesShapeQuad = executor.usesShapeQuadGeometry(for: pass, layer: layer, frameState: frameState)
+        let usesObjectQuad = !usesShapeQuad
+            && executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         let isWaveLikePass = Self.isWaveLikePass(pass)
         let isWaterWavesPass = Self.isWaterWavesPass(pass)
         // The transpiler is fragment-only: it always uses wpe_fullscreen_vertex and
@@ -959,7 +961,7 @@ struct WPEMetalShaderDispatcher {
                 for: pass,
                 layout: result.uniformLayout,
                 texturesBySlot: resolvedTexturesBySlot,
-                destinationTexture: usesObjectQuad ? (primary ?? destination.texture) : destination.texture
+                destinationTexture: (usesObjectQuad || usesShapeQuad) ? (primary ?? destination.texture) : destination.texture
             )
         }
         #if !LITE_BUILD && DEBUG
@@ -1004,9 +1006,17 @@ struct WPEMetalShaderDispatcher {
             return
         }
 
+        let vertexName: String?
+        if usesShapeQuad {
+            vertexName = "wpe_shape_quad_vertex"
+        } else if usesObjectQuad {
+            vertexName = "wpe_object_quad_vertex"
+        } else {
+            vertexName = nil
+        }
         let pipelineState = try executor.translatedPipelineState(
             for: result,
-            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : nil,
+            vertexName: vertexName,
             blendMode: pass.pass.blending,
             colorPixelFormat: destination.texture.pixelFormat,
             depthPixelFormat: depthPixelFormat
@@ -1016,7 +1026,23 @@ struct WPEMetalShaderDispatcher {
         if !packedUniformSlots.isEmpty {
             executor.bindTranslatedUniformSlots(packedUniformSlots, to: encoder)
         }
-        if usesObjectQuad {
+        if usesShapeQuad {
+            var shapeUniforms = executor.shapeQuadUniforms(
+                for: layer,
+                sceneSize: executor.objectQuadSceneSize(
+                    for: pass,
+                    layer: layer,
+                    destination: destination,
+                    frameState: frameState
+                ),
+                cameraParallax: frameState.cameraParallax
+            )
+            encoder.setVertexBytes(
+                &shapeUniforms,
+                length: MemoryLayout<WPEShapeQuadUniforms>.stride,
+                index: 1
+            )
+        } else if usesObjectQuad {
             var quadUniforms = executor.objectQuadUniforms(
                 for: layer,
                 sceneSize: executor.objectQuadSceneSize(
