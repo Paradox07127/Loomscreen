@@ -22,13 +22,18 @@ struct WPEParticleRopeVertex {
 ///
 /// **Coordinate convention: WPE author space is Y-up, bottom-left
 /// origin throughout — NO Y-flip anywhere.** Scene-object `origin`,
-/// emitter `origin`, per-particle `velocity`, and `gravity` are all
-/// used as authored, and the Metal vertex stage is also Y-up, so the
-/// pipeline runs one consistent Y-up frame. Only the scene-object's
-/// `angles.z` rotation is negated (`Rz(-angleZ)`) because WPE's
-/// clockwise author rotation maps to the Y-up frame's counter-clockwise
-/// sense (that sign is about rotation *direction*, not position/velocity
-/// Y, and is verified independently).
+/// emitter `origin`, per-particle `velocity`, `gravity`, and the
+/// object's `angles.z` rotation are all used as authored (`Rz(+angleZ)`),
+/// matching the image-layer path (`WPEMetalRenderExecutor` passes
+/// `geometry.angles.z` UNNEGATED into the quad rotation). An earlier
+/// `Rz(-angleZ)` was justified as "clockwise author → Y-up CCW", but the
+/// image quad — validated across many rotated layers — does NOT negate,
+/// so the two disagreed; and its "verification" leaned on saber (~0°) and
+/// 3725117707 (~159°), both sign-insensitive (0° trivial, 159°≈180°
+/// symmetric). Scene 3462491575's 雪景 (angleZ −57.6°, sign-sensitive)
+/// drifted right under `-angleZ` where WPE blows it left → align to the
+/// image-layer `+angleZ`. Flipping preserves the leaves' vertical fall/rise
+/// (that only depended on the ~180° symmetry) and mirrors their horizontal.
 ///
 /// **Do NOT re-add an "emitter-internal Y-down" flip on
 /// `velocity.y`/`gravity.y`/`origin.y`.** P7 (`dfbccce`) did exactly
@@ -67,12 +72,12 @@ struct WPEParticleSceneTransform {
     )
 
     /// Apply the scene-object model matrix
-    /// `T(renderOrigin) · Rz(-angleZ) · S(scale)` to a point already
-    /// in the emitter's Y-down-flipped-to-Y-up local frame.
+    /// `T(renderOrigin) · Rz(+angleZ) · S(scale)` to a point already
+    /// in the emitter's Y-up local frame (matches the image-layer quad).
     func applyModelMatrix(toLocalPoint p: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(p.x * objectScale.x, p.y * objectScale.y, p.z * objectScale.z)
-        let cosA = cos(-objectAngleZ)
-        let sinA = sin(-objectAngleZ)
+        let cosA = cos(objectAngleZ)
+        let sinA = sin(objectAngleZ)
         return renderOrigin + SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
@@ -82,18 +87,16 @@ struct WPEParticleSceneTransform {
 
     /// Rotation + scale chain, no translation — for velocity, gravity, and
     /// other free vectors. NO Y-flip (author space and render frame are both
-    /// Y-up).
+    /// Y-up); rotation is `+angleZ` (see the type doc — matches image layers).
     ///
     /// Oracle-tested (saber 3526278753): flipping velocity Y makes the leaves
     /// RISE (sim vy +78 instead of -74), whereas WPE's decoded velocity
     /// (TEXCOORD1) and ours are both NEGATIVE = falling. The older "velocity
-    /// already had its Y flipped at spawn" note was wrong. See `turbulenceNoise`
-    /// for the one remaining Y discrepancy (a turbulence-model gap, not an axis
-    /// bug).
+    /// already had its Y flipped at spawn" note was wrong.
     func applyModelDirection(_ v: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(v.x * objectScale.x, v.y * objectScale.y, v.z * objectScale.z)
-        let cosA = cos(-objectAngleZ)
-        let sinA = sin(-objectAngleZ)
+        let cosA = cos(objectAngleZ)
+        let sinA = sin(objectAngleZ)
         return SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
@@ -121,7 +124,8 @@ struct WPEParticleSceneTransform {
     func visualRotationZ(localRotationZ: Float) -> Float {
         let signs = visualScaleSigns()
         let localRotation = signs.x * signs.y < 0 ? -localRotationZ : localRotationZ
-        return -objectAngleZ + localRotation
+        // `+angleZ` to match the flipped position/velocity chain and the image quad.
+        return objectAngleZ + localRotation
     }
 
     func visualAngularZ(localAngularZ: Float) -> Float {
@@ -253,6 +257,21 @@ final class WPEParticleSystem {
     /// Hard ceiling so a single emitter can't blow the GPU memory budget.
     /// 8K particles × 48 bytes = 384 KB per system.
     static let absoluteCap = 8192
+    /// Perspective near-depth boost. Positive Z is toward the camera in WPE's
+    /// particle perspective path: `depthScale(z) = 1 + boost * clamp(z/maxDepth)`.
+    /// This makes +Z gravity starfields expand radially toward the viewer instead
+    /// of collapsing back to the vanishing point.
+    static let perspectiveNearBoost: Float = 1.5
+
+    /// `turbulentvelocityrandom` seed speed. WPE's initializer gives each particle
+    /// a one-time full-3D curl-noise velocity so it TRAVELS out of the spawn box —
+    /// distinct from the `turbulence` OPERATOR, which is a continuous, often
+    /// axis-masked sway. For 大型/ember the operator mask is "1 0 0" (X-only) and
+    /// there is no gravity, so WITHOUT this seed the sparks have zero Y velocity and
+    /// stay stuck below-screen forever (invisible). The magnitude follows the parsed
+    /// turbulence speed when present; this constant is the fallback. Tunable, pending
+    /// on-device comparison against Windows.
+    static let turbulentVelocityInitSpeed: Float = 150
 
     private struct Particle {
         var position: SIMD3<Float>
@@ -407,9 +426,16 @@ final class WPEParticleSystem {
     }
 
     private func uniform(_ low: Double, _ high: Double) -> Double {
-        guard high > low else { return low }
+        // WPE min/max are two corners of a range, NOT ordered: `velocityrandom`
+        // often authors max more-negative than min (e.g. snowperspective's
+        // "-10 -50 0" … "-37 -90 0"). Sample the span regardless of order — the
+        // old `high > low` guard returned `low`, pinning every such component to
+        // its min so 3462491575's 雪景 fell at the slow end of its speed range.
+        let lo = Swift.min(low, high)
+        let hi = Swift.max(low, high)
+        guard hi > lo else { return lo }
         let r = Double.random(in: 0...1, using: &rng)
-        return low + (high - low) * r
+        return lo + (hi - lo) * r
     }
 
     private func uniformVector(_ low: SIMD3<Double>, _ high: SIMD3<Double>) -> SIMD3<Float> {
@@ -468,11 +494,21 @@ final class WPEParticleSystem {
     /// something close to a frame (~16ms) so spawn/integration math
     /// stays accurate.
     func prewarm(simulatedSeconds: Double, step: Double = 1.0 / 60) {
-        guard simulatedSeconds > 0, definition.rate > 0 else { return }
-        let substeps = Int((simulatedSeconds / step).rounded(.up))
-        var virtualNow: Double = 0
+        guard simulatedSeconds > 0, step > 0,
+              definition.rate > 0 || definition.instantaneousCount > 0 else { return }
+        let delay = max(0, definition.startDelay)
+        let activeStart = min(delay, simulatedSeconds)
+        if simulatedSeconds <= activeStart {
+            firstTickTime = -simulatedSeconds
+            lastTickTime = 0
+            return
+        }
+        firstTickTime = 0
+        lastTickTime = activeStart
+        var virtualNow = activeStart
+        let substeps = Int(((simulatedSeconds - activeStart) / step).rounded(.up))
         for _ in 0..<substeps {
-            virtualNow += step
+            virtualNow = min(simulatedSeconds, virtualNow + step)
             advance(now: virtualNow)
         }
         // The renderer's real frame clock starts at 0 after load. Keep
@@ -527,7 +563,61 @@ final class WPEParticleSystem {
             let sway = sin((particle.age + particle.oscPosPhase) * particle.oscPosFrequency * 2 * Float.pi)
             drawPosition += oscillatePositionMask * (sway * particle.oscPosScale)
         }
+        // Perspective (`flags & 4`): project draw position + size through a depth
+        // scale about the emitter's vanishing point. Positive Z is near/toward
+        // camera, so +Z motion pushes particles outward and makes them grow.
+        if definition.isPerspective {
+            let scale = perspectiveDepthScale(depth: particle.position.z)
+            let vp = sceneTransform.renderOrigin
+            drawPosition = SIMD3<Float>(
+                vp.x + (drawPosition.x - vp.x) * scale,
+                vp.y + (drawPosition.y - vp.y) * scale,
+                drawPosition.z
+            )
+            spriteSize *= scale
+        }
         return (drawPosition, rgb, alpha, spriteSize, lifetimeFraction)
+    }
+
+    /// `1 + boost * clamp(z/maxDepth)` in `[1, 1+boost]`: nonpositive/far depth
+    /// stays at 1x, positive/toward-camera depth grows to `1+boost`. Drives both
+    /// sprite size and draw-position projection, so a WPE perspective starfield
+    /// with +Z gravity flies outward toward the camera. `maxDepth` must include
+    /// authored spawn depth AND the Z distance a particle can travel during its
+    /// life; some WPE starfields spawn in a flat XY disk (`directions.z == 0`)
+    /// and move through depth solely via Z gravity.
+    private func perspectiveDepthScale(depth z: Float) -> Float {
+        let maxDepth = perspectiveDepthExtent()
+        let t = min(max(z / maxDepth, 0), 1)
+        return 1 + Self.perspectiveNearBoost * t
+    }
+
+    private func perspectiveDepthExtent() -> Float {
+        let localSpawnDepth: Double
+        switch definition.emitterShape {
+        case .box:
+            localSpawnDepth = abs(definition.dispersalMax.z)
+        case .sphere:
+            localSpawnDepth = abs(definition.dispersalMax.z * definition.directionMask.z)
+        }
+        let spawnDepth = Float(localSpawnDepth) * max(0.0001, abs(sceneTransform.objectScale.z))
+        let lifetime = Float(max(definition.lifetimeMin, definition.lifetimeMax, 0))
+        let localVelocityMin = SIMD3<Float>(
+            Float(definition.velocityMin.x),
+            Float(definition.velocityMin.y),
+            Float(definition.velocityMin.z)
+        )
+        let localVelocityMax = SIMD3<Float>(
+            Float(definition.velocityMax.x),
+            Float(definition.velocityMax.y),
+            Float(definition.velocityMax.z)
+        )
+        let velocityDepth = max(
+            abs(sceneTransform.applyModelDirection(localVelocityMin).z),
+            abs(sceneTransform.applyModelDirection(localVelocityMax).z)
+        ) * lifetime
+        let gravityDepth = abs(gravity.z) * lifetime * lifetime * 0.5
+        return max(1, spawnDepth, velocityDepth, gravityDepth)
     }
 
     func tick(now: Double) {
@@ -893,7 +983,22 @@ final class WPEParticleSystem {
             Float(definition.originOffset.z)
         )
         let localPoint = emitterOriginLocal + dispersal
-        let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        var localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        if definition.hasTurbulentVelocityInit {
+            // WPE `turbulentvelocityrandom`: seed a persistent curl-noise velocity so
+            // the particle drifts out of its spawn box (rising embers, drifting motes).
+            // Sample the same noise field the operator uses, but UNMASKED — the
+            // initializer produces a full velocity, not the operator's axis-limited
+            // sway — with a per-particle random phase for spread. Magnitude follows the
+            // parsed turbulence speed when present, else the tunable fallback.
+            let noiseScale = definition.turbulenceScale > 0 ? Float(definition.turbulenceScale) : 0.1
+            let phase = Float(Double.random(in: 0..<(2 * .pi), using: &rng))
+            let n = turbulenceNoise(x: localPoint.x * noiseScale, y: localPoint.y * noiseScale, t: phase)
+            let seedSpeed = definition.turbulenceSpeedMax > 0
+                ? Float(definition.turbulenceSpeedMax)
+                : Self.turbulentVelocityInitSpeed
+            localVelocity += SIMD3<Float>(n.x, n.y, 0) * seedSpeed
+        }
         let position: SIMD3<Float>
         if requiresFollowParent {
             // Event-follow child: ride the parent's live particle. Skip spawning

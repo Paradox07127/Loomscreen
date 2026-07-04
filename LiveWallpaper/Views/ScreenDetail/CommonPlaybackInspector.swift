@@ -631,7 +631,7 @@ struct ContentSecurityInspector: View {
         }
     }
 
-    private func trustRowInfo(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> LocalizedStringKey {
+    private func trustRowInfo(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> String.LocalizationValue {
         if trustStore.isBuiltInTrusted(origin) {
             return "Built-in trust for the platform's official embed surface — cannot be revoked."
         }

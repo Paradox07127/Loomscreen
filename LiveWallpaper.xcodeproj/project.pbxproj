@@ -19,6 +19,8 @@
 		0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B021 /* LiveWallpaperVideoWeb */; };
 		0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B022 /* LiveWallpaperSharedUI */; };
 		0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B023 /* LiveWallpaperProFeatures */; };
+		0CA00000000000000000C003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000C002 /* Sparkle */; };
+		0CA00000000000000000C005 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000C004 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,6 +83,7 @@
 				0CA00000000000000000A203 /* LiveWallpaperSharedUI in Frameworks */,
 				0CA00000000000000000A303 /* LiveWallpaperProWPE in Frameworks */,
 				0CA00000000000000000A403 /* LiveWallpaperProFeatures in Frameworks */,
+				0CA00000000000000000C003 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -101,6 +104,7 @@
 				0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */,
 				0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */,
 				0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */,
+				0CA00000000000000000C005 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,6 +164,7 @@
 				0CA00000000000000000A202 /* LiveWallpaperSharedUI */,
 				0CA00000000000000000A302 /* LiveWallpaperProWPE */,
 				0CA00000000000000000A402 /* LiveWallpaperProFeatures */,
+				0CA00000000000000000C002 /* Sparkle */,
 			);
 			productName = LiveWallpaper;
 			productReference = 0C322BEF2D6950480033C48B /* LiveWallpaper.app */;
@@ -207,6 +212,7 @@
 				0CA00000000000000000B021 /* LiveWallpaperVideoWeb */,
 				0CA00000000000000000B022 /* LiveWallpaperSharedUI */,
 				0CA00000000000000000B023 /* LiveWallpaperProFeatures */,
+				0CA00000000000000000C004 /* Sparkle */,
 			);
 			productName = LiveWallpaperLite;
 			productReference = 0CA00000000000000000B000 /* Loomscreen.app */;
@@ -252,6 +258,7 @@
 				0CA00000000000000000A201 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperSharedUI" */,
 				0CA00000000000000000A301 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProWPE" */,
 				0CA00000000000000000A401 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProFeatures" */,
+				0CA00000000000000000C001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C322BF02D6950480033C48B /* Products */;
@@ -470,7 +477,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -508,7 +515,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -583,7 +590,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -621,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
@@ -698,6 +705,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		0CA00000000000000000C001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		0CA00000000000000000A002 /* LiveWallpaperCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -734,6 +752,16 @@
 		0CA00000000000000000B023 /* LiveWallpaperProFeatures */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LiveWallpaperProFeatures;
+		};
+		0CA00000000000000000C002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0CA00000000000000000C001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		0CA00000000000000000C004 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0CA00000000000000000C001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

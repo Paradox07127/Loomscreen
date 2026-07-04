@@ -23,6 +23,28 @@ struct WPEMetalRenderExecutorTests {
         #expect(WPEMetalDepthStateCache.compareFunction(for: "lequal") == .lessEqual)
     }
 
+    @Test("Destination-reading blend modes load the existing attachment (incl. screen)")
+    func destinationReadingBlendModesRequireExistingDestination() throws {
+        // Screen/additive/multiply read the destination as their `dst` operand, so
+        // the attachment must be `.load`ed, not `.clear`ed — clearing it drops the
+        // backdrop and (for screen) makes the layer paint over nothing. Regression
+        // guard for scene 3521337568's atmosphere overlay (colorBlendMode 7).
+        for mode in ["screen", "premultipliedScreen", "additive", "premultipliedAdditive",
+                     "premultipliedMultiply", "multiply", "darken", "lighten"] {
+            #expect(
+                WPEMetalRenderExecutor.blendModeRequiresExistingDestination(mode),
+                "\(mode) must load the existing destination"
+            )
+        }
+        // Over/replace modes fully define the pixel, so a fresh clear is correct.
+        for mode in ["disabled", "premultipliedDisabled", "normal", "premultiplied", "translucent"] {
+            #expect(
+                !WPEMetalRenderExecutor.blendModeRequiresExistingDestination(mode),
+                "\(mode) must not force a destination load"
+            )
+        }
+    }
+
     @Test("Refraction snapshot freshness tracks output texture identity")
     func refractionSnapshotFreshnessTracksOutputIdentity() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

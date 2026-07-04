@@ -682,6 +682,15 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         #expect(!source.contains("withSynchronizedLivePosterFrameIfNeeded"))
     }
 
+    @Test("Character-sheet bound cache stores successful nil checks")
+    func characterSheetBoundCacheStoresSuccessfulNilChecks() throws {
+        let executor = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalRenderExecutor.swift")
+
+        #expect(executor.contains("struct CharacterSheetBoundDetailCacheEntry"))
+        #expect(executor.contains("characterSheetBoundDetailByObjectID[layer.objectID] = CharacterSheetBoundDetailCacheEntry"))
+        #expect(!executor.contains("private var characterSheetBoundDetailByObjectID: [String: String?]"))
+    }
+
     @Test("Scene detail fallback preview is a bounded static poster and releases ImageIO state")
     func sceneDetailPreviewFallbackDoesNotRetainAnimatedPreviewState() throws {
         let detail = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift")

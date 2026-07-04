@@ -145,6 +145,52 @@ struct WPEEngineAssetsInstallerTests {
         #expect(SteamCMDDoctorService.parsePublicBuildID(fromAppInfo: appInfo) == nil)
     }
 
+    @Test("Update check outcome distinguishes available, up-to-date, and failed checks")
+    func updateCheckOutcomeHasStableSettingsStates() {
+        #expect(WPEEngineAssetsInstaller.UpdateCheckOutcome.resolve(
+            installedBuildID: "10",
+            latestBuildID: "11"
+        ) == .available(latestBuildID: "11"))
+        #expect(WPEEngineAssetsInstaller.UpdateCheckOutcome.resolve(
+            installedBuildID: "10",
+            latestBuildID: "10"
+        ) == .upToDate(buildID: "10"))
+        #expect(WPEEngineAssetsInstaller.UpdateCheckOutcome.resolve(
+            installedBuildID: nil,
+            latestBuildID: "11"
+        ) == .unableToCompare)
+        #expect(WPEEngineAssetsInstaller.UpdateCheckOutcome.resolve(
+            installedBuildID: "10",
+            latestBuildID: nil
+        ) == .checkFailed)
+    }
+
+    @Test("Ownership preflight cleanup removes app-update state without deleting linked assets")
+    func ownershipPreflightCleanupPreservesLinkedAssets() throws {
+        let fm = FileManager.default
+        let base = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Caches/lw-ownership-cleanup-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let steamApps = base.appendingPathComponent("steamapps", isDirectory: true)
+        let downloading = steamApps.appendingPathComponent("downloading", isDirectory: true)
+        let stagedApp = downloading.appendingPathComponent("431960", isDirectory: true)
+        let managedAssets = steamApps
+            .appendingPathComponent("common/wallpaper_engine/assets/materials/util", isDirectory: true)
+        try fm.createDirectory(at: stagedApp, withIntermediateDirectories: true)
+        try fm.createDirectory(at: managedAssets, withIntermediateDirectories: true)
+        try "staged".write(to: stagedApp.appendingPathComponent("chunk.bin"), atomically: true, encoding: .utf8)
+        try "state".write(to: downloading.appendingPathComponent("state_431960_123.patch"), atomically: true, encoding: .utf8)
+        try "manifest".write(to: steamApps.appendingPathComponent("appmanifest_431960.acf"), atomically: true, encoding: .utf8)
+        try "asset".write(to: managedAssets.appendingPathComponent("noise.png"), atomically: true, encoding: .utf8)
+
+        SteamCMDDoctorService.prepareWallpaperEngineOwnershipProbe(steamApps: steamApps, fileManager: fm)
+
+        #expect(!fm.fileExists(atPath: stagedApp.path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: downloading.appendingPathComponent("state_431960_123.patch").path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: steamApps.appendingPathComponent("appmanifest_431960.acf").path(percentEncoded: false)))
+        #expect(fm.fileExists(atPath: managedAssets.appendingPathComponent("noise.png").path(percentEncoded: false)))
+    }
+
     @Test("Content is complete only when materials/models/shaders are all present")
     func contentCompletenessRequiresFrameworkDirs() throws {
         let fm = FileManager.default

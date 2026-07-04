@@ -225,8 +225,8 @@ struct WPECacheManagementView: View {
                     .storageDestructiveIconStyle()
                     .controlSize(.small)
                     .disabled((videoStats?.totalBytes ?? 0) == 0)
-                    .help(Text("Clear video cache"))
-                    .accessibilityLabel(Text("Clear video cache"))
+                    .help(Text("Clear Video Cache"))
+                    .accessibilityLabel(Text("Clear Video Cache"))
                     StorageInfoButton {
                         infoNote("Frames extracted from scene videos, reused across launches. Capped at 2 GB — the least-recently-used files are removed first, and orphaned scenes are reclaimed at startup.")
                     }

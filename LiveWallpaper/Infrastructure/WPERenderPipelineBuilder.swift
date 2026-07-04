@@ -76,17 +76,11 @@ struct WPERenderPipelineBuilder: Sendable {
         if (layer.imagePath as NSString).pathExtension.lowercased() == "mdl" {
             return model
         }
-        // Only the modern pre-assembled puppet generations (MDLV0021/0023) ship MDLV
-        // vertices already in assembled object space, which the renderer can draw
-        // directly. Older generations (MDLV0019 and below) store an *exploded* "pieces"
-        // mesh whose assembled pose is produced by WPE's closed editor-side puppet solver
-        // and is NOT recoverable from the file (verified 2026-06-22 via vertex-occupancy
-        // analysis: the mesh is genuinely disjoint clusters; linux-wallpaperengine also
-        // rejects <21). Drawing them — as a mesh or as the flat atlas — yields scattered,
-        // misaligned puppets. Per the product decision, refuse the whole scene with a
-        // warning instead of shipping a misaligned wallpaper, rather than silently
-        // degrading to a broken flat render.
-        guard model.version >= 21 else {
+        // MDLV0021/0023 ship vertices pre-assembled in object space. MDLV0019/0020 store the
+        // flat character-sheet (bind pose = exploded pieces); the assembled pose is recovered by
+        // linear-blend skinning through the MDLA animation pose (see the executor's skinning gate).
+        // Generations below 19 are unverified, so still refused.
+        guard model.version >= 19 else {
             let generation = String(format: "MDLV%04d", model.version)
             Logger.warning(
                 "WPE scene uses unsupported puppet generation \(generation) "

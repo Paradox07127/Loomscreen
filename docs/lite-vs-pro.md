@@ -20,7 +20,7 @@ interface. Video / HTML / Apple Aerials fidelity is identical.
 | System monitor panel | ✅ | ✅ |
 | Lock-screen snapshot sync | ✅ | ✅ |
 | Game / full-screen auto-pause | ✅ | ✅ |
-| Launch-time update check | ✅ | ✅ |
+| GitHub Releases update check | ✅ | ✅ |
 | **Metal shader procedural wallpapers** | — | ✅ |
 | **Wallpaper-Engine scene rendering** | — | ✅ |
 | **Local copied project-folder import** | — | ✅ |

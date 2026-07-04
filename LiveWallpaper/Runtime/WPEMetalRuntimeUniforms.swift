@@ -390,22 +390,25 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         worldPoint: SIMD3<Double>,
         sceneSize: CGSize
     ) -> (center: SIMD2<Float>, depthScale: Float)? {
+        // WPE's runtime perspective camera uses the authored eye POSITION but a
+        // FIXED identity orientation (forward −Z, up +Y) — center/up in scene.json
+        // are editor viewport state. Ground truth (workshop 3509243656 screenshots):
+        // an object at the world origin (the 罗盘 rings, and the n-body cluster
+        // whose com is re-centered to the origin every frame) renders x-centered
+        // and mid-frame; the authored eye→center look-at (pitch −19.6°) would put
+        // it in the top fifth of the frame instead.
         let eye = sceneCamera.eye
-        let forward = Self.normalized(sceneCamera.center - eye, fallback: SIMD3<Double>(0, 0, -1))
-        let right = Self.normalized(simd_cross(forward, sceneCamera.up), fallback: SIMD3<Double>(1, 0, 0))
-        let up = Self.normalized(simd_cross(right, forward), fallback: SIMD3<Double>(0, 1, 0))
         let relative = worldPoint - eye
-        let depth = simd_dot(relative, forward)
+        let depth = -relative.z
         guard depth.isFinite, depth > 0.0001 else { return nil }
         let sceneHeight = Double(max(sceneSize.height, 1))
         let fov = max(min(sceneCamera.fov, 179), 1) * .pi / 180
         let focal = sceneHeight / max(2 * tan(fov * 0.5), 0.0001)
         let depthScale = focal / depth
-        let projected = SIMD2<Double>(
-            simd_dot(relative, right) * depthScale,
-            simd_dot(relative, up) * depthScale
+        return (
+            SIMD2<Float>(Float(relative.x * depthScale), Float(relative.y * depthScale)),
+            Float(depthScale)
         )
-        return (SIMD2<Float>(Float(projected.x), Float(projected.y)), Float(depthScale))
     }
 
     private static func topLeftOrthographicMatrix(
@@ -436,13 +439,9 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         sceneCamera: WPESceneCamera,
         aspect: Double
     ) -> [Double] {
+        // Identity orientation (forward −Z, up +Y) from the authored eye — matches
+        // `projectedCenterInScenePixels`; see the ground-truth note there.
         let eye = sceneCamera.eye
-        let center = sceneCamera.center
-        let upSeed = sceneCamera.up
-        let forward = normalized(center - eye, fallback: SIMD3<Double>(0, 0, -1))
-        let right = normalized(simd_cross(forward, upSeed), fallback: SIMD3<Double>(1, 0, 0))
-        let up = normalized(simd_cross(right, forward), fallback: SIMD3<Double>(0, 1, 0))
-
         let fovRadians = max(min(sceneCamera.fov, 179), 1) * .pi / 180
         let f = 1.0 / tan(fovRadians * 0.5)
         let zNear = max(sceneCamera.nearZ, 0.0001)
@@ -455,10 +454,10 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
             0, 0, (zNear * zFar) / (zNear - zFar), 0
         ]
         let view = [
-            right.x, up.x, -forward.x, 0,
-            right.y, up.y, -forward.y, 0,
-            right.z, up.z, -forward.z, 0,
-            -simd_dot(right, eye), -simd_dot(up, eye), simd_dot(forward, eye), 1
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            -eye.x, -eye.y, -eye.z, 1
         ]
         return multiply4x4(projection, view)
     }

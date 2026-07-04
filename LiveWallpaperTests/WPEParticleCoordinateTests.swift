@@ -59,12 +59,12 @@ struct WPEParticleCoordinateTests {
 
     // MARK: - Emitter local Y-down (flips applied at spawn)
 
-    @Test("angles.z is negated in model matrix (emitter local Y-down convention)")
-    func angleZIsNegated() {
-        // A 90° turn around +Z in the WPE author frame maps to Rz(-π/2)
-        // in the Y-up render frame (Win32 clockwise → Y-up
-        // counterclockwise is -1 sign). Point (1, 0) should swing to
-        // (0, -1) under this convention.
+    @Test("angles.z rotates as authored (+angleZ), matching the image-layer quad")
+    func angleZMatchesImageLayer() {
+        // The particle model matrix uses `Rz(+angleZ)` — same sign the image
+        // quad applies (WPEMetalRenderExecutor passes geometry.angles.z
+        // unnegated). A 90° turn swings (1, 0) → (0, +1). (An earlier
+        // `Rz(-angleZ)` sent 3462491575's 雪景 rightward where WPE blows it left.)
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
             objectOrigin: SIMD3<Float>(960, 540, 0), // renderOrigin (0,0)
@@ -73,7 +73,7 @@ struct WPEParticleCoordinateTests {
         )
         let p = transform.applyModelMatrix(toLocalPoint: SIMD3<Float>(1, 0, 0))
         #expect(abs(p.x) < 0.0001)
-        #expect(abs(p.y - (-1)) < 0.0001)
+        #expect(abs(p.y - 1) < 0.0001)
     }
 
     @Test("applyModelDirection rotates without translating")
@@ -297,7 +297,9 @@ struct WPEParticleCoordinateTests {
 
         #expect(instance.positionAndSize.z < 0)
         #expect(instance.rotationAndLife.w > 0)
-        #expect(abs(instance.rotationAndLife.x - (-0.75)) < 0.001)
+        // Sprite rotation carries the object's `+angleZ` (matches the image quad;
+        // the horizontal mirror rides positionAndSize.z sign, not the angle).
+        #expect(abs(instance.rotationAndLife.x - 0.75) < 0.001)
     }
 
     @Test("Parser captures directions mask")

@@ -103,6 +103,28 @@ struct WPEMetalSceneRendererTests {
         #expect(pixel.r > pixel.b)
     }
 
+    @Test("Hidden text object's compute script still runs, populating shared state")
+    func hiddenTextComputeScriptRunsDespiteInvisibility() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.hiddenComputeTextScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        // The compute text is visible:false — WPE still runs its script, which
+        // writes shared.answer. Skipping hidden scripts (the bug) left it unset,
+        // so 三体's civilisation/ranking read-outs rendered blank.
+        let answer = renderer.sharedScriptValueForTesting("answer") as? Double
+        #expect(answer == 42)
+    }
+
     @Test("Renders layers created by SceneScript")
     func rendersSceneScriptCreatedLayers() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -329,6 +351,33 @@ struct WPEMetalSceneRendererTests {
         #expect(snapshot.size.height == 64)
     }
 
+    @Test("Scene debug artifacts do not emit render heartbeat lines")
+    func sceneDebugArtifactsSkipRenderHeartbeat() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+
+        WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
+        defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        let log = try await Self.sceneDebugLog(
+            for: fixture.descriptor.workshopID,
+            containing: "load() succeeded; presented first frame"
+        )
+        #expect(log.contains("[load.begin]"))
+        #expect(!log.contains("[heartbeat]"))
+    }
+
     @Test("Texture load failure attributes diagnostic to the WPE object name that referenced it")
     func textureLoadDiagnosticsUseLayerObjectName() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -494,6 +543,27 @@ struct WPEMetalSceneRendererTests {
         // re-loads and legitimately re-defers, so it is not the invalidation case.)
         renderer.cleanup()
         #expect(renderer.debugAudioStartupPending == false)
+    }
+
+    private static func sceneDebugLog(for workshopID: String, containing marker: String) async throws -> String {
+        let root = try #require(WPESceneDebugArtifacts.rootURL)
+        let fm = FileManager.default
+        for _ in 0..<100 {
+            let folders = (try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            for folder in folders where folder.lastPathComponent.contains(workshopID) {
+                let logURL = folder.appendingPathComponent("scene.log")
+                guard let log = try? String(contentsOf: logURL, encoding: .utf8) else { continue }
+                if log.contains(marker) {
+                    return log
+                }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw CocoaError(.fileReadNoSuchFile)
     }
 }
 
@@ -705,6 +775,53 @@ private struct MetalSceneFixture {
               "script": "\(escapedScript)"
             }
           }]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
+        )
+    }
+
+    /// A HIDDEN text object whose script writes `shared.answer`, plus a visible
+    /// text object — mirrors 三体 3509243656, where a `visible:false` 日志 text
+    /// computes all the civilisation/ranking data the visible read-outs display.
+    static func hiddenComputeTextScene() throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let computeScript = "'use strict';\\nexport function update(value) { shared.answer = 42; return value; }"
+        let readerScript = "'use strict';\\nexport function update(value) { return String(shared.answer); }"
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [
+            {
+              "id": "backdrop", "name": "Backdrop", "type": "image",
+              "image": "models/util/solidlayer.json",
+              "color": "0 0 1", "alpha": 1
+            },
+            {
+              "id": "compute", "name": "日志", "type": "text",
+              "font": "systemfont_arial", "visible": false,
+              "origin": "32 32 0",
+              "text": { "value": "log", "script": "\(computeScript)" }
+            },
+            {
+              "id": "reader", "name": "readout", "type": "text",
+              "font": "systemfont_arial", "visible": true,
+              "origin": "32 32 0",
+              "text": { "value": "0", "script": "\(readerScript)" }
+            }
+          ]
         }
         """
         try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))

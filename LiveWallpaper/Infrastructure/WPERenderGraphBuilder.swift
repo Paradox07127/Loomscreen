@@ -89,11 +89,15 @@ struct WPERenderGraphBuilder: Sendable {
         // scene and bakes those effects onto the system (WPEMetalSceneRenderer),
         // so the wrapper layer must NOT also run — otherwise it captures the whole
         // frame and tints the background in the mask region (3462491575's rain).
-        let particleOnlyComposeWrappers = Self.particleOnlyComposeWrapperIDs(
+        // A `composelayer` with NO renderable descendant (no image, no particle) is an empty
+        // group container — a script click-hotspot / interaction zone. Its passthrough material
+        // binds `_rt_FullFrameBuffer` (the whole-scene texture), so drawing it paints the entire
+        // scene into its small quad = a picture-in-picture. WPE emits zero draws for these.
+        let composeWrappersToDrop = Self.particleOnlyComposeWrapperIDs(
             in: document, objectByID: objectByID
-        )
+        ).union(Self.emptyComposeWrapperIDs(in: document, objectByID: objectByID))
         let visibleLayerIDs = Set(document.imageObjects
-            .filter { !particleOnlyComposeWrappers.contains($0.id) }
+            .filter { !composeWrappersToDrop.contains($0.id) }
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
             .filter {
                 // Composite normally, OR keep a layer whose only reason for being hidden is a
@@ -411,8 +415,13 @@ struct WPERenderGraphBuilder: Sendable {
         // 头部/胸部/脖颈 child up and left relative to the body (Windows-trace residual ~−90px x / ~−210px y).
         // Gated while validating; the centroid stays as the fallback when bind data is unavailable.
         let anchorPoint: SIMD2<Double>
-        if useAttachmentBindAnchor,
-           let bindAnchor = bindAnchorPoint(for: attachment, bones: parentModel.bones) {
+        // Character-sheet puppets (MDLV0019/0020) MUST use the bind-anchor pivot: their mesh vertices
+        // are the exploded source sheet, so the skin-weighted centroid fallback is meaningless. The
+        // assembled anchor comes from the frame-0 pose inside `assembledBindWorldByBone`. Pre-assembled
+        // puppets keep the opt-in flag behavior.
+        let isCharacterSheet = parentModel.version >= 19 && parentModel.version <= 20
+        if (useAttachmentBindAnchor || isCharacterSheet),
+           let bindAnchor = bindAnchorPoint(for: attachment, model: parentModel) {
             anchorPoint = bindAnchor
         } else if let joint = skinnedJoint(of: attachment.boneIndex, in: parentModel.meshes) {
             anchorPoint = joint
@@ -462,69 +471,22 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     /// The attachment's anchor point in the parent MDLV mesh frame: the translation of
-    /// `bindWorld[boneIndex] · attachment.matrix`, where `bindWorld` composes the bone's parent chain.
-    /// This is the WPE attachment pivot (not the skin-region centroid). Returns nil if the bone or its
-    /// bind transform is missing/non-finite.
+    /// `assembledBindWorld[boneIndex] · attachment.matrix`. The assembled bind-world uses the frame-0
+    /// pose for character-sheet puppets (raw MDLS = exploded sheet there) and the raw MDLS for
+    /// pre-assembled puppets — see `WPEPuppetAnimationEvaluator.assembledBindWorldByBone`. This is the
+    /// WPE attachment pivot (not the skin-region centroid). Returns nil if the bone or its bind
+    /// transform is missing/non-finite.
     private static func bindAnchorPoint(
         for attachment: WPEPuppetAttachment,
-        bones: [WPEPuppetBone]
+        model: WPEPuppetModel
     ) -> SIMD2<Double>? {
-        guard let boneWorld = bindWorldMatrices(bones: bones)[attachment.boneIndex] else { return nil }
+        guard let boneWorld = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(model: model)[attachment.boneIndex] else {
+            return nil
+        }
         let anchor = boneWorld * attachment.matrix
         let p = anchor.columns.3
         guard p.x.isFinite, p.y.isFinite else { return nil }
         return SIMD2<Double>(Double(p.x), Double(p.y))
-    }
-
-    /// Composes each MDLS bone's parent-local `rawMatrix` down the hierarchy (`world(parent)·local`)
-    /// into a model-space bind-world matrix, keyed by bone index. Roots use their local matrix directly.
-    /// A missing/unparseable matrix, a missing parent, or a cycle leaves that bone UNRESOLVED (absent
-    /// from the result) so `bindAnchorPoint` returns nil and the caller falls back to the legacy
-    /// centroid anchor instead of adopting a finite-but-wrong identity-derived anchor.
-    ///
-    /// NOTE on the composition (do not naively "simplify" to raw): `WPEMdlParser.worldMatrices(bind:)`
-    /// uses `rawMatrix` DIRECTLY as the skinning-palette bind-world. For the head attachment anchor,
-    /// however, the raw head-bone translation is implausible (≈(221,323)) and did NOT match Windows
-    /// ground truth, while the hierarchy-composed value (≈(686,800)) · MDAT did — and is on-device
-    /// confirmed for 3719111841. So the attachment path empirically needs composition. This tension
-    /// with the palette bind path is unresolved across the corpus → keep this opt-in (default OFF) and
-    /// validate on a non-root-anchor rig before widening. FOLLOW-UP: the executor's animated follow
-    /// (`layerApplyingAttachmentFollow`) still measures its bind reference from the RAW matrix, so when
-    /// skinning is re-enabled it must switch to this composed bind-world to stay consistent with the
-    /// static placement here.
-    private static func bindWorldMatrices(bones: [WPEPuppetBone]) -> [Int: simd_float4x4] {
-        let localByIndex = Dictionary(
-            bones.compactMap { bone -> (Int, simd_float4x4)? in
-                WPEMdlParser.matrix(fromColumnMajorFloats: bone.rawMatrix).map { (bone.index, $0) }
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let parentByIndex = Dictionary(
-            bones.map { ($0.index, $0.parentIndex) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var cache: [Int: simd_float4x4] = [:]
-        
-        for _ in 0..<bones.count {
-            var progress = false
-            for bone in bones {
-                let index = bone.index
-                if cache[index] != nil { continue }
-                guard let local = localByIndex[index] else { continue }
-                
-                if let parent = parentByIndex[index] ?? nil, parent != index {
-                    if let parentWorld = cache[parent] {
-                        cache[index] = parentWorld * local
-                        progress = true
-                    }
-                } else {
-                    cache[index] = local
-                    progress = true
-                }
-            }
-            if !progress { break }
-        }
-        return cache
     }
 
     static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
@@ -816,31 +778,73 @@ struct WPERenderGraphBuilder: Sendable {
         )
         guard !composeLayerIDs.isEmpty else { return [] }
         let parentByID = document.objectParentByID
-        func nearestComposeAncestor(of startID: String) -> String? {
+        // ALL compose ancestors (not just the nearest): a particle nested under `outer -> inner`
+        // must drop BOTH wrappers, else `outer` survives with no built child and still draws the
+        // full-frame passthrough.
+        func composeAncestors(of startID: String) -> Set<String> {
+            var result: Set<String> = []
             var current = parentByID[startID]
             var seen: Set<String> = []
             while let id = current, seen.insert(id).inserted {
-                if composeLayerIDs.contains(id) { return id }
+                if composeLayerIDs.contains(id) { result.insert(id) }
                 current = parentByID[id]
             }
-            return nil
+            return result
         }
         var wrappersWithParticle: Set<String> = []
         for particle in document.particleObjects {
-            if let compose = nearestComposeAncestor(of: particle.id) {
-                wrappersWithParticle.insert(compose)
-            }
+            wrappersWithParticle.formUnion(composeAncestors(of: particle.id))
         }
         guard !wrappersWithParticle.isEmpty else { return [] }
         // Disqualify any wrapper that also has a renderable image descendant —
         // that makes it a genuine mixed group, not a particle-only wrapper.
         var wrappersWithImageChild: Set<String> = []
         for image in document.imageObjects where !composeLayerIDs.contains(image.id) {
-            if let compose = nearestComposeAncestor(of: image.id) {
-                wrappersWithImageChild.insert(compose)
-            }
+            wrappersWithImageChild.formUnion(composeAncestors(of: image.id))
         }
         return wrappersWithParticle.subtracting(wrappersWithImageChild)
+    }
+
+    /// IDs of `composelayer` objects with NO renderable descendant anywhere below them (no image
+    /// other than nested composelayers, no particle). These are empty interaction containers whose
+    /// passthrough material would otherwise paint `_rt_FullFrameBuffer` (the whole scene) into their
+    /// quad — a picture-in-picture. A wrapper with any renderable descendant (directly or through a
+    /// nested composelayer) is a real group and is kept, so nesting stays correct.
+    private static func emptyComposeWrapperIDs(
+        in document: WPESceneDocument,
+        objectByID: [String: WPESceneImageObject]
+    ) -> Set<String> {
+        let composeLayerIDs = Set(
+            document.imageObjects
+                .filter { isComposelayerModelPath($0.imageRelativePath) }
+                .map(\.id)
+        )
+        guard !composeLayerIDs.isEmpty else { return [] }
+        let parentByID = document.objectParentByID
+        func composeAncestors(of startID: String) -> Set<String> {
+            var result: Set<String> = []
+            var current = parentByID[startID]
+            var seen: Set<String> = []
+            while let id = current, seen.insert(id).inserted {
+                if composeLayerIDs.contains(id) { result.insert(id) }
+                current = parentByID[id]
+            }
+            return result
+        }
+        var nonEmpty: Set<String> = []
+        for image in document.imageObjects where !composeLayerIDs.contains(image.id) {
+            nonEmpty.formUnion(composeAncestors(of: image.id))
+        }
+        for id in composeLayerIDs {
+            guard let compose = objectByID[id] else { continue }
+            if referencedLayerIDs(in: compose).contains(where: { $0 != id && objectByID[$0] != nil }) {
+                nonEmpty.insert(id)
+            }
+        }
+        for particle in document.particleObjects {
+            nonEmpty.formUnion(composeAncestors(of: particle.id))
+        }
+        return composeLayerIDs.subtracting(nonEmpty)
     }
 
     private static func strippedUtilityPath(_ path: String) -> String {
@@ -871,7 +875,8 @@ struct WPERenderGraphBuilder: Sendable {
         )
 
         if let materialPath {
-            let material = try builtinMaterial(path: materialPath, object: object) ?? loadMaterial(path: materialPath)
+            let loadedMaterial = try builtinMaterial(path: materialPath, object: object) ?? loadMaterial(path: materialPath)
+            let material = Self.materialRespectingCopyBackground(loadedMaterial, object: object)
             context.source = material.initialTextureSource(fallback: context.source)
             try appendMaterialPasses(
                 material.passes,
@@ -983,6 +988,23 @@ struct WPERenderGraphBuilder: Sendable {
             parallaxDepth: object.parallaxDepth,
             sortIndex: sortIndex
         )
+    }
+
+    private static func materialRespectingCopyBackground(
+        _ material: WPEMaterialAsset,
+        object: WPESceneImageObject
+    ) -> WPEMaterialAsset {
+        guard !object.copyBackground,
+              isComposelayerModelPath(object.imageRelativePath),
+              let firstPass = material.passes.first,
+              firstPass.textures[0] == .fbo("_rt_FullFrameBuffer") else {
+            return material
+        }
+        var passes = material.passes
+        var textures = firstPass.textures
+        textures[0] = .previous
+        passes[0] = firstPass.replacingTextures(textures)
+        return WPEMaterialAsset(path: material.path, passes: passes)
     }
 
     private func resolvedPuppetMeshCenter(
@@ -1481,11 +1503,43 @@ private struct LayerBuildContext {
         let finalSceneBlendMode = object.blendMode == .normal
             ? nil
             : object.blendMode.rawValue.premultipliedRenderTargetBlendMode
+
+        func appendingCanonicalCompositeCopyIfNeeded(
+            to finalized: [WPERenderPass],
+            finalSource: WPETextureReference
+        ) -> [WPERenderPass] {
+            guard preserveFinalCompositeForScene,
+                  finalSource != .fbo(compositeA) else {
+                return finalized
+            }
+            guard case .fbo = finalSource else {
+                return finalized
+            }
+            return finalized + [WPERenderPass(
+                id: "\(object.id).\(finalized.count)",
+                phase: .command(file: "materials/util/copy.json"),
+                shader: "materials/util/copy.json",
+                source: finalSource,
+                target: .layerComposite(name: compositeA),
+                textures: [0: finalSource],
+                binds: [:],
+                constants: [:],
+                combos: [:],
+                blending: "premultipliedDisabled",
+                cullMode: "nocull",
+                depthTest: "disabled",
+                depthWrite: "disabled"
+            )]
+        }
+
         guard let lastPass = passes.last,
               finalUntargetedPassToScene,
               passTargetsWereExplicit.indices.contains(passes.count - 1),
               passTargetsWereExplicit[passes.count - 1] == false else {
-            return passes.movingFirstBlendModeToFinalPass()
+            return appendingCanonicalCompositeCopyIfNeeded(
+                to: passes.movingFirstBlendModeToFinalPass(),
+                finalSource: source
+            )
         }
 
         // Workshop custom effects must NOT be fused into the scene-size pass:
@@ -1496,10 +1550,14 @@ private struct LayerBuildContext {
         // match WPE's own fused passes, so they keep the fast path.
         let lastPassIsWorkshopEffect = lastPass.shader.contains("workshop/")
         if preserveFinalCompositeForScene || lastPassIsWorkshopEffect,
-           let sceneSource = lastPass.target.textureReference {
-            var finalized = passes
+           let lastSource = lastPass.target.textureReference {
+            let finalSource = preserveFinalCompositeForScene ? source : lastSource
+            var finalized = appendingCanonicalCompositeCopyIfNeeded(to: passes, finalSource: finalSource)
+            let sceneSource = preserveFinalCompositeForScene && finalSource != .fbo(compositeA)
+                ? WPETextureReference.fbo(compositeA)
+                : finalSource
             finalized.append(WPERenderPass(
-                id: "\(object.id).\(passes.count)",
+                id: "\(object.id).\(finalized.count)",
                 phase: .command(file: "materials/util/copy.json"),
                 shader: "materials/util/copy.json",
                 source: sceneSource,
@@ -1832,7 +1890,8 @@ private extension String {
              "premultipliednormalmapped",
              "premultipliedadditive",
              "premultiplieddisabled",
-             "premultipliedmultiply":
+             "premultipliedmultiply",
+             "premultipliedscreen":
             return self
         case "disabled":
             return "premultipliedDisabled"
@@ -1840,6 +1899,8 @@ private extension String {
             return "premultipliedAdditive"
         case "multiply":
             return "premultipliedMultiply"
+        case "screen":
+            return "premultipliedScreen"
         default:
             return "premultiplied"
         }
@@ -1866,10 +1927,18 @@ private extension String {
 
 private extension Array where Element == WPERenderPass {
     func movingFirstBlendModeToFinalPass(finalBlendMode: String? = nil) -> [WPERenderPass] {
-        guard count > 1,
-              let first = first,
+        guard let first = first,
               let last = last else {
             return self
+        }
+
+        // Single-pass layer: the base draw IS the scene draw, so an authored
+        // object blend (additive/screen/multiply) must still land on it.
+        if count == 1 {
+            guard let finalBlendMode else { return self }
+            var result = self
+            result[0] = first.replacingBlending(finalBlendMode)
+            return result
         }
 
         var result = self

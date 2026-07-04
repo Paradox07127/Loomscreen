@@ -151,21 +151,6 @@ final class WPEMetalRenderExecutor {
     /// rendered gamma stays stable across offscreen and onscreen passes.
     static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
 
-    /// Debug bisect flag: when `defaults write Taijia.LiveWallpaper
-    /// WPEMetalBypassEffects -bool YES` is in effect (and the binary is
-    /// a DEBUG build) every image layer skips its material/effect/command
-    /// passes and blits the first pass's resolved source texture to scene.
-    /// Used to confirm Metal's upload+present chain reaches the screen
-    /// before the effect shader chain is exercised. Always false in
-    /// Release builds.
-    static var bypassEffectsForDebug: Bool {
-        #if DEBUG
-        return UserDefaults.standard.bool(forKey: "WPEMetalBypassEffects")
-        #else
-        return false
-        #endif
-    }
-
     /// Optional developer override for the per-puppet deferred-warp decision (see
     /// `shouldDeferPuppetMeshWarp`). `nil` (the default, and always in Release) means "decide
     /// automatically per puppet"; an explicit DEBUG `defaults write Taijia.LiveWallpaper
@@ -277,19 +262,6 @@ final class WPEMetalRenderExecutor {
     }()
 
     /// Mirrors the slot-0 precedence used by
-    /// `WPEMetalSceneRenderer.requiredTextureReferences(for:)`: prefer the
-    /// per-pass binding override, then the pass's `textures[0]`, then the
-    /// raw graph source. We use this to look up the layer's resolved
-    /// background image in the bypass path so the blit copies the asset
-    /// the renderer actually preloaded — not the unresolved model JSON
-    /// path that `WPERenderLayer.imagePath` carries.
-    static func bypassSourceReference(for layer: WPEPreparedRenderLayer) -> WPETextureReference? {
-        guard let firstPass = layer.passes.first else { return nil }
-        return firstPass.textureBindings[0]
-            ?? firstPass.pass.textures[0]
-            ?? firstPass.pass.source
-    }
-
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let targetPool: WPEMetalRenderTargetPool
@@ -462,8 +434,14 @@ final class WPEMetalRenderExecutor {
         let enabled: Bool
         let palette: [simd_float4x4]
         let attachmentsByName: [String: WPEPuppetAttachment]
-        /// Parent puppet's MDLS bind matrices (model space) keyed by bone index, for anchor following.
+        /// Parent puppet's RAW MDLS bind-world per bone — the basis the palette (`current · rawBind⁻¹`)
+        /// was built on, so `palette · (rawBind · MDAT)` recovers the anchor's CURRENT world position.
         let boneBindByIndex: [Int: simd_float4x4]
+        /// Parent puppet's ASSEMBLED bind-world per bone: the frame-0 pose for character-sheet puppets
+        /// (raw MDLS is the exploded sheet there), the raw bind for pre-assembled. This is the anchor's
+        /// REST position — matching the graph builder's static placement — so the follow adds only the
+        /// animated `current − rest` delta (zero at rest) instead of double-counting the assembly.
+        let assembledBoneBindByIndex: [Int: simd_float4x4]
         let reason: String
     }
 
@@ -527,6 +505,8 @@ final class WPEMetalRenderExecutor {
         // for a different puppet/material/animation, so drop them when the graph is rebuilt.
         puppetClipPairsCache.removeAll()
         loggedClipActivation.removeAll()
+        characterSheetWarnedReasonByObjectID.removeAll()
+        characterSheetBoundDetailByObjectID.removeAll()
         // Scene size / pipeline may change across a reload; drop the recycled
         // frame targets so the next render() re-allocates at the right size.
         outputTexturePool.removeAll()
@@ -968,7 +948,7 @@ final class WPEMetalRenderExecutor {
         #endif
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
-        let staticLayerCacheEnabled = Self.isStaticLayerCacheEnabled && !Self.bypassEffectsForDebug
+        let staticLayerCacheEnabled = Self.isStaticLayerCacheEnabled
         staticLayerCompositeCache.updateBudget(Self.staticLayerCacheBudgetBytes)
         if staticLayerCacheEnabled {
             if staticLayerCacheSceneSize != size {
@@ -993,7 +973,7 @@ final class WPEMetalRenderExecutor {
         // Aliasing is disabled while the debug bypass path is active — bypass
         // skips a layer's passes, which would break the lockstep pass index the
         // alias plan relies on.
-        let aliasIntervals = (WPEMetalRenderTargetPool.isFBOAliasingEnabled && !Self.bypassEffectsForDebug)
+        let aliasIntervals = WPEMetalRenderTargetPool.isFBOAliasingEnabled
             ? fboAliasIntervals(pipeline: preparedPipeline, sceneSize: size)
             : []
         targetPool.prepare(pipeline: preparedPipeline, aliasIntervals: aliasIntervals)
@@ -1019,7 +999,6 @@ final class WPEMetalRenderExecutor {
         groupingContainerObjectIDs = Set(preparedPipeline.layers.compactMap { $0.graphLayer.parentObjectID })
         persistentDepthTargetIDs = computePersistentDepthTargetIDs(for: preparedPipeline)
         var didEncode = false
-        let bypassEffects = Self.bypassEffectsForDebug
         let attachmentContext = makeAttachmentFrameContext(
             for: preparedPipeline,
             runtimeUniforms: runtimeUniforms,
@@ -1178,39 +1157,6 @@ final class WPEMetalRenderExecutor {
                 #endif
                 continue
             }
-            if bypassEffects, let firstSource = Self.bypassSourceReference(for: layer) {
-                guard graphLayer.visible else {
-                    didEncode = true
-                    continue
-                }
-                // Debug bisect: skip every material/effect/command pass and
-                // blit the first pass's resolved source (the background
-                // image) straight to scene. Lets us prove the upload +
-                // present chain works at the layer's native resolution
-                // before the effect shaders join the mix. Debug-only path, so
-                // a layer whose first source isn't a sampleable texture (e.g. a
-                // solidlayer/util color layer whose source is `models/util/
-                // solidlayer.json`) is skipped rather than aborting the whole
-                // scene with a RESOURCE_MISS.
-                do {
-                    try encodeCopy(
-                        reference: firstSource,
-                        target: .scene,
-                        layer: graphLayer,
-                        runtimeUniforms: runtimeUniforms,
-                        textures: textures,
-                        commandBuffer: commandBuffer,
-                        frameState: &frameState
-                    )
-                } catch {
-                    Logger.info(
-                        "[WPE.bypass] skipped layer \(layer.graphLayer.objectID): source \(firstSource) not blittable (\(error))",
-                        category: .wpeRender
-                    )
-                }
-                didEncode = true
-                continue
-            }
             for (layerPassIndex, pass) in layer.passes.enumerated() {
                 // Advance the alias index for EVERY pass (defer fires endPass at
                 // iteration exit, including the hidden-pass `continue` below), so
@@ -1223,10 +1169,18 @@ final class WPEMetalRenderExecutor {
                 // Hidden layer: still encode passes that write a composite/FBO
                 // (dependents may sample them), but skip the final scene draw so
                 // the layer is invisible. Toggling `visible` true re-includes it
-                // without a pipeline rebuild.
+                // without a pipeline rebuild. A pass targeting the shared group
+                // buffer (`_rt_layerGroup_*`) is a group child's VISIBLE output —
+                // the group-child analogue of the scene draw — so skip it too;
+                // otherwise a condition-hidden variant kept in the graph for live
+                // script toggling paints into the group buffer and overlaps the
+                // selected variant (scene 3226487183's mutually-exclusive poses).
                 if !graphLayer.visible {
                     switch pass.pass.target {
                     case .scene:
+                        didEncode = true
+                        continue
+                    case .fbo(let name) where name.hasPrefix("_rt_layerGroup_"):
                         didEncode = true
                         continue
                     case .layerComposite, .fbo:
@@ -1271,8 +1225,22 @@ final class WPEMetalRenderExecutor {
                     )
                 }
                 #if DEBUG
-                if case .scene = pass.pass.target {
-                    captureScenePassIfDumping(dumpScenePasses, label: pass.pass.id, output: output, commandBuffer: commandBuffer)
+                if dumpScenePasses {
+                    // Dump BOTH the scene target and each layer's intermediate composite target, so a
+                    // per-layer effect chain (e.g. 840's face → opacity/waterripple/…) can be inspected
+                    // pass-by-pass to see exactly which pass drops/moves content.
+                    let dumpTarget: MTLTexture?
+                    switch pass.pass.target {
+                    case .scene:
+                        dumpTarget = output
+                    case .layerComposite(let name), .fbo(let name):
+                        // Use the texture the pass ACTUALLY wrote to (FBO pooling/aliasing means
+                        // re-resolving the name by `targetTexture` can vend a different/cleared one).
+                        dumpTarget = frameState.latestNamedTextures[name]
+                    }
+                    if let dumpTarget {
+                        captureScenePassIfDumping(dumpScenePasses, label: pass.pass.id, output: dumpTarget, commandBuffer: commandBuffer)
+                    }
                 }
                 #endif
             }
@@ -2109,7 +2077,7 @@ final class WPEMetalRenderExecutor {
            Self.isLayerGroupTargetName(name) {
             return true
         }
-        return blendModeRequiresExistingDestination(pass.pass.blending)
+        return Self.blendModeRequiresExistingDestination(pass.pass.blending)
     }
 
     /// Targets used by more than one depth pass (depth-write OR depth-test) — a
@@ -2127,7 +2095,7 @@ final class WPEMetalRenderExecutor {
         return Set(depthPassCounts.compactMap { $0.value > 1 ? $0.key : nil })
     }
 
-    private func blendModeRequiresExistingDestination(_ blendMode: String) -> Bool {
+    static func blendModeRequiresExistingDestination(_ blendMode: String) -> Bool {
         let normalized = blendMode
             .lowercased()
             .replacingOccurrences(of: "-", with: "")
@@ -2138,12 +2106,14 @@ final class WPEMetalRenderExecutor {
              "additive",
              "premultipliedadditive",
              "premultipliedmultiply",
+             "premultipliedscreen",
              "darken",
              "lighten",
              "multiply",
              "negative",
              "oneone",
              "oneoneone",
+             "screen",
              "subtract",
              "subtractive":
             return true
@@ -2510,25 +2480,48 @@ final class WPEMetalRenderExecutor {
         // here desyncs the attachment-follow anchor from `palette[bone] · bind⁻¹`, so a followed face/
         // hair layer drifts/stretches relative to the skinned head. See the palette fix (69ed52b).
         let boneBindByIndex = Self.composedBindWorldByBoneIndex(model.bones)
+        // Assembled (frame-0 for character sheets) bind-world for the anchor REST position; raw for the
+        // palette basis. Equal for pre-assembled puppets (no-op), so this only affects MDLV0019/0020.
+        let assembledBoneBindByIndex = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(model: model)
         func disabled(_ reason: String) -> PuppetSkinningState {
             PuppetSkinningState(
                 enabled: false,
                 palette: [],
                 attachmentsByName: attachmentsByName,
                 boneBindByIndex: boneBindByIndex,
+                assembledBoneBindByIndex: assembledBoneBindByIndex,
                 reason: reason
             )
         }
 
-        // Bone skinning is opt-in (default OFF). Enabling it by default (9c44bab) together with the
-        // relaxed displacement gate (e204842: 0.12→1.5·extent) regressed previously-static face/blink
-        // puppets: their additive eye animation now passed the gate and got bone-skinned into
-        // deformation (scenes 3461168300 / 3554161528). Skin only when the user explicitly opts in via
-        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`, until per-scene
-        // skinning correctness is validated. Resolve from the SAME domain as `WPEPuppetClipComposite`
-        // (Taijia suite first, .standard fallback) so the documented `defaults write Taijia.LiveWallpaper`
-        // is honoured even when the renderer's standard domain isn't the app's — otherwise the clip flag
-        // turns on but skinning silently stays off and the eye never deforms.
+        // MDLV0019/0020 ship the mesh as a FLAT character sheet: the MDLV bind pose is the exploded
+        // split-source, and the assembled character is recovered ONLY by skinning through the MDLA
+        // animation pose. Its bind pose is therefore guaranteed-wrong, so skinning is MANDATORY for
+        // these generations — the opt-in flag and the regression carve-outs (which exist to keep
+        // pre-assembled v21/v23 face/blink puppets static) must not apply, and rejecting on the
+        // displacement bound can only make it worse than the already-broken bind. Derived here from the
+        // model the executor already holds; no scene-schema threading.
+        if model.version >= 19, model.version < 21, !model.bones.isEmpty {
+            return mandatorySkinningState(
+                for: layer,
+                model: model,
+                attachmentsByName: attachmentsByName,
+                boneBindByIndex: boneBindByIndex,
+                assembledBoneBindByIndex: assembledBoneBindByIndex,
+                time: runtimeUniforms.time
+            )
+        }
+
+        // Bone skinning is opt-in for pre-assembled puppets (default OFF). Enabling it by default
+        // (9c44bab) together with the relaxed displacement gate (e204842: 0.12→1.5·extent) regressed
+        // previously-static face/blink puppets: their additive eye animation now passed the gate and got
+        // bone-skinned into deformation (scenes 3461168300 / 3554161528). Skin only when the user
+        // explicitly opts in via `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`,
+        // until per-scene skinning correctness is validated. Resolve from the SAME domain as
+        // `WPEPuppetClipComposite` (Taijia suite first, .standard fallback) so the documented
+        // `defaults write Taijia.LiveWallpaper` is honoured even when the renderer's standard domain
+        // isn't the app's — otherwise the clip flag turns on but skinning silently stays off and the eye
+        // never deforms.
         guard Self.puppetSkinningEnabled else {
             return disabled("user-disabled")
         }
@@ -2561,7 +2554,92 @@ final class WPEMetalRenderExecutor {
             palette: evaluation.palette,
             attachmentsByName: attachmentsByName,
             boneBindByIndex: boneBindByIndex,
+            assembledBoneBindByIndex: assembledBoneBindByIndex,
             reason: evaluation.transformSpace?.rawValue ?? "bind"
+        )
+    }
+
+    /// Character-sheet validation runs per frame (palette is time-dependent), so the per-object
+    /// warnings dedupe by reason and the clip-wide displacement scan — time-independent — memoizes
+    /// per objectID. Both reset on graph rebuild (`releaseTransientResources`).
+    private var characterSheetWarnedReasonByObjectID: [String: String] = [:]
+    private struct CharacterSheetBoundDetailCacheEntry {
+        let detail: String?
+    }
+    private var characterSheetBoundDetailByObjectID: [String: CharacterSheetBoundDetailCacheEntry] = [:]
+
+    /// Skinning gate for MDLV0019/0020 character-sheet puppets, where skinning is MANDATORY (the bind
+    /// pose is the exploded split-source). Bypasses the opt-in flag and the pre-assembled regression
+    /// carve-outs (`unresolved-attachment` / `missing-hierarchy` / `skin-index-out-of-range` / the
+    /// displacement bound); keeps only the irreducible precondition — a finite, non-empty palette — so
+    /// there is something to skin with. A model that fails even that keeps the (broken) static draw.
+    private func mandatorySkinningState(
+        for layer: WPERenderLayer,
+        model: WPEPuppetModel,
+        attachmentsByName: [String: WPEPuppetAttachment],
+        boneBindByIndex: [Int: simd_float4x4],
+        assembledBoneBindByIndex: [Int: simd_float4x4],
+        time: Double
+    ) -> PuppetSkinningState {
+        let generation = String(format: "MDLV%04d", model.version)
+        func disabled(_ reason: String) -> PuppetSkinningState {
+            PuppetSkinningState(
+                enabled: false,
+                palette: [],
+                attachmentsByName: attachmentsByName,
+                boneBindByIndex: boneBindByIndex,
+                assembledBoneBindByIndex: assembledBoneBindByIndex,
+                reason: reason
+            )
+        }
+        func warnOnce(_ reason: String, _ message: String) {
+            guard characterSheetWarnedReasonByObjectID[layer.objectID] != reason else { return }
+            characterSheetWarnedReasonByObjectID[layer.objectID] = reason
+            Logger.warning(message, category: .wpeRender)
+        }
+        let animationLayers = puppetAnimationLayers(for: layer, model: model)
+        guard !animationLayers.isEmpty else {
+            warnOnce(
+                "no-animation",
+                "WPE \(generation) character-sheet puppet without animation renders unassembled (bind)."
+            )
+            return disabled("no-animation")
+        }
+        let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(
+            layers: animationLayers,
+            bones: model.bones,
+            at: time
+        )
+        guard !evaluation.palette.isEmpty,
+              evaluation.palette.allSatisfy(WPEPuppetAnimationEvaluator.matrixIsFinite) else {
+            warnOnce(
+                "palette-unresolved",
+                "WPE \(generation) character-sheet puppet palette unresolved/non-finite; renders "
+                    + "unassembled (bind)."
+            )
+            return disabled("palette-unresolved")
+        }
+        let boundDetail: String?
+        if let cached = characterSheetBoundDetailByObjectID[layer.objectID] {
+            boundDetail = cached.detail
+        } else {
+            boundDetail = paletteBoundFailureDetail(layers: animationLayers, bones: model.bones, meshes: model.meshes)
+            characterSheetBoundDetailByObjectID[layer.objectID] = CharacterSheetBoundDetailCacheEntry(detail: boundDetail)
+        }
+        if let detail = boundDetail {
+            warnOnce(
+                "bound-exempt",
+                "WPE \(generation) character-sheet puppet exceeds the displacement bound (\(detail)); "
+                    + "skinning anyway (bind pose is unassembled)."
+            )
+        }
+        return PuppetSkinningState(
+            enabled: true,
+            palette: evaluation.palette,
+            attachmentsByName: attachmentsByName,
+            boneBindByIndex: boneBindByIndex,
+            assembledBoneBindByIndex: assembledBoneBindByIndex,
+            reason: "character-sheet[\(evaluation.transformSpace?.rawValue ?? "bind")]"
         )
     }
 
@@ -2697,9 +2775,14 @@ final class WPEMetalRenderExecutor {
               attachment.boneIndex < parentState.palette.count else {
             return layer
         }
-        let boneBind = parentState.boneBindByIndex[attachment.boneIndex] ?? matrix_identity_float4x4
-        let anchorBindModel = boneBind * attachment.matrix
-        let anchorCurrentModel = parentState.palette[attachment.boneIndex] * anchorBindModel
+        let rawBoneBind = parentState.boneBindByIndex[attachment.boneIndex] ?? matrix_identity_float4x4
+        let assembledBoneBind = parentState.assembledBoneBindByIndex[attachment.boneIndex] ?? rawBoneBind
+        // CURRENT anchor world: the palette is `currentWorld · rawBind⁻¹`, so multiplying the RAW-basis
+        // anchor recovers `currentWorld · MDAT`. REST anchor: the ASSEMBLED bind (frame-0 for character
+        // sheets) — the same pose the graph builder placed the child at — so the delta is the animated
+        // motion only, zero at rest. For pre-assembled puppets assembled == raw, so this is unchanged.
+        let anchorCurrentModel = parentState.palette[attachment.boneIndex] * (rawBoneBind * attachment.matrix)
+        let anchorBindModel = assembledBoneBind * attachment.matrix
         let bindPoint = SIMD2<Float>(anchorBindModel.columns.3.x, anchorBindModel.columns.3.y)
         let currentPoint = SIMD2<Float>(anchorCurrentModel.columns.3.x, anchorCurrentModel.columns.3.y)
         let bindScene = puppetModelPointToScene(bindPoint, layer: parent, sceneSize: context.sceneSize)
@@ -5320,6 +5403,16 @@ final class WPEMetalRenderExecutor {
             attachment.destinationRGBBlendFactor = .zero
             attachment.sourceAlphaBlendFactor = .zero
             attachment.destinationAlphaBlendFactor = .one
+        case "premultipliedscreen", "screen":
+            // Premultiplied source: src + dst·(1−src) ≡ WPE's alpha-weighted
+            // screen mix(dst, screen(dst,src), a) — black pixels leave dst intact.
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceColor
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         case "translucent":
             fallthrough
         default:

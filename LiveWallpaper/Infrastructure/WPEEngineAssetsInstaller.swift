@@ -23,6 +23,23 @@ final class WPEEngineAssetsInstaller {
         let total: UInt64?
     }
 
+    enum UpdateCheckOutcome: Equatable, Sendable {
+        case notChecked
+        case checking
+        case available(latestBuildID: String)
+        case upToDate(buildID: String?)
+        case unableToCompare
+        case checkFailed
+
+        static func resolve(installedBuildID: String?, latestBuildID: String?) -> UpdateCheckOutcome {
+            guard let latestBuildID else { return .checkFailed }
+            guard let installedBuildID else { return .unableToCompare }
+            return latestBuildID == installedBuildID
+                ? .upToDate(buildID: installedBuildID)
+                : .available(latestBuildID: latestBuildID)
+        }
+    }
+
     static let shared = WPEEngineAssetsInstaller()
 
     private(set) var phase: Phase = .idle
@@ -32,6 +49,7 @@ final class WPEEngineAssetsInstaller {
     private(set) var installedBuildID: String?
     private(set) var latestBuildID: String?
     private(set) var updateAvailable = false
+    private(set) var updateCheckOutcome: UpdateCheckOutcome = .notChecked
 
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Per-run token. Guards a cancel-then-retry race where a superseded run's
@@ -49,9 +67,9 @@ final class WPEEngineAssetsInstaller {
     private(set) var hasManagedInstall: Bool
 
     init() {
-        let stored = SettingsManager.shared.wpeEngineAssetsManagedBuildID
-        hasManagedInstall = stored != nil
-        installedBuildID = (stored == Self.unknownBuildMarker) ? nil : stored
+        let state = Self.managedStateFromDefaults()
+        hasManagedInstall = state.hasManagedInstall
+        installedBuildID = state.installedBuildID
     }
 
     var isBusy: Bool {
@@ -66,7 +84,14 @@ final class WPEEngineAssetsInstaller {
     /// so an external deletion or library self-heal can't leave the row showing
     /// "linked" when it isn't.
     func refreshManagedInstallState() {
-        hasManagedInstall = WPEEngineAssetsLibrary.hasManagedInstall
+        let state = Self.managedStateFromDefaults()
+        hasManagedInstall = state.hasManagedInstall
+        installedBuildID = state.installedBuildID
+        if !hasManagedInstall {
+            latestBuildID = nil
+            updateAvailable = false
+            updateCheckOutcome = .notChecked
+        }
     }
 
     // MARK: - Download / update
@@ -78,6 +103,7 @@ final class WPEEngineAssetsInstaller {
         phase = .downloading
         progress = nil
         progressBytes = nil
+        updateCheckOutcome = .notChecked
         task = Task { [weak self] in await self?.run(using: doctor, attempt: attempt) }
     }
 
@@ -88,6 +114,17 @@ final class WPEEngineAssetsInstaller {
         progress = nil
         progressBytes = nil
         if isBusy { phase = .idle }
+    }
+
+    func clearTransientStatus() {
+        if case .failed = phase {
+            phase = .idle
+        }
+        if !hasManagedInstall {
+            latestBuildID = nil
+            updateAvailable = false
+            updateCheckOutcome = .notChecked
+        }
     }
 
     private func run(using doctor: SteamCMDDoctorService, attempt: UUID) async {
@@ -141,6 +178,7 @@ final class WPEEngineAssetsInstaller {
         installedBuildID = buildID
         latestBuildID = buildID
         updateAvailable = false
+        updateCheckOutcome = .upToDate(buildID: buildID)
         currentAttempt = nil
         WPEEngineAssetsLibrary.shared.refresh()
         phase = .idle
@@ -159,6 +197,7 @@ final class WPEEngineAssetsInstaller {
         let attempt = UUID()
         currentAttempt = attempt
         phase = .checking
+        updateCheckOutcome = .checking
         task = Task { [weak self] in
             let latest = await doctor.latestWallpaperEngineBuildID()
             guard let self, self.currentAttempt == attempt else { return }
@@ -166,12 +205,16 @@ final class WPEEngineAssetsInstaller {
             self.currentAttempt = nil
             self.phase = .idle
             self.latestBuildID = latest
-            let installed = SettingsManager.shared.wpeEngineAssetsManagedBuildID
-            if let latest, let installed, installed != Self.unknownBuildMarker {
-                self.updateAvailable = latest != installed
-            } else {
-                self.updateAvailable = false
-            }
+            let outcome = UpdateCheckOutcome.resolve(
+                installedBuildID: self.installedBuildID,
+                latestBuildID: latest
+            )
+            self.updateCheckOutcome = outcome
+            self.updateAvailable = {
+                if case .available = outcome { return true }
+                return false
+            }()
+            self.postUpdateCheckToast(outcome)
         }
     }
 
@@ -185,6 +228,7 @@ final class WPEEngineAssetsInstaller {
         installedBuildID = nil
         latestBuildID = nil
         updateAvailable = false
+        updateCheckOutcome = .notChecked
         WPEEngineAssetsLibrary.shared.refresh()
         phase = .idle
     }
@@ -200,6 +244,48 @@ final class WPEEngineAssetsInstaller {
             message: message,
             isSuccess: false
         )
+    }
+
+    private static func managedStateFromDefaults() -> (hasManagedInstall: Bool, installedBuildID: String?) {
+        let hasManagedInstall = WPEEngineAssetsLibrary.hasManagedInstall
+        guard hasManagedInstall else { return (false, nil) }
+        let stored = SettingsManager.shared.wpeEngineAssetsManagedBuildID
+        return (true, stored == Self.unknownBuildMarker ? nil : stored)
+    }
+
+    private func postUpdateCheckToast(_ outcome: UpdateCheckOutcome) {
+        switch outcome {
+        case .available:
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Wallpaper Engine update available", comment: "Engine-assets update check found an update."),
+                title: "",
+                message: String(localized: "Click Update to download and relink the latest assets.", comment: "Engine-assets update available toast subtitle."),
+                isSuccess: true
+            )
+        case .upToDate:
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Wallpaper Engine assets are up to date", comment: "Engine-assets update check success headline."),
+                title: "",
+                message: String(localized: "No download is needed.", comment: "Engine-assets update check up-to-date subtitle."),
+                isSuccess: true
+            )
+        case .unableToCompare:
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Couldn't compare versions", comment: "Engine-assets update check version-unknown headline."),
+                title: "",
+                message: String(localized: "Download again to refresh the managed assets.", comment: "Engine-assets update check version-unknown subtitle."),
+                isSuccess: false
+            )
+        case .checkFailed:
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Couldn't check for updates", comment: "Engine-assets update check failure headline."),
+                title: "",
+                message: String(localized: "SteamCMD did not return the latest Wallpaper Engine build.", comment: "Engine-assets update check failure subtitle."),
+                isSuccess: false
+            )
+        case .notChecked, .checking:
+            break
+        }
     }
 }
 
@@ -275,6 +361,10 @@ extension WPEEngineAssetsInstaller {
     /// into resuming the pending update).
     nonisolated static func cleanupSteamcmdAppState(fileManager: FileManager = .default) {
         guard let steamApps = containerSteamApps(fileManager: fileManager) else { return }
+        cleanupSteamcmdAppState(steamApps: steamApps, fileManager: fileManager)
+    }
+
+    nonisolated static func cleanupSteamcmdAppState(steamApps: URL, fileManager: FileManager = .default) {
         var targets = [
             steamApps.appendingPathComponent("appmanifest_\(wpeAppID).acf", isDirectory: false),
             steamApps.appendingPathComponent("downloading/\(wpeAppID)", isDirectory: true),

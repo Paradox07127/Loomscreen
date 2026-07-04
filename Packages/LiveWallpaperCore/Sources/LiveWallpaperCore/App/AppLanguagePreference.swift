@@ -25,6 +25,15 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
         localeIdentifier.map(Locale.init(identifier:)) ?? .autoupdatingCurrent
     }
 
+    public func localizationBundle(in bundle: Bundle = .main) -> Bundle {
+        guard let localeIdentifier,
+              let path = bundle.path(forResource: localeIdentifier, ofType: "lproj"),
+              let localizedBundle = Bundle(path: path) else {
+            return bundle
+        }
+        return localizedBundle
+    }
+
     public var titleKey: LocalizedStringKey {
         switch self {
         case .system:
@@ -53,6 +62,47 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
         } else {
             UserDefaults.standard.set(preference.rawValue, forKey: storageKey)
         }
+    }
+
+    public static func localizedString(
+        _ key: String,
+        defaultValue: String? = nil,
+        tableName: String? = nil,
+        bundle: Bundle = .main
+    ) -> String {
+        current.localizationBundle(in: bundle).localizedString(
+            forKey: key,
+            value: defaultValue ?? key,
+            table: tableName
+        )
+    }
+
+    public static func localizedString(
+        _ key: String.LocalizationValue,
+        bundle: Bundle = .main
+    ) -> String {
+        let preference = current
+        return String(
+            localized: key,
+            bundle: preference.localizationBundle(in: bundle),
+            locale: preference.locale
+        )
+    }
+
+    public static func localizedFormat(
+        _ key: String,
+        defaultValue: String? = nil,
+        tableName: String? = nil,
+        bundle: Bundle = .main,
+        _ arguments: CVarArg...
+    ) -> String {
+        let format = localizedString(
+            key,
+            defaultValue: defaultValue,
+            tableName: tableName,
+            bundle: bundle
+        )
+        return String(format: format, locale: current.locale, arguments: arguments)
     }
 }
 

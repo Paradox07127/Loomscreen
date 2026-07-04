@@ -20,7 +20,7 @@ final class WPESceneLoadTiming {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
     /// The stage whose marker closes the load window and triggers the summary.
-    /// Markers recorded after it (e.g. the playback `heartbeat`) are ignored.
+    /// Markers recorded after the first frame are ignored.
     static let terminalStage = "render.firstFrame.done"
 
     private let workshopID: String

@@ -29,6 +29,17 @@
 		<string>com.apple.audioanalyticsd</string>
 	</array>
 	<!--
+	    Sparkle test integration only. Sandboxed apps need this temporary
+	    exception so Sparkle's Installer XPC service can report status and
+	    install updates outside the app container. These expand per SKU at
+	    build time through PRODUCT_BUNDLE_IDENTIFIER.
+	-->
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spki</string>
+	</array>
+	<!--
 	    Read-only access to the package-manager prefixes so the sandboxed app
 	    (and the SteamCMD child it spawns) can locate + load a Homebrew/MacPorts
 	    SteamCMD install and its sibling dylibs, which live outside the sandbox

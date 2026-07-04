@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 
 /// Identifies a global shortcut command. Adding a case requires:
 /// 1) extending `default(for:)` with a sensible default binding (or `nil`),
@@ -22,41 +23,79 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
 
     public var rawAction: RawAction { rawValue }
 
+    public var displayNameKey: LocalizedStringKey {
+        switch self {
+        case .togglePlayback:
+            return "Play / Pause All Wallpapers"
+        case .nextWallpaper:
+            return "Next Wallpaper (Active Display)"
+        case .previousWallpaper:
+            return "Previous Wallpaper (Active Display)"
+        case .toggleMute:
+            return "Toggle Mute"
+        case .toggleMouseInteraction:
+            return "Toggle Interaction"
+        case .toggleWallpapers:
+            return "Show / Hide All Wallpapers"
+        case .reloadWallpapers:
+            return "Reload All Wallpapers"
+        }
+    }
+
     public var displayName: String {
         switch self {
         case .togglePlayback:
-            return String(localized: "Play / Pause All Wallpapers", defaultValue: "Play / Pause All Wallpapers", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Play / Pause All Wallpapers")
         case .nextWallpaper:
-            return String(localized: "Next Wallpaper (Active Display)", defaultValue: "Next Wallpaper (Active Display)", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Next Wallpaper (Active Display)")
         case .previousWallpaper:
-            return String(localized: "Previous Wallpaper (Active Display)", defaultValue: "Previous Wallpaper (Active Display)", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Previous Wallpaper (Active Display)")
         case .toggleMute:
-            return String(localized: "Toggle Mute", defaultValue: "Toggle Mute", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Toggle Mute")
         case .toggleMouseInteraction:
-            return String(localized: "Toggle Interaction", defaultValue: "Toggle Interaction", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Toggle Interaction")
         case .toggleWallpapers:
-            return String(localized: "Show / Hide All Wallpapers", defaultValue: "Show / Hide All Wallpapers", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Show / Hide All Wallpapers")
         case .reloadWallpapers:
-            return String(localized: "Reload All Wallpapers", defaultValue: "Reload All Wallpapers", comment: "Global shortcut action name.")
+            return AppLanguagePreference.localizedString("Reload All Wallpapers")
+        }
+    }
+
+    public var displayDescriptionKey: LocalizedStringKey {
+        switch self {
+        case .togglePlayback:
+            return "Pause every active wallpaper, or resume them all."
+        case .nextWallpaper:
+            return "Advance the playlist on the display under the cursor."
+        case .previousWallpaper:
+            return "Step the playlist back on the display under the cursor."
+        case .toggleMute:
+            return "Mute or unmute video and scene wallpapers."
+        case .toggleMouseInteraction:
+            return "Turn pointer and click input on or off for scene and web wallpapers."
+        case .toggleWallpapers:
+            return "Hide every wallpaper to reveal the desktop, or bring them back."
+        case .reloadWallpapers:
+            return "Force every display to re-render its wallpaper."
         }
     }
 
     public var displayDescription: String {
         switch self {
         case .togglePlayback:
-            return String(localized: "Pause every active wallpaper, or resume them all.", defaultValue: "Pause every active wallpaper, or resume them all.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Pause every active wallpaper, or resume them all.")
         case .nextWallpaper:
-            return String(localized: "Advance the playlist on the display under the cursor.", defaultValue: "Advance the playlist on the display under the cursor.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Advance the playlist on the display under the cursor.")
         case .previousWallpaper:
-            return String(localized: "Step the playlist back on the display under the cursor.", defaultValue: "Step the playlist back on the display under the cursor.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Step the playlist back on the display under the cursor.")
         case .toggleMute:
-            return String(localized: "Mute or unmute video and scene wallpapers.", defaultValue: "Mute or unmute video and scene wallpapers.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Mute or unmute video and scene wallpapers.")
         case .toggleMouseInteraction:
-            return String(localized: "Turn pointer and click input on or off for scene and web wallpapers.", defaultValue: "Turn pointer and click input on or off for scene and web wallpapers.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Turn pointer and click input on or off for scene and web wallpapers.")
         case .toggleWallpapers:
-            return String(localized: "Hide every wallpaper to reveal the desktop, or bring them back.", defaultValue: "Hide every wallpaper to reveal the desktop, or bring them back.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Hide every wallpaper to reveal the desktop, or bring them back.")
         case .reloadWallpapers:
-            return String(localized: "Force every display to re-render its wallpaper.", defaultValue: "Force every display to re-render its wallpaper.", comment: "Global shortcut action description.")
+            return AppLanguagePreference.localizedString("Force every display to re-render its wallpaper.")
         }
     }
 
@@ -146,7 +185,7 @@ public struct GlobalShortcutBinding: Codable, Equatable, Hashable, Sendable {
             if let scalar = printableCharacter(for: keyCode) {
                 return String(scalar).uppercased()
             }
-            return String(localized: "Key \(keyCode)", comment: "Fallback keyboard key name. The placeholder is a hardware key code.")
+            return AppLanguagePreference.localizedFormat("Key %u", keyCode)
         }
     }
 

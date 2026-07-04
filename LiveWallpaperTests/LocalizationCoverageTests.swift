@@ -61,11 +61,37 @@ struct LocalizationCoverageTests {
         }
     }
 
+    @Test("Shared package UI resolves app-localized Text from the app bundle")
+    func sharedPackageUIResolvesTextFromAppBundle() throws {
+        let source = try Self.projectFile("Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/SettingRow.swift")
+
+        #expect(source.contains("Text(title, bundle: .main)"))
+        #expect(source.contains("Text($0, bundle: .main)"))
+        #expect(source.contains("let info: String.LocalizationValue?"))
+        #expect(source.contains("@AppStorage(AppLanguagePreference.storageKey)"))
+        #expect(source.contains(".help(localizedText)"))
+        #expect(source.contains("Text(verbatim: localizedText)"))
+        #expect(!source.contains(".help(text)"))
+        #expect(!source.contains("self.title = Text(title)"))
+        #expect(!source.contains("self.subtitle = subtitle.map { Text($0) }"))
+        #expect(!source.contains("self.info = info.map { Text($0) }"))
+    }
+
+    @Test("Shortcut action copy remains localizable at render time")
+    func shortcutActionCopyRemainsLocalizableAtRenderTime() throws {
+        let shortcutView = try Self.projectFile("LiveWallpaper/Views/Settings/ShortcutsSettingsView.swift")
+        let actionModel = try Self.projectFile("Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Schema/GlobalShortcutAction.swift")
+
+        #expect(!shortcutView.contains("Text(verbatim: action.displayName)"))
+        #expect(!shortcutView.contains("Text(verbatim: action.displayDescription)"))
+        #expect(shortcutView.contains("Text(action.displayNameKey, bundle: .main)"))
+        #expect(shortcutView.contains("Text(action.displayDescriptionKey, bundle: .main)"))
+        #expect(actionModel.contains("var displayNameKey: LocalizedStringKey"))
+        #expect(actionModel.contains("var displayDescriptionKey: LocalizedStringKey"))
+    }
+
     @Test("Workshop import copy describes local copied projects, not online Workshop connection")
     func workshopImportCopyAvoidsOnlineConnectionLanguage() throws {
-        let projectRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let relativePaths = [
             "LiveWallpaper/L10n.swift",
             "LiveWallpaper/Resources/Localizable.xcstrings",
@@ -79,8 +105,7 @@ struct LocalizationCoverageTests {
             "LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift",
         ]
         let source = try relativePaths.map { relativePath in
-            let url = projectRoot.appendingPathComponent(relativePath)
-            return try String(contentsOf: url, encoding: .utf8)
+            try Self.projectFile(relativePath)
         }.joined(separator: "\n")
 
         let disallowedPhrases = [
@@ -112,6 +137,13 @@ struct LocalizationCoverageTests {
         let hits = disallowedPhrases.filter { source.contains($0) }
         #expect(hits.isEmpty, "User-facing import copy still implies online Workshop/WPE coupling: \(hits)")
         #expect(source.contains("Workshop Library"), "The product decision keeps the Workshop Library page label.")
+    }
+
+    private static func projectFile(_ relativePath: String, filePath: String = #filePath) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
     }
 }
 

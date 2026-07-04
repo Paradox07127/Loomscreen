@@ -133,6 +133,17 @@ final class WPEMetalPipelineCache {
             attachment.sourceAlphaBlendFactor = .zero
             attachment.destinationAlphaBlendFactor = .one
 
+        case "premultipliedscreen", "screen":
+            // Premultiplied source: src + dst·(1−src) ≡ WPE's alpha-weighted
+            // screen mix(dst, screen(dst,src), a) — black pixels leave dst intact.
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceColor
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
         case "translucent", "normalmapped", "normal":
             fallthrough
 

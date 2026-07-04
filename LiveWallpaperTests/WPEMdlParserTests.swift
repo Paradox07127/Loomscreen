@@ -36,6 +36,118 @@ struct WPEPuppetAnimationEvaluatorTests {
         #expect(palette.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
     }
 
+    @Test("Frame-0 identity fast path requires proof for every base channel")
+    func baseFrameMatchesRawBindStrictness() {
+        let identityRaw: [Float] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        let bone = WPEPuppetBone(index: 0, parentIndex: nil, rawMatrix: identityRaw)
+        let restKey = WPEPuppetAnimKey(
+            frame: 0, translation: .zero, euler: .zero, scale: SIMD3(1, 1, 1)
+        )
+        let matching = WPEPuppetAnimChannel(boneIndex: 0, keyframes: [restKey])
+        #expect(WPEPuppetAnimationEvaluator.baseFrameMatchesRawBind(channels: [matching], bones: [bone]))
+
+        // A channel whose bone has no raw matrix must not be assumed to match.
+        let orphan = WPEPuppetAnimChannel(boneIndex: 5, keyframes: [restKey])
+        #expect(!WPEPuppetAnimationEvaluator.baseFrameMatchesRawBind(
+            channels: [matching, orphan], bones: [bone]
+        ))
+
+        // A channel without keyframes must not be assumed to match.
+        let empty = WPEPuppetAnimChannel(boneIndex: 0, keyframes: [])
+        #expect(!WPEPuppetAnimationEvaluator.baseFrameMatchesRawBind(channels: [empty], bones: [bone]))
+
+        // Character-sheet signature: frame-0 pose differs from the raw bind.
+        let assembled = WPEPuppetAnimChannel(boneIndex: 0, keyframes: [
+            WPEPuppetAnimKey(frame: 0, translation: SIMD3(10, 0, 0), euler: .zero, scale: SIMD3(1, 1, 1))
+        ])
+        #expect(!WPEPuppetAnimationEvaluator.baseFrameMatchesRawBind(channels: [assembled], bones: [bone]))
+    }
+
+    @Test("Assembled bind-world uses frame-0 for character sheets, raw MDLS for pre-assembled")
+    func assembledBindWorldPicksFrameZeroForCharacterSheet() {
+        func rawBone(_ t: SIMD3<Float>) -> WPEPuppetBone {
+            WPEPuppetBone(
+                index: 0, parentIndex: nil,
+                rawMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.x, t.y, t.z, 1]
+            )
+        }
+        func model(rawT: SIMD3<Float>, frame0T: SIMD3<Float>) -> WPEPuppetModel {
+            let channel = WPEPuppetAnimChannel(boneIndex: 0, keyframes: [
+                WPEPuppetAnimKey(frame: 0, translation: frame0T, euler: .zero, scale: SIMD3(1, 1, 1))
+            ])
+            return WPEPuppetModel(
+                version: 19,
+                meshes: [],
+                bones: [rawBone(rawT)],
+                animations: [WPEPuppetAnimation(id: 1, name: "a", mode: "loop", fps: 30, frameCount: 1, channels: [channel])]
+            )
+        }
+        // Character sheet: raw MDLS is the exploded layout, frame-0 is the assembled anchor → frame-0 wins.
+        let sheet = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(
+            model: model(rawT: SIMD3(287, -672, 0), frame0T: SIMD3(2, -108, 0))
+        )
+        #expect(sheet[0].map { simd_equal($0.columns.3, SIMD4<Float>(2, -108, 0, 1)) } == true)
+        // Pre-assembled: frame-0 == raw → raw path, no change.
+        let assembled = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(
+            model: model(rawT: SIMD3(287, -672, 0), frame0T: SIMD3(287, -672, 0))
+        )
+        #expect(assembled[0].map { simd_equal($0.columns.3, SIMD4<Float>(287, -672, 0, 1)) } == true)
+    }
+
+    @Test("Assembled bind-world composes parent-child, falls back on missing channel and on a cycle")
+    func assembledBindWorldCompositionAndFallbacks() {
+        func rawBone(_ index: Int, parent: Int?, _ t: SIMD3<Float>) -> WPEPuppetBone {
+            WPEPuppetBone(
+                index: index, parentIndex: parent,
+                rawMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.x, t.y, t.z, 1]
+            )
+        }
+        func chan(_ bone: Int, _ t: SIMD3<Float>) -> WPEPuppetAnimChannel {
+            WPEPuppetAnimChannel(boneIndex: bone, keyframes: [
+                WPEPuppetAnimKey(frame: 0, translation: t, euler: .zero, scale: SIMD3(1, 1, 1))
+            ])
+        }
+        // Character sheet, 2-level hierarchy. Bone 0 frame-0 = (10,0); bone 1 (child) frame-0 = (5,0)
+        // → composed child world = (15,0). Bone 1 has NO channel → falls back to its raw local (100,0),
+        // composed onto frame-0 parent (10,0) = (110,0).
+        let model = WPEPuppetModel(
+            version: 19, meshes: [],
+            bones: [rawBone(0, parent: nil, SIMD3(1, 0, 0)),
+                    rawBone(1, parent: 0, SIMD3(100, 0, 0))],
+            animations: [WPEPuppetAnimation(
+                id: 1, name: "a", mode: "loop", fps: 30, frameCount: 1,
+                channels: [chan(0, SIMD3(10, 0, 0)), chan(1, SIMD3(5, 0, 0))]
+            )]
+        )
+        let world = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(model: model)
+        #expect(world[0].map { simd_equal($0.columns.3, SIMD4<Float>(10, 0, 0, 1)) } == true)
+        #expect(world[1].map { simd_equal($0.columns.3, SIMD4<Float>(15, 0, 0, 1)) } == true)
+
+        // Missing channel for the child → raw local composed on the frame-0 parent.
+        let missingChild = WPEPuppetModel(
+            version: 19, meshes: [],
+            bones: [rawBone(0, parent: nil, SIMD3(1, 0, 0)),
+                    rawBone(1, parent: 0, SIMD3(100, 0, 0))],
+            animations: [WPEPuppetAnimation(
+                id: 1, name: "a", mode: "loop", fps: 30, frameCount: 1, channels: [chan(0, SIMD3(10, 0, 0))]
+            )]
+        )
+        let missing = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(model: missingChild)
+        // Missing child channel makes frame-0 not match raw (parent differs), so the character-sheet
+        // path is taken; the child has no frame-0 key so it uses its raw local (100,0) on parent (10,0).
+        #expect(missing[1].map { simd_equal($0.columns.3, SIMD4<Float>(110, 0, 0, 1)) } == true)
+
+        // A 0↔1 cycle must not fold the cycle into a bone's transform: each resolves to its own local.
+        let cyclic = WPEPuppetModel(
+            version: 19, meshes: [],
+            bones: [rawBone(0, parent: 1, SIMD3(1, 0, 0)),
+                    rawBone(1, parent: 0, SIMD3(2, 0, 0))],
+            animations: []
+        )
+        let cyc = WPEPuppetAnimationEvaluator.assembledBindWorldByBone(model: cyclic)
+        #expect(cyc[0].map { simd_equal($0.columns.3, SIMD4<Float>(1, 0, 0, 1)) } == true)
+    }
+
     @Test("Loop mode wraps the sampled frame index")
     func loopModeWraps() {
         let anim = animation(frameCount: 2, mode: "loop", channels: [channel([
@@ -184,6 +296,45 @@ struct WPEMdlParserTests {
         #expect(vertex.uv == SIMD2<Float>(0.65, 0.198))
     }
 
+    @Test("MDLV23 skeleton fixture audit accounts for every byte")
+    func auditAccountsForMDLV23SkeletonFixture() throws {
+        var audit: WPEMdlParseAudit?
+        let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithSkeleton(), audit: &audit)
+        let parseAudit = try #require(audit)
+
+        #expect(model.version == 23)
+        #expect(parseAudit.sections.contains { $0.kind == .mdlvMesh })
+        #expect(parseAudit.sections.contains { $0.kind == .mdls })
+        #expect(parseAudit.unexplainedGaps.isEmpty)
+        #expect(parseAudit.trailingLeftover == nil)
+    }
+
+    @Test("MDLV19 fixture audit accounts for every byte")
+    func auditAccountsForMDLV19Fixture() throws {
+        var audit: WPEMdlParseAudit?
+        let model = try WPEMdlParser.parse(data: makeSingleVertexSkinnedMDLV19(), audit: &audit)
+        let parseAudit = try #require(audit)
+
+        #expect(model.version == 19)
+        #expect(parseAudit.sections.contains { $0.kind == .mdlvMesh })
+        #expect(parseAudit.unexplainedGaps.isEmpty)
+        #expect(parseAudit.trailingLeftover == nil)
+    }
+
+    @Test("Audit surfaces bytes appended after the parsed MDL")
+    func auditSurfacesTrailingLeftoverBytes() throws {
+        var data = makeSingleVertexSkinnedMDLV19()
+        let junkRangeStart = data.count
+        data.append(contentsOf: [0xde, 0xad, 0xbe, 0xef])
+        var audit: WPEMdlParseAudit?
+
+        _ = try WPEMdlParser.parse(data: data, audit: &audit)
+        let parseAudit = try #require(audit)
+
+        #expect(parseAudit.unexplainedGaps.isEmpty)
+        #expect(parseAudit.trailingLeftover == junkRangeStart..<data.count)
+    }
+
     @Test("Parses MDLV16 scene model header with the leading meshCount byte")
     func parsesMDLV16SceneModelHeaderWithLeadingByte() throws {
         // Scene 3509243656 ships a static scene model (`models/Hollow Cylinder/...mdl`)
@@ -223,6 +374,16 @@ struct WPEMdlParserTests {
         #expect(model.bones[1].parentIndex == 0)
         #expect(model.bones[1].rawMatrix[12] == 12)
         #expect(model.bones[1].rawMatrix[13] == -34)
+    }
+
+    @Test("Retains the raw MDLS bone-name string (often a rig-physics JSON blob)")
+    func retainsBoneNameString() throws {
+        let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithBoneNameJSON())
+
+        #expect(model.bones.count == 1)
+        // The name field carries a rig-physics JSON blob in the real corpus; it must survive verbatim,
+        // unparsed, so a future runtime can consume it.
+        #expect(model.bones[0].name == #"{"tm":null,"tp":[1.0,2.0,3.0]}"#)
     }
 
     @Test("Recovers mesh geometry when the MDLS skeleton section is malformed")
@@ -445,6 +606,12 @@ struct WPEMdlParserTests {
     }
 
     private func makeSkinnedMDLV23WithSkeleton() -> Data {
+        makeSkinnedMDLV23WithSkeleton(boneName: "{}")
+    }
+
+    /// Single-bone MDLV0023 skeleton whose bone-name cstring is `boneName`. The MDLS section-end offset
+    /// must account for the name length so the parser consumes the whole record.
+    private func makeSkinnedMDLV23WithSkeleton(boneName: String) -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0023".utf8))
         data.appendLE(UInt32(0x80000900))
@@ -471,9 +638,10 @@ struct WPEMdlParserTests {
         data.append(UInt8(0))
         data.append(UInt8(0))
 
+        let nameByteCount = Array(boneName.utf8).count + 1
         data.append(contentsOf: Array("MDLS0004".utf8))
         data.append(UInt8(0))
-        data.appendLE(UInt32(data.count + 1 + 4 + 4 + 4 + 1 + 4 + 4 + (16 * 4) + 3))
+        data.appendLE(UInt32(data.count + 1 + 4 + 4 + 4 + 1 + 4 + 4 + (16 * 4) + nameByteCount))
         data.appendLE(UInt32(1))
         data.appendLE(UInt32(0))
         data.append(UInt8(0))
@@ -488,9 +656,13 @@ struct WPEMdlParserTests {
                 [5, -7, 0, 1]
             ]
         )
-        data.appendCString("{}")
+        data.appendCString(boneName)
 
         return data
+    }
+
+    private func makeSkinnedMDLV23WithBoneNameJSON() -> Data {
+        makeSkinnedMDLV23WithSkeleton(boneName: #"{"tm":null,"tp":[1.0,2.0,3.0]}"#)
     }
 
     private func makeMDLV23WithAnimation() -> Data {

@@ -689,6 +689,8 @@ final class SteamCMDDoctorService {
                 return
             }
 
+            Self.prepareWallpaperEngineOwnershipProbe(fileManager: fileManager)
+
             var removedIDs: [UInt64] = []
             for itemID in Self.ownershipProbeCandidateIDs {
                 let script = try SteamCMDScriptWriter.ownershipProbeScript(username: username, itemID: itemID)
@@ -735,6 +737,17 @@ final class SteamCMDDoctorService {
             ))
         } catch {
             setProbe(.wallpaperEngineOwnership, status: .red(message: redacted(error.localizedDescription), command: nil))
+        }
+    }
+
+    nonisolated static func prepareWallpaperEngineOwnershipProbe(
+        steamApps: URL? = nil,
+        fileManager: FileManager = .default
+    ) {
+        if let steamApps {
+            WPEEngineAssetsInstaller.cleanupSteamcmdAppState(steamApps: steamApps, fileManager: fileManager)
+        } else {
+            WPEEngineAssetsInstaller.cleanupSteamcmdAppState(fileManager: fileManager)
         }
     }
 

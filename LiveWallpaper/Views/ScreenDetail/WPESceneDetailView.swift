@@ -571,7 +571,7 @@ struct WPESceneDetailView: View {
     /// flag drift ("works on my machine") is visible. Only explicitly-set keys
     /// print; the curated list excludes pure dump/trace toggles.
     private static let renderFlagKeys = [
-        "WPEMetalBypassEffects", "WPEMetalFBOAliasingEnabled",
+        "WPEMetalFBOAliasingEnabled",
         "WPEMetalMemorylessDepthEnabled", "WPEMetalNonBlockingFrameSubmit",
         "WPEMetalRefractionSnapshotReuseEnabled", "WPEMetalSerializeFrames",
         "WPEMetalShaderPrewarmEnabled", "WPEMetalStaticLayerCacheEnabled",

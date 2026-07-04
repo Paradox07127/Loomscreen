@@ -1,3 +1,4 @@
+import LiveWallpaperCore
 import SwiftUI
 
 /// Inspector row pairing an icon-prefixed title with a trailing control.
@@ -23,7 +24,7 @@ public struct SettingRow<Content: View>: View {
     let title: Text
     let titleBadge: SettingRowTitleBadge?
     let subtitle: Text?
-    let info: Text?
+    let info: String.LocalizationValue?
     let content: Content
 
     public init(
@@ -32,15 +33,15 @@ public struct SettingRow<Content: View>: View {
         title: LocalizedStringKey,
         titleBadge: SettingRowTitleBadge? = nil,
         subtitle: LocalizedStringKey? = nil,
-        info: LocalizedStringKey? = nil,
+        info: String.LocalizationValue? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.icon = icon
         self.iconColor = iconColor
-        self.title = Text(title)
+        self.title = Text(title, bundle: .main)
         self.titleBadge = titleBadge
-        self.subtitle = subtitle.map { Text($0) }
-        self.info = info.map { Text($0) }
+        self.subtitle = subtitle.map { Text($0, bundle: .main) }
+        self.info = info
         self.content = content()
     }
 
@@ -54,7 +55,7 @@ public struct SettingRow<Content: View>: View {
         verbatimTitle: String,
         verbatimSubtitle: String? = nil,
         titleBadge: SettingRowTitleBadge? = nil,
-        info: LocalizedStringKey? = nil,
+        info: String.LocalizationValue? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.icon = icon
@@ -62,7 +63,7 @@ public struct SettingRow<Content: View>: View {
         self.title = Text(verbatim: verbatimTitle)
         self.titleBadge = titleBadge
         self.subtitle = verbatimSubtitle.map { Text(verbatim: $0) }
-        self.info = info.map { Text($0) }
+        self.info = info
         self.content = content()
     }
 
@@ -116,19 +117,19 @@ public struct SettingRow<Content: View>: View {
 /// click (popover). Public so inspector rows that don't use `SettingRow`
 /// (e.g. compact slider grids) can adopt the same pattern.
 public struct InfoTooltipButton: View {
-    let text: Text
+    let text: String.LocalizationValue?
+    let verbatimText: String?
     @State private var isPresentingPopover = false
+    @AppStorage(AppLanguagePreference.storageKey) private var rawPreference = AppLanguagePreference.system.rawValue
 
-    public init(text: LocalizedStringKey) {
-        self.text = Text(text)
+    public init(text: String.LocalizationValue) {
+        self.text = text
+        self.verbatimText = nil
     }
 
     public init(verbatim text: String) {
-        self.text = Text(verbatim: text)
-    }
-
-    fileprivate init(text: Text) {
-        self.text = text
+        self.text = nil
+        self.verbatimText = text
     }
 
     public var body: some View {
@@ -140,16 +141,27 @@ public struct InfoTooltipButton: View {
                 .foregroundStyle(.tertiary)
         }
         .buttonStyle(.plain)
-        .help(text)
-        .accessibilityLabel(Text("More information"))
-        .accessibilityHint(text)
+        .help(localizedText)
+        .accessibilityLabel(Text("More information", bundle: .main))
+        .accessibilityHint(Text(verbatim: localizedText))
         .popover(isPresented: $isPresentingPopover, arrowEdge: .top) {
-            text
+            Text(verbatim: localizedText)
                 .font(.callout)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 280, alignment: .leading)
                 .padding(12)
         }
+    }
+
+    private var localizedText: String {
+        if let verbatimText { return verbatimText }
+        guard let text else { return "" }
+        let preference = AppLanguagePreference(rawValue: rawPreference) ?? .system
+        return String(
+            localized: text,
+            bundle: preference.localizationBundle(in: .main),
+            locale: preference.locale
+        )
     }
 }

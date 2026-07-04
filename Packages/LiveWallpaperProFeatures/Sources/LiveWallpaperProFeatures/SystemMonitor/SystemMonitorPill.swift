@@ -1,11 +1,9 @@
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Collapsed sidebar-footer entry point for the system dashboard. Shows a single
-/// liquid-glass capsule with a live health dot; tapping reveals the full
-/// `SystemMonitorView` gauges in a popover. Holding a monitoring reference while
-/// visible keeps the dot live, while avoiding the always-on render of four
-/// animated rings and keeping the sidebar footer height fixed.
+/// Sidebar-footer entry point for the system dashboard. The collapsed row keeps
+/// a live health dot; tapping expands the full gauges upward inside the sidebar
+/// on a glass surface instead of escaping into a popover.
 public struct SystemMonitorPill: View {
     private var monitor = SystemMonitor.shared
     @State private var isExpanded = false
@@ -20,17 +18,34 @@ public struct SystemMonitorPill: View {
     }
 
     public var body: some View {
-        header
-            .popover(isPresented: $isExpanded, arrowEdge: .bottom) {
-                SystemMonitorView(
-                    activeDisplayCount: activeDisplayCount,
-                    totalDisplayCount: totalDisplayCount
-                )
-                .padding(DesignTokens.Spacing.sm)
-                .frame(width: 244)
-            }
+        content
             .onAppear { monitor.startMonitoring() }
             .onDisappear { monitor.stopMonitoring() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isExpanded {
+            expandedPanel
+        } else {
+            header
+                .adaptiveGlassSurface(.capsule, interactive: true)
+        }
+    }
+
+    private var expandedPanel: some View {
+        VStack(spacing: DesignTokens.Spacing.sm) {
+            SystemMonitorView(
+                activeDisplayCount: activeDisplayCount,
+                totalDisplayCount: totalDisplayCount
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+
+            header
+        }
+        .padding(DesignTokens.Spacing.xs)
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md), interactive: true)
     }
 
     private var header: some View {
@@ -71,7 +86,6 @@ public struct SystemMonitorPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .adaptiveGlassSurface(.capsule, interactive: true)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("System", comment: "Sidebar system-monitor pill title."))
         .accessibilityValue(loadDescription)

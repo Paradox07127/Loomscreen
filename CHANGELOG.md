@@ -13,6 +13,24 @@ will be cut once the surface has stabilized through real-world use.
 Pro-edition (`LiveWallpaper.app`) release notes live separately and are
 not covered by this file.
 
+## [0.2.3] — 2026-07-04
+
+### Changed
+- Settings and shortcut surfaces were tightened for clearer navigation,
+  action labels, and destructive-action presentation.
+- Localization catalogs were refreshed and coverage checks were updated for
+  the current UI strings.
+- Release documentation now calls out the manual DMG publishing path and the
+  current updater boundary: public builds still use GitHub Releases checks and
+  manual download/replace updates.
+
+### Fixed
+- Additional WPE scene-rendering, puppet-model, particle, and render-graph
+  stability fixes landed for the shared codebase. These remain Pro-only at
+  runtime in the Lite SKU.
+- Workshop and engine-assets maintenance paths were hardened, including
+  SteamCMD diagnostics and installed-item presentation.
+
 ## [0.2.2] — 2026-07-01
 
 ### Added
@@ -127,7 +145,8 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.2...HEAD
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.3...HEAD
+[0.2.3]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.2...loomscreen-v0.2.3
 [0.2.2]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.1...loomscreen-v0.2.2
 [0.2.1]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...loomscreen-v0.2.1
 [0.2.0]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...loomscreen-v0.2.0

@@ -347,19 +347,11 @@ struct WorkshopInstalledView: View {
                 && storageMatches(entry)
                 && matchesSearch(entry, query: query)
         }
-        switch sortOrder {
-        case .recommended:
-            return filtered
-        case .name:
-            return filtered.sorted { compareByTitle($0, $1) }
-        case .type:
-            return filtered.sorted {
-                let lhs = typeSortRank($0.origin.originalType)
-                let rhs = typeSortRank($1.origin.originalType)
-                if lhs != rhs { return lhs < rhs }
-                return compareByTitle($0, $1)
-            }
-        }
+        return WPEInstalledLibrarySorter.sorted(
+            filtered,
+            by: sortOrder,
+            updatedWorkshopIDs: updatedWorkshopIDs
+        )
     }
 
     private func matchesSearch(_ entry: WPEHistoryEntry, query: String) -> Bool {
@@ -367,22 +359,6 @@ struct WorkshopInstalledView: View {
         return entry.origin.title.localizedCaseInsensitiveContains(query)
             || entry.origin.workshopID.localizedCaseInsensitiveContains(query)
             || entry.origin.localizedDisplayTypeName.localizedCaseInsensitiveContains(query)
-    }
-
-    private func compareByTitle(_ lhs: WPEHistoryEntry, _ rhs: WPEHistoryEntry) -> Bool {
-        let order = lhs.origin.title.localizedCaseInsensitiveCompare(rhs.origin.title)
-        if order != .orderedSame { return order == .orderedAscending }
-        return lhs.origin.workshopID.localizedCaseInsensitiveCompare(rhs.origin.workshopID) == .orderedAscending
-    }
-
-    private func typeSortRank(_ type: WPEType) -> Int {
-        switch type {
-        case .video: return 0
-        case .web: return 1
-        case .scene: return 2
-        case .application: return 3
-        case .unknown: return 4
-        }
     }
 
     // MARK: - Type filter chips (multi-select)
@@ -982,8 +958,8 @@ private enum InstalledStorageKind: String, CaseIterable, Identifiable {
     }
 }
 
-private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
-    case recommended, name, type
+enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
+    case recommended, name, updateAvailable
 
     var id: Self { self }
 
@@ -991,8 +967,38 @@ private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
         switch self {
         case .recommended: return String(localized: "Recent", comment: "Workshop library sort order: most recently imported first.")
         case .name: return String(localized: "Name", comment: "Workshop library sort order.")
-        case .type: return String(localized: "Type", comment: "Workshop library sort order.")
+        case .updateAvailable: return String(localized: "Needs Update", comment: "Workshop library sort order: update-available items first.")
         }
+    }
+}
+
+enum WPEInstalledLibrarySorter {
+    static func sorted(
+        _ entries: [WPEHistoryEntry],
+        by sortOrder: WPELibrarySortOrder,
+        updatedWorkshopIDs: Set<String>
+    ) -> [WPEHistoryEntry] {
+        switch sortOrder {
+        case .recommended:
+            return entries
+        case .name:
+            return entries.sorted(by: compareByTitle)
+        case .updateAvailable:
+            return entries.sorted { lhs, rhs in
+                let lhsNeedsUpdate = updatedWorkshopIDs.contains(lhs.origin.workshopID)
+                let rhsNeedsUpdate = updatedWorkshopIDs.contains(rhs.origin.workshopID)
+                if lhsNeedsUpdate != rhsNeedsUpdate {
+                    return lhsNeedsUpdate
+                }
+                return compareByTitle(lhs, rhs)
+            }
+        }
+    }
+
+    private static func compareByTitle(_ lhs: WPEHistoryEntry, _ rhs: WPEHistoryEntry) -> Bool {
+        let order = lhs.origin.title.localizedCaseInsensitiveCompare(rhs.origin.title)
+        if order != .orderedSame { return order == .orderedAscending }
+        return lhs.origin.workshopID.localizedCaseInsensitiveCompare(rhs.origin.workshopID) == .orderedAscending
     }
 }
 

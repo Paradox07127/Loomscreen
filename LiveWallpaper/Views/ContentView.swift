@@ -437,7 +437,6 @@ struct Sidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if featureCatalog.isEnabled(.systemMonitor) {
                 VStack(spacing: 0) {
-                    Divider()
                     SystemMonitorPill(
                         activeDisplayCount: activeWallpaperDisplayCount,
                         totalDisplayCount: screenManager.screens.count

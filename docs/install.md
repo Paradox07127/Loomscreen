@@ -36,7 +36,8 @@ open the Releases page to download it. You can also:
 - **Skip this version** — silence a specific release.
 
 Updating is a manual download-and-replace (drag the new `Loomscreen.app` into
-`/Applications`, repeat the `xattr` step).
+`/Applications`, repeat the `xattr` step). Public builds do not auto-install
+updates yet.
 
 ## First-run onboarding
 

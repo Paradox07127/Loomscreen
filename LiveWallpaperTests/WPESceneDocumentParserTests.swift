@@ -297,6 +297,27 @@ struct WPESceneDocumentParserTests {
         #expect(layer.blendMode == .additive)
     }
 
+    @Test("Image numeric colorBlendMode 7 maps to layer screen blend")
+    func imageNumericColorBlendModeSevenMapsToScreenBlend() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "471",
+                "name": "atmosphere overlay",
+                "type": "image",
+                "image": "models/workshop/2079971872/atmosphere.json",
+                "colorBlendMode": 7
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.blendMode == .screen)
+    }
+
     @Test("Image origin script using cursorWorldPosition is preserved for runtime")
     func cursorOriginScriptIsPreservedForRuntime() throws {
         let script = """

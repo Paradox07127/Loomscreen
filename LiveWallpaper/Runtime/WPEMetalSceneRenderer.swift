@@ -69,13 +69,24 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return mib * 1_048_576
     }
 
-    /// When true, emitters are pre-populated to their steady-state spread on
-    /// load (`WPEParticleSystem.prewarm`, up to ~900 substeps/system — the
-    /// dominant `particles.load` cost). Default OFF: emitters start empty and
-    /// fill naturally, trading the populated-on-load look for a faster load.
-    /// Flip `WPEParticlePrewarmEnabled` (Developer Tools → "Particle prewarm").
+    /// When true, emitters with no authored start offset are also pre-populated
+    /// to their steady-state spread on load. Emitters with `starttime > 0`
+    /// always prewarm because WPE authors use that field as an initial simulation
+    /// offset for already-populated first frames.
     private static var particlePrewarmEnabled: Bool {
         UserDefaults.standard.bool(forKey: "WPEParticlePrewarmEnabled")
+    }
+
+    nonisolated static func particlePrewarmSeconds(
+        for definition: WPEParticleDefinition,
+        manualPrewarmEnabled: Bool
+    ) -> Double? {
+        guard definition.rate > 0 || definition.instantaneousCount > 0 else { return nil }
+        let authoredStart = max(0, definition.startDelay)
+        guard authoredStart > 0 || manualPrewarmEnabled else { return nil }
+        let activeSeconds = min(max(definition.lifetimeMax, 2.0), 15.0)
+        let seconds = authoredStart + activeSeconds
+        return seconds > 0 ? seconds : nil
     }
 
     /// Slave a revealed loop video's playhead to lead its intro overlay by the
@@ -384,11 +395,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var objectParentByID: [String: String] = [:]
     private var ownVisibilityByID: [String: Bool] = [:]
 
-    /// Emits a structured per-frame summary roughly once per second so runtime
-    /// logs can show time advancement, dynamic texture swaps, and output size.
-    private var lastHeartbeatTime: TimeInterval = -1
-
     var renderedTexture: MTLTexture? { outputTexture }
+
+    /// Test hook: reads a value from the scene's shared script store after a
+    /// render, so a test can assert a HIDDEN text object's compute script ran
+    /// (populated `shared`) rather than being skipped by the visibility filter.
+    func sharedScriptValueForTesting(_ key: String) -> Any? {
+        sceneScriptSharedState?.get(key)
+    }
     /// Read-back of the first frame, captured at the end of `performLoad()`
     /// **only when scene-debug artifacts are enabled**. Production leaves it
     /// `nil`; the inspector requests a poster from the next normally-presented
@@ -1647,6 +1661,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 category: .performance
             )
         }
+        // WPE runs a text object's script regardless of its visibility. Several
+        // scenes (e.g. 三体 3509243656) use a HIDDEN text object purely as a
+        // COMPUTE script that writes shared state — civilisation stats, ranking,
+        // temperature — which the VISIBLE data texts then read via `value =
+        // shared.txtN`. Ticking only visible objects left that shared state unset,
+        // so every derived readout rendered blank. Tick every script here (for its
+        // side effects on `shared`), independent of whether it will be drawn.
+        var liveTextByID: [String: String] = [:]
+        liveTextByID.reserveCapacity(textScriptInstances.count)
+        for (id, instance) in textScriptInstances {
+            liveTextByID[id] = instance.tickString()
+        }
         if let textRenderer, !textObjects.isEmpty {
             // CoreText draws for objects that don't take the MSDF path this frame.
             var draws: [WPETextOverlayDraw] = []
@@ -1658,7 +1684,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             for object in textObjects where liveTextVisibility[object.id] ?? object.visible {
                 let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
                 guard resolvedAlpha > 0 else { continue }
-                let liveText = textScriptInstances[object.id]?.tickString() ?? object.text
+                let liveText = liveTextByID[object.id] ?? object.text
                 let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 let textParallax = parallaxFrame.pixelOffset(
@@ -2409,8 +2435,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // always-visible stub, so a dock script gating on `parent.visible` can't
         // otherwise hide itself (green App Launcher Dock on 3660962877). Walk the
         // chain live so a runtime ancestor toggle is respected, not snapshotted.
-        liveLayerVisibility[objectID] = state.visible && ancestorChainVisible(objectID)
-        liveLayerAlpha[objectID] = state.alpha
+        if state.visibleAssigned {
+            liveLayerVisibility[objectID] = state.visible && ancestorChainVisible(objectID)
+        }
+        if state.alphaAssigned {
+            liveLayerAlpha[objectID] = state.alpha
+        }
         guard !state.videoCommands.isEmpty,
               let key = layerVideoSourceKey[objectID],
               let video = dynamicTextureSources[key] as? WPEVideoTextureSource else { return }
@@ -2736,18 +2766,14 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             system.followParent = followParent
             system.requiresFollowParent = true
         }
-        // Prewarm pre-populates the emitter to its STEADY-STATE age/position
-        // spread so it loads already-full (matches WPE's populated-on-load
-        // look) instead of filling from empty. It is the dominant
-        // `particles.load` cost — up to ~900 substeps/system run synchronously
-        // on the main actor — so it is gated: default OFF = emitters start at
-        // zero and fill naturally (faster load); flip `WPEParticlePrewarmEnabled`
-        // (Developer Tools → "Particle prewarm") to restore the populated look.
-        if Self.particlePrewarmEnabled {
-            // Prewarm long enough that the first-spawned particles have lived a
-            // full lifetime (a `+2s` cap left them clustered near the origin).
-            let prewarmSeconds = max(0, definition.startDelay)
-                + min(max(definition.lifetimeMax, 2.0), 15.0)
+        // WPE `starttime` is used by workshop authors as an initial simulation
+        // offset: star fields with `starttime: 200` should load already full,
+        // not wait 200 wall-clock seconds. The manual developer flag only adds
+        // the same steady-state prewarm to emitters whose authored starttime is 0.
+        if let prewarmSeconds = Self.particlePrewarmSeconds(
+            for: definition,
+            manualPrewarmEnabled: Self.particlePrewarmEnabled
+        ) {
             system.prewarm(simulatedSeconds: prewarmSeconds)
         }
         particleSystems.append(system)
@@ -3984,19 +4010,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Phase 2E: pulls fresh `MTLTexture`s from dynamic sources and enforces the
     /// optional static-texture VRAM budget before every render call.
     private func texturesForCurrentFrame(time: TimeInterval, pipeline: WPEPreparedRenderPipeline) throws -> [String: MTLTexture] {
-        let shouldLogHeartbeat = time - lastHeartbeatTime >= 10.0 || lastHeartbeatTime < 0
-        var dynamicFrameLog: [String] = []
         for (path, source) in dynamicTextureSources {
             if let texture = source.texture(at: time) {
                 loadedTextures[path] = texture
-                guard shouldLogHeartbeat else { continue }
-                if let animated = source as? WPETexAnimatedTextureSource {
-                    dynamicFrameLog.append("\(path)#\(animated.frameIndex(at: time))")
-                } else if let lazy = source as? WPETexLazyAnimatedTextureSource {
-                    dynamicFrameLog.append("\(path) \(lazy.debugFrameDescription(at: time))")
-                } else {
-                    dynamicFrameLog.append("\(path)#?")
-                }
             }
         }
 
@@ -4015,15 +4031,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             } else {
                 deactivateTextureCacheBudget()
             }
-        }
-        // Heartbeat throttled to 10s so it confirms liveness without spamming
-        // the log every second. (Was 1s — see Log filtering guidance.)
-        if shouldLogHeartbeat {
-            lastHeartbeatTime = time
-            let scene = "\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))"
-            let output = outputTexture.map { "\($0.width)x\($0.height)" } ?? "nil"
-            let dyn = dynamicFrameLog.isEmpty ? "none" : dynamicFrameLog.joined(separator: " ")
-            debugStage("heartbeat", "t=\(String(format: "%.2f", time))s scene=\(scene) output=\(output) dynamic=\(dyn)")
         }
         return loadedTextures
     }

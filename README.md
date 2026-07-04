@@ -106,8 +106,9 @@ Detailed guide: [docs/quick-start.md](docs/quick-start.md)
 
 ## Updates
 
-- One launch-time check + manual check path in **Settings → About**.
+- One launch-time GitHub Releases check + manual check path in **Settings → About**.
 - Manual updates: download the new DMG and repeat the `xattr` step once.
+- Public builds do not auto-install updates yet.
 
 ## Requirements
 

@@ -6,6 +6,11 @@
 xcuserdata/
 *.xcuserstate
 project.xcworkspace/
+!LiveWallpaper.xcodeproj/project.xcworkspace/
+!LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/
+LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/*
+!LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+!LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 xcuserdata/
 *.xcuserdatad/
 

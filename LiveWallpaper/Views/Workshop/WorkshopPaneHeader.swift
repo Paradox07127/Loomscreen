@@ -98,13 +98,9 @@ struct WorkshopPaneHeader: View {
                     Button {
                         onImport()
                     } label: {
-                        if isImporting {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "folder.badge.plus")
-                        }
+                        headerIconLabel(systemName: "folder.badge.plus", isBusy: isImporting)
                     }
-                    .adaptiveGlassButton(.regular)
+                    .adaptiveGlassButton(.regular, shape: .circle)
                     .controlSize(.regular)
                     .disabled(isImporting)
                     .help(Text("Import Wallpaper Engine projects from a folder"))
@@ -114,14 +110,27 @@ struct WorkshopPaneHeader: View {
                 Button {
                     onPaste()
                 } label: {
-                    Image(systemName: "plus")
+                    headerIconLabel(systemName: "plus")
                 }
-                .adaptiveGlassButton(.regular)
+                .adaptiveGlassButton(.regular, shape: .circle)
                 .controlSize(.regular)
                 .help(Text("Add a Steam Workshop item by URL or ID"))
                 .accessibilityLabel(Text("Add from Workshop URL or ID"))
             }
         }
+    }
+
+    @ViewBuilder
+    private func headerIconLabel(systemName: String, isBusy: Bool = false) -> some View {
+        ZStack {
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: systemName)
+            }
+        }
+        .frame(width: 18, height: 18)
     }
 }
 #endif

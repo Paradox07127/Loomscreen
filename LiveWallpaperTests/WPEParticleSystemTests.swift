@@ -564,6 +564,102 @@ struct WPEParticleSystemTests {
         #expect(def.turbulenceMask.z == 0)
     }
 
+    @Test("Parser reads perspective flag (flags & 4)")
+    func parserReadsPerspectiveFlag() throws {
+        let perspective = try #require(WPEParticleDefinitionParser.parse(
+            data: Data(#"{"maxcount": 4, "flags": 4, "emitter": [{"rate": 5}]}"#.utf8)))
+        #expect(perspective.isPerspective)
+        let flat = try #require(WPEParticleDefinitionParser.parse(
+            data: Data(#"{"maxcount": 4, "flags": 0, "emitter": [{"rate": 5}]}"#.utf8)))
+        #expect(!flat.isPerspective)
+        let none = try #require(WPEParticleDefinitionParser.parse(
+            data: Data(#"{"maxcount": 4, "emitter": [{"rate": 5}]}"#.utf8)))
+        #expect(!none.isPerspective)
+    }
+
+    @Test("Perspective particles draw with depth-varied size")
+    func perspectiveDepthVariesSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Sphere emitter with a wide Z dispersal → particles at many depths.
+        // Positive Z projects toward the camera and grows, while nonpositive
+        // depth remains near the authored size.
+        let json = #"""
+        {
+            "maxcount": 200, "flags": 4,
+            "emitter": [{"name": "sphererandom", "rate": 100000, "distancemin": 10, "distancemax": 1000, "directions": "1 1 1"}],
+            "initializer": [
+                {"name": "lifetimerandom", "min": 100, "max": 100},
+                {"name": "sizerandom", "min": 40, "max": 40}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.isPerspective)
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        for step in 1...6 { system.tick(now: Double(step) * 0.05) }
+        let n = system.liveInstanceCount
+        try #require(n >= 32)
+        let buf = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 200)
+        var minSize: Float = .greatestFiniteMagnitude
+        var maxSize: Float = 0
+        for i in 0..<n {
+            let s = buf[i].positionAndSize.w
+            minSize = Swift.min(minSize, s)
+            maxSize = Swift.max(maxSize, s)
+        }
+        // Authored size 40; the depth cue boosts NEAR flakes (depthScale up to
+        // 1+boost) and leaves FAR ones at ~1×. So sizes span from ~40 (far) up
+        // past 40 (near, boosted), a clear near/far spread.
+        #expect(minSize <= 45, "far particles stay near the base size (min \(minSize))")
+        #expect(maxSize > 60, "near particles are boosted bigger (max \(maxSize))")
+        #expect(maxSize - minSize > 20, "depth should spread sizes (span \(maxSize - minSize))")
+    }
+
+    @Test("Perspective particles keep depth projection when Z comes from gravity")
+    func perspectiveDepthAccountsForGravityTravel() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 5, lifetimeMax: 5,
+            sizeMin: 10, sizeMax: 10,
+            originOffset: SIMD3(100, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            directionMask: SIMD3(2, 2, 0),
+            gravity: SIMD3(0, 0, 250),
+            isPerspective: true
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let near = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize
+
+        for step in 2...12 {
+            system.tick(now: Double(step) * 0.05)
+        }
+        let mid = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize
+
+        for step in 13...40 {
+            system.tick(now: Double(step) * 0.05)
+        }
+        let late = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize
+
+        // This starfield pattern spawns at z=0 and moves only through +Z
+        // gravity. WPE renders that as motion toward the camera: particles
+        // project farther from the vanishing point and grow over their life.
+        #expect(mid.x > near.x + 1)
+        #expect(mid.w > near.w + 0.1)
+        #expect(late.x > mid.x + 5)
+        #expect(late.w > mid.w + 0.5)
+    }
+
     @Test("Turbulence produces non-zero position delta")
     func turbulenceProducesPositionDelta() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -610,6 +706,66 @@ struct WPEParticleSystemTests {
         let dx = stormy.x - calm.x
         let dy = stormy.y - calm.y
         #expect(sqrt(dx * dx + dy * dy) > 0.5)
+    }
+
+    @Test("Parser flags a turbulentvelocityrandom initializer")
+    func parserFlagsTurbulentVelocityInit() throws {
+        let seeded = try #require(WPEParticleDefinitionParser.parse(data: Data(#"""
+        {
+            "maxcount": 8, "emitter": [{"name": "boxrandom", "rate": 10}],
+            "initializer": [{"name": "turbulentvelocityrandom", "offset": 0.5, "scale": 0.1}]
+        }
+        """#.utf8)))
+        #expect(seeded.hasTurbulentVelocityInit)
+        let plain = try #require(WPEParticleDefinitionParser.parse(data: Data(#"""
+        {"maxcount": 8, "emitter": [{"name": "boxrandom", "rate": 10}]}
+        """#.utf8)))
+        #expect(!plain.hasTurbulentVelocityInit)
+    }
+
+    @Test("turbulentvelocityrandom seeds a travelling velocity (embers leave the box)")
+    func turbulentVelocityInitSeedsMotion() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Ember-style: point spawn, zero base velocity, NO turbulence operator
+        // (speedMax 0). The only Y-motion source is the seed. Without it the
+        // sparks are stuck at spawn Y (invisible below-screen); with it they
+        // travel out of the box.
+        func makeDef(seed: Bool) -> WPEParticleDefinition {
+            WPEParticleDefinition(
+                materialRelativePath: nil, maxCount: 32,
+                rate: 10000, startDelay: 0,
+                lifetimeMin: 10, lifetimeMax: 10,
+                sizeMin: 1, sizeMax: 1,
+                originOffset: SIMD3(0, 0, 0),
+                dispersalMin: 0, dispersalMax: 0,
+                velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+                colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+                fadeInSeconds: 0,
+                hasTurbulentVelocityInit: seed
+            )
+        }
+        // Spread of Y across live particles: a point emitter with zero base
+        // velocity keeps every spark on the SAME Y line unless the seed gives
+        // each a distinct travelling velocity.
+        func spreadY(_ def: WPEParticleDefinition) throws -> Float {
+            let system = try #require(WPEParticleSystem(definition: def, device: device))
+            for step in 1...6 { system.tick(now: Double(step) * 0.1) }
+            let n = system.liveInstanceCount
+            try #require(n >= 8)
+            let buf = system.instanceBuffer.contents()
+                .bindMemory(to: WPEParticleInstance.self, capacity: 32)
+            var lo: Float = .greatestFiniteMagnitude
+            var hi: Float = -.greatestFiniteMagnitude
+            for i in 0..<n {
+                let y = buf[i].positionAndSize.y
+                lo = Swift.min(lo, y); hi = Swift.max(hi, y)
+            }
+            return hi - lo
+        }
+        let stuck = try spreadY(makeDef(seed: false))
+        let travelled = try spreadY(makeDef(seed: true))
+        #expect(stuck < 0.01, "no seed → all sparks stay on one Y line (spread \(stuck))")
+        #expect(travelled > 10, "seed → sparks fan out in Y (spread \(travelled))")
     }
 
     @Test("alphafade timings are lifetime fractions, not seconds")
@@ -700,6 +856,45 @@ struct WPEParticleSystemTests {
             .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.x
 
         #expect(after > before + 5)
+    }
+
+    @Test("Authored starttime forces WPE-matching prewarm without the manual prewarm flag")
+    func authoredStarttimeForcesPrewarm() {
+        let delayed = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 5_000,
+            rate: 250, startDelay: 200,
+            lifetimeMin: 5, lifetimeMax: 5,
+            sizeMin: 3, sizeMax: 5,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 512,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.1
+        )
+        let immediate = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 128,
+            rate: 10, startDelay: 0,
+            lifetimeMin: 2, lifetimeMax: 2,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+
+        #expect(WPEMetalSceneRenderer.particlePrewarmSeconds(
+            for: delayed,
+            manualPrewarmEnabled: false
+        ) == 205)
+        #expect(WPEMetalSceneRenderer.particlePrewarmSeconds(
+            for: immediate,
+            manualPrewarmEnabled: false
+        ) == nil)
+        #expect(WPEMetalSceneRenderer.particlePrewarmSeconds(
+            for: immediate,
+            manualPrewarmEnabled: true
+        ) == 2)
     }
 
     // MARK: - Mouse interaction: control points (M3)

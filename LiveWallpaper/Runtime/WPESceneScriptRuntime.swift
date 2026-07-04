@@ -369,6 +369,11 @@ struct WPELayerScriptState: Sendable, Equatable {
     var visible: Bool
     var alpha: Double
     var videoCommands: [WPELayerVideoCommand]
+    /// Whether the script EXPLICITLY assigned this field. A layer it merely READ
+    /// (`if (getLayer(x).visible)`) must not be driven, else the handle's default
+    /// `visible=true` clobbers the layer's real state. Own/created states apply both.
+    var visibleAssigned: Bool = true
+    var alphaAssigned: Bool = true
 }
 
 /// Runtime state for a layer created by `thisScene.createLayer(...)`.
@@ -566,6 +571,11 @@ final class WPELayerScriptInstance {
         private var didThrow = false
         /// Handles minted by `thisScene.getLayer(name)`, keyed by layer name.
         private var namedLayers: [String: JSValue] = [:]
+        /// Layers whose `visible`/`alpha` the script EXPLICITLY assigned (keyed by
+        /// handle key = layer name, or `ownKey` for `thisLayer`). A `getLayer(x)`
+        /// the script only *read* never lands here, so `readOutput` won't drive it.
+        private var assignedVisible: [String: Bool] = [:]
+        private var assignedAlpha: [String: Double] = [:]
         private var createdLayers: [(key: String, handle: JSValue)] = []
         private var createdLayerCounter = 0
         /// Video commands per layer key ("" = thisLayer, else the getLayer name).
@@ -919,8 +929,12 @@ final class WPELayerScriptInstance {
         /// so a UI script that walks the tree runs instead of throwing on init.
         private func makeLayerHandle(key: String, in context: JSContext) -> JSValue {
             let handle = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
-            handle.setObject(true, forKeyedSubscript: "visible" as NSString)
-            handle.setObject(1.0, forKeyedSubscript: "alpha" as NSString)
+            // `visible`/`alpha` are accessor properties (not data) so an explicit
+            // `handle.visible = x` is DISTINGUISHABLE from a mere read. Reading a
+            // handle the script never assigned returns the neutral default (shown),
+            // but `readOutput` only drives layers recorded here — so a read-only
+            // reference can't clobber a layer's real visibility.
+            installAssignmentAccessors(on: handle, key: key, in: context)
             handle.setObject(Self.unitScale(in: context), forKeyedSubscript: "scale" as NSString)
             let videoHandle = makeVideoHandle(key: key, in: context)
             let getVideoTexture: @convention(block) () -> JSValue = { videoHandle }
@@ -932,6 +946,47 @@ final class WPELayerScriptInstance {
             let getAnimationLayer: @convention(block) (JSValue) -> JSValue = { _ in anim }
             handle.setObject(getAnimationLayer, forKeyedSubscript: "getAnimationLayer" as NSString)
             return handle
+        }
+
+        /// Install `visible`/`alpha` as accessor properties whose setters record an
+        /// EXPLICIT assignment (into `assignedVisible`/`assignedAlpha` keyed by
+        /// `key`), and whose getters return the last assigned value or the neutral
+        /// default. This is what lets `readOutput` drive only the layers a script
+        /// actually set — not every layer it merely read.
+        private func installAssignmentAccessors(on handle: JSValue, key: String, in context: JSContext) {
+            let getVisible: @convention(block) () -> Bool = { [weak self] in
+                self?.assignedVisible[key] ?? true
+            }
+            let setVisible: @convention(block) (JSValue) -> Void = { [weak self] value in
+                self?.assignedVisible[key] = value.toBool()
+            }
+            let getAlpha: @convention(block) () -> Double = { [weak self] in
+                self?.assignedAlpha[key] ?? 1
+            }
+            let setAlpha: @convention(block) (JSValue) -> Void = { [weak self] value in
+                let scalar = value.toDouble()
+                self?.assignedAlpha[key] = scalar.isFinite ? scalar : 1
+            }
+            defineAccessor(on: handle, property: "visible", get: getVisible, set: setVisible, in: context)
+            defineAccessor(on: handle, property: "alpha", get: getAlpha, set: setAlpha, in: context)
+        }
+
+        private func defineAccessor(
+            on handle: JSValue,
+            property: String,
+            get: Any,
+            set: Any,
+            in context: JSContext
+        ) {
+            guard let objectClass = context.objectForKeyedSubscript("Object"),
+                  let define = objectClass.objectForKeyedSubscript("defineProperty"),
+                  !define.isUndefined,
+                  let descriptor = JSValue(newObjectIn: context) else { return }
+            descriptor.setObject(get, forKeyedSubscript: "get" as NSString)
+            descriptor.setObject(set, forKeyedSubscript: "set" as NSString)
+            descriptor.setObject(true, forKeyedSubscript: "enumerable" as NSString)
+            descriptor.setObject(true, forKeyedSubscript: "configurable" as NSString)
+            define.call(withArguments: [handle, property, descriptor])
         }
 
         private static func unitScale(in context: JSContext) -> JSValue {
@@ -995,8 +1050,20 @@ final class WPELayerScriptInstance {
         private func readOutput() -> WPELayerScriptOutput {
             let own = stateFor(handle: thisLayer, key: Self.ownKey)
             var others: [String: WPELayerScriptState] = [:]
-            for (name, handle) in namedLayers {
-                others[name] = stateFor(handle: handle, key: name)
+            for (name, _) in namedLayers {
+                let visible = assignedVisible[name]
+                let alpha = assignedAlpha[name]
+                let video = pendingVideo[name] ?? []
+                // A layer the script only READ (never assigned visible/alpha, no
+                // video command) must not be driven — leave its real visibility be.
+                guard visible != nil || alpha != nil || !video.isEmpty else { continue }
+                others[name] = WPELayerScriptState(
+                    visible: visible ?? true,
+                    alpha: alpha ?? 1,
+                    videoCommands: video,
+                    visibleAssigned: visible != nil,
+                    alphaAssigned: alpha != nil
+                )
             }
             let created = createdLayers.map { createdStateFor(handle: $0.handle, key: $0.key) }
             pendingVideo.removeAll(keepingCapacity: true)

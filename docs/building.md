@@ -44,5 +44,5 @@ in the PR description.
 
 ## Packaging a release
 
-See [`RELEASING.md`](../RELEASING.md) for the ad-hoc DMG packaging flow
-(`scripts/release-app.sh --sku lite|pro`) and the current CI caveat.
+See [`RELEASING.md`](../RELEASING.md) for the maintainer-only ad-hoc DMG
+packaging flow, 0.2.3 preflight checklist, and current updater status.

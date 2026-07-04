@@ -180,8 +180,8 @@ Entry path: Settings `General / Shortcuts` tabs.
 - Wallpaper automation runs schedule/playlist rotation in minute cadence.
 - Full-screen/game-window/battery behavior controls are centralized in manager/policy layers.
 - Update check:
-  - launch-time check + manual check in About tab.
-  - no background polling service.
+  - launch-time GitHub Releases check + manual check in About tab.
+  - no background polling service and no public auto-install updater yet.
 
 ## 9) Security and privacy
 
@@ -212,4 +212,3 @@ Entry path: Settings `General / Shortcuts` tabs.
   `LiveWallpaper/Views/Settings/*.swift`
 - Workshop stack:
   `LiveWallpaper/Views/Workshop/*.swift`
-

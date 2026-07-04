@@ -215,55 +215,71 @@ struct WPERenderPipelineBuilderTests {
         #expect(mesh.parts == [WPEPuppetMeshPart(id: 7, start: 0, count: 3)])
     }
 
-    @Test("A legacy MDLV<21 puppet refuses the whole scene instead of rendering it misaligned")
+    @Test("A pre-v19 puppet generation refuses the whole scene instead of rendering it misaligned")
     func legacyPuppetGenerationRefusesScene() throws {
-        // Same parseable puppet, but tagged MDLV0019 (the exploded-pieces generation we
-        // cannot assemble). loadPuppetModel must throw so the scene is skipped + warned,
-        // not silently degraded to a scattered render.
-        var legacyMDL = makeSingleTrianglePuppetMDL()
-        legacyMDL.replaceSubrange(0..<8, with: "MDLV0019".utf8)
+        // A parseable puppet tagged MDLV0017 (a generation below the verified character-sheet floor).
+        // loadPuppetModel must throw so the scene is skipped + warned, not silently degraded.
         let fixture = try makeFixture(dataFiles: [
-            "models/layer_puppet.mdl": legacyMDL
+            "models/layer_puppet.mdl": makeLegacyPuppetMDLBelow19()
         ])
         defer { fixture.cleanup() }
 
-        let graph = WPERenderGraph(layers: [
-            WPERenderLayer(
-                objectID: "7",
-                objectName: "Layer",
-                imagePath: "models/layer.json",
-                materialPath: "materials/layer.json",
-                puppetPath: "models/layer_puppet.mdl",
-                geometry: .identity,
-                compositeA: "_rt_imageLayerComposite_7_a",
-                compositeB: "_rt_imageLayerComposite_7_b",
-                localFBOs: [],
-                passes: [
-                    WPERenderPass(
-                        id: "7.0",
-                        phase: .material,
-                        shader: "generic4",
-                        source: .image("materials/layer.png"),
-                        target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
-                        textures: [:],
-                        binds: [:],
-                        constants: [:],
-                        combos: [:],
-                        blending: "normal",
-                        cullMode: "nocull",
-                        depthTest: "disabled",
-                        depthWrite: "disabled"
-                    )
-                ]
-            )
-        ])
+        let graph = WPERenderGraph(layers: [puppetLayer()])
 
         #expect {
             _ = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
         } throws: { error in
             guard case SceneRenderingError.metalRendererUnsupported(let reason) = error else { return false }
-            return reason.contains("MDLV0019")
+            return reason.contains("MDLV0017")
         }
+    }
+
+    @Test("An MDLV0019 character-sheet puppet loads (it is assembled by skinning, not refused)")
+    func mdlv19PuppetLoadsInsteadOfRefusing() throws {
+        // The v19 exploded character-sheet is recovered by skinning through the MDLA pose, so the
+        // pipeline must now accept it (regression for the old `version >= 21` refusal).
+        var mdl = makeSingleTrianglePuppetMDL()
+        mdl.replaceSubrange(0..<8, with: "MDLV0019".utf8)
+        let fixture = try makeFixture(dataFiles: [
+            "models/layer_puppet.mdl": mdl
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [puppetLayer()])
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let model = try #require(pipeline.layers.first?.puppetModel)
+        #expect(model.version == 19)
+    }
+
+    private func puppetLayer() -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: "7",
+            objectName: "Layer",
+            imagePath: "models/layer.json",
+            materialPath: "materials/layer.json",
+            puppetPath: "models/layer_puppet.mdl",
+            geometry: .identity,
+            compositeA: "_rt_imageLayerComposite_7_a",
+            compositeB: "_rt_imageLayerComposite_7_b",
+            localFBOs: [],
+            passes: [
+                WPERenderPass(
+                    id: "7.0",
+                    phase: .material,
+                    shader: "generic4",
+                    source: .image("materials/layer.png"),
+                    target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
+                    textures: [:],
+                    binds: [:],
+                    constants: [:],
+                    combos: [:],
+                    blending: "normal",
+                    cullMode: "nocull",
+                    depthTest: "disabled",
+                    depthWrite: "disabled"
+                )
+            ]
+        )
     }
 
     @Test("MDLV16 direct scene model loads as static mesh instead of legacy puppet")
@@ -1469,6 +1485,30 @@ struct WPERenderPipelineBuilderTests {
         data.appendLE(UInt32(0))
         data.appendLE(UInt32(0))
         data.appendLE(UInt32(3))
+
+        return data
+    }
+
+    /// A parseable puppet below the verified MDLV0019 character-sheet floor. Uses the pre-v19 header
+    /// layout (`u32 flags, u32, u32 meshCount`) with a v17+ 24-byte bbox so the parser succeeds and the
+    /// version guard — not a parse failure — is what refuses the scene.
+    private func makeLegacyPuppetMDLBelow19() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0017".utf8))
+        data.appendLE(UInt32(0x180000f))
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/layer.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(0, 0, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+        data.appendLE(UInt32(0))
 
         return data
     }

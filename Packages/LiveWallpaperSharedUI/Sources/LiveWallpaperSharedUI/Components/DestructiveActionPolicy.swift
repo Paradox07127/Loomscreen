@@ -64,7 +64,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .removeScheduleSlot:        return "Remove this schedule slot?"
         case .disableSchedule:           return "Disable schedule?"
         case .clearUnusedWallpapers:     return "Clear unused wallpapers?"
-        case .clearAllStorageCaches:      return "Clear all caches?"
+        case .clearAllStorageCaches:      return "Clear all storage caches?"
         case .clearSceneVideoCache:       return "Clear scene video texture cache?"
         case .forgetWorkshopLibrary:     return "Forget scene library?"
         case .forgetEngineAssets:        return "Forget external scene-format install folder?"

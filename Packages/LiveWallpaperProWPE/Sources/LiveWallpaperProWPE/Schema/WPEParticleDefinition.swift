@@ -325,6 +325,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// distinction gates the derived-grid atlas fallback, which must not
     /// slice single-image sprites that merely inherited the default.
     public let declaresSequenceAnimation: Bool
+    /// True when the particle JSON's top-level `flags` sets the perspective bit
+    /// (`flags & 4`, WPE's "…perspective" presets). Particles then carry a depth
+    /// (Z) and are drawn with a perspective divide — near ones larger + faster,
+    /// far ones smaller + slower (3462491575's 雪景远景 snow).
+    public let isPerspective: Bool
+    /// True when a `turbulentvelocityrandom` initializer is present — the
+    /// particle is seeded with a curl-noise INITIAL velocity (WPE's rising
+    /// embers/sparks: 大型 3115). Without it such emitters spawn motionless.
+    public let hasTurbulentVelocityInit: Bool
     /// Per-particle base alpha sampled on spawn (alpharandom). The
     /// fade-in/out envelope multiplies this value at draw time.
     public let alphaMin: Double
@@ -448,7 +457,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = [],
         hasColorInitializer: Bool = false,
-        declaresSequenceAnimation: Bool = false
+        declaresSequenceAnimation: Bool = false,
+        isPerspective: Bool = false,
+        hasTurbulentVelocityInit: Bool = false
     ) {
         self.init(
             materialRelativePath: materialRelativePath,
@@ -504,7 +515,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
-            declaresSequenceAnimation: declaresSequenceAnimation
+            declaresSequenceAnimation: declaresSequenceAnimation,
+            isPerspective: isPerspective,
+            hasTurbulentVelocityInit: hasTurbulentVelocityInit
         )
     }
 
@@ -562,7 +575,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = [],
         hasColorInitializer: Bool = false,
-        declaresSequenceAnimation: Bool = false
+        declaresSequenceAnimation: Bool = false,
+        isPerspective: Bool = false,
+        hasTurbulentVelocityInit: Bool = false
     ) {
         self.materialRelativePath = materialRelativePath
         // Prefer explicit child references; fall back to bare paths (origin 0)
@@ -592,6 +607,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.colorMax = colorMax
         self.hasColorInitializer = hasColorInitializer
         self.declaresSequenceAnimation = declaresSequenceAnimation
+        self.isPerspective = isPerspective
+        self.hasTurbulentVelocityInit = hasTurbulentVelocityInit
         self.alphaMin = alphaMin
         self.alphaMax = alphaMax
         self.rotationMin = rotationMin
@@ -722,7 +739,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
-            declaresSequenceAnimation: declaresSequenceAnimation
+            declaresSequenceAnimation: declaresSequenceAnimation,
+            isPerspective: isPerspective,
+            hasTurbulentVelocityInit: hasTurbulentVelocityInit
         )
     }
 
@@ -784,7 +803,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
-            declaresSequenceAnimation: declaresSequenceAnimation
+            declaresSequenceAnimation: declaresSequenceAnimation,
+            isPerspective: isPerspective,
+            hasTurbulentVelocityInit: hasTurbulentVelocityInit
         )
     }
 
@@ -857,6 +878,11 @@ public enum WPEParticleDefinitionParser {
         let declaresSequenceAnimation =
             (json["animationmode"] as? String)?.lowercased() == "sequence"
             || WPEValueParser.double(json["sequencemultiplier"]) != nil
+        // Top-level `flags` bit 4 = perspective (WPE's snowperspective etc.):
+        // particles carry a Z depth and draw with a perspective divide.
+        let particleFlags = (json["flags"] as? Int)
+            ?? (json["flags"] as? Double).map { Int($0) } ?? 0
+        let isPerspective = (particleFlags & 4) != 0
 
         var rate: Double = 0
         var instantaneousCount: Int = 0
@@ -907,6 +933,7 @@ public enum WPEParticleDefinitionParser {
         var colorMin = def.colorMin
         var colorMax = def.colorMax
         var hasColorInitializer = false
+        var hasTurbulentVelocityInit = false
         var alphaMin: Double = def.alphaMin
         var alphaMax: Double = def.alphaMax
         var rotationMin: SIMD3<Double> = def.rotationMin
@@ -975,6 +1002,7 @@ public enum WPEParticleDefinitionParser {
                     angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? angularVelocityMin
                     angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? angularVelocityMax
                 case "turbulentvelocityrandom":
+                    hasTurbulentVelocityInit = true
                     turbulenceSpeedMin = WPEValueParser.double(entry["speedmin"]) ?? turbulenceSpeedMin
                     turbulenceSpeedMax = WPEValueParser.double(entry["speedmax"]) ?? turbulenceSpeedMax
                     turbulenceScale = WPEValueParser.double(entry["scale"]) ?? turbulenceScale
@@ -1167,7 +1195,9 @@ public enum WPEParticleDefinitionParser {
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
-            declaresSequenceAnimation: declaresSequenceAnimation
+            declaresSequenceAnimation: declaresSequenceAnimation,
+            isPerspective: isPerspective,
+            hasTurbulentVelocityInit: hasTurbulentVelocityInit
         )
     }
 

@@ -1000,14 +1000,58 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.initialOutput.own.visible == true)
     }
 
+    @Test("getLayer READ-only reference does not drive the layer (3226487183 variant overlap)")
+    func getLayerReadOnlyReferenceDoesNotDrive() throws {
+        // 3226487183's 点击切换面具 (1293): its update() READS
+        // getLayer('中面具身体背景').visible for a conditional but never assigns it.
+        // A read must not clobber the layer's real (condition-form-hidden) state —
+        // otherwise the handle's default visible=true force-shows the mutually
+        // exclusive mask body over the correct default character.
+        let script = """
+        'use strict';
+        var probedVisible = true;
+        export function update() {
+            // read-only: reference the layer + read its visibility, never assign
+            var probed = thisScene.getLayer('中面具身体背景');
+            probedVisible = probed.visible;
+            // a SEPARATE layer IS explicitly driven — that one must still appear
+            thisScene.getLayer('面具花').visible = true;
+        }
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        let output = try #require(instance.tick())
+        // read-only reference is NOT driven
+        #expect(output.others["中面具身体背景"] == nil)
+        // explicit assignment IS driven
+        #expect(output.others["面具花"]?.visible == true)
+        #expect(output.others["面具花"]?.visibleAssigned == true)
+    }
+
+    @Test("getLayer alpha-only assignment does not force visible")
+    func getLayerAlphaOnlyDoesNotForceVisible() throws {
+        // Setting only .alpha must leave .visible untouched (visibleAssigned == false),
+        // so the renderer patches alpha without clobbering the layer's visibility.
+        let script = """
+        'use strict';
+        export function update() { thisScene.getLayer('fade').alpha = 0.25; }
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        let output = try #require(instance.tick())
+        let fade = try #require(output.others["fade"])
+        #expect(fade.alpha == 0.25)
+        #expect(fade.alphaAssigned == true)
+        #expect(fade.visibleAssigned == false)
+    }
+
     @Test("applyUserProperties activates the time-of-day switch (3470764447 后处理层)")
     func applyUserPropertiesDrivesTimeOfDaySwitch() throws {
         // Mirrors 3470764447's 后处理层: its update() gates the day/night switch on
         // `timeVarying`, which WPE sets ONLY through applyUserProperties. Without
-        // that call, init()'s getLayer() leaves all five time-band layers at the
-        // default visible=true and update() no-ops — the bug. Bands span the whole
-        // day so any real wall-clock hour resolves to `morning`, keeping it
-        // deterministic without a clock injection.
+        // that call update() no-ops, so the switch never narrows. init() only
+        // REFERENCES the five layers (getLayer, no assignment), so they must NOT be
+        // driven — a read-only reference leaves each band at its real scene
+        // visibility. Bands span the whole day so any real wall-clock hour resolves
+        // to `morning`, keeping it deterministic without a clock injection.
         let script = """
         'use strict';
         var displayVideo = ["morning", "day", "dusk", "night", "mddn"];
@@ -1043,11 +1087,12 @@ struct WPESceneScriptRuntimeTests {
         let bands = ["morning", "day", "dusk", "night", "mddn"]
         let instance = try WPELayerScriptInstance(script: script)
 
-        // Bug repro: init referenced all five layers, so they all default-show, and
-        // update() can't narrow because timeVarying is still false.
-        #expect(bands.allSatisfy { instance.initialOutput.others[$0]?.visible == true })
+        // init() only REFERENCES the five layers (getLayer, no visibility assignment),
+        // so none is driven — each stays at its real scene visibility. update() also
+        // no-ops while timeVarying is false, so the switch cannot narrow yet.
+        #expect(bands.allSatisfy { instance.initialOutput.others[$0] == nil })
         let beforeProps = try #require(instance.tick())
-        #expect(bands.allSatisfy { beforeProps.others[$0]?.visible == true })
+        #expect(bands.allSatisfy { beforeProps.others[$0] == nil })
 
         // Fix: deliver the user-property bag (timevarying on, bands covering all
         // 24h → morning). The next tick narrows to exactly the morning layer.

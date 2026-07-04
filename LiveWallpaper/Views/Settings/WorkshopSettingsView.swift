@@ -80,16 +80,10 @@ struct WorkshopSettingsView: View {
                     engineAssetsControl
                         .frame(maxHeight: 24)
                 }
-                if let error = engineAssets.lastError {
-                    Text(error)
+                if let status = engineAssetsStatusLine {
+                    Text(verbatim: status.message)
                         .font(.caption)
-                        .foregroundStyle(DesignTokens.Colors.Status.danger)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if showsEngineDownloadHint {
-                    Text("Set up SteamCMD in the Doctor to enable in-app download — no files to add manually.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(status.tint)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } header: {
@@ -135,6 +129,10 @@ struct WorkshopSettingsView: View {
         // (.scrollContentBackground) + insets (.contentMargins) so this tab
         // doesn't show a different-colored inset panel than other tabs.
         .settingsFormChrome()
+        .overlay(alignment: .bottomTrailing) {
+            WorkshopDownloadToastHost()
+                .padding(DesignTokens.Spacing.lg)
+        }
         .sheet(isPresented: $showingDoctor) {
             WorkshopDoctorView()
                 .environment(doctorService)
@@ -248,10 +246,13 @@ struct WorkshopSettingsView: View {
     @ViewBuilder
     private var engineAssetsManualControl: some View {
         HStack(spacing: DesignTokens.Spacing.xs) {
-            Button("Change") { Task { _ = await engineAssets.requestAccess() } }
+            Button("Change") { Task { await requestManualEngineAssetsAccess() } }
                 .buttonStyle(.bordered).controlSize(.small).fixedSize()
                 .help(Text("Pick a different Wallpaper Engine install folder"))
-            Button("Forget", role: .destructive) { engineAssets.clearAccess() }
+            Button("Forget", role: .destructive) {
+                engineAssets.clearAccess()
+                engineInstaller.clearTransientStatus()
+            }
                 .buttonStyle(.bordered).controlSize(.small).fixedSize()
                 .tint(DesignTokens.Colors.Status.danger)
                 .help(Text("Remove access to the Wallpaper Engine install folder"))
@@ -270,9 +271,16 @@ struct WorkshopSettingsView: View {
             }
             .buttonStyle(.bordered).controlSize(.small).fixedSize()
             .help(Text("Download the copy of Wallpaper Engine you own for extra scene coverage"))
-            Button("Link folder…") { Task { _ = await engineAssets.requestAccess() } }
+            Button("Link folder…") { Task { await requestManualEngineAssetsAccess() } }
                 .buttonStyle(.bordered).controlSize(.small).fixedSize()
                 .help(Text("Grant read-only access to a Wallpaper Engine install for extra scene coverage"))
+        }
+    }
+
+    private func requestManualEngineAssetsAccess() async {
+        if await engineAssets.requestAccess() {
+            engineInstaller.refreshManagedInstallState()
+            engineInstaller.clearTransientStatus()
         }
     }
 
@@ -281,6 +289,103 @@ struct WorkshopSettingsView: View {
             && !engineInstaller.hasManagedInstall
             && !engineAssets.isAuthorized
             && !doctorService.isDownloadReady
+    }
+
+    private struct EngineAssetsStatusLine {
+        let message: String
+        let tint: Color
+    }
+
+    private var engineAssetsStatusLine: EngineAssetsStatusLine? {
+        if case .failed(let message) = engineInstaller.phase {
+            return EngineAssetsStatusLine(message: message, tint: DesignTokens.Colors.Status.danger)
+        }
+        if preflightingDoctor {
+            return EngineAssetsStatusLine(
+                message: String(localized: "Checking SteamCMD readiness before downloading.", comment: "Engine-assets settings status while preflighting SteamCMD."),
+                tint: .secondary
+            )
+        }
+        switch engineInstaller.phase {
+        case .downloading:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Downloading Wallpaper Engine, then Loomscreen will keep only the assets folder and link it automatically.", comment: "Engine-assets settings status while downloading."),
+                tint: .secondary
+            )
+        case .pruning:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Download finished. Keeping the assets folder and linking it now.", comment: "Engine-assets settings status while pruning the downloaded WPE app."),
+                tint: .secondary
+            )
+        case .checking:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Checking Steam for the latest Wallpaper Engine build.", comment: "Engine-assets settings status while checking for updates."),
+                tint: .secondary
+            )
+        case .idle, .failed:
+            break
+        }
+        if let error = engineAssets.lastError {
+            return EngineAssetsStatusLine(message: error, tint: DesignTokens.Colors.Status.danger)
+        }
+        if engineInstaller.hasManagedInstall {
+            return managedEngineAssetsStatusLine
+        }
+        if engineAssets.isAuthorized {
+            let name = engineAssets.engineRootDisplayName ?? String(
+                localized: "selected folder",
+                comment: "Fallback display name for a manually linked engine-assets folder."
+            )
+            return EngineAssetsStatusLine(
+                message: String(localized: "Linked to \(name) for extra scene coverage.", comment: "Engine-assets settings status for a manually linked folder."),
+                tint: DesignTokens.Colors.Status.active
+            )
+        }
+        if showsEngineDownloadHint {
+            return EngineAssetsStatusLine(
+                message: String(localized: "Set up SteamCMD in the Doctor to enable in-app download, or link an existing folder manually.", comment: "Engine-assets settings status when SteamCMD is not ready."),
+                tint: .secondary
+            )
+        }
+        return EngineAssetsStatusLine(
+            message: String(localized: "Not linked. Most scenes still use Loomscreen's built-in equivalents.", comment: "Engine-assets settings status when no engine assets are linked."),
+            tint: .secondary
+        )
+    }
+
+    private var managedEngineAssetsStatusLine: EngineAssetsStatusLine {
+        switch engineInstaller.updateCheckOutcome {
+        case .available:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Update available on Steam. Current downloaded assets are still linked.", comment: "Engine-assets settings status when an update is available."),
+                tint: DesignTokens.Colors.Status.warning
+            )
+        case .upToDate:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Downloaded assets linked and up to date.", comment: "Engine-assets settings status when downloaded assets are current."),
+                tint: DesignTokens.Colors.Status.active
+            )
+        case .unableToCompare:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Downloaded assets linked, but their version is unknown. Download again to refresh them.", comment: "Engine-assets settings status when installed build id is unknown."),
+                tint: DesignTokens.Colors.Status.warning
+            )
+        case .checkFailed:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Downloaded assets linked. Couldn't check Steam for updates.", comment: "Engine-assets settings status when update check fails."),
+                tint: DesignTokens.Colors.Status.warning
+            )
+        case .checking:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Checking Steam for the latest Wallpaper Engine build.", comment: "Engine-assets settings status while checking for updates."),
+                tint: .secondary
+            )
+        case .notChecked:
+            return EngineAssetsStatusLine(
+                message: String(localized: "Downloaded assets linked for extra scene coverage.", comment: "Engine-assets settings status for downloaded assets before checking updates."),
+                tint: DesignTokens.Colors.Status.active
+            )
+        }
     }
 
     // MARK: - Title status badges (uniform icon-only seals next to each name)
@@ -307,9 +412,13 @@ struct WorkshopSettingsView: View {
     }
 
     private var engineTitleBadge: SettingRowTitleBadge? {
-        (engineInstaller.hasManagedInstall || engineAssets.isAuthorized)
-            ? SettingRowTitleBadge(systemImage: "checkmark.seal.fill", tint: DesignTokens.Colors.Status.active, accessibilityLabel: Text("Linked"))
-            : nil
+        if engineInstaller.updateAvailable {
+            return SettingRowTitleBadge(systemImage: "arrow.down.circle.fill", tint: DesignTokens.Colors.Status.warning, accessibilityLabel: Text("Update available"))
+        }
+        if engineInstaller.hasManagedInstall || engineAssets.isAuthorized {
+            return SettingRowTitleBadge(systemImage: "checkmark.seal.fill", tint: DesignTokens.Colors.Status.active, accessibilityLabel: Text("Linked"))
+        }
+        return nil
     }
 
 }

@@ -26,7 +26,6 @@ struct SettingsSidebar: View {
                 SettingsSidebarSearchField(text: $searchText)
             }
             .padding(.horizontal, DesignTokens.Spacing.md)
-            .padding(.top, DesignTokens.Spacing.md)
             .padding(.bottom, DesignTokens.Spacing.sm)
 
             List(selection: $selection) {
