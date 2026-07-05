@@ -56,8 +56,6 @@ struct DeveloperToolsView: View {
               help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
         .init(key: "WPEParticlePrewarmEnabled", title: "Particle prewarm",
               help: "Also pre-populate emitters with starttime 0 to their steady-state spread on load. Authored starttime offsets always prewarm for WPE-matching first frames. Reload the scene to apply."),
-        .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
-              help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
         .init(key: "WPEAudioDebugLog", title: "Audio debug log",
               help: "Verbose audio-reactive DSP logging."),
         .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp (override)",

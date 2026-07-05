@@ -5,7 +5,7 @@ import Testing
 
 /// Unit coverage for the pure channel-extraction seam of
 /// `SystemAudioCaptureService`. The Core Audio tap lifecycle itself needs real
-/// hardware (see `SystemAudioCaptureProbe`); the deinterleave math does not.
+/// hardware; the deinterleave math does not.
 @Suite("System audio capture — channel extraction")
 struct SystemAudioCaptureServiceTests {
     @available(macOS 14.2, *)

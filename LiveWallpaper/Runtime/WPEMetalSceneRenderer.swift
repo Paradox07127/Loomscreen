@@ -825,8 +825,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             let drawable = mtkView.drawableSize
             let base = cameraUniforms.renderSize
             let cap = CGSize(width: 3840, height: 2160)
-            let targetW = min(max(drawable.width, base.width), cap.width)
-            let targetH = min(max(drawable.height, base.height), cap.height)
+            var targetW = min(max(drawable.width, base.width), cap.width)
+            var targetH = min(max(drawable.height, base.height), cap.height)
+            // Clamp to the memory tier's pixel budget (HDR float16 counts double)
+            // so native-res + HDR bloom don't stack into an OOM on 8/16 GB Macs.
+            let budget = WPEMemoryTier.current.perspectiveRenderPixelBudget(hdr: document.general.hdr)
+            let pixels = Double(targetW * targetH)
+            if pixels > budget {
+                let shrink = (budget / pixels).squareRoot()
+                targetW = max(base.width, (targetW * CGFloat(shrink)).rounded())
+                targetH = max(base.height, (targetH * CGFloat(shrink)).rounded())
+            }
             if targetW > base.width + 1 || targetH > base.height + 1 {
                 cameraUniforms = WPEMetalCameraUniforms(
                     orthogonalProjection: WPESceneOrthogonalProjection(

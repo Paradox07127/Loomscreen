@@ -199,11 +199,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SystemAudioCaptureManager.shared.setEnabled(audioResponseEnabled)
         }
 
-        // On-device verification hook for the system-audio capture tap. No-op
-        // unless `WPEAudioCaptureProbe` default is set. See SystemAudioCaptureProbe.
-        if #available(macOS 14.2, *), !runtimeOptions.isTesting {
-            SystemAudioCaptureProbe.runIfRequested()
-        }
         #endif
 
         #if !LITE_BUILD && DIRECT_DISTRIBUTION

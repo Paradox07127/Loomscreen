@@ -18,6 +18,25 @@ struct WPEMetalTextureCacheBudgetTests {
         #expect(WPEMemoryTier.tier(forPhysicalMemoryBytes: 64 * gib) == .expansive)
     }
 
+    @Test("Perspective native-res pixel budget bounds the FBO blow-up")
+    func perspectiveRenderPixelBudget() {
+        let base = 1920.0 * 1080.0
+        // constrained never bumps above 1080; HDR halves it further (float16).
+        #expect(WPEMemoryTier.constrained.perspectiveRenderPixelBudget(hdr: false) == base)
+        #expect(WPEMemoryTier.constrained.perspectiveRenderPixelBudget(hdr: true) == base * 0.5)
+        // standard allows ~1620p SDR, halved for HDR.
+        #expect(WPEMemoryTier.standard.perspectiveRenderPixelBudget(hdr: false) == base * 2.25)
+        #expect(WPEMemoryTier.standard.perspectiveRenderPixelBudget(hdr: true) == base * 2.25 * 0.5)
+        // expansive allows up to 4K SDR (4×), 2× for HDR.
+        #expect(WPEMemoryTier.expansive.perspectiveRenderPixelBudget(hdr: false) == base * 4.0)
+        #expect(WPEMemoryTier.expansive.perspectiveRenderPixelBudget(hdr: true) == base * 2.0)
+        // HDR budget is always strictly below the SDR budget (float16 penalty).
+        for tier in [WPEMemoryTier.constrained, .standard, .expansive] {
+            #expect(tier.perspectiveRenderPixelBudget(hdr: true)
+                < tier.perspectiveRenderPixelBudget(hdr: false))
+        }
+    }
+
     @Test("Memory tiers carry the intended renderer defaults")
     func memoryTierDefaults() {
         #expect(WPEMemoryTier.constrained.defaultTextureCacheBudgetBytes == 256 * 1_048_576)
