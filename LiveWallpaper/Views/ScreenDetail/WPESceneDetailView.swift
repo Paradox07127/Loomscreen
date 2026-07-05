@@ -575,9 +575,8 @@ struct WPESceneDetailView: View {
         "WPEMetalStaticLayerCacheEnabled",
         "WPEMetalStaticLayerCacheBudgetMiB", "WPEMetalTextureCacheBudgetMiB",
         "WPEMetalIntroPhaseAlignEnabled", "WPEEnableMSDFText", "WPEParallaxGain",
-        "WPEParticlePrewarmEnabled", "WPEPuppetEnableSkinning",
-        "WPEPuppetAttachmentBindAnchor", "WPEPuppetClipComposite",
-        "WPEPuppetDeferMeshWarp"
+        "WPEParticlePrewarmEnabled", "WPEPuppetAttachmentBindAnchor",
+        "WPEPuppetClipComposite", "WPEPuppetDeferMeshWarp"
     ]
 
     private static func nonDefaultRenderFlags() -> [String] {

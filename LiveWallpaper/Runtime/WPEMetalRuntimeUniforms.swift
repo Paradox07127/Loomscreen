@@ -281,24 +281,52 @@ struct WPEMetalFrameClock: Sendable {
     }
 }
 
+/// Pointer position plus ownership state for one renderer view. `position` is
+/// always safe for uniforms; `isInsideView` tells cursor-reactive systems
+/// whether the mouse actually belongs to this wallpaper surface.
+struct WPEMetalPointerSample: Equatable, Sendable {
+    let position: SIMD2<Double>
+    let isInsideView: Bool
+
+    static let inactive = WPEMetalPointerSample(
+        position: SIMD2<Double>(0.5, 0.5),
+        isInsideView: false
+    )
+
+    static func inside(_ position: SIMD2<Double>) -> WPEMetalPointerSample {
+        WPEMetalPointerSample(
+            position: position.clampedToUnitSquare,
+            isInsideView: true
+        )
+    }
+}
+
 /// Pointer position sampler. `live` reads `NSEvent.mouseLocation` and maps it
-/// to the renderer view's UV space; `fixed` is for fixtures that need a
-/// known pointer position regardless of the cursor.
+/// to the renderer view's UV space; `fixed` is for fixtures that need a known
+/// active pointer position regardless of the cursor.
 @MainActor
 struct WPEMetalPointerSampler {
-    let sample: @MainActor @Sendable (NSView) -> SIMD2<Double>
+    let sample: @MainActor @Sendable (NSView) -> WPEMetalPointerSample
 
     static let live = WPEMetalPointerSampler { view in
-        normalizedSceneUV(mouseLocation: NSEvent.mouseLocation, in: view)
+        sampleSceneUV(mouseLocation: NSEvent.mouseLocation, in: view)
     }
 
     static func fixed(_ uv: SIMD2<Double>) -> WPEMetalPointerSampler {
-        WPEMetalPointerSampler { _ in uv.clampedToUnitSquare }
+        WPEMetalPointerSampler { _ in WPEMetalPointerSample.inside(uv) }
+    }
+
+    static func fixedOutside() -> WPEMetalPointerSampler {
+        WPEMetalPointerSampler { _ in .inactive }
     }
 
     static func normalizedSceneUV(mouseLocation: CGPoint, in view: NSView) -> SIMD2<Double> {
+        sampleSceneUV(mouseLocation: mouseLocation, in: view).position
+    }
+
+    static func sampleSceneUV(mouseLocation: CGPoint, in view: NSView) -> WPEMetalPointerSample {
         guard view.bounds.width > 0, view.bounds.height > 0 else {
-            return SIMD2<Double>(0.5, 0.5)
+            return .inactive
         }
 
         let localPoint: CGPoint
@@ -309,9 +337,13 @@ struct WPEMetalPointerSampler {
             localPoint = view.convert(mouseLocation, from: nil)
         }
 
+        guard view.bounds.contains(localPoint) else {
+            return .inactive
+        }
+
         let x = Double(localPoint.x / view.bounds.width)
         let y = 1.0 - Double(localPoint.y / view.bounds.height)
-        return SIMD2<Double>(x, y).clampedToUnitSquare
+        return .inside(SIMD2<Double>(x, y))
     }
 }
 
@@ -323,6 +355,16 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
     let viewProjectionMatrix: [Double]
     let usesPerspectiveProjection: Bool
     let sceneCamera: WPESceneCamera
+    /// Scene light uniforms from `general.ambientcolor`/`skylightcolor` (raw,
+    /// no sRGB conversion — matches WPE's cbuffer upload) + `general.hdr`.
+    /// Consumed by the scene-model generic4 fragment and any transpiled shader
+    /// binding `g_Light*`.
+    let lightAmbientColor: SIMD3<Double>
+    let lightSkylightColor: SIMD3<Double>
+    let sceneHDR: Bool
+    /// Scene HDR bloom settings (nil = off) — consumed by the executor's
+    /// post-scene bloom pyramid.
+    let bloom: WPESceneBloomSettings?
 
     static let identity = WPEMetalCameraUniforms(
         renderSize: CGSize(width: 1, height: 1),
@@ -339,13 +381,21 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
     init(
         orthogonalProjection: WPESceneOrthogonalProjection,
         sceneCamera: WPESceneCamera,
-        usesPerspectiveProjection: Bool = false
+        usesPerspectiveProjection: Bool = false,
+        lightAmbientColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        lightSkylightColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        sceneHDR: Bool = false,
+        bloom: WPESceneBloomSettings? = nil
     ) {
         let width = max(orthogonalProjection.width, 1)
         let height = max(orthogonalProjection.height, 1)
         renderSize = CGSize(width: width, height: height)
         self.usesPerspectiveProjection = usesPerspectiveProjection
         self.sceneCamera = sceneCamera
+        self.lightAmbientColor = lightAmbientColor
+        self.lightSkylightColor = lightSkylightColor
+        self.sceneHDR = sceneHDR
+        self.bloom = bloom
         viewProjectionMatrix = usesPerspectiveProjection
             ? Self.perspectiveViewProjectionMatrix(
                 sceneCamera: sceneCamera,
@@ -363,17 +413,31 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         renderSize: CGSize,
         viewProjectionMatrix: [Double],
         usesPerspectiveProjection: Bool,
-        sceneCamera: WPESceneCamera
+        sceneCamera: WPESceneCamera,
+        lightAmbientColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        lightSkylightColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        sceneHDR: Bool = false,
+        bloom: WPESceneBloomSettings? = nil
     ) {
         self.renderSize = renderSize
         self.viewProjectionMatrix = viewProjectionMatrix
         self.usesPerspectiveProjection = usesPerspectiveProjection
         self.sceneCamera = sceneCamera
+        self.lightAmbientColor = lightAmbientColor
+        self.lightSkylightColor = lightSkylightColor
+        self.sceneHDR = sceneHDR
+        self.bloom = bloom
     }
 
     var uniformValues: [String: WPESceneShaderConstantValue] {
         [
-            "g_ViewProjectionMatrix": .vector(viewProjectionMatrix)
+            "g_ViewProjectionMatrix": .vector(viewProjectionMatrix),
+            "g_LightAmbientColor": .vector([lightAmbientColor.x, lightAmbientColor.y, lightAmbientColor.z]),
+            "g_LightSkylightColor": .vector([lightSkylightColor.x, lightSkylightColor.y, lightSkylightColor.z]),
+            // Internal carrier for `general.hdr` (not a WPE uniform name, so no
+            // transpiled shader ever binds it): the scene-model generic4 path
+            // reads it from merged pass uniforms — no extra executor plumbing.
+            "g_SceneHDREnabled": .number(sceneHDR ? 1 : 0)
         ]
     }
 
@@ -390,13 +454,12 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         worldPoint: SIMD3<Double>,
         sceneSize: CGSize
     ) -> (center: SIMD2<Float>, depthScale: Float)? {
-        // WPE's runtime perspective camera uses the authored eye POSITION but a
-        // FIXED identity orientation (forward −Z, up +Y) — center/up in scene.json
-        // are editor viewport state. Ground truth (workshop 3509243656 screenshots):
-        // an object at the world origin (the 罗盘 rings, and the n-body cluster
-        // whose com is re-centered to the origin every frame) renders x-centered
-        // and mid-frame; the authored eye→center look-at (pitch −19.6°) would put
-        // it in the top fifth of the frame instead.
+        // WPE's runtime perspective camera has a FIXED identity orientation
+        // (forward −Z, up +Y); the eye comes from the scene's camera OBJECT (see
+        // WPESceneDocumentParser.runtimeCameraObjectOverride). Ground truth
+        // (RenderDoc capture of 3509243656): g_ViewProjectionMatrix is a pure
+        // translation view (clip.w = eye.z − z, no rotation) and fov is VERTICAL
+        // (y-scale = 1/tan(fov/2), x = y/aspect).
         let eye = sceneCamera.eye
         let relative = worldPoint - eye
         let depth = -relative.z
@@ -439,8 +502,8 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         sceneCamera: WPESceneCamera,
         aspect: Double
     ) -> [Double] {
-        // Identity orientation (forward −Z, up +Y) from the authored eye — matches
-        // `projectedCenterInScenePixels`; see the ground-truth note there.
+        // Identity orientation (forward −Z, up +Y) from the runtime camera eye —
+        // matches `projectedCenterInScenePixels`; see the ground-truth note there.
         let eye = sceneCamera.eye
         let fovRadians = max(min(sceneCamera.fov, 179), 1) * .pi / 180
         let f = 1.0 / tan(fovRadians * 0.5)

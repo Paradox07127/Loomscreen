@@ -243,36 +243,6 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(schema.properties.contains { $0.key == "bgmvolume" })
     }
 
-    @Test("Inspector schema loader reports custom settings timing when enabled")
-    func inspectorSchemaLoaderReportsTimingWhenEnabled() async throws {
-        let key = "WPECustomSettingsLoadTiming"
-        let previous = UserDefaults.standard.object(forKey: key)
-        defer {
-            if let previous {
-                UserDefaults.standard.set(previous, forKey: key)
-            } else {
-                UserDefaults.standard.removeObject(forKey: key)
-            }
-        }
-        UserDefaults.standard.set(true, forKey: key)
-
-        let folder = try makeProjectFolder(manifest: sampleManifest)
-        let bookmark = try folder.bookmarkData(
-            options: [.withSecurityScope],
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
-
-        let outcome = await WPEProjectCustomSettingsSchemaLoader.load(
-            source: .folder(bookmarkData: bookmark, indexFileName: "index.html"),
-            wpeOrigin: nil
-        )
-
-        #expect(outcome.log.contains("[custom-settings-timing]"))
-        #expect(outcome.log.contains("bookmark.resolve"))
-        #expect(outcome.log.contains("schema.read"))
-    }
-
     @Test("Project property schema cache invalidates when project.json changes")
     func schemaCacheInvalidatesWhenManifestChanges() throws {
         let folder = try makeProjectFolder(manifest: manifestWithProperty(key: "speed", text: "Speed"))

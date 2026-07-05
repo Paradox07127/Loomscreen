@@ -105,6 +105,71 @@ vertex WPEVertexOut wpe_object_quad_vertex(
     return out;
 }
 
+// WPE `effects/skew` MODE=1 (Vertex): displaces the quad corners in the layer's
+// local space BEFORE rotation, turning the rectangle into a parallelogram (the
+// "leaning/standing on the background" look — 3470764447's long audio bar).
+// Matches WPE's assets/effects/skew/shaders/effects/skew.vert MODE==1:
+//   textureScale = g_Texture0Resolution.zw * g_TextureReductionScale
+//   position.x += textureScale.x * (step(uv.y,0.5)*g_Top + step(0.5,uv.y)*g_Bottom)
+//   position.y += textureScale.y * (step(uv.x,0.5)*g_Left + step(0.5,uv.x)*g_Right)
+// WPE's `g_Texture0Resolution.zw` is the texture pixel size and its a_Position
+// quad spans that same pixel extent, so the displacement is exactly the param as
+// a FRACTION of the quad's own width/height — which in this normalized corner
+// space ([-0.5,0.5], full extent 1) is just `corner += param`. The
+// g_TextureReductionScale factor is pre-multiplied into these params on the CPU
+// (WPESkewParams; defaults to 1.0). UV is left unchanged (MODE=1 keeps
+// v_TexCoord = a_TexCoord), so the texture stretches across the sheared quad.
+// Falls back to the plain object quad when all params are zero (skew disabled).
+struct WPESkewParams {
+    float4 topBottomLeftRight; // x=g_Top, y=g_Bottom, z=g_Left, w=g_Right
+};
+
+vertex WPEVertexOut wpe_skew_object_quad_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEObjectQuadUniforms& u [[buffer(1)]],
+    constant WPESkewParams& skew [[buffer(2)]]
+) {
+    float2 corner;
+    float2 uv;
+    switch (vertexID) {
+        case 0: corner = float2(-0.5, -0.5); uv = float2(0.0, 1.0); break;
+        case 1: corner = float2( 0.5, -0.5); uv = float2(1.0, 1.0); break;
+        case 2: corner = float2(-0.5,  0.5); uv = float2(0.0, 0.0); break;
+        default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
+    }
+    // Use the ORIGINAL (pre-mirror) uv for the step tests, matching WPE's
+    // a_TexCoord: uv.y==0 is the top edge (corner.y=+0.5), uv.y==1 the bottom.
+    corner.x += step(uv.y, 0.5) * skew.topBottomLeftRight.x
+              + step(0.5, uv.y) * skew.topBottomLeftRight.y;
+    corner.y += step(uv.x, 0.5) * skew.topBottomLeftRight.z
+              + step(0.5, uv.x) * skew.topBottomLeftRight.w;
+
+    float rot = u.sceneSizeAndRotation.z;
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 localPixels = corner * u.centerAndSize.zw;
+    float2 rotatedCorner = float2(
+        c * localPixels.x - s * localPixels.y,
+        s * localPixels.x + c * localPixels.y
+    );
+    float halfWidth = max(u.sceneSizeAndRotation.x, 1.0) * 0.5;
+    float halfHeight = max(u.sceneSizeAndRotation.y, 1.0) * 0.5;
+    float2 centerNDC = float2(
+        u.centerAndSize.x / halfWidth,
+        u.centerAndSize.y / halfHeight
+    );
+    float2 cornerNDC = rotatedCorner / float2(halfWidth, halfHeight);
+    uv = float2(
+        u.uvSignAndPadding.x < 0.0 ? 1.0 - uv.x : uv.x,
+        u.uvSignAndPadding.y < 0.0 ? 1.0 - uv.y : uv.y
+    );
+
+    WPEVertexOut out;
+    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+
 // A DIRECTDRAW shape-quad layer (e.g. lightshafts light beams) draws a 4-corner
 // perspective quad whose corners come from the effect's point0..3 gizmo — NOT an
 // axis-aligned rectangle. The CPU pre-transforms each corner into scene-centered
@@ -643,6 +708,114 @@ fragment half4 wpe_genericimage4_fragment(
     return half4(float4(rgb * alpha, alpha));
 }
 
+// WPE HDR scene bloom pyramid. Parameters RenderDoc-verified on 3509243656:
+// prefilter g_BloomBlendParams = (threshold, knee, 2(threshold−knee),
+// 0.25/(threshold−knee)) with knee = threshold×(1−feather) — a continuous
+// soft-knee (both branches meet at brightness = knee + 2(threshold−knee));
+// g_BloomStrength = authored strength/17; every stage is a 4-tap box at
+// ±source-texel offsets; upsample is additive SRC_ALPHA/ONE weighted by scatter.
+struct WPEBloomUniforms {
+    float4 texelAndWeight; // xy = source texel size, z = strength (prefilter) / src alpha (upsample)
+    float4 blendParams;    // prefilter knee curve; unused elsewhere
+    float4 tint;           // rgb = bloom tint (prefilter)
+};
+
+static inline float3 wpe_bloom_box4(
+    texture2d<float, access::sample> source,
+    float2 uv,
+    float2 texel
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    return 0.25 * (
+        source.sample(linearSampler, uv + texel).rgb
+        + source.sample(linearSampler, uv - texel).rgb
+        + source.sample(linearSampler, uv + float2(texel.x, -texel.y)).rgb
+        + source.sample(linearSampler, uv - float2(texel.x, -texel.y)).rgb
+    );
+}
+
+fragment half4 wpe_bloom_prefilter_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<float, access::sample> texture0 [[texture(0)]],
+    constant WPEBloomUniforms& u [[buffer(0)]]
+) {
+    float3 color = wpe_bloom_box4(texture0, in.uv, u.texelAndWeight.xy);
+    float brightness = max(color.r, max(color.g, color.b));
+    float soft = clamp(brightness - u.blendParams.y, 0.0, u.blendParams.z);
+    soft = soft * soft * u.blendParams.w;
+    float contribution = max(soft, brightness - u.blendParams.x) / max(brightness, 0.0001);
+    return half4(float4(color * contribution * u.texelAndWeight.z * u.tint.rgb, 1.0));
+}
+
+fragment half4 wpe_bloom_downsample_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<float, access::sample> texture0 [[texture(0)]],
+    constant WPEBloomUniforms& u [[buffer(0)]]
+) {
+    return half4(float4(wpe_bloom_box4(texture0, in.uv, u.texelAndWeight.xy), 1.0));
+}
+
+// Draws with the "additive" pipeline (SRC_ALPHA/ONE): alpha carries the
+// scatter weight so each level accumulates into the next-larger one.
+fragment half4 wpe_bloom_upsample_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<float, access::sample> texture0 [[texture(0)]],
+    constant WPEBloomUniforms& u [[buffer(0)]]
+) {
+    return half4(float4(wpe_bloom_box4(texture0, in.uv, u.texelAndWeight.xy), u.texelAndWeight.z));
+}
+
+// WPE generic4 MODEL material (scene 3D models — suns/planets/skybox shells).
+// Port of assets/shaders/generic4.frag (2.8.26, pulled from the Windows install):
+// albedo = tex0 × g_TintColor; EMISSIVE_MAP reads the slot-2 component map's
+// ALPHA channel (slot 1 is the normal map — unused here); LIGHTING with no
+// scene lights reduces to the vertex hemispheric ambient
+// mix(g_LightSkylightColor, g_LightAmbientColor, N·up*0.5+0.5); CombineLighting
+// and the HDR brightness/emissive-overbright terms follow common_pbr_2.h. The
+// mesh vertex carries no normals, so the hemisphere mix is evaluated at its
+// midpoint — today's users (emissive-dominated suns, small planets) make the
+// residual invisible.
+struct WPESceneModelGenericUniforms {
+    float4 tintColorAlpha;   // rgb = g_TintColor (raw, WPE uploads unconverted), a = g_TintAlpha × layer alpha
+    float4 emissive;         // rgb = g_EmissiveColor, w = g_EmissiveBrightness
+    float4 ambientLighting;  // rgb = mix(skylight, ambient, 0.5), w = LIGHTING combo
+    float4 brightnessFlags;  // x = g_Brightness × layer brightness, y = emissive map bound, z = scene HDR
+};
+
+fragment half4 wpe_scene_model_generic4_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
+    constant WPESceneModelGenericUniforms& u [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 albedo = float4(texture0.sample(linearSampler, in.uv));
+    albedo.rgb *= u.tintColorAlpha.rgb;
+    float alpha = albedo.a * u.tintColorAlpha.a;
+
+    float maskAlpha = u.brightnessFlags.y > 0.5
+        ? float(texture1.sample(linearSampler, in.uv).a)
+        : 0.0;
+    float3 light = max(float3(0.0), u.emissive.rgb * albedo.rgb * (maskAlpha * u.emissive.w));
+    float3 ambient = u.ambientLighting.w > 0.5
+        ? u.ambientLighting.rgb * albedo.rgb
+        : albedo.rgb;
+
+    float3 combined;
+    if (u.brightnessFlags.z > 0.5) {
+        // CombineLighting HDR variant + `#if HDR` brightness/emissive overbright.
+        float lightLen = length(light);
+        float overbright = (saturate(lightLen - 2.0) * 0.5) / max(0.01, lightLen);
+        combined = saturate(ambient + light) + light * overbright;
+        combined *= u.brightnessFlags.x;
+        combined += u.emissive.rgb * combined * max(0.0, maskAlpha * (u.emissive.w - 1.0));
+    } else {
+        combined = ambient + light;
+    }
+    // Premultiplied-alpha render target — see wpe_genericimage2_fragment.
+    return half4(float4(combined * alpha, alpha));
+}
+
 // Port of WPE clippingmaskimage4.frag: renders the clip SHAPE part into the clip-mask
 // render target. `.r` carries the mask coverage (consumed by CLIPPINGTARGET below),
 // `.a` carries the shape alpha. alphaMaskUV.w maps WPE's g_RenderVar0.x (invert toggle).
@@ -965,7 +1138,7 @@ vertex WPEParticleVertexOut wpe_particle_rope_vertex(
 
 struct WPETextOverlayUniforms {
     float4 centerAndSize;   // x,y center (pixel space) ; z,w width,height (pixels)
-    float4 sceneSize;       // x = scene width, y = scene height
+    float4 sceneSize;       // x = scene width, y = scene height, z = z rotation (radians, author CCW)
     float4 color;           // rgb = straight text color, a = text alpha (applied in shader)
 };
 
@@ -992,19 +1165,29 @@ vertex WPETextOverlayVertexOut wpe_text_overlay_vertex(
         u.centerAndSize.x / halfWidth,
         u.centerAndSize.y / halfHeight
     );
-    float2 cornerNDC = corner * float2(
-        u.centerAndSize.z / halfWidth,
-        u.centerAndSize.w / halfHeight
-    );
     WPETextOverlayVertexOut out;
     // The vertical POSITION (centerNDC.y) is already correct in WPE's text
     // space — the clock sits next to Miku's face — so it must NOT be flipped.
-    // Only the glyph's own vertical extent (cornerNDC.y) was inverted, which
-    // rendered the text upside-down; negate just that so the text reads upright
-    // while staying in the right place. X is untouched.
+    // Only the glyph's own vertical extent was inverted, which rendered the
+    // text upside-down; the -corner.y below keeps the text upright while
+    // staying in place. The corner offset rotates about the center in PIXEL
+    // space (author CCW, matching the parent transform-host chain) BEFORE the
+    // anisotropic NDC divide, so rotation doesn't shear. rot=0 reproduces the
+    // pre-rotation output exactly.
+    float rot = u.sceneSize.z;
+    float2 offsetPixels = float2(
+        corner.x * u.centerAndSize.z,
+        -corner.y * u.centerAndSize.w
+    );
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 rotated = float2(
+        c * offsetPixels.x - s * offsetPixels.y,
+        s * offsetPixels.x + c * offsetPixels.y
+    );
     out.position = float4(
-        centerNDC.x + cornerNDC.x,
-        centerNDC.y - cornerNDC.y,
+        centerNDC.x + rotated.x / halfWidth,
+        centerNDC.y + rotated.y / halfHeight,
         0.0, 1.0
     );
     out.uv = uv;
@@ -1162,7 +1345,6 @@ struct WPEWaterWavesUniforms {
     float directionX;
     float directionY;
     float hasMask;
-    float debugMode; // 0 normal; 1 mask grayscale; 2 source+red mask overlay; 3 displacement heatmap; 4 solid magenta
     float4 texture1Resolution; // (textureWidth, textureHeight, imageWidth, imageHeight)
 };
 
@@ -1177,18 +1359,18 @@ fragment half4 wpe_effect_waterwaves_fragment(
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float2 direction = float2(uniforms.directionX, uniforms.directionY);
-    // Mirror waterwaves.vert's mask-UV padding correction (v_TexCoord.zw *= res.zw/res.xy)
-    // for the debug overlay so the mask visualization lands where the real effect samples.
-    float2 maskUV = in.uv;
-    if (uniforms.debugMode > 0.5) {
-        float2 maskScale = float2(
-            abs(uniforms.texture1Resolution.x) > 0.000001 ? uniforms.texture1Resolution.z / uniforms.texture1Resolution.x : 1.0,
-            abs(uniforms.texture1Resolution.y) > 0.000001 ? uniforms.texture1Resolution.w / uniforms.texture1Resolution.y : 1.0
-        );
-        maskUV *= maskScale;
-    }
+    // Mask UV follows waterwaves.vert's v_TexCoord.zw = wpe_texcoord_with_resolution:
+    // scale by the mask's image/texture ratio so a padded (NPOT) mask samples only its
+    // valid region. texture1Resolution is (texW, texH, imgW, imgH); ratio is 1 (no-op)
+    // for a full-size mask. Matches WPEShaderTranspiler's transpiled path bit-for-bit.
+    float2 maskScale = float2(
+        abs(uniforms.texture1Resolution.x) > 0.000001
+            ? uniforms.texture1Resolution.z / uniforms.texture1Resolution.x : 0.0,
+        abs(uniforms.texture1Resolution.y) > 0.000001
+            ? uniforms.texture1Resolution.w / uniforms.texture1Resolution.y : 0.0
+    );
     float mask = (uniforms.hasMask > 0.5)
-        ? float(texture1.sample(linearSampler, maskUV).r)
+        ? float(texture1.sample(linearSampler, in.uv * maskScale).r)
         : 1.0;
 
     float distance = uniforms.time * uniforms.speed + dot(in.uv, direction) * uniforms.scale;
@@ -1199,31 +1381,6 @@ fragment half4 wpe_effect_waterwaves_fragment(
 
     float2 displacement = shaped * offset * strength * mask;
     float2 uv = clamp(in.uv + displacement, float2(0.0), float2(1.0));
-
-    // Developer Tools "Waterwaves debug" visualizations (0 in production).
-    if (uniforms.debugMode > 0.5) {
-        if (uniforms.debugMode > 3.5) {
-            // Plumbing test: paint the whole pass solid magenta, ignoring mask/source.
-            // If this shows on the character, the waterwaves pass runs live and the flag
-            // reaches the renderer (so any "no motion" is mask alignment, not plumbing).
-            return half4(1.0h, 0.0h, 1.0h, 1.0h);
-        }
-        if (uniforms.debugMode < 1.5) {
-            // Mask as grayscale — shows WHERE the effect is allowed to act (and reveals
-            // any vertical flip vs the character).
-            return half4(half3(mask), 1.0h);
-        } else if (uniforms.debugMode < 2.5) {
-            // Source with the mask region tinted red — confirms the trigger region lands on
-            // the intended part of the character (e.g. the hair).
-            float4 base = float4(texture0.sample(linearSampler, in.uv));
-            float3 tinted = mix(base.rgb, float3(1.0, 0.0, 0.0), mask * 0.6);
-            return half4(half3(tinted), half(base.a));
-        }
-        // Displacement-magnitude heatmap (amplified) — shows whether the wave field is
-        // actually nonzero over the masked region.
-        float mag = clamp(length(displacement) * 120.0, 0.0, 1.0);
-        return half4(half(mag), half(mag * 0.4), 0.0h, 1.0h);
-    }
 
     return texture0.sample(linearSampler, uv);
 }

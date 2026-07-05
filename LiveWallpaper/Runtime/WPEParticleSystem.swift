@@ -224,9 +224,9 @@ final class WPEParticleSystem {
     private let pointerLockedControlPointIDs: Set<Int>
 
     private var aliveCount: Int = 0
-    /// Diagnostic (for `WPEParticleCursorDebug`): how many particles a
-    /// control-point attractor pushed/pulled on the last tick. With attractors
-    /// present and a live pointer, 0 means nothing is landing in range.
+    /// Diagnostic: how many particles a control-point attractor pushed/pulled
+    /// on the last tick. With attractors present and a live pointer, 0 means
+    /// nothing is landing in range.
     private(set) var lastAttractorAffectedCount = 0
     private var particles: [Particle]
     private var spawnAccumulator: Double = 0
@@ -410,10 +410,10 @@ final class WPEParticleSystem {
         return sceneTransform.applyModelMatrix(toLocalPoint: rawOffset)
     }
 
-    /// One-line cursor-reactivity snapshot for the `WPEParticleCursorDebug`
-    /// flag; `nil` for systems with no cursor interaction. Reports whether the
-    /// pointer-locked control point resolves (i.e. the cursor is live) and how
-    /// many particles the attractors actually moved last tick.
+    /// One-line cursor-reactivity diagnostic snapshot; `nil` for systems with
+    /// no cursor interaction. Reports whether the pointer-locked control point
+    /// resolves (i.e. the cursor is live) and how many particles the
+    /// attractors actually moved last tick.
     func cursorDebugSummary() -> String? {
         guard !attractors.isEmpty || !pointerLockedControlPointIDs.isEmpty else { return nil }
         func fmt(_ v: SIMD3<Float>?) -> String {

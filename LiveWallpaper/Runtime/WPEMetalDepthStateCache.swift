@@ -16,16 +16,21 @@ final class WPEMetalDepthStateCache {
     }
 
     static let memorylessDepthDefaultsKey = "WPEMetalMemorylessDepthEnabled"
-    /// Default ON. Suite-first so `defaults write Taijia.LiveWallpaper
-    /// WPEMetalMemorylessDepthEnabled -bool NO` is honoured even when the renderer
-    /// runs in a process whose standard domain isn't the app's.
-    static var isMemorylessDepthEnabled: Bool {
+    /// Internal kill-switch, default ON: `.memoryless` (tile-only) depth on Apple
+    /// GPUs saves depth-texture bandwidth/footprint but is precision-sensitive, so
+    /// `defaults write Taijia.LiveWallpaper WPEMetalMemorylessDepthEnabled -bool NO`
+    /// stays as the per-user escape hatch. Suite-first so that write is honoured
+    /// even when the renderer runs in a process whose standard domain isn't the
+    /// app's. Frozen read-once (restart to apply) — this was the last per-frame
+    /// UserDefaults read in the release render loop; no in-app code writes the key
+    /// or expects a live toggle.
+    static let isMemorylessDepthEnabled: Bool = {
         let suite = UserDefaults.appSuite
         if suite.object(forKey: memorylessDepthDefaultsKey) != nil {
             return suite.bool(forKey: memorylessDepthDefaultsKey)
         }
         return UserDefaults.standard.object(forKey: memorylessDepthDefaultsKey) as? Bool ?? true
-    }
+    }()
 
     /// Whether this device + flag permit memoryless (tile-only) depth at all. The
     /// caller additionally opts a target out (`allowTransient: false`) when more
@@ -35,9 +40,10 @@ final class WPEMetalDepthStateCache {
         Self.isMemorylessDepthEnabled && device.supportsFamily(.apple1)
     }
 
-    /// Derive load/store from the actual texture so a hot defaults change can't pair
-    /// a memoryless texture (cached for the frame) with a `.store` action — which is
-    /// a Metal validation crash.
+    /// Derive load/store from the actual texture, never from the flag: pairing a
+    /// memoryless texture (cached for the frame) with a `.store` action is a Metal
+    /// validation crash. The flag is frozen read-once, so a mid-process flip can't
+    /// happen anymore, but the texture's own storage mode stays the source of truth.
     func isTransientDepthAttachment(_ texture: MTLTexture) -> Bool {
         texture.storageMode == .memoryless
     }

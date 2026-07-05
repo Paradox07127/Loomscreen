@@ -354,6 +354,73 @@ struct WPERenderGraphBuilderTests {
         #expect(group.passes.last?.target == .scene)
     }
 
+    @Test("copybackground=false group composites its own buffer, not the live scene (3470764447 PiP)")
+    func copyBackgroundFalseGroupCompositesOwnBufferNotScene() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["child_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+
+        // `copybackground: false` downgrades the material's `_rt_FullFrameBuffer`
+        // to `.previous` (materialRespectingCopyBackground). The group rewrite
+        // must map that back to the group's own buffer — binding `.previous` on
+        // the scene-targeting composite paints the live scene into the group's
+        // quad (3470764447 layer 249's picture-in-picture).
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                [
+                    "id": "group",
+                    "name": "Group",
+                    "type": "image",
+                    "image": "models/util/composelayer.json",
+                    "copybackground": false,
+                    "origin": "500 400 0",
+                    "size": "200 100 0"
+                ],
+                [
+                    "id": "child",
+                    "name": "Child",
+                    "type": "image",
+                    "image": "models/child.json",
+                    "parent": "group",
+                    "origin": "5 7 0",
+                    "size": "40 30 0"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        let group = try #require(graph.layers.first { $0.objectID == "group" })
+        let groupTarget = "_rt_layerGroup_group"
+        #expect(group.groupCompositeSource == groupTarget)
+        #expect(group.passes.first?.source == .fbo(groupTarget))
+        #expect(group.passes.first?.textures[0] == .fbo(groupTarget))
+        #expect(group.passes.last?.target == .scene)
+
+        let child = try #require(graph.layers.first { $0.objectID == "child" })
+        #expect(child.passes.last?.target == .fbo(name: groupTarget))
+    }
+
     @Test("Composelayer wrapping only a particle is dropped from the graph")
     func composelayerWrappingOnlyParticleIsDropped() throws {
         let root = FileManager.default.temporaryDirectory
@@ -447,6 +514,65 @@ struct WPERenderGraphBuilderTests {
         #expect(!graph.layers.contains { $0.objectID == "hotspot" })
         #expect(graph.layers.contains { $0.objectID == "group" })
         #expect(graph.layers.contains { $0.objectID == "child" })
+    }
+
+    @Test("Effect-less fullscreenlayer passthrough is dropped; one with a visible effect is kept")
+    func noOpFullscreenPassthroughDroppedEffectBearingKept() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // fullscreenlayer util = an identity full-frame copy of the whole scene.
+        try writeJSON(["material": "materials/util/fullscreenlayer.json"], to: root.appendingPathComponent("models/util/fullscreenlayer.json"))
+        try writeJSON([
+            "passes": [["shader": "copy", "textures": ["_rt_FullFrameBuffer"]]]
+        ], to: root.appendingPathComponent("materials/util/fullscreenlayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [["shader": "genericimage2", "textures": ["child_albedo"]]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+        // A real post-process effect (e.g. DoF) authored onto a fullscreenlayer.
+        try writeJSON([
+            "passes": [["material": "materials/workshop/1/effects/blur.json"]]
+        ], to: root.appendingPathComponent("effects/workshop/1/blur/effect.json"))
+        try writeJSON([
+            "passes": [["shader": "workshop/1/effects/blur"]]
+        ], to: root.appendingPathComponent("materials/workshop/1/effects/blur.json"))
+
+        // `postprocess` mirrors scene 3470764447's 后处理层: an effect-less
+        // fullscreenlayer whose only pass is an identity `_rt_FullFrameBuffer`→scene
+        // copy — a WPE no-op that, if drawn, accrues a nested picture-in-picture.
+        // `dof` is a fullscreenlayer WITH a visible effect: a real post-process
+        // that must survive. `bg` is a normal image layer.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": "postprocess", "name": "后处理层", "type": "image",
+                    "image": "models/util/fullscreenlayer.json", "origin": "0 0 0"
+                ],
+                [
+                    "id": "dof", "name": "DoF", "type": "image",
+                    "image": "models/util/fullscreenlayer.json", "origin": "0 0 0",
+                    "effects": [["id": 1, "file": "effects/workshop/1/blur/effect.json", "visible": true]]
+                ],
+                [
+                    "id": "bg", "name": "Background", "type": "image",
+                    "image": "models/child.json", "origin": "0 0 0", "size": "3840 2160 0"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(!graph.layers.contains { $0.objectID == "postprocess" },
+                "effect-less fullscreen passthrough must be dropped (picture-in-picture no-op)")
+        #expect(graph.layers.contains { $0.objectID == "dof" },
+                "a fullscreenlayer with a visible effect is a real post-process and must be kept")
+        #expect(graph.layers.contains { $0.objectID == "bg" })
     }
 
     @Test("Nested particle-only composelayers drop BOTH wrappers (outer keeps no full-frame passthrough)")

@@ -4659,35 +4659,6 @@
         }
       }
     },
-    "Cached Projects (%lld)" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cached Projects (%lld)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キャッシュ済みプロジェクト（%lld）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已缓存的项目 (%lld)"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已快取的專案（%lld）"
-          }
-        }
-      }
-    },
     "Caches" : {
       "comment" : "Storage settings.",
       "extractionState" : "manual",

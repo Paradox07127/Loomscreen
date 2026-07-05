@@ -123,18 +123,12 @@ struct WPEShaderTranspiler {
         }
         _ = !varyings.isEmpty || activeSource.contains("v_TexCoord") || activeSource.contains("gl_FragCoord")
 
-        // Noise/detail textures (e.g. `util/noise`) are tiled: WPE samples them with
-        // wrap/repeat at coords far outside [0,1]. Our single `linearSampler` is
-        // clamp_to_edge, so without a repeat sampler those coords clamp to the texture
-        // edge — collapsing filmgrain's tiled noise into a scrolling edge-smear cross-hatch.
-        // Mark samplers the shader annotates as noise so their reads use `repeatSampler`;
-        // the framebuffer / masks keep clamp (they're sampled in range, where it's a no-op).
-        let repeatSamplers = Set(
-            sortedSamplers
-                .filter { ($0.comment?.lowercased().contains("noise")) == true }
-                .map(\.name)
-        )
-
+        // Sampler wrap (clamp vs repeat) and filter are NOT decided here anymore: every
+        // `g_TextureN.sample` is rewritten to the per-slot runtime sampler `wpeSamplerN`
+        // (`rewriteSamplersToPerSlot`), whose address/filter the executor binds from the
+        // texture's TEXI flags. The old "annotate a sampler as noise → repeatSampler"
+        // heuristic is retired — it couldn't see per-texture ClampUVs and missed
+        // water-normal / flow maps (waterripple froze).
         let body = bodyLines.joined(separator: "\n")
         guard let mainRange = Self.locateMain(in: body) else {
             throw WPEShaderCompilerError.translationFailed(
@@ -154,21 +148,27 @@ struct WPEShaderTranspiler {
             preMain + "\n" + postMain,
             varyingTypesByName: varyingTypesByName,
             preserveTexCoordZW: preserveTexCoordZW,
-            premultipliedInputSlots: premultipliedInputSlots,
-            repeatSamplers: repeatSamplers
+            premultipliedInputSlots: premultipliedInputSlots
         )
         let translatedMain = translateMain(
             mainBody,
             varyingTypesByName: varyingTypesByName,
             preserveTexCoordZW: preserveTexCoordZW,
             premultipliedInputSlots: premultipliedInputSlots,
-            premultiplyOutput: premultipliedOutput,
-            repeatSamplers: repeatSamplers
+            premultiplyOutput: premultipliedOutput
         )
-        let helperMutableGlobals = extractProgramScopeMutableDeclarations(from: translatedHelpers)
+        // Convert `g_TextureN.sample(linear|repeatSampler, …)` → the per-slot runtime
+        // sampler `wpeSamplerN` in BOTH helper and main bodies BEFORE resource threading,
+        // so `rewriteHelperResourceAccess` sees `wpeSamplerN` in a helper body and wires
+        // it into that helper's signature/call (via its `samplerStateResources`). Runs
+        // after the `linearSampler`-keyed narrowing / LOD rewrites (inside the translate
+        // calls above), so those still matched the literal name.
+        let perSlotHelpers = Self.rewriteSamplersToPerSlot(translatedHelpers)
+        let perSlotMain = Self.rewriteSamplersToPerSlot(translatedMain)
+        let helperMutableGlobals = extractProgramScopeMutableDeclarations(from: perSlotHelpers)
         let helperResources = rewriteHelperResourceAccess(
             helpers: helperMutableGlobals.source,
-            mainBody: translatedMain,
+            mainBody: perSlotMain,
             uniforms: uniforms,
             samplers: sortedSamplers,
             mutableGlobals: helperMutableGlobals.declarations
@@ -713,6 +713,26 @@ struct WPEShaderTranspiler {
             inner = inner + "\nreturn \(zero);\n"
         }
         return inner
+    }
+
+    /// Rewrite every `g_Texture<N>.sample(linearSampler|repeatSampler, …)` read to the
+    /// per-slot runtime sampler `wpeSampler<N>`, whose address mode (clamp/repeat) and
+    /// filter (linear/nearest) are bound from the texture's TEXI flags in the executor —
+    /// so scrolled tiling maps (water-normal, noise, flow) repeat instead of clamping to
+    /// a frozen edge. `wpeSampler<N>` is a `main` argument and a threaded helper resource
+    /// (`helperResources`), so it is in scope in both main and helper bodies; `#define`
+    /// macro bodies expand into those same scopes. Runs LAST, after the `linearSampler`-
+    /// keyed coordinate-narrowing and LOD rewrites, so those still match the literal name.
+    private static func rewriteSamplersToPerSlot(_ source: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(g_Texture(\d+)\.sample\()(?:linearSampler|repeatSampler)(\s*,)"#
+        ) else { return source }
+        let ns = source as NSString
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: NSRange(location: 0, length: ns.length),
+            withTemplate: "$1wpeSampler$2$3"
+        )
     }
 
     // MARK: - Type / intrinsic substitutions
@@ -1851,13 +1871,21 @@ struct WPEShaderTranspiler {
         let samplerResources = samplers.map {
             HelperResource(name: $0.name, parameterType: "texture2d<float>")
         }
+        // Texture-call rewriting turns a helper-body `texture(g_TextureN, uv)`
+        // into `g_TextureN.sample(wpeSamplerN, uv)` — the per-slot sampler
+        // STATE must be threaded alongside the texture or the helper references
+        // an undeclared identifier (godrays_gaussian's blur helpers).
+        let samplerStateResources = samplers.compactMap { decl -> HelperResource? in
+            guard let slot = textureSlot(for: decl.name) else { return nil }
+            return HelperResource(name: "wpeSampler\(slot)", parameterType: "sampler")
+        }
         let uniformResources = uniforms.map {
             HelperResource(name: $0.name, parameterType: helperParameterType(for: $0))
         }
         let mutableGlobalResources = mutableGlobals.map {
             HelperResource(name: $0.name, parameterType: $0.helperParameterType)
         }
-        return samplerResources + uniformResources + mutableGlobalResources
+        return samplerResources + samplerStateResources + uniformResources + mutableGlobalResources
     }
 
     private static func helperMacroDependencies(
@@ -2248,8 +2276,18 @@ struct WPEShaderTranspiler {
             signature.append("    constant WPEUniforms& u [[buffer(0)]],")
         }
         for slot in 0..<Self.customTextureSlotCount {
+            signature.append("    texture2d<float> tex\(slot) [[texture(\(slot))]],")
+        }
+        // Per-slot samplers. Address mode (clamp vs repeat) and filter (linear vs
+        // nearest) are bound at runtime from each texture's TEXI flags in
+        // WPEMetalRenderExecutor's custom-shader dispatch. This replaces the old
+        // annotation heuristic that clamp-sampled every content texture — which
+        // froze scrolled tiling maps (water-normal, noise, flow) the moment their
+        // sample UVs left [0,1]. Direct `g_TextureN` reads use `wpeSamplerN`; helper
+        // samples fall back to the file-scope clamp/repeat constants.
+        for slot in 0..<Self.customTextureSlotCount {
             let comma = slot < Self.customTextureSlotCount - 1 ? "," : ""
-            signature.append("    texture2d<float> tex\(slot) [[texture(\(slot))]]\(comma)")
+            signature.append("    sampler wpeSampler\(slot) [[sampler(\(slot))]]\(comma)")
         }
         signature.append(") {")
         out.append(signature.joined(separator: "\n"))

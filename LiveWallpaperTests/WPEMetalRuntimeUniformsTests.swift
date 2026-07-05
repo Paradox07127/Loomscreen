@@ -129,6 +129,25 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(abs(uv.y - 0.75) < 0.0001)
     }
 
+    @Test("Pointer sampler marks locations outside the renderer view inactive")
+    func pointerSamplerMarksLocationsOutsideRendererViewInactive() throws {
+        let window = NSWindow(
+            contentRect: CGRect(x: 100, y: 100, width: 200, height: 100),
+            styleMask: [],
+            backing: .buffered,
+            defer: false
+        )
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.contentView = view
+
+        let uv = WPEMetalPointerSampler.normalizedSceneUV(
+            mouseLocation: CGPoint(x: 450, y: 125),
+            in: view
+        )
+
+        #expect(uv == SIMD2<Double>(0.5, 0.5))
+    }
+
     @Test("Orthographic camera uses scene projection dimensions")
     func orthographicCameraUsesSceneProjectionDimensions() {
         let projection = WPESceneOrthogonalProjection(width: 200, height: 100, auto: true)

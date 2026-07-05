@@ -183,8 +183,28 @@ final class WPEMSDFAtlas {
     /// to `skipped` after exhausting these so a temporary failure can recover.
     private var storeFailures: [WPEMSDFGlyphKey: Int] = [:]
     private var clock: UInt64 = 0
+    /// Cap on concurrent background generations. Scene load used to fan out one
+    /// detached task per uncached glyph — a text/CJK-heavy scene saturated every
+    /// core (~90% app CPU) until the atlas warmed up. Excess requests queue FIFO
+    /// and drain as generations complete; half the cores keeps warm-up fast
+    /// without starving render/decode work.
+    private let maxConcurrentGenerations = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+    private var activeGenerations = 0
+    private var queuedGenerations: [GlyphGenerationRequest] = []
 
-    init(device: MTLDevice, pageSize: Int = 1024, maxPages: Int = 4) {
+    /// Monotonic atlas epoch, bumped every time a page's pixels are reset
+    /// (`evict`). A cached draw payload (#4) records the epoch it was built at;
+    /// when the epoch advances, some page it references may have had its pixels
+    /// overwritten (page.reset keeps the MTLTexture but frees its skyline, so a
+    /// new glyph can land on old UVs), so the payload's vertex UVs can no longer
+    /// be trusted and the cache must rebuild. Never reset — strictly increasing.
+    private(set) var generation: UInt64 = 0
+
+    init(
+        device: MTLDevice,
+        pageSize: Int = 1024,
+        maxPages: Int = 4
+    ) {
         self.device = device
         self.pageSize = max(pageSize, 1)
         self.maxPages = max(maxPages, 1)
@@ -204,6 +224,10 @@ final class WPEMSDFAtlas {
             for: key
         )
     }
+
+    /// Number of cached glyph entries — test observability for the
+    /// canonical-size keying invariant (sizes must NOT fork entries).
+    var entryCount: Int { entries.count }
 
     /// Cache-only lookup (no generation). Cheap; safe to call every frame.
     func cachedEntry(for key: WPEMSDFGlyphKey) -> WPEMSDFAtlasEntry? {
@@ -229,27 +253,42 @@ final class WPEMSDFAtlas {
         }
         guard !pending.contains(key) else { return .pending }
         pending.insert(key)
-        let request = GlyphGenerationRequest(
+        queuedGenerations.append(GlyphGenerationRequest(
             key: key,
             generator: generator,
             font: font,
             maxCellSide: pageSize
-        )
-        Task.detached(priority: .utility) { [request, weak self] in
-            let generated = request.generator.generate(
-                glyph: request.key.glyph,
-                font: request.font,
-                maxCellSide: request.maxCellSide
-            ).map { GeneratedGlyph(bitmap: $0.bitmap, metrics: $0.metrics) }
-            await MainActor.run { [weak self] in
-                self?.completeGeneration(generated, for: request.key)
-            }
-        }
+        ))
+        launchQueuedGenerations()
         return .pending
     }
 
+    private func launchQueuedGenerations() {
+        while activeGenerations < maxConcurrentGenerations, !queuedGenerations.isEmpty {
+            let request = queuedGenerations.removeFirst()
+            activeGenerations += 1
+            // The scene-load warm-up is user-visible latency, not background
+            // housekeeping — `.userInitiated` (not `.utility`) keeps these glyph
+            // generations from being starved behind decode/video work.
+            Task.detached(priority: .userInitiated) { [request, weak self] in
+                let generated = request.generator.generate(
+                    glyph: request.key.glyph,
+                    font: request.font,
+                    maxCellSide: request.maxCellSide
+                ).map { GeneratedGlyph(bitmap: $0.bitmap, metrics: $0.metrics) }
+                await MainActor.run { [weak self] in
+                    self?.completeGeneration(generated, for: request.key)
+                }
+            }
+        }
+    }
+
     private func completeGeneration(_ generated: GeneratedGlyph?, for key: WPEMSDFGlyphKey) {
-        defer { pending.remove(key) }
+        activeGenerations = max(activeGenerations - 1, 0)
+        defer {
+            pending.remove(key)
+            launchQueuedGenerations()
+        }
         guard entries[key] == nil else { return }
         // No outline (whitespace / unsupported) is a PERMANENT skip — never
         // re-schedule, never draw as a 0.5 box.
@@ -358,6 +397,11 @@ final class WPEMSDFAtlas {
             entries[key] = nil
         }
         page.reset()
+        // A page's pixels are now free to be overwritten by new glyphs. Any
+        // cached draw payload (#4) whose vertex UVs point into this page would
+        // silently sample the wrong glyph, so advance the epoch to invalidate
+        // every payload built before this eviction.
+        generation &+= 1
     }
 
     private func touch(_ page: Page) {

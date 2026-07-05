@@ -39,7 +39,40 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        #expect(result.mslSource.contains("getNoise(v_TexCoord, g_Texture1)"))
+        #expect(result.mslSource.contains("getNoise(v_TexCoord, g_Texture1"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    // MARK: - Helper-scope per-slot sampler (godrays_gaussian blur helpers, 3509243656)
+
+    @Test("Blur helper sampling g_Texture0 threads the per-slot sampler state")
+    func helperScopeSamplerStateCompiles() throws {
+        // effects/godrays_gaussian: common_blur helpers sample g_Texture0, whose
+        // rewritten form references the per-slot `wpeSampler0` — the sampler
+        // STATE must be threaded into the helper alongside the texture.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        vec4 blur3a(vec2 uv, vec2 direction) {
+            vec4 color = texture(g_Texture0, uv) * 0.5;
+            color += texture(g_Texture0, uv + direction) * 0.25;
+            color += texture(g_Texture0, uv - direction) * 0.25;
+            return color;
+        }
+        void main() {
+            gl_FragColor = blur3a(v_TexCoord, vec2(0.001, 0.0));
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "helper_scope_sampler_state",
+            preprocessedSource: source
+        )
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
@@ -177,7 +210,7 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        #expect(result.mslSource.contains("sharpen(v_TexCoord, g_Texture0, g_TexelSize)"))
+        #expect(result.mslSource.contains("sharpen(v_TexCoord, g_Texture0, wpeSampler0, g_TexelSize)"))
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
@@ -436,8 +469,8 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        #expect(result.mslSource.contains("float3 albedo = g_Texture0.sample(linearSampler, v_TexCoord.xy).rgb;"))
-        #expect(result.mslSource.contains("float mask = g_Texture1.sample(linearSampler, v_TexCoord.xy).r;"))
+        #expect(result.mslSource.contains("float3 albedo = g_Texture0.sample(wpeSampler0, v_TexCoord.xy).rgb;"))
+        #expect(result.mslSource.contains("float mask = g_Texture1.sample(wpeSampler1, v_TexCoord.xy).r;"))
         #expect(result.mslSource.contains("v_TexCoord.xy - float2(0.5)"))
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
@@ -462,7 +495,7 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.xy).r"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoord.xy).r"))
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
@@ -625,7 +658,7 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler, v_TexCoord.xy);"))
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0, v_TexCoord.xy);"))
         #expect(result.mslSource.contains("auto pointer = g_PointerPosition * u_pointerSpeed;"))
         #expect(result.mslSource.contains("u_rOffset * timer.xy + pointer"))
         #expect(result.mslSource.contains("float3 finalColor = float4(rValue.r, scene.g, timer.b, 0.1).rgb;"))

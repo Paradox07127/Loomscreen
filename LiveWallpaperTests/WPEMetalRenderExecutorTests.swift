@@ -23,6 +23,34 @@ struct WPEMetalRenderExecutorTests {
         #expect(WPEMetalDepthStateCache.compareFunction(for: "lequal") == .lessEqual)
     }
 
+    @Test("Puppet defaults optional flag resolves unset, suite, and standard fallback")
+    func puppetDefaultsFlagOptionalResolvesUnsetSuiteAndStandardFallback() throws {
+        let key = "WPEPuppetFlagResolutionScratch"
+        let suiteName = "LiveWallpaperTests.puppetFlagScratch.suite"
+        let standardName = "LiveWallpaperTests.puppetFlagScratch.standard"
+        let scratchSuite = UserDefaults(suiteName: suiteName)!
+        let scratchStandard = UserDefaults(suiteName: standardName)!
+        let cleanup = {
+            scratchSuite.removePersistentDomain(forName: suiteName)
+            scratchStandard.removePersistentDomain(forName: standardName)
+        }
+        cleanup()
+        defer { cleanup() }
+
+        #expect(WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) == nil)
+        #expect((WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) ?? true) == true)
+
+        scratchStandard.set(true, forKey: key)
+        scratchSuite.set(false, forKey: key)
+        #expect(WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) == false)
+
+        scratchSuite.removeObject(forKey: key)
+        #expect(WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) == true)
+
+        scratchStandard.set(false, forKey: key)
+        #expect(WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) == false)
+    }
+
     @Test("Destination-reading blend modes load the existing attachment (incl. screen)")
     func destinationReadingBlendModesRequireExistingDestination() throws {
         // Screen/additive/multiply read the destination as their `dst` operand, so
@@ -90,6 +118,47 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.g <= 5)
         #expect(pixel.b <= 5)
         #expect(pixel.a >= 250)
+    }
+
+    @Test("effects/skew MODE=1 is detected as a vertex-skew pass with correct params")
+    func skewMode1DetectedWithParams() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        func skewPrepared(mode: Int, top: Double, bottom: Double = 0, left: Double = 0, right: Double = 0) -> WPEPreparedRenderPass {
+            let pass = WPERenderPass(
+                id: "290.2",
+                phase: .effect(file: "effects/skew/effect.json"),
+                shader: "effects/skew",
+                source: .fbo("comp"),
+                target: .fbo(name: "_rt_layerGroup_249"),
+                textures: [0: .fbo("comp")],
+                binds: [:],
+                constants: [
+                    "top": .number(top), "bottom": .number(bottom),
+                    "left": .number(left), "right": .number(right)
+                ],
+                combos: ["MODE": mode],
+                blending: "normal", cullMode: "nocull",
+                depthTest: "disabled", depthWrite: "disabled"
+            )
+            return WPEPreparedRenderPass(
+                pass: pass,
+                shader: WPEShaderProgram(name: "effects/skew", vertexSource: "", fragmentSource: "", isBuiltin: false),
+                textureBindings: [:],
+                comboValues: ["MODE": mode],
+                uniformValues: [:]
+            )
+        }
+        // MODE=1 with a non-zero top (3470764447's audio bar): detected + params read.
+        let vertexSkew = skewPrepared(mode: 1, top: 0.34)
+        #expect(executor.isVertexSkewPass(vertexSkew))
+        let params = executor.vertexSkewParams(for: vertexSkew).topBottomLeftRight
+        #expect(abs(params.x - 0.34) < 0.0001)
+        #expect(params.y == 0 && params.z == 0 && params.w == 0)
+        // MODE=0 (UV) is handled by the transpiled fragment, not the vertex path.
+        #expect(!executor.isVertexSkewPass(skewPrepared(mode: 0, top: 0.34)))
+        // MODE=1 but all-zero params = skew disabled → keep the plain object quad.
+        #expect(!executor.isVertexSkewPass(skewPrepared(mode: 1, top: 0)))
     }
 
     @Test("Godrays combine custom pass preserves FBO albedo through builtin compatibility path")
@@ -761,6 +830,93 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    // The custom-shader dispatch binds each texture slot's sampler from the bound
+    // texture's TEXI ClampUVs flag. A tiling map (ClampUVs unset) must sample with
+    // `repeat` so time-scrolled UVs keep advancing instead of clamping to a frozen
+    // edge — the waterripple "ripples stop after a few minutes" bug. This drives an
+    // out-of-range sample and checks the flag flips repeat vs clamp.
+    @Test("Custom-shader sampler honors the TEXI ClampUVs flag (repeat vs clamp)")
+    func customShaderSamplerHonorsClampUVsFlag() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        // 2×1 source: texel 0 red, texel 1 green. Sample at u=1.25:
+        //   repeat → fract(1.25)=0.25 → texel-0 centre → RED
+        //   clamp  → 1.0 → texel-1 edge → GREEN
+        func makeSplitTexture() throws -> MTLTexture {
+            try makeRGBAInputTexture(
+                device: device, width: 2, height: 1,
+                bytes: Data([255, 0, 0, 255, 0, 255, 0, 255])
+            )
+        }
+        let pass = WPERenderPass(
+            id: "wrap.0",
+            phase: .effect(file: "effects/wrap/effect.json"),
+            shader: "effects/wrap",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        func pipeline() -> WPEPreparedRenderPipeline {
+            WPEPreparedRenderPipeline(layers: [
+                WPEPreparedRenderLayer(
+                    graphLayer: graphLayer(pass: pass),
+                    passes: [WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "effects/wrap",
+                            vertexSource: "// fullscreen vertex from executor",
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            void main() {
+                                gl_FragColor = texture(g_Texture0, vec2(1.25, 0.5));
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [0: .image("materials/base.png")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )]
+                )
+            ])
+        }
+
+        // ClampUVs unset → repeat → wraps to the red texel.
+        let repeatTex = try makeSplitTexture()
+        WPEMetalTextureMetadataRegistry.shared.register(
+            texture: repeatTex, imageWidth: 2, imageHeight: 1, clampUVs: false
+        )
+        let repeatOut = try executor.render(
+            pipeline: pipeline(), size: CGSize(width: 1, height: 1),
+            textures: ["materials/base.png": repeatTex]
+        )
+        let repeatPixel = try readPixel(repeatOut, x: 0, y: 0)
+        #expect(repeatPixel.r >= 200)
+        #expect(repeatPixel.g <= 60)
+
+        // ClampUVs set → clamp-to-edge → the green edge texel (teeth: proves the flag
+        // actually drives the address mode, not a constant).
+        let clampTex = try makeSplitTexture()
+        WPEMetalTextureMetadataRegistry.shared.register(
+            texture: clampTex, imageWidth: 2, imageHeight: 1, clampUVs: true
+        )
+        let clampOut = try executor.render(
+            pipeline: pipeline(), size: CGSize(width: 1, height: 1),
+            textures: ["materials/base.png": clampTex]
+        )
+        let clampPixel = try readPixel(clampOut, x: 0, y: 0)
+        #expect(clampPixel.g >= 200)
+        #expect(clampPixel.r <= 60)
+    }
+
     @Test("Translated waterwaves squares authored strength before sampling")
     func translatedWaterwavesSquaresAuthoredStrengthBeforeSampling() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -880,6 +1036,163 @@ struct WPEMetalRenderExecutorTests {
 
         #expect(pixel.r >= 200)
         #expect(pixel.g <= 40)
+    }
+
+    // Oracle diff: the builtin waterwaves fallback (wpe_effect_waterwaves_fragment,
+    // used only when a scene ships no waterwaves source) must sample the flow mask at
+    // the same scaled UV as the transpiled real-WPE path — v_TexCoord.zw =
+    // wpe_texcoord_with_resolution(uv, g_Texture1Resolution). With a padded mask
+    // (imageWidth < textureWidth) the two paths only agree once the builtin applies
+    // the image/texture ratio; sampling plain in.uv makes them diverge on the right
+    // half, where the ratio maps the sample back into the valid image region.
+    @Test("Builtin waterwaves fallback scales mask UV to match the transpiled path")
+    func builtinWaterwavesFallbackScalesMaskUVLikeTranspiledPath() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        // Source: 8×1, texels 0–5 red, 6–7 green. Sampling at a texel centre avoids
+        // linear-filter blend: uv.x=0.6875 → texel5 (red), uv.x=0.9375 → texel7 (green).
+        var sourceBytes = [UInt8]()
+        for x in 0..<8 {
+            sourceBytes += (x < 6) ? [255, 0, 0, 255] : [0, 255, 0, 255]
+        }
+        let source = try makeRGBAInputTexture(
+            device: device, width: 8, height: 1, bytes: Data(sourceBytes)
+        )
+        // Mask: physical 4×1 (texels 0–1 white, 2–3 black) but a 2-wide image, so the
+        // image/texture ratio is 0.5. At output pixel 5 (uv.x=0.6875): scaled UV 0.34375
+        // lands in the white region (mask≈1 → displacement), plain UV 0.6875 lands in the
+        // black region (mask≈0 → no displacement). Both UVs stay clear of the boundary.
+        var maskBytes = [UInt8]()
+        for x in 0..<4 {
+            maskBytes += (x < 2) ? [255, 255, 255, 255] : [0, 0, 0, 255]
+        }
+        let mask = try makeRGBAInputTexture(
+            device: device, width: 4, height: 1, bytes: Data(maskBytes)
+        )
+        WPEMetalTextureMetadataRegistry.shared.register(texture: mask, imageWidth: 2, imageHeight: 1)
+
+        // g_Time·g_Speed = π/2 → sin=1, sign·pow(1,exp)=1; g_Scale=0 makes the phase
+        // spatially constant so displacement.x = strength²·mask = 0.25·mask.
+        let uniformValues: [String: WPESceneShaderConstantValue] = [
+            "g_Time": .number(Double.pi / 2),
+            "g_Speed": .number(1),
+            "g_Scale": .number(0),
+            "g_Strength": .number(0.5),
+            "g_Exponent": .number(1),
+            "g_Direction": .number(0)
+        ]
+        let pass = WPERenderPass(
+            id: "waterwaves.0",
+            phase: .effect(file: "effects/waterwaves/effect.json"),
+            shader: "effects/waterwaves",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png"), 1: .image("materials/mask.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let textureBindings: [Int: WPETextureReference] = [
+            0: .image("materials/base.png"),
+            1: .image("materials/mask.png")
+        ]
+        let textures = ["materials/base.png": source, "materials/mask.png": mask]
+
+        // Builtin fallback path (WPEPreparedRenderPass.shader == nil → dispatch() switch
+        // → dispatchWaterWavesEffect → wpe_effect_waterwaves_fragment).
+        let builtinPipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: nil,
+                    textureBindings: textureBindings,
+                    comboValues: [:],
+                    uniformValues: uniformValues
+                )]
+            )
+        ])
+        // Transpiled reference path (real waterwaves.frag → wpe_translated_fragment).
+        let transpiledPipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(
+                        name: "effects/waterwaves",
+                        vertexSource: """
+                        uniform vec4 g_Texture1Resolution;
+                        uniform float g_Direction;
+                        varying vec4 v_TexCoord;
+                        varying vec2 v_Direction;
+                        """,
+                        fragmentSource: """
+                        uniform sampler2D g_Texture0;
+                        uniform sampler2D g_Texture1;
+                        uniform float g_Time;
+                        uniform float g_Speed;
+                        uniform float g_Scale;
+                        uniform float g_Exponent;
+                        uniform float g_Strength;
+                        varying vec4 v_TexCoord;
+                        varying vec2 v_Direction;
+                        void main() {
+                            float mask = texture(g_Texture1, v_TexCoord.zw).r;
+                            vec2 texCoord = v_TexCoord.xy;
+                            float distance = g_Time * g_Speed + dot(texCoord, v_Direction) * g_Scale;
+                            float strength = g_Strength * g_Strength;
+                            vec2 offset = vec2(v_Direction.y, -v_Direction.x);
+                            float val1 = sin(distance);
+                            float s1 = sign(val1);
+                            val1 = pow(abs(val1), g_Exponent);
+                            texCoord += val1 * s1 * offset * strength * mask;
+                            gl_FragColor = texture(g_Texture0, texCoord);
+                        }
+                        """,
+                        isBuiltin: false
+                    ),
+                    textureBindings: textureBindings,
+                    comboValues: [:],
+                    uniformValues: uniformValues
+                )]
+            )
+        ])
+
+        let runtime = WPEMetalRuntimeUniforms(
+            time: Double.pi / 2,
+            daytime: 0,
+            brightness: 1,
+            pointerPosition: SIMD2<Double>(0.5, 0.5)
+        )
+        let builtinOutput = try executor.render(
+            pipeline: builtinPipeline,
+            size: CGSize(width: 8, height: 1),
+            textures: textures,
+            runtimeUniforms: runtime
+        )
+        let transpiledOutput = try executor.render(
+            pipeline: transpiledPipeline,
+            size: CGSize(width: 8, height: 1),
+            textures: textures,
+            runtimeUniforms: runtime
+        )
+
+        // At output pixel 5 the scaled-UV mask read (≈1) displaces the sample from the
+        // red texel 5 to the green texel 7. The builtin must match the transpiled oracle
+        // there — a plain-in.uv mask read would read ≈0, leaving the pixel red.
+        let builtinPixel = try readPixel(builtinOutput, x: 5, y: 0)
+        let transpiledPixel = try readPixel(transpiledOutput, x: 5, y: 0)
+        #expect(builtinPixel.g >= 200)
+        #expect(builtinPixel.r <= 60)
+        #expect(Int(builtinPixel.r) - Int(transpiledPixel.r) < 24)
+        #expect(Int(transpiledPixel.r) - Int(builtinPixel.r) < 24)
+        #expect(Int(builtinPixel.g) - Int(transpiledPixel.g) < 24)
+        #expect(Int(transpiledPixel.g) - Int(builtinPixel.g) < 24)
     }
 
     @Test("Translated texture resolution uses texture-local dimensions")

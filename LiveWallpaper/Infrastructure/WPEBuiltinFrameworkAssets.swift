@@ -2,10 +2,11 @@
 import Foundation
 
 /// App-bundled clean-room equivalents of the small Wallpaper Engine framework
-/// files referenced by common scene projects. Authored locally, contain no
-/// WPE bytes; ship under `wpe-builtins/` (~68 KB). See `expectedFiles` for
-/// the authoritative inventory. Noise PNGs are generated idempotently by
-/// `scripts/generate-wpe-builtin-noise.py`.
+/// files referenced by common scene projects, plus the clean-room MSDF text
+/// shader (`shaders/font.frag`) that the GPU text path resolves for every
+/// install. Authored locally, contain no WPE bytes; ship under
+/// `wpe-builtins/`. See `expectedFiles` for the authoritative inventory.
+/// Noise PNGs are generated idempotently by `scripts/generate-wpe-builtin-noise.py`.
 enum WPEBuiltinFrameworkAssets {
     /// Bundle directory containing the resources. `.bundle` extension keeps
     /// the subdirectory tree intact so `models/util/*.json` doesn't collide
@@ -41,7 +42,8 @@ enum WPEBuiltinFrameworkAssets {
         "models/util/solidlayer.json",
         "models/util/solidlayer_depthtest.json",
         "shaders/effectcomposebackground.frag",
-        "shaders/effectcomposebackground.vert"
+        "shaders/effectcomposebackground.vert",
+        "shaders/font.frag"
     ]
 }
 #endif

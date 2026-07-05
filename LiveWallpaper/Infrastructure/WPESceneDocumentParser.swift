@@ -50,10 +50,20 @@ enum WPESceneDocumentParser {
             throw WPESceneDocumentError.missingGeneral
         }
 
-        let camera = parseCamera(cameraDict, general: generalDict, diagnostics: &diagnostics)
+        let authoredCamera = parseCamera(cameraDict, general: generalDict, diagnostics: &diagnostics)
         let general = parseGeneral(generalDict, diagnostics: &diagnostics)
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
+        // WPE's runtime camera is a scene OBJECT carrying a `camera` key ("default");
+        // the top-level `camera` block is only the editor viewport bookmark. Ground
+        // truth (RenderDoc capture of 3509243656): g_EyePosition == the camera
+        // object's origin (0,0,6) with identity orientation, while the top-level
+        // eye (−2.06, 0.85, 10.07) sits outside the skybox shell and is never used.
+        let camera = runtimeCameraObjectOverride(
+            rawObjects,
+            base: authoredCamera,
+            diagnostics: &diagnostics
+        )
         // Script-driven `origin` resolves to the CURRENT user-property values
         // (the baked `value` is stale once the user tweaks the bound sliders).
         // Computed before transform combination so each object's parent offset
@@ -134,6 +144,15 @@ enum WPESceneDocumentParser {
                let object = parseTextObject(
                    entry,
                    transform: transform,
+                   localOrigin: localTransform(in: entry, scriptOrigins: scriptResolvedOrigins).origin,
+                   parentObjectID: entryID.flatMap { objectParentByID[$0] },
+                   // WPE fills text to its box in BOTH ortho and perspective
+                   // scenes (RenderDoc + on-device WPE screenshot of 3509243656:
+                   // the civ-status / clock text fills its box and is readable;
+                   // at raw pointsize it was ~4× too small — box height 134 vs
+                   // pointsize 28). The perspective `depthScale` then shrinks it
+                   // with distance on top of the box fit.
+                   fitsTextToBox: true,
                    effectiveVisible: effectiveVisible,
                    diagnostics: &diagnostics
                ) {
@@ -720,6 +739,9 @@ enum WPESceneDocumentParser {
     private static func parseTextObject(
         _ dict: [String: Any],
         transform: SceneObjectTransform,
+        localOrigin: SIMD3<Double>? = nil,
+        parentObjectID: String? = nil,
+        fitsTextToBox: Bool = true,
         effectiveVisible: Bool? = nil,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneTextObject? {
@@ -762,6 +784,22 @@ enum WPESceneDocumentParser {
         let pointSize = unwrapDouble(dict["pointsize"]) ?? unwrapDouble(dict["fontsize"]) ?? 32
         let color = unwrapVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
+        // Script-driven alpha/visible (3509243656's login-intro texts) — the
+        // renderer ticks these; the baked value above is only the seed.
+        var alphaScript: String?
+        var alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+        if let alphaDict = dict["alpha"] as? [String: Any],
+           let script = alphaDict["script"] as? String, !script.isEmpty {
+            alphaScript = script
+            alphaScriptProperties = scriptPropertyValues(alphaDict["scriptproperties"])
+        }
+        var visibleScript: String?
+        var visibleScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
+        if let visibleDict = dict["visible"] as? [String: Any],
+           let script = visibleDict["script"] as? String, !script.isEmpty {
+            visibleScript = script
+            visibleScriptProperties = scriptPropertyValues(visibleDict["scriptproperties"])
+        }
         let origin = transform.origin
         let scale = transform.scale
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
@@ -817,7 +855,15 @@ enum WPESceneDocumentParser {
             shadowSize: max(0, shadowSize),
             shadowColor: shadowColor,
             shadowOffset: shadowOffset,
-            letterSpacing: letterSpacing
+            letterSpacing: letterSpacing,
+            parentObjectID: parentObjectID,
+            localOrigin: localOrigin,
+            alphaScript: alphaScript,
+            alphaScriptProperties: alphaScriptProperties,
+            visibleScript: visibleScript,
+            visibleScriptProperties: visibleScriptProperties,
+            originScript: dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false),
+            fitsTextToBox: fitsTextToBox
         )
     }
 
@@ -1132,6 +1178,37 @@ enum WPESceneDocumentParser {
         return WPESceneCamera(center: center, eye: eye, up: up, nearZ: nearZ, farZ: farZ, fov: fov)
     }
 
+    private static func runtimeCameraObjectOverride(
+        _ rawObjects: [[String: Any]],
+        base: WPESceneCamera,
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneCamera {
+        guard let entry = rawObjects.first(where: { $0["camera"] is String }) else { return base }
+        let origin = parseVector3(entry["origin"]) ?? .zero
+        var fov = base.fov
+        if let raw = entry["fov"] {
+            if let dict = raw as? [String: Any], let value = parseDouble(dict["value"]) {
+                fov = value
+            } else if let value = parseDouble(raw) {
+                fov = value
+            }
+        }
+        if parseVector3(entry["angles"]) != nil {
+            diagnostics.append(.init(
+                severity: .warning,
+                message: "Camera object declares angles — not applied (identity orientation assumed)"
+            ))
+        }
+        return WPESceneCamera(
+            center: origin + SIMD3<Double>(0, 0, -1),
+            eye: origin,
+            up: SIMD3<Double>(0, 1, 0),
+            nearZ: base.nearZ,
+            farZ: base.farZ,
+            fov: fov
+        )
+    }
+
     // MARK: - General
 
     private static func parseGeneral(_ dict: [String: Any], diagnostics: inout [WPESceneDiagnostic]) -> WPESceneGeneral {
@@ -1176,12 +1253,33 @@ enum WPESceneDocumentParser {
             mouseInfluence: parseDouble(dict["cameraparallaxmouseinfluence"]) ?? parallaxDefaults.mouseInfluence
         )
         let supportsAudioProcessing = parseBool(dict["supportsaudioprocessing"]) ?? false
+        let hdr = parseBool(dict["hdr"]) ?? false
+        // v1 scope: HDR bloom only (the RenderDoc-verified pipeline). The SDR
+        // bloom path (bloomstrength/bloomthreshold, quarter-res blur) differs
+        // and stays unimplemented rather than approximated.
+        var bloom: WPESceneBloomSettings?
+        if hdr, parseBool(dict["bloom"]) == true {
+            bloom = WPESceneBloomSettings(
+                strength: unwrapDouble(dict["bloomhdrstrength"]) ?? 1,
+                threshold: unwrapDouble(dict["bloomhdrthreshold"]) ?? 0.5,
+                feather: unwrapDouble(dict["bloomhdrfeather"]) ?? 0.5,
+                scatter: unwrapDouble(dict["bloomhdrscatter"]) ?? 1,
+                iterations: parseInt(dict["bloomhdriterations"]) ?? 6,
+                tint: parseVector3(dict["bloomtint"]) ?? SIMD3<Double>(1, 1, 1)
+            )
+        }
         return WPESceneGeneral(
             clearColor: clearColor,
             orthogonalProjection: projection,
             usesPerspectiveProjection: usesPerspectiveProjection,
             cameraParallax: cameraParallax,
-            supportsAudioProcessing: supportsAudioProcessing
+            supportsAudioProcessing: supportsAudioProcessing,
+            lightAmbientColor: parseVector3(dict["ambientcolor"])
+                ?? WPESceneGeneral.defaultGeneral.lightAmbientColor,
+            lightSkylightColor: parseVector3(dict["skylightcolor"])
+                ?? WPESceneGeneral.defaultGeneral.lightSkylightColor,
+            hdr: hdr,
+            bloom: bloom
         )
     }
 

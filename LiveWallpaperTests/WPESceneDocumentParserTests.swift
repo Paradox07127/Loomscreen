@@ -241,6 +241,182 @@ struct WPESceneDocumentParserTests {
         #expect(document.camera.farZ == 10000)
     }
 
+    @Test("Camera object overrides the top-level editor camera")
+    func cameraObjectOverridesTopLevelCamera() throws {
+        // 3509243656: the RenderDoc capture's g_EyePosition is the camera
+        // OBJECT's origin (0,0,6); the top-level eye (10.07 away, outside the
+        // radius-8 skybox shell) is only the editor viewport bookmark.
+        let payload: [String: Any] = [
+            "camera": [
+                "center": "-1.83970 0.51670 9.15603",
+                "eye": "-2.05772 0.85240 10.07242",
+                "up": "0 1 0"
+            ],
+            "general": ["orthogonalprojection": NSNull(), "fov": 60],
+            "objects": [[
+                "id": 443,
+                "camera": "default",
+                "origin": "0.00000 0.00000 6.00000",
+                "fov": ["user": "newproperty71", "value": 50.0],
+                "zoom": 1.0,
+                "solid": true
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.camera.eye == SIMD3<Double>(0, 0, 6))
+        #expect(document.camera.center == SIMD3<Double>(0, 0, 5))
+        #expect(document.camera.up == SIMD3<Double>(0, 1, 0))
+        #expect(document.camera.fov == 50)
+    }
+
+    @Test("Text object records parent id and pre-composition local origin")
+    func textObjectRecordsParentAndLocalOrigin() throws {
+        // 3509243656's menu panels: text hangs under a script-driven transform
+        // host — the renderer re-composes localOrigin through the live chain,
+        // so both fields must survive parsing.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
+            "objects": [
+                ["id": 2051, "name": "panel", "origin": "10 20 0"],
+                [
+                    "id": 1230,
+                    "name": "CIV STATE",
+                    "text": "STATE",
+                    "parent": 2051,
+                    "origin": "5 -3 0"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let text = try #require(document.textObjects.first { $0.id == "1230" })
+        #expect(text.parentObjectID == "2051")
+        #expect(text.localOrigin == SIMD3<Double>(5, -3, 0))
+        // Parse-time world origin still carries the composed chain.
+        #expect(text.origin == SIMD3<Double>(15, 17, 0))
+    }
+
+    @Test("HDR bloom settings parse from general (user-bound values unwrapped)")
+    func hdrBloomSettingsParse() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": [
+                "orthogonalprojection": NSNull(),
+                "hdr": true,
+                "bloom": true,
+                "bloomhdrstrength": ["user": "hdr", "value": 4.0],
+                "bloomhdrthreshold": 0.46,
+                "bloomhdrfeather": 0.88,
+                "bloomhdrscatter": ["user": "hdr1", "value": 2.0],
+                "bloomhdriterations": 6,
+                "bloomtint": "1 1 1"
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let bloom = try #require(document.general.bloom)
+        #expect(bloom.strength == 4.0)
+        #expect(bloom.threshold == 0.46)
+        #expect(bloom.feather == 0.88)
+        #expect(bloom.scatter == 2.0)
+        #expect(bloom.iterations == 6)
+        // SDR-only bloom stays off (v1 implements the HDR pipeline only).
+        let sdrPayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": NSNull(), "bloom": true]
+        ]
+        let sdrDoc = try WPESceneDocumentParser.parse(
+            data: JSONSerialization.data(withJSONObject: sdrPayload, options: [])
+        )
+        #expect(sdrDoc.general.bloom == nil)
+    }
+
+    @Test("Text object dynamic origin script is captured for runtime ticking")
+    func textDynamicOriginScriptCaptured() throws {
+        // 3509243656's star tooltip labels track their body via a `shared.xxN`
+        // origin script — it must be captured (not resolved to the stale seed).
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": NSNull()],
+            "objects": [[
+                "id": 408,
+                "name": "coord",
+                "text": "[x]",
+                "origin": [
+                    "script": "export function update(v){v.x=shared.xx1;v.y=shared.yy1;v.z=shared.zz1;return v;}",
+                    "value": "0 1 0"
+                ]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let label = try #require(document.textObjects.first { $0.id == "408" })
+        #expect(label.originScript != nil)
+        #expect(label.originScript?.script.contains("shared.xx1") == true)
+        // A static origin (no live tokens) stays nil — resolved at parse.
+        let staticPayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": NSNull()],
+            "objects": [[
+                "id": 1,
+                "text": "clock",
+                "origin": ["script": "export function update(v){v.x=0.5;return v;}", "value": "0 0 0"]
+            ]]
+        ]
+        let staticDoc = try WPESceneDocumentParser.parse(
+            data: JSONSerialization.data(withJSONObject: staticPayload)
+        )
+        #expect(staticDoc.textObjects.first { $0.id == "1" }?.originScript == nil)
+    }
+
+    @Test("Text object alpha script is retained for runtime ticking")
+    func textAlphaScriptRetained() throws {
+        // 3509243656's login-intro texts hide themselves via alpha scripts —
+        // dropping the script left them stuck at the baked alpha ("漏出来").
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
+            "objects": [[
+                "id": 490,
+                "name": "***",
+                "text": "***",
+                "alpha": [
+                    "script": "export function update(value) { return 0; }",
+                    "value": 0.2
+                ]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let text = try #require(document.textObjects.first { $0.id == "490" })
+        #expect(text.alphaScript?.contains("update") == true)
+        #expect(abs(text.alpha - 0.2) < 0.0001)
+    }
+
+    @Test("Scene without a camera object keeps the top-level camera")
+    func sceneWithoutCameraObjectKeepsTopLevelCamera() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0", "eye": "3 4 5", "up": "0 1 0"],
+            "general": ["orthogonalprojection": NSNull(), "fov": 50],
+            "objects": [[
+                "id": 1,
+                "name": "layer",
+                "image": "models/a.json",
+                "origin": "0 0 6"
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.camera.eye == SIMD3<Double>(3, 4, 5))
+        #expect(document.camera.fov == 50)
+    }
+
     // MARK: - Image objects
 
     @Test("Image object with happy-path fields populates imageObjects")

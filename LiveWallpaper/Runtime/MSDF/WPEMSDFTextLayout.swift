@@ -17,6 +17,11 @@ struct WPEMSDFTextMesh {
 
 @MainActor
 struct WPEMSDFTextLayout {
+    /// Missing glyphs schedule background (off-main) generation and the layout
+    /// returns nil until they land — the object shows CoreText for a frame or two
+    /// meanwhile. There is deliberately NO inline-generation mode: this runs on
+    /// the `@MainActor` render loop, and a whole scene's glyph set is millions–
+    /// billions of float ops, so generating here would beachball the first frame.
     func layout(
         object: WPESceneTextObject,
         font: CTFont,
@@ -47,10 +52,12 @@ struct WPEMSDFTextLayout {
         )
         let innerWidth = max(boxSize.width - padding * 2, 1)
         let innerHeight = max(boxSize.height - padding * 2, 1)
-        let alignedLineWidth = min(lineWidth, innerWidth)
+        // Use the REAL line width (not clamped to the box): height-fit text can be
+        // wider than the box, and it must stay centered ON the box — overflowing
+        // symmetrically like WPE — rather than left-anchored inside it.
         let xOffset = padding + horizontalOffset(
             alignment: object.horizontalAlignment,
-            lineWidth: alignedLineWidth,
+            lineWidth: lineWidth,
             innerWidth: innerWidth
         )
         let baseline = padding + baselineOffset(
@@ -89,14 +96,24 @@ struct WPEMSDFTextLayout {
             // glyphs the scene font lacks, and glyph IDs are relative to that font.
             let runFont = Self.runFont(run) ?? font
             let runFontID = Self.fontIdentifier(runFont)
-            let runPixelSize = max(Int(ceil(CTFontGetSize(runFont))), 1)
             let runPathUnitsToEm = Self.pathUnitsToEmUnits(font: runFont)
+            // Generate ONCE per (font, glyph) at the canonical size and scale
+            // through em-normalized metrics. Keying the atlas on the live pixel
+            // size regenerated every glyph whenever box-fit re-derived the font
+            // size from the CURRENT line width — a ticking clock with
+            // non-tabular digits changed width every second, which burned CPU
+            // re-rasterizing distance fields and flickered the whole object
+            // back to CoreText while the "new" size's glyphs were pending.
+            let canonicalPixelSize = generator.canonicalPixelSize
+            let generationFont: CTFont = CTFontGetSize(runFont) == CGFloat(canonicalPixelSize)
+                ? runFont
+                : CTFontCreateCopyWithAttributes(runFont, CGFloat(canonicalPixelSize), nil, nil)
 
             for index in 0..<glyphCount {
                 let glyph = glyphs[index]
-                let key = WPEMSDFGlyphKey(fontID: runFontID, glyph: glyph, pixelSize: runPixelSize)
+                let key = WPEMSDFGlyphKey(fontID: runFontID, glyph: glyph, pixelSize: canonicalPixelSize)
                 let entry: WPEMSDFAtlasEntry
-                switch atlas.requestEntry(for: key, generator: generator, font: runFont) {
+                switch atlas.requestEntry(for: key, generator: generator, font: generationFont) {
                 case .ready(let ready):
                     entry = ready
                 case .pending:
@@ -111,9 +128,13 @@ struct WPEMSDFTextLayout {
                     return nil
                 }
                 let position = positions[index]
+                // bearing is stored in em units; cellSize × emUnitsPerPixel is the
+                // cell extent in em units — both divide by the CURRENT run's
+                // path-units-per-em to land in current point space, so one
+                // canonical-size entry serves every on-screen font size.
                 let bearing = entry.metrics.bearing / runPathUnitsToEm
-                let glyphWidth = Double(entry.metrics.cellSize.width) / entry.metrics.scale
-                let glyphHeight = Double(entry.metrics.cellSize.height) / entry.metrics.scale
+                let glyphWidth = Double(entry.metrics.cellSize.width) * entry.metrics.emUnitsPerPixel / runPathUnitsToEm
+                let glyphHeight = Double(entry.metrics.cellSize.height) * entry.metrics.emUnitsPerPixel / runPathUnitsToEm
                 let x = Double(xOffset) + Double(position.x) + bearing.x
                 let y = Double(baseline) - Double(position.y) - (bearing.y + glyphHeight)
                 appendQuad(
@@ -138,13 +159,16 @@ struct WPEMSDFTextLayout {
     }
 
     private func horizontalOffset(alignment: String, lineWidth: CGFloat, innerWidth: CGFloat) -> CGFloat {
+        // No `max(…, 0)` floor: when the (height-fit) line is wider than the box,
+        // a centered line needs a NEGATIVE offset so it overflows symmetrically
+        // about the box center, and a right-aligned line likewise overflows left.
         switch alignment.lowercased() {
         case "left":
             return 0
         case "right":
-            return max(innerWidth - lineWidth, 0)
+            return innerWidth - lineWidth
         default:
-            return max((innerWidth - lineWidth) * 0.5, 0)
+            return (innerWidth - lineWidth) * 0.5
         }
     }
 
@@ -206,9 +230,23 @@ struct WPEMSDFTextLayout {
         return nil
     }
 
-    private static func fontIdentifier(_ font: CTFont) -> String {
-        let name = CTFontCopyPostScriptName(font) as String
-        return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
+    /// Stable font identity used for BOTH the in-memory atlas key and the
+    /// persistent disk-cache key. Deliberately NOT size-qualified (entries are
+    /// canonical-size and size-independent — a size suffix forked the atlas per
+    /// fitted size, see the canonical-size note in `layout`). It folds the
+    /// backing file URL + unitsPerEm in with the PostScript name so two
+    /// DIFFERENT physical fonts that share a PostScript name (a scene-bundled
+    /// face vs a system fallback, a re-used generic name) can't collide — CGGlyph
+    /// IDs are font-relative, so a wrong face maps the same ID to a different
+    /// outline. A missing URL (rare in-memory font) degrades to name+em; a URL
+    /// that differs across launches just misses (regenerate), never mis-serves.
+    /// Not `private` so `WPEMSDFTextRenderer`'s first-frame sync probe keys
+    /// glyphs on the exact same identity the layout will.
+    static func fontIdentifier(_ font: CTFont) -> String {
+        let psName = CTFontCopyPostScriptName(font) as String
+        let unitsPerEm = CTFontGetUnitsPerEm(font)
+        let urlPath = (CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)?.path ?? "-"
+        return "\(psName)|\(unitsPerEm)|\(urlPath)"
     }
 
     private static func isWhitespace(_ utf16Offset: CFIndex, flags: [Bool]) -> Bool {

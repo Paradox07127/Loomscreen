@@ -408,6 +408,11 @@ enum WPELayerScriptCursorEvent: Sendable, Equatable {
     case up
     case rightDown
     case rightUp
+    /// Hover transitions, dispatched per-layer from renderer hit-testing (the
+    /// pointer entered/left THIS layer's screen rect) — unlike down/up which
+    /// broadcast. 3509243656's star tooltips fade in on `cursorEnter`.
+    case enter
+    case leave
 
     fileprivate var handlerName: String {
         switch self {
@@ -415,6 +420,8 @@ enum WPELayerScriptCursorEvent: Sendable, Equatable {
         case .up: return "cursorUp"
         case .rightDown: return "cursorRightDown"
         case .rightUp: return "cursorRightUp"
+        case .enter: return "cursorEnter"
+        case .leave: return "cursorLeave"
         }
     }
 }

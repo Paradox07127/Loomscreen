@@ -54,24 +54,17 @@ struct DeveloperToolsView: View {
     private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = [
         .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
               help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
-        .init(key: "WPEMetalLoadTiming", title: "Load timing",
-              help: "Log a per-phase scene-load time breakdown ([load-timing] …) at first frame, for measuring + comparing load cost."),
-        .init(key: "WPECustomSettingsLoadTiming", title: "Custom settings timing",
-              help: "Log WPE project custom-settings schema load timing ([custom-settings-timing] …), including bookmark resolve, cache probe, and project.json read/parse."),
         .init(key: "WPEParticlePrewarmEnabled", title: "Particle prewarm",
               help: "Also pre-populate emitters with starttime 0 to their steady-state spread on load. Authored starttime offsets always prewarm for WPE-matching first frames. Reload the scene to apply."),
         .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
               help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
         .init(key: "WPEAudioDebugLog", title: "Audio debug log",
               help: "Verbose audio-reactive DSP logging."),
-        .init(key: "WPEPuppetLogSkinningReason", title: "Log puppet skinning gate",
-              help: "Log why each puppet's GPU skinning is enabled or gated off (blink/body-sway depend on it). Filter logs for 🦴 [puppet-skin]. Logged once per change."),
         .init(key: "WPEPuppetDeferMeshWarp", title: "Defer puppet mesh warp (override)",
               help: "Override the automatic per-puppet decision (default: defer only puppets that have an effect chain, so their effect masks align). ON forces every non-clip puppet to defer; OFF forces direct warp. Clip-eye puppets ignore this. Reload the scene to apply."),
     ]
 
     private static let diagnosticStringKeys: [String] = [
-        WPEWaterWavesDebugMode.defaultsKey,
         "WPEDumpScenePasses",
         "WPEDumpScenePassesAtTime",
         "WPEMetalCaptureScene",
@@ -136,7 +129,6 @@ struct DeveloperToolsView: View {
         for key in Self.diagnosticStringKeys {
             UserDefaults.standard.removeObject(forKey: key)
         }
-        UserDefaults.standard.removeObject(forKey: WPEWaterWavesTrace.defaultsKey)
         captureIDs = []
         flagRefresh += 1
     }

@@ -150,6 +150,12 @@ final class WPEMetalRenderExecutor {
     /// pass can be reused by `present()` without re-creation, and so the
     /// rendered gamma stays stable across offscreen and onscreen passes.
     static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
+    /// Per-scene output format: `.rgba16Float` for HDR scenes so >1 emissive
+    /// survives to the bloom prefilter (an 8-bit target clamps at scene write,
+    /// which killed the sun glow); SDR scenes keep the 8-bit sRGB target.
+    /// Known trade-off: `WPEMetalTextureSnapshotter` bails on non-rgba8 formats,
+    /// so HDR scenes produce no preview snapshot / first-frame.png.
+    private var currentOutputPixelFormat: MTLPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
 
     /// Optional developer override for the per-puppet deferred-warp decision (see
     /// `shouldDeferPuppetMeshWarp`). `nil` (the default, and always in Release) means "decide
@@ -164,51 +170,26 @@ final class WPEMetalRenderExecutor {
         #endif
     }
 
-    /// Diagnostic: log each puppet's GPU-skinning gate result (enabled, or the
-    /// disable reason — `unresolved-attachment` / `missing-hierarchy` /
-    /// `palette-unresolved` / `skin-index-out-of-range` / `palette-unbounded` /
-    /// `no-animation` / `user-disabled`). A gated-off puppet falls back to the
-    /// static rest pose (no blink/sway), so this surfaces *why* a puppet doesn't
-    /// animate. Logged once per object per change (not per frame). DEBUG-only.
-    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetLogSkinningReason -bool YES`.
-    static var logPuppetSkinningReason: Bool {
-        #if DEBUG
-        return UserDefaults.standard.bool(forKey: "WPEPuppetLogSkinningReason")
-        #else
-        return false
-        #endif
-    }
-
     /// WPE genericimage4 puppet clip-composite (clip-mask RT + CLIPPINGTARGET) so an eye
-    /// puppet's pupil is occluded when the blink closes. Default OFF; only takes effect when
-    /// the builder injected a clip-mask binding (texture slot 8) onto a genericimage4 pass.
-    /// `defaults write Taijia.LiveWallpaper WPEPuppetClipComposite -bool YES`.
-    static let puppetClipCompositeEnabled: Bool = puppetDefaultsFlag("WPEPuppetClipComposite")
+    /// puppet's pupil is occluded when the blink closes. Default ON; opt out with
+    /// `defaults write Taijia.LiveWallpaper WPEPuppetClipComposite -bool NO`.
+    /// Still only takes effect when the builder injected a clip-mask binding (texture slot 8).
+    static let puppetClipCompositeEnabled: Bool = puppetDefaultsFlagOptional("WPEPuppetClipComposite") ?? true
 
-    /// Default OFF until per-scene skinning correctness is validated. Suite-first
-    /// (`defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`).
-    /// Read once on first use, then cached — restart to apply (was read per-puppet per-frame).
-    static let puppetSkinningEnabled: Bool = puppetDefaultsFlag("WPEPuppetEnableSkinning")
-
-    /// Reads an opt-in bool from the app's `Taijia.LiveWallpaper` suite first, falling back to the
-    /// process `.standard` domain. Puppet flags MUST share this so `defaults write Taijia.LiveWallpaper …`
-    /// is honoured uniformly even when the renderer runs in a process whose standard domain isn't the app's.
-    static func puppetDefaultsFlag(_ key: String) -> Bool {
-        let suite = UserDefaults.appSuite
+    /// Reads a puppet bool override from the app's `Taijia.LiveWallpaper` suite first, falling back to
+    /// the process `.standard` domain while preserving "unset" (`nil`). Puppet flags MUST share this
+    /// so `defaults write Taijia.LiveWallpaper …` is honoured uniformly even when the renderer runs in
+    /// a process whose standard domain isn't the app's.
+    static func puppetDefaultsFlagOptional(
+        _ key: String,
+        suite: UserDefaults = .appSuite,
+        standard: UserDefaults = .standard
+    ) -> Bool? {
         if suite.object(forKey: key) != nil {
             return suite.bool(forKey: key)
         }
-        return UserDefaults.standard.bool(forKey: key)
-    }
-
-    /// Suite-first variant that distinguishes "unset" (`nil`) from an explicit value, for override flags.
-    static func puppetDefaultsFlagOptional(_ key: String) -> Bool? {
-        let suite = UserDefaults.appSuite
-        if suite.object(forKey: key) != nil {
-            return suite.bool(forKey: key)
-        }
-        if UserDefaults.standard.object(forKey: key) != nil {
-            return UserDefaults.standard.bool(forKey: key)
+        if standard.object(forKey: key) != nil {
+            return standard.bool(forKey: key)
         }
         return nil
     }
@@ -260,6 +241,35 @@ final class WPEMetalRenderExecutor {
     /// skips the preprocess entirely on the hot path. Pass ids can recur across
     /// scenes, so this is cleared on reload (via `releaseTransientResources`).
     private var compiledShaderResultByPassID: [String: WPEShaderCompileResult] = [:]
+
+    /// Sampler states for transpiled shaders' per-slot `wpeSampler<slot>` bindings,
+    /// keyed by (clampUVs, noInterpolation). Only four combinations exist, so this
+    /// stays tiny; created lazily on first use.
+    private var customSamplerStateCache: [Int: MTLSamplerState] = [:]
+
+    /// The `MTLSamplerState` for a custom-shader texture slot, driven by the bound
+    /// texture's TEXI flags (registered at load in `WPEMetalTextureMetadataRegistry`).
+    /// Unregistered textures (render targets / framebuffers) and unbound slots fall
+    /// back to clamp-to-edge + linear — the safe default that never wraps.
+    func customShaderSamplerState(for texture: MTLTexture?) -> MTLSamplerState {
+        let resolution = texture.map { WPEMetalTextureMetadataRegistry.shared.resolution(for: $0) }
+        let clamp = resolution?.clampUVs ?? true
+        let nearest = resolution?.noInterpolation ?? false
+        let key = (clamp ? 1 : 0) | (nearest ? 2 : 0)
+        if let cached = customSamplerStateCache[key] { return cached }
+        let descriptor = MTLSamplerDescriptor()
+        let filter: MTLSamplerMinMagFilter = nearest ? .nearest : .linear
+        descriptor.minFilter = filter
+        descriptor.magFilter = filter
+        let address: MTLSamplerAddressMode = clamp ? .clampToEdge : .repeat
+        descriptor.sAddressMode = address
+        descriptor.tAddressMode = address
+        // Force-unwrap matches the executor's other GPU-object creation: a valid
+        // descriptor never fails to produce a sampler state on a live device.
+        let state = device.makeSamplerState(descriptor: descriptor)!
+        customSamplerStateCache[key] = state
+        return state
+    }
 
     /// Merge pre-warmed transpile results into the shader cache. Called on the
     /// main actor AFTER the warm task group drains and BEFORE the first
@@ -326,6 +336,9 @@ final class WPEMetalRenderExecutor {
     /// They are only ever read (seeded before the target's first write of the
     /// frame), so the creation-time clear stays valid for the cache lifetime.
     private var bootstrapPreviousTextureCache: [BootstrapPreviousKey: MTLTexture] = [:]
+    /// Scratch textures (one per size/format) holding a stable snapshot of the
+    /// scene for a pass that reads `.previous` while ALSO writing to the scene.
+    private var sceneReadHazardSnapshotCache: [BootstrapPreviousKey: MTLTexture] = [:]
 
     private struct BootstrapPreviousKey: Hashable {
         let targetID: WPEMetalTargetID
@@ -454,7 +467,10 @@ final class WPEMetalRenderExecutor {
         puppetClipPairsCache.removeAll()
         loggedClipActivation.removeAll()
         characterSheetWarnedReasonByObjectID.removeAll()
-        characterSheetBoundDetailByObjectID.removeAll()
+        puppetBoundScanDetailByObjectID.removeAll()
+        puppetPaletteCacheByObjectID.removeAll()
+        lastLoggedPuppetSkinningReason.removeAll()
+        bonePaletteBufferPool.drain()
         // Scene size / pipeline may change across a reload; drop the recycled
         // frame targets so the next render() re-allocates at the right size.
         outputTexturePool.removeAll()
@@ -476,145 +492,6 @@ final class WPEMetalRenderExecutor {
 
     // MARK: - FBO memory diagnostic (read-only)
 
-    private struct FBOMemoryLifetime {
-        var firstPassIndex: Int
-        var lastPassIndex: Int
-
-        mutating func touch(_ passIndex: Int) {
-            firstPassIndex = min(firstPassIndex, passIndex)
-            lastPassIndex = max(lastPassIndex, passIndex)
-        }
-    }
-
-    /// Logs a static account of the scene's render-target (FBO) memory when
-    /// `WPEMetalFBOMemoryReport` is set — total (sum) vs estimated peak-concurrent
-    /// (the aliasing headroom), per-target bytes + lifetime, and ping-pong
-    /// secondaries. Read-only: computes keys WITHOUT allocating, mutates nothing.
-    func logFBOMemoryReportIfRequested(
-        pipeline: WPEPreparedRenderPipeline,
-        sceneSize: CGSize,
-        sceneID: String?
-    ) {
-        guard UserDefaults.standard.bool(forKey: "WPEMetalFBOMemoryReport") else { return }
-        Logger.notice(
-            fboMemoryReport(pipeline: pipeline, sceneSize: sceneSize, sceneID: sceneID),
-            category: .performance
-        )
-    }
-
-    private func fboMemoryReport(
-        pipeline: WPEPreparedRenderPipeline,
-        sceneSize: CGSize,
-        sceneID: String?
-    ) -> String {
-        let declaredFBOs = Self.fboReportDeclaredFBOs(in: pipeline)
-        var flattened: [(index: Int, layer: WPEPreparedRenderLayer, pass: WPEPreparedRenderPass)] = []
-        var passIndex = 0
-        for layer in pipeline.layers {
-            for pass in layer.passes {
-                flattened.append((passIndex, layer, pass))
-                passIndex += 1
-            }
-        }
-
-        // Only `.fbo` / `.layerComposite` allocate through the targetPool;
-        // `.scene` resolves to the output texture (separate output pool), so it
-        // is NOT an FBO-pool allocation and must be excluded from this account.
-        func poolKey(for target: WPERenderTarget, layer: WPEPreparedRenderLayer) -> WPEMetalRenderTargetKey? {
-            switch target {
-            case .scene:
-                return nil
-            case .fbo, .layerComposite:
-                return targetPool.diagnosticKey(
-                    for: target,
-                    layer: layer.graphLayer,
-                    sceneSize: sceneSize,
-                    declaredFBOs: declaredFBOs
-                )
-            }
-        }
-
-        var bytesByKey: [WPEMetalRenderTargetKey: Int] = [:]
-        var keysByName: [String: Set<WPEMetalRenderTargetKey>] = [:]
-        for item in flattened {
-            guard let targetKey = poolKey(for: item.pass.pass.target, layer: item.layer) else { continue }
-            bytesByKey[targetKey] = Self.fboReportBytes(for: targetKey)
-            keysByName[targetKey.name, default: []].insert(targetKey)
-        }
-
-        var lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime] = [:]
-        var secondaryKeys = Set<WPEMetalRenderTargetKey>()
-        var writtenTargets = Set<WPEMetalTargetID>()
-
-        func touch(_ key: WPEMetalRenderTargetKey, at index: Int) {
-            if lifetimes[key] != nil {
-                lifetimes[key]?.touch(index)
-            } else {
-                lifetimes[key] = FBOMemoryLifetime(firstPassIndex: index, lastPassIndex: index)
-            }
-        }
-
-        for item in flattened {
-            let targetID = WPEMetalTargetID(target: item.pass.pass.target)
-            let targetKey = poolKey(for: item.pass.pass.target, layer: item.layer)
-            if let targetKey {
-                touch(targetKey, at: item.index)
-                // A pool secondary (ping-pong) is only allocated when the target
-                // was already written this frame — a first-write `.previous` reads
-                // the cleared bootstrap, not a pool secondary.
-                if writtenTargets.contains(targetID),
-                   passReadsCurrentTarget(item.pass, targetID: targetID) {
-                    secondaryKeys.insert(targetKey)
-                }
-            }
-            // Lifetime uses the EFFECTIVE bindings (the builder rewrites bind
-            // `.previous` → source), so a stale raw `.previous` doesn't extend the
-            // wrong target's lifetime and inflate the peak estimate.
-            for reference in fboReportEffectiveTextureReferences(for: item.pass) {
-                switch reference {
-                case .fbo(let name):
-                    for namedKey in keysByName[name] ?? [] {
-                        touch(namedKey, at: item.index)
-                    }
-                case .previous:
-                    if let targetKey { touch(targetKey, at: item.index) }
-                case .image, .asset:
-                    break
-                }
-            }
-            writtenTargets.insert(targetID)
-        }
-
-        let uniqueKeys = bytesByKey.keys.sorted(by: Self.fboReportSort)
-        let sumBytes = uniqueKeys.reduce(0) { $0 + (bytesByKey[$1] ?? 0) }
-        let secondaryBytes = secondaryKeys.reduce(0) { $0 + (bytesByKey[$1] ?? 0) }
-        let peakBytes = Self.fboReportPeakBytes(lifetimes: lifetimes, bytesByKey: bytesByKey)
-        let aliased = Self.fboReportSameSizeAliased(lifetimes: lifetimes, bytesByKey: bytesByKey)
-        let aliasHeapBytes = Self.fboReportAliasHeapBytes(lifetimes: lifetimes, bytesByKey: bytesByKey)
-        let totalBytes = sumBytes + secondaryBytes
-        let sceneLabel = sceneID ?? "-"
-
-        var lines = [
-            "[fbo-report] scene=\(sceneLabel) size=\(Int(sceneSize.width))x\(Int(sceneSize.height)) "
-                + "count=\(uniqueKeys.count) sum=\(Self.fboReportMiB(sumBytes))MiB "
-                + "secondary=\(Self.fboReportMiB(secondaryBytes))MiB(\(secondaryKeys.count)) "
-                + "total=\(Self.fboReportMiB(totalBytes))MiB "
-                + "peakFloor=\(Self.fboReportMiB(peakBytes))MiB "
-                + "aliasSameSize=\(Self.fboReportMiB(aliased.bytes))MiB(save\(Self.fboReportMiB(sumBytes - aliased.bytes))MiB) "
-                + "aliasHeap=\(Self.fboReportMiB(aliasHeapBytes))MiB(save\(Self.fboReportMiB(sumBytes - aliasHeapBytes))MiB)"
-        ]
-        for key in uniqueKeys {
-            let bytes = bytesByKey[key] ?? 0
-            let range = lifetimes[key].map { "\($0.firstPassIndex)..\($0.lastPassIndex)" } ?? "-"
-            let secondary = secondaryKeys.contains(key) ? " secondary" : ""
-            lines.append(
-                "[fbo-report]   \(key.name) \(key.width)x\(key.height) \(key.format) "
-                    + "\(Self.fboReportMiB(bytes))MiB life=\(range)\(secondary)"
-            )
-        }
-        return lines.joined(separator: "\n")
-    }
-
     private static func fboReportDeclaredFBOs(in pipeline: WPEPreparedRenderPipeline) -> [String: WPERenderFBO] {
         var declared: [String: WPERenderFBO] = [:]
         for layer in pipeline.layers {
@@ -623,104 +500,6 @@ final class WPEMetalRenderExecutor {
             }
         }
         return declared
-    }
-
-    /// Effective texture reads — `pass.source` plus the rewritten bindings (the
-    /// builder turns bind `.previous` into `pass.source`), used for accurate
-    /// name-based lifetime/peak (unlike the raw hazard predicate).
-    private func fboReportEffectiveTextureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {
-        var references: [WPETextureReference] = [pass.pass.source]
-        references.append(contentsOf: pass.textureBindings.values)
-        return references
-    }
-
-    private static func fboReportBytes(for key: WPEMetalRenderTargetKey) -> Int {
-        key.width * key.height * fboReportBytesPerPixel(for: key.pixelFormat)
-    }
-
-    private static func fboReportBytesPerPixel(for pixelFormat: MTLPixelFormat) -> Int {
-        switch pixelFormat {
-        case .rgba16Float:
-            return 8
-        case .r8Unorm:
-            return 1
-        default:
-            return 4
-        }
-    }
-
-    private static func fboReportPeakBytes(
-        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
-        bytesByKey: [WPEMetalRenderTargetKey: Int]
-    ) -> Int {
-        guard let maxPass = lifetimes.values.map(\.lastPassIndex).max() else { return 0 }
-        var peak = 0
-        for index in 0...maxPass {
-            let liveBytes = lifetimes.reduce(0) { partial, entry in
-                guard entry.value.firstPassIndex <= index, index <= entry.value.lastPassIndex else {
-                    return partial
-                }
-                return partial + (bytesByKey[entry.key] ?? 0)
-            }
-            peak = max(peak, liveBytes)
-        }
-        return peak
-    }
-
-    /// Realizable memory if same-(size,format) FBOs with non-overlapping
-    /// lifetimes share one physical texture (greedy interval coloring per
-    /// group) — the SAFE aliasing approach: same-MTLTexture reuse within the
-    /// frame, `.tracked` heaps barrier the transitions, no makeAliasable/offset
-    /// math. Less than the placement-heap `peakFloor` (which packs mixed sizes).
-    private static func fboReportSameSizeAliased(
-        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
-        bytesByKey: [WPEMetalRenderTargetKey: Int]
-    ) -> (bytes: Int, slots: Int) {
-        struct Group: Hashable {
-            let width: Int
-            let height: Int
-            let pixelFormat: UInt
-        }
-        var intervalsByGroup: [Group: [(first: Int, last: Int)]] = [:]
-        var bytesByGroup: [Group: Int] = [:]
-        for (key, lifetime) in lifetimes {
-            let group = Group(width: key.width, height: key.height, pixelFormat: key.pixelFormat.rawValue)
-            intervalsByGroup[group, default: []].append((lifetime.firstPassIndex, lifetime.lastPassIndex))
-            bytesByGroup[group] = bytesByKey[key] ?? 0
-        }
-        var totalBytes = 0
-        var totalSlots = 0
-        for (group, intervals) in intervalsByGroup {
-            // Greedy interval coloring: reuse a slot only when its occupant's
-            // last use ended STRICTLY before this FBO's first use (no same-pass
-            // read/write of a shared texture).
-            var slotEnds: [Int] = []
-            for interval in intervals.sorted(by: { $0.first < $1.first }) {
-                if let slot = slotEnds.firstIndex(where: { $0 < interval.first }) {
-                    slotEnds[slot] = interval.last
-                } else {
-                    slotEnds.append(interval.last)
-                }
-            }
-            totalSlots += slotEnds.count
-            totalBytes += slotEnds.count * (bytesByGroup[group] ?? 0)
-        }
-        return (totalBytes, totalSlots)
-    }
-
-    /// Realizable memory with full placement-heap aliasing (mixed sizes packed
-    /// by `WPEMetalFBOAliasPlanner`) — the consistent big win, ≈ peakFloor. This
-    /// is the size the Phase-B shared heap will actually allocate.
-    private static func fboReportAliasHeapBytes(
-        lifetimes: [WPEMetalRenderTargetKey: FBOMemoryLifetime],
-        bytesByKey: [WPEMetalRenderTargetKey: Int]
-    ) -> Int {
-        var intervals: [WPEMetalFBOAliasPlanner.Interval] = []
-        for (index, key) in lifetimes.keys.enumerated() {
-            guard let lifetime = lifetimes[key], let size = bytesByKey[key] else { continue }
-            intervals.append(.init(id: index, size: size, firstPass: lifetime.firstPassIndex, lastPass: lifetime.lastPassIndex))
-        }
-        return WPEMetalFBOAliasPlanner.plan(intervals).heapSize
     }
 
     /// Conservative alias intervals handed to the target pool: per pool-FBO key,
@@ -804,20 +583,8 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    private static func fboReportSort(_ lhs: WPEMetalRenderTargetKey, _ rhs: WPEMetalRenderTargetKey) -> Bool {
-        if lhs.name != rhs.name { return lhs.name < rhs.name }
-        if lhs.width != rhs.width { return lhs.width < rhs.width }
-        if lhs.height != rhs.height { return lhs.height < rhs.height }
-        if lhs.format != rhs.format { return lhs.format < rhs.format }
-        return lhs.pixelFormat.rawValue < rhs.pixelFormat.rawValue
-    }
-
-    private static func fboReportMiB(_ bytes: Int) -> String {
-        String(format: "%.1f", Double(bytes) / 1_048_576.0)
-    }
-
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
-    /// (confirms the builtin effect_waterwaves path actually runs + the debug flag value reaching it).
+    /// (confirms the builtin effect_waterwaves path actually runs).
     private var loggedWaterWavesDispatch = false
     /// Scene size (ortho-projection pixels) for the frame currently encoding.
     /// Stashed at frame start so `usesObjectQuadGeometry` can judge a
@@ -892,6 +659,10 @@ final class WPEMetalRenderExecutor {
         }()
         #endif
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
+        currentOutputPixelFormat = cameraUniforms.sceneHDR
+            ? .rgba16Float
+            : Self.outputPixelFormat
+        targetPool.promotesLDRFormatsToHDR = cameraUniforms.sceneHDR
         let output = try makeOutputTexture(size: size)
         let staticLayerCacheEnabled = Self.isStaticLayerCacheEnabled
         staticLayerCompositeCache.updateBudget(Self.staticLayerCacheBudgetBytes)
@@ -1195,6 +966,13 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
 
+        try encodeSceneBloomIfNeeded(
+            cameraUniforms: cameraUniforms,
+            output: output,
+            commandBuffer: commandBuffer
+        )
+
+        recyclePaletteBuffersOnCompletion(of: commandBuffer)
         if asyncSubmission {
             // Bound in-flight depth (signal mirrors the wait above) and surface
             // GPU errors from the handler — they land after we've returned, so we
@@ -1547,7 +1325,7 @@ final class WPEMetalRenderExecutor {
                 sceneSize: SIMD4<Float>(
                     Float(max(sceneSize.width, 1)),
                     Float(max(sceneSize.height, 1)),
-                    0, 0
+                    overlay.rotation, 0
                 ),
                 color: SIMD4<Float>(
                     overlay.tint.x,
@@ -1675,7 +1453,7 @@ final class WPEMetalRenderExecutor {
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.sourceAlphaBlendFactor = .one
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: pipelineDescriptor) }
+        let state = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
         msdfTextPipelineCache[key] = state
         return state
     }
@@ -1795,7 +1573,7 @@ final class WPEMetalRenderExecutor {
         attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
         attachment.sourceAlphaBlendFactor = .one
         attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
         textOverlayPipelineCache[colorPixelFormat.rawValue] = state
         return state
     }
@@ -1901,7 +1679,7 @@ final class WPEMetalRenderExecutor {
             attachment.sourceAlphaBlendFactor = .sourceAlpha
             attachment.destinationAlphaBlendFactor = .one
         }
-        let state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
         particlePipelineCache[key] = state
         return state
     }
@@ -2131,6 +1909,27 @@ final class WPEMetalRenderExecutor {
             previousTextureForTarget = initialPreviousTextureForTarget
         }
 
+        // A pass that reads `.previous` while ALSO targeting the scene would bind
+        // `.previous` to `latestSceneTexture` — the SAME live `output` texture it
+        // is drawing into (`targetTexture(.scene)` always returns `output`). That
+        // read-write feedback is undefined on the GPU: scene 3470764447's rotated
+        // `compose source=previous target=scene` card sampled the pixels it was
+        // writing, recursing the whole frame into itself and flickering. `.previous`
+        // does NOT traverse `snapshotFullFrameBufferIfAliasingScene` (that only
+        // covers `_rt_FullFrameBuffer`-style aliases), so snapshot the scene-so-far
+        // into a stable scratch here and rebind `.previous` to it. The write still
+        // targets `output`; the read is now a frozen frame-before-this-pass image.
+        if readsCurrentTarget, case .scene = targetID,
+           let prev = previousTextureForTarget,
+           ObjectIdentifier(prev) == ObjectIdentifier(destination.texture) {
+            let snapshot = try sceneReadHazardSnapshot(
+                matching: destination.texture,
+                commandBuffer: commandBuffer
+            )
+            frameState.markInitialized(snapshot)
+            frameState.seedPreviousTexture(snapshot, targetID: .scene)
+        }
+
         if readsCurrentTarget,
            let previousTextureForTarget,
            ObjectIdentifier(previousTextureForTarget) != ObjectIdentifier(destination.texture),
@@ -2324,14 +2123,10 @@ final class WPEMetalRenderExecutor {
                 for: layer.graphLayer,
                 model: model,
                 attachedChildNames: attachedChildNamesByParent[layer.graphLayer.objectID] ?? [],
-                runtimeUniforms: runtimeUniforms
+                time: runtimeUniforms.time
             )
         }
-        #if DEBUG
-        if Self.logPuppetSkinningReason {
-            logResolvedPuppetSkinning(pipeline: pipeline, skinningByObjectID: skinningByObjectID)
-        }
-        #endif
+        recordPuppetSkinningBreadcrumbs(pipeline: pipeline, skinningByObjectID: skinningByObjectID)
         return PuppetAttachmentFrameContext(
             layersByObjectID: layersByID,
             skinningByObjectID: skinningByObjectID,
@@ -2339,31 +2134,45 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    #if DEBUG
     /// Per-objectID dedup so the skinning-gate reason logs once per change, not per frame.
+    /// Reset on graph rebuild so every scene load leaves one breadcrumb per puppet.
     private var lastLoggedPuppetSkinningReason: [String: String] = [:]
 
-    /// Logs why each puppet's GPU skinning is enabled or gated off (see `logPuppetSkinningReason`).
-    private func logResolvedPuppetSkinning(
+    /// Release-visible skinning-gate breadcrumb: a gated-off puppet silently renders the static rest
+    /// pose (no blink/sway), so surface why in EVERY build — warning for DISABLED (mirrors the
+    /// v19/v20 character-sheet path), info for ENABLED — and mirror the state into the scene-debug
+    /// layer-placements dump so a bug-report dump carries the gate decision.
+    private func recordPuppetSkinningBreadcrumbs(
         pipeline: WPEPreparedRenderPipeline,
         skinningByObjectID: [String: PuppetSkinningState]
     ) {
+        var states: [(objectID: String, summary: String)] = []
         for layer in pipeline.layers where layer.puppetModel != nil {
             let objectID = layer.graphLayer.objectID
             let state = skinningByObjectID[objectID]
             let enabled = state?.enabled ?? false
             let reason = state?.reason ?? "no-state"
             let summary = "\(enabled ? "ENABLED" : "DISABLED")/\(reason)"
+            states.append((objectID, summary))
             guard lastLoggedPuppetSkinningReason[objectID] != summary else { continue }
             lastLoggedPuppetSkinningReason[objectID] = summary
-            Logger.info(
-                "🦴 [puppet-skin] obj=\(objectID) name=\(layer.graphLayer.objectName) "
-                    + "skinning=\(enabled ? "ENABLED" : "DISABLED") reason=\(reason)",
-                category: .wpeRender
-            )
+            let message = "🦴 [puppet-skin] obj=\(objectID) name=\(layer.graphLayer.objectName) "
+                + "skinning=\(enabled ? "ENABLED" : "DISABLED") reason=\(reason)"
+            // "no-animation" = a static mesh (bones=0/animations=0 — e.g. the
+            // threebody suns/skybox). Skinning off is the only possible state
+            // there, so it's info; warning stays for puppets that silently lose
+            // blink/sway.
+            if enabled || reason == "no-animation" {
+                Logger.info(message, category: .wpeRender)
+            } else {
+                Logger.warning(message, category: .wpeRender)
+            }
         }
+        // Full state every frame (not just changes): the artifacts layer stamps entries with its
+        // placements generation, so a rebuilt pipeline's dump shows `pending(last=…)` until the next
+        // frame re-proves each gate — pushing only changes would leave a stale verdict standing.
+        WPESceneDebugArtifacts.shared.recordPuppetSkinningStates(states)
     }
-    #endif
 
     /// Composes each bone's WORLD bind matrix by walking the MDLS hierarchy (`world(parent) · rawLocal`),
     /// matching the palette's bind basis and the static attachment anchor (WPERenderGraphBuilder).
@@ -2410,7 +2219,7 @@ final class WPEMetalRenderExecutor {
         for layer: WPERenderLayer,
         model: WPEPuppetModel,
         attachedChildNames: Set<String>,
-        runtimeUniforms: WPEMetalRuntimeUniforms
+        time: Double
     ) -> PuppetSkinningState {
         let attachmentsByName = Dictionary(
             model.attachments.map { ($0.name, $0) },
@@ -2438,10 +2247,10 @@ final class WPEMetalRenderExecutor {
         // MDLV0019/0020 ship the mesh as a FLAT character sheet: the MDLV bind pose is the exploded
         // split-source, and the assembled character is recovered ONLY by skinning through the MDLA
         // animation pose. Its bind pose is therefore guaranteed-wrong, so skinning is MANDATORY for
-        // these generations — the opt-in flag and the regression carve-outs (which exist to keep
-        // pre-assembled v21/v23 face/blink puppets static) must not apply, and rejecting on the
-        // displacement bound can only make it worse than the already-broken bind. Derived here from the
-        // model the executor already holds; no scene-schema threading.
+        // these generations — the regression carve-outs (which exist to keep pre-assembled v21/v23
+        // face/blink puppets static) must not apply, and rejecting on the displacement bound can only
+        // make it worse than the already-broken bind. Derived here from the model the executor already
+        // holds; no scene-schema threading.
         if model.version >= 19, model.version < 21, !model.bones.isEmpty {
             return mandatorySkinningState(
                 for: layer,
@@ -2449,23 +2258,13 @@ final class WPEMetalRenderExecutor {
                 attachmentsByName: attachmentsByName,
                 boneBindByIndex: boneBindByIndex,
                 assembledBoneBindByIndex: assembledBoneBindByIndex,
-                time: runtimeUniforms.time
+                time: time
             )
         }
 
-        // Bone skinning is opt-in for pre-assembled puppets (default OFF). Enabling it by default
-        // (9c44bab) together with the relaxed displacement gate (e204842: 0.12→1.5·extent) regressed
-        // previously-static face/blink puppets: their additive eye animation now passed the gate and got
-        // bone-skinned into deformation (scenes 3461168300 / 3554161528). Skin only when the user
-        // explicitly opts in via `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`,
-        // until per-scene skinning correctness is validated. Resolve from the SAME domain as
-        // `WPEPuppetClipComposite` (Taijia suite first, .standard fallback) so the documented
-        // `defaults write Taijia.LiveWallpaper` is honoured even when the renderer's standard domain
-        // isn't the app's — otherwise the clip flag turns on but skinning silently stays off and the eye
-        // never deforms.
-        guard Self.puppetSkinningEnabled else {
-            return disabled("user-disabled")
-        }
+        // Bone skinning is always enabled for pre-assembled puppets that pass validation. The gates
+        // below still reject unresolved attachments, missing hierarchies, out-of-range indices, and
+        // unbounded palettes so failing puppets fall back to the static rest mesh.
         let animationLayers = puppetAnimationLayers(for: layer, model: model)
         guard !animationLayers.isEmpty else { return disabled("no-animation") }
         // If a child attaches to an anchor we cannot resolve, refuse to skin this parent so the body
@@ -2476,10 +2275,11 @@ final class WPEMetalRenderExecutor {
         guard WPEPuppetAnimationEvaluator.hasUsableHierarchy(layers: animationLayers, bones: model.bones) else {
             return disabled("missing-hierarchy")
         }
-        let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(
+        let evaluation = cachedPaletteEvaluation(
+            objectID: layer.objectID,
             layers: animationLayers,
             bones: model.bones,
-            at: runtimeUniforms.time
+            at: time
         )
         guard evaluation.parentChannelMapSucceeded, !evaluation.palette.isEmpty else {
             return disabled("palette-unresolved")
@@ -2487,7 +2287,7 @@ final class WPEMetalRenderExecutor {
         guard Self.skinBlendIndicesAreInRange(in: model.meshes, paletteCount: evaluation.palette.count) else {
             return disabled("skin-index-out-of-range")
         }
-        if let detail = paletteBoundFailureDetail(layers: animationLayers, bones: model.bones, meshes: model.meshes) {
+        if let detail = cachedPaletteBoundFailureDetail(objectID: layer.objectID, layers: animationLayers, model: model) {
             return disabled("palette-unbounded[\(detail)]")
         }
         return PuppetSkinningState(
@@ -2500,20 +2300,118 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    /// Character-sheet validation runs per frame (palette is time-dependent), so the per-object
-    /// warnings dedupe by reason and the clip-wide displacement scan — time-independent — memoizes
-    /// per objectID. Both reset on graph rebuild (`releaseTransientResources`).
+    /// Test seam: drives the private skinning gate plus the identity-palette fallback without a full
+    /// render.
+    func puppetSkinningGateForTesting(
+        layer: WPERenderLayer,
+        model: WPEPuppetModel,
+        attachedChildNames: Set<String> = [],
+        time: Double = 0
+    ) -> (enabled: Bool, reason: String, bonePalette: [simd_float4x4], skinningEnabledUniform: Float) {
+        let state = validatedSkinningState(
+            for: layer,
+            model: model,
+            attachedChildNames: attachedChildNames,
+            time: time
+        )
+        let paletteState = puppetBonePalette(for: state)
+        return (state.enabled, state.reason, paletteState.bonePalette, paletteState.skinningEnabled)
+    }
+
+    /// Gate validation runs per frame, so its two expensive pieces memoize per objectID (reset on
+    /// graph rebuild via `releaseTransientResources`, since a reload can reuse an objectID for a
+    /// different puppet):
+    /// - the clip-wide displacement scan (6 palette evaluations) is time-independent given the
+    ///   animation-layer stack, keyed by that stack's signature;
+    /// - the per-frame palette evaluation quantizes time to discrete sampled frames
+    ///   (`sampledFrameIndex`), so an unchanged (stack, sampled-frames) signature reproduces the
+    ///   palette bit-exactly and the evaluation is skipped (~60fps render vs ~24-30fps clips).
     private var characterSheetWarnedReasonByObjectID: [String: String] = [:]
-    private struct CharacterSheetBoundDetailCacheEntry {
+    private struct PuppetBoundScanCacheEntry {
+        let stackSignature: [UInt64]
         let detail: String?
     }
-    private var characterSheetBoundDetailByObjectID: [String: CharacterSheetBoundDetailCacheEntry] = [:]
+    private var puppetBoundScanDetailByObjectID: [String: PuppetBoundScanCacheEntry] = [:]
+    private struct PuppetPaletteCacheEntry {
+        let frameSignature: [UInt64]
+        let evaluation: WPEPuppetPaletteEvaluation
+    }
+    private var puppetPaletteCacheByObjectID: [String: PuppetPaletteCacheEntry] = [:]
+
+    /// Time-independent identity of an animation-layer stack: every input `paletteEvaluation` and
+    /// the bound scan depend on besides time (and bones/meshes, which are fixed per objectID within
+    /// a graph build).
+    private static func puppetStackSignature(_ layers: [WPEPuppetAnimationLayer]) -> [UInt64] {
+        var signature: [UInt64] = []
+        signature.reserveCapacity(layers.count * 4 + 1)
+        signature.append(UInt64(layers.count))
+        for layer in layers {
+            signature.append(UInt64(bitPattern: Int64(layer.animation.id)))
+            signature.append(layer.additive ? 1 : 0)
+            signature.append(UInt64(layer.blend.bitPattern))
+            signature.append(layer.rate.bitPattern)
+        }
+        return signature
+    }
+
+    /// Stack signature plus each layer's sampled frame at `time` — the palette is a pure function
+    /// of this (the evaluator reads time only through `sampledFrameIndex(at: time * rate)`).
+    private static func puppetFrameSignature(_ layers: [WPEPuppetAnimationLayer], at time: Double) -> [UInt64] {
+        var signature = puppetStackSignature(layers)
+        for layer in layers {
+            let frame = WPEPuppetAnimationEvaluator.sampledFrameIndex(for: layer.animation, at: time * layer.rate)
+            signature.append(UInt64(bitPattern: Int64(frame)))
+        }
+        return signature
+    }
+
+    /// Cache-hit counters proving the memoization actually short-circuits (a recompute-only path
+    /// would still pass the output-equality tests). Production cost is one Int increment.
+    private(set) var puppetPaletteCacheHitsForTesting = 0
+    private(set) var puppetBoundScanCacheHitsForTesting = 0
+
+    private func cachedPaletteEvaluation(
+        objectID: String,
+        layers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone],
+        at time: Double
+    ) -> WPEPuppetPaletteEvaluation {
+        let signature = Self.puppetFrameSignature(layers, at: time)
+        if let cached = puppetPaletteCacheByObjectID[objectID], cached.frameSignature == signature {
+            puppetPaletteCacheHitsForTesting += 1
+            return cached.evaluation
+        }
+        let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(layers: layers, bones: bones, at: time)
+        puppetPaletteCacheByObjectID[objectID] = PuppetPaletteCacheEntry(
+            frameSignature: signature,
+            evaluation: evaluation
+        )
+        return evaluation
+    }
+
+    private func cachedPaletteBoundFailureDetail(
+        objectID: String,
+        layers: [WPEPuppetAnimationLayer],
+        model: WPEPuppetModel
+    ) -> String? {
+        let signature = Self.puppetStackSignature(layers)
+        if let cached = puppetBoundScanDetailByObjectID[objectID], cached.stackSignature == signature {
+            puppetBoundScanCacheHitsForTesting += 1
+            return cached.detail
+        }
+        let detail = paletteBoundFailureDetail(layers: layers, bones: model.bones, meshes: model.meshes)
+        puppetBoundScanDetailByObjectID[objectID] = PuppetBoundScanCacheEntry(
+            stackSignature: signature,
+            detail: detail
+        )
+        return detail
+    }
 
     /// Skinning gate for MDLV0019/0020 character-sheet puppets, where skinning is MANDATORY (the bind
-    /// pose is the exploded split-source). Bypasses the opt-in flag and the pre-assembled regression
-    /// carve-outs (`unresolved-attachment` / `missing-hierarchy` / `skin-index-out-of-range` / the
-    /// displacement bound); keeps only the irreducible precondition — a finite, non-empty palette — so
-    /// there is something to skin with. A model that fails even that keeps the (broken) static draw.
+    /// pose is the exploded split-source). Bypasses the pre-assembled regression carve-outs
+    /// (`unresolved-attachment` / `missing-hierarchy` / `skin-index-out-of-range` / the displacement
+    /// bound); keeps only the irreducible precondition — a finite, non-empty palette — so there is
+    /// something to skin with. A model that fails even that keeps the (broken) static draw.
     private func mandatorySkinningState(
         for layer: WPERenderLayer,
         model: WPEPuppetModel,
@@ -2546,7 +2444,8 @@ final class WPEMetalRenderExecutor {
             )
             return disabled("no-animation")
         }
-        let evaluation = WPEPuppetAnimationEvaluator.paletteEvaluation(
+        let evaluation = cachedPaletteEvaluation(
+            objectID: layer.objectID,
             layers: animationLayers,
             bones: model.bones,
             at: time
@@ -2560,14 +2459,7 @@ final class WPEMetalRenderExecutor {
             )
             return disabled("palette-unresolved")
         }
-        let boundDetail: String?
-        if let cached = characterSheetBoundDetailByObjectID[layer.objectID] {
-            boundDetail = cached.detail
-        } else {
-            boundDetail = paletteBoundFailureDetail(layers: animationLayers, bones: model.bones, meshes: model.meshes)
-            characterSheetBoundDetailByObjectID[layer.objectID] = CharacterSheetBoundDetailCacheEntry(detail: boundDetail)
-        }
-        if let detail = boundDetail {
+        if let detail = cachedPaletteBoundFailureDetail(objectID: layer.objectID, layers: animationLayers, model: model) {
             warnOnce(
                 "bound-exempt",
                 "WPE \(generation) character-sheet puppet exceeds the displacement bound (\(detail)); "
@@ -2861,45 +2753,58 @@ final class WPEMetalRenderExecutor {
             frameState: frameState,
             currentTargetID: destination.id
         )
-        let fragmentName = normalizedShader == "genericimage4"
-            ? "wpe_genericimage4_fragment"
-            : "wpe_genericimage2_fragment"
-        encoder.setRenderPipelineState(try renderPipeline(
-            vertexName: "wpe_scene_model_mesh_vertex",
-            fragmentName: fragmentName,
-            blendMode: pass.pass.blending,
-            colorPixelFormat: destination.texture.pixelFormat,
-            depthPixelFormat: depthPixelFormat
-        ))
-        encoder.setFragmentTexture(primary, index: 0)
+        if normalizedShader == "genericimage4" {
+            // generic4 MODEL material semantics differ from the image-layer path:
+            // slot 1 is the normal map (unused), slot 2 the PBR component map
+            // whose ALPHA is the emissive mask; tint/emissive come from the
+            // material constants ("color"/"emissivecolor"…). RenderDoc oracle on
+            // 3509243656: the suns are tex0 × g_TintColor with
+            // g_EmissiveColor × mask.a × g_EmissiveBrightness — the flat image
+            // fragment rendered them plain white.
+            encoder.setRenderPipelineState(try renderPipeline(
+                vertexName: "wpe_scene_model_mesh_vertex",
+                fragmentName: "wpe_scene_model_generic4_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            encoder.setFragmentTexture(primary, index: 0)
 
-        let hasMask: Bool
-        let maskForUniforms: MTLTexture?
-        if normalizedShader == "genericimage4",
-           let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1] {
-            let mask = try WPEMetalShaderInputs.resolve(
-                reference: maskRef,
-                textures: textures,
-                frameState: frameState,
-                currentTargetID: destination.id
+            var componentMap: MTLTexture?
+            if let maskRef = pass.textureBindings[2] ?? pass.pass.textures[2] {
+                componentMap = try? WPEMetalShaderInputs.resolve(
+                    reference: maskRef,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+            }
+            encoder.setFragmentTexture(componentMap ?? primary, index: 1)
+            var uniforms = sceneModelGenericUniforms(
+                for: pass,
+                layer: layer,
+                hasComponentMap: componentMap != nil
             )
-            encoder.setFragmentTexture(mask, index: 1)
-            hasMask = true
-            maskForUniforms = mask
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESceneModelGenericUniforms>.stride, index: 0)
         } else {
+            encoder.setRenderPipelineState(try renderPipeline(
+                vertexName: "wpe_scene_model_mesh_vertex",
+                fragmentName: "wpe_genericimage2_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            encoder.setFragmentTexture(primary, index: 0)
             encoder.setFragmentTexture(primary, index: 1)
-            hasMask = false
-            maskForUniforms = nil
+            var uniforms = genericImageUniforms(
+                for: pass,
+                layer: layer,
+                hasMask: false,
+                sourceTexture: primary,
+                maskTexture: nil
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
         }
-
-        var uniforms = genericImageUniforms(
-            for: pass,
-            layer: layer,
-            hasMask: hasMask,
-            sourceTexture: primary,
-            maskTexture: maskForUniforms
-        )
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
         let paletteState = puppetBonePalette(for: skinningState)
         var meshUniforms = sceneModelMeshUniforms(for: layer, frameState: frameState, paletteState: paletteState)
@@ -3279,8 +3184,7 @@ final class WPEMetalRenderExecutor {
     ) -> (bonePalette: [simd_float4x4], skinningEnabled: Float) {
         // When the skinning gate rejects (partial hierarchy, out-of-range indices, unbounded palette,
         // unfollowable attached child) the identity palette reproduces the assembled MDLV rest mesh
-        // (no-regression guard). Skinning is opt-in (default off); enable with `defaults write
-        // Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
+        // (no-regression guard). Skinning is always on; validation remains the safety net.
         let resolvedPalette = skinningState?.enabled == true ? (skinningState?.palette ?? []) : []
         let bonePalette = resolvedPalette.isEmpty
             ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
@@ -3409,17 +3313,83 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    /// Recycles bone-palette buffers across frames instead of `makeBuffer` per draw. Buffers are
+    /// power-of-two bucketed so puppets with different bone counts share them; the shader only reads
+    /// `paletteCount` entries (`indices < paletteCount` guards every tap), so a bucket's stale tail is
+    /// never sampled. Lock-protected: `recycle` runs on Metal completion threads.
+    private final class PuppetBonePaletteBufferPool: @unchecked Sendable {
+        private let lock = NSLock()
+        private var freeBuffersByLength: [Int: [MTLBuffer]] = [:]
+        /// Frames in flight are semaphore-bounded, so a scene needs at most a few buffers per
+        /// puppet; anything beyond this per bucket is released rather than hoarded.
+        private let maxFreePerLength = 8
+
+        func acquire(byteCount: Int, device: MTLDevice) -> MTLBuffer? {
+            let length = Self.bucketLength(for: byteCount)
+            lock.lock()
+            let reused = freeBuffersByLength[length]?.popLast()
+            lock.unlock()
+            return reused ?? device.makeBuffer(length: length, options: [])
+        }
+
+        func recycle(_ buffers: [MTLBuffer]) {
+            guard !buffers.isEmpty else { return }
+            lock.lock()
+            for buffer in buffers where (freeBuffersByLength[buffer.length]?.count ?? 0) < maxFreePerLength {
+                freeBuffersByLength[buffer.length, default: []].append(buffer)
+            }
+            lock.unlock()
+        }
+
+        func drain() {
+            lock.lock()
+            freeBuffersByLength.removeAll()
+            lock.unlock()
+        }
+
+        private static func bucketLength(for byteCount: Int) -> Int {
+            var length = 256
+            while length < byteCount { length <<= 1 }
+            return length
+        }
+    }
+
+    private let bonePaletteBufferPool = PuppetBonePaletteBufferPool()
+    /// Palette buffers bound while encoding the current frame; handed to the frame command buffer's
+    /// completion handler at commit so they return to the pool only after the GPU has consumed them.
+    /// A frame aborted before commit leaves its buffers here — they ride along with the next commit
+    /// (never executed by the GPU, so recycling them late is safe, early would be too).
+    private var bonePaletteBuffersInFlight: [MTLBuffer] = []
+
+    /// See `PresentCompletionTexture`: `MTLBuffer` handles are thread-safe but not `Sendable`-annotated.
+    private struct PaletteBufferRecycleBatch: @unchecked Sendable {
+        let buffers: [MTLBuffer]
+    }
+
+    /// Called once per frame right before commit (completion handlers must be added pre-commit).
+    private func recyclePaletteBuffersOnCompletion(of commandBuffer: MTLCommandBuffer) {
+        guard !bonePaletteBuffersInFlight.isEmpty else { return }
+        let batch = PaletteBufferRecycleBatch(buffers: bonePaletteBuffersInFlight)
+        bonePaletteBuffersInFlight.removeAll()
+        let pool = bonePaletteBufferPool
+        commandBuffer.addCompletedHandler { _ in
+            pool.recycle(batch.buffers)
+        }
+    }
+
     private func bindPuppetBonePalette(
         _ bonePalette: [simd_float4x4],
         encoder: MTLRenderCommandEncoder
     ) throws {
-        let bonePaletteBuffer = bonePalette.withUnsafeBytes { rawBuffer in
-            device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
-        }
-        guard let bonePaletteBuffer else {
+        let byteCount = bonePalette.count * MemoryLayout<simd_float4x4>.stride
+        guard let buffer = bonePaletteBufferPool.acquire(byteCount: byteCount, device: device) else {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
-        encoder.setVertexBuffer(bonePaletteBuffer, offset: 0, index: 2)
+        bonePalette.withUnsafeBytes { rawBuffer in
+            buffer.contents().copyMemory(from: rawBuffer.baseAddress!, byteCount: rawBuffer.count)
+        }
+        bonePaletteBuffersInFlight.append(buffer)
+        encoder.setVertexBuffer(buffer, offset: 0, index: 2)
     }
 
     // MARK: - Puppet clip-composite (WPE genericimage4 CLIPPINGTARGET)
@@ -4283,6 +4253,53 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    /// True when this pass is WPE `effects/skew` in MODE=1 (Vertex): the quad
+    /// geometry must be displaced in the vertex stage (the fragment leaves the UV
+    /// untouched in MODE=1, so a fragment-only transpile drops the effect
+    /// entirely). MODE=0 (UV) is handled by the ordinary transpiled fragment.
+    func isVertexSkewPass(_ pass: WPEPreparedRenderPass) -> Bool {
+        let shader = pass.pass.shader
+            .replacingOccurrences(of: "\\", with: "/")
+            .lowercased()
+        guard shader == "effects/skew" || shader.hasSuffix("/effects/skew") else {
+            return false
+        }
+        let mode = pass.comboValues["MODE"] ?? pass.pass.combos["MODE"] ?? 0
+        guard mode == 1 else { return false }
+        let params = vertexSkewParams(for: pass)
+        // All-zero params = skew disabled → keep the plain object quad.
+        return params.topBottomLeftRight != SIMD4<Float>(repeating: 0)
+    }
+
+    /// The MODE=1 skew corner-displacement params (top/bottom/left/right) as
+    /// fractions of the quad extent, read from the pass material values. WPE's
+    /// `skew.vert` multiplies the displacement by `g_TextureReductionScale`
+    /// (`textureScale = g_Texture0Resolution.zw * g_TextureReductionScale`), so it
+    /// is folded in here — it defaults to 1.0 (full resolution), which is the case
+    /// for the FBO-composite textures skew effects sample.
+    func vertexSkewParams(for pass: WPEPreparedRenderPass) -> WPESkewParams {
+        func value(_ names: [String], default fallback: Float = 0) -> Float {
+            for name in names {
+                if let v = pass.uniformValues[name] ?? pass.pass.constants[name] {
+                    return Self.scalarValue(v, default: fallback)
+                }
+            }
+            let lowered = Set(names.map { $0.lowercased() })
+            if let match = pass.uniformValues.first(where: { lowered.contains($0.key.lowercased()) })
+                ?? pass.pass.constants.first(where: { lowered.contains($0.key.lowercased()) }) {
+                return Self.scalarValue(match.value, default: fallback)
+            }
+            return fallback
+        }
+        let reductionScale = value(["textureReductionScale", "g_TextureReductionScale"], default: 1)
+        return WPESkewParams(topBottomLeftRight: reductionScale * SIMD4<Float>(
+            value(["top", "g_Top"]),
+            value(["bottom", "g_Bottom"]),
+            value(["left", "g_Left"]),
+            value(["right", "g_Right"])
+        ))
+    }
+
     func usesObjectQuadGeometry(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -4642,7 +4659,11 @@ final class WPEMetalRenderExecutor {
         commandBuffer: MTLCommandBuffer
     ) {
         guard enabled,
-              let snapshot = makeDebugSnapshotTexture(width: output.width, height: output.height),
+              let snapshot = makeDebugSnapshotTexture(
+                  width: output.width,
+                  height: output.height,
+                  pixelFormat: output.pixelFormat
+              ),
               let blit = commandBuffer.makeBlitCommandEncoder() else {
             return
         }
@@ -4661,9 +4682,13 @@ final class WPEMetalRenderExecutor {
         scenePassDumps.append((label: label, texture: snapshot))
     }
 
-    private func makeDebugSnapshotTexture(width: Int, height: Int) -> MTLTexture? {
+    private func makeDebugSnapshotTexture(
+        width: Int,
+        height: Int,
+        pixelFormat: MTLPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
+    ) -> MTLTexture? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: Self.outputPixelFormat,
+            pixelFormat: pixelFormat,
             width: max(width, 1),
             height: max(height, 1),
             mipmapped: false
@@ -4712,13 +4737,16 @@ final class WPEMetalRenderExecutor {
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
         let width = max(Int(size.width), 1)
         let height = max(Int(size.height), 1)
-        outputTexturePool.removeAll { $0.width != width || $0.height != height }
+        let pixelFormat = currentOutputPixelFormat
+        outputTexturePool.removeAll {
+            $0.width != width || $0.height != height || $0.pixelFormat != pixelFormat
+        }
         if let recycled = outputTexturePool.first(where: isOutputTextureReusable) {
             noteVendedOutputTexture(recycled)
             return recycled
         }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: Self.outputPixelFormat,
+            pixelFormat: pixelFormat,
             width: width,
             height: height,
             mipmapped: false
@@ -4804,6 +4832,44 @@ final class WPEMetalRenderExecutor {
         frameState.seedPreviousTexture(texture, targetID: targetID)
         frameState.markInitialized(texture)
         return texture
+    }
+
+    /// A stable snapshot of the live scene `output` for a pass that reads
+    /// `.previous` while also writing the scene (see the read-write hazard note at
+    /// the call site). Copies the scene-so-far into a cached scratch (one per
+    /// size/format, reused every frame since it's re-copied before each read) so
+    /// `.previous` binds to a frozen image instead of the texture being drawn.
+    private func sceneReadHazardSnapshot(
+        matching source: MTLTexture,
+        commandBuffer: MTLCommandBuffer
+    ) throws -> MTLTexture {
+        let key = BootstrapPreviousKey(
+            targetID: .scene,
+            width: source.width,
+            height: source.height,
+            pixelFormat: source.pixelFormat
+        )
+        let snapshot: MTLTexture
+        if let cached = sceneReadHazardSnapshotCache[key] {
+            snapshot = cached
+        } else {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: source.pixelFormat,
+                width: source.width,
+                height: source.height,
+                mipmapped: false
+            )
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .private
+            guard let made = device.makeTexture(descriptor: descriptor) else {
+                throw WPEMetalTextureLoaderError.textureAllocationFailed
+            }
+            made.label = "WPE Metal scene .previous read snapshot"
+            sceneReadHazardSnapshotCache[key] = made
+            snapshot = made
+        }
+        try copyTexture(source, to: snapshot, commandBuffer: commandBuffer)
+        return snapshot
     }
 
     private func makeClearedPreviousTexture(
@@ -4911,8 +4977,7 @@ final class WPEMetalRenderExecutor {
         scale: Float,
         strength: Float,
         exponent: Float,
-        direction: SIMD2<Float>,
-        debugMode: Float
+        direction: SIMD2<Float>
     ) throws {
         let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
         encoder.setRenderPipelineState(try renderPipeline(
@@ -4951,7 +5016,7 @@ final class WPEMetalRenderExecutor {
         if !loggedWaterWavesDispatch {
             loggedWaterWavesDispatch = true
             Logger.info(
-                "WPE waterwaves dispatch ran (builtin effect_waterwaves): debugMode=\(debugMode) hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
+                "WPE waterwaves dispatch ran (builtin effect_waterwaves): hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
                 category: .wpeRender
             )
         }
@@ -4967,7 +5032,6 @@ final class WPEMetalRenderExecutor {
             directionX: direction.x,
             directionY: direction.y,
             hasMask: hasMask,
-            debugMode: debugMode,
             texture1Resolution: SIMD4<Float>(
                 Float(maskResolution.textureWidth),
                 Float(maskResolution.textureHeight),
@@ -5117,6 +5181,227 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    /// generic4 scene-model material constants → fragment uniforms. Material
+    /// bindings use the shader-annotation names ("color" → g_TintColor,
+    /// "emissivecolor" → g_EmissiveColor…), NOT the g_* uniform names, and WPE
+    /// uploads them RAW (no sRGB conversion — RenderDoc-verified). The emissive
+    /// term requires BOTH the slot-2 component map and authored emissive
+    /// constants: WPE's EMISSIVE_MAP combo is baked by the editor from the mask
+    /// asset, which we can't read, so authored intent is the safe gate.
+    private func sceneModelGenericUniforms(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        hasComponentMap: Bool
+    ) -> WPESceneModelGenericUniforms {
+        func constantVector3(_ names: [String], default def: SIMD3<Float>) -> SIMD3<Float> {
+            for name in names {
+                if let v = pass.pass.constants[name]?.vectorValue, v.count >= 3 {
+                    return SIMD3<Float>(Float(v[0]), Float(v[1]), Float(v[2]))
+                }
+            }
+            return def
+        }
+        func constantScalar(_ names: [String], default def: Float) -> Float {
+            for name in names {
+                if let v = pass.pass.constants[name]?.numberValue {
+                    return Float(v)
+                }
+            }
+            return def
+        }
+        func mergedVector3(_ name: String, default def: SIMD3<Float>) -> SIMD3<Float> {
+            guard let v = pass.uniformValues[name]?.vectorValue, v.count >= 3 else { return def }
+            return SIMD3<Float>(Float(v[0]), Float(v[1]), Float(v[2]))
+        }
+
+        let tint = constantVector3(["color", "g_TintColor"], default: SIMD3<Float>(1, 1, 1))
+        let tintAlpha = constantScalar(["alpha", "Alpha", "g_TintAlpha"], default: 1)
+            * Float(layer.geometry.alpha)
+        let emissiveColor = constantVector3(["emissivecolor", "g_EmissiveColor"], default: SIMD3<Float>(1, 1, 1))
+        let emissiveBrightness = constantScalar(["emissivebrightness", "g_EmissiveBrightness"], default: 1)
+        let brightness = constantScalar(["brightness", "g_Brightness"], default: 1)
+            * Float(layer.geometry.brightness)
+        let ambient = mergedVector3("g_LightAmbientColor", default: SIMD3<Float>(1, 1, 1))
+        let skylight = mergedVector3("g_LightSkylightColor", default: SIMD3<Float>(1, 1, 1))
+        let lightingEnabled = (pass.pass.combos["LIGHTING"] ?? 1) != 0
+        let hdr = (pass.uniformValues["g_SceneHDREnabled"]?.numberValue ?? 0) > 0.5
+        let emissiveAuthored = pass.pass.constants["emissivecolor"] != nil
+            || pass.pass.constants["emissivebrightness"] != nil
+        let emissiveMapActive = hasComponentMap && emissiveAuthored
+
+        return WPESceneModelGenericUniforms(
+            tintColorAlpha: SIMD4<Float>(tint.x, tint.y, tint.z, tintAlpha),
+            emissive: SIMD4<Float>(emissiveColor.x, emissiveColor.y, emissiveColor.z, emissiveBrightness),
+            // No per-vertex normals in the mesh path — evaluate the vertex
+            // hemisphere mix(skylight, ambient, N·up*0.5+0.5) at its midpoint.
+            ambientLighting: SIMD4<Float>(
+                (skylight.x + ambient.x) * 0.5,
+                (skylight.y + ambient.y) * 0.5,
+                (skylight.z + ambient.z) * 0.5,
+                lightingEnabled ? 1 : 0
+            ),
+            brightnessFlags: SIMD4<Float>(brightness, emissiveMapActive ? 1 : 0, hdr ? 1 : 0, 0)
+        )
+    }
+
+    // MARK: - Scene HDR bloom
+
+    /// Kill switch: `defaults write Taijia.LiveWallpaper WPEMetalSceneBloomEnabled -bool NO`.
+    private static let isSceneBloomEnabled: Bool =
+        (UserDefaults.standard.object(forKey: "WPEMetalSceneBloomEnabled") as? Bool) ?? true
+
+    private var bloomLevelTextures: [MTLTexture] = []
+    private var bloomLevelBaseWidth = 0
+    private var bloomLevelBaseHeight = 0
+    private var bloomLevelPixelFormat: MTLPixelFormat = .invalid
+    private var bloomLevelRequestedCount = 0
+
+    /// WPE HDR bloom pyramid (RenderDoc-verified structure on 3509243656):
+    /// prefilter (soft-knee threshold + strength/17 + tint) into a half-res
+    /// chain, 4-tap box downsamples, scatter-weighted SRC_ALPHA/ONE upsamples,
+    /// additive composite back onto the scene. Runs on the LDR output — HDR
+    /// overbright is clamped at scene write, so glow strength on >1 content is
+    /// approximate until the scene renders to a float target.
+    private func encodeSceneBloomIfNeeded(
+        cameraUniforms: WPEMetalCameraUniforms,
+        output: MTLTexture,
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        guard Self.isSceneBloomEnabled, let bloom = cameraUniforms.bloom else { return }
+        ensureBloomLevels(for: output, levelCount: min(max(bloom.iterations, 1), 6))
+        let levels = bloomLevelTextures.count
+        guard levels >= 1 else { return }
+
+        let threshold = Float(bloom.threshold)
+        let knee = threshold * Float(1 - min(max(bloom.feather, 0), 1))
+        let kneeSpan = max(threshold - knee, 0.0001)
+        let blendParams = SIMD4<Float>(threshold, knee, 2 * kneeSpan, 0.25 / kneeSpan)
+        let strength = Float(bloom.strength) / 17
+        let scatterAlpha = min(max(Float(bloom.scatter) * 0.25, 0), 1)
+        let tint = SIMD4<Float>(Float(bloom.tint.x), Float(bloom.tint.y), Float(bloom.tint.z), 1)
+
+        func texel(of texture: MTLTexture) -> SIMD2<Float> {
+            SIMD2<Float>(1 / Float(max(texture.width, 1)), 1 / Float(max(texture.height, 1)))
+        }
+
+        func draw(
+            into destination: MTLTexture,
+            source: MTLTexture,
+            fragment: String,
+            blendMode: String,
+            uniforms: WPEBloomUniforms
+        ) throws {
+            let descriptor = MTLRenderPassDescriptor()
+            descriptor.colorAttachments[0].texture = destination
+            descriptor.colorAttachments[0].loadAction = blendMode == "normal" ? .dontCare : .load
+            descriptor.colorAttachments[0].storeAction = .store
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+                throw WPEMetalRenderExecutorError.commandBufferFailed
+            }
+            defer { encoder.endEncoding() }
+            encoder.setRenderPipelineState(try renderPipeline(
+                vertexName: "wpe_fullscreen_vertex",
+                fragmentName: fragment,
+                blendMode: blendMode,
+                colorPixelFormat: destination.pixelFormat,
+                depthPixelFormat: .invalid
+            ))
+            var uniforms = uniforms
+            encoder.setFragmentTexture(source, index: 0)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEBloomUniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+
+        let sceneTexel = texel(of: output)
+        try draw(
+            into: bloomLevelTextures[0],
+            source: output,
+            fragment: "wpe_bloom_prefilter_fragment",
+            blendMode: "normal",
+            uniforms: WPEBloomUniforms(
+                texelAndWeight: SIMD4<Float>(sceneTexel.x, sceneTexel.y, strength, 0),
+                blendParams: blendParams,
+                tint: tint
+            )
+        )
+        for level in 1..<levels {
+            let source = bloomLevelTextures[level - 1]
+            let t = texel(of: source)
+            try draw(
+                into: bloomLevelTextures[level],
+                source: source,
+                fragment: "wpe_bloom_downsample_fragment",
+                blendMode: "normal",
+                uniforms: WPEBloomUniforms(
+                    texelAndWeight: SIMD4<Float>(t.x, t.y, 0, 0),
+                    blendParams: .zero,
+                    tint: tint
+                )
+            )
+        }
+        var level = levels - 1
+        while level >= 1 {
+            let destination = bloomLevelTextures[level - 1]
+            let t = texel(of: destination)
+            try draw(
+                into: destination,
+                source: bloomLevelTextures[level],
+                fragment: "wpe_bloom_upsample_fragment",
+                blendMode: "additive",
+                uniforms: WPEBloomUniforms(
+                    texelAndWeight: SIMD4<Float>(t.x, t.y, scatterAlpha, 0),
+                    blendParams: .zero,
+                    tint: tint
+                )
+            )
+            level -= 1
+        }
+        let compositeTexel = texel(of: bloomLevelTextures[0])
+        try draw(
+            into: output,
+            source: bloomLevelTextures[0],
+            fragment: "wpe_bloom_upsample_fragment",
+            blendMode: "additive",
+            uniforms: WPEBloomUniforms(
+                texelAndWeight: SIMD4<Float>(compositeTexel.x, compositeTexel.y, 1, 0),
+                blendParams: .zero,
+                tint: tint
+            )
+        )
+    }
+
+    private func ensureBloomLevels(for output: MTLTexture, levelCount: Int) {
+        if bloomLevelBaseWidth == output.width,
+           bloomLevelBaseHeight == output.height,
+           bloomLevelPixelFormat == output.pixelFormat,
+           bloomLevelRequestedCount == levelCount {
+            return
+        }
+        bloomLevelTextures = []
+        bloomLevelBaseWidth = output.width
+        bloomLevelBaseHeight = output.height
+        bloomLevelPixelFormat = output.pixelFormat
+        bloomLevelRequestedCount = levelCount
+        var width = output.width / 2
+        var height = output.height / 2
+        for index in 0..<levelCount {
+            guard width >= 8, height >= 8 else { break }
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: output.pixelFormat,
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .private
+            guard let texture = device.makeTexture(descriptor: descriptor) else { break }
+            texture.label = "wpe.bloom.level\(index)"
+            bloomLevelTextures.append(texture)
+            width /= 2
+            height /= 2
+        }
+    }
+
     private static func logicalUVScale(for texture: MTLTexture?) -> SIMD2<Float> {
         guard let texture else { return SIMD2<Float>(1, 1) }
         let resolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: texture)
@@ -5208,7 +5493,7 @@ final class WPEMetalRenderExecutor {
         Self.applyBlendMode(blendMode.lowercased(), to: colorAttachment)
         let state: MTLRenderPipelineState
         do {
-            state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
+            state = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
             throw WPEMetalRenderExecutorError.pipelineStateBuildFailed(
                 name: result.fragmentFunctionName,
@@ -5528,26 +5813,24 @@ final class WPEMetalRenderExecutor {
         let premultipliedInputSlots = premultipliedInputSlots(for: pass)
         let premultipliedOutput = usesPremultipliedOutput(blendMode: pass.pass.blending)
         do {
-            return try WPEMetalTranspileTimer.measure {
-                try processor.process(
-                    shaderName: program.name,
-                    vertexSource: program.vertexSource,
-                    fragmentSource: program.fragmentSource,
-                    comboValues: pass.comboValues,
-                    materialTextureBindings: Dictionary(
-                        uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
-                            switch ref {
-                            case .image(let p), .asset(let p): return (slot, p)
-                            case .fbo(let n): return (slot, n)
-                            case .previous: return nil
-                            }
+            return try processor.process(
+                shaderName: program.name,
+                vertexSource: program.vertexSource,
+                fragmentSource: program.fragmentSource,
+                comboValues: pass.comboValues,
+                materialTextureBindings: Dictionary(
+                    uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
+                        switch ref {
+                        case .image(let p), .asset(let p): return (slot, p)
+                        case .fbo(let n): return (slot, n)
+                        case .previous: return nil
                         }
-                    )
-                ).replacingPremultipliedAlphaSettings(
-                    inputSlots: premultipliedInputSlots,
-                    output: premultipliedOutput
+                    }
                 )
-            }
+            ).replacingPremultipliedAlphaSettings(
+                inputSlots: premultipliedInputSlots,
+                output: premultipliedOutput
+            )
         } catch let error as WPEShaderCompilerError {
             if recordFailure {
                 WPESceneDebugArtifacts.shared.recordShaderFailure(

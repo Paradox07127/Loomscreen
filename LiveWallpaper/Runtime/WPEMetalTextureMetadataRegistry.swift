@@ -8,12 +8,26 @@ struct WPEMetalTextureResolution: Equatable, Sendable {
     let textureHeight: Int
     let imageWidth: Int
     let imageHeight: Int
+    /// TEXI ClampUVs flag → sample with clamp-to-edge. Defaults to `true` (clamp)
+    /// for unregistered textures (render targets / framebuffers) and raster images,
+    /// which must not wrap. Only real `.tex` content with the bit UNSET tiles (repeat).
+    let clampUVs: Bool
+    /// TEXI NoInterpolation flag → sample with nearest filtering. Default `false` (linear).
+    let noInterpolation: Bool
 
-    init(texture: MTLTexture, imageWidth: Int? = nil, imageHeight: Int? = nil) {
+    init(
+        texture: MTLTexture,
+        imageWidth: Int? = nil,
+        imageHeight: Int? = nil,
+        clampUVs: Bool = true,
+        noInterpolation: Bool = false
+    ) {
         textureWidth = max(texture.width, 1)
         textureHeight = max(texture.height, 1)
         self.imageWidth = max(Self.validLogicalSize(imageWidth) ?? texture.width, 1)
         self.imageHeight = max(Self.validLogicalSize(imageHeight) ?? texture.height, 1)
+        self.clampUVs = clampUVs
+        self.noInterpolation = noInterpolation
     }
 
     var shaderValue: WPESceneShaderConstantValue {
@@ -56,12 +70,20 @@ final class WPEMetalTextureMetadataRegistry: @unchecked Sendable {
 
     private init() {}
 
-    func register(texture: MTLTexture, imageWidth: Int? = nil, imageHeight: Int? = nil) {
+    func register(
+        texture: MTLTexture,
+        imageWidth: Int? = nil,
+        imageHeight: Int? = nil,
+        clampUVs: Bool = true,
+        noInterpolation: Bool = false
+    ) {
         let key = ObjectIdentifier(texture as AnyObject)
         let resolution = WPEMetalTextureResolution(
             texture: texture,
             imageWidth: imageWidth,
-            imageHeight: imageHeight
+            imageHeight: imageHeight,
+            clampUVs: clampUVs,
+            noInterpolation: noInterpolation
         )
         lock.lock()
         resolutions[key] = Entry(texture: texture, resolution: resolution)

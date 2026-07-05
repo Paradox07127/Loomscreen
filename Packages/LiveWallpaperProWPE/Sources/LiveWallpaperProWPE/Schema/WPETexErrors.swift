@@ -175,6 +175,24 @@ public struct WPETexInfo: Sendable, Equatable {
     /// opaque (red lines/blocks).
     public static let alphaChannelPriorityFlag: UInt32 = 0x0008_0000
 
+    /// TEXI flag bit 0x1 = NoInterpolation: sample with nearest (point) filtering
+    /// instead of linear — pixel-art / palette maps (e.g. `camera.tex`).
+    public static let noInterpolationFlag: UInt32 = 0x0000_0001
+
+    /// TEXI flag bit 0x2 = ClampUVs: the texture must NOT tile — sample with
+    /// clamp-to-edge. When UNSET (the default) WPE tiles it with `repeat`, which
+    /// is required for scrolled maps (water-normal, noise, flow) whose sample UVs
+    /// leave [0,1] over time; gradients / flashlights / beams set the bit.
+    /// Empirically confirmed: every `gradient_*` / `flashlight*` / `beam_*` sets
+    /// 0x2, while `waterripplenormal` (flags 0x0) does not.
+    public static let clampUVsFlag: UInt32 = 0x0000_0002
+
+    /// Sample with clamp-to-edge (`true`) vs `repeat`/tile (`false`). See `clampUVsFlag`.
+    public var clampUVs: Bool { flags & Self.clampUVsFlag != 0 }
+
+    /// Sample with nearest (`true`) vs linear (`false`) filtering. See `noInterpolationFlag`.
+    public var noInterpolation: Bool { flags & Self.noInterpolationFlag != 0 }
+
     /// Whether this texture must be sampled as LUMINANCE_ALPHA → (R, R, R, G):
     /// R is luminance broadcast to RGB, G is the alpha falloff. In the WPE
     /// corpus `RG88` is ONLY ever a particle glow/sprite — normal and data

@@ -586,8 +586,7 @@ struct WPEMetalShaderDispatcher {
                 scale: WPEMetalShaderInputs.floatScalar(named: ["g_Scale", "scale"], in: pass, default: 200),
                 strength: WPEMetalShaderInputs.floatScalar(named: ["g_Strength", "strength"], in: pass, default: 0.1),
                 exponent: WPEMetalShaderInputs.floatScalar(named: ["g_Exponent", "exponent"], in: pass, default: 1),
-                direction: SIMD2<Float>(-sin(waveAngle), cos(waveAngle)),
-                debugMode: WPEWaterWavesDebugMode.current.rawValue
+                direction: SIMD2<Float>(-sin(waveAngle), cos(waveAngle))
             )
 
         case "effect_spin":
@@ -941,6 +940,14 @@ struct WPEMetalShaderDispatcher {
                 fallbackToPrimary: fallbackToPrimary
             )
             encoder.setFragmentTexture(texture, index: slot)
+            // Bind the matching per-slot sampler (`wpeSampler<slot>`): address mode
+            // (clamp/repeat) + filter (linear/nearest) come from the texture's TEXI
+            // flags. Tiling maps sampled at time-scrolled UVs (water-normal, noise,
+            // flow) now repeat instead of clamping to a frozen edge.
+            encoder.setFragmentSamplerState(
+                executor.customShaderSamplerState(for: texture),
+                index: slot
+            )
             if let texture {
                 resolvedTexturesBySlot[slot] = texture
             }
@@ -975,40 +982,17 @@ struct WPEMetalShaderDispatcher {
         )
         #endif
 
-        if isWaterWavesPass && WPEWaterWavesTrace.isEnabled {
-            Self.traceWaterWavesPass(
-                pass: pass,
-                result: result,
-                layout: result.uniformLayout,
-                slots: packedUniformSlots,
-                texturesBySlot: resolvedTexturesBySlot
-            )
-        }
-
-        // When the Developer Tools "Waterwaves debug" picker is on, draw the builtin debug
-        // fragment (with the packed uniforms) instead of the transpiled shader. Off in production.
-        let waterWavesDebugMode = isWaterWavesPass ? WPEWaterWavesDebugMode.current : .off
-        if waterWavesDebugMode != .off {
-            try dispatchWaterWavesDebugOverlay(
-                pass: pass,
-                destination: destination,
-                sourceTexture: resolvedTexturesBySlot[0] ?? primary,
-                maskTexture: Self.hasExplicitTextureSlot(1, in: pass)
-                    ? resolvedTexturesBySlot[1]
-                    : (resolvedTexturesBySlot[0] ?? primary),
-                hasMask: Self.hasExplicitTextureSlot(1, in: pass),
-                layout: result.uniformLayout,
-                slots: packedUniformSlots,
-                debugMode: waterWavesDebugMode,
-                encoder: encoder,
-                depthPixelFormat: depthPixelFormat
-            )
-            return
-        }
-
+        // WPE `effects/skew` MODE=1 displaces the quad GEOMETRY in the vertex
+        // stage; the transpiled fragment leaves the UV untouched, so a plain
+        // object quad would drop the effect. Route it through the skew vertex
+        // (object-quad transform + WPE corner displacement) when it uses the
+        // object quad (group/scene target with a layer transform).
+        let usesSkewVertex = usesObjectQuad && executor.isVertexSkewPass(pass)
         let vertexName: String?
         if usesShapeQuad {
             vertexName = "wpe_shape_quad_vertex"
+        } else if usesSkewVertex {
+            vertexName = "wpe_skew_object_quad_vertex"
         } else if usesObjectQuad {
             vertexName = "wpe_object_quad_vertex"
         } else {
@@ -1060,6 +1044,14 @@ struct WPEMetalShaderDispatcher {
                 length: MemoryLayout<WPEObjectQuadUniforms>.stride,
                 index: 1
             )
+            if usesSkewVertex {
+                var skewParams = executor.vertexSkewParams(for: pass)
+                encoder.setVertexBytes(
+                    &skewParams,
+                    length: MemoryLayout<WPESkewParams>.stride,
+                    index: 2
+                )
+            }
         }
     }
 
@@ -1188,93 +1180,6 @@ struct WPEMetalShaderDispatcher {
         }
     }
 
-    /// Phase B helper: render the builtin waterwaves debug fragment (mask/overlay/displacement/
-    /// solid visualizations) onto the live transpiler-path target, using the uniforms packed for
-    /// the real shader. Lets the Developer Tools debug picker affect the actual on-screen path.
-    private func dispatchWaterWavesDebugOverlay(
-        pass: WPEPreparedRenderPass,
-        destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        sourceTexture: MTLTexture?,
-        maskTexture: MTLTexture?,
-        hasMask: Bool,
-        layout: [WPEUniformSlot],
-        slots: [SIMD4<Float>],
-        debugMode: WPEWaterWavesDebugMode,
-        encoder: MTLRenderCommandEncoder,
-        depthPixelFormat: MTLPixelFormat
-    ) throws {
-        guard let sourceTexture else {
-            throw WPEMetalRenderExecutorError.missingTexture(pass.pass.source)
-        }
-        let resolvedMaskTexture = maskTexture ?? sourceTexture
-        encoder.setRenderPipelineState(try executor.renderPipeline(
-            vertexName: "wpe_fullscreen_vertex",
-            fragmentName: "wpe_effect_waterwaves_fragment",
-            blendMode: pass.pass.blending,
-            colorPixelFormat: destination.texture.pixelFormat,
-            depthPixelFormat: depthPixelFormat
-        ))
-        encoder.setFragmentTexture(sourceTexture, index: 0)
-        encoder.setFragmentTexture(resolvedMaskTexture, index: 1)
-
-        let angle = Self.packedScalar(named: "g_Direction", in: layout, slots: slots) ?? 0
-        let direction = SIMD2<Float>(-sin(angle), cos(angle))
-        var uniforms = WPEWaterWavesUniforms(
-            time: Self.packedScalar(named: "g_Time", in: layout, slots: slots) ?? 0,
-            speed: Self.packedScalar(named: "g_Speed", in: layout, slots: slots) ?? 5,
-            scale: Self.packedScalar(named: "g_Scale", in: layout, slots: slots) ?? 200,
-            strength: Self.packedScalar(named: "g_Strength", in: layout, slots: slots) ?? 0.1,
-            exponent: Self.packedScalar(named: "g_Exponent", in: layout, slots: slots) ?? 1,
-            directionX: direction.x,
-            directionY: direction.y,
-            hasMask: hasMask ? 1 : 0,
-            debugMode: debugMode.rawValue,
-            texture1Resolution: Self.packedVector(named: "g_Texture1Resolution", in: layout, slots: slots)
-                ?? Self.textureResolutionVector(for: resolvedMaskTexture)
-        )
-        encoder.setFragmentBytes(
-            &uniforms,
-            length: MemoryLayout<WPEWaterWavesUniforms>.stride,
-            index: 0
-        )
-        // The caller (WPEMetalRenderExecutor.encode) issues the fullscreen draw after dispatch returns.
-    }
-
-    private static func traceWaterWavesPass(
-        pass: WPEPreparedRenderPass,
-        result: WPEShaderCompileResult,
-        layout: [WPEUniformSlot],
-        slots: [SIMD4<Float>],
-        texturesBySlot: [Int: MTLTexture]
-    ) {
-        WPESceneDebugArtifacts.shared.recordNoteOnce(
-            name: "msl-\(pass.pass.id)-\(pass.pass.shader).metal",
-            contents: result.mslSource
-        )
-
-        let angle = packedScalar(named: "g_Direction", in: layout, slots: slots)
-        let direction = angle.map { SIMD2<Float>(-sin($0), cos($0)) }
-        let strength = packedScalar(named: "g_Strength", in: layout, slots: slots)
-        let maxUV = strength.map { $0 * $0 }
-        WPESceneDebugArtifacts.shared.appendLog(
-            "[waterwaves.trace] pass=\(pass.pass.id)"
-                + " combos=\(pass.comboValues)"
-                + " samplers=\(result.samplerNames)"
-                + " tex0=\(textureSizeDescription(texturesBySlot[0]))"
-                + " tex1=\(textureSizeDescription(texturesBySlot[1]))"
-                + " g_Time=\(scalarDescription(packedScalar(named: "g_Time", in: layout, slots: slots)))"
-                + " g_Direction=\(scalarDescription(angle))"
-                + " dir=\(vector2Description(direction))"
-                + " g_Speed=\(scalarDescription(packedScalar(named: "g_Speed", in: layout, slots: slots)))"
-                + " g_Scale=\(scalarDescription(packedScalar(named: "g_Scale", in: layout, slots: slots)))"
-                + " g_Strength=\(scalarDescription(strength))"
-                + " g_Exponent=\(scalarDescription(packedScalar(named: "g_Exponent", in: layout, slots: slots)))"
-                + " g_Texture1Resolution=\(vector4Description(packedVector(named: "g_Texture1Resolution", in: layout, slots: slots)))"
-                + " maxUV=\(scalarDescription(maxUV))",
-            level: .warning
-        )
-    }
-
     private static func isWaterWavesPass(_ pass: WPEPreparedRenderPass) -> Bool {
         WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "effect_waterwaves"
     }
@@ -1289,57 +1194,6 @@ struct WPEMetalShaderDispatcher {
         pass.textureBindings[slot] != nil
             || pass.pass.textures[slot] != nil
             || pass.pass.binds[slot] != nil
-    }
-
-    private static func packedScalar(
-        named name: String,
-        in layout: [WPEUniformSlot],
-        slots: [SIMD4<Float>]
-    ) -> Float? {
-        packedVector(named: name, in: layout, slots: slots)?.x
-    }
-
-    private static func packedVector(
-        named name: String,
-        in layout: [WPEUniformSlot],
-        slots: [SIMD4<Float>]
-    ) -> SIMD4<Float>? {
-        guard let uniform = layout.first(where: { $0.name == name }),
-              slots.indices.contains(uniform.slot) else {
-            return nil
-        }
-        return slots[uniform.slot]
-    }
-
-    private static func textureResolutionVector(for texture: MTLTexture?) -> SIMD4<Float> {
-        guard let texture else { return SIMD4<Float>(1, 1, 1, 1) }
-        let resolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: texture)
-        return SIMD4<Float>(
-            Float(resolution.textureWidth),
-            Float(resolution.textureHeight),
-            Float(resolution.imageWidth),
-            Float(resolution.imageHeight)
-        )
-    }
-
-    private static func textureSizeDescription(_ texture: MTLTexture?) -> String {
-        guard let texture else { return "nil" }
-        return "\(texture.width)x\(texture.height)"
-    }
-
-    private static func scalarDescription(_ value: Float?) -> String {
-        guard let value else { return "nil" }
-        return String(format: "%.6f", value)
-    }
-
-    private static func vector2Description(_ value: SIMD2<Float>?) -> String {
-        guard let value else { return "nil" }
-        return String(format: "(%.6f,%.6f)", value.x, value.y)
-    }
-
-    private static func vector4Description(_ value: SIMD4<Float>?) -> String {
-        guard let value else { return "nil" }
-        return String(format: "(%.3f,%.3f,%.3f,%.3f)", value.x, value.y, value.z, value.w)
     }
 
     private func isSceneCaptureUtilityLayer(_ layer: WPERenderLayer) -> Bool {

@@ -5,9 +5,12 @@ import Foundation
 /// reused so steady-state processing performs no heap allocation, allowing it to
 /// run directly on a Core Audio IOProc or ScreenCaptureKit sample queue.
 ///
-/// Channels are kept separate (no mono collapse) and each bin is dB-normalized
-/// with attack/release temporal smoothing so the visual response matches
-/// Wallpaper Engine instead of jumping on raw magnitudes.
+/// Channels are kept separate (no mono collapse). Bands are LOG-spaced across
+/// [lowFrequency, highFrequency] with a treble EQ boost, then each band is
+/// dB-normalized with attack/release temporal smoothing — matching Wallpaper
+/// Engine's lively full-range bars instead of the bass-only twitch a linear
+/// binning produced. Silence still decays to an exact flat line (noise floor
+/// maps to 0), like WPE's muted state.
 ///
 /// Incoming callback buffers are usually smaller than `fftSize` (devices deliver
 /// 256–1024 frames). The input buffers act as a sliding window: each call shifts
@@ -17,13 +20,42 @@ final class AudioSpectrumProcessor {
     struct Configuration: Equatable, Sendable {
         var fftSize: Int = 2048
         var binCount: Int = 64
-        var minDB: Float = -80
-        var maxDB: Float = -12
-        var gain: Float = 1.15
+        // dB→[0,1] mapping window. Calibrated against the WPE RenderDoc oracle
+        // (3470764447): WPE's captured spectrum has mean≈0.45 with a WIDE
+        // per-bar spread (std≈0.25) — that bin-to-bin height CONTRAST is what
+        // reads as "lively/jumpy". The old wide [-80,-12] window (68 dB)
+        // compressed a music frame into a flat 0.7–0.9 block (std≈0.07): bars lit
+        // but barely differing. This narrower 32 dB window steepens the curve so
+        // small dB differences become visible height differences — on the same
+        // synthetic music frame std rises to ≈0.22, matching WPE. `noiseFloor`
+        // below still gates silence to 0, so a muted scene stays a flat line.
+        var minDB: Float = -56
+        var maxDB: Float = -24
+        var gain: Float = 0.8
         var noiseFloor: Float = 0.002
         var attackTime: Float = 0.045
-        var releaseTime: Float = 0.180
+        // Snappier fall (was 0.180) so bars visibly DROP between transients
+        // instead of hanging — measured ~26% more per-frame motion at 0.090,
+        // still slow enough to avoid single-frame flicker.
+        var releaseTime: Float = 0.090
         var sampleRate: Float = 48_000
+        /// Log-spaced band edges (WPE-style), low → high frequency. Linear
+        /// grouping packed all musical energy (≤2 kHz) into the first few of the
+        /// 64 bands, so most bars sat flat while Wallpaper Engine's dance across
+        /// the whole range — the "full-range motion" is log binning, not noise.
+        var lowFrequency: Float = 25
+        var highFrequency: Float = 16_000
+        /// Treble EQ compensation: each band is boosted by
+        /// `(fCenter / lowFrequency)^eqExponent` so upper bands visually keep up
+        /// with bass-heavy program material, approximating WPE's per-band
+        /// equalization. 0 disables the boost.
+        var eqExponent: Float = 0.30
+    }
+
+    /// Precomputed FFT-magnitude range + EQ boost for one output band.
+    private struct Band {
+        let range: Range<Int>
+        let boost: Float
     }
 
     private let configuration: Configuration
@@ -53,6 +85,7 @@ final class AudioSpectrumProcessor {
     private var rightOutput: [Float]
     private var previousLeft: [Float]
     private var previousRight: [Float]
+    private let bands: [Band]
 
     init(configuration: Configuration = Configuration()) {
         var resolved = configuration
@@ -86,6 +119,33 @@ final class AudioSpectrumProcessor {
         self.rightOutput = [Float](repeating: 0, count: resolved.binCount)
         self.previousLeft = [Float](repeating: 0, count: resolved.binCount)
         self.previousRight = [Float](repeating: 0, count: resolved.binCount)
+        self.bands = Self.logBands(configuration: resolved)
+    }
+
+    /// Log-spaced [lowFrequency, highFrequency] band ranges over the FFT
+    /// magnitude bins, with the per-band treble EQ boost baked in. Every band
+    /// spans at least one FFT bin; edges clamp to the magnitude buffer so a
+    /// misconfigured range can't index out of bounds.
+    private static func logBands(configuration: Configuration) -> [Band] {
+        let halfBins = configuration.fftSize / 2
+        let binWidth = configuration.sampleRate / Float(configuration.fftSize)
+        let nyquist = configuration.sampleRate * 0.5
+        let low = max(min(configuration.lowFrequency, nyquist * 0.5), binWidth)
+        let high = max(min(configuration.highFrequency, nyquist * 0.98), low * 2)
+        let ratio = high / low
+        let count = configuration.binCount
+
+        return (0..<count).map { band in
+            let fStart = low * powf(ratio, Float(band) / Float(count))
+            let fEnd = low * powf(ratio, Float(band + 1) / Float(count))
+            let start = min(max(Int(fStart / binWidth), 1), halfBins - 1)
+            let end = min(max(Int((fEnd / binWidth).rounded()), start + 1), halfBins)
+            let center = sqrtf(fStart * fEnd)
+            let boost = configuration.eqExponent == 0
+                ? Float(1)
+                : min(powf(center / low, configuration.eqExponent), 16)
+            return Band(range: start..<end, boost: boost)
+        }
     }
 
     func process(left: [Float], right: [Float], timestampNanos: UInt64) -> AudioSpectrumFrame {
@@ -190,22 +250,12 @@ final class AudioSpectrumProcessor {
     }
 
     private func compressMagnitudesIntoBins() {
-        let inputBins = magnitudes.count
-        let groupSize = max(1, inputBins / configuration.binCount)
-
-        for bin in 0..<configuration.binCount {
-            let start = bin * groupSize
-            let end = min(start + groupSize, inputBins)
-            guard start < end else {
-                compressedBins[bin] = 0
-                continue
-            }
-
+        for (bin, band) in bands.enumerated() {
             var sum: Float = 0
-            for index in start..<end {
+            for index in band.range {
                 sum += magnitudes[index]
             }
-            compressedBins[bin] = sum / Float(end - start)
+            compressedBins[bin] = band.boost * sum / Float(band.range.count)
         }
     }
 

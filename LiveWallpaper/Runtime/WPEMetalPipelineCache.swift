@@ -50,7 +50,7 @@ final class WPEMetalPipelineCache {
 
         let state: MTLRenderPipelineState
         do {
-            state = try WPEMetalCompileTimer.measure { try device.makeRenderPipelineState(descriptor: descriptor) }
+            state = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
             let detail = """
             vertex: \(vertexName)

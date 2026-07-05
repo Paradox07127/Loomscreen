@@ -82,6 +82,66 @@ struct WPEMetalSceneRendererTests {
         #expect(mtkView.enableSetNeedsDisplay == false)
     }
 
+    @Test("Cursor scripts use a neutral pointer while the mouse is outside this renderer")
+    func cursorScriptsUseNeutralPointerOutsideRenderer() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.cursorOriginScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 100, y: 100, width: 64, height: 64),
+            device: device,
+            pointerSampler: .fixedOutside()
+        )
+
+        try await renderer.load()
+
+        let uniforms = try #require(renderer.lastRuntimeUniforms)
+        #expect(uniforms.pointerPosition == SIMD2<Double>(0.5, 0.5))
+
+        let origin = try #require(renderer.lastFramePipeline?.layers.first?.graphLayer.geometry.origin)
+        #expect(abs(origin.x - 32) < 0.0001)
+        #expect(abs(origin.y - 32) < 0.0001)
+    }
+
+    @Test("Click capture remains active when Follow Cursor is disabled")
+    func clickCaptureRemainsActiveWhenFollowCursorIsDisabled() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device,
+            pointerSampler: .fixed(SIMD2<Double>(0.25, 0.75))
+        )
+        let view = try #require(renderer.nsView as? WPEInteractiveMTKView)
+        renderer.setMouseInteractionEnabled(false)
+        renderer.setClickCaptureEnabled(true)
+        let event = try #require(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: CGPoint(x: 16, y: 16),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ))
+        view.mouseMoved(with: event)
+
+        try await renderer.load()
+
+        let uniforms = try #require(renderer.lastRuntimeUniforms)
+        #expect(uniforms.pointerPosition == SIMD2<Double>(0.5, 0.5))
+        #expect(uniforms.pointerClick.position == SIMD2<Double>(0.25, 0.75))
+    }
+
     @Test("Loads material texture bindings before rendering")
     func loadsMaterialTextureBindings() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

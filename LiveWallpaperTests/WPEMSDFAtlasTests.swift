@@ -53,4 +53,20 @@ struct WPEMSDFAtlasTests {
         let aAgain = try #require(atlas.entry(for: keyA, generator: generator, font: font))
         #expect(aAgain.page == b.page)
     }
+
+    @Test("Eviction advances the atlas generation epoch (payload-cache invalidation signal)")
+    func evictionAdvancesGeneration() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
+        let generator = WPEMSDFGlyphGenerator()
+        let atlas = WPEMSDFAtlas(device: device, pageSize: 64, maxPages: 1)
+        let keyA = WPEMSDFGlyphKey(fontID: "Helvetica", glyph: glyph("A", font: font), pixelSize: 32)
+        let keyB = WPEMSDFGlyphKey(fontID: "Helvetica", glyph: glyph("B", font: font), pixelSize: 32)
+
+        let before = atlas.generation
+        _ = try #require(atlas.entry(for: keyA, generator: generator, font: font))
+        // Filling the same single page with a second glyph forces an eviction.
+        _ = try #require(atlas.entry(for: keyB, generator: generator, font: font))
+        #expect(atlas.generation > before, "eviction must bump the generation epoch")
+    }
 }

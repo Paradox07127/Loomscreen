@@ -10,33 +10,23 @@ private func isImplicitFBOTextureName(_ name: String) -> Bool {
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
-    /// Opt-in (default OFF) fix for body-split attachment placement: anchor attached children to the
+    /// Default-ON fix for body-split attachment placement: anchor attached children to the
     /// MDAT bind point on the bone's hierarchy-composed bind-world transform instead of the bone's
     /// skin-weighted vertex centroid. The centroid sat above the true joint, pushing 头部/胸部/脖颈
-    /// children up and left relative to the body. When OFF, the legacy centroid path is unchanged.
-    /// Enable: `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool YES`.
+    /// children up and left relative to the body. Opt out with
+    /// `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool NO`.
+    /// When OFF, the legacy centroid path is unchanged.
     private static var useAttachmentBindAnchor: Bool {
-        let key = "WPEPuppetAttachmentBindAnchor"
-        let suite = UserDefaults.appSuite
-        if suite.object(forKey: key) != nil {
-            return suite.bool(forKey: key)
-        }
-        return UserDefaults.standard.bool(forKey: key)
+        WPEMetalRenderExecutor.puppetDefaultsFlagOptional("WPEPuppetAttachmentBindAnchor") ?? true
     }
 
     /// Injects the WPE genericimage4 clip-composite bindings (clip-mask asset on slot 1 +
     /// intermediate clip RT on slot 8) so the executor can occlude an eye puppet's pupil on
-    /// blink close. Default OFF; when OFF the graph is byte-identical (no extra texture/FBO).
-    /// Frozen read-once to match `WPEMetalRenderExecutor.puppetClipCompositeEnabled` — both
-    /// consumers must agree, else a same-process toggle + reload partially applies. Restart to apply.
-    private static let puppetClipCompositeEnabled: Bool = {
-        let key = "WPEPuppetClipComposite"
-        let suite = UserDefaults.appSuite
-        if suite.object(forKey: key) != nil {
-            return suite.bool(forKey: key)
-        }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
+    /// blink close. Default ON; when OFF the graph is byte-identical (no extra texture/FBO).
+    /// Forwards the executor's frozen read-once flag so builder and executor CANNOT
+    /// disagree — a divergent pair would half-apply the feature (mask injected but never
+    /// composited, or a composite plan against a graph that never bound it). Restart to apply.
+    private static let puppetClipCompositeEnabled = WPEMetalRenderExecutor.puppetClipCompositeEnabled
 
     init(
         cacheRootURL: URL,
@@ -93,9 +83,15 @@ struct WPERenderGraphBuilder: Sendable {
         // group container — a script click-hotspot / interaction zone. Its passthrough material
         // binds `_rt_FullFrameBuffer` (the whole-scene texture), so drawing it paints the entire
         // scene into its small quad = a picture-in-picture. WPE emits zero draws for these.
+        // Also drops effect-less `fullscreenlayer`/`projectlayer` passthroughs whose
+        // only pass is an identity `_rt_FullFrameBuffer`→scene copy — a WPE no-op that,
+        // if drawn, re-injects the whole frame over itself and accrues a nested
+        // picture-in-picture (scene 3470764447). See `noOpFullFramePassthroughIDs`.
+        let noOpFullFrameDrops = Self.noOpFullFramePassthroughIDs(in: document, objectByID: objectByID)
         let composeWrappersToDrop = Self.particleOnlyComposeWrapperIDs(
             in: document, objectByID: objectByID
         ).union(Self.emptyComposeWrapperIDs(in: document, objectByID: objectByID))
+         .union(noOpFullFrameDrops)
         let visibleLayerIDs = Set(document.imageObjects
             .filter { !composeWrappersToDrop.contains($0.id) }
             .filter { !Self.hasHiddenAncestor($0, objectByID: objectByID, liveVisibilityIDs: liveVisibilityIDs) }
@@ -196,10 +192,22 @@ struct WPERenderGraphBuilder: Sendable {
                 if !localFBOs.contains(where: { $0.name == groupTarget }) {
                     localFBOs.append(fbo)
                 }
+                // The group's base pass must sample the group's OWN buffer. The
+                // composelayer material authors that as `_rt_FullFrameBuffer`
+                // (alias rewrite below), but `materialRespectingCopyBackground`
+                // downgrades it to `.previous` first when `copybackground` is
+                // false — and `.previous` on a scene-targeting pass resolves to
+                // the LIVE scene, painting the whole frame into the group's quad
+                // as a picture-in-picture (3470764447's layer 249). Map both
+                // spellings to the group buffer; later passes keep `.previous`
+                // untouched (mid-chain it means the previous composite).
                 return layer
                     .replacingLocalFBOs(localFBOs)
-                    .replacingPasses(layer.passes.map {
-                        $0.replacingSceneAliasReferences(with: .fbo(groupTarget))
+                    .replacingPasses(layer.passes.enumerated().map { index, pass in
+                        let aliased = pass.replacingSceneAliasReferences(with: .fbo(groupTarget))
+                        return index == 0
+                            ? aliased.replacingPreviousReferences(with: .fbo(groupTarget))
+                            : aliased
                     })
                     .withGroupCompositeSource(groupTarget)
             }
@@ -418,7 +426,7 @@ struct WPERenderGraphBuilder: Sendable {
         // Character-sheet puppets (MDLV0019/0020) MUST use the bind-anchor pivot: their mesh vertices
         // are the exploded source sheet, so the skin-weighted centroid fallback is meaningless. The
         // assembled anchor comes from the frame-0 pose inside `assembledBindWorldByBone`. Pre-assembled
-        // puppets keep the opt-in flag behavior.
+        // puppets use the default-on flag; `-bool NO` restores the centroid path.
         let isCharacterSheet = parentModel.version >= 19 && parentModel.version <= 20
         if useAttachmentBindAnchor || isCharacterSheet,
            let bindAnchor = bindAnchorPoint(for: attachment, model: parentModel) {
@@ -847,6 +855,36 @@ struct WPERenderGraphBuilder: Sendable {
         return composeLayerIDs.subtracting(nonEmpty)
     }
 
+    private static func isFullFramePassthroughUtilityPath(_ path: String) -> Bool {
+        let stripped = strippedUtilityPath(path)
+        return stripped == "models/util/fullscreenlayer.json"
+            || stripped == "models/util/projectlayer.json"
+    }
+
+    /// IDs of `fullscreenlayer` / `projectlayer` utility layers with NO visible
+    /// effect. Their material is a single identity full-frame `copy` of
+    /// `_rt_FullFrameBuffer` back to `scene` — in WPE a passthrough that draws the
+    /// whole scene onto itself is invisible, so WPE emits zero draws for it. This
+    /// renderer materializes `_rt_FullFrameBuffer` as a persistent pool slot that
+    /// is re-snapshotted each frame, so actually drawing the copy re-injects the
+    /// whole composited frame (poster and all) over itself and accumulates a
+    /// nested picture-in-picture frame over frame (scene 3470764447). Dropping the
+    /// no-op layer matches WPE and removes the feedback. A fullscreenlayer WITH a
+    /// visible effect (e.g. DoF, scene 3479521040) is a real post-process and is
+    /// NOT dropped. Mirrors `emptyComposeWrapperIDs`, which handles the
+    /// `composelayer` variant of the same picture-in-picture hazard.
+    private static func noOpFullFramePassthroughIDs(
+        in document: WPESceneDocument,
+        objectByID: [String: WPESceneImageObject]
+    ) -> Set<String> {
+        Set(
+            document.imageObjects
+                .filter { isFullFramePassthroughUtilityPath($0.imageRelativePath) }
+                .filter { !$0.effects.contains(where: \.visible) }
+                .map(\.id)
+        )
+    }
+
     private static func strippedUtilityPath(_ path: String) -> String {
         let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
         guard normalized.hasPrefix("../") else { return normalized }
@@ -992,6 +1030,13 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
+    /// `copybackground: false` composelayers must NOT seed their chain with the
+    /// scene snapshot, so the material's `_rt_FullFrameBuffer` binding is
+    /// downgraded to `.previous` (fresh composite = transparent). CAUTION: for a
+    /// composelayer that becomes a layer GROUP, `applyComposelayerGroups` must map
+    /// this `.previous` on the base pass to the group's own buffer — otherwise the
+    /// scene-targeting composite binds the LIVE scene and paints a
+    /// picture-in-picture (3470764447's layer 249). Keep both sides in sync.
     private static func materialRespectingCopyBackground(
         _ material: WPEMaterialAsset,
         object: WPESceneImageObject
@@ -1827,6 +1872,30 @@ private extension WPERenderPass {
     func replacingSceneAliasReferences(with replacement: WPETextureReference) -> WPERenderPass {
         let newSource = source.replacingSceneAlias(with: replacement)
         let newTextures = textures.mapValues { $0.replacingSceneAlias(with: replacement) }
+        return WPERenderPass(
+            id: id,
+            phase: phase,
+            shader: shader,
+            source: newSource,
+            target: target,
+            textures: newTextures,
+            binds: binds,
+            constants: constants,
+            combos: combos,
+            blending: blending,
+            cullMode: cullMode,
+            depthTest: depthTest,
+            depthWrite: depthWrite
+        )
+    }
+
+    /// Rewrites `.previous` source/texture references to `replacement`. Only for a
+    /// compose GROUP's base pass, where `.previous` (the `copybackground: false`
+    /// downgrade of `_rt_FullFrameBuffer`) must mean the group's own buffer — on a
+    /// scene-targeting pass it would resolve to the live scene mid-frame.
+    func replacingPreviousReferences(with replacement: WPETextureReference) -> WPERenderPass {
+        let newSource = source == .previous ? replacement : source
+        let newTextures = textures.mapValues { $0 == .previous ? replacement : $0 }
         return WPERenderPass(
             id: id,
             phase: phase,

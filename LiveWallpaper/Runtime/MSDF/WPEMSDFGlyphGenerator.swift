@@ -8,6 +8,12 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
     private let parameters: WPEMSDFParameters
     private static let neutralFill = SIMD4<Float>(0.5, 0.5, 0.5, 1)
 
+    /// The one font point size glyphs are generated at. Distance fields are
+    /// resolution-independent, so a glyph is rasterized ONCE at this canonical
+    /// size and scaled to any on-screen size through its em-normalized metrics —
+    /// the atlas must never fork entries by live pixel size.
+    var canonicalPixelSize: Int { max(parameters.generationCellCap, 1) }
+
     init(parameters: WPEMSDFParameters = WPEMSDFParameters()) {
         self.parameters = parameters
     }
@@ -17,6 +23,34 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         font: CTFont,
         maxCellSide: Int? = nil
     ) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics)? {
+        guard let prep = prepareGlyph(glyph: glyph, font: font, maxCellSide: maxCellSide) else {
+            return nil
+        }
+
+        // Hoist per-glyph work (segment bounding boxes + the once-flattened
+        // winding polyline) out of the 64×64 pixel loop. Every pixel then
+        // queries this prepared value instead of re-deriving both from scratch.
+        let prepared = prep.shape.prepared()
+        let bitmap = rasterize(prep) { prepared.signedDistances(at: $0) }
+        return (bitmap: bitmap, metrics: prep.metrics)
+    }
+
+    /// Shared per-glyph setup: build the shape from the outline, fit it into the
+    /// cell, apply edge coloring, and derive metrics. The rasterization strategy
+    /// (prepared vs. brute-force reference) is decoupled so tests can prove the
+    /// two produce identical bitmaps.
+    private struct PreparedGlyph {
+        let shape: WPEMSDFShape
+        let cellSide: Int
+        let pixelRange: Double
+        let metrics: WPEMSDFGlyphMetrics
+    }
+
+    private func prepareGlyph(
+        glyph: CGGlyph,
+        font: CTFont,
+        maxCellSide: Int?
+    ) -> PreparedGlyph? {
         guard let sizing = cellSizing(font: font, maxCellSide: maxCellSide) else { return nil }
         let padding = sizing.padding
         let cellSide = sizing.cellSide
@@ -61,20 +95,6 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
         WPEMSDFEdgeColoring.colorShape(&shape, angleThreshold: parameters.angleThreshold)
 
         let pixelRange = max(parameters.pixelRange, 0.001)
-        var bitmap = WPEMSDFBitmap(width: cellSide, height: cellSide, fill: Self.neutralFill)
-        for y in 0..<bitmap.height {
-            for x in 0..<bitmap.width {
-                let point = WPEMSDFPoint(Double(x) + 0.5, Double(y) + 0.5)
-                let d = shape.signedDistances(at: point)
-                bitmap[x, y] = SIMD4<Float>(
-                    encodedDistance(d.r, pixelRange: pixelRange),
-                    encodedDistance(d.g, pixelRange: pixelRange),
-                    encodedDistance(d.b, pixelRange: pixelRange),
-                    1
-                )
-            }
-        }
-
         let cellOrigin = WPEMSDFPoint(-translate.x / scale, -translate.y / scale)
         let metrics = WPEMSDFGlyphMetrics(
             cellSize: CGSize(width: cellSide, height: cellSide),
@@ -84,8 +104,53 @@ final class WPEMSDFGlyphGenerator: @unchecked Sendable {
             translate: translate,
             emUnitsPerPixel: pathUnitsToEm / scale
         )
-        return (bitmap: bitmap, metrics: metrics)
+        return PreparedGlyph(shape: shape, cellSide: cellSide, pixelRange: pixelRange, metrics: metrics)
     }
+
+    private func rasterize(
+        _ prep: PreparedGlyph,
+        signedDistances: (WPEMSDFPoint) -> (r: Double, g: Double, b: Double)
+    ) -> WPEMSDFBitmap {
+        let cellSide = prep.cellSide
+        let pixelRange = prep.pixelRange
+        var bitmap = WPEMSDFBitmap(width: cellSide, height: cellSide, fill: Self.neutralFill)
+        // The glyph shape lives in CTFont path space: +Y UP, ascenders at high y.
+        // The bitmap must be stored TOP-DOWN (row 0 = glyph top) because every
+        // consumer is y-down: the atlas uploads rows verbatim into an MTLTexture
+        // (row 0 = v0 = top) and the layout's quads pin uvRect.minY to the quad's
+        // screen-top edge. Sampling row y at path height − y makes storage match —
+        // without this flip every glyph renders upside down in place.
+        for y in 0..<bitmap.height {
+            let pathY = Double(bitmap.height - 1 - y) + 0.5
+            for x in 0..<bitmap.width {
+                let point = WPEMSDFPoint(Double(x) + 0.5, pathY)
+                let d = signedDistances(point)
+                bitmap[x, y] = SIMD4<Float>(
+                    encodedDistance(d.r, pixelRange: pixelRange),
+                    encodedDistance(d.g, pixelRange: pixelRange),
+                    encodedDistance(d.b, pixelRange: pixelRange),
+                    1
+                )
+            }
+        }
+        return bitmap
+    }
+
+    #if DEBUG
+    /// Test-only oracle: rasterize the SAME glyph via the original brute-force
+    /// signed-distance path (no bbox culling, winding re-flattened per pixel).
+    /// The equivalence test asserts this is byte-identical to `generate`.
+    func generateBruteForceReference(
+        glyph: CGGlyph,
+        font: CTFont,
+        maxCellSide: Int? = nil
+    ) -> WPEMSDFBitmap? {
+        guard let prep = prepareGlyph(glyph: glyph, font: font, maxCellSide: maxCellSide) else {
+            return nil
+        }
+        return rasterize(prep) { prep.shape.signedDistancesBruteForce(at: $0) }
+    }
+    #endif
 
     /// Rejects non-finite or overflowing font sizes (so `Int(ceil(...))` never
     /// traps) and any cell larger than the atlas page can hold.

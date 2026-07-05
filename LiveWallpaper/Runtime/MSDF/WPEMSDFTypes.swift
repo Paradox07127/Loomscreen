@@ -78,12 +78,29 @@ struct WPEMSDFBitmap {
     }
 }
 
-struct WPEMSDFGlyphMetrics {
+struct WPEMSDFGlyphMetrics: Equatable {
     let cellSize: CGSize
     let bearing: WPEMSDFPoint
     let advance: WPEMSDFPoint
     let scale: Double
     let translate: WPEMSDFPoint
     let emUnitsPerPixel: Double
+
+    init(
+        cellSize: CGSize,
+        bearing: WPEMSDFPoint,
+        advance: WPEMSDFPoint,
+        scale: Double,
+        translate: WPEMSDFPoint,
+        emUnitsPerPixel: Double
+    ) {
+        self.cellSize = cellSize
+        self.bearing = bearing
+        self.advance = advance
+        self.scale = scale
+        self.translate = translate
+        self.emUnitsPerPixel = emUnitsPerPixel
+    }
 }
+
 #endif

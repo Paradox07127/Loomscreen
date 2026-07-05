@@ -315,6 +315,28 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let shadowColor: SIMD3<Double>
     public let shadowOffset: SIMD2<Double>
     public let letterSpacing: Double
+    /// Parent object id + this object's LOCAL origin (pre-composition). `origin`
+    /// above is the parse-time WORLD origin; when the parent chain moves at
+    /// runtime (script-driven menu panels), the renderer re-composes
+    /// `localOrigin` through the live parent transforms instead.
+    public let parentObjectID: String?
+    public let localOrigin: SIMD3<Double>?
+    /// Script-driven alpha/visible on TEXT objects (3509243656's login-intro
+    /// texts fade themselves out via alpha scripts; the clock gates visibility).
+    /// Ticked by the renderer through the same layer-script machinery as image
+    /// layers — the baked `alpha`/`visible` above are only the load-time seeds.
+    public let alphaScript: String?
+    public let alphaScriptProperties: [String: WPESceneScriptPropertyValue]
+    public let visibleScript: String?
+    public let visibleScriptProperties: [String: WPESceneScriptPropertyValue]
+    /// Dynamic `origin` SceneScript (reads `shared`/`input`/time), ticked live by
+    /// the renderer — 3509243656's star-coordinate tooltip labels track their
+    /// body via `shared.xxN`. Nil when the origin is static (resolved at parse).
+    public let originScript: WPESceneTransformScript?
+    /// Ortho scenes fit the rendered text into `boxSize` (legacy, clock-validated);
+    /// PERSPECTIVE scenes render at raw `pointSize` — RenderDoc oracle: WPE's 3D
+    /// text quads carry pointsize-scaled glyphs and `size` is only the layout box.
+    public let fitsTextToBox: Bool
 
     public init(
         id: String,
@@ -342,7 +364,15 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         shadowSize: Double = 0,
         shadowColor: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         shadowOffset: SIMD2<Double> = SIMD2<Double>(0, 0),
-        letterSpacing: Double = 0
+        letterSpacing: Double = 0,
+        parentObjectID: String? = nil,
+        localOrigin: SIMD3<Double>? = nil,
+        alphaScript: String? = nil,
+        alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        visibleScript: String? = nil,
+        visibleScriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        originScript: WPESceneTransformScript? = nil,
+        fitsTextToBox: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -370,6 +400,14 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.shadowColor = shadowColor
         self.shadowOffset = shadowOffset
         self.letterSpacing = letterSpacing
+        self.parentObjectID = parentObjectID
+        self.localOrigin = localOrigin
+        self.alphaScript = alphaScript
+        self.alphaScriptProperties = alphaScriptProperties
+        self.visibleScript = visibleScript
+        self.visibleScriptProperties = visibleScriptProperties
+        self.originScript = originScript
+        self.fitsTextToBox = fitsTextToBox
     }
 
     public func resolvedAlpha(at time: Double) -> Double {
@@ -406,7 +444,15 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
             shadowSize: shadowSize,
             shadowColor: shadowColor,
             shadowOffset: shadowOffset,
-            letterSpacing: letterSpacing
+            letterSpacing: letterSpacing,
+            parentObjectID: parentObjectID,
+            localOrigin: localOrigin,
+            alphaScript: alphaScript,
+            alphaScriptProperties: alphaScriptProperties,
+            visibleScript: visibleScript,
+            visibleScriptProperties: visibleScriptProperties,
+            originScript: originScript,
+            fitsTextToBox: fitsTextToBox
         )
     }
 }
@@ -504,6 +550,35 @@ public struct WPESceneCamera: Equatable, Sendable {
     )
 }
 
+/// WPE HDR scene bloom (`general.bloom` + `bloomhdr*`). Values are the raw
+/// scene.json numbers; the executor derives the cbuffer forms RenderDoc-verified
+/// on 3509243656 (g_BloomStrength = strength/17, knee curve from
+/// threshold/feather, per-level texel offsets, scatter-weighted additive upsample).
+public struct WPESceneBloomSettings: Equatable, Sendable {
+    public let strength: Double
+    public let threshold: Double
+    public let feather: Double
+    public let scatter: Double
+    public let iterations: Int
+    public let tint: SIMD3<Double>
+
+    public init(
+        strength: Double,
+        threshold: Double,
+        feather: Double,
+        scatter: Double,
+        iterations: Int,
+        tint: SIMD3<Double>
+    ) {
+        self.strength = strength
+        self.threshold = threshold
+        self.feather = feather
+        self.scatter = scatter
+        self.iterations = iterations
+        self.tint = tint
+    }
+}
+
 public struct WPESceneGeneral: Equatable, Sendable {
     public let clearColor: SIMD3<Double>
     public let orthogonalProjection: WPESceneOrthogonalProjection
@@ -514,19 +589,38 @@ public struct WPESceneGeneral: Equatable, Sendable {
     /// to keep the view on the continuous-frame path so the visualizer animates
     /// with audio instead of freezing on the static/on-demand path.
     public let supportsAudioProcessing: Bool
+    /// WPE `general.ambientcolor` / `general.skylightcolor` — the scene light
+    /// uniforms (`g_LightAmbientColor` / `g_LightSkylightColor`), uploaded RAW
+    /// (no sRGB conversion; RenderDoc-verified on 3509243656). Default WHITE so
+    /// scenes that never author them keep the pre-lighting model look.
+    public let lightAmbientColor: SIMD3<Double>
+    public let lightSkylightColor: SIMD3<Double>
+    /// WPE `general.hdr`: gates the HDR branches of model materials
+    /// (brightness multiply + emissive overbright in generic4).
+    public let hdr: Bool
+    /// Non-nil when the scene enables HDR bloom (`bloom:true` + `hdr:true`).
+    public let bloom: WPESceneBloomSettings?
 
     public init(
         clearColor: SIMD3<Double>,
         orthogonalProjection: WPESceneOrthogonalProjection,
         usesPerspectiveProjection: Bool = false,
         cameraParallax: WPESceneCameraParallaxSettings = .disabled,
-        supportsAudioProcessing: Bool = false
+        supportsAudioProcessing: Bool = false,
+        lightAmbientColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        lightSkylightColor: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        hdr: Bool = false,
+        bloom: WPESceneBloomSettings? = nil
     ) {
         self.clearColor = clearColor
         self.orthogonalProjection = orthogonalProjection
         self.usesPerspectiveProjection = usesPerspectiveProjection
         self.cameraParallax = cameraParallax
         self.supportsAudioProcessing = supportsAudioProcessing
+        self.lightAmbientColor = lightAmbientColor
+        self.lightSkylightColor = lightSkylightColor
+        self.hdr = hdr
+        self.bloom = bloom
     }
 
     public static let defaultGeneral = WPESceneGeneral(

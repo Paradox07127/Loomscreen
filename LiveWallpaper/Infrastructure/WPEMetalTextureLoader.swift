@@ -196,7 +196,9 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         WPEMetalTextureMetadataRegistry.shared.register(
             texture: texture,
             imageWidth: payload.info.imageWidth > 0 ? payload.info.imageWidth : mip.width,
-            imageHeight: payload.info.imageHeight > 0 ? payload.info.imageHeight : mip.height
+            imageHeight: payload.info.imageHeight > 0 ? payload.info.imageHeight : mip.height,
+            clampUVs: payload.info.clampUVs,
+            noInterpolation: payload.info.noInterpolation
         )
 
         let expected = format.expectedByteCount(width: mip.width, height: mip.height)

@@ -260,22 +260,9 @@ struct WPEMultiRootResourceResolver: Sendable {
         let event = WPEResolutionEvent(ref: relativePath, attempts: attempts, finalOutcome: finalOutcome)
         // Optional probe miss = expected, not a missing asset — don't trace it.
         if optional, finalOutcome != .resolved {
-            emitVerboseLog(event)
             return
         }
         tracer.record(event)
-        emitVerboseLog(event)
-    }
-
-    private func emitVerboseLog(_ event: WPEResolutionEvent) {
-        guard UserDefaults.standard.bool(forKey: "wpeVerboseResolverLogging") else { return }
-        let chain = event.attempts
-            .map { "\($0.origin.debugLabel)=\($0.outcome.debugLabel)" }
-            .joined(separator: " -> ")
-        Logger.debug(
-            "resolve '\(event.ref)': \(chain); final=\(event.finalOutcome.debugLabel)",
-            category: .wpeResolver
-        )
     }
 
     private func dependencyReference(_ relativePath: String) -> (workshopID: String, childPath: String)? {

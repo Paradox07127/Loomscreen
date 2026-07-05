@@ -47,6 +47,10 @@ struct WPEMetalRenderTargetKey: Hashable {
 /// next to the texture so the heap is not deallocated while the texture is
 /// still in the pool.
 final class WPEMetalRenderTargetPool {
+    /// Set per scene by the executor: HDR scenes promote 8-bit FBOs to
+    /// half-float (see `pixelFormat(forFBOFormat:promoteLDRToHDR:)`).
+    var promotesLDRFormatsToHDR = false
+
     private struct Allocation {
         let texture: MTLTexture
         let heap: MTLHeap?
@@ -187,8 +191,8 @@ final class WPEMetalRenderTargetPool {
     }
 
     /// Read-only twin of `texture(...)` keying: the slot key a target resolves to
-    /// WITHOUT allocating. Used by `WPEMetalFBOMemoryReport` to account FBO memory
-    /// statically.
+    /// WITHOUT allocating. Used to compute conservative alias intervals for the
+    /// FBO placement-heap aliasing plan statically.
     func diagnosticKey(
         for target: WPERenderTarget,
         layer: WPERenderLayer,
@@ -216,7 +220,7 @@ final class WPEMetalRenderTargetPool {
             }
         }
 
-        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
+        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format, promoteLDRToHDR: promotesLDRFormatsToHDR)
         if let pixelSize = spec.pixelSize {
             return WPEMetalRenderTargetKey(
                 name: spec.name,
@@ -262,7 +266,7 @@ final class WPEMetalRenderTargetPool {
         avoiding textureToAvoid: MTLTexture?
     ) throws -> MTLTexture {
         let spec = targetSpec(for: target, layer: layer)
-        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
+        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format, promoteLDRToHDR: promotesLDRFormatsToHDR)
         let key = targetKey(
             for: target,
             spec: spec,
@@ -560,13 +564,21 @@ final class WPEMetalRenderTargetPool {
     }
 
     static func pixelFormat(forFBOFormat format: String) -> MTLPixelFormat {
+        pixelFormat(forFBOFormat: format, promoteLDRToHDR: false)
+    }
+
+    /// HDR scenes promote 8-bit color targets to `.rgba16Float` (WPE renders the
+    /// whole scene graph in half-float under `general.hdr`) — otherwise >1
+    /// emissive dies at the FIRST layer-composite copy and the godrays/bloom
+    /// chain never sees it. Alpha masks (`r8`) stay 8-bit.
+    static func pixelFormat(forFBOFormat format: String, promoteLDRToHDR: Bool) -> MTLPixelFormat {
         switch format.lowercased() {
         case "rgba16f", "rgba_half", "rgba16161616f":
             return .rgba16Float
         case "r8", "r8unorm":
             return .r8Unorm
         default:
-            return WPEMetalRenderExecutor.outputPixelFormat
+            return promoteLDRToHDR ? .rgba16Float : WPEMetalRenderExecutor.outputPixelFormat
         }
     }
 }

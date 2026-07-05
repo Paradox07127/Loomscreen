@@ -263,71 +263,8 @@ struct WPEWaterWavesUniforms {
     var directionY: Float
     /// 1 when an opacity mask is bound in texture slot 1, else 0 (effect applies everywhere).
     var hasMask: Float
-    /// Diagnostic visualization: 0 = normal effect, 1 = mask grayscale, 2 = source with the
-    /// mask region tinted red, 3 = displacement-magnitude heatmap. Driven by the Developer
-    /// Tools "Waterwaves debug" picker; 0 in production.
-    var debugMode: Float = 0
     /// WPE packs texture resolution as (textureWidth, textureHeight, imageWidth, imageHeight).
-    /// The debug overlay uses this to mirror `waterwaves.vert`'s mask-UV padding correction.
     var texture1Resolution: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
-}
-
-/// Developer Tools "Waterwaves uniform trace" flag — when on, the live custom (transpiler) path
-/// logs the packed waterwaves uniforms per pass and dumps the translated MSL once. Off in production.
-enum WPEWaterWavesTrace {
-    static let defaultsKey = "WPEWaterWavesTrace"
-
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: defaultsKey)
-    }
-}
-
-/// Developer Tools "Waterwaves debug" visualization mode — single source of truth shared by the
-/// shader dispatcher (`rawValue` → shader uniform) and the Developer Tools picker. Persisted as a
-/// string under `defaultsKey` so it survives relaunch and is resettable from the UI.
-enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
-    case off = 0
-    case mask = 1
-    case overlay = 2
-    case displacement = 3
-    case solid = 4
-
-    static let defaultsKey = "WPEWaterWavesDebugMode"
-    var id: Float { rawValue }
-
-    var storageValue: String {
-        switch self {
-        case .off: return "off"
-        case .mask: return "mask"
-        case .overlay: return "overlay"
-        case .displacement: return "displacement"
-        case .solid: return "solid"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .off: return "Off (normal effect)"
-        case .mask: return "Mask (grayscale)"
-        case .overlay: return "Mask overlay (red on character)"
-        case .displacement: return "Displacement heatmap"
-        case .solid: return "Pass test (solid magenta)"
-        }
-    }
-
-    init(storageValue: String?) {
-        switch storageValue {
-        case WPEWaterWavesDebugMode.mask.storageValue: self = .mask
-        case WPEWaterWavesDebugMode.overlay.storageValue: self = .overlay
-        case WPEWaterWavesDebugMode.displacement.storageValue: self = .displacement
-        case WPEWaterWavesDebugMode.solid.storageValue: self = .solid
-        default: self = .off
-        }
-    }
-
-    static var current: WPEWaterWavesDebugMode {
-        WPEWaterWavesDebugMode(storageValue: UserDefaults.standard.string(forKey: defaultsKey))
-    }
 }
 
 struct WPEShakeUniforms {
@@ -358,6 +295,28 @@ struct WPEObjectQuadUniforms {
     var sceneSizeAndRotation: SIMD4<Float>
     /// x/y = UV sign for preserving negative WPE scale mirroring, z = local capture CLEARALPHA, w reserved.
     var uvSignAndPadding: SIMD4<Float>
+}
+
+/// Layout MUST match `WPEBloomUniforms` in `WPEMetalBuiltins.metal`.
+struct WPEBloomUniforms {
+    /// xy = source texel size, z = strength (prefilter) / source alpha (upsample), w pad.
+    var texelAndWeight: SIMD4<Float>
+    /// Prefilter soft-knee: (threshold, knee, 2(threshold−knee), 0.25/(threshold−knee)).
+    var blendParams: SIMD4<Float>
+    var tint: SIMD4<Float>
+}
+
+/// Layout MUST match `WPESceneModelGenericUniforms` in `WPEMetalBuiltins.metal`
+/// (generic4 scene-model material: tint + emissive map + hemispheric ambient + HDR).
+struct WPESceneModelGenericUniforms {
+    /// rgb = g_TintColor (raw, WPE uploads unconverted), a = g_TintAlpha × layer alpha.
+    var tintColorAlpha: SIMD4<Float>
+    /// rgb = g_EmissiveColor, w = g_EmissiveBrightness.
+    var emissive: SIMD4<Float>
+    /// rgb = mix(g_LightSkylightColor, g_LightAmbientColor, 0.5), w = LIGHTING combo (0/1).
+    var ambientLighting: SIMD4<Float>
+    /// x = g_Brightness × layer brightness, y = emissive map bound (0/1), z = scene HDR (0/1), w pad.
+    var brightnessFlags: SIMD4<Float>
 }
 
 /// Layout MUST match `WPEShapeQuadUniforms` in `WPEMetalBuiltins.metal`. Four
@@ -515,10 +474,17 @@ struct WPEParticleProjection {
     var padding: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
 }
 
+/// Layout MUST match `WPESkewParams` in WPEMetalBuiltins.metal. Normalized
+/// `effects/skew` MODE=1 vertex-displacement params (fractions of the quad
+/// extent): x=g_Top, y=g_Bottom, z=g_Left, w=g_Right.
+struct WPESkewParams {
+    var topBottomLeftRight: SIMD4<Float>
+}
+
 /// Layout MUST match `WPETextOverlayUniforms` in WPEMetalBuiltins.metal.
 struct WPETextOverlayUniforms {
     var centerAndSize: SIMD4<Float>  // x,y center (pixel space), z,w width,height
-    var sceneSize: SIMD4<Float>      // x = scene width, y = scene height
+    var sceneSize: SIMD4<Float>      // x = scene width, y = scene height, z = z rotation (radians, author CCW)
     var color: SIMD4<Float>          // rgb tint, a = effective alpha
 }
 
@@ -537,5 +503,8 @@ struct WPETextOverlayDraw {
     /// shader can re-multiply if the rasterizer ever ships unpremultiplied.
     let tint: SIMD3<Float>
     let alpha: Float
+    /// Composed transform-host z rotation (radians, author-space CCW); the
+    /// overlay quad rotates about its center. 0 = axis-aligned (the default).
+    var rotation: Float = 0
 }
 #endif

@@ -290,23 +290,74 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         recordLayerPlacements(pipeline)
     }
 
+    /// Latest puppet skinning-gate state per objectID, pushed by the render executor every frame and
+    /// merged into the layer-placements dump so a bug-report dump shows why a puppet fell back to the
+    /// rest pose. Placements are recorded at pipeline build — before the first frame resolves the
+    /// gate — so a puppet line reads `skinning=pending` until a state stamped with the CURRENT
+    /// placements generation arrives; a state from a previous pipeline renders as
+    /// `pending(last=…)` instead of masquerading as current (a reload can reuse an objectID for a
+    /// different puppet, and a failed first frame must not leave the old verdict standing).
+    private let layerPlacementsLock = NSLock()
+    private struct PuppetSkinningEntry {
+        let generation: Int
+        let summary: String
+    }
+    private var puppetSkinningByObjectID: [String: PuppetSkinningEntry] = [:]
+    private var layerPlacementsGeneration = 0
+    private struct LayerPlacementLine {
+        let puppetObjectID: String?
+        let text: String
+    }
+    private var layerPlacementLines: [LayerPlacementLine] = []
+
+    /// Called once per rendered frame with EVERY puppet's current gate state (executor-side logging
+    /// dedupes separately). Cheap when nothing changed: re-stamping an unchanged summary only
+    /// rewrites the note when it moves a stale entry to the current generation, and only summaries
+    /// that actually changed reach the scene-debug log.
+    func recordPuppetSkinningStates(_ states: [(objectID: String, summary: String)]) {
+        guard isEnabled, !states.isEmpty else { return }
+        layerPlacementsLock.lock()
+        let generation = layerPlacementsGeneration
+        var changedSummaries: [(String, String)] = []
+        var needsRewrite = false
+        for (objectID, summary) in states {
+            let existing = puppetSkinningByObjectID[objectID]
+            guard existing?.generation != generation || existing?.summary != summary else { continue }
+            puppetSkinningByObjectID[objectID] = PuppetSkinningEntry(generation: generation, summary: summary)
+            needsRewrite = true
+            if existing?.summary != summary {
+                changedSummaries.append((objectID, summary))
+            }
+        }
+        let hasPlacements = !layerPlacementLines.isEmpty
+        layerPlacementsLock.unlock()
+        for (objectID, summary) in changedSummaries {
+            appendLog("[puppet-skin] id=\(objectID) skinning=\(summary)")
+        }
+        if needsRewrite, hasPlacements { writeLayerPlacementsNote() }
+    }
+
     /// Dumps layer placements + puppet MDAT anchors so a body-split rig's
     /// parent/child mis-placement can be diagnosed numerically.
     func recordLayerPlacements(_ pipeline: WPEPreparedRenderPipeline) {
         guard isEnabled else { return }
         func fmt(_ v: SIMD3<Double>) -> String { String(format: "(%.1f,%.1f,%.1f)", v.x, v.y, v.z) }
         func fmt2(_ v: SIMD2<Double>) -> String { String(format: "(%.1f,%.1f)", v.x, v.y) }
-        var lines: [String] = []
+        var lines: [LayerPlacementLine] = []
+        var puppetObjectIDs: Set<String> = []
         for layer in pipeline.layers {
             let g = layer.graphLayer.geometry
             let sizeStr = g.size.map { String(format: "%.0fx%.0f", $0.width, $0.height) } ?? "nil"
-            lines.append(
-                "id=\(layer.graphLayer.objectID) name=\(layer.graphLayer.objectName) "
-                + "puppet=\(layer.puppetModel != nil ? 1 : 0) "
-                + "parent=\(layer.graphLayer.parentObjectID ?? "-") attach=\(layer.graphLayer.attachment ?? "-") "
-                + "origin=\(fmt(g.origin)) size=\(sizeStr) meshCenter=\(fmt2(g.puppetMeshCenter)) "
-                + "scale=\(fmt(g.scale)) angles=\(fmt(g.angles)) align=\(g.alignment)"
-            )
+            let isPuppet = layer.puppetModel != nil
+            if isPuppet { puppetObjectIDs.insert(layer.graphLayer.objectID) }
+            lines.append(LayerPlacementLine(
+                puppetObjectID: isPuppet ? layer.graphLayer.objectID : nil,
+                text: "id=\(layer.graphLayer.objectID) name=\(layer.graphLayer.objectName) "
+                    + "puppet=\(isPuppet ? 1 : 0) "
+                    + "parent=\(layer.graphLayer.parentObjectID ?? "-") attach=\(layer.graphLayer.attachment ?? "-") "
+                    + "origin=\(fmt(g.origin)) size=\(sizeStr) meshCenter=\(fmt2(g.puppetMeshCenter)) "
+                    + "scale=\(fmt(g.scale)) angles=\(fmt(g.angles)) align=\(g.alignment)"
+            ))
             if let model = layer.puppetModel, !model.attachments.isEmpty {
                 for a in model.attachments {
                     let bind = a.bindMatrix
@@ -314,12 +365,48 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
                     let bone = model.bones.first { $0.index == a.boneIndex }
                     let bw = bone.flatMap { $0.rawMatrix.count >= 16 ? $0.rawMatrix : nil }
                     let bwt = bw.map { String(format: "boneWorld_T=(%.1f,%.1f)", $0[12], $0[13]) } ?? "boneWorld_T=?"
-                    lines.append("    anchor \(a.name) -> bone \(a.boneIndex)  \(bt)  \(bwt)")
+                    lines.append(LayerPlacementLine(
+                        puppetObjectID: nil,
+                        text: "    anchor \(a.name) -> bone \(a.boneIndex)  \(bt)  \(bwt)"
+                    ))
                 }
             }
         }
-        recordNote(name: "layer-placements.txt", contents: lines.joined(separator: "\n"))
+        layerPlacementsLock.lock()
+        layerPlacementLines = lines
+        // A new pipeline starts a new generation: every gate state must be re-proven by the next
+        // rendered frame before it renders as current. Entries for objectIDs no longer present are
+        // dropped outright.
+        layerPlacementsGeneration += 1
+        puppetSkinningByObjectID = puppetSkinningByObjectID.filter { puppetObjectIDs.contains($0.key) }
+        layerPlacementsLock.unlock()
+        writeLayerPlacementsNote()
         appendLog("[placements] wrote \(pipeline.layers.count) layer placements")
+    }
+
+    private func writeLayerPlacementsNote() {
+        recordNote(name: "layer-placements.txt", contents: renderedLayerPlacementsContents())
+    }
+
+    /// Exposed for tests via `layerPlacementsContentsForTesting`.
+    private func renderedLayerPlacementsContents() -> String {
+        layerPlacementsLock.lock()
+        let lines = layerPlacementLines
+        let skinning = puppetSkinningByObjectID
+        let generation = layerPlacementsGeneration
+        layerPlacementsLock.unlock()
+        let rendered = lines.map { line -> String in
+            guard let id = line.puppetObjectID else { return line.text }
+            guard let entry = skinning[id] else { return line.text + " skinning=pending" }
+            return entry.generation == generation
+                ? line.text + " skinning=\(entry.summary)"
+                : line.text + " skinning=pending(last=\(entry.summary))"
+        }
+        return rendered.joined(separator: "\n")
+    }
+
+    func layerPlacementsContentsForTesting() -> String {
+        renderedLayerPlacementsContents()
     }
 
     func recordFirstFrameStats(_ stats: WPEMetalTextureVisualStats) {

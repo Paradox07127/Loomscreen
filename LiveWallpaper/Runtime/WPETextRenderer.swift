@@ -109,6 +109,9 @@ final class WPETextRenderer {
     /// text as an image whose texture is `size`. Without a box, use raw `pointSize`.
     private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
         let base = CGFloat(max(object.pointSize, 1))
+        // Perspective scenes render at raw pointsize (RenderDoc-verified — see
+        // WPESceneTextObject.fitsTextToBox); the box only lays out/aligns.
+        guard object.fitsTextToBox else { return base }
         guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }
         let key = FontSizeKey(
             text: object.text,
@@ -123,11 +126,19 @@ final class WPETextRenderer {
         if let cached = fontSizeCache[key] { return cached }
         let baseAttr = makeAttributedString(object: object, fontSize: base)
         let natural = measureBounds(baseAttr, maxWidth: object.maxWidth)
-        let innerW = max(box.x - 2 * object.padding, 1)
         let innerH = max(box.y - 2 * object.padding, 1)
-        let nw = max(Double(natural.width), 0.5)
         let nh = max(Double(natural.height), 0.5)
-        let fit = min(innerW / nw, innerH / nh)
+        // WPE fits text to the box HEIGHT (RenderDoc-verified on 3470764447: its
+        // near-square weekday box renders "SUNDAY" filling the box vertically —
+        // on-screen glyph height ≈ boxHeight × worldScale — and lets the word
+        // overflow the box width, which is only a layout envelope, not a clip).
+        // The earlier min(widthFit, heightFit) was width-limited for short words
+        // in wide/tall boxes and under-sized them ~5× (weekday, date). `size` is
+        // still the EDITOR's content snapshot, not a hard constraint: script-grown
+        // content (3509243656's CIV stats) and stale 2×2 boxes (pointsize 9) must
+        // stay at pointsize, so the fit only UP-scales — the `max(…, 1)` floor
+        // keeps a box smaller than the text at the authored pointsize.
+        let fit = max(innerH / nh, 1)
         guard fit.isFinite, fit > 0 else { return base }
         let result = base * CGFloat(fit)
         if fontSizeCache.count >= cacheLimit { fontSizeCache.removeAll(keepingCapacity: true) }

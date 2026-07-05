@@ -30,7 +30,7 @@ struct WPEShaderTranspilerTests {
         )
         #expect(result.samplers == ["g_Texture0"])
         #expect(result.uniformLayout.contains { $0.name == "g_Scale" && $0.glslType == "vec2" })
-        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler"))
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
         #expect(result.mslSource.contains("out vec4") == false)
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -292,13 +292,12 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
-    @Test("Tiled noise texture samples with repeatSampler; framebuffer keeps clamp")
+    @Test("Each texture read emits its own per-slot sampler (wrap bound at runtime)")
     func noiseTextureUsesRepeatSampler() throws {
         // filmgrain tiles util/noise at coords far beyond [0,1] (v_TexCoordNoise = uv·scale).
-        // The single clamp_to_edge linearSampler collapsed that into a scrolling edge-smear
-        // cross-hatch (scene 3265584934). Noise samplers (annotated "...noise...") must use
-        // address::repeat; the framebuffer (g_Texture0) keeps clamp so shake/offset reads
-        // don't wrap the frame at its edges.
+        // The transpiler now emits a per-slot `wpeSampler<slot>` for every g_TextureN read;
+        // the actual repeat-vs-clamp address mode is bound at runtime from the texture's TEXI
+        // ClampUVs flag — WPEMetalRenderExecutorTests covers that the flag drives repeat/clamp.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0; // {"hidden":true}
@@ -320,20 +319,19 @@ struct WPEShaderTranspilerTests {
             shaderName: "effects/filmgrain",
             preprocessedSource: source
         )
-        #expect(result.mslSource.contains("constexpr sampler repeatSampler(address::repeat, filter::linear)"))
-        #expect(result.mslSource.contains("g_Texture1.sample(repeatSampler, v_TexCoordNoise.xy)"))
-        // The framebuffer must stay on the clamp sampler.
-        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler, v_TexCoord.xy)"))
+        #expect(result.mslSource.contains("sampler wpeSampler1 [[sampler(1)]]"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoordNoise.xy)"))
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0, v_TexCoord.xy)"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
-    @Test("Non-noise textures keep the clamp linearSampler")
+    @Test("Mask and framebuffer reads also map to their per-slot samplers")
     func nonNoiseTexturesKeepClampSampler() throws {
-        // Only samplers annotated as noise/tiled get repeat — a plain mask/framebuffer
-        // sampler must stay on linearSampler so this fix can't wrap unrelated effects.
+        // Every texture read maps to its slot's runtime sampler; the clamp/repeat choice is
+        // the executor's (from TEXI flags), so the transpiler just wires wpeSampler<slot>.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -348,8 +346,8 @@ struct WPEShaderTranspilerTests {
             shaderName: "effects/genericmask",
             preprocessedSource: source
         )
-        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.xy)"))
-        #expect(!result.mslSource.contains("g_Texture1.sample(repeatSampler"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoord.xy)"))
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0, v_TexCoord.xy)"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
@@ -643,8 +641,8 @@ struct WPEShaderTranspilerTests {
         )
         #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
         // The flow map must still sample at .zw, not be downgraded to .xy.
-        #expect(result.mslSource.contains("g_Texture2.sample(linearSampler, v_TexCoord.zw)"))
-        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.zw)"))
+        #expect(result.mslSource.contains("g_Texture2.sample(wpeSampler2, v_TexCoord.zw)"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoord.zw)"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
@@ -754,7 +752,7 @@ struct WPEShaderTranspilerTests {
             preprocessedSource: source
         )
         #expect(result.mslSource.contains("textureLod(") == false)
-        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler"))
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
         #expect(result.mslSource.contains("level("))
         // The 3-arg LOD sample must still get the v_TexCoord -> .xy narrowing.
         #expect(result.mslSource.contains("v_TexCoord.xy"))

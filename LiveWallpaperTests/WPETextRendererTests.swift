@@ -144,6 +144,37 @@ struct WPETextRendererTests {
         #expect(first.size != unboxed.size)
     }
 
+    @Test("Box-fit fills the box HEIGHT, not the width-limited min (3470764447 weekday)")
+    func boxFitFillsHeightNotWidthLimited() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: FileManager.default.temporaryDirectory,
+            dependencyMounts: []
+        )
+        let renderer = WPETextRenderer(device: device, resolver: resolver)
+        // A short word in a near-square box (WPE 3470764447's weekday: box ~471×366,
+        // word "SUNDAY"). WPE fits to HEIGHT and lets the word overflow the width,
+        // so the rendered glyph height must fill most of the box height — NOT the
+        // much smaller size the old min(widthFit, heightFit) produced.
+        let object = WPESceneTextObject(
+            id: "wd", name: "Weekday", text: "SUNDAY",
+            fontRelativePath: nil, pointSize: 32,
+            color: SIMD3<Double>(1, 1, 1), alpha: 1,
+            origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+            visible: true, horizontalAlignment: "center", verticalAlignment: "middle",
+            maxWidth: nil, parallaxDepth: SIMD2<Double>(0, 0),
+            boxSize: SIMD2<Double>(471, 366), padding: 0
+        )
+        let rendered = try #require(renderer.rasterize(object))
+        // Height-fill: rendered text height reaches most of the box height. The old
+        // width-limited fit produced roughly boxWidth/wordWidth × lineHeight, far
+        // short of the box height for a short word in a near-square box.
+        #expect(rendered.size.height >= 366 * 0.7)
+        // And the word overflows the box width (that's why WPE letter-spacing/
+        // overflow is expected) — proving the fit is height-driven, not width-capped.
+        #expect(rendered.size.width > 471)
+    }
+
     @Test("Rasterized texture is a neutral coverage mask, not baked color")
     func rasterizesNeutralCoverageMask() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
