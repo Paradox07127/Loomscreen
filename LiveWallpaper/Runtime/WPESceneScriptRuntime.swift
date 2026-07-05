@@ -157,7 +157,7 @@ final class WPESceneScriptInstance {
             context.exceptionHandler = { _, ex in
                 _ = ex
             }
-            let _ = context.evaluateScript(script)
+            _ = context.evaluateScript(script)
 
             // Overlay the scene's per-object scriptProperty overrides onto the
             // script's declared defaults, so text renders with the scene's
@@ -1196,7 +1196,7 @@ private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JS
 /// global is a reassignable property of the global object. JavaScriptCore keeps
 /// `let`/`const` as lexical bindings OFF the global object, which Swift can
 /// neither read nor replace — so the scene's overrides would be ignored.
-fileprivate func wpeNormalizeScriptPropertiesDeclaration(_ preprocessed: String) -> String {
+private func wpeNormalizeScriptPropertiesDeclaration(_ preprocessed: String) -> String {
     preprocessed
         .replacingOccurrences(of: "let scriptProperties", with: "var scriptProperties")
         .replacingOccurrences(of: "const scriptProperties", with: "var scriptProperties")
@@ -1204,7 +1204,7 @@ fileprivate func wpeNormalizeScriptPropertiesDeclaration(_ preprocessed: String)
 
 /// Snapshot a script's declared scriptProperty defaults (from its
 /// `createScriptProperties()` object) so an injection can rebuild from them.
-fileprivate func wpeDeclaredScriptPropertyDefaults(
+private func wpeDeclaredScriptPropertyDefaults(
     _ value: JSValue?
 ) -> [String: WPESceneScriptPropertyValue] {
     guard let dict = value?.toDictionary() as? [String: Any] else { return [:] }
@@ -1227,7 +1227,7 @@ fileprivate func wpeDeclaredScriptPropertyDefaults(
 /// scene's overrides as the script's global, so `update()` reads the scene's
 /// configuration. A fresh object means no prior object's bindings leak in, and a
 /// script that never declared the object still receives its overrides.
-fileprivate func wpeInstallScriptProperties(
+private func wpeInstallScriptProperties(
     overrides: [String: WPESceneScriptPropertyValue],
     declaredDefaults: [String: WPESceneScriptPropertyValue],
     into context: JSContext

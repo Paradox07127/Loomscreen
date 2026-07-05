@@ -285,7 +285,7 @@ struct WPEMetalFrameClock: Sendable {
 /// to the renderer view's UV space; `fixed` is for fixtures that need a
 /// known pointer position regardless of the cursor.
 @MainActor
-struct WPEMetalPointerSampler: Sendable {
+struct WPEMetalPointerSampler {
     let sample: @MainActor @Sendable (NSView) -> SIMD2<Double>
 
     static let live = WPEMetalPointerSampler { view in

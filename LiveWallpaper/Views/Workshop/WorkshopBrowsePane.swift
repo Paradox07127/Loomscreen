@@ -9,7 +9,7 @@ struct WorkshopBrowsePane: View {
     let onRequestKeyEntry: () -> Void
     /// nil when embedded without the tabbed pane chrome (e.g. the standalone
     /// Browse sheet), which then renders no header and contributes no toolbar items.
-    var paneHeader: (() -> AnyView)? = nil
+    var paneHeader: (() -> AnyView)?
 
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?

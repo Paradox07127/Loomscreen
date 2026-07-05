@@ -6,8 +6,8 @@ public struct IllustratedEmptyState: View {
     public let title: LocalizedStringKey
     public let message: LocalizedStringKey
     public var symbolColor: Color = .secondary
-    public var primary: ButtonAction? = nil
-    public var secondary: ButtonAction? = nil
+    public var primary: ButtonAction?
+    public var secondary: ButtonAction?
     public var variant: Variant = .standard
 
     public enum Variant {

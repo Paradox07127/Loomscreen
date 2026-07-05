@@ -275,7 +275,7 @@ final class SteamCMDDoctorService {
         await autoConfigureIfNeeded()
         guard binaryBookmarkData != nil,
               workdirBookmarkData != nil,
-              (username.map(SteamCMDScriptWriter.validateUsername) ?? false),
+              username.map(SteamCMDScriptWriter.validateUsername) ?? false,
               !isGreen(.cachedLogin)
         else { return }
         if case .running? = probes[.cachedLogin]?.status { return }
@@ -1025,8 +1025,7 @@ final class SteamCMDDoctorService {
         var i = open
         while i < text.endIndex {
             let c = text[i]
-            if c == "{" { depth += 1 }
-            else if c == "}" {
+            if c == "{" { depth += 1 } else if c == "}" {
                 depth -= 1
                 if depth == 0 { return text[text.index(after: open)..<i] }
             }

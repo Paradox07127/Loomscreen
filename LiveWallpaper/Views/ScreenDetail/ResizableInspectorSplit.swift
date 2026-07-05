@@ -39,7 +39,7 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     /// Fired when the user drags the resize handle far enough past the panel's
     /// minimum to collapse it. When nil, drag-to-close is off and the handle is
     /// a pure resizer clamped at `minWidth`.
-    var onClose: (() -> Void)? = nil
+    var onClose: (() -> Void)?
 
     @ViewBuilder var main: () -> Main
     /// Built at the resolved full width; the container clips it to the animated

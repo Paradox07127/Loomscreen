@@ -4,7 +4,7 @@ import LiveWallpaperCore
 struct BookmarksLibraryView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var store = BookmarkStore.shared
-    @State private var renamingID: UUID? = nil
+    @State private var renamingID: UUID?
     @State private var renameDraft: String = ""
     @State private var searchText: String = ""
     @State private var typeFilter: BookmarkTypeFilter = .all

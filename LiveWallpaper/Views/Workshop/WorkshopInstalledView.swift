@@ -11,10 +11,10 @@ struct WorkshopInstalledView: View {
     /// Tapping a tag in the detail inspector bubbles up here so the pane can
     /// switch to Browse Online and scope the grid to that tag. nil = tags are
     /// shown but inert (e.g. if ever embedded without a Browse tab).
-    var onBrowseTag: ((String) -> Void)? = nil
+    var onBrowseTag: ((String) -> Void)?
     /// nil renders no header and contributes no toolbar items (keeps the view
     /// embeddable like Browse).
-    var paneHeader: (() -> AnyView)? = nil
+    var paneHeader: (() -> AnyView)?
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(SteamCMDDoctorService.self) private var doctor

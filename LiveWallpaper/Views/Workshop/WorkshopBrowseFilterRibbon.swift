@@ -388,7 +388,7 @@ struct WorkshopFilterChip: View {
     let isSelected: Bool
     /// Option-click: collapse the category to just this option. `nil` disables
     /// the shortcut (and its hint).
-    var onIsolate: (() -> Void)? = nil
+    var onIsolate: (() -> Void)?
     let action: () -> Void
 
     var body: some View {

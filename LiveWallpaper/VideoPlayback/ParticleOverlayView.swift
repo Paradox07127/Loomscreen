@@ -352,7 +352,7 @@ final class ParticleOverlayView: NSView {
             return cell
         }
 
-        let near = createLayer(3.0, 1.3, 4,  0.7, 8)
+        let near = createLayer(3.0, 1.3, 4, 0.7, 8)
         let mid  = createLayer(2.0, 0.9, 10, 0.5, 6)
         let far  = createLayer(1.4, 0.5, 18, 0.3, 4)
 
@@ -392,7 +392,7 @@ final class ParticleOverlayView: NSView {
             return cell
         }
 
-        let bright = createLayer(3.5, 1.2, 6,  warmWhite)
+        let bright = createLayer(3.5, 1.2, 6, warmWhite)
         let mid    = createLayer(2.5, 0.8, 12, coolBlue)
         let faint  = createLayer(1.5, 0.5, 20, coolBlue)
 

@@ -828,7 +828,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
         // load below; awaited at the render.firstFrame gate so the first synchronous
         // render() hits the warmed cache instead of paying the lazy transpile inline.
-        // No-op when WPEMetalShaderPrewarmEnabled is off.
         async let shaderWarm: Void = prewarmCustomShaders(for: pipeline)
 
         debugStage("textures.load", "begin (pipeline-driven)")
@@ -3281,8 +3280,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func prewarmCustomShaders(for pipeline: WPEPreparedRenderPipeline) async {
         // Always pre-compile before the first-frame encode: compiling a pipeline
         // state inline during an open render encoder corrupts the pass (3660962877
-        // black bg + green quad). The flag only picks parallel vs serial width.
-        let parallel = WPEMetalRenderExecutor.isShaderPrewarmEnabled
+        // black bg + green quad).
         let generation = loadGeneration
         debugStage("shader.prewarm", "begin")
 
@@ -3303,7 +3301,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
 
         let compiler = executor.shaderCompiler
-        let width = parallel ? max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2)) : 1
+        let width = max(2, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
 
         let warmed: [(key: String, result: WPEShaderCompileResult)]
         do {

@@ -7,9 +7,9 @@ struct WorkshopInspectorContent: View {
     let item: WorkshopQueryItem
     let doctor: SteamCMDDoctorService
     /// nil disables the author link (plain author text).
-    var onBrowseCreator: ((String, String?) -> Void)? = nil
+    var onBrowseCreator: ((String, String?) -> Void)?
     /// nil → tags render as plain labels.
-    var onSelectTag: ((String) -> Void)? = nil
+    var onSelectTag: ((String) -> Void)?
 
     @Environment(\.openURL) private var openURL
     @Environment(ScreenManager.self) private var screenManager

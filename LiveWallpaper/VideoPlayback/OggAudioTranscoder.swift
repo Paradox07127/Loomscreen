@@ -7,7 +7,7 @@ import LiveWallpaperCore
 /// audio WKWebView decodes unreliably (raw `.ogg` plays silently / stalls on
 /// macOS) get a format it can. `AVAudioFile` does the in-process decode (no
 /// third-party lib); wired into the `livewallpaper://` handler's existing
-/// substitution path. Kill switch: `WPEOggTranscodeEnabled -bool NO`.
+/// substitution path.
 ///
 /// Concurrency (the subtle part): WK media loaders issue overlapping range
 /// requests for one URL, so callers coalesce onto a single transcode and all see
@@ -45,16 +45,12 @@ final class OggAudioTranscoder: @unchecked Sendable {
         ["ogg", "oga", "opus"].contains(url.pathExtension.lowercased())
     }
 
-    private var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "WPEOggTranscodeEnabled") as? Bool ?? true
-    }
-
     /// Cached AAC `.m4a` for `oggURL`, transcoding on first call. Returns nil on
-    /// disable, failure, or timeout — the caller then serves the raw ogg, i.e. no
+    /// failure or timeout — the caller then serves the raw ogg, i.e. no
     /// regression vs today. Concurrent callers for the same file see one
     /// consistent result.
     func transcodedM4A(forOgg oggURL: URL) -> URL? {
-        guard isEnabled, Self.isOggFamily(oggURL), let key = cacheKey(for: oggURL) else { return nil }
+        guard Self.isOggFamily(oggURL), let key = cacheKey(for: oggURL) else { return nil }
         let destination = cacheDirectory.appendingPathComponent(key).appendingPathExtension("m4a")
 
         lock.lock()

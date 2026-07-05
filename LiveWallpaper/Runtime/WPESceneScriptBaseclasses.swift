@@ -3,7 +3,7 @@ import JavaScriptCore
 
 enum WPESceneScriptBaseclasses {
     static func install(in context: JSContext) {
-        let _ = context.evaluateScript(Self.prelude)
+        _ = context.evaluateScript(Self.prelude)
     }
 
     private static let prelude = #"""

@@ -14,10 +14,6 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     /// rather than crashing Metal.
     static let fixedVertexFunctionName = "wpe_fullscreen_vertex"
 
-    init(device: MTLDevice) {
-        self.device = device
-    }
-
     func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool) throws -> WPEShaderCompileResult {
         let translation: WPEShaderTranslationResult
         let fragmentSource = Self.fragmentSourceByAddingVertexUniformsIfNeeded(

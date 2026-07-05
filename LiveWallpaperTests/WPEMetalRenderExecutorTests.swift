@@ -1673,8 +1673,8 @@ struct WPEMetalRenderExecutorTests {
             width: 4,
             height: 2,
             bytes: Data([
-                255, 0, 0, 255,   255, 0, 0, 255,   0, 0, 0, 255,   0, 0, 0, 255,
-                255, 0, 0, 255,   255, 0, 0, 255,   0, 0, 0, 255,   0, 0, 0, 255
+                255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255,
+                255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255
             ])
         )
         WPEMetalTextureMetadataRegistry.shared.register(texture: input, imageWidth: 2, imageHeight: 2)
@@ -3392,10 +3392,10 @@ private func preparedBuiltinPass(
 
 private func makeCheckerTexture(device: MTLDevice) throws -> MTLTexture {
     try makeRGBAInputTexture(device: device, width: 2, height: 2, bytes: Data([
-        255, 0,   0,   255,
-        0,   255, 0,   255,
-        0,   0,   255, 255,
-        255, 255, 0,   255
+        255, 0, 0, 255,
+        0, 255, 0, 255,
+        0, 0, 255, 255,
+        255, 255, 0, 255
     ]))
 }
 
@@ -3900,8 +3900,8 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 100)
     }
 
-    @Test("Layer-local effect FBO sizes to the layer footprint only when enabled")
-    func layerLocalFBOSizingFlagControlsFootprint() throws {
+    @Test("Layer-local effect FBO sizes to the layer footprint")
+    func layerLocalFBOSizesToFootprint() throws {
         let layer = WPERenderLayer(
             objectID: "fx",
             objectName: "Effect",
@@ -3924,13 +3924,9 @@ private extension WPEMetalRenderExecutorTests {
         )
         let scene = CGSize(width: 3840, height: 2160)
 
-        // off → no local override (caller falls back to full-scene FBO)
+        // A local effect FBO uses the layer's own footprint, not the full scene.
         #expect(WPEMetalRenderTargetPool.layerLocalFBOPixelSize(
-            fboName: "fxBlur", layer: layer, sceneSize: scene, enabled: false) == nil)
-
-        // on → the layer's own footprint
-        #expect(WPEMetalRenderTargetPool.layerLocalFBOPixelSize(
-            fboName: "fxBlur", layer: layer, sceneSize: scene, enabled: true) == CGSize(width: 200, height: 200))
+            fboName: "fxBlur", layer: layer, sceneSize: scene) == CGSize(width: 200, height: 200))
     }
 
     @Test("Projectlayer composite target also uses full scene size")
@@ -4783,8 +4779,7 @@ private extension WPEMetalRenderExecutorTests {
         let previous = defaults.object(forKey: key)
         defaults.removeObject(forKey: key)
         defer {
-            if let previous { defaults.set(previous, forKey: key) }
-            else { defaults.removeObject(forKey: key) }
+            if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
         #expect(WPEMetalRenderExecutor.readStaticLayerCacheEnabled() == false)
         defaults.set(true, forKey: key)

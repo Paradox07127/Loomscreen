@@ -11,7 +11,7 @@ struct VideoInformationOverlay: View {
     /// doesn't refire a redundant metadata load for the same URL.
     let player: AVPlayer?
 
-    @State private var videoResolution: (width: Int, height: Int)? = nil
+    @State private var videoResolution: (width: Int, height: Int)?
     @State private var videoFrameRate: Double = 0
     @State private var fileSize: String = ""
     @State private var formatBadges: [VideoFormatBadge] = []

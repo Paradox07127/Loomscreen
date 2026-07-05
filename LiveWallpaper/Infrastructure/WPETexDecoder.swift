@@ -13,7 +13,6 @@ import ImageIO
 ///   - ImageIO-backed TEXB payloads: PNG/JPEG/etc. (`FreeImage` formats)
 ///   - Reject precisely: DXT1/3/5, BC7, RGBA1010102, animation/sequence frames
 struct WPETexDecoder: Sendable {
-    init() {}
 
     /// Cheap header probe — used by `WallpaperEngineImportService` during capability tier classification.
     func probe(data: Data) -> Result<WPETexInfo, WPETexDecodeError> {

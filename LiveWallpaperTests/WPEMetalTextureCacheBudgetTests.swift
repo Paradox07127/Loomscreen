@@ -48,8 +48,7 @@ struct WPEMetalTextureCacheBudgetTests {
         let key = WPEMetalSceneRenderer.textureCacheBudgetMiBDefaultsKey
         let previous = defaults.object(forKey: key)
         defer {
-            if let previous { defaults.set(previous, forKey: key) }
-            else { defaults.removeObject(forKey: key) }
+            if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
 
         defaults.removeObject(forKey: key)

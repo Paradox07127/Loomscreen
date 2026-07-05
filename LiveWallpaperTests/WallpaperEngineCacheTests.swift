@@ -269,7 +269,7 @@ private struct TempCacheEnvironment {
     }
 }
 
-fileprivate enum SyntheticPackage {
+private enum SyntheticPackage {
     struct Entry {
         let name: String
         let bytes: [UInt8]

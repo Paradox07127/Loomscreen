@@ -344,7 +344,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
         if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
             wallpaperMode = storedMode
-        } else if (scheduleSlots?.isEmpty == false) {
+        } else if scheduleSlots?.isEmpty == false {
             wallpaperMode = .schedule
         } else {
             wallpaperMode = .playlist

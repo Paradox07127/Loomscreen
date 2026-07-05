@@ -15,7 +15,7 @@ struct ScreenDetailHeader: View {
     let onSelectVideo: () -> Void
     let onClearWallpaper: () -> Void
     /// `nil` where scenes aren't available (Lite), which also hides the button.
-    var onApplyScene: (() -> Void)? = nil
+    var onApplyScene: (() -> Void)?
 
     var body: some View {
         DetailHeaderBar(

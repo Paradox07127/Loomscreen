@@ -109,7 +109,7 @@ extension VideoWallpaperWindow {
             return
         }
 
-        if NSEqualRects(self.frame, frame) {
+        if self.frame == frame {
             return
         }
 

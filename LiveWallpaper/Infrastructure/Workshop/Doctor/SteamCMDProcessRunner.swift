@@ -39,8 +39,7 @@ actor SteamCMDProcessRunner {
         workingDirectory: URL?,
         onProgress: SteamCMDProgressHandler? = nil
     ) async -> SteamCMDRunResult {
-        do { try await Self.steamcmdGate.acquire() }
-        catch { return SteamCMDRunResult(exitCode: nil, stdout: "", stderr: "", timedOut: false, killed: true) }
+        do { try await Self.steamcmdGate.acquire() } catch { return SteamCMDRunResult(exitCode: nil, stdout: "", stderr: "", timedOut: false, killed: true) }
         defer { Self.steamcmdGate.release() }
         do {
             try Task.checkCancellation()

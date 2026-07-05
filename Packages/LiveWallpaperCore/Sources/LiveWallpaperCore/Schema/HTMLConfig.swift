@@ -28,7 +28,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
 
     /// Optional user-supplied stylesheet injected at document end.
     /// `nil` (the default) means no extra CSS is injected.
-    public var customCSS: String? = nil
+    public var customCSS: String?
 
     /// Hard mute on all media — separate from `audioVolume` so unmute can
     /// restore the previous level instead of jumping to full volume.

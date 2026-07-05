@@ -20,8 +20,8 @@ struct InspectorResizeHandle: View {
     /// this value arms a close: releasing there fires `onRequestClose` instead
     /// of committing a width. The preview width remains clamped at `minWidth`
     /// so the panel does not crop its contents while the close is armed.
-    var closeThreshold: CGFloat? = nil
-    var onRequestClose: (() -> Void)? = nil
+    var closeThreshold: CGFloat?
+    var onRequestClose: (() -> Void)?
 
     private let handleWidth: CGFloat = 6
     private let handleHeight: CGFloat = 52

@@ -15,9 +15,9 @@ struct WPEHistoryRow: View {
     var onTap: () -> Void = {}
     let onRemove: () -> Void
     var isBookmarked: Bool = false
-    var onBookmark: (() -> Void)? = nil
+    var onBookmark: (() -> Void)?
     var hasUpdate: Bool = false
-    var onUpdate: (() -> Void)? = nil
+    var onUpdate: (() -> Void)?
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

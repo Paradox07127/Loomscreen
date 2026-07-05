@@ -15,4 +15,3 @@ struct ScreenDetailLoadingView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
-

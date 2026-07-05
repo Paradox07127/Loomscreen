@@ -118,3 +118,8 @@ CLAUDE.md
 # Python bytecode
 __pycache__/
 *.pyc
+
+#baseline
+.periphery.yml
+.swiftformat
+.swiftlint.yml

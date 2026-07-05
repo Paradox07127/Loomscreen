@@ -68,29 +68,10 @@ final class WPEMetalRenderTargetPool {
         let lastPass: Int
     }
 
-    static let fboAliasingDefaultsKey = "WPEMetalFBOAliasingEnabled"
-    /// Default ON (on-device validated). Manual override wins:
-    /// `defaults write … WPEMetalFBOAliasingEnabled -bool NO` forces the
-    /// discrete-per-target path back on. Read once on first use, then cached —
-    /// restart to apply (this ran per-target per-frame ≈ 11–17% of render CPU in trace).
-    static let isFBOAliasingEnabled: Bool =
-        UserDefaults.standard.object(forKey: fboAliasingDefaultsKey) as? Bool ?? true
-
-    static let layerLocalFBOSizingDefaultsKey = "WPEMetalLayerLocalFBOSizing"
-    /// Size a layer's OWN local effect FBOs (`layer.localFBOs`, not scene-wide
-    /// declared FBOs and not scene aliases) to the layer footprint instead of the
-    /// full scene — a small overlay's blur/glow FBO at 4K otherwise allocates and
-    /// renders ~99.5% wasted pixels. Default ON (device-validated 2026-06-26: memory
-    /// dropped, no visual regression). Manual override wins:
-    /// `defaults write … WPEMetalLayerLocalFBOSizing -bool NO` restores full-scene FBOs.
-    /// Read once on first use, then cached — restart to apply.
-    static let isLayerLocalFBOSizingEnabled: Bool =
-        UserDefaults.standard.object(forKey: layerLocalFBOSizingDefaultsKey) as? Bool ?? true
-
-    /// Pixel footprint for a layer-private effect FBO when `isLayerLocalFBOSizingEnabled`:
-    /// the layer's own footprint instead of the full scene. Used by BOTH `targetKey`
-    /// (allocation) and `diagnosticKey` (alias planning) so they can never mis-key.
-    /// nil → keep the full-scene default (scene alias, cross-layer declared FBO, or flag off).
+    /// Pixel footprint for a layer-private effect FBO: the layer's own footprint
+    /// instead of the full scene. Used by BOTH `targetKey` (allocation) and
+    /// `diagnosticKey` (alias planning) so they can never mis-key.
+    /// nil → keep the full-scene default (scene alias or cross-layer declared FBO).
     /// Only `layer.localFBOs` entries qualify (no other layer reads them).
     /// (A `WPEMetalLayerLocalFBOScale` downsample knob was tried + removed: shrinking a
     /// scene-sized FBO to a distinct half-scene size took it OUT of the shared FBO-aliasing
@@ -98,12 +79,10 @@ final class WPEMetalRenderTargetPool {
     static func layerLocalFBOPixelSize(
         fboName: String,
         layer: WPERenderLayer,
-        sceneSize: CGSize,
-        enabled: Bool = isLayerLocalFBOSizingEnabled
+        sceneSize: CGSize
     ) -> CGSize? {
         let localFBOName = inheritedPuppetClipBaseName(for: fboName) ?? fboName
-        guard enabled,
-              !WPEMetalShaderInputs.isSceneAliasName(fboName),
+        guard !WPEMetalShaderInputs.isSceneAliasName(fboName),
               layer.localFBOs.contains(where: { $0.name == localFBOName }) else { return nil }
         return layerCompositeSize(for: layer, sceneSize: sceneSize)
     }
@@ -128,7 +107,7 @@ final class WPEMetalRenderTargetPool {
     private var slots: [WPEMetalRenderTargetKey: Slot] = [:]
     private var declaredFBOs: [String: WPERenderFBO] = [:]
 
-    // Aliasing state (only populated when WPEMetalFBOAliasingEnabled).
+    // Aliasing state (per-frame heap-backed sharing of non-overlapping targets).
     private var aliasHeap: MTLHeap?
     private var aliasLastPassByKey: [WPEMetalRenderTargetKey: Int] = [:]
     private var aliasFrameTextures: [WPEMetalRenderTargetKey: (texture: MTLTexture, lastPass: Int)] = [:]
@@ -151,7 +130,7 @@ final class WPEMetalRenderTargetPool {
             }
         }
 
-        guard Self.isFBOAliasingEnabled, !aliasIntervals.isEmpty else {
+        guard !aliasIntervals.isEmpty else {
             releaseAliasState()
             return
         }
@@ -189,7 +168,7 @@ final class WPEMetalRenderTargetPool {
     /// this frame allocates fresh; the single serial command queue guarantees the
     /// prior frame's GPU work finished before this frame reuses the memory.
     func beginAliasFrame() {
-        guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
+        guard !aliasFrameTextures.isEmpty else { return }
         for entry in aliasFrameTextures.values {
             entry.texture.makeAliasable()
         }
@@ -200,7 +179,7 @@ final class WPEMetalRenderTargetPool {
     /// aliasable so a later target can reuse its heap memory. The driver (tracked
     /// automatic heap) inserts the read-before-write barrier.
     func endPass(passIndex: Int) {
-        guard Self.isFBOAliasingEnabled, !aliasFrameTextures.isEmpty else { return }
+        guard !aliasFrameTextures.isEmpty else { return }
         for (key, entry) in aliasFrameTextures where entry.lastPass == passIndex {
             entry.texture.makeAliasable()
             aliasFrameTextures.removeValue(forKey: key)
@@ -295,7 +274,7 @@ final class WPEMetalRenderTargetPool {
         // Aliased primary: heap-backed, shared with non-overlapping targets.
         // Ping-pong secondaries (textureToAvoid != nil) and non-planned keys fall
         // through to the discrete per-key path below.
-        if Self.isFBOAliasingEnabled, textureToAvoid == nil, let lastPass = aliasLastPassByKey[key] {
+        if textureToAvoid == nil, let lastPass = aliasLastPassByKey[key] {
             return try aliasTexture(for: key, lastPass: lastPass)
         }
 
@@ -415,12 +394,11 @@ final class WPEMetalRenderTargetPool {
         // effects run in layer-local UV space.
         if isSceneCaptureUtilityLayer(layer),
            layer.groupCompositeSource == nil,
-           (!WPEMetalRenderExecutor.subregionComposeOutputEnabled
-                || WPEMetalSceneCaptureUtilityModels.outputGeometry(
-                    path: layer.imagePath,
-                    geometry: layer.geometry,
-                    sceneSize: sceneSize
-                ) == .fullscreen) {
+           WPEMetalSceneCaptureUtilityModels.outputGeometry(
+               path: layer.imagePath,
+               geometry: layer.geometry,
+               sceneSize: sceneSize
+           ) == .fullscreen {
             return sceneSize
         }
 

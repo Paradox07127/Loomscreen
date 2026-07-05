@@ -213,30 +213,6 @@ final class WPEMetalRenderExecutor {
         return nil
     }
 
-    static let refractionSnapshotReuseDefaultsKey = "WPEMetalRefractionSnapshotReuseEnabled"
-    /// Skip the per-refract-pass full-frame blit while no write has touched the
-    /// same output texture since the last snapshot. Default ON; suite-first so
-    /// `defaults write Taijia.LiveWallpaper WPEMetalRefractionSnapshotReuseEnabled
-    /// -bool NO` is honoured even when the renderer runs outside the app's standard domain.
-    /// Read once on first use, then cached — restart to apply.
-    static let isRefractionSnapshotReuseEnabled: Bool = {
-        let suite = UserDefaults.appSuite
-        if suite.object(forKey: refractionSnapshotReuseDefaultsKey) != nil {
-            return suite.bool(forKey: refractionSnapshotReuseDefaultsKey)
-        }
-        return UserDefaults.standard.object(forKey: refractionSnapshotReuseDefaultsKey) as? Bool ?? true
-    }()
-
-    /// Rollback gate for sub-region compose-layer output (the audio-visualizer
-    /// "box" fix). Default ON. `defaults write Taijia.LiveWallpaper
-    /// WPEMetalSubregionComposeOutput -bool NO` reverts every scene-capture
-    /// utility layer to the legacy unconditional-fullscreen output.
-    /// Read once on first use, then cached — restart to apply.
-    static let subregionComposeOutputEnabled: Bool =
-        UserDefaults.standard.object(forKey: "WPEMetalSubregionComposeOutput") == nil
-            ? true
-            : UserDefaults.standard.bool(forKey: "WPEMetalSubregionComposeOutput")
-
     static let staticLayerCacheDefaultsKey = "WPEMetalStaticLayerCacheEnabled"
     static let staticLayerCacheBudgetMiBDefaultsKey = "WPEMetalStaticLayerCacheBudgetMiB"
 
@@ -284,16 +260,6 @@ final class WPEMetalRenderExecutor {
     /// skips the preprocess entirely on the hot path. Pass ids can recur across
     /// scenes, so this is cleared on reload (via `releaseTransientResources`).
     private var compiledShaderResultByPassID: [String: WPEShaderCompileResult] = [:]
-
-    static let shaderPrewarmDefaultsKey = "WPEMetalShaderPrewarmEnabled"
-    /// Parallel (multi-thread) shader pre-warm. Default ON (heavy scenes ~halve
-    /// load, e.g. 3226487183 3.3s→1.7s). Shaders are ALWAYS pre-compiled before
-    /// the first-frame encode regardless of this flag — compiling inline during an
-    /// open render encoder corrupts the pass. `-bool NO` only forces SERIAL
-    /// pre-warm (width 1); it does NOT disable pre-warming.
-    static var isShaderPrewarmEnabled: Bool {
-        UserDefaults.standard.object(forKey: shaderPrewarmDefaultsKey) as? Bool ?? true
-    }
 
     /// Merge pre-warmed transpile results into the shader cache. Called on the
     /// main actor AFTER the warm task group drains and BEFORE the first
@@ -348,24 +314,6 @@ final class WPEMetalRenderExecutor {
     /// (which would starve the output ring and grow latency unboundedly).
     private let inFlightSemaphore = DispatchSemaphore(value: maxFramesInFlight)
 
-    static let nonBlockingFrameSubmitDefaultsKey = "WPEMetalNonBlockingFrameSubmit"
-    /// Drop the frame instead of blocking when the in-flight budget is full.
-    /// `render()` runs on the @MainActor (MTKView's `draw(in:)`), and that actor
-    /// is shared across every display — so a blocking `inFlightSemaphore.wait()`
-    /// here while this display's GPU is busy also stalls *other* displays'
-    /// `draw` callbacks, dropping a dual-60fps setup to 30fps each. Polling and
-    /// skipping the frame keeps the actor free; each display paces to its own
-    /// GPU independently. Default ON; `-bool NO` restores the blocking wait.
-    static var isNonBlockingFrameSubmitEnabled: Bool {
-        let suite = UserDefaults.appSuite
-        if suite.object(forKey: nonBlockingFrameSubmitDefaultsKey) != nil {
-            return suite.bool(forKey: nonBlockingFrameSubmitDefaultsKey)
-        }
-        return UserDefaults.standard.object(forKey: nonBlockingFrameSubmitDefaultsKey) as? Bool ?? true
-    }
-    /// Cached at init — the submit discipline never changes mid-session, so the
-    /// per-frame render path doesn't re-read defaults.
-    private let nonBlockingFrameSubmit = WPEMetalRenderExecutor.isNonBlockingFrameSubmitEnabled
     /// When true, `render()` and the text passes block on GPU completion
     /// (`waitUntilCompleted`) so a CPU read-back of the frame (scene-debug
     /// first-frame snapshot, visual-stats, GPU capture, test pixel diffs) observes
@@ -925,15 +873,12 @@ final class WPEMetalRenderExecutor {
         // permit is never lost.
         let asyncSubmission = !synchronizeFrameCompletion
         if asyncSubmission {
-            if nonBlockingFrameSubmit {
-                // Poll, don't block: a blocking wait here holds the @MainActor
-                // (this runs from MTKView.draw) and starves other displays.
-                // Thrown before the `defer` below is armed, so no stray signal.
-                if inFlightSemaphore.wait(timeout: .now()) == .timedOut {
-                    throw WPEMetalFrameInFlightBudgetExhausted()
-                }
-            } else {
-                inFlightSemaphore.wait()
+            // Poll, don't block: a blocking wait here holds the @MainActor
+            // (this runs from MTKView.draw, shared across every display) and would
+            // stall other displays' draw callbacks, dropping dual-60fps to 30fps.
+            // Thrown before the `defer` below is armed, so no stray signal.
+            if inFlightSemaphore.wait(timeout: .now()) == .timedOut {
+                throw WPEMetalFrameInFlightBudgetExhausted()
             }
         }
         var didCommitAsync = false
@@ -973,9 +918,7 @@ final class WPEMetalRenderExecutor {
         // Aliasing is disabled while the debug bypass path is active — bypass
         // skips a layer's passes, which would break the lockstep pass index the
         // alias plan relies on.
-        let aliasIntervals = WPEMetalRenderTargetPool.isFBOAliasingEnabled
-            ? fboAliasIntervals(pipeline: preparedPipeline, sceneSize: size)
-            : []
+        let aliasIntervals = fboAliasIntervals(pipeline: preparedPipeline, sceneSize: size)
         targetPool.prepare(pipeline: preparedPipeline, aliasIntervals: aliasIntervals)
         targetPool.beginAliasFrame()
         // The per-frame output texture is freshly allocated and `.shared`; its
@@ -1884,8 +1827,7 @@ final class WPEMetalRenderExecutor {
         if let cached = refractionBackground, cached.width == output.width,
            cached.height == output.height, cached.pixelFormat == output.pixelFormat {
             bg = cached
-            if Self.isRefractionSnapshotReuseEnabled,
-               frameState.hasFreshRefractionSnapshot(for: output) {
+            if frameState.hasFreshRefractionSnapshot(for: output) {
                 return bg
             }
         } else {
@@ -4375,7 +4317,6 @@ final class WPEMetalRenderExecutor {
         guard WPEMetalSceneCaptureUtilityModels.isSceneCaptureUtilityModelPath(layer.imagePath) else {
             return .fullscreen
         }
-        guard Self.subregionComposeOutputEnabled else { return .fullscreen }
         // A compose layer that parents children is a layer-group container, not
         // a scene-effect box: its children render flat, so confining its own
         // passthrough to the authored box would paint a scene-copy PiP. Keep it

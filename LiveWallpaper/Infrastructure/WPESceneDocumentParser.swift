@@ -725,7 +725,7 @@ enum WPESceneDocumentParser {
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
         let text: String?
-        var textScript: String? = nil
+        var textScript: String?
         var textScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         switch raw {
         case let value as String:
@@ -1277,7 +1277,7 @@ enum WPESceneDocumentParser {
         // drives the layer's visibility/alpha (and any video texture) per frame —
         // e.g. an intro video that plays once then hides. Capture it; the layer
         // stays renderable (visible defaults true above) until init()/update() run.
-        var visibleScript: String? = nil
+        var visibleScript: String?
         var visibleScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         if let visibleDict = dict["visible"] as? [String: Any],
            let script = visibleDict["script"] as? String, !script.isEmpty {
@@ -1285,7 +1285,7 @@ enum WPESceneDocumentParser {
             visibleScriptProperties = scriptPropertyValues(visibleDict["scriptproperties"])
             diagnostics.append(.init(severity: .info, message: "Image \(name) has a visible-script; runs as a layer SceneScript"))
         }
-        var alphaScript: String? = nil
+        var alphaScript: String?
         var alphaScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         if let alphaDict = dict["alpha"] as? [String: Any],
            let script = alphaDict["script"] as? String, !script.isEmpty {

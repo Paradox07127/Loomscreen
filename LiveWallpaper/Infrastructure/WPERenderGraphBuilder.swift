@@ -420,7 +420,7 @@ struct WPERenderGraphBuilder: Sendable {
         // assembled anchor comes from the frame-0 pose inside `assembledBindWorldByBone`. Pre-assembled
         // puppets keep the opt-in flag behavior.
         let isCharacterSheet = parentModel.version >= 19 && parentModel.version <= 20
-        if (useAttachmentBindAnchor || isCharacterSheet),
+        if useAttachmentBindAnchor || isCharacterSheet,
            let bindAnchor = bindAnchorPoint(for: attachment, model: parentModel) {
             anchorPoint = bindAnchor
         } else if let joint = skinnedJoint(of: attachment.boneIndex, in: parentModel.meshes) {

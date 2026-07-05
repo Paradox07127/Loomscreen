@@ -39,4 +39,3 @@ struct PlaybackToggleButton: View {
             : Text("Resumes video playback", comment: "A11y hint for playback toggle when paused."))
     }
 }
-

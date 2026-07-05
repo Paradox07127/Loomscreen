@@ -384,4 +384,3 @@ public final class SystemMonitor {
         return min(gpuUtil, 100.0)
     }
 }
-

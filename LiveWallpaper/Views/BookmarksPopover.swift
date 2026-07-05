@@ -16,7 +16,7 @@ struct BookmarksPopover: View {
 
     @State private var store = BookmarkStore.shared
     @State private var nameDraft: String = ""
-    @State private var draftInitializedFor: UUID? = nil
+    @State private var draftInitializedFor: UUID?
     @State private var pendingDestructive: PendingDestructive?
 
     var body: some View {

@@ -98,8 +98,7 @@ struct WorkshopDoctorView: View {
                     onPick: { url in
                         setupError = nil
                         Task {
-                            do { try await service.bindBinary(url) }
-                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                            do { try await service.bindBinary(url) } catch { await MainActor.run { setupError = error.localizedDescription } }
                         }
                     },
                     onAutoDetect: {
@@ -115,15 +114,13 @@ struct WorkshopDoctorView: View {
                         let home = FileManager.default.homeDirectoryForCurrentUser
                         let steamURL = home.appendingPathComponent("Library/Application Support/Steam", isDirectory: true)
                         Task {
-                            do { try await service.bindWorkdir(steamURL, isSharedSteamLibrary: true) }
-                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                            do { try await service.bindWorkdir(steamURL, isSharedSteamLibrary: true) } catch { await MainActor.run { setupError = error.localizedDescription } }
                         }
                     },
                     onPickSeparate: { url in
                         setupError = nil
                         Task {
-                            do { try await service.bindWorkdir(url, isSharedSteamLibrary: false) }
-                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                            do { try await service.bindWorkdir(url, isSharedSteamLibrary: false) } catch { await MainActor.run { setupError = error.localizedDescription } }
                         }
                     }
                 )
@@ -131,8 +128,7 @@ struct WorkshopDoctorView: View {
                 UsernameRow(
                     currentUsername: service.username,
                     onSave: { name in
-                        do { try service.setUsername(name) }
-                        catch { setupError = error.localizedDescription }
+                        do { try service.setUsername(name) } catch { setupError = error.localizedDescription }
                     }
                 )
                 Divider()

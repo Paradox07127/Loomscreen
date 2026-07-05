@@ -99,7 +99,7 @@ final class ShaderThumbnailRenderer {
 /// serialized through `lock`; everything else is value-typed or already
 /// thread-safe (`MTLDevice`/`MTLLibrary`/`MTLCommandQueue` are Sendable in
 /// the macOS 14+ Metal headers).
-fileprivate final class ThumbnailRenderHelper: @unchecked Sendable {
+private final class ThumbnailRenderHelper: @unchecked Sendable {
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
     private let defaultLibrary: MTLLibrary?
@@ -269,7 +269,7 @@ fileprivate final class ThumbnailRenderHelper: @unchecked Sendable {
 
 /// Immutable render request — `Sendable` so it crosses into `Task.detached`
 /// without compiler warnings under Swift 6 strict concurrency.
-fileprivate struct ThumbnailRequest: Sendable {
+private struct ThumbnailRequest: Sendable {
     let source: ShaderSource
     let customSource: String?
     let pixelWidth: Int
