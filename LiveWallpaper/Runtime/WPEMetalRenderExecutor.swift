@@ -145,6 +145,16 @@ final class WPEShaderErrorSink: @unchecked Sendable {
 }
 
 final class WPEMetalRenderExecutor {
+    /// Builtin shader identities compared across the material/model helpers. `copy`,
+    /// `genericImage2`, `genericImage4` match against `normalizedBuiltinShaderName`;
+    /// `godraysCombine` is the raw (lowercased) shader path used for source-aliasing.
+    private enum BuiltinShaderName {
+        static let copy = "copy"
+        static let genericImage2 = "genericimage2"
+        static let genericImage4 = "genericimage4"
+        static let godraysCombine = "effects/godrays_combine"
+    }
+
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share
     /// a single sRGB pixel format so render pipelines built for the offscreen
     /// pass can be reused by `present()` without re-creation, and so the
@@ -224,10 +234,8 @@ final class WPEMetalRenderExecutor {
     private let targetPool: WPEMetalRenderTargetPool
     private let depthCache: WPEMetalDepthStateCache
     private let pipelineCache: WPEMetalPipelineCache
-    /// Invoked when the dispatcher sees a non-built-in shader. Defaults to
-    /// the shipping Swift transpiler; tests inject an alternate compiler at
-    /// this seam.
-    let shaderCompiler: WPEShaderCompiling
+    /// Translates non-built-in shaders via the shipping Swift transpiler.
+    let shaderCompiler: WPESwiftShaderCompiler
     /// Phase 2D-H: memoize the per-shader compile across frames so we
     /// don't re-translate every draw call.
     private var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
@@ -297,6 +305,8 @@ final class WPEMetalRenderExecutor {
     )
     private var staticLayerCacheSceneSize: CGSize?
     private var loggedStaticLayerCacheHits: Set<String> = []
+    /// Throttles the generic4 component-map resolve-failure diagnostic to once per objectID.
+    private var loggedComponentMapResolveFailures: Set<String> = []
 
     /// Scene-output ring: per-frame outputs are recycled instead of freshly
     /// allocated every `render()` (~32 MB alloc/free per frame at 4K). A slot
@@ -429,7 +439,7 @@ final class WPEMetalRenderExecutor {
         let depthPixelFormat: UInt
     }
 
-    init(device: MTLDevice, shaderCompiler: WPEShaderCompiling? = nil) throws {
+    init(device: MTLDevice) throws {
         guard let queue = device.makeCommandQueue() else {
             throw WPEMetalRenderExecutorError.commandQueueUnavailable
         }
@@ -441,14 +451,9 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
         self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
-        self.shaderCompiler = shaderCompiler ?? Self.preferredCompiler(device: device)
-    }
-
-    private static func preferredCompiler(device: MTLDevice) -> any WPEShaderCompiling {
-        // The Swift transpiler is the only Metal-side translator we ship.
-        // Shaders it can't handle bubble up as
-        // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`.
-        WPESwiftShaderCompiler(device: device)
+        // The Swift transpiler is the only Metal-side translator we ship; shaders
+        // it can't handle surface as the scene's metalRendererUnsupported load error.
+        self.shaderCompiler = WPESwiftShaderCompiler(device: device)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -467,6 +472,7 @@ final class WPEMetalRenderExecutor {
         // for a different puppet/material/animation, so drop them when the graph is rebuilt.
         puppetClipPairsCache.removeAll()
         loggedClipActivation.removeAll()
+        loggedComponentMapResolveFailures.removeAll()
         characterSheetWarnedReasonByObjectID.removeAll()
         puppetBoundScanDetailByObjectID.removeAll()
         puppetPaletteCacheByObjectID.removeAll()
@@ -2108,16 +2114,21 @@ final class WPEMetalRenderExecutor {
         runtimeUniforms: WPEMetalRuntimeUniforms,
         sceneSize: CGSize
     ) -> PuppetAttachmentFrameContext {
-        let layersByID = Dictionary(
-            pipeline.layers.map { ($0.graphLayer.objectID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
         var attachedChildNamesByParent: [String: Set<String>] = [:]
         for layer in pipeline.layers {
             guard let parentID = layer.graphLayer.parentObjectID,
                   let attachment = layer.graphLayer.attachment else { continue }
             attachedChildNamesByParent[parentID, default: []].insert(attachment)
         }
+        // The objectID→layer index is only ever read to resolve a child's parent
+        // puppet in `layerApplyingAttachmentFollow`; a scene with no attached
+        // children never touches it, so skip building it there.
+        let layersByID: [String: WPEPreparedRenderLayer] = attachedChildNamesByParent.isEmpty
+            ? [:]
+            : Dictionary(
+                pipeline.layers.map { ($0.graphLayer.objectID, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
         var skinningByObjectID: [String: PuppetSkinningState] = [:]
         for layer in pipeline.layers {
             guard let model = layer.puppetModel else { continue }
@@ -2744,7 +2755,8 @@ final class WPEMetalRenderExecutor {
         guard !meshes.isEmpty else { return false }
 
         let normalizedShader = WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader)
-        guard normalizedShader == "genericimage2" || normalizedShader == "genericimage4" else {
+        guard normalizedShader == BuiltinShaderName.genericImage2
+                || normalizedShader == BuiltinShaderName.genericImage4 else {
             return false
         }
 
@@ -2755,7 +2767,7 @@ final class WPEMetalRenderExecutor {
             frameState: frameState,
             currentTargetID: destination.id
         )
-        if normalizedShader == "genericimage4" {
+        if normalizedShader == BuiltinShaderName.genericImage4 {
             // generic4 MODEL material semantics differ from the image-layer path:
             // slot 1 is the normal map (unused), slot 2 the PBR component map
             // whose ALPHA is the emissive mask; tint/emissive come from the
@@ -2774,12 +2786,24 @@ final class WPEMetalRenderExecutor {
 
             var componentMap: MTLTexture?
             if let maskRef = pass.textureBindings[2] ?? pass.pass.textures[2] {
-                componentMap = try? WPEMetalShaderInputs.resolve(
-                    reference: maskRef,
-                    textures: textures,
-                    frameState: frameState,
-                    currentTargetID: destination.id
-                )
+                do {
+                    componentMap = try WPEMetalShaderInputs.resolve(
+                        reference: maskRef,
+                        textures: textures,
+                        frameState: frameState,
+                        currentTargetID: destination.id
+                    )
+                } catch {
+                    // A missing/unresolvable component map silently falls back to
+                    // albedo, which drops the emissive mask (flat white suns on
+                    // 3509243656). Surface it once so the degrade is diagnosable.
+                    if loggedComponentMapResolveFailures.insert(layer.objectID).inserted {
+                        Logger.warning(
+                            "[WPE.generic4] component-map resolve failed for \(layer.objectName), falling back to albedo: \(error)",
+                            category: .wpeRender
+                        )
+                    }
+                }
             }
             encoder.setFragmentTexture(componentMap ?? primary, index: 1)
             var uniforms = sceneModelGenericUniforms(
@@ -2851,7 +2875,8 @@ final class WPEMetalRenderExecutor {
         guard !meshes.isEmpty else { return false }
 
         let normalizedShader = WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader)
-        guard normalizedShader == "genericimage2" || normalizedShader == "genericimage4" else {
+        guard normalizedShader == BuiltinShaderName.genericImage2
+                || normalizedShader == BuiltinShaderName.genericImage4 else {
             return false
         }
 
@@ -2863,7 +2888,7 @@ final class WPEMetalRenderExecutor {
             currentTargetID: destination.id
         )
 
-        let fragmentName = normalizedShader == "genericimage4"
+        let fragmentName = normalizedShader == BuiltinShaderName.genericImage4
             ? "wpe_genericimage4_fragment"
             : "wpe_genericimage2_fragment"
         encoder.setRenderPipelineState(try renderPipeline(
@@ -2883,7 +2908,7 @@ final class WPEMetalRenderExecutor {
         let maskBindingName: String?
         let maskFallbackToPrimary: Bool
         #endif
-        if normalizedShader == "genericimage4" {
+        if normalizedShader == BuiltinShaderName.genericImage4 {
             // A clip-composite binding (slot 8) is consumed by the dedicated clip pass; the
             // injected slot-1 mask must NOT be applied as a flat static mask to every part here.
             let maskRef = hasPuppetClipCompositeBinding(pass, layer: layer)
@@ -3051,7 +3076,7 @@ final class WPEMetalRenderExecutor {
         }
         let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
         guard !meshes.isEmpty else { return false }
-        guard WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "copy" else {
+        guard WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == BuiltinShaderName.copy else {
             return false
         }
 
@@ -3478,7 +3503,7 @@ final class WPEMetalRenderExecutor {
     ) -> PuppetClipCompositePlan? {
         guard Self.puppetClipCompositeEnabled,
               hasPuppetClipCompositeBinding(pass, layer: layer),
-              WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == "genericimage4",
+              WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader) == BuiltinShaderName.genericImage4,
               let clipMaskReference = pass.textureBindings[1] ?? pass.pass.textures[1],
               let clipTargetReference = pass.textureBindings[8] ?? pass.pass.textures[8],
               case .fbo(let clipTargetName) = clipTargetReference,
@@ -3532,7 +3557,7 @@ final class WPEMetalRenderExecutor {
     private func layerHasDeferredWarpTarget(_ layer: WPERenderLayer) -> Bool {
         layer.passes.contains { pass in
             guard isDeferredWarpTarget(pass.target, layer: layer) else { return false }
-            return WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "copy"
+            return WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == BuiltinShaderName.copy
         }
     }
 
@@ -3576,7 +3601,7 @@ final class WPEMetalRenderExecutor {
         let injectedClipRT = WPETextureReference.fbo(Self.puppetClipRTName(objectID: layer.objectID))
         let hasInjectedClipPass = layer.passes.contains { pass in
             guard case .material = pass.phase,
-                  WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == "genericimage4" else {
+                  WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == BuiltinShaderName.genericImage4 else {
                 return false
             }
             return pass.textures[8] == injectedClipRT
@@ -5168,7 +5193,9 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
-    private static let imageUniformDebugEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
+    /// Developer-only image brightness/color diagnostic; gated by its own key so it
+    /// is independent of the unrelated audio-reactive DSP log toggle.
+    private static let imageUniformDebugEnabled = UserDefaults.standard.bool(forKey: "WPEImageUniformDebugLog")
     nonisolated(unsafe) private static var loggedImageUniformNames = Set<String>()
 
     func genericImageUniforms(
@@ -5513,8 +5540,8 @@ final class WPEMetalRenderExecutor {
 
     private static func requiresDiscreteDestinationForSourceAliasing(_ pass: WPEPreparedRenderPass) -> Bool {
         let shaderName = pass.pass.shader.lowercased()
-        return shaderName == "effects/godrays_combine"
-            || shaderName.hasSuffix("/effects/godrays_combine")
+        return shaderName == BuiltinShaderName.godraysCombine
+            || shaderName.hasSuffix("/" + BuiltinShaderName.godraysCombine)
     }
 
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {
@@ -5878,7 +5905,7 @@ final class WPEMetalRenderExecutor {
             .hasPrefix("premultiplied")
     }
 
-    /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over the given prepared pass.
+    /// Run the WPE preprocessor + `WPESwiftShaderCompiler` over the given prepared pass.
     /// Build the deterministic, runtime-independent compile request for a custom-shader
     /// pass — the cheap preprocess half of `compileCustomShader`, factored out so the
     /// off-thread pre-warm computes the IDENTICAL `translationCacheKey` (a load-time warm

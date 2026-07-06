@@ -2,25 +2,6 @@
 import Foundation
 import Metal
 
-/// Boundary type for the WPE → MSL shader pipeline.
-///
-/// `WPESwiftShaderCompiler` is the only shipping implementation; it wraps
-/// the pure-Swift `WPEShaderTranspiler`. Shaders the transpiler can't
-/// handle throw `.translationFailed`, which surfaces as
-/// `SceneRenderingError.metalRendererUnsupported` (the scene's load error).
-protocol WPEShaderCompiling: Sendable {
-    /// `recordFailure` gates the scene-debug shader-failure artifact. The
-    /// off-thread transpile pre-warm passes `false` so a failing shader is
-    /// recorded once — by the real first-frame render — not twice.
-    func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool) throws -> WPEShaderCompileResult
-}
-
-extension WPEShaderCompiling {
-    func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        try compile(request, recordFailure: true)
-    }
-}
-
 /// One compile job. The `processed*Source` strings are already through
 /// `WPEShaderPreprocessor` (combos baked in, includes resolved, WPE macros
 /// rewritten). The compiler only needs to translate canonical GLSL to MSL.

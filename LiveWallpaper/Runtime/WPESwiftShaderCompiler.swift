@@ -2,11 +2,14 @@
 import Foundation
 import Metal
 
-/// `WPEShaderCompiling` implementation that uses `WPEShaderTranspiler` to
-/// emit MSL and `MTLDevice.makeLibrary(source:)` to compile it. Shaders it
-/// can't handle throw `.translationFailed`, which `WPEMetalSceneRenderer`
-/// surfaces as `SceneRenderingError.metalRendererUnsupported`.
-struct WPESwiftShaderCompiler: WPEShaderCompiling {
+/// Uses `WPEShaderTranspiler` to emit MSL and `MTLDevice.makeLibrary(source:)`
+/// to compile it. Shaders it can't handle throw `.translationFailed`, which
+/// `WPEMetalSceneRenderer` surfaces as `SceneRenderingError.metalRendererUnsupported`.
+///
+/// `recordFailure` gates the scene-debug shader-failure artifact. The off-thread
+/// transpile pre-warm passes `false` so a failing shader is recorded once — by the
+/// real first-frame render — not twice.
+struct WPESwiftShaderCompiler: Sendable {
     let device: MTLDevice
     /// Fragment-only compiler contract: vertex execution always stays on the
     /// built-in fullscreen quad. Model/vertex-domain shaders are never compiled
@@ -14,7 +17,7 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     /// rather than crashing Metal.
     static let fixedVertexFunctionName = "wpe_fullscreen_vertex"
 
-    func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool) throws -> WPEShaderCompileResult {
+    func compile(_ request: WPEShaderCompileRequest, recordFailure: Bool = true) throws -> WPEShaderCompileResult {
         let translation: WPEShaderTranslationResult
         let fragmentSource = Self.fragmentSourceByAddingVertexUniformsIfNeeded(
             fragmentSource: request.processedFragmentSource,

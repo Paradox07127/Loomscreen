@@ -1862,4 +1862,189 @@ struct WPEShaderTranspilerTests {
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
+
+    @Test("A `#if` on its own line inside a block comment is not treated as a live directive")
+    func ignoresPreprocessorDirectiveInsideBlockComment() throws {
+        // A prose block comment mentioning a directive leaves an UNBALANCED `#if 0`
+        // (no matching `#endif` outside the comment). If it were read as live it would
+        // push a never-popped inactive frame and drop the real uniforms/main, so
+        // locateMain would fail — the compile gate proves the real code survived.
+        let source = """
+        #version 410 core
+        /*
+         The uniforms below were previously guarded by
+         #if 0
+         during an old rework; they are unconditional now.
+        */
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Tint;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Tint;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "directive_in_block_comment",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
+        #expect(result.uniformLayout.contains { $0.name == "g_Tint" })
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("A `}` inside a helper-body comment does not truncate the parsed body")
+    func helperBodyCommentBraceDoesNotTruncateResourceThreading() throws {
+        // A lone `}` in a line comment before the sampler use would close the helper
+        // early in the brace matcher, so g_Texture0/wpeSampler0 would not be threaded
+        // into the helper's signature and the emitted MSL would reference an undeclared
+        // identifier (or the truncated body would be malformed).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        vec4 sampleTinted(vec2 uv) {
+            float k = 0.5;
+            // end of the old early-out block was here: }
+            return texture(g_Texture0, uv) * k;
+        }
+        void main() {
+            gl_FragColor = sampleTinted(v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "helper_comment_brace",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("sampleTinted(v_TexCoord, g_Texture0, wpeSampler0)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Arithmetic/bitwise `#if` conditions evaluate with correct precedence")
+    func evaluatesArithmeticPreprocessorConditions() throws {
+        // Without an additive/multiplicative/bitwise grammar level, `#if A + B > 1`
+        // leaves `+` unconsumed, the condition parses as false, and the guarded
+        // `uniform g_Tint` is dropped — main then references an undeclared uniform
+        // and MSL compilation fails. The compile gate proves the branch was kept.
+        let source = """
+        #version 410 core
+        #define A 1
+        #define B 1
+        #define FLAGS 6
+        uniform sampler2D g_Texture0;
+        #if A + B > 1
+        uniform vec4 g_Tint;
+        #endif
+        #if (FLAGS & 2) == 2 && 8 >> 1 == 4
+        uniform float g_Extra;
+        #endif
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Tint * g_Extra;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "arithmetic_preprocessor",
+            preprocessedSource: source
+        )
+        #expect(result.uniformLayout.contains { $0.name == "g_Tint" })
+        #expect(result.uniformLayout.contains { $0.name == "g_Extra" })
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Nested regular texture() is fully rewritten (no texture() survives) and compiles")
+    func translatesNestedRegularTextureFragment() throws {
+        // The inner texture() lives inside the outer call's uv argument; without
+        // recursing on that argument it stays as GLSL `texture(...)`, which Metal
+        // (no free-function `texture`) rejects.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, texture(g_Texture1, v_TexCoord).xy);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "nested_texture",
+            preprocessedSource: source
+        )
+        // No GLSL free-function `texture(g_TextureN, …)` may survive (the `[[texture(N)]]`
+        // binding attribute legitimately contains the substring `texture(`, so match the
+        // call form specifically).
+        #expect(result.mslSource.contains("texture(g_Texture") == false)
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("A backslash-continued macro body threads its texture into helper scope")
+    func helperMacroWithBackslashContinuationThreadsResources() throws {
+        // The dependency regex captures the macro body only up to the first newline,
+        // so a resource referenced on a continuation line is missed and never threaded
+        // into the helper — the expanded macro then references an undeclared g_Texture0.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        #define SAMPLE(uv) \\
+            texture(g_Texture0, uv)
+        vec4 blur(vec2 uv) {
+            return SAMPLE(uv);
+        }
+        void main() {
+            gl_FragColor = blur(v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "macro_continuation_helper",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("blur(v_TexCoord, g_Texture0, wpeSampler0)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Comma-separated uniform declarations become separate uniforms")
+    func parsesCommaSeparatedUniformDeclarations() throws {
+        // `uniform float u_a, u_b;` must become two uniforms in distinct slots, not a
+        // single malformed `u_a,u_b`. If it stayed combined, u_b would be undeclared
+        // in main and the MSL would fail to compile.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float u_a, u_b;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * (u_a + u_b);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "comma_uniforms",
+            preprocessedSource: source
+        )
+        #expect(result.uniformLayout.contains { $0.name == "u_a" && $0.glslType == "float" })
+        #expect(result.uniformLayout.contains { $0.name == "u_b" && $0.glslType == "float" })
+        let slotA = try #require(result.uniformLayout.first { $0.name == "u_a" })
+        let slotB = try #require(result.uniformLayout.first { $0.name == "u_b" })
+        #expect(slotA.slot != slotB.slot, "each declarator occupies its own slot")
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
 }

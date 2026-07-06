@@ -92,8 +92,9 @@ struct WPEShaderTranspiler {
                 samplers.append(sampler)
                 continue
             }
-            if let uniform = WPEUniformDecl.parse(line: trimmed) {
-                uniforms.append(uniform)
+            let parsedUniforms = WPEUniformDecl.parseAll(line: trimmed)
+            if !parsedUniforms.isEmpty {
+                uniforms.append(contentsOf: parsedUniforms)
                 continue
             }
             if let varying = WPEVaryingDecl.parse(line: trimmed) {
@@ -252,8 +253,16 @@ struct WPEShaderTranspiler {
         var frames: [ConditionalFrame] = []
         var output: [String] = []
 
-        for line in source.components(separatedBy: "\n") {
-            guard let directive = preprocessorDirective(in: line) else {
+        // Detect directives on a comment-masked copy so a `#if`/`#endif` sitting on
+        // its own line inside a `/* … */` block (or after `//`) isn't read as a live
+        // directive — that would push/pop conditional frames and silently drop real
+        // code. The mask is length-preserving, so masked and raw lines align 1:1;
+        // directives are parsed from the masked line but the raw line is emitted.
+        let rawLines = source.components(separatedBy: "\n")
+        let maskedLines = maskComments(source).components(separatedBy: "\n")
+
+        for (line, maskedLine) in zip(rawLines, maskedLines) {
+            guard let directive = preprocessorDirective(in: maskedLine) else {
                 if preprocessorIsActive(frames) {
                     output.append(line)
                 }
@@ -480,10 +489,37 @@ struct WPEShaderTranspiler {
         }
 
         private mutating func parseAnd() -> Int? {
-            guard var lhs = parseEquality() else { return nil }
+            guard var lhs = parseBitOr() else { return nil }
             while matchOperator("&&") {
-                guard let rhs = parseEquality() else { return nil }
+                guard let rhs = parseBitOr() else { return nil }
                 lhs = lhs != 0 && rhs != 0 ? 1 : 0
+            }
+            return lhs
+        }
+
+        private mutating func parseBitOr() -> Int? {
+            guard var lhs = parseBitXor() else { return nil }
+            while matchOperator("|") {
+                guard let rhs = parseBitXor() else { return nil }
+                lhs |= rhs
+            }
+            return lhs
+        }
+
+        private mutating func parseBitXor() -> Int? {
+            guard var lhs = parseBitAnd() else { return nil }
+            while matchOperator("^") {
+                guard let rhs = parseBitAnd() else { return nil }
+                lhs ^= rhs
+            }
+            return lhs
+        }
+
+        private mutating func parseBitAnd() -> Int? {
+            guard var lhs = parseEquality() else { return nil }
+            while matchOperator("&") {
+                guard let rhs = parseEquality() else { return nil }
+                lhs &= rhs
             }
             return lhs
         }
@@ -504,20 +540,83 @@ struct WPEShaderTranspiler {
         }
 
         private mutating func parseRelational() -> Int? {
-            guard var lhs = parseUnary() else { return nil }
+            guard var lhs = parseShift() else { return nil }
             while true {
                 if matchOperator(">=") {
-                    guard let rhs = parseUnary() else { return nil }
+                    guard let rhs = parseShift() else { return nil }
                     lhs = lhs >= rhs ? 1 : 0
                 } else if matchOperator("<=") {
-                    guard let rhs = parseUnary() else { return nil }
+                    guard let rhs = parseShift() else { return nil }
                     lhs = lhs <= rhs ? 1 : 0
                 } else if matchOperator(">") {
-                    guard let rhs = parseUnary() else { return nil }
+                    guard let rhs = parseShift() else { return nil }
                     lhs = lhs > rhs ? 1 : 0
                 } else if matchOperator("<") {
-                    guard let rhs = parseUnary() else { return nil }
+                    guard let rhs = parseShift() else { return nil }
                     lhs = lhs < rhs ? 1 : 0
+                } else {
+                    return lhs
+                }
+            }
+        }
+
+        private mutating func parseShift() -> Int? {
+            // `<<`/`>>` on Int are masking shifts (never trap), so no overflow guard
+            // needed; a nonsensical shift count just yields 0 or the sign fill.
+            guard var lhs = parseAdditive() else { return nil }
+            while true {
+                if matchOperator("<<") {
+                    guard let rhs = parseAdditive() else { return nil }
+                    lhs <<= rhs
+                } else if matchOperator(">>") {
+                    guard let rhs = parseAdditive() else { return nil }
+                    lhs >>= rhs
+                } else {
+                    return lhs
+                }
+            }
+        }
+
+        private mutating func parseAdditive() -> Int? {
+            guard var lhs = parseMultiplicative() else { return nil }
+            while true {
+                if matchOperator("+") {
+                    guard let rhs = parseMultiplicative() else { return nil }
+                    let (result, overflow) = lhs.addingReportingOverflow(rhs)
+                    guard !overflow else { return nil }
+                    lhs = result
+                } else if matchOperator("-") {
+                    guard let rhs = parseMultiplicative() else { return nil }
+                    let (result, overflow) = lhs.subtractingReportingOverflow(rhs)
+                    guard !overflow else { return nil }
+                    lhs = result
+                } else {
+                    return lhs
+                }
+            }
+        }
+
+        // Overflow/divide-by-zero fall back to nil so the whole `#if` is treated as
+        // unparseable (→ false), the same safe default as any other malformed
+        // condition — never a runtime trap on pathological shader input.
+        private mutating func parseMultiplicative() -> Int? {
+            guard var lhs = parseUnary() else { return nil }
+            while true {
+                if matchOperator("*") {
+                    guard let rhs = parseUnary() else { return nil }
+                    let (result, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+                    guard !overflow else { return nil }
+                    lhs = result
+                } else if matchOperator("/") {
+                    guard let rhs = parseUnary(), rhs != 0 else { return nil }
+                    let (result, overflow) = lhs.dividedReportingOverflow(by: rhs)
+                    guard !overflow else { return nil }
+                    lhs = result
+                } else if matchOperator("%") {
+                    guard let rhs = parseUnary(), rhs != 0 else { return nil }
+                    let (result, overflow) = lhs.remainderReportingOverflow(dividingBy: rhs)
+                    guard !overflow else { return nil }
+                    lhs = result
                 } else {
                     return lhs
                 }
@@ -529,9 +628,15 @@ struct WPEShaderTranspiler {
                 guard let value = parseUnary() else { return nil }
                 return value == 0 ? 1 : 0
             }
+            if matchOperator("~") {
+                guard let value = parseUnary() else { return nil }
+                return ~value
+            }
             if matchOperator("-") {
                 guard let value = parseUnary() else { return nil }
-                return -value
+                let (result, overflow) = Int(0).subtractingReportingOverflow(value)
+                guard !overflow else { return nil }
+                return result
             }
             if matchOperator("+") {
                 return parseUnary()
@@ -586,7 +691,9 @@ struct WPEShaderTranspiler {
                     if next < expression.endIndex, expression[next] == "/" {
                         break
                     }
-                    return nil
+                    tokens.append(.op("/"))
+                    index = next
+                    continue
                 }
                 if ch.isNumber {
                     var end = expression.index(after: index)
@@ -626,7 +733,7 @@ struct WPEShaderTranspiler {
                 let next = expression.index(after: index)
                 if next < expression.endIndex {
                     let two = String(expression[index...next])
-                    if ["&&", "||", "==", "!=", ">=", "<="].contains(two) {
+                    if ["&&", "||", "==", "!=", ">=", "<=", "<<", ">>"].contains(two) {
                         tokens.append(.op(two))
                         index = expression.index(after: next)
                         continue
@@ -637,7 +744,7 @@ struct WPEShaderTranspiler {
                     tokens.append(.lParen)
                 case ")":
                     tokens.append(.rParen)
-                case "!", ">", "<", "+", "-":
+                case "!", ">", "<", "+", "-", "*", "%", "&", "|", "^", "~":
                     tokens.append(.op(String(ch)))
                 default:
                     return nil
@@ -1767,7 +1874,14 @@ struct WPEShaderTranspiler {
                     if let comma = commaIndex, cursor < source.endIndex {
                         let argStart = source.index(index, offsetBy: needle.count)
                         let sampler = source[argStart..<comma].trimmingCharacters(in: .whitespacesAndNewlines)
-                        let uv = source[source.index(after: comma)..<cursor].trimmingCharacters(in: .whitespacesAndNewlines)
+                        // Recurse on the uv arg so a `texture(…)` nested inside it is
+                        // also rewritten (Metal has no free-function `texture`). The
+                        // sampler arg is always a bare identifier and cannot nest.
+                        let uv = rewriteTextureCalls(
+                            String(source[source.index(after: comma)..<cursor]),
+                            premultipliedInputSlots: premultipliedInputSlots,
+                            repeatSamplers: repeatSamplers
+                        ).trimmingCharacters(in: .whitespacesAndNewlines)
                         let samplerState = repeatSamplers.contains(sampler) ? "repeatSampler" : "linearSampler"
                         var sample = "\(sampler).sample(\(samplerState), \(uv))"
                         if shouldUnpremultiplySample(sampler: sampler, premultipliedInputSlots: premultipliedInputSlots) {
@@ -1939,22 +2053,32 @@ struct WPEShaderTranspiler {
         in source: String,
         resources: [HelperResource]
     ) -> [String: Set<String>] {
+        // Fold `\`-continued macro bodies onto one line first: the body pattern is
+        // single-line (`[^\n]*`), so without folding a resource referenced on a
+        // continuation line (`#define S(uv) \` <nl> `texture(g_Texture0, uv)`) is
+        // missed and never threaded into the helper. Only used for dependency
+        // scanning, so collapsing continuations here doesn't affect emitted source.
+        let folded = source.replacingOccurrences(
+            of: #"\\[ \t]*\r?\n"#,
+            with: " ",
+            options: .regularExpression
+        )
         let pattern = #"(?m)^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\b([^\n]*)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return [:]
         }
-        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        let matches = regex.matches(in: folded, range: NSRange(folded.startIndex..., in: folded))
         var dependencies: [String: Set<String>] = [:]
         var bodies: [String: String] = [:]
 
         for match in matches {
             guard match.numberOfRanges >= 3,
-                  let nameRange = Range(match.range(at: 1), in: source),
-                  let bodyRange = Range(match.range(at: 2), in: source) else {
+                  let nameRange = Range(match.range(at: 1), in: folded),
+                  let bodyRange = Range(match.range(at: 2), in: folded) else {
                 continue
             }
-            let name = String(source[nameRange])
-            let body = String(source[bodyRange])
+            let name = String(folded[nameRange])
+            let body = String(folded[bodyRange])
             bodies[name] = body
             dependencies[name] = Set(
                 resources
@@ -2196,6 +2320,30 @@ struct WPEShaderTranspiler {
         var index = open
         while index < source.endIndex {
             let ch = source[index]
+            // Skip `//` and `/* */` regions so a `}`/`)` inside a comment (e.g. a
+            // `// }` in a helper body) can't close the delimiter early and truncate
+            // the body — returned index still maps onto `source`.
+            let next = source.index(after: index)
+            if ch == "/", next < source.endIndex, source[next] == "/" {
+                index = next
+                while index < source.endIndex, source[index] != "\n" {
+                    index = source.index(after: index)
+                }
+                continue
+            }
+            if ch == "/", next < source.endIndex, source[next] == "*" {
+                index = source.index(after: next)
+                while index < source.endIndex {
+                    if source[index] == "*",
+                       source.index(after: index) < source.endIndex,
+                       source[source.index(after: index)] == "/" {
+                        index = source.index(index, offsetBy: 2)
+                        break
+                    }
+                    index = source.index(after: index)
+                }
+                continue
+            }
             if ch == openChar {
                 depth += 1
             } else if ch == closeChar {
@@ -3315,39 +3463,52 @@ struct WPEUniformDecl: Equatable {
     let defaultValue: WPESceneShaderConstantValue?
 
     static func parse(line: String) -> Self? {
-        guard line.hasPrefix("uniform ") else { return nil }
+        parseAll(line: line).first
+    }
+
+    /// A single line may declare several comma-separated uniforms
+    /// (`uniform float u_a, u_b;`). Each declarator becomes its own `Self`, sharing
+    /// the base type and the trailing metadata comment; array suffixes are per
+    /// declarator. Returns `[]` when the line is not a uniform declaration.
+    static func parseAll(line: String) -> [Self] {
+        guard line.hasPrefix("uniform ") else { return [] }
         let body = String(line.dropFirst("uniform ".count))
-        if body.hasPrefix("sampler") { return nil }
+        if body.hasPrefix("sampler") { return [] }
         let trimmed = body.trimmingCharacters(in: .whitespaces)
-        guard let semicolon = trimmed.firstIndex(of: ";") else { return nil }
+        guard let semicolon = trimmed.firstIndex(of: ";") else { return [] }
         let decl = trimmed[..<semicolon]
-        let comment = trimmed[trimmed.index(after: semicolon)...]
+        let comment = String(trimmed[trimmed.index(after: semicolon)...])
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard tokens.count >= 2 else { return nil }
+        guard tokens.count >= 2 else { return [] }
         let type = tokens[0]
-        let nameToken = tokens[1...].joined()
-        var name = nameToken
-        var arrayLength: Int?
-        if let bracket = name.firstIndex(of: "[") {
-            let core = String(name[..<bracket])
-            let after = name[name.index(after: bracket)...]
-            if let close = after.firstIndex(of: "]") {
-                let lengthString = String(after[..<close]).trimmingCharacters(in: .whitespaces)
-                arrayLength = Int(lengthString)
-            }
-            name = core
-        }
-        guard !name.isEmpty else { return nil }
+        // The base type is the first token; everything after it is one or more
+        // declarators. Split those on commas, not the whole line, so the type isn't
+        // duplicated onto each name.
+        let declaratorSource = tokens[1...].joined(separator: " ")
+        let metadata = Self.parseMetadataComment(comment)
         let metal = mapType(type)
-        let metadata = Self.parseMetadataComment(String(comment))
-        return Self(
-            type: type,
-            name: name,
-            metalType: metal,
-            arrayLength: arrayLength,
-            materialName: metadata.materialName,
-            defaultValue: metadata.defaultValue
-        )
+        return declaratorSource.split(separator: ",").compactMap { declarator in
+            var name = declarator.trimmingCharacters(in: .whitespaces)
+            var arrayLength: Int?
+            if let bracket = name.firstIndex(of: "[") {
+                let core = name[..<bracket].trimmingCharacters(in: .whitespaces)
+                let after = name[name.index(after: bracket)...]
+                if let close = after.firstIndex(of: "]") {
+                    let lengthString = String(after[..<close]).trimmingCharacters(in: .whitespaces)
+                    arrayLength = Int(lengthString)
+                }
+                name = core
+            }
+            guard !name.isEmpty else { return nil }
+            return Self(
+                type: type,
+                name: name,
+                metalType: metal,
+                arrayLength: arrayLength,
+                materialName: metadata.materialName,
+                defaultValue: metadata.defaultValue
+            )
+        }
     }
 
     private static func parseMetadataComment(_ raw: String) -> (

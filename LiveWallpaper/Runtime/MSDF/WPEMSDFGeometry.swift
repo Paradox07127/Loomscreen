@@ -271,7 +271,15 @@ enum WPEMSDFSegment {
         case let .quadratic(p0, c, p1, _):
             return (p1 - c * 2 + p0) * 2
         case let .cubic(p0, c0, c1, p1, _):
-            return (c1 - c0 * 2 + p0) * (6 * (1 - t)) + (p1 - c1 * 2 + c0) * (6 * t)
+            // Explicit types avoid quadratic overload-resolution blowup on
+            // SIMD2<Double> operators (compiler took >400ms on this line
+            // as a single chained expression).
+            let u: Double = 1 - t
+            let accel0: WPEMSDFPoint = c1 - c0 * 2 + p0
+            let accel1: WPEMSDFPoint = p1 - c1 * 2 + c0
+            let weight0: Double = 6 * u
+            let weight1: Double = 6 * t
+            return accel0 * weight0 + accel1 * weight1
         }
     }
 
