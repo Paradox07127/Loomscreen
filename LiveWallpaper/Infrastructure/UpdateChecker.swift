@@ -3,9 +3,11 @@ import os
 
 /// Lightweight launch-time update checker for the Loomscreen Lite SKU.
 ///
-/// **Cadence**: once per launch, ≥12h since last check (persisted in
-/// `UserDefaults`); no background timer. Manual "Check for Updates" from the
-/// About panel bypasses the throttle.
+/// **Cadence**: once per launch, throttled by a persisted "next eligible"
+/// instant — 12 h after a successful check, but only 1 h after a failed one so
+/// a transient GitHub blip doesn't suppress the next check for the full window.
+/// No background timer. Manual "Check for Updates" from the About panel
+/// bypasses the throttle.
 ///
 /// **Network**: single unauthenticated GET to GitHub's
 /// `/repos/<owner>/<repo>/releases?per_page=10` with `Accept: application/vnd.github+json`.
@@ -36,7 +38,16 @@ final class UpdateChecker {
     }
 
     private(set) var status: Status = .idle
+    /// Truthful time of the last check attempt — surfaced in the UI as
+    /// "Last checked …", so it always reflects when we actually reached out,
+    /// regardless of outcome.
     private(set) var lastCheckedAt: Date?
+
+    /// Earliest instant an automatic check may run again. Advanced by
+    /// `throttleInterval` on success and `failureRetryInterval` on failure.
+    /// Kept separate from `lastCheckedAt` so the shorter failure backoff
+    /// never corrupts the user-visible timestamp.
+    private var nextEligibleAt: Date?
 
     /// Tag the user pressed "Skip this version" against. Suppresses the
     /// banner for that exact tag; a newer tag still triggers as normal.
@@ -54,12 +65,18 @@ final class UpdateChecker {
 
     static let tagPrefix = "loomscreen-v"
     static let throttleInterval: TimeInterval = 60 * 60 * 12
+    /// Backoff after a failed check (network error, rate limit, bad payload).
+    /// Far shorter than `throttleInterval` so a transient GitHub blip doesn't
+    /// suppress the next automatic check for the full 12 h, while still keeping
+    /// a floor that prevents a retry storm on every relaunch.
+    static let failureRetryInterval: TimeInterval = 60 * 60
     static let maximumReleaseBodyCharacters = 4_000
     static let trustedGitHubHost = "github.com"
     static let trustedReleasesPathPrefix = "/Paradox07127/Loomscreen/releases/"
     static let trustedDownloadPathPrefix = "/Paradox07127/Loomscreen/releases/download/"
 
     private static let lastCheckedKey = "loomscreen.update.lastCheckedAt"
+    private static let nextEligibleKey = "loomscreen.update.nextEligibleAt"
     private static let skippedVersionKey = "loomscreen.update.skippedVersion"
     private static let defaults: UserDefaults = .standard
 
@@ -82,35 +99,47 @@ final class UpdateChecker {
         if let stored = Self.defaults.object(forKey: Self.lastCheckedKey) as? Date {
             self.lastCheckedAt = stored
         }
+        if let nextEligible = Self.defaults.object(forKey: Self.nextEligibleKey) as? Date {
+            self.nextEligibleAt = nextEligible
+        } else if let stored = self.lastCheckedAt {
+            // Upgrade path: installs that predate the split still honor the
+            // 12 h window off their recorded last-checked time.
+            self.nextEligibleAt = stored.addingTimeInterval(Self.throttleInterval)
+        }
     }
 
-    /// Run a check. `force = false` honors the 12 h throttle; `force = true`
-    /// (manual "Check for Updates" button) ignores it. The attempt timestamp
-    /// is persisted *before* the network call so a failed lookup (no
-    /// network, rate-limited, malformed payload) cannot reset the throttle
-    /// and trigger a retry on every relaunch.
+    /// Run a check. `force = false` honors the throttle window; `force = true`
+    /// (manual "Check for Updates" button) ignores it. A successful check pushes
+    /// the next eligible time out 12 h; a failure (no network, rate-limited,
+    /// malformed payload) pushes it only 1 h, so a transient error doesn't
+    /// suppress automatic checks for the full window yet still can't trigger a
+    /// retry storm on every relaunch.
     func checkNow(force: Bool) async {
         guard status != .checking else { return }
         let attemptedAt = now()
-        if !force, let last = lastCheckedAt {
-            let elapsed = attemptedAt.timeIntervalSince(last)
-            // Negative `elapsed` = wall-clock moved backwards (timezone change,
-            // NTP correction); treat as stale rather than suppressing forever.
-            if elapsed >= 0, elapsed < Self.throttleInterval {
-                logger.debug("Skipping update check (within 12h throttle).")
+        if !force, let eligible = nextEligibleAt {
+            let remaining = eligible.timeIntervalSince(attemptedAt)
+            // Clock-rollback detectors: an attempt timestamped before the last
+            // recorded one, or a wait longer than we ever schedule. Either way
+            // run the check instead of extending the suppression.
+            let rolledBack = lastCheckedAt.map { attemptedAt < $0 } ?? false
+            if !rolledBack, remaining > 0, remaining <= Self.throttleInterval {
+                logger.debug("Skipping update check (throttle window not elapsed).")
                 return
             }
         }
         status = .checking
-        persistLastCheckedAt(attemptedAt)
+        recordLastChecked(attemptedAt)
         do {
             let releases = try await transport.fetchReleases(from: Self.releasesAPI)
             status = evaluate(releases: releases)
+            scheduleNextEligible(after: Self.throttleInterval, from: attemptedAt)
         } catch {
             // Generic user-facing string so a hostile response can't smuggle
             // implementation details into the UI.
             logger.error("Update check failed: \(String(describing: error), privacy: .private)")
             status = .failed(reason: "Unable to check for updates right now.")
+            scheduleNextEligible(after: Self.failureRetryInterval, from: attemptedAt)
         }
     }
 
@@ -123,9 +152,15 @@ final class UpdateChecker {
         }
     }
 
-    private func persistLastCheckedAt(_ stamp: Date) {
+    private func recordLastChecked(_ stamp: Date) {
         lastCheckedAt = stamp
         Self.defaults.set(stamp, forKey: Self.lastCheckedKey)
+    }
+
+    private func scheduleNextEligible(after interval: TimeInterval, from stamp: Date) {
+        let next = stamp.addingTimeInterval(interval)
+        nextEligibleAt = next
+        Self.defaults.set(next, forKey: Self.nextEligibleKey)
     }
 
     private func evaluate(releases: [GitHubRelease]) -> Status {

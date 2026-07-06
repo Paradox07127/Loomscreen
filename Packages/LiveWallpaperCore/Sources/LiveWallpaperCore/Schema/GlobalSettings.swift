@@ -15,8 +15,9 @@ public struct GlobalSettings: Codable, Sendable {
     /// `pauseOnFullScreen` (which needs a single ≥95% window), this sums the
     /// *union* area of every non-system window on a display and pauses when it
     /// covers ≥ 85% — so a desktop tiled/overlapped by ordinary windows still
-    /// yields the GPU. Off by default; it's a more aggressive sibling of the
-    /// full-screen rule.
+    /// yields the GPU. Default `true`: an invisible wallpaper burning power is
+    /// the common case users don't think to guard against, so we cover it out
+    /// of the box (resumes the instant the desktop is revealed).
     public var pauseOnWindowOcclusion: Bool
     /// `true` → `.regular` activation policy (Dock + Cmd+Tab); `false`
     /// (default) → `.accessory` (menu-bar only). Toggled live; no relaunch.
@@ -119,7 +120,7 @@ public struct GlobalSettings: Codable, Sendable {
         startOnLogin: Bool = false,
         pauseOnFullScreen: Bool = true,
         pauseInGameMode: Bool = true,
-        pauseOnWindowOcclusion: Bool = false,
+        pauseOnWindowOcclusion: Bool = true,
         showInDock: Bool = false,
         weatherLocation: WeatherLocationPreference = .default,
         globalShortcutsEnabled: Bool = true,
@@ -162,12 +163,16 @@ public struct GlobalSettings: Codable, Sendable {
         // Existing installs never saw this key — default to true so the
         // behavior matches the original hardcoded GameMode pause.
         pauseInGameMode = (try? c.decodeIfPresent(Bool.self, forKey: .pauseInGameMode)) ?? true
-        pauseOnWindowOcclusion = (try? c.decodeIfPresent(Bool.self, forKey: .pauseOnWindowOcclusion)) ?? false
+        // Default true (power-saving) for installs that predate the key; an
+        // explicit stored false still wins because the field is always encoded.
+        pauseOnWindowOcclusion = (try? c.decodeIfPresent(Bool.self, forKey: .pauseOnWindowOcclusion)) ?? true
         showInDock = try c.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         weatherLocation = (try? c.decodeIfPresent(WeatherLocationPreference.self, forKey: .weatherLocation)) ?? .default
         globalShortcutsEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .globalShortcutsEnabled)) ?? true
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
-        recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
+        // Lossy per-element decode: a single history row broken by a future
+        // WPEHistoryEntry shape change drops only that row, not the whole list.
+        recentWPEImports = Self.decodeLossyArray(WPEHistoryEntry.self, from: c, forKey: .recentWPEImports)
         deletedWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .deletedWorkshopIDs)) ?? []
         applicationPerformanceRules = (try? c.decodeIfPresent([ApplicationPerformanceRule].self, forKey: .applicationPerformanceRules)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
@@ -176,5 +181,40 @@ public struct GlobalSettings: Codable, Sendable {
         developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? GlobalSettings.defaultDeveloperModeEnabled
         audioResponseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .audioResponseEnabled)) ?? false
         adaptiveFrameRateEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .adaptiveFrameRateEnabled)) ?? false
+    }
+
+    /// Decodes an array while salvaging as many elements as possible: a
+    /// malformed element is skipped instead of collapsing the whole collection
+    /// to empty. A missing key, a `null`, or a non-array value all yield `[]`,
+    /// matching the `decodeIfPresent + default` behavior used above.
+    private static func decodeLossyArray<Element: Decodable, Key: CodingKey>(
+        _ type: Element.Type,
+        from container: KeyedDecodingContainer<Key>,
+        forKey key: Key
+    ) -> [Element] {
+        guard var unkeyed = try? container.nestedUnkeyedContainer(forKey: key) else { return [] }
+        var result: [Element] = []
+        if let count = unkeyed.count { result.reserveCapacity(count) }
+        while !unkeyed.isAtEnd {
+            let indexBefore = unkeyed.currentIndex
+            if let element = try? unkeyed.decode(Element.self) {
+                result.append(element)
+            } else {
+                // Consume the malformed element so the cursor advances past it.
+                _ = try? unkeyed.decode(AnyDecodableSkip.self)
+            }
+            // Safety net: if neither decode advanced the cursor, bail rather
+            // than spin forever on a decoder that won't consume the element.
+            if unkeyed.currentIndex == indexBefore { break }
+        }
+        return result
+    }
+}
+
+/// Consumes one arbitrary JSON value so a failed element decode can advance
+/// past it; without this the unkeyed container's cursor would stall and loop.
+private struct AnyDecodableSkip: Decodable {
+    init(from decoder: Decoder) throws {
+        _ = try? decoder.singleValueContainer()
     }
 }

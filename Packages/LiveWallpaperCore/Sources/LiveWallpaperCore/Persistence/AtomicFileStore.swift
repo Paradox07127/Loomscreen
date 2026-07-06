@@ -201,8 +201,7 @@ public struct AtomicFileStore<Value: Codable> {
         )
 
         if let handle = try? FileHandle(forWritingTo: tempURL) {
-            let fd = handle.fileDescriptor
-            _ = fcntl(fd, F_FULLFSYNC)
+            fullSync(handle.fileDescriptor, label: tempURL.lastPathComponent)
             try? handle.close()
         }
 
@@ -256,8 +255,30 @@ public struct AtomicFileStore<Value: Codable> {
         let parent = url.deletingLastPathComponent().path(percentEncoded: false)
         let fd = open(parent, O_RDONLY)
         guard fd >= 0 else { return }
-        _ = fcntl(fd, F_FULLFSYNC)
+        fullSync(fd, label: url.deletingLastPathComponent().lastPathComponent)
         close(fd)
+    }
+
+    /// Best-effort strong durability. `F_FULLFSYNC` flushes the drive's write
+    /// cache but isn't supported on every filesystem (returns -1/ENOTSUP), so
+    /// on failure we downgrade to `fsync` rather than silently assuming the
+    /// bytes reached stable storage. Never throws: atomicity is already
+    /// guaranteed by the atomic write + rename, this only tightens the
+    /// crash-durability window.
+    private func fullSync(_ fd: Int32, label: String) {
+        guard fcntl(fd, F_FULLFSYNC) == -1 else { return }
+        let fullSyncErr = errno
+        if fsync(fd) == 0 {
+            Logger.warning(
+                "AtomicFileStore F_FULLFSYNC unsupported for \(label) (errno \(fullSyncErr)); fell back to fsync",
+                category: category
+            )
+        } else {
+            Logger.error(
+                "AtomicFileStore durability sync failed for \(label): F_FULLFSYNC errno \(fullSyncErr), fsync errno \(errno)",
+                category: category
+            )
+        }
     }
 
     private func fileExists(_ url: URL) -> Bool {

@@ -52,10 +52,11 @@ struct UpdateCheckerTests {
         UserDefaults.standard
     }
 
-    /// Wipe both persistence keys before every test so throttle and skip
-    /// state never bleed across `@Test` runs.
+    /// Wipe every persistence key before each test so throttle and skip state
+    /// never bleed across `@Test` runs.
     private func resetDefaults() {
         defaultsSuite.removeObject(forKey: "loomscreen.update.lastCheckedAt")
+        defaultsSuite.removeObject(forKey: "loomscreen.update.nextEligibleAt")
         defaultsSuite.removeObject(forKey: "loomscreen.update.skippedVersion")
     }
 
@@ -225,8 +226,8 @@ struct UpdateCheckerTests {
         #expect(reason == "Unable to check for updates right now.")
     }
 
-    @Test("Persists lastCheckedAt BEFORE the network call so failures cannot defeat the throttle")
-    func failedFetchStillUpdatesThrottle() async {
+    @Test("A failed check records the truthful lastCheckedAt but only backs off failureRetryInterval")
+    func failedFetchUsesShortRetryWindow() async {
         resetDefaults()
         struct TestError: Error { }
         let transport = StubTransport(error: TestError())
@@ -239,12 +240,91 @@ struct UpdateCheckerTests {
 
         await checker.checkNow(force: false)
 
+        // lastCheckedAt stays truthful (UI shows when we actually reached out).
         #expect(checker.lastCheckedAt == attemptInstant)
         #expect(defaultsSuite.object(forKey: "loomscreen.update.lastCheckedAt") as? Date == attemptInstant)
+        // Next eligibility is the SHORT retry window, not the full 12h throttle.
+        let expectedNext = attemptInstant.addingTimeInterval(UpdateChecker.failureRetryInterval)
+        #expect(defaultsSuite.object(forKey: "loomscreen.update.nextEligibleAt") as? Date == expectedNext)
         guard case .failed = checker.status else {
             Issue.record("Expected .failed after transport error.")
             return
         }
+    }
+
+    @Test("A transient failure does NOT suppress the next auto-check for the full 12h window")
+    func transientFailureRetriesAfterShortWindow() async {
+        resetDefaults()
+        struct TestError: Error { }
+        let failInstant = Date(timeIntervalSince1970: 1_000_000)
+        let failing = StubTransport(error: TestError())
+        let firstChecker = UpdateChecker(
+            transport: failing,
+            now: { failInstant },
+            currentVersionString: "1.0.0"
+        )
+        await firstChecker.checkNow(force: false)
+        #expect(failing.fetchCount == 1)
+
+        // A fresh instance 90 min later (past the 1h failure window, well inside
+        // the 12h success window) must re-attempt automatically.
+        let retryInstant = failInstant.addingTimeInterval(90 * 60)
+        let succeeding = StubTransport(releases: [
+            release(tag: "loomscreen-v2.0.0")
+        ])
+        let secondChecker = UpdateChecker(
+            transport: succeeding,
+            now: { retryInstant },
+            currentVersionString: "1.0.0"
+        )
+        await secondChecker.checkNow(force: false)
+
+        #expect(succeeding.fetchCount == 1, "A retry after the short failure window must fetch.")
+        guard case .available = secondChecker.status else {
+            Issue.record("Expected .available on the successful retry.")
+            return
+        }
+    }
+
+    @Test("A successful check schedules the full 12h throttle window")
+    func successSchedulesFullThrottle() async {
+        resetDefaults()
+        let instant = Date(timeIntervalSince1970: 1_000_000)
+        let transport = StubTransport(releases: [
+            release(tag: "loomscreen-v1.0.0")
+        ])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { instant },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        let expectedNext = instant.addingTimeInterval(UpdateChecker.throttleInterval)
+        #expect(defaultsSuite.object(forKey: "loomscreen.update.nextEligibleAt") as? Date == expectedNext)
+        #expect(checker.status == .upToDate)
+    }
+
+    @Test("Upgraders with only a legacy lastCheckedAt still honor the 12h window")
+    func legacyLastCheckedDerivesThrottle() async {
+        resetDefaults()
+        // Pre-split install: only the old key is present, no nextEligibleAt.
+        let last = Date(timeIntervalSince1970: 1_000_000)
+        defaultsSuite.set(last, forKey: "loomscreen.update.lastCheckedAt")
+        let transport = StubTransport(releases: [
+            release(tag: "loomscreen-v9.9.9")  // would trigger .available if fetched
+        ])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { last.addingTimeInterval(60 * 60) },  // 1h later, inside 12h window
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        #expect(transport.fetchCount == 0, "Derived 12h window must still throttle upgraders.")
+        #expect(checker.status == .idle)
     }
 
     @Test("Treats backwards-running wall clock as stale (proceeds with the check)")
