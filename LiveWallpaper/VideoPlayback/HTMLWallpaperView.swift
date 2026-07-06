@@ -2,35 +2,8 @@ import AppKit
 import LiveWallpaperCore
 import WebKit
 
-/// `WKWebView` 子类：开启 first-mouse 接收（Plash 模式），关闭 Force-Touch 链接预览，
-/// 过滤右键菜单中无意义项（下载图片 / 分享 / 在新窗口打开等）。
-final class HTMLWebView: WKWebView {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    private static let blockedMenuTitles: Set<String> = [
-        "Download Image",
-        "Download Linked File",
-        "Download Video",
-        "Open Image in New Window",
-        "Open Video in New Window",
-        "Open Frame in New Window",
-        "Open Link in New Window",
-        "Share",
-        "Enter Full Screen",
-        "Enter Enhanced Full Screen"
-    ]
-
-    // The warn-long diagnostic reports ~450ms here regardless of body shape
-    // (closure 432 / for-where 472 / fully annotated 447 / EMPTY body 0):
-    // it's the Clang importer's first touch of the NSMenu surface in this
-    // target being attributed to this function, not solver time — benign,
-    // don't chase it.
-    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        for item in menu.items where HTMLWebView.blockedMenuTitles.contains(item.title) {
-            menu.removeItem(item)
-        }
-    }
-}
+// HTMLWebView (the context-menu-filtering WKWebView subclass) lives in
+// LiveWallpaperVideoWeb — see its header for why (warn-long importer cost).
 
 /// WKWebView-backed HTML wallpaper host.
 @MainActor
