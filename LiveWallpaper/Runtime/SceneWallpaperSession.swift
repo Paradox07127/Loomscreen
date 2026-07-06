@@ -25,8 +25,21 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     /// `loadTask` when done" writes so a finished older task can't drop the
     /// handle of a newer one that replaced it while the older was draining.
     private var loadGeneration = 0
-    private(set) var loadError: SceneRenderingError?
+    private(set) var loadError: SceneRenderingError? {
+        didSet {
+            runtimeError = loadError.map {
+                .sceneRenderingFailed(description: $0.errorDescription ?? "")
+            }
+        }
+    }
     private(set) var loadProgress: String?
+    private(set) var runtimeError: WallpaperRuntimeError? {
+        didSet {
+            guard oldValue != runtimeError else { return }
+            onRuntimeErrorChange?()
+        }
+    }
+    var onRuntimeErrorChange: (@MainActor () -> Void)?
 
     init(window: NSWindow, renderer: WPEMetalSceneRenderer) {
         self.window = window
@@ -169,6 +182,10 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     // No prepareForDisplay override: the protocol-extension default
     // (50ms warm-up) gives the Metal renderer enough lead time to present
     // its first frame before the wallpaper window is brought to screen.
+
+    func retry() async {
+        await reload()
+    }
 
     func reload() async {
         guard let renderer else {

@@ -861,7 +861,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
         // load below; awaited at the render.firstFrame gate so the first synchronous
         // render() hits the warmed cache instead of paying the lazy transpile inline.
-        async let shaderWarm: Void = prewarmCustomShaders(for: pipeline)
+        async let shaderWarm: Void = prewarmCustomShaders(for: pipeline, textObjects: document.textObjects)
 
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
@@ -1902,13 +1902,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         sceneScriptSharedState = sharedState
         for object in textObjects {
             guard let script = object.textScript else { continue }
-            if let instance = try? WPESceneScriptInstance(
-                script: script,
-                initialValue: object.text,
-                scriptProperties: object.scriptProperties,
-                shared: sharedState
-            ) {
+            do {
+                let instance = try WPESceneScriptInstance(
+                    script: script,
+                    initialValue: object.text,
+                    scriptProperties: object.scriptProperties,
+                    shared: sharedState
+                )
                 textScriptInstances[object.id] = instance
+            } catch {
+                Logger.warning("Scene \(descriptor.workshopID) [TextScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
     }
@@ -3228,9 +3231,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         liveLayerVisibility = nextLayerVisibility
         liveTextVisibility = nextTextVisibility
 
-        // Feed changed values to any layer script's `applyUserProperties` so a
-        // runtime toggle (e.g. `timevarying`) reacts without a full reload.
-        if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty {
+        // Feed changed values to any layer/text script's `applyUserProperties` so a
+        // runtime toggle (e.g. `timevarying`) reacts without a full reload. Text
+        // visible/alpha scripts route the same way as they do at init and per frame.
+        if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty
+            || !textVisibleScriptInstances.isEmpty || !textAlphaScriptInstances.isEmpty {
             let changed = Self.bridgeUserProperties(
                 patch.newValues.filter { patch.changedKeys.contains($0.key) }
             )
@@ -3249,6 +3254,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                         runtimeSeconds: lastRuntimeUniforms?.time
                     ) {
                         applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
+                    }
+                }
+                for (objectID, instance) in textVisibleScriptInstances {
+                    if let output = instance.applyUserProperties(
+                        changed,
+                        runtimeSeconds: lastRuntimeUniforms?.time
+                    ) {
+                        applyTextScriptOutput(output, ownObjectID: objectID)
+                    }
+                }
+                for (objectID, instance) in textAlphaScriptInstances {
+                    if let output = instance.applyUserProperties(
+                        changed,
+                        runtimeSeconds: lastRuntimeUniforms?.time
+                    ) {
+                        liveTextAlpha[objectID] = output.own.alpha
                     }
                 }
             }
@@ -3616,7 +3637,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// render re-hits and records them as today). Respects `loadGeneration` so a superseded
     /// load never seeds. Captures only `Sendable` values (the compiler protocol is `Sendable`,
     /// requests are `Sendable`) — never the non-`Sendable` executor.
-    private func prewarmCustomShaders(for pipeline: WPEPreparedRenderPipeline) async {
+    private func prewarmCustomShaders(
+        for pipeline: WPEPreparedRenderPipeline,
+        textObjects: [WPESceneTextObject]
+    ) async {
         // Always pre-compile before the first-frame encode: compiling a pipeline
         // state inline during an open render encoder corrupts the pass (3660962877
         // black bg + green quad).
@@ -3630,6 +3654,20 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         for layer in pipeline.layers {
             for pass in layer.passes where pass.shader?.isBuiltin == false {
                 guard let request = try? WPEMetalRenderExecutor.makeCompileRequest(for: pass, recordFailure: false) else { continue }
+                requestsByKey[request.translationCacheKey] = request
+            }
+        }
+        // GPU MSDF text loads via a separate path (loadTextOverlays) whose font.frag
+        // is otherwise transpiled lazily on the first synchronous drawMSDFText. Warm
+        // it here on the same off-thread task group. Gate must match loadTextOverlays.
+        if !textObjects.isEmpty,
+           UserDefaults.standard.object(forKey: "WPEEnableMSDFText") as? Bool ?? true,
+           let fontFragmentSource = resolveMSDFFontFragmentSource() {
+            for request in WPEMSDFTextRenderer.prewarmShaderRequests(
+                for: textObjects,
+                fontFragmentSource: fontFragmentSource,
+                resolver: resourceResolver
+            ) {
                 requestsByKey[request.translationCacheKey] = request
             }
         }

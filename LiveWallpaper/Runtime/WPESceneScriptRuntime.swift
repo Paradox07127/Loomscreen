@@ -108,6 +108,9 @@ final class WPESceneScriptInstance {
         private var context: JSContext?
         private var updateFunction: JSValue?
         private let shared: WPESharedScriptState?
+        /// Latches after the first uncaught JS exception is logged, so a script
+        /// that throws every tick surfaces once instead of spamming per frame.
+        private var didLogException = false
 
         init(shared: WPESharedScriptState?) {
             self.shared = shared
@@ -154,8 +157,13 @@ final class WPESceneScriptInstance {
             WPESceneScriptInstance.installSandbox(in: context)
             WPESceneScriptBaseclasses.install(in: context)
             if let shared { wpeInstallSharedState(shared, in: context) }
-            context.exceptionHandler = { _, ex in
-                _ = ex
+            context.exceptionHandler = { [weak self] _, ex in
+                guard let self, !self.didLogException else { return }
+                self.didLogException = true
+                Logger.warning(
+                    "Text SceneScript raised an uncaught JS exception — text frozen at its last value: \(ex?.toString() ?? "unknown")",
+                    category: .wpeRender
+                )
             }
             _ = context.evaluateScript(script)
 
@@ -349,6 +357,10 @@ enum WPESceneScriptError: Error, Equatable {
     /// The script exceeded its wall-clock execution budget (runaway loop);
     /// the instance was disabled before it could hang the render thread.
     case executionTimedOut
+    /// The module body raised an uncaught exception at evaluation, so no usable
+    /// `update()` was declared. The caller drops the instance and keeps the
+    /// baked transform (same visual result as an inert instance, but logged).
+    case scriptEvaluationFailed
 }
 
 // MARK: - Layer SceneScript (visible-script video intros)
@@ -1503,6 +1515,8 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         switch outcome {
         case .contextUnavailable:
             throw WPESceneScriptError.contextUnavailable
+        case .setupFailed:
+            throw WPESceneScriptError.scriptEvaluationFailed
         case .ready:
             break
         }
@@ -1532,6 +1546,7 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         enum SetupOutcome {
             case ready
             case contextUnavailable
+            case setupFailed
         }
 
         private let queue = DispatchQueue(label: "com.livewallpaper.wpe-dynamic-transform", qos: .userInitiated)
@@ -1600,7 +1615,10 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
 
             didThrow = false
             _ = context.evaluateScript(script)
-            guard !didThrow else { return .ready }
+            // A module body that throws at eval never declares a usable update();
+            // report failure so the caller logs and keeps the baked transform,
+            // rather than installing a permanently inert instance.
+            guard !didThrow else { return .setupFailed }
 
             if !scriptProperties.isEmpty {
                 wpeInstallScriptProperties(

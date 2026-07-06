@@ -1,6 +1,8 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import LiveWallpaperProWPE
 import Metal
 import MetalKit
 import Testing
@@ -59,6 +61,51 @@ struct WPEMetalSceneRendererTests {
         #expect(renderer.hasPresentedFrame)
         #expect(renderer.renderGraph?.layers.count == 1)
         #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidlayer")
+    }
+
+    @Test("Async scene load failure surfaces session runtimeError and fires the change callback")
+    func sceneLoadFailurePropagatesSessionRuntimeError() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        try Data("{ not valid json".utf8).write(to: fixture.root.appendingPathComponent("scene.json"))
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 64, height: 64),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        // cleanup() closes the window; without this the close() release plus
+        // ARC's own release over-releases it (production windows set the same).
+        window.isReleasedWhenClosed = false
+        let session = SceneWallpaperSession(window: window, renderer: renderer)
+        defer { session.cleanup() }
+
+        var changeCount = 0
+        session.onRuntimeErrorChange = { changeCount += 1 }
+
+        session.startLoadIfNeeded()
+        for _ in 0..<100 where session.runtimeError == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let error = try #require(session.runtimeError)
+        guard case .sceneRenderingFailed(let description) = error else {
+            Issue.record("Expected sceneRenderingFailed, got \(error)")
+            return
+        }
+        #expect(!description.isEmpty)
+        #expect(changeCount == 1)
+        #expect(error.canRetry)
+        #expect(session.summary.activity == .error)
     }
 
     @Test("Dynamic origin scripts keep otherwise static scenes on the continuous render loop")
@@ -626,6 +673,66 @@ struct WPEMetalSceneRendererTests {
         // re-loads and legitimately re-defers, so it is not the invalidation case.)
         renderer.cleanup()
         #expect(renderer.debugAudioStartupPending == false)
+    }
+
+    @Test(
+        "MSDF text shader pre-warm dedups by effect combo and matches the draw-path cache key",
+        .enabled(if: WPEBuiltinFrameworkAssets.rootURL != nil)
+    )
+    func msdfTextPrewarmRequestsMatchDrawPathCacheKey() throws {
+        let primaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("msdf-prewarm-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: primaryRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
+        let resolver = WPEMultiRootResourceResolver(primaryRootURL: primaryRoot, dependencyMounts: [])
+        let data = try resolver.data(relativePath: "shaders/font.frag", optional: true)
+        let fontSource = try #require(String(data: data, encoding: .utf8))
+
+        func textObject(id: String, outlineSize: Double) -> WPESceneTextObject {
+            WPESceneTextObject(
+                id: id,
+                name: id,
+                text: "Hi",
+                fontRelativePath: nil,
+                pointSize: 64,
+                color: SIMD3<Double>(1, 1, 1),
+                alpha: 1,
+                origin: SIMD3<Double>(0.5, 0.5, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                visible: true,
+                horizontalAlignment: "center",
+                verticalAlignment: "middle",
+                maxWidth: nil,
+                parallaxDepth: SIMD2<Double>(0, 0),
+                outlineSize: outlineSize
+            )
+        }
+
+        // Two plain objects (identical combo) + one outlined object (distinct
+        // combo): the warm must collapse to exactly the two distinct compiles.
+        let plainA = textObject(id: "plainA", outlineSize: 0)
+        let plainB = textObject(id: "plainB", outlineSize: 0)
+        let outlined = textObject(id: "outlined", outlineSize: 4)
+
+        let warmRequests = WPEMSDFTextRenderer.prewarmShaderRequests(
+            for: [plainA, plainB, outlined],
+            fontFragmentSource: fontSource,
+            resolver: resolver
+        )
+        let warmKeys = Set(warmRequests.map(\.translationCacheKey))
+        #expect(warmKeys.count == 2)
+
+        // Each warmed key must equal the key the draw path (compileMSDFFontShader)
+        // would look up for that object's combo — otherwise the warm never hits.
+        for object in [plainA, outlined] {
+            let combos = WPEMSDFFontMaterial.make(object: object, parameters: WPEMSDFParameters()).combos
+            let drawKey = try WPEMSDFTextRenderer.makeShaderRequest(
+                fontFragmentSource: fontSource,
+                resolver: resolver,
+                comboValues: combos
+            ).translationCacheKey
+            #expect(warmKeys.contains(drawKey))
+        }
     }
 
     private static func sceneDebugLog(for workshopID: String, containing marker: String) async throws -> String {

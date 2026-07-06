@@ -286,7 +286,22 @@ final class WPEMSDFTextRenderer {
     }
 
     private func shaderRequest(comboValues: [String: Int]) throws -> WPEShaderCompileRequest {
-        let processor = WPEShaderPreprocessor { [resolver] path, _ in
+        try Self.makeShaderRequest(
+            fontFragmentSource: fontFragmentSource,
+            resolver: resolver,
+            comboValues: comboValues
+        )
+    }
+
+    /// Builds the translated `font.frag` compile request for a combo set. Static
+    /// so the load-time shader pre-warm can produce the IDENTICAL request (same
+    /// `translationCacheKey`) without an instance, keeping the warm a cache hit.
+    static func makeShaderRequest(
+        fontFragmentSource: String,
+        resolver: WPEMultiRootResourceResolver,
+        comboValues: [String: Int]
+    ) throws -> WPEShaderCompileRequest {
+        let processor = WPEShaderPreprocessor { path, _ in
             Self.readInclude(path: path, resolver: resolver)
         }
         // Prepend the WPE builtin macro prelude (CAST2/ddx/ddy/saturate/…). The
@@ -301,6 +316,33 @@ final class WPEMSDFTextRenderer {
             comboValues: comboValues,
             materialTextureBindings: [:]
         )
+    }
+
+    /// The deduped set of `font.frag` compile requests a scene's text objects
+    /// will need, so the load-time pre-warm can transpile them off-thread instead
+    /// of paying the ~GLSL→MSL cost synchronously on first `drawMSDFText`. Combos
+    /// derive purely from each object's static effect toggles (outline/blur/shadow),
+    /// so this needs no glyph layout. Deduped by combo signature since many text
+    /// objects share the same effect set (→ one compile).
+    static func prewarmShaderRequests(
+        for textObjects: [WPESceneTextObject],
+        fontFragmentSource: String,
+        resolver: WPEMultiRootResourceResolver,
+        parameters: WPEMSDFParameters = WPEMSDFParameters()
+    ) -> [WPEShaderCompileRequest] {
+        var requestsByCombo: [String: WPEShaderCompileRequest] = [:]
+        for object in textObjects {
+            let combos = WPEMSDFFontMaterial.make(object: object, parameters: parameters).combos
+            let comboSig = combos.keys.sorted().map { "\($0)=\(combos[$0] ?? 0)" }.joined(separator: ",")
+            guard requestsByCombo[comboSig] == nil else { continue }
+            guard let request = try? makeShaderRequest(
+                fontFragmentSource: fontFragmentSource,
+                resolver: resolver,
+                comboValues: combos
+            ) else { continue }
+            requestsByCombo[comboSig] = request
+        }
+        return Array(requestsByCombo.values)
     }
 
     // MARK: - Digit pre-warm (kills the clock-tick CoreText flash)

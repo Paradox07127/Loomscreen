@@ -9,6 +9,10 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
     case webNavigationFailed(URL, code: Int?, description: String)
     case networkOffline
     case sandboxRevoked
+    /// WPE scene load/rebuild failure. `description` is the already-localized
+    /// `SceneRenderingError` text — the mapping lives in the app target because
+    /// this module cannot see the Pro-only scene error types.
+    case sceneRenderingFailed(description: String)
 
     public var userMessage: String {
         switch self {
@@ -28,6 +32,11 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
             return String(localized: "The network appears to be offline.", defaultValue: "The network appears to be offline.", comment: "Runtime error message.")
         case .sandboxRevoked:
             return String(localized: "File permission expired. Re-pick the source to restore access.", defaultValue: "File permission expired. Re-pick the source to restore access.", comment: "Runtime error message.")
+        case .sceneRenderingFailed(let description):
+            if description.isEmpty {
+                return String(localized: "The scene wallpaper failed to load.", defaultValue: "The scene wallpaper failed to load.", comment: "Runtime error message.")
+            }
+            return description
         }
     }
 
@@ -35,7 +44,7 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
         switch self {
         case .fileAccessDenied, .sandboxRevoked:
             return false
-        case .mediaNotPlayable, .webNavigationFailed, .networkOffline:
+        case .mediaNotPlayable, .webNavigationFailed, .networkOffline, .sceneRenderingFailed:
             return true
         }
     }
@@ -46,7 +55,7 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
     /// `info` is a degraded-mode notice.
     public var severity: Severity {
         switch self {
-        case .fileAccessDenied, .sandboxRevoked, .mediaNotPlayable:
+        case .fileAccessDenied, .sandboxRevoked, .mediaNotPlayable, .sceneRenderingFailed:
             return .error
         case .webNavigationFailed:
             return .warning
@@ -67,6 +76,8 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
             return String(localized: "Network offline", defaultValue: "Network offline", comment: "Runtime error title.")
         case .sandboxRevoked:
             return String(localized: "File permission expired", defaultValue: "File permission expired", comment: "Runtime error title.")
+        case .sceneRenderingFailed:
+            return String(localized: "Scene wallpaper failed to load", defaultValue: "Scene wallpaper failed to load", comment: "Runtime error title.")
         }
     }
 
@@ -78,7 +89,7 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
             return middleTruncated(url.path, maxLength: 60)
         case .webNavigationFailed(let url, _, _):
             return middleTruncated(url.absoluteString, maxLength: 60)
-        case .networkOffline, .sandboxRevoked:
+        case .networkOffline, .sandboxRevoked, .sceneRenderingFailed:
             return nil
         }
     }
@@ -95,6 +106,8 @@ public enum WallpaperRuntimeError: Error, Equatable, Sendable {
             return ""
         case .sandboxRevoked:
             return ""
+        case .sceneRenderingFailed(let description):
+            return description
         }
     }
 
