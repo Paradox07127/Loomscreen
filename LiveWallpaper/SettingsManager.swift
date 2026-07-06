@@ -55,11 +55,23 @@ final class SettingsManager {
         /// though we keep the legacy keys for one version as a compatibility
         /// buffer.
         static let configMigrationVersion = "Settings.MigrationVersion"
+        /// Separate from `configMigrationVersion` (that one only gates the
+        /// one-time UserDefaults→file move). This tracks the in-blob Codable
+        /// shape of `GlobalSettings`/`ScreenConfiguration` themselves, so a
+        /// future breaking schema change has a real stored baseline to
+        /// compare against instead of assuming every install starts at 0.
+        static let blobSchemaVersion = "Settings.BlobSchemaVersion"
     }
 
     /// Current migration revision. Bump when introducing a new file-backed
     /// store or schema change so the migration path re-runs on next launch.
     private static let currentMigrationVersion = 1
+
+    /// Current in-blob schema revision. No transform runs today — this only
+    /// stamps the baseline forward each launch — but a future breaking
+    /// `GlobalSettings`/`ScreenConfiguration` change bumps this and adds a
+    /// dispatch in `stampBlobSchemaVersionIfNeeded` keyed off `storedVersion`.
+    private static let currentBlobSchemaVersion = 1
 
     init(directory: ConfigurationDirectory = ConfigurationDirectory()) {
         let screenConfigStore = AtomicFileStore<[ScreenConfiguration]>(
@@ -81,6 +93,7 @@ final class SettingsManager {
         )
 
         migrateLegacyUserDefaultsIfNeeded()
+        stampBlobSchemaVersionIfNeeded()
     }
 
     // MARK: - Screen Configurations
@@ -554,7 +567,19 @@ final class SettingsManager {
             return false
         }
     }
-    
+
+    /// Reads the last-stamped in-blob schema version and advances it to
+    /// `currentBlobSchemaVersion`. Today there is no transform to run (every
+    /// decoder is `decodeIfPresent`-defensive), so this only establishes a
+    /// real baseline; a future breaking change adds a `storedVersion <
+    /// N` dispatch here before the final stamp, the same shape as
+    /// `migrateLegacyUserDefaultsIfNeeded` above.
+    private func stampBlobSchemaVersionIfNeeded() {
+        let storedVersion = UserDefaults.standard.integer(forKey: Keys.blobSchemaVersion)
+        guard storedVersion < Self.currentBlobSchemaVersion else { return }
+        UserDefaults.standard.set(Self.currentBlobSchemaVersion, forKey: Keys.blobSchemaVersion)
+    }
+
     // MARK: - Validation
 
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {

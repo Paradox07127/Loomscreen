@@ -121,28 +121,41 @@ extension WorkshopAnimatedGIF {
     }
 
     static func readFrameDelays(from source: CGImageSource, frameCount: Int) -> [TimeInterval] {
-        (0..<frameCount).map { index in
-            guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any] else {
-                return 0.1
+        var delays: [TimeInterval] = []
+        delays.reserveCapacity(frameCount)
+        // Explicit loop (not `map`) so each iteration's bridged `[String: Any]`
+        // property dict is released before the next `CopyProperties` call,
+        // rather than all `maxFrameCount` (120) of them piling up for the
+        // duration of one grid cell's decode.
+        for index in 0..<frameCount {
+            autoreleasepool {
+                delays.append(frameDelay(from: source, index: index))
             }
-            if let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
-                if let unclamped = (gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber)?.doubleValue, unclamped > 0 {
-                    return max(unclamped, minFrameDelay)
-                }
-                if let delay = (gif[kCGImagePropertyGIFDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, minFrameDelay)
-                }
-            }
-            if let png = props[kCGImagePropertyPNGDictionary as String] as? [String: Any] {
-                if let delay = (png[kCGImagePropertyAPNGUnclampedDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, minFrameDelay)
-                }
-                if let delay = (png[kCGImagePropertyAPNGDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
-                    return max(delay, minFrameDelay)
-                }
-            }
+        }
+        return delays
+    }
+
+    private static func frameDelay(from source: CGImageSource, index: Int) -> TimeInterval {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any] else {
             return 0.1
         }
+        if let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
+            if let unclamped = (gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber)?.doubleValue, unclamped > 0 {
+                return max(unclamped, minFrameDelay)
+            }
+            if let delay = (gif[kCGImagePropertyGIFDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
+                return max(delay, minFrameDelay)
+            }
+        }
+        if let png = props[kCGImagePropertyPNGDictionary as String] as? [String: Any] {
+            if let delay = (png[kCGImagePropertyAPNGUnclampedDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
+                return max(delay, minFrameDelay)
+            }
+            if let delay = (png[kCGImagePropertyAPNGDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
+                return max(delay, minFrameDelay)
+            }
+        }
+        return 0.1
     }
 }
 #endif

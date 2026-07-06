@@ -265,14 +265,14 @@ actor SteamCMDProcessRunner {
                 return
             }
             guard !Task.isCancelled else { return }
-            processGroup.terminate()
+            processGroup.terminate(dueToTimeout: true)
         }
 
         let exitCode = await waitTask.value
         timeoutTask.cancel()
         processGroup.markExited()
 
-        let timedOut = !timeoutTask.isCancelled && processGroup.didTerminate
+        let timedOut = processGroup.didTerminateByTimeout
         let killed = processGroup.didTerminate
 
         // Drain the pipes off a utility-QoS thread. `waitForEOF` blocks on a
@@ -347,12 +347,22 @@ private final class SteamCMDProcessGroup: @unchecked Sendable {
     private let lock = NSLock()
     private var terminated = false
     private var exited = false
+    private var terminatedByTimeout = false
 
     init(pid: pid_t) { self.pid = pid }
 
     var didTerminate: Bool {
         lock.lock(); defer { lock.unlock() }
         return terminated
+    }
+
+    /// True only when the timeout deadline (not outer-task cancellation) fired
+    /// the kill. Recorded here rather than derived from `Task.isCancelled` —
+    /// cancelling an already-finished timeout task also flips that to `true`,
+    /// so it can't disambiguate "timed out" from "cancelled" after the fact.
+    var didTerminateByTimeout: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return terminatedByTimeout
     }
 
     func markExited() {
@@ -365,10 +375,11 @@ private final class SteamCMDProcessGroup: @unchecked Sendable {
     }
 
     @discardableResult
-    func terminate() -> Bool {
+    func terminate(dueToTimeout: Bool = false) -> Bool {
         lock.lock()
         let shouldTerminate = !terminated
         if shouldTerminate { terminated = true }
+        if dueToTimeout { terminatedByTimeout = true }
         lock.unlock()
 
         guard shouldTerminate else { return true }

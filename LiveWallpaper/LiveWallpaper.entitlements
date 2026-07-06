@@ -10,8 +10,11 @@
 	    Core Audio Process Tap (system-audio "loopback" capture) drives the
 	    audio-reactive wallpaper feature. Under App Sandbox the tap + private
 	    aggregate device read audio input, which requires this entitlement plus
-	    the user granting "System Audio Recording" (TCC). Pro / direct-distribution
-	    only; the Lite (Loomscreen) build excludes the capture code entirely.
+	    the user granting "System Audio Recording" (TCC). The consuming code
+	    (SystemAudioCaptureService) is `#if !LITE_BUILD`-gated out of the Lite
+	    binary, but Pro and Lite share this one entitlements file (see
+	    CODE_SIGN_ENTITLEMENTS in project.pbxproj) — the grant itself is
+	    unconditional; only the compiled code that would use it is excluded.
 	-->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
@@ -44,8 +47,13 @@
 	    (and the SteamCMD child it spawns) can locate + load a Homebrew/MacPorts
 	    SteamCMD install and its sibling dylibs, which live outside the sandbox
 	    container. Read-only and scoped to tooling directories; downloads/cache
-	    still go to user-granted or container-local locations. Direct-distribution
-	    only (these exceptions are not accepted on the Mac App Store).
+	    still go to user-granted or container-local locations. The consuming
+	    code (SteamCMDDoctorService/SteamCMDScriptWriter) is `#if !LITE_BUILD
+	    && DIRECT_DISTRIBUTION`-gated, but this file is shared across every
+	    build config (no MAS target exists in this project) — temporary
+	    exceptions like this one are not accepted for a Mac App Store
+	    submission, which would require its own conditionally-stripped
+	    entitlements file, not just excluded Swift code.
 	-->
 	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
 	<array>

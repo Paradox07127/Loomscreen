@@ -32,7 +32,6 @@ final class UpdateChecker {
         let tagName: String
         let version: SemanticVersion
         let releasePageURL: URL
-        let downloadURL: URL?
         let publishedAt: Date?
         let body: String
     }
@@ -73,7 +72,6 @@ final class UpdateChecker {
     static let maximumReleaseBodyCharacters = 4_000
     static let trustedGitHubHost = "github.com"
     static let trustedReleasesPathPrefix = "/Paradox07127/Loomscreen/releases/"
-    static let trustedDownloadPathPrefix = "/Paradox07127/Loomscreen/releases/download/"
 
     private static let lastCheckedKey = "loomscreen.update.lastCheckedAt"
     private static let nextEligibleKey = "loomscreen.update.nextEligibleAt"
@@ -172,7 +170,6 @@ final class UpdateChecker {
                 tagName: release.tagName,
                 version: version,
                 releasePageURL: Self.trustedReleasePageURL(release.htmlURL),
-                downloadURL: release.assets.compactMap(Self.trustedDMGDownloadURL).first,
                 publishedAt: release.publishedAt,
                 body: release.body.map { String($0.prefix(Self.maximumReleaseBodyCharacters)) } ?? ""
             )
@@ -200,20 +197,6 @@ final class UpdateChecker {
     private static func trustedReleasePageURL(_ url: URL?) -> URL {
         guard let url, isTrustedGitHubURL(url, pathPrefix: trustedReleasesPathPrefix)
         else { return releasesPage }
-        return url
-    }
-
-    private static func trustedDMGDownloadURL(for asset: GitHubRelease.Asset) -> URL? {
-        // A unified release carries both the Lite (`Loomscreen-*.dmg`) and Pro
-        // (`Loomscreen-Pro-*.dmg`) builds; the Lite updater must resolve its own
-        // DMG, never the Pro one — match the Lite name and exclude the Pro one
-        // regardless of the asset order GitHub returns.
-        let name = asset.name.lowercased()
-        guard name.hasPrefix("loomscreen-"), !name.contains("-pro-"), name.hasSuffix(".dmg"),
-              let url = asset.browserDownloadURL,
-              isTrustedGitHubURL(url, pathPrefix: trustedDownloadPathPrefix),
-              url.pathExtension.lowercased() == "dmg"
-        else { return nil }
         return url
     }
 
@@ -319,7 +302,54 @@ struct URLSessionUpdateCheckerTransport: UpdateCheckerTransport {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([GitHubRelease].self, from: data)
+        let decoded = try decoder.decode(LossyArray<GitHubRelease>.self, from: data)
+        // A non-empty payload where EVERY element failed to decode is a broken
+        // (or hostile) response, not "no releases" — fail so the 1 h retry
+        // window applies instead of a silent 12 h "up to date".
+        if decoded.elements.isEmpty, decoded.droppedCount > 0 {
+            throw URLError(.cannotParseResponse)
+        }
+        return decoded.elements
+    }
+}
+
+/// Decodes a JSON array while salvaging every element that parses, instead of
+/// `Array`'s all-or-nothing behavior: one malformed/draft-shaped release
+/// object elsewhere in GitHub's response must not fail the whole batch and
+/// hide a real update from every other (valid) release in the same payload.
+/// Not `private` so `UpdateCheckerTests` can exercise it directly.
+struct LossyArray<Element: Decodable>: Decodable {
+    let elements: [Element]
+    let droppedCount: Int
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var result: [Element] = []
+        var dropped = 0
+        if let count = container.count { result.reserveCapacity(count) }
+        while !container.isAtEnd {
+            let indexBefore = container.currentIndex
+            if let element = try? container.decode(Element.self) {
+                result.append(element)
+            } else {
+                // Consume the malformed element so the cursor advances past it.
+                _ = try? container.decode(AnyDecodableSkip.self)
+                dropped += 1
+            }
+            // Safety net: if neither decode advanced the cursor, bail rather
+            // than spin forever on a decoder that won't consume the element.
+            if container.currentIndex == indexBefore { break }
+        }
+        elements = result
+        droppedCount = dropped
+    }
+}
+
+/// Consumes one arbitrary JSON value so a failed element decode can advance
+/// past it; without this the unkeyed container's cursor would stall and loop.
+struct AnyDecodableSkip: Decodable {
+    init(from decoder: Decoder) throws {
+        _ = try? decoder.singleValueContainer()
     }
 }
 

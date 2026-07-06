@@ -22,7 +22,7 @@ public final class LogFileSink: @unchecked Sendable {
     private let lock = NSLock()
     private let formatter: ISO8601DateFormatter
     private let rotationByteThreshold: UInt64 = 1_048_576  // 1 MiB
-    private let rotationKeepCount = 3
+    private static let rotationKeepCount = 3
 
     /// Persistent append handle + in-memory size, both guarded by `lock`. Avoids a
     /// per-line open/close + `stat` on the hot warning path. Reset on rotation.
@@ -108,16 +108,23 @@ public final class LogFileSink: @unchecked Sendable {
 
         let fm = FileManager.default
         let oldest = url.deletingPathExtension()
-            .appendingPathExtension("\(rotationKeepCount).log")
+            .appendingPathExtension("\(Self.rotationKeepCount).log")
         try? fm.removeItem(at: oldest)
-        for index in stride(from: rotationKeepCount - 1, through: 1, by: -1) {
+        for index in stride(from: Self.rotationKeepCount - 1, through: 1, by: -1) {
             let src = url.deletingPathExtension().appendingPathExtension("\(index).log")
             let dst = url.deletingPathExtension().appendingPathExtension("\(index + 1).log")
             try? fm.moveItem(at: src, to: dst)
         }
         let firstRotated = url.deletingPathExtension().appendingPathExtension("1.log")
         try? fm.moveItem(at: url, to: firstRotated)
+        // moveItem keeps the source's mode — re-tighten in case the current
+        // log predates the 0600 policy.
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: Int16(0o600))], ofItemAtPath: firstRotated.path)
         try? Data().write(to: url, options: .atomic)
+        // `.atomic` writes via a temp file + rename, landing on default umask
+        // permissions — reapply 0600 so a rotated file isn't laxer than the
+        // one `prepareLogFileURL` created.
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: Int16(0o600))], ofItemAtPath: url.path)
         cachedSize = 0
     }
 
@@ -179,13 +186,26 @@ public final class LogFileSink: @unchecked Sendable {
         }
         let directory = libraryURL.appendingPathComponent("Logs/LiveWallpaper", isDirectory: true)
         do {
-            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            try fm.createDirectory(
+                at: directory, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+            )
         } catch {
             return nil
         }
         let url = directory.appendingPathComponent("runtime.log")
         if !fm.fileExists(atPath: url.path) {
-            fm.createFile(atPath: url.path, contents: nil)
+            fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: NSNumber(value: Int16(0o600))])
+        }
+        // createDirectory/createFile only set permissions on creation — tighten
+        // pre-existing installs (and any laxer rotated siblings) on every launch.
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: Int16(0o700))], ofItemAtPath: directory.path)
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: Int16(0o600))], ofItemAtPath: url.path)
+        for index in 1...rotationKeepCount {
+            let rotated = url.deletingPathExtension().appendingPathExtension("\(index).log")
+            if fm.fileExists(atPath: rotated.path) {
+                try? fm.setAttributes([.posixPermissions: NSNumber(value: Int16(0o600))], ofItemAtPath: rotated.path)
+            }
         }
         return url
     }

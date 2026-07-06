@@ -621,6 +621,13 @@ final class SteamCMDDoctorService {
         // where a download could start mid sign-out, and — since the "Sign out"
         // action only shows for a GREEN cachedLogin — prevents a double-fire.
         setProbe(.cachedLogin, status: .running)
+        // Ownership is only meaningful with a green cachedLogin (see the guard in
+        // runWallpaperEngineOwnershipProbe); without this, a prior green result
+        // would otherwise survive sign-out untouched and read as still-valid.
+        setProbe(.wallpaperEngineOwnership, status: .yellow(
+            message: "Cached Steam login must pass before ownership can be checked.",
+            command: nil
+        ))
         if let username, SteamCMDScriptWriter.validateUsername(username),
            binaryBookmarkData != nil, workdirBookmarkData != nil,
            let binary = try? resolveBinaryURL(), let workdir = try? resolveWorkdirURL() {

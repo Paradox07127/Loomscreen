@@ -80,30 +80,6 @@ struct UpdateCheckerTests {
         }
         #expect(release.tagName == "loomscreen-v1.1.0")
         #expect(release.version == SemanticVersion(major: 1, minor: 1, patch: 0))
-        #expect(release.downloadURL?.lastPathComponent == "Loomscreen-1.1.0.dmg")
-    }
-
-    @Test("Unified release resolves the Lite DMG, never the Pro DMG")
-    func unifiedReleasePicksLiteNotPro() async {
-        resetDefaults()
-        // Pro listed first to prove the name filter, not asset order, decides.
-        let transport = StubTransport(releases: [
-            release(tag: "loomscreen-v1.1.0",
-                    assetNames: ["Loomscreen-Pro-1.1.0.dmg", "Loomscreen-1.1.0.dmg"])
-        ])
-        let checker = UpdateChecker(
-            transport: transport,
-            now: { Date(timeIntervalSince1970: 1_000_000) },
-            currentVersionString: "1.0.0"
-        )
-
-        await checker.checkNow(force: false)
-
-        guard case .available(let release) = checker.status else {
-            Issue.record("Expected .available, got \(String(describing: checker.status))")
-            return
-        }
-        #expect(release.downloadURL?.lastPathComponent == "Loomscreen-1.1.0.dmg")
     }
 
     @Test("Reports .upToDate when the newest tag matches the running version")
@@ -380,40 +356,6 @@ struct UpdateCheckerTests {
         #expect(release.releasePageURL == UpdateChecker.releasesPage)
     }
 
-    @Test("Rejects non-GitHub or non-.dmg download URLs")
-    func rejectsHostileDownloadURL() async {
-        resetDefaults()
-        let hostile = GitHubRelease(
-            tagName: "loomscreen-v1.1.0",
-            body: nil,
-            draft: false,
-            prerelease: false,
-            publishedAt: nil,
-            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v1.1.0"),
-            assets: [
-                .init(name: "Loomscreen-1.1.0.dmg",
-                      browserDownloadURL: URL(string: "https://evil.example.com/Loomscreen-1.1.0.dmg")),
-                .init(name: "Loomscreen-1.1.0.zip",
-                      browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/loomscreen-v1.1.0/Loomscreen-1.1.0.zip"))
-            ]
-        )
-        let transport = StubTransport(releases: [hostile])
-        let checker = UpdateChecker(
-            transport: transport,
-            now: { Date(timeIntervalSince1970: 1_000_000) },
-            currentVersionString: "1.0.0"
-        )
-
-        await checker.checkNow(force: false)
-
-        guard case .available(let release) = checker.status else {
-            Issue.record("Expected .available, got \(String(describing: checker.status))")
-            return
-        }
-        #expect(release.downloadURL == nil,
-                "Hostile .dmg URL and benign .zip URL must both be rejected.")
-    }
-
     @Test("Truncates oversized release notes body")
     func truncatesOversizedBody() async {
         resetDefaults()
@@ -539,6 +481,35 @@ struct UpdateCheckerTests {
         #expect(r.htmlURL?.absoluteString.contains("loomscreen-v1.0.1") == true)
     }
 
+    @Test("One malformed release object doesn't fail decoding the rest of the array")
+    func lossyArraySalvagesValidReleasesAroundAMalformedOne() throws {
+        // The middle release is otherwise well-formed but has a type-mismatched
+        // `prerelease` (a string where GitHub always sends a bool) — isolating
+        // the failure to a single field, not a missing-required-key shortcut.
+        let json = """
+        [
+          { "tag_name": "loomscreen-v1.0.0", "draft": false, "prerelease": false, "assets": [] },
+          { "tag_name": "loomscreen-v1.1.0", "draft": false, "prerelease": "not-a-bool", "assets": [] },
+          { "tag_name": "loomscreen-v1.2.0", "draft": false, "prerelease": false, "assets": [] }
+        ]
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let releases = try decoder.decode(LossyArray<GitHubRelease>.self, from: Data(json.utf8)).elements
+
+        #expect(releases.map(\.tagName) == ["loomscreen-v1.0.0", "loomscreen-v1.2.0"])
+    }
+
+    @Test("A completely non-array payload still fails (lossiness is per-element, not per-response)")
+    func lossyArrayStillThrowsOnNonArrayRoot() {
+        let json = "{ \"not\": \"an array\" }"
+        let decoder = JSONDecoder()
+        #expect(throws: (any Error).self) {
+            try decoder.decode(LossyArray<GitHubRelease>.self, from: Data(json.utf8))
+        }
+    }
+
     // MARK: - Helpers
 
     private func release(
@@ -560,23 +531,6 @@ struct UpdateCheckerTests {
                     browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/\(tag)/\(name)")
                 )]
             } ?? []
-        )
-    }
-
-    private func release(tag: String, assetNames: [String]) -> GitHubRelease {
-        GitHubRelease(
-            tagName: tag,
-            body: nil,
-            draft: false,
-            prerelease: false,
-            publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/\(tag)"),
-            assets: assetNames.map { name in
-                GitHubRelease.Asset(
-                    name: name,
-                    browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/\(tag)/\(name)")
-                )
-            }
         )
     }
 }

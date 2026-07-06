@@ -33,12 +33,18 @@ final class OggAudioTranscoder: @unchecked Sendable {
     /// the decode loop when a file is slow, not just hung.
     private let deadline: TimeInterval = 6
 
+    /// Disk ceiling for the transcode cache. Unlike `WPEVideoTextureDiskCache`
+    /// there's no per-workshopID orphan GC — sources here aren't attributable
+    /// to a scene, so a flat mtime-LRU cap is the whole reclamation story.
+    private static let maxCacheBytes: UInt64 = 256 * 1024 * 1024  // 256 MiB
+
     private init() {
         let caches = (try? FileManager.default.url(
             for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )) ?? FileManager.default.temporaryDirectory
         cacheDirectory = caches.appendingPathComponent("OggTranscode", isDirectory: true)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        queue.async { [self] in enforceSizeLimit() }
     }
 
     static func isOggFamily(_ url: URL) -> Bool {
@@ -93,6 +99,7 @@ final class OggAudioTranscoder: @unchecked Sendable {
             pending[key] = nil
             group.leave()
             lock.unlock()
+            if produced != nil { enforceSizeLimit() }
         }
 
         guard group.wait(timeout: .now() + deadline) == .success else {
@@ -196,6 +203,61 @@ final class OggAudioTranscoder: @unchecked Sendable {
         let seed = "\(url.path)|\(size)|\(stamp)"
         let digest = SHA256.hash(data: Data(seed.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Evicts the least-recently-modified `.m4a`s until the directory is back
+    /// under `maxCacheBytes`. Runs off the caller's path (init / after a
+    /// background transcode completes) so it never adds latency to playback.
+    private func enforceSizeLimit() {
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        var files: [(url: URL, size: UInt64, modified: Date)] = []
+        var total: UInt64 = 0
+        for url in children {
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true else { continue }
+            let size = UInt64(max(0, values.fileSize ?? 0))
+            let modified = values.contentModificationDate ?? .distantPast
+            if url.pathExtension == "partial" {
+                // Fresh `.partial` belongs to a possibly-running transcode; a
+                // stale one is an orphan from a killed process. Either way it
+                // never counts against the budget.
+                if modified < Date(timeIntervalSinceNow: -3600) {
+                    try? fm.removeItem(at: url)
+                }
+                continue
+            }
+            guard url.pathExtension == "m4a" else { continue }
+            total += size
+            files.append((url, size, modified))
+        }
+        guard total > Self.maxCacheBytes else { return }
+
+        for file in files.sorted(by: { $0.modified < $1.modified }) {
+            if total <= Self.maxCacheBytes { break }
+            let key = file.url.deletingPathExtension().lastPathComponent
+            // Check-and-delete atomically with the caller's disk-hit promotion
+            // (which also runs under `lock`): clear the memo and unlink while
+            // holding it so a concurrent request can't re-promote the path
+            // between our check and the delete. Evicting a `.ready` entry is
+            // fine — the next request simply re-transcodes.
+            lock.lock()
+            if pending[key] != nil {
+                lock.unlock()
+                continue
+            }
+            let previous = memo[key]
+            memo[key] = nil
+            let removed = (try? fm.removeItem(at: file.url)) != nil
+            if !removed { memo[key] = previous }
+            lock.unlock()
+            if removed { total -= file.size }
+        }
     }
 
     private enum TranscodeError: Error { case timedOut, truncated }
