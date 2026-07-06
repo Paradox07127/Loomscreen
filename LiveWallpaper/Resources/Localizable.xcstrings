@@ -21616,7 +21616,7 @@
       }
     },
     "OK" : {
-      "comment" : "Menu bar TEMP status: thermal state nominal. Keep short — ideally ≤4 Latin characters or equivalent width.",
+      "comment" : "Dismiss button on the monitor wallpaper wrong-folder alert.\nMenu bar TEMP status: thermal state nominal. Keep short — ideally ≤4 Latin characters or equivalent width.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -34478,6 +34478,36 @@
         }
       }
     },
+    "That's not the expected folder" : {
+      "comment" : "Monitor wallpaper AI-log access: title shown when the user grants a folder other than the provider's own root.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That's not the expected folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想定されたフォルダではありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是预期的文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這不是預期的資料夾"
+          }
+        }
+      }
+    },
     "The author's scene.json couldn't be parsed: %@" : {
       "comment" : "Wallpaper Engine fallback warning body. The placeholder is parser detail.",
       "localizations" : {
@@ -34628,59 +34658,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此金鑰屬於你自己的 Steam 帳戶，而不是 Loomscreen。呼叫會透過 HTTPS 直接傳送到 Valve，金鑰只儲存在此 Mac 的鑰匙圈中（不透過 iCloud 同步）。可在 steamcommunity.com/dev/apikey 免費取得。"
-          }
-        }
-      }
-    },
-    "The web renderer process crashed repeatedly." : {
-      "comment" : "Runtime error detail shown when an HTML wallpaper's WebKit content process keeps crashing and the retry budget is exhausted.",
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Webレンダラープロセスが繰り返しクラッシュしました。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网页渲染进程反复崩溃。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "網頁渲染處理程序反覆當機。"
-          }
-        }
-      }
-    },
-    "That's not the expected folder" : {
-      "comment" : "Monitor wallpaper AI-log access: title shown when the user grants a folder other than the provider's own root.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "That's not the expected folder"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "想定されたフォルダではありません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这不是预期的文件夹"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這不是預期的資料夾"
           }
         }
       }
@@ -34909,6 +34886,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法播放影片 %@。"
+          }
+        }
+      }
+    },
+    "The web renderer process crashed repeatedly." : {
+      "comment" : "Runtime error detail shown when an HTML wallpaper's WebKit content process keeps crashing and the retry budget is exhausted.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webレンダラープロセスが繰り返しクラッシュしました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页渲染进程反复崩溃。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網頁渲染處理程序反覆當機。"
           }
         }
       }
