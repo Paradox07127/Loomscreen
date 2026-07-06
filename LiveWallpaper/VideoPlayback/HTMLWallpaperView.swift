@@ -92,6 +92,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// sources leave this nil so the navigation policy can deny `file://`
     /// requests originating from untrusted content.
     private var currentLocalReadAccessRoot: URL?
+    /// The wallpaper's declared origin when the active source is a remote
+    /// `.url` (nil for `.file` / `.folder` / `.inline`). The navigation policy
+    /// uses it to allow same-host scripted redirects for remote wallpapers
+    /// while denying any external `.other` navigation for local/inline ones.
+    private var currentRemoteSourceOrigin: URL?
 
     /// Snapshot overlay shown on top of the WKWebView while suspended, so
     /// the desktop keeps a static last-frame image even though the
@@ -661,6 +666,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             activeSecurityScopedURL = url
             let readRoot = Self.readAccessRoot(forFileURL: url)
             currentLocalReadAccessRoot = readRoot
+            currentRemoteSourceOrigin = nil
             webView.loadFileURL(url, allowingReadAccessTo: readRoot)
         case .folder(let bookmarkData, let indexFileName):
             guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
@@ -669,6 +675,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
             activeSecurityScopedURL = folderURL
             currentLocalReadAccessRoot = folderURL
+            currentRemoteSourceOrigin = nil
             updateWallpaperEnginePropertyBridge(for: folderURL)
             folderHandler.folderURL = folderURL
             // In-place package serving: when the source folder holds a
@@ -690,9 +697,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
             currentLocalReadAccessRoot = nil
+            currentRemoteSourceOrigin = url
             webView.load(URLRequest(url: url))
         case .inline(let html):
             currentLocalReadAccessRoot = nil
+            currentRemoteSourceOrigin = nil
             webView.loadHTMLString(html, baseURL: nil)
         }
     }
@@ -777,6 +786,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
         activeSecurityScopedURL = nil
         currentLocalReadAccessRoot = nil
+        currentRemoteSourceOrigin = nil
     }
 
     nonisolated static func isAllowedRemoteURL(_ url: URL) -> Bool {
@@ -829,12 +839,21 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Pure navigation policy used by `decidePolicyFor`. Remote and inline
     /// sources can never navigate to `file://`; local sources may, but only
     /// inside their granted read root.
+    ///
+    /// `remoteSourceOrigin` is the wallpaper's declared origin when the source
+    /// is a remote `.url` (nil for local `.file`/`.folder`/`.inline`). It gates
+    /// script-driven main-frame navigations (`.other`/`.reload`, e.g.
+    /// `location.href = …`): a remote wallpaper is already a user-chosen web
+    /// origin and keeps following `http(s)` navigations/redirects, but a
+    /// local/inline wallpaper may never silently swap itself out for an external
+    /// `http(s)` page — only its own origin's redirects (same-scheme+host) pass.
     nonisolated static func navigationDecision(
         for url: URL?,
         navigationType: WKNavigationType,
         currentURL: URL?,
         allowMouseInteraction: Bool,
-        localReadAccessRoot: URL?
+        localReadAccessRoot: URL?,
+        remoteSourceOrigin: URL? = nil
     ) -> NavigationDecision {
         switch navigationType {
         case .other, .reload:
@@ -842,8 +861,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             if url.isFileURL {
                 return fileURL(url, isContainedIn: localReadAccessRoot) ? .allow : .cancel
             }
-            if isAllowedRemoteURL(url) { return .allow }
             if url.scheme?.lowercased() == FolderURLSchemeHandler.scheme { return .allow }
+            if isAllowedRemoteURL(url) {
+                // A remote wallpaper is an explicitly user-chosen web origin;
+                // redirect/`location.href` chains are normal, so keep allowing
+                // its http(s) navigations. A local/inline source has no remote
+                // origin — deny any external navigation it scripts, letting only
+                // a same-origin move through (harmless, e.g. hash/self reload).
+                if remoteSourceOrigin != nil { return .allow }
+                return isSameOrigin(navigationURL: url, current: currentURL) ? .allow : .cancel
+            }
             return .cancel
 
         case .linkActivated:
@@ -935,6 +962,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Snapshot Overlay
 
+    /// Upper bound on the suspend-snapshot bitmap width in pixels. The overlay
+    /// only shows a static last-frame stretched to the view's point size, so
+    /// there's no visible gain in retaining a full backing-pixel capture — on a
+    /// 5K panel that would be a ~50 MB `NSImage` held per suspended screen,
+    /// working against the very memory-relief the suspend is meant to provide.
+    private static let maxSuspendSnapshotWidth: CGFloat = 1920
+
     /// Hides the webView behind the snapshot so WebKit can stop updating the
     /// compositor surface. Generation-counted to discard stale captures that
     /// arrive after a resume.
@@ -943,6 +977,15 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         let generation = snapshotGeneration
         let snapshotConfig = WKSnapshotConfiguration()
         snapshotConfig.afterScreenUpdates = false
+        // Cap the capture to point-width (downsampled from backing pixels) and
+        // an absolute ceiling so multiple high-DPI screens can't each pin a
+        // full-resolution bitmap while suspended.
+        let pointWidth = webView.bounds.width
+        if pointWidth > 0 {
+            snapshotConfig.snapshotWidth = NSNumber(
+                value: Double(min(pointWidth, Self.maxSuspendSnapshotWidth))
+            )
+        }
         webView.takeSnapshot(with: snapshotConfig) { [weak self] image, _ in
             Task { @MainActor [weak self] in
                 guard let self,
@@ -1279,7 +1322,8 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             navigationType: navigationAction.navigationType,
             currentURL: webView.url,
             allowMouseInteraction: allowMouseInteraction,
-            localReadAccessRoot: currentLocalReadAccessRoot
+            localReadAccessRoot: currentLocalReadAccessRoot,
+            remoteSourceOrigin: currentRemoteSourceOrigin
         )
         switch decision {
         case .allow:
@@ -1376,14 +1420,24 @@ extension HTMLWallpaperView: WKNavigationDelegate {
 
     /// WebContent process crash leaves the WKWebView blank/transparent with no
     /// `didFail` callback. Reload the current source so the wallpaper recovers
-    /// instead of staying permanently white.
+    /// instead of staying permanently white — but through the shared retry
+    /// budget so a page that crashes on every load backs off exponentially and
+    /// finally surfaces a terminal error instead of hot-looping the renderer.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !isCleaningUp else { return }
         Logger.error(
             "HTML wallpaper WebContent process terminated; reloading source. url=\(webView.url?.absoluteString ?? "<no url>")",
             category: .screenManager
         )
-        reloadCurrentSource()
+        if shouldRetryNavigationFailure() { return }
+        reportError(.webNavigationFailed(
+            webView.url ?? URL(string: "about:blank") ?? URL(fileURLWithPath: "/"),
+            code: nil,
+            description: String(
+                localized: "The web renderer process crashed repeatedly.",
+                comment: "Runtime error detail shown when an HTML wallpaper's WebKit content process keeps crashing and the retry budget is exhausted."
+            )
+        ))
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
