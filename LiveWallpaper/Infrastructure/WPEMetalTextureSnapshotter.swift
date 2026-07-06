@@ -114,28 +114,18 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         for pixel in 0..<pixelCount {
             let base = pixel * 4
             for channel in 0..<3 {
-                let linear = min(max(float(fromHalfBits: halves[base + channel]), 0), 1)
+                let linear = clampedUnit(Float(Float16(bitPattern: halves[base + channel])))
                 out[base + channel] = UInt8(sRGBEncode(linear) * 255 + 0.5)
             }
-            let alpha = min(max(float(fromHalfBits: halves[base + 3]), 0), 1)
+            let alpha = clampedUnit(Float(Float16(bitPattern: halves[base + 3])))
             out[base + 3] = UInt8(alpha * 255 + 0.5)
         }
         return out
     }
 
-    /// Portable IEEE-754 half decode (Float16 the type is arm64-only in Swift).
-    private static func float(fromHalfBits bits: UInt16) -> Float {
-        let sign = Float(bits >> 15 == 0 ? 1 : -1)
-        let exponent = Int((bits >> 10) & 0x1F)
-        let mantissa = Int(bits & 0x3FF)
-        switch exponent {
-        case 0:
-            return sign * Float(mantissa) * exp2(-24)
-        case 0x1F:
-            return mantissa == 0 ? sign * .infinity : .nan
-        default:
-            return sign * Float(1024 + mantissa) * exp2(Float(exponent - 25))
-        }
+    /// NaN-safe clamp: a NaN texel would trap the UInt8 conversion.
+    private static func clampedUnit(_ value: Float) -> Float {
+        value.isFinite ? min(max(value, 0), 1) : 0
     }
 
     private static func sRGBEncode(_ linear: Float) -> Float {

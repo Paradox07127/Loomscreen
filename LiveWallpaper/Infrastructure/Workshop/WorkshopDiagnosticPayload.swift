@@ -93,13 +93,8 @@ struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
     }()
 
     static let runningArchitecture: String = {
-        #if arch(arm64)
+        // App ships arm64-only (ARCHS = arm64).
         return "arm64"
-        #elseif arch(x86_64)
-        return "x86_64"
-        #else
-        return "unknown"
-        #endif
     }()
 }
 

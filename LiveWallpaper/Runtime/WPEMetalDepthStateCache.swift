@@ -32,12 +32,12 @@ final class WPEMetalDepthStateCache {
         return UserDefaults.standard.object(forKey: memorylessDepthDefaultsKey) as? Bool ?? true
     }()
 
-    /// Whether this device + flag permit memoryless (tile-only) depth at all. The
-    /// caller additionally opts a target out (`allowTransient: false`) when more
-    /// than one pass writes its depth, since those can load depth across encoders.
-    /// Intel/AMD (no `.apple1`) and the flag-off path stay on `.private`.
+    /// Whether the flag permits memoryless (tile-only) depth at all. The caller
+    /// additionally opts a target out (`allowTransient: false`) when more than
+    /// one pass writes its depth, since those can load depth across encoders.
+    /// (arm64-only distribution: every Mac GPU is Apple family / TBDR.)
     var depthAttachmentIsTransient: Bool {
-        Self.isMemorylessDepthEnabled && device.supportsFamily(.apple1)
+        Self.isMemorylessDepthEnabled
     }
 
     /// Derive load/store from the actual texture, never from the flag: pairing a

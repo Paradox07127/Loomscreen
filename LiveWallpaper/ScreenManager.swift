@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import Metal
 import Observation
 
 struct WallpaperSessionSummaryCache: Equatable {
@@ -127,13 +126,6 @@ final class ScreenManager {
     /// to keep the MTKView clock at full rate in the background; released when
     /// the last session goes away. See `refreshAppNapAssertion()`.
     @ObservationIgnored private var renderingActivityToken: (any NSObjectProtocol)?
-    /// Retained handle for the Metal device-removal observer. Every live renderer
-    /// is built from `MTLCreateSystemDefaultDevice()`, so an eGPU / Thunderbolt-
-    /// dock GPU being pulled (or requested for removal) invalidates the device the
-    /// render pipelines still hold. We watch for that and rebuild the affected
-    /// sessions on a fresh device instead of letting Metal calls silently fail.
-    /// nonisolated(unsafe): assigned once during main-actor setup, touched again only in deinit.
-    @ObservationIgnored private nonisolated(unsafe) var metalDeviceObserver: (any NSObjectProtocol)?
     private enum UserAbsenceReason: Hashable {
         case screenLocked
         case displaySleep
@@ -354,12 +346,6 @@ final class ScreenManager {
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
 
-    deinit {
-        if let metalDeviceObserver {
-            MTLRemoveDeviceObserver(metalDeviceObserver)
-        }
-    }
-
     // MARK: - Observers Setup
     private func setupPowerMonitoring() {
         powerMonitor.powerSourcePublisher
@@ -475,48 +461,6 @@ final class ScreenManager {
                 self?.handleScreenUnlocked()
             }
             .store(in: &cleanupTasks)
-
-        setupMetalDeviceObserver()
-    }
-
-    /// Registers for Metal device add/remove events. The handler is invoked on an
-    /// arbitrary thread, so it hops to the main actor before touching state.
-    private func setupMetalDeviceObserver() {
-        guard metalDeviceObserver == nil else { return }
-        let result = MTLCopyAllDevicesWithObserver { [weak self] _, notification in
-            Task { @MainActor in
-                self?.handleMetalDeviceChange(notification)
-            }
-        }
-        metalDeviceObserver = result.observer
-    }
-
-    /// Rebuilds every render session on a fresh device when the one our pipelines
-    /// were built on is pulled. Scoped to removals: additions (a GPU coming back)
-    /// don't invalidate anything, and the periodic wake check already re-homes to
-    /// whatever default device exists.
-    private func handleMetalDeviceChange(_ notification: MTLDeviceNotificationName) {
-        switch notification {
-        case .removalRequested, .wasRemoved:
-            revalidateRenderDeviceHealth(reason: "Metal device removed")
-        default:
-            break
-        }
-    }
-
-    /// Cheap liveness probe for the system default device (what every renderer is
-    /// built from). If it can no longer be created, or it has dropped out of the
-    /// live device list, the held device is stale — rebuild all sessions through
-    /// the existing reload path so each re-acquires a valid device. A no-op while
-    /// the default device is still present, so it's safe to call on every wake.
-    private func revalidateRenderDeviceHealth(reason: String) {
-        guard screens.contains(where: { $0.runtimeSession != nil }) else { return }
-        let currentDefault = MTLCreateSystemDefaultDevice()
-        let liveRegistryIDs = Set(MTLCopyAllDevices().map(\.registryID))
-        let defaultIsHealthy = currentDefault.map { liveRegistryIDs.contains($0.registryID) } ?? false
-        guard !defaultIsHealthy else { return }
-        Logger.warning("\(reason): default Metal device unavailable — rebuilding render sessions", category: .lifecycle)
-        reloadAllScreens()
     }
 
     private func handleScreenLocked() {
@@ -1408,9 +1352,6 @@ final class ScreenManager {
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
         refreshScreens()
-        // A GPU pulled while asleep may not emit a removal notification we caught,
-        // so re-verify the render device here and rebuild if it's gone stale.
-        revalidateRenderDeviceHealth(reason: "System wake")
         powerMonitor.refreshPowerStatus()
         setUserAbsence(.systemSleep, present: false)
     }

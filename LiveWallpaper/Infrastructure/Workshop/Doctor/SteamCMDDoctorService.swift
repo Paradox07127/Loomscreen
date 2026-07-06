@@ -470,7 +470,6 @@ final class SteamCMDDoctorService {
     }
 
     private func runRosettaProbe() {
-        #if arch(arm64)
         let marker = URL(fileURLWithPath: "/Library/Apple/usr/share/rosetta/rosetta")
         if fileManager.fileExists(atPath: marker.path(percentEncoded: false)) {
             setProbe(.rosetta, status: .green(detail: "Rosetta is installed."))
@@ -480,9 +479,6 @@ final class SteamCMDDoctorService {
                 command: "/usr/sbin/softwareupdate --install-rosetta --agree-to-license"
             ))
         }
-        #else
-        setProbe(.rosetta, status: .green(detail: "Rosetta is not required on this Mac."))
-        #endif
     }
 
     private func runGatekeeperProbe() async {

@@ -111,23 +111,9 @@ enum WPEMetalTextureLimits {
     /// width/height, so invalid descriptors are rejected before Metal's
     /// Objective-C validation aborts the current test/app process.
     static func maximum2DTextureDimension(for device: MTLDevice) -> Int {
-        if device.supportsFamily(.apple10) {
-            return 32_768
-        }
-        if device.supportsFamily(.apple9)
-            || device.supportsFamily(.apple8)
-            || device.supportsFamily(.apple7)
-            || device.supportsFamily(.apple6)
-            || device.supportsFamily(.apple5)
-            || device.supportsFamily(.apple4)
-            || device.supportsFamily(.apple3)
-            || device.supportsFamily(.mac2) {
-            return 16_384
-        }
-        if device.supportsFamily(.apple2) {
-            return 8_192
-        }
-        return 8_192
+        // arm64-only distribution: every Mac GPU is Apple family with an
+        // .apple7 (M1) floor at 16384; .apple10 raises the cap.
+        device.supportsFamily(.apple10) ? 32_768 : 16_384
     }
 }
 
