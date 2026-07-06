@@ -5,10 +5,8 @@ import WebKit
 /// `WKWebView` 子类：开启 first-mouse 接收（Plash 模式），关闭 Force-Touch 链接预览，
 /// 过滤右键菜单中无意义项（下载图片 / 分享 / 在新窗口打开等）。
 final class HTMLWebView: WKWebView {
-    /// 关键：交互态首次点击就生效，不需要先把 wallpaper window 激活成 key window。
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// 借鉴 Plash：右键菜单里这些项在壁纸场景下完全无意义，直接拿掉。
     private static let blockedMenuTitles: Set<String> = [
         "Download Image",
         "Download Linked File",
@@ -1401,18 +1399,22 @@ extension HTMLWallpaperView: WKNavigationDelegate {
 // MARK: - WKUIDelegate
 
 extension HTMLWallpaperView: WKUIDelegate {
-    /// 页面调用 `window.open()` 时，导航当前 webView 而不是开 popup（壁纸场景没有 popup 窗）。
+    /// `window.open()` fires here with no user-gesture guarantee (e.g. from a
+    /// timer), so unlike `.linkActivated` navigation it can't be trusted to
+    /// open external URLs — always refuse the popup.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if let url = navigationAction.request.url,
-           allowMouseInteraction,
-           HTMLWallpaperView.isExternallyOpenableURL(url) {
-            NSWorkspace.shared.open(url)
-        }
+        // Log scheme+host only: full URLs from untrusted wallpaper content can
+        // carry tokens/userinfo into the persistent log.
+        let target = navigationAction.request.url
+        Logger.warning(
+            "HTML wallpaper blocked window.open() to \(target.map { "\($0.scheme ?? "?")://\($0.host ?? "?")" } ?? "<no url>")",
+            category: .screenManager
+        )
         return nil
     }
 }

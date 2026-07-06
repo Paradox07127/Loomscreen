@@ -66,6 +66,18 @@ final class MonitorSourceAuthorization {
         requestAccess(for: .codex, from: window, onGrant: onGrant)
     }
 
+    // MARK: - Revoke
+
+    /// Fully drops the user's grant for a provider: stops the live security
+    /// scope and deletes the persisted bookmark so `isAuthorized` reads false
+    /// and nothing can re-resolve it. The corresponding agent source falls back
+    /// to `unauthorized` health on the next `MonitorRuntime.refreshSources()`.
+    func revokeAccess(_ provider: Provider) {
+        stopAccessing(provider)
+        defaults.removeObject(forKey: provider.defaultsKey)
+        Logger.info("Monitor: revoked grant for \(provider.defaultDirectoryName)", category: .fileAccess)
+    }
+
     private func requestAccess(for provider: Provider, from window: NSWindow?, onGrant: (@MainActor () -> Void)?) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false

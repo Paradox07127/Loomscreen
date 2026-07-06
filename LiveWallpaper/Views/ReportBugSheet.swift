@@ -8,11 +8,18 @@ import SwiftUI
 /// in Browser" to submit, and the log file stays local until they manually
 /// attach it. Matches the privacy posture of indie macOS apps (Ice / Rectangle
 /// / Stats).
+///
+/// The attachable log is a *sanitized* copy: the whole runtime log is run
+/// through `PIISanitizer` and written next to the app's caches, so what the
+/// user drags into a public issue has the same redaction posture as the
+/// preview above it — not the raw file (which logs paths/hosts verbatim).
 struct ReportBugSheet: View {
     let report: BugReport
     var onDismiss: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+
+    @State private var sanitizedLogURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -35,6 +42,13 @@ struct ReportBugSheet: View {
             idealHeight: 520,
             maxHeight: 760
         )
+        .task(id: report.id) {
+            guard let source = report.logFileURL, report.logFileExists else {
+                sanitizedLogURL = nil
+                return
+            }
+            sanitizedLogURL = await Self.makeSanitizedLogCopy(from: source)
+        }
     }
 
     private var header: some View {
@@ -74,9 +88,9 @@ struct ReportBugSheet: View {
             )
             .frame(maxHeight: .infinity)
 
-            if let logURL = report.logFileURL, report.logFileExists {
+            if let logURL = sanitizedLogURL {
                 Label {
-                    Text("Detailed log: drag the runtime log into the GitHub issue after it opens.")
+                    Text("Detailed log (sanitized): drag it into the GitHub issue after it opens.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } icon: {
@@ -98,14 +112,14 @@ struct ReportBugSheet: View {
             }
             .keyboardShortcut(.cancelAction)
 
-            if let logURL = report.logFileURL, report.logFileExists {
+            if let logURL = sanitizedLogURL {
                 Button {
                     BugReporter.revealLogInFinder(logURL)
                 } label: {
                     Label("Show Log in Finder", systemImage: "folder")
                 }
-                .help(Text("Open Finder and highlight the runtime log file"))
-                .accessibilityLabel(Text("Show runtime log in Finder"))
+                .help(Text("Open Finder and highlight the sanitized log file"))
+                .accessibilityLabel(Text("Show sanitized log in Finder"))
             }
 
             Button {
@@ -118,5 +132,27 @@ struct ReportBugSheet: View {
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Scrubs the whole runtime log and writes it to a stable caches path the
+    /// user can drag after the sheet dismisses. Runs off the main actor because
+    /// it does file IO; the log is rotation-capped at ~1 MiB so a single
+    /// full-string `PIISanitizer.scrub` stays cheap. Returns `nil` (hiding the
+    /// affordance) rather than ever pointing the UI at the unsanitized source.
+    nonisolated private static func makeSanitizedLogCopy(from source: URL) async -> URL? {
+        await Task.detached(priority: .userInitiated) {
+            guard let raw = try? String(contentsOf: source, encoding: .utf8) else { return nil }
+            let scrubbed = PIISanitizer.scrub(raw)
+
+            let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            let destination = caches.appendingPathComponent("LiveWallpaper-log-sanitized.txt")
+            do {
+                try scrubbed.write(to: destination, atomically: true, encoding: .utf8)
+                return destination
+            } catch {
+                return nil
+            }
+        }.value
     }
 }

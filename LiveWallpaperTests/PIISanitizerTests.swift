@@ -78,4 +78,39 @@ struct PIISanitizerTests {
         #expect(scrubbed == raw)
     }
 
+    /// Regression: a co-resident account whose name extends the running user's
+    /// (`/Users/al` home vs `/Users/alice/…`) must be fully redacted, not turned
+    /// into a partial-name leak like `~ice/…` by an unbounded HOME substring pass.
+    @Test("Does not leak a username that extends the HOME path")
+    func doesNotLeakPrefixExtendingUsername() {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        guard home.hasPrefix("/Users/") else { return }
+
+        // Synthesize a *different* user whose path starts with the real home
+        // string but continues past its component boundary. Under the sandboxed
+        // test runner HOME is the container path, so build the expectation
+        // dynamically: only the /Users/<name> component gets redacted.
+        let neighbor = home + "xyz/Movies/private.mov"
+        let scrubbed = PIISanitizer.scrub(neighbor)
+
+        var parts = neighbor.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        if parts.count > 2 { parts[2] = "<redacted>" }
+        let expected = parts.joined(separator: "/")
+
+        #expect(!scrubbed.contains("~"))
+        #expect(scrubbed == expected)
+    }
+
+    /// The running user's own home is still collapsed to `~` at a component
+    /// boundary and leaves no `/Users/<name>` residue behind.
+    @Test("Collapses own HOME to ~ at a path boundary")
+    func collapsesOwnHomeAtBoundary() {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
+        guard home.hasPrefix("/Users/") else { return }
+
+        let scrubbed = PIISanitizer.scrub("\(home)/Library/Logs/runtime.log")
+        #expect(scrubbed == "~/Library/Logs/runtime.log")
+        #expect(!scrubbed.contains("/Users/"))
+    }
+
 }

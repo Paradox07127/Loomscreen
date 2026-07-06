@@ -13,8 +13,11 @@ enum PIISanitizer {
     static func scrub(_ raw: String) -> String {
         var result = raw
 
-        if let home = Self.homePath {
-            result = result.replacingOccurrences(of: home, with: "~")
+        // Boundary-anchored so a home like `/Users/al` doesn't eat into
+        // `/Users/alice` and defeat the `/Users/<name>` rule below.
+        if let regex = Self.homePathRegex {
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "~")
         }
 
         for rule in Self.rules {
@@ -42,9 +45,12 @@ enum PIISanitizer {
         }
     }
 
-    private static let homePath: String? = {
+    private static let homePathRegex: NSRegularExpression? = {
         guard let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty else { return nil }
-        return home
+        // `(?=/|$)` keeps the match to a whole path component so a home that is
+        // a strict prefix of another user's path (`/Users/al` vs `/Users/alice`)
+        // is left for the `/Users/<name>` rule instead of being corrupted here.
+        return try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: home) + #"(?=/|$)"#)
     }()
 
     private static let rules: [Rule] = [

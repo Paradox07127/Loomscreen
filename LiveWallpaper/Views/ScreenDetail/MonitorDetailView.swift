@@ -154,12 +154,16 @@ struct MonitorDetailView: View {
             title: "Authorize Claude Folder",
             subtitle: "Read-only access to ~/.claude"
         ) {
-            authorizationControl(isAuthorized: claudeAuthorized) {
-                MonitorSourceAuthorization.shared.requestClaudeAccess(from: hostWindow()) {
-                    refreshAuthorizationState()
-                    Task { await MonitorRuntime.shared.refreshSources() }
-                }
-            }
+            authorizationControl(
+                isAuthorized: claudeAuthorized,
+                authorize: {
+                    MonitorSourceAuthorization.shared.requestClaudeAccess(from: hostWindow()) {
+                        refreshAuthorizationState()
+                        Task { await MonitorRuntime.shared.refreshSources() }
+                    }
+                },
+                revoke: { revoke(.claude) }
+            )
         }
 
         SettingRow(
@@ -168,26 +172,42 @@ struct MonitorDetailView: View {
             title: "Authorize Codex Folder",
             subtitle: "Read-only access to ~/.codex"
         ) {
-            authorizationControl(isAuthorized: codexAuthorized) {
-                MonitorSourceAuthorization.shared.requestCodexAccess(from: hostWindow()) {
-                    refreshAuthorizationState()
-                    Task { await MonitorRuntime.shared.refreshSources() }
-                }
-            }
+            authorizationControl(
+                isAuthorized: codexAuthorized,
+                authorize: {
+                    MonitorSourceAuthorization.shared.requestCodexAccess(from: hostWindow()) {
+                        refreshAuthorizationState()
+                        Task { await MonitorRuntime.shared.refreshSources() }
+                    }
+                },
+                revoke: { revoke(.codex) }
+            )
         }
     }
 
     @ViewBuilder
-    private func authorizationControl(isAuthorized: Bool, action: @escaping () -> Void) -> some View {
+    private func authorizationControl(
+        isAuthorized: Bool,
+        authorize: @escaping () -> Void,
+        revoke: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 6) {
             if isAuthorized {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .accessibilityLabel(Text("Authorized"))
+                Button("Revoke", action: revoke)
+                    .controlSize(.small)
             }
-            Button(isAuthorized ? "Re-authorize…" : "Authorize…", action: action)
+            Button(isAuthorized ? "Re-authorize…" : "Authorize…", action: authorize)
                 .controlSize(.small)
         }
+    }
+
+    private func revoke(_ provider: MonitorSourceAuthorization.Provider) {
+        MonitorSourceAuthorization.shared.revokeAccess(provider)
+        refreshAuthorizationState()
+        Task { await MonitorRuntime.shared.refreshSources() }
     }
 
     // MARK: - Binding + commit

@@ -277,11 +277,18 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         guard !isSuspended else { return }
         isSuspended = true
         stopPump()
+        // Stopping the pump only halts native snapshot delivery; the page's own
+        // rAF loop + CSS `infinite` animations keep waking the compositor every
+        // vsync. Tell dashboard.html to park them, and suspend any media too.
+        webView.setAllMediaPlaybackSuspended(true) {}
+        webView.evaluateJavaScript("window.__monitorSuspend && window.__monitorSuspend()", completionHandler: nil)
     }
 
     private func resume() {
         guard isSuspended else { return }
         isSuspended = false
+        webView.setAllMediaPlaybackSuspended(false) {}
+        webView.evaluateJavaScript("window.__monitorResume && window.__monitorResume()", completionHandler: nil)
         // Force one immediate push so the desktop reflects the current state the
         // instant playback resumes, then restart the cadence.
         pushLatestSnapshot(force: true)

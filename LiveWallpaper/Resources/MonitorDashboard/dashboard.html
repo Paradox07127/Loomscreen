@@ -478,6 +478,11 @@ body:not(.motion) *,body:not(.motion) *::before,body:not(.motion) *::after{anima
 /* Quota numbers older than the capture freshness window read as history, not
    live truth. */
 .limits-stale{opacity:.55;filter:saturate(.6)}
+/* Native suspend (occluded / battery / fullscreen): park every CSS animation
+   so the compositor can sleep. `animation-play-state` does not inherit, so the
+   root class must target descendants explicitly. */
+html.is-suspended *,html.is-suspended *::before,html.is-suspended *::after{
+  animation-play-state:paused!important;-webkit-animation-play-state:paused!important}
 
 @media (prefers-reduced-motion:reduce){
   .strip.is-needsInput::after{animation:none}
@@ -1307,7 +1312,9 @@ function tsToClock(epochSec){
    countdowns) between pushes without needing new data, + stale check.
    Throttled to ~1Hz to stay quiet. */
 var lastTick = 0;
+var suspended = false;
 function loop(t){
+  if(suspended) return;              // native suspend: stop re-arming rAF
   requestAnimationFrame(loop);
   if(t - lastTick < 950) return;
   lastTick = t;
@@ -1430,6 +1437,22 @@ function genFleetSnap(t){
    ========================================================== */
 window.__monitorPush = onPush;
 window.__monitorConfig = onConfig;
+
+/* Native lifecycle hooks (called from MonitorWallpaperView.suspend/resume).
+   Suspend halts the rAF loop and pauses CSS animations so an occluded/parked
+   wallpaper stops waking the compositor; the pump is stopped natively in
+   parallel, and the forced push on resume refreshes any stale timers. */
+window.__monitorSuspend = function(){
+  if(suspended) return;
+  suspended = true;
+  document.documentElement.classList.add("is-suspended");
+};
+window.__monitorResume = function(){
+  if(!suspended) return;
+  suspended = false;
+  document.documentElement.classList.remove("is-suspended");
+  requestAnimationFrame(loop);   // re-arm; loop() bailed without rescheduling
+};
 
 function boot(){
   applyMotionPref();
