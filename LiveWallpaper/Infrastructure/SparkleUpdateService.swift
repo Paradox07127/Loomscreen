@@ -16,16 +16,6 @@ final class SparkleUpdateService {
         SparkleUpdateConfiguration.manualChecksEnabled
     }
 
-    var canCheckForUpdates: Bool {
-        guard manualChecksEnabled else { return false }
-        #if canImport(Sparkle)
-        startUpdaterIfNeeded()
-        return updaterController?.updater.canCheckForUpdates ?? false
-        #else
-        return false
-        #endif
-    }
-
     func checkForUpdates() {
         guard manualChecksEnabled else { return }
         #if canImport(Sparkle)

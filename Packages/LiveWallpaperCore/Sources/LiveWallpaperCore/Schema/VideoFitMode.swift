@@ -21,15 +21,6 @@ public enum VideoFitMode: String, Codable, CaseIterable, Identifiable, Sendable 
         }
     }
 
-    public var descriptionKey: LocalizedStringKey {
-        switch self {
-        case .aspectFill: return "Fill screen (may crop video)"
-        case .aspectFit: return "Fit entire video (may show borders)"
-        case .stretch: return "Stretch to fill screen (may distort)"
-        case .center: return "Center at original size (may crop or show borders)"
-        }
-    }
-
     public var tooltipKey: LocalizedStringKey {
         switch self {
         case .aspectFill: return "Fill: crop to fill screen"

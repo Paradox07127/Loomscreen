@@ -5,8 +5,8 @@ import Foundation
 /// remove / prune, each posting `.wallpaperConfigurationDidChange`).
 ///
 /// Reads stay on the store directly — call sites elsewhere keep using
-/// `configurationStore.get(for:)` / `.loadAll()` / `.allScreenIDs()` because
-/// reads have no side effects to centralise.
+/// `configurationStore.get(for:)` / `.loadAll()` because reads have no side
+/// effects to centralise.
 @MainActor
 final class WallpaperPersistenceCoordinator {
     private let store: WallpaperConfigurationStore

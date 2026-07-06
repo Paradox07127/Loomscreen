@@ -1336,7 +1336,6 @@ final class ScreenManager {
         wpeImportTracker.clearError(for: screen.id)
     }
 
-    typealias WPEProjectPreparationOutcome = WPEImportCoordinator.PreparationOutcome
     typealias WPEProjectApplyOutcome = WPEImportCoordinator.ApplyOutcome
 
     @discardableResult
@@ -1630,10 +1629,6 @@ final class ScreenManager {
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
         effectsCoordinator.setWeatherReactive(enabled, for: screen)
-    }
-
-    func applyWeatherEffects(for screen: Screen) {
-        effectsCoordinator.applyWeatherEffects(for: screen)
     }
 
     func startWeatherMonitoring() {

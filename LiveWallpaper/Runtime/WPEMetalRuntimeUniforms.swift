@@ -525,15 +525,6 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
         return multiply4x4(projection, view)
     }
 
-    private static func normalized(
-        _ value: SIMD3<Double>,
-        fallback: SIMD3<Double>
-    ) -> SIMD3<Double> {
-        let length = simd_length(value)
-        guard length.isFinite, length > 0.000001 else { return fallback }
-        return value / length
-    }
-
     private static func multiply4x4(_ lhs: [Double], _ rhs: [Double]) -> [Double] {
         guard lhs.count == 16, rhs.count == 16 else { return lhs }
         var out = [Double](repeating: 0, count: 16)

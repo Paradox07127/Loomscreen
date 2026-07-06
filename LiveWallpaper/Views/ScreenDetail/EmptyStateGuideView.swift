@@ -10,7 +10,6 @@ struct EmptyStateGuideView: View {
     let onChooseShader: () -> Void
     let onChooseScene: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {

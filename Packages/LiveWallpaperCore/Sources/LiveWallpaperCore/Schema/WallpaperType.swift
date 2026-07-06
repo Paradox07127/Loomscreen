@@ -18,14 +18,4 @@ public enum WallpaperType: String, Codable, CaseIterable, Identifiable, Sendable
         case .monitor: return "Monitor"
         }
     }
-
-    public var iconName: String {
-        switch self {
-        case .video: return "film"
-        case .html: return "globe"
-        case .metalShader: return "wand.and.stars"
-        case .scene: return "cube.transparent"
-        case .monitor: return "gauge.with.dots.needle.67percent"
-        }
-    }
 }

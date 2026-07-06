@@ -116,11 +116,6 @@ final class MonitorSourceAuthorization {
         }
     }
 
-    func clearAccess(_ provider: Provider) {
-        stopAccessing(provider)
-        defaults.removeObject(forKey: provider.defaultsKey)
-    }
-
     // MARK: - Resolution
 
     func resolveClaudeRoot() -> URL? {

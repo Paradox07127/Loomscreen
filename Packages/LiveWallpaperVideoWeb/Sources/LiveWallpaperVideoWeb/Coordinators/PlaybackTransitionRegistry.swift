@@ -81,9 +81,4 @@ public final class PlaybackTransitionRegistry {
         validationTaskByScreen[screenID]?.cancel()
         validationTaskByScreen[screenID] = task
     }
-
-    public func cancelValidationTask(for screenID: CGDirectDisplayID) {
-        validationTaskByScreen[screenID]?.cancel()
-        validationTaskByScreen[screenID] = nil
-    }
 }

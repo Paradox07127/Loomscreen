@@ -35,17 +35,6 @@ final class HTMLWallpaperCoordinator {
 
     // MARK: - Multi-instance diagnostics
 
-    func sourceMultiplicity() -> [String: [CGDirectDisplayID]] {
-        var map: [String: [CGDirectDisplayID]] = [:]
-        for screen in screensProvider() {
-            guard screen.runtimeSession?.wallpaperType == .html,
-                  let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
-                  case .html(let source, _) = config.activeWallpaper else { continue }
-            map[source.diagnosticSignature, default: []].append(screen.id)
-        }
-        return map
-    }
-
     func screensRunningSameSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
         let signature = source.diagnosticSignature
         return screensProvider().filter { other in

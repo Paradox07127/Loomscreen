@@ -93,8 +93,6 @@ final class WPEEngineAssetsLibrary {
         }
     }
 
-    var isManagedInstall: Bool { Self.hasManagedInstall }
-
     func clearAccess() {
         SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
         SettingsManager.shared.clearWPEEngineAssetsBookmark()

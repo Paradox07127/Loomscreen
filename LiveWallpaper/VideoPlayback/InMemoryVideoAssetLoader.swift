@@ -82,11 +82,6 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
         return (loader, customURL(forLastComponent: (entryName as NSString).lastPathComponent))
     }
 
-    /// `lwmem://` form triggers the resource-loader delegate path.
-    static func customURL(for url: URL) -> URL {
-        customURL(forLastComponent: url.lastPathComponent)
-    }
-
     private static func customURL(forLastComponent lastComponent: String) -> URL {
         var components = URLComponents()
         components.scheme = scheme

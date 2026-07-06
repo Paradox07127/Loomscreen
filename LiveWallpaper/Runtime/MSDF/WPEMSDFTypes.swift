@@ -43,14 +43,6 @@ struct WPEMSDFBitmap {
         self.pixels = [SIMD4<Float>](repeating: fill, count: width * height)
     }
 
-    init(width: Int, height: Int, pixels: [SIMD4<Float>]) {
-        precondition(width >= 0 && height >= 0)
-        precondition(pixels.count == width * height)
-        self.width = width
-        self.height = height
-        self.pixels = pixels
-    }
-
     subscript(x: Int, y: Int) -> SIMD4<Float> {
         get {
             pixels[y * width + x]

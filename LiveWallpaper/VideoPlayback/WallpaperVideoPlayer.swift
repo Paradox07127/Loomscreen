@@ -947,15 +947,6 @@ final class WallpaperVideoPlayer {
         setFrameRateLimit(requestedFrameRateLimit)
     }
 
-    /// Sleep / wake suspend hook.
-    func suspend() {
-        pause()
-    }
-
-    func resume() {
-        play()
-    }
-
     private func reportError(_ error: WallpaperRuntimeError) {
         runtimeError = error
         onError?(error)

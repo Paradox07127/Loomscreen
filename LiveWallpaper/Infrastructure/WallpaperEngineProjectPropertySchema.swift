@@ -151,13 +151,6 @@ final class WallpaperEngineProjectPropertySchemaCache: @unchecked Sendable {
         return parsed
     }
 
-    func removeAll() {
-        lock.lock()
-        entries.removeAll(keepingCapacity: true)
-        recency.removeAll(keepingCapacity: true)
-        lock.unlock()
-    }
-
     private func cacheKey(
         manifestURL: URL,
         preferredLanguages: [String],

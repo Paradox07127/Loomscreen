@@ -11,15 +11,6 @@ public struct ScreenConfigurationSignature: Equatable, Hashable, Sendable {
     public let height: Int
     public let scale: Int
 
-    public init(displayID: CGDirectDisplayID, originX: Int, originY: Int, width: Int, height: Int, scale: Int) {
-        self.displayID = displayID
-        self.originX = originX
-        self.originY = originY
-        self.width = width
-        self.height = height
-        self.scale = scale
-    }
-
     public init(screen: NSScreen) {
         let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? 0
         let f = screen.frame

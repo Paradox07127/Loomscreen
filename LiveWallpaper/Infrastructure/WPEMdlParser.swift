@@ -42,8 +42,6 @@ struct WPEMdlParseAudit: Equatable, Sendable {
     struct KnownSkip: Equatable, Sendable {
         let label: String
         let range: Range<Int>
-
-        var byteCount: Int { range.count }
     }
 
     struct SectionRecord: Equatable, Sendable {
@@ -51,26 +49,15 @@ struct WPEMdlParseAudit: Equatable, Sendable {
         let label: String
         let range: Range<Int>
         let intentionallySkippedRanges: [KnownSkip]
-
-        var consumedByteCount: Int { range.count }
-        var intentionallySkippedByteCount: Int {
-            intentionallySkippedRanges.reduce(0) { $0 + $1.byteCount }
-        }
     }
 
     struct Gap: Equatable, Sendable {
         let range: Range<Int>
-
-        var byteCount: Int { range.count }
     }
 
     let sections: [SectionRecord]
     let unexplainedGaps: [Gap]
     let trailingLeftover: Range<Int>?
-
-    var trailingLeftoverByteCount: Int {
-        trailingLeftover?.count ?? 0
-    }
 }
 
 struct WPEPuppetMesh: Equatable, Sendable {

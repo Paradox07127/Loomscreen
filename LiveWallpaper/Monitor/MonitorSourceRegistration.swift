@@ -6,13 +6,6 @@ protocol MonitorUsageProviding: Sendable {
     func currentUsage() async -> MonitorProviderUsage
 }
 
-/// Account-level rate limits (five-hour / weekly percentages + reset times) a
-/// source can optionally expose. Backed by the Claude Code statusline payload;
-/// `MonitorRuntime` merges the result into the shared `MonitorUsageSnapshot`.
-protocol MonitorAccountLimitsProviding: Sendable {
-    func currentLimits() async -> ClaudeRateLimits?
-}
-
 extension ClaudeAgentSource: MonitorUsageProviding {}
 extension CodexAgentSource: MonitorUsageProviding {}
 

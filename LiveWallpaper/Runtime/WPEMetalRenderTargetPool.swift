@@ -563,10 +563,6 @@ final class WPEMetalRenderTargetPool {
         return remainder == 0 ? size : size + alignment - remainder
     }
 
-    static func pixelFormat(forFBOFormat format: String) -> MTLPixelFormat {
-        pixelFormat(forFBOFormat: format, promoteLDRToHDR: false)
-    }
-
     /// HDR scenes promote 8-bit color targets to `.rgba16Float` (WPE renders the
     /// whole scene graph in half-float under `general.hdr`) — otherwise >1
     /// emissive dies at the FIRST layer-composite copy and the godrays/bloom

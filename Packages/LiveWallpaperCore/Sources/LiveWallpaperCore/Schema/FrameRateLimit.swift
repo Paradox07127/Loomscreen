@@ -25,16 +25,6 @@ public enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    public var iconName: String {
-        switch self {
-        case .fps15: return "leaf.fill"
-        case .fps24: return "film"
-        case .fps30: return "tortoise"
-        case .fps60: return "hare"
-        case .unlimited: return "infinity"
-        }
-    }
-
     /// Whether this limit is worth forcing a compositing pipeline for plain
     /// (effect-free) playback. Decoding cost is unaffected by frame rate, so
     /// strapping `AVVideoComposition` onto AVPlayer adds a render pass without

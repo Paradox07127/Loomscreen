@@ -117,12 +117,6 @@ public enum HTMLTrust: Equatable, Sendable {
         }
     }
 
-    /// Compatibility shim for legacy host-only callers.
-    public static func evaluate(source: HTMLSource, trustedHosts: Set<String>) -> HTMLTrust {
-        let origins = Set(trustedHosts.compactMap(TrustedHTMLOrigin.init(persistedValue:)))
-        return evaluate(source: source, trustedOrigins: origins)
-    }
-
     /// Effective JS gate: untrusted remote always forces JS off.
     public func effectiveAllowJavaScript(requested: Bool) -> Bool {
         switch self {

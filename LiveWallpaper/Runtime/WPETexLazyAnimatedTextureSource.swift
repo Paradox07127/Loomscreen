@@ -188,13 +188,6 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         return max(min(lo, frames.count - 1), 0)
     }
 
-    func debugFrameDescription(at time: TimeInterval) -> String {
-        let index = frameIndex(at: time)
-        let frame = frames[index]
-        let rect = frame.subRect
-        return "lazy:\(index)/image\(frame.imageID)[\(Int(rect.origin.x)),\(Int(rect.origin.y)),\(Int(rect.width))x\(Int(rect.height))]"
-    }
-
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         _ = profile
     }

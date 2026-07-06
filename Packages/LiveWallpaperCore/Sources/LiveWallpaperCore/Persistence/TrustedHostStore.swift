@@ -58,7 +58,6 @@ public final class TrustedHostStore {
     public var originSet: Set<TrustedHTMLOrigin> {
         Set(origins).union(Self.builtInTrustedOrigins)
     }
-    public var hostSet: Set<String> { Set(originSet.map(\.rawValue)) }
 
     /// True when `origin` is on the immutable built-in allowlist. UI uses
     /// this to hide / disable the Revoke control for built-ins.
@@ -115,10 +114,6 @@ public final class TrustedHostStore {
 
     private func persist() {
         persistence.save(hosts)
-    }
-
-    public static func normalize(_ raw: [String]) -> [String] {
-        normalizeOrigins(raw).map(\.rawValue)
     }
 
     public static func normalizeOrigins(_ raw: [String]) -> [TrustedHTMLOrigin] {

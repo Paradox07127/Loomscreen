@@ -581,7 +581,6 @@ struct DetailContent: View {
     /// selection can't bring the diagnostic surface back without the toggle.
     let canShowDeveloperTools: Bool
     @Environment(ScreenManager.self) private var screenManager
-    @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
         Group {

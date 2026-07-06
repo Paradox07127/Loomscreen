@@ -518,12 +518,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         setHTMLWallpaper(source: HTMLSource(legacyString: content), config: .default)
     }
 
-    public mutating func updateHTMLConfig(_ config: HTMLConfig) {
-        guard case .html(let source, _) = activeWallpaper else { return }
-        savedHTMLConfig = config
-        activeWallpaper = .html(source: source, config: config)
-    }
-
     public mutating func setShaderWallpaper(_ source: ShaderSource) {
         preserveCurrentVideoBookmarkIfNeeded()
         preserveCurrentHTMLIfNeeded()
@@ -545,13 +539,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper = .scene(resolved)
         wpeOrigin = origin
         savedSceneDescriptor = resolved
-    }
-
-    public mutating func setMonitorWallpaper(_ config: MonitorWallpaperConfiguration) {
-        preserveCurrentVideoBookmarkIfNeeded()
-        preserveCurrentHTMLIfNeeded()
-        savedMonitorConfiguration = config
-        activeWallpaper = .monitor(config)
     }
 
     public mutating func updateMonitorConfiguration(_ config: MonitorWallpaperConfiguration) {

@@ -107,17 +107,6 @@ enum WPEMSDFSegment {
         }
     }
 
-    var controlPoints: [WPEMSDFPoint] {
-        switch self {
-        case let .linear(p0, p1, _):
-            return [p0, p1]
-        case let .quadratic(p0, c, p1, _):
-            return [p0, c, p1]
-        case let .cubic(p0, c0, c1, p1, _):
-            return [p0, c0, c1, p1]
-        }
-    }
-
     /// Axis-aligned bounding box of the segment's control points. A Bézier curve
     /// lies within the convex hull of its control points, so this AABB fully
     /// contains the curve. The Euclidean distance from any query point to this
@@ -344,34 +333,6 @@ struct WPEMSDFContour {
 struct WPEMSDFShape {
     var contours: [WPEMSDFContour]
 
-    func bounds() -> CGRect {
-        var hasPoint = false
-        var minX = Double.greatestFiniteMagnitude
-        var minY = Double.greatestFiniteMagnitude
-        var maxX = -Double.greatestFiniteMagnitude
-        var maxY = -Double.greatestFiniteMagnitude
-
-        for contour in contours {
-            for segment in contour.segments {
-                for point in segment.controlPoints {
-                    hasPoint = true
-                    minX = min(minX, point.x)
-                    minY = min(minY, point.y)
-                    maxX = max(maxX, point.x)
-                    maxY = max(maxY, point.y)
-                }
-            }
-        }
-
-        guard hasPoint else { return .null }
-        return CGRect(
-            x: CGFloat(minX),
-            y: CGFloat(minY),
-            width: CGFloat(maxX - minX),
-            height: CGFloat(maxY - minY)
-        )
-    }
-
     mutating func applyTransform(scale: Double, translate: WPEMSDFPoint) {
         for contourIndex in contours.indices {
             for segmentIndex in contours[contourIndex].segments.indices {
@@ -380,20 +341,6 @@ struct WPEMSDFShape {
                     translate: translate
                 )
             }
-        }
-    }
-
-    func signedDistance(at point: WPEMSDFPoint, channel: WPEMSDFEdgeColor) -> Double {
-        let distances = signedDistances(at: point)
-        switch channel {
-        case .red:
-            return distances.r
-        case .green:
-            return distances.g
-        case .blue:
-            return distances.b
-        default:
-            return WPEMSDFGeometryMath.median(distances.r, distances.g, distances.b)
         }
     }
 

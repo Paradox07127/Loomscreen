@@ -117,10 +117,6 @@ public final class Logger {
         log(message(), category: category, level: .error, file: file, function: function, line: line)
     }
 
-    public static func fault(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message(), category: category, level: .fault, file: file, function: function, line: line)
-    }
-
     // MARK: - Lifecycle Logging
 
     public static func functionStart(category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {

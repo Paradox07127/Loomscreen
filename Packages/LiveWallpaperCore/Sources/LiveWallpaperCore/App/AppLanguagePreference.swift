@@ -77,18 +77,6 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
         )
     }
 
-    public static func localizedString(
-        _ key: String.LocalizationValue,
-        bundle: Bundle = .main
-    ) -> String {
-        let preference = current
-        return String(
-            localized: key,
-            bundle: preference.localizationBundle(in: bundle),
-            locale: preference.locale
-        )
-    }
-
     public static func localizedFormat(
         _ key: String,
         defaultValue: String? = nil,

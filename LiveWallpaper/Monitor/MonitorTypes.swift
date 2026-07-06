@@ -132,10 +132,6 @@ struct MonitorSnapshot: Codable, Sendable, Equatable {
     var usage: MonitorUsageSnapshot?
     var health: [MonitorSourceHealth]?
 
-    var fleetAggregate: MonitorAgentStatus {
-        (agents ?? []).map(\.status).max { $0.attentionPriority < $1.attentionPriority } ?? .unknown
-    }
-
     static let jsonEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]

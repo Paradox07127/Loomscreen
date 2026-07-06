@@ -32,18 +32,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private var waterWavesPathValue = "Inactive"
     private var waterWavesPathStamp: TimeInterval = 0
 
-    /// Which code path the waterwaves effect is currently taking ("Builtin" /
-    /// "Transpiled" / "Inactive"). Goes stale to "Inactive" ~1s after the last
-    /// waterwaves dispatch so it reflects the *current* scene.
-    var waterWavesPath: String {
-        waterWavesPathLock.lock()
-        defer { waterWavesPathLock.unlock() }
-        if ProcessInfo.processInfo.systemUptime - waterWavesPathStamp > 1.0 {
-            return "Inactive"
-        }
-        return waterWavesPathValue
-    }
-
     func setWaterWavesPath(_ path: String) {
         waterWavesPathLock.lock()
         waterWavesPathValue = path

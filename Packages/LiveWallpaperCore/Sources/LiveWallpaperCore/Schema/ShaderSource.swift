@@ -11,11 +11,6 @@ public enum ShaderSource: Equatable, Sendable, Hashable {
     case builtin(MetalShaderPreset)
     case custom(UUID)
 
-    public var isCustom: Bool {
-        if case .custom = self { return true }
-        return false
-    }
-
     public var builtinPreset: MetalShaderPreset? {
         if case .builtin(let preset) = self { return preset }
         return nil

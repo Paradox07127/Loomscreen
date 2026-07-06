@@ -96,14 +96,6 @@ enum HTMLWallpaperCompatibilityPolicy {
         return !entryHTMLLooksDPRAware(folderURL: folderURL, indexFileName: indexFileName)
     }
 
-    /// Wallpaper Engine workshop projects ship a `project.json` next to the entry HTML.
-    static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
-        withResolvedFolderURL(source) { folderURL in
-            let manifest = folderURL.appendingPathComponent("project.json")
-            return FileManager.default.fileExists(atPath: manifest.path)
-        } ?? false
-    }
-
     private static func withResolvedFolderURL<T>(_ source: HTMLSource, _ body: (URL) -> T) -> T? {
         guard case .folder(let bookmarkData, _) = source else { return nil }
         guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(

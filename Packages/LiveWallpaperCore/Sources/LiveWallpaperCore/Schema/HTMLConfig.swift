@@ -142,10 +142,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// translate into infinity by mis-typing a value.
     public static let maxTransformTranslate: Double = 3000
 
-    /// Bounds for the refresh timer. Anything below 5s is rejected because
-    /// `WKWebView.reload()` itself takes ~50–200ms and the page rarely has
-    /// time to render before being torn down again.
-    public static let minRefreshIntervalSeconds: Int = 0
+    /// Upper bound for the refresh timer (24h).
     public static let maxRefreshIntervalSeconds: Int = 24 * 60 * 60
 
     private enum CodingKeys: String, CodingKey {

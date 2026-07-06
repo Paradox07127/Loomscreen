@@ -109,10 +109,6 @@ public final class WallpaperConfigurationStore {
         cache.removeAll()
     }
 
-    public func allScreenIDs() -> [CGDirectDisplayID] {
-        loadAll().map(\.screenID)
-    }
-
     public func loadAll() -> [ScreenConfiguration] {
         let configs = persistence.loadConfigurations()
         cache = Dictionary(uniqueKeysWithValues: configs.map { ($0.screenID, $0) })

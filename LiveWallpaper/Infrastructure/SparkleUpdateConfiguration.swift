@@ -2,7 +2,6 @@ import Foundation
 
 enum SparkleUpdateConfiguration {
     static let isPublicDistributionEnabled = false
-    static let publicEDKey = "pfIShU4dEXqPd5ObYNfDBiQWcXozk7estwzTnF9BamQ="
     static let manualChecksDefaultsKey = "SparkleTestManualChecksEnabled"
     static let manualChecksEnvironmentKey = "LOOMSCREEN_SPARKLE_TESTING"
 

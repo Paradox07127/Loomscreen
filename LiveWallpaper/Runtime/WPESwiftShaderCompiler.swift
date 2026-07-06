@@ -131,10 +131,5 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     private static func shouldExposeVertexUniformToFragment(_ uniform: WPEUniformDecl) -> Bool {
         !uniform.type.hasPrefix("mat") && !uniform.name.hasPrefix("g_Model")
     }
-
-    private static func arraySuffix(for uniform: WPEUniformDecl) -> String {
-        guard let arrayLength = uniform.arrayLength else { return "" }
-        return "[\(arrayLength)]"
-    }
 }
 #endif

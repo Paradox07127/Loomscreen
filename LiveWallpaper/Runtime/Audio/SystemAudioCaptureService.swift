@@ -80,8 +80,6 @@ final class SystemAudioCaptureService: @unchecked Sendable {
 
     private(set) var isRunning = false
 
-    var lastInputPeak: Float { context?.lastInputPeak ?? 0 }
-
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?

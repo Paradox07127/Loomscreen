@@ -14,7 +14,6 @@ private enum HUDSignal {
     static let idle = Color(red: 0.470, green: 0.454, blue: 0.432)       // neutral oklch(.56 .010 76)
 
     static let ink = Color(red: 0.924, green: 0.907, blue: 0.875)
-    static let inkDim = Color(red: 0.618, green: 0.593, blue: 0.558)
     static let inkFaint = Color(red: 0.413, green: 0.391, blue: 0.361)
 
     /// Warm graphite tint laid over the vibrancy base so the capsule reads as

@@ -70,7 +70,6 @@ public enum DesignTokens {
         public static let md: CGFloat = 12
         public static let lg: CGFloat = 16
         public static let xl: CGFloat = 24
-        public static let xxl: CGFloat = 32
     }
 
     public enum Corner {
@@ -86,7 +85,6 @@ public enum DesignTokens {
         public static let maxWidth: CGFloat = 392
         public static let defaultWidth: CGFloat = idealWidth
         public static let horizontalPadding: CGFloat = Spacing.md
-        public static let verticalPadding: CGFloat = Spacing.lg
         /// Shared geometry for every inspector "label … [slider][value]" row so
         /// sliders and their numeric readouts line up across all sections. The
         /// readout font (`Typography.metric`) is already monospaced, so call
@@ -108,13 +106,11 @@ public enum DesignTokens {
     public enum Sidebar {
         public static let width: CGFloat = 180
         public static let maxWidth: CGFloat = width * 1.2
-        public static let sectionHeaderSpacing: CGFloat = 6
         public static let sectionHeaderBottomPadding: CGFloat = 0
         /// Negative inset pulled above each sidebar section header to tighten the
         /// otherwise-airy default gap between sections (macOS has no public
         /// `listSectionSpacing`, so we claw it back on the header itself).
         public static let sectionHeaderTopPadding: CGFloat = -7
-        public static let displayHeaderBottomPadding: CGFloat = 6
     }
 
     public enum DetailHeader {
@@ -142,7 +138,6 @@ public enum DesignTokens {
         public static let searchMinWidth: CGFloat = 132
         public static let searchIdealWidth: CGFloat = 168
         public static let searchMaxWidth: CGFloat = 216
-        public static let controlHeight: CGFloat = 28
     }
 
     /// Floor dimensions every sidebar-routed library page uses. Without this,
@@ -169,7 +164,6 @@ public enum DesignTokens {
     public enum Settings {
         public static let formHorizontalMargin: CGFloat = 18
         public static let formVerticalMargin: CGFloat = 12
-        public static let actionGridSpacing: CGFloat = 10
     }
 
     public enum Card {
