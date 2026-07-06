@@ -34,22 +34,33 @@ struct ScreenDetailInspectorPanel: View {
                         wallpaperModeCard
                     }
 
-                    CommonPlaybackInspector(
-                        screen: screen,
-                        wallpaperType: draft.selectedWallpaperType,
-                        muted: $draft.videoMuted,
-                        videoVolume: $draft.videoVolume,
-                        videoDisplayMode: $draft.selectedVideoDisplayMode,
-                        frameRateLimit: $draft.selectedFrameRateLimit,
-                        syncToLockScreen: $draft.setAsLockScreen,
-                        sceneMouseInteractionEnabled: $draft.sceneMouseInteractionEnabled,
-                        sceneClickCaptureEnabled: $draft.sceneClickCaptureEnabled,
-                        sceneFitMode: $draft.selectedFitMode,
-                        htmlConfig: draft.selectedWallpaperType == .html ? $draft.htmlConfig : nil,
-                        videoColorSpace: draft.videoColorSpace,
-                        showsResetPlayback: showsResetPlayback,
-                        onResetPlayback: onResetPlaybackSettings
-                    )
+                    // Monitor has no audio / fit / frame-rate playback surface;
+                    // it gets its own module + authorization card instead of the
+                    // common playback inspector.
+                    if draft.selectedWallpaperType == .monitor {
+                        MonitorDetailView(
+                            screen: screen,
+                            screenManager: screenManager,
+                            featureCatalog: featureCatalog
+                        )
+                    } else {
+                        CommonPlaybackInspector(
+                            screen: screen,
+                            wallpaperType: draft.selectedWallpaperType,
+                            muted: $draft.videoMuted,
+                            videoVolume: $draft.videoVolume,
+                            videoDisplayMode: $draft.selectedVideoDisplayMode,
+                            frameRateLimit: $draft.selectedFrameRateLimit,
+                            syncToLockScreen: $draft.setAsLockScreen,
+                            sceneMouseInteractionEnabled: $draft.sceneMouseInteractionEnabled,
+                            sceneClickCaptureEnabled: $draft.sceneClickCaptureEnabled,
+                            sceneFitMode: $draft.selectedFitMode,
+                            htmlConfig: draft.selectedWallpaperType == .html ? $draft.htmlConfig : nil,
+                            videoColorSpace: draft.videoColorSpace,
+                            showsResetPlayback: showsResetPlayback,
+                            onResetPlayback: onResetPlaybackSettings
+                        )
+                    }
 
                     if draft.selectedWallpaperType == .html {
                         ContentSecurityInspector(

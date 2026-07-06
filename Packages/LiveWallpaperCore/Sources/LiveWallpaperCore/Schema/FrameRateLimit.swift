@@ -100,8 +100,8 @@ extension FrameRateLimit {
     ///   forcing an `AVVideoComposition` recompose (see `enforcesCompositionCap`).
     public static func naturalDefault(for wallpaperType: WallpaperType) -> FrameRateLimit {
         switch wallpaperType {
-        case .scene:                       return .fps30
-        case .video, .html, .metalShader:  return .fps60
+        case .scene:                                 return .fps30
+        case .video, .html, .metalShader, .monitor:  return .fps60
         }
     }
 }

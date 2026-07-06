@@ -45,6 +45,9 @@ public struct WPEOriginReconciler: OriginReconciler {
                 configuration.wpeOrigin = nil
                 return
             }
+        case .monitor:
+            // Monitor wallpapers carry no WPE origin; drop any stale metadata.
+            configuration.wpeOrigin = nil
         }
     }
 }

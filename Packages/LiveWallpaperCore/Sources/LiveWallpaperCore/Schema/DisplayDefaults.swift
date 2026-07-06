@@ -102,17 +102,33 @@ public struct DisplayDefaults: Codable, Equatable, Sendable {
     public var html: DisplayPlaybackDefaults
     public var metalShader: DisplayPlaybackDefaults
     public var scene: DisplayPlaybackDefaults
+    public var monitor: DisplayPlaybackDefaults
 
     public init(
         video: DisplayPlaybackDefaults = .natural(for: .video),
         html: DisplayPlaybackDefaults = .natural(for: .html),
         metalShader: DisplayPlaybackDefaults = .natural(for: .metalShader),
-        scene: DisplayPlaybackDefaults = .natural(for: .scene)
+        scene: DisplayPlaybackDefaults = .natural(for: .scene),
+        monitor: DisplayPlaybackDefaults = .natural(for: .monitor)
     ) {
         self.video = video
         self.html = html
         self.metalShader = metalShader
         self.scene = scene
+        self.monitor = monitor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case video, html, metalShader, scene, monitor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        video = try c.decodeIfPresent(DisplayPlaybackDefaults.self, forKey: .video) ?? .natural(for: .video)
+        html = try c.decodeIfPresent(DisplayPlaybackDefaults.self, forKey: .html) ?? .natural(for: .html)
+        metalShader = try c.decodeIfPresent(DisplayPlaybackDefaults.self, forKey: .metalShader) ?? .natural(for: .metalShader)
+        scene = try c.decodeIfPresent(DisplayPlaybackDefaults.self, forKey: .scene) ?? .natural(for: .scene)
+        monitor = try c.decodeIfPresent(DisplayPlaybackDefaults.self, forKey: .monitor) ?? .natural(for: .monitor)
     }
 
     public func playbackDefaults(for wallpaperType: WallpaperType) -> DisplayPlaybackDefaults {
@@ -125,6 +141,8 @@ public struct DisplayDefaults: Codable, Equatable, Sendable {
             metalShader
         case .scene:
             scene
+        case .monitor:
+            monitor
         }
     }
 }
@@ -176,7 +194,7 @@ public extension ScreenConfiguration {
             videoColorSpace = defaults.videoColorSpace
         case .html:
             applyHTMLAudioDefaults(defaults)
-        case .metalShader:
+        case .metalShader, .monitor:
             break
         case .scene:
             sceneMouseInteractionEnabled = defaults.sceneMouseInteractionEnabled

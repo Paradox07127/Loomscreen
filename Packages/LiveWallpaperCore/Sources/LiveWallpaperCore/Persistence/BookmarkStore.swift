@@ -141,6 +141,10 @@ public final class BookmarkStore {
             }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default bookmark label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        case .monitor:
+            // Monitor wallpapers aren't user-bookmarkable in v1; this branch
+            // only exists to keep the switch exhaustive.
+            return "Monitor"
         }
     }
 
@@ -157,6 +161,8 @@ public final class BookmarkStore {
             }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        case .monitor:
+            return "Monitor"
         }
     }
 
@@ -173,6 +179,8 @@ public final class BookmarkStore {
             }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        case .monitor:
+            return "Monitor"
         }
     }
 }

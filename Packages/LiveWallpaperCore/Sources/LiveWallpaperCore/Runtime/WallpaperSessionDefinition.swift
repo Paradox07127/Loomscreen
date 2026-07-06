@@ -9,6 +9,7 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
     case html(HTMLSource, HTMLConfig)
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
+    case monitor(MonitorWallpaperConfiguration)
 
     public static func video(bookmarkData: Data) -> WallpaperSessionDefinition {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)
@@ -29,6 +30,8 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
                   !descriptor.cacheRelativePath.isEmpty,
                   !descriptor.entryFile.isEmpty else { return nil }
             self = .scene(descriptor)
+        case .monitor(let config):
+            self = .monitor(config)
         }
     }
 
@@ -45,6 +48,8 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
             }
         case .scene(let descriptor):
             return "Scene \(descriptor.workshopID)"
+        case .monitor:
+            return "Monitor"
         }
     }
 }

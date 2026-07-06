@@ -9,6 +9,7 @@ public enum WallpaperContent: Equatable, Sendable {
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
+    case monitor(MonitorWallpaperConfiguration)
 
     public static func video(bookmarkData: Data) -> WallpaperContent {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)
@@ -24,6 +25,8 @@ public enum WallpaperContent: Equatable, Sendable {
             return .metalShader
         case .scene:
             return .scene
+        case .monitor:
+            return .monitor
         }
     }
 
@@ -64,13 +67,18 @@ public enum WallpaperContent: Equatable, Sendable {
         guard case .scene(let descriptor) = self else { return nil }
         return descriptor
     }
+
+    public var monitorConfiguration: MonitorWallpaperConfiguration? {
+        guard case .monitor(let config) = self else { return nil }
+        return config
+    }
 }
 
 // MARK: - Codable
 
 extension WallpaperContent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case video, html, metalShader, scene
+        case video, html, metalShader, scene, monitor
     }
 
     private enum VideoCodingKeys: String, CodingKey {
@@ -90,6 +98,10 @@ extension WallpaperContent: Codable {
 
     private enum SceneCodingKeys: String, CodingKey {
         case descriptor
+    }
+
+    private enum MonitorCodingKeys: String, CodingKey {
+        case config
     }
 
     public init(from decoder: Decoder) throws {
@@ -130,6 +142,12 @@ extension WallpaperContent: Codable {
             return
         }
 
+        if let monitorNested = try? container.nestedContainer(keyedBy: MonitorCodingKeys.self, forKey: .monitor) {
+            let config = try monitorNested.decodeIfPresent(MonitorWallpaperConfiguration.self, forKey: .config) ?? .default
+            self = .monitor(config)
+            return
+        }
+
         throw DecodingError.dataCorrupted(
             DecodingError.Context(
                 codingPath: decoder.codingPath,
@@ -155,6 +173,9 @@ extension WallpaperContent: Codable {
         case .scene(let descriptor):
             var nested = container.nestedContainer(keyedBy: SceneCodingKeys.self, forKey: .scene)
             try nested.encode(descriptor, forKey: .descriptor)
+        case .monitor(let config):
+            var nested = container.nestedContainer(keyedBy: MonitorCodingKeys.self, forKey: .monitor)
+            try nested.encode(config, forKey: .config)
         }
     }
 }

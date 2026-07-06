@@ -29,6 +29,9 @@ extension ScreenManager {
             setShaderWallpaper(source: source, for: screen)
         case .scene(let descriptor):
             setSceneWallpaper(descriptor: descriptor, origin: bookmark.wpeOrigin, for: screen)
+        case .monitor(let monitorConfig):
+            switchToMonitorWallpaper(for: screen)
+            updateMonitorConfiguration(monitorConfig, for: screen)
         }
     }
 

@@ -14,9 +14,10 @@ struct LiteSKUSmokeTests {
     func liteCatalogSurfaceArea() {
         let capabilities = ProductCapabilities.lite
         #expect(capabilities.sku == .lite)
-        #expect(capabilities.selectableWallpaperTypes == [.video, .html])
+        #expect(capabilities.selectableWallpaperTypes == [.video, .html, .monitor])
         #expect(capabilities.canRender(.video))
         #expect(capabilities.canRender(.html))
+        #expect(capabilities.canRender(.monitor))
         #expect(!capabilities.canRender(.metalShader))
         #expect(!capabilities.canRender(.scene))
         #expect(capabilities.selectableWallpaperModes.contains(.playlist))
@@ -30,6 +31,9 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.enabledFeatures.contains(.inspectorPreview))
         #expect(capabilities.enabledFeatures.contains(.videoEffects))
         #expect(capabilities.enabledFeatures.contains(.weatherReactive))
+        // Monitor wallpaper is in both SKUs; its AI-agent modules (.agentFleet) are Pro-only.
+        #expect(capabilities.enabledFeatures.contains(.monitorWallpaper))
+        #expect(!capabilities.enabledFeatures.contains(.agentFleet))
         #expect(!capabilities.enabledFeatures.contains(.wpeImport))
         #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }

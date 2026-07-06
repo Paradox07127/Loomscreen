@@ -67,6 +67,9 @@ struct ScreenDetailView: View {
             screenManager.switchToShaderWallpaper(for: screen)
         case .scene:
             break
+        case .monitor:
+            guard featureCatalog.isEnabled(.monitorWallpaper) else { return }
+            screenManager.switchToMonitorWallpaper(for: screen)
         }
     }
 
@@ -104,6 +107,10 @@ struct ScreenDetailView: View {
                 // (schemecolor, sliders). Inspector rows gate video-only
                 // content internally.
                 return config?.wallpaperType == .scene
+            case .monitor:
+                // Mount once a real monitor config loads so the inspector can
+                // surface module toggles + authorization rows.
+                return config?.wallpaperType == .monitor
             case .metalShader:
                 return false
             }
@@ -349,7 +356,7 @@ struct ScreenDetailView: View {
                 Button("Choose Video…") { showFilePicker() }
             case .html:
                 Button("Choose Web…") { showHTMLSourcePicker() }
-            case .metalShader, .scene:
+            case .metalShader, .scene, .monitor:
                 EmptyView()
             }
             Button("Cancel", role: .cancel) { }
@@ -524,7 +531,7 @@ struct ScreenDetailView: View {
             showFilePicker()
         case .html:
             showHTMLSourcePicker()
-        case .metalShader, .scene:
+        case .metalShader, .scene, .monitor:
             draft.selectedWallpaperType = activeType
         }
     }

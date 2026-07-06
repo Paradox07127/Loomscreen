@@ -189,6 +189,8 @@ struct BookmarksPopover: View {
             }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Bookmark source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        case .monitor:
+            return String(localized: "Monitor", comment: "Bookmark source label for the system monitor wallpaper.")
         }
     }
 }

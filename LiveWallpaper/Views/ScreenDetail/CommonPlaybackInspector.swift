@@ -110,7 +110,7 @@ struct CommonPlaybackInspector: View {
     private var showsFrameRateRow: Bool {
         switch wallpaperType {
         case .video, .metalShader, .scene: return true
-        case .html: return false
+        case .html, .monitor: return false
         }
     }
 

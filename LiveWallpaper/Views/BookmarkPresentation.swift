@@ -7,6 +7,7 @@ extension WallpaperBookmark {
         case .html: return .green
         case .metalShader: return .purple
         case .scene: return .orange
+        case .monitor: return Color(red: 0.98, green: 0.66, blue: 0.25)
         }
     }
 
@@ -29,6 +30,8 @@ extension WallpaperBookmark {
             }
         case .scene(let descriptor):
             return Text("Workshop \(descriptor.workshopID)", comment: "Bookmark subtitle for a Workshop scene. The placeholder is the Workshop ID.")
+        case .monitor:
+            return Text("System Monitor", comment: "Bookmark subtitle for the system monitor wallpaper.")
         }
     }
 }

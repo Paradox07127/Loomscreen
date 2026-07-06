@@ -168,6 +168,29 @@ final class AmbientWallpaperSessionBuilder {
         return session
     }
 
+    /// Mounts the bundled first-party monitor dashboard. Ships in both SKUs;
+    /// `agentFleetEnabled` (Pro-only) decides whether the AI-agent / usage
+    /// modules inside it are wired up — Lite passes `false` for a system-only
+    /// dashboard.
+    func makeMonitorSession(
+        _ config: MonitorWallpaperConfiguration,
+        agentFleetEnabled: Bool,
+        frame: CGRect
+    ) -> AmbientWallpaperSession {
+        let window = VideoWallpaperWindow(frame: frame)
+        let monitorView = MonitorWallpaperView(
+            frame: frame,
+            configuration: config,
+            agentFleetEnabled: agentFleetEnabled
+        )
+        window.contentView = monitorView
+        let session = AmbientWallpaperSession(window: window, wallpaperType: .monitor, performanceTarget: monitorView)
+        // Click-through unless the per-screen toggle opts in; the view mirrors
+        // the same flag in its `hitTest`.
+        window.setWallpaperMouseInteractionEnabled(config.mouseInteractionEnabled)
+        return session
+    }
+
     #if !LITE_BUILD
     func makeShaderSession(source: ShaderSource, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)

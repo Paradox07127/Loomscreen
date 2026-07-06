@@ -425,7 +425,7 @@ private struct BookmarkTile: View {
             ), !Task.isCancelled {
                 thumbnail = image
             }
-        case .metalShader, .scene:
+        case .metalShader, .scene, .monitor:
             break
         }
     }
@@ -439,6 +439,7 @@ private struct BookmarkTile: View {
         case .html:        typeTag = "html"
         case .metalShader: typeTag = "shader"
         case .scene:       typeTag = "scene"
+        case .monitor:     typeTag = "monitor"
         }
         return "bookmark::\(typeTag)::\(bookmark.id.uuidString)"
     }

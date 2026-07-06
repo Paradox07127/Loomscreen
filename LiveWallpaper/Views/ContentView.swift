@@ -534,6 +534,8 @@ struct ScreenRow: View {
             return "sparkles.rectangle.stack"
         case .scene:
             return "cube.transparent"
+        case .monitor:
+            return "gauge.with.dots.needle.67percent"
         case nil:
             return "display"
         }
@@ -564,6 +566,8 @@ struct ScreenRow: View {
             return summary.activity == .active ? Text("Wallpaper playing") : Text("Wallpaper paused")
         case .scene:
             return Text("Scene wallpaper")
+        case .monitor:
+            return Text("Monitor wallpaper active")
         case nil:
             return Text("No wallpaper configured")
         }

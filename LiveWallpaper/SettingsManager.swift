@@ -576,6 +576,9 @@ final class SettingsManager {
             return !descriptor.workshopID.isEmpty
                 && !descriptor.cacheRelativePath.isEmpty
                 && !descriptor.entryFile.isEmpty
+        case .monitor:
+            // Bundled dashboard + self-contained config — always valid.
+            return true
         }
     }
 

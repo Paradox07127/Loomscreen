@@ -19,6 +19,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// when the user re-picks the same scene after a type switch. Without it a
     /// scene's settings vanished the moment another wallpaper type went active.
     public var savedSceneDescriptor: SceneDescriptor?
+    /// Last applied monitor configuration — restored on type switch back to
+    /// Monitor, mirroring `savedHTMLConfig` / `savedSceneDescriptor`.
+    public var savedMonitorConfiguration: MonitorWallpaperConfiguration?
     public var playbackSpeed: Double
     public var fitMode: VideoFitMode
     public var videoDisplayMode: VideoDisplayMode = .perDisplay
@@ -77,6 +80,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case savedHTMLSource
         case savedHTMLConfig
         case savedSceneDescriptor
+        case savedMonitorConfiguration
         case playbackSpeed
         case fitMode
         case videoDisplayMode
@@ -226,12 +230,13 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 playlistCursorIndex: playlistCursorIndex,
                 setAsLockScreen: setAsLockScreen
             )
-        case .html, .metalShader, .scene:
+        case .html, .metalShader, .scene, .monitor:
             // `.scene` no longer maps to a synthetic HTML placeholder — Phase 2.0
             // ships a real renderer. This convenience initializer is still
             // hit by legacy tests and migration paths that have no descriptor;
             // they degrade to an empty video so the type-pivot UI surfaces a
-            // "not configured" Scene tab instead of crashing.
+            // "not configured" Scene tab instead of crashing. `.monitor` has a
+            // self-contained default config, so it maps to a real dashboard.
             let wallpaper: WallpaperContent = switch wallpaperType {
             case .html:
                 .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
@@ -241,6 +246,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 .video(bookmarkData: videoBookmarkData)
             case .scene:
                 .video(bookmarkData: Data())
+            case .monitor:
+                .monitor(.default)
             }
 
             self.init(
@@ -353,6 +360,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
         savedSceneDescriptor = try c.decodeIfPresent(SceneDescriptor.self, forKey: .savedSceneDescriptor)
+        savedMonitorConfiguration = try c.decodeIfPresent(MonitorWallpaperConfiguration.self, forKey: .savedMonitorConfiguration)
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
         displayFingerprint = try c.decodeIfPresent(String.self, forKey: .displayFingerprint)
         // Absent in legacy / loose-video payloads → nil. Refined below from the
@@ -374,6 +382,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
             }
             if savedSceneDescriptor == nil, case .scene(let descriptor) = decodedWallpaper {
                 savedSceneDescriptor = descriptor
+            }
+            if savedMonitorConfiguration == nil, case .monitor(let config) = decodedWallpaper {
+                savedMonitorConfiguration = config
             }
             return
         }
@@ -407,6 +418,14 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 activeWallpaper = .video(bookmarkData: Data())
                 savedVideoBookmarkData = legacySavedBookmark
             }
+        case .monitor:
+            // Predates the `.monitor` case existing in a top-level
+            // `wallpaperType` blob (Monitor only ever persists via the
+            // structured `activeWallpaper` container), so this is only
+            // reachable from a forward-dated import — activate a default
+            // dashboard rather than blanking the screen.
+            activeWallpaper = .monitor(.default)
+            savedVideoBookmarkData = legacySavedBookmark
         }
     }
 
@@ -456,6 +475,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(savedHTMLSource, forKey: .savedHTMLSource)
         try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
         try c.encodeIfPresent(savedSceneDescriptor, forKey: .savedSceneDescriptor)
+        try c.encodeIfPresent(savedMonitorConfiguration, forKey: .savedMonitorConfiguration)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
         try c.encode(videoDisplayMode, forKey: .videoDisplayMode)
@@ -525,6 +545,29 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper = .scene(resolved)
         wpeOrigin = origin
         savedSceneDescriptor = resolved
+    }
+
+    public mutating func setMonitorWallpaper(_ config: MonitorWallpaperConfiguration) {
+        preserveCurrentVideoBookmarkIfNeeded()
+        preserveCurrentHTMLIfNeeded()
+        savedMonitorConfiguration = config
+        activeWallpaper = .monitor(config)
+    }
+
+    public mutating func updateMonitorConfiguration(_ config: MonitorWallpaperConfiguration) {
+        guard case .monitor = activeWallpaper else { return }
+        savedMonitorConfiguration = config
+        activeWallpaper = .monitor(config)
+    }
+
+    @discardableResult
+    public mutating func activateSavedMonitorWallpaper() -> Bool {
+        let config = savedMonitorConfiguration ?? .default
+        preserveCurrentVideoBookmarkIfNeeded()
+        preserveCurrentHTMLIfNeeded()
+        savedMonitorConfiguration = config
+        activeWallpaper = .monitor(config)
+        return true
     }
 
     @discardableResult

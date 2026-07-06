@@ -53,6 +53,9 @@ struct ScreenDetailPreviewArea: View {
                 #else
                 EmptyView()
                 #endif
+            } else if draft.selectedWallpaperType == .monitor,
+                      featureCatalog.isEnabled(.monitorWallpaper) {
+                monitorContent
             }
         }
         // No hard minWidth: the parent assigns this area an explicit width
@@ -141,6 +144,19 @@ struct ScreenDetailPreviewArea: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Static placeholder for the Monitor wallpaper — no live WKWebView in the
+    /// inspector preview (v1); the dashboard only renders on the desktop layer.
+    /// Module toggles + authorization live in the inspector to the side.
+    private var monitorContent: some View {
+        IllustratedEmptyState(
+            symbol: "gauge.with.dots.needle.67percent",
+            title: "System Monitor",
+            message: "A live system dashboard runs on your desktop. Adjust what it shows in the panel.",
+            symbolColor: Color(red: 0.98, green: 0.66, blue: 0.25)
+        )
+        .padding(24)
     }
 
     private func cappedPreviewHeight(
@@ -304,6 +320,7 @@ struct ScreenDetailPreviewArea: View {
         case .html:         return "Web file or folder"
         case .metalShader:  return "Switch to Video or Web to drop"
         case .scene:        return "Switch to Video or Web to drop"
+        case .monitor:      return "Switch to Video or Web to drop"
         }
     }
 }

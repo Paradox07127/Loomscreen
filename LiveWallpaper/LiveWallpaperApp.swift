@@ -175,6 +175,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             globalShortcutManager?.start()
         }
 
+        // Floating fleet HUD (Pro-only): restore the user's persisted on/off
+        // state. Independent of the Monitor wallpaper — it manages its own
+        // agents-only runtime lease while shown.
+        if !runtimeOptions.isTesting,
+           manager.featureCatalog.isEnabled(.agentFleet) {
+            MonitorHUDController.shared.focusHandler = { MonitorFocusRouter.focus(sessionID: $0) }
+            MonitorHUDController.shared.applyPersistedStateAtStartup()
+        }
+
         Logger.notice("Application startup complete", category: .startup)
 
         if startupPlan.showSettingsOnLaunch {
@@ -288,6 +297,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isWaitingForTerminationFlush else { return .terminateNow }
         isWaitingForTerminationFlush = true
         screenManager?.tearDownForTermination()
+        // Synchronous, bounded (small JSON): the tail-cursor debounce window
+        // must not drop the last offsets on quit.
+        MonitorSourceRegistration.flushCursorStoreForTermination()
         Task { @MainActor in
             // Reply on whichever lands first: the flush, or a 2s watchdog. The
             // persistence-actor writes don't honor cancellation, so we don't

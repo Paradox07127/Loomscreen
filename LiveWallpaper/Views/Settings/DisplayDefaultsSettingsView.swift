@@ -7,6 +7,7 @@ private enum DisplayDefaultsKind {
     case html
     case metalShader
     case scene
+    case monitor
 }
 
 struct DisplayDefaultsSettingsView: View {
@@ -252,6 +253,8 @@ struct DisplayDefaultsSettingsView: View {
             displayDefaults.metalShader
         case .scene:
             displayDefaults.scene
+        case .monitor:
+            displayDefaults.monitor
         }
     }
 
@@ -265,6 +268,8 @@ struct DisplayDefaultsSettingsView: View {
             displayDefaults.metalShader = playback
         case .scene:
             displayDefaults.scene = playback
+        case .monitor:
+            displayDefaults.monitor = playback
         }
         persist()
     }

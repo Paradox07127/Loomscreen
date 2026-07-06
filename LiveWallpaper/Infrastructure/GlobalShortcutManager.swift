@@ -221,16 +221,18 @@ final class GlobalShortcutManager {
         }
     }
 
-    /// "Mouse interaction" means cursor-follow for scenes and click-through for
-    /// web wallpapers — the only types with a mouse seam. The new on/off state
-    /// is decided across just those screens, then pushed per type.
+    /// "Mouse interaction" means cursor-follow for scenes, click-through for web
+    /// wallpapers, and clickable dashboard for the monitor — the types with a
+    /// mouse seam. The new on/off state is decided across just those screens,
+    /// then pushed per type.
     private func toggleGlobalMouseInteraction(via manager: ScreenManager) {
         let states: [Bool] = manager.screens.compactMap { screen in
             guard let config = manager.getConfiguration(for: screen) else { return nil }
             switch config.wallpaperType {
-            case .scene: return config.sceneMouseInteractionEnabled
-            case .html:  return config.htmlConfig?.allowMouseInteraction
-            default:     return nil
+            case .scene:   return config.sceneMouseInteractionEnabled
+            case .html:    return config.htmlConfig?.allowMouseInteraction
+            case .monitor: return config.activeWallpaper.monitorConfiguration?.mouseInteractionEnabled
+            default:       return nil
             }
         }
         guard !states.isEmpty else { return }
@@ -244,6 +246,11 @@ final class GlobalShortcutManager {
                 if var html = config.htmlConfig {
                     html.allowMouseInteraction = newEnabled
                     manager.updateHTMLConfig(html, for: screen)
+                }
+            case .monitor:
+                if var monitor = config.activeWallpaper.monitorConfiguration {
+                    monitor.mouseInteractionEnabled = newEnabled
+                    manager.updateMonitorConfiguration(monitor, for: screen)
                 }
             default:
                 break

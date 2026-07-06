@@ -47,6 +47,7 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
         case .html(let source, _): return source.iconName
         case .metalShader: return "sparkles.rectangle.stack"
         case .scene: return "cube.transparent"
+        case .monitor: return "gauge.with.dots.needle.67percent"
         }
     }
 

@@ -173,6 +173,11 @@ public final class WallpaperConfigurationStore {
             return false
         case .scene:
             return false
+        case .monitor:
+            // No external resource bookmark to validate — the dashboard is a
+            // bundled page, and the optional Claude/Codex roots have their own
+            // security-scoped bookmarks whose absence only degrades health.
+            return false
         }
     }
 }

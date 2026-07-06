@@ -15,6 +15,16 @@ public enum ProductFeature: String, Sendable, Hashable, Codable {
     case metalShader
     case scene
 
+    /// The system-metrics dashboard wallpaper (`WallpaperType.monitor`).
+    /// Available in BOTH Lite and Pro — system monitoring serves the broad
+    /// user base. Gates only the wallpaper surface; the AI-agent modules
+    /// inside it are gated separately by `.agentFleet`.
+    case monitorWallpaper
+    /// Pro-only: unlocks the AI-agent sessions + AI-usage modules INSIDE the
+    /// monitor wallpaper. Lite users get a full system-metrics dashboard with
+    /// no AI rows.
+    case agentFleet
+
     case wpeImport
     case videoEffects
     case weatherReactive
@@ -63,7 +73,7 @@ public struct ProductCapabilities: Sendable, Equatable {
     public static let lite = ProductCapabilities(
         sku: .lite,
         enabledFeatures: [
-            .video, .html,
+            .video, .html, .monitorWallpaper,
             .videoEffects, .weatherReactive,
             .scheduleAutomation, .playlists,
             .systemMonitor, .globalShortcuts,
@@ -76,6 +86,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         sku: .pro,
         enabledFeatures: [
             .video, .html, .metalShader, .scene,
+            .monitorWallpaper, .agentFleet,
             .wpeImport, .videoEffects, .weatherReactive,
             .scheduleAutomation, .playlists,
             .systemMonitor, .globalShortcuts, .developerTools,
@@ -101,6 +112,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         case .html:        return enabledFeatures.contains(.html)
         case .metalShader: return enabledFeatures.contains(.metalShader)
         case .scene:       return enabledFeatures.contains(.scene)
+        case .monitor:     return enabledFeatures.contains(.monitorWallpaper)
         }
     }
 

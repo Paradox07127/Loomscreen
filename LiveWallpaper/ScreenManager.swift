@@ -689,6 +689,8 @@ final class ScreenManager {
             config.savedHTMLConfig = nil
         case .scene:
             config.savedSceneDescriptor = nil
+        case .monitor:
+            config.savedMonitorConfiguration = nil
         case .metalShader:
             break
         }
@@ -816,9 +818,11 @@ final class ScreenManager {
             activateAmbientWallpaper(.metalShader(shaderSource), for: screen, configuration: configuration)
         case .scene(let descriptor):
             activateAmbientWallpaper(.scene(descriptor), for: screen, configuration: configuration)
+        case .monitor(let monitorConfig):
+            activateAmbientWallpaper(.monitor(monitorConfig), for: screen, configuration: configuration)
         }
     }
-    
+
     // MARK: - Video Management
 
     /// Replaces the primary video while preserving per-screen settings.
@@ -1670,6 +1674,40 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
+    /// Activate (or restore) the Monitor wallpaper for a screen when the user
+    /// toggles the type picker to Monitor. Seeds a default configuration on a
+    /// screen that has never had one, mirroring `switchToHTMLWallpaper`.
+    func switchToMonitorWallpaper(for screen: Screen) {
+        var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
+            screenID: screen.id,
+            wallpaper: .monitor(.default)
+        ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
+
+        let previousWallpaper = config.activeWallpaper
+        config.activateSavedMonitorWallpaper()
+
+        if previousWallpaper == config.activeWallpaper,
+           screen.runtimeSession?.wallpaperType == .monitor {
+            Logger.info("Monitor wallpaper already active for screen \(screen.id); keeping existing session", category: .screenManager)
+            return
+        }
+
+        saveConfiguration(config)
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+    }
+
+    /// Push an edited Monitor configuration and restart the wallpaper session so
+    /// the renderer rebuilds under the new module mix. There is no in-place apply
+    /// seam on the monitor view yet, so this always rebuilds (like scene edits).
+    func updateMonitorConfiguration(_ config: MonitorWallpaperConfiguration, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
+        guard case .monitor(let current) = configuration.activeWallpaper else { return }
+        guard current != config else { return }
+        configuration.updateMonitorConfiguration(config)
+        saveConfiguration(configuration)
+        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+    }
+
     func setSceneWallpaper(descriptor: SceneDescriptor, origin: WPEOrigin?, for screen: Screen) {
         var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
@@ -1751,6 +1789,13 @@ final class ScreenManager {
             _ = descriptor
             #endif
             return
+        case .monitor(let monitorConfig):
+            session = ambientSessionBuilder.makeMonitorSession(
+                monitorConfig,
+                agentFleetEnabled: featureCatalog.isEnabled(.agentFleet),
+                frame: screen.frame
+            )
+            Logger.info("Set monitor wallpaper for screen \(screen.id) [agentFleet=\(featureCatalog.isEnabled(.agentFleet))]", category: .screenManager)
         case .video:
             return
         }

@@ -127,6 +127,7 @@ struct ScreenDetailHeader: View {
         case .html:        return "Clear Web Page — remove the saved web page for this display"
         case .metalShader: return "Stop Shader — deactivate the running shader for this display"
         case .scene:       return "Clear Scene — remove the active scene for this display"
+        case .monitor:     return "Clear Monitor — remove the monitor wallpaper for this display"
         }
     }
 
@@ -136,6 +137,7 @@ struct ScreenDetailHeader: View {
         case .html:        return "Clear web page"
         case .metalShader: return "Stop shader"
         case .scene:       return "Clear scene"
+        case .monitor:     return "Clear monitor"
         }
     }
 
@@ -196,6 +198,9 @@ struct ScreenDetailHeader: View {
             if case .scene(let descriptor)? = config?.activeWallpaper {
                 return .scene(descriptor)
             }
+            return nil
+        case .monitor:
+            // Monitor wallpapers aren't bookmarkable in v1.
             return nil
         }
     }

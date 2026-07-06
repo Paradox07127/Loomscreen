@@ -14,7 +14,10 @@ struct MenuBarContent: View {
     let openSettingsAndAddWallpaper: () -> Void
 
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.dismiss) private var dismiss
+
+    @State private var hudEnabled = MonitorHUDController.shared.isEnabled
 
     private var monitor: SystemMonitor { .shared }
 
@@ -41,6 +44,10 @@ struct MenuBarContent: View {
                 header
                 sectionDivider
                 displays
+                if featureCatalog.isEnabled(.agentFleet) {
+                    sectionDivider
+                    fleetHUDRow
+                }
                 sectionDivider
                 footer
             }
@@ -140,6 +147,51 @@ struct MenuBarContent: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Pro-only floating HUD toggle. Mirrors the header master switch's control
+    /// style (small `.switch`) and the display row's icon-tile + label layout.
+    private var fleetHUDRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "rectangle.on.rectangle.angled")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hudEnabled ? DesignTokens.Colors.Status.active : Color.secondary)
+                .frame(width: 26, height: 26)
+                .adaptiveGlassSurface(.roundedRectangle(8))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Fleet HUD")
+                    .font(DesignTokens.Typography.bodyEmphasized)
+                    .lineLimit(1)
+                Text("Floating agent status over any app")
+                    .font(DesignTokens.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: Binding(
+                get: { hudEnabled },
+                set: { enabled in
+                    guard enabled != hudEnabled else { return }
+                    hudEnabled = enabled
+                    MonitorHUDController.shared.isEnabled = enabled
+                }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Fleet HUD"))
+            .accessibilityValue(hudEnabled ? Text("On") : Text("Off"))
+            .accessibilityAddTraits(.isButton)
+        }
+        .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
+        .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
+        .frame(maxWidth: .infinity)
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
+        .help(Text("Show a floating capsule with live AI-agent fleet status on top of every space"))
     }
 
     private var usageStrip: some View {
@@ -346,6 +398,8 @@ struct MenuBarContent: View {
             return "Shader"
         case .scene:
             return "Scene"
+        case .monitor:
+            return "Monitor"
         case nil:
             return nil
         }
@@ -361,6 +415,8 @@ struct MenuBarContent: View {
             return "cube.transparent"
         case .video:
             return "play.rectangle"
+        case .monitor:
+            return "gauge.with.dots.needle.67percent"
         case nil:
             return "display"
         }
