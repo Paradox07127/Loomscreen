@@ -952,8 +952,14 @@ struct WallpaperPolicyEngineTests {
             hasConfiguredWallpaperSessions: true,
             hasConfiguredSceneSessions: false
         ))
-        #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+        // pauseOnWindowOcclusion defaults on and alone keeps the poll alive.
+        #expect(WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: false),
+            hasConfiguredWallpaperSessions: true,
+            hasConfiguredSceneSessions: false
+        ))
+        #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+            globalSettings: GlobalSettings(pauseOnFullScreen: false, pauseOnWindowOcclusion: false),
             hasConfiguredWallpaperSessions: true,
             hasConfiguredSceneSessions: false
         ))
@@ -971,7 +977,7 @@ struct WallpaperPolicyEngineTests {
             hasConfiguredSceneSessions: true
         ))
         #expect(!WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
-            globalSettings: GlobalSettings(pauseOnFullScreen: false, adaptiveFrameRateEnabled: true),
+            globalSettings: GlobalSettings(pauseOnFullScreen: false, pauseOnWindowOcclusion: false, adaptiveFrameRateEnabled: true),
             hasConfiguredWallpaperSessions: true,
             hasConfiguredSceneSessions: false
         ))
@@ -1565,5 +1571,248 @@ private final class TestWallpaperRuntimeSession: WallpaperRuntimeSession {
 
     func cleanup() {
         cleanupCallCount += 1
+    }
+}
+
+// MARK: - Infrastructure ↔ Runtime boundary (ADR-002, step 1)
+
+/// Fitness function standing in for the compile-time boundary the single app
+/// target cannot enforce: `Infrastructure/` must not reach into types declared
+/// under `Runtime/`. It freezes today's crossings as an explicit baseline and
+/// fails on any *new* one, so the coupling can only be paid down over time.
+@Suite("Infrastructure↔Runtime boundary")
+struct InfrastructureRuntimeBoundaryTests {
+
+    /// Known Infra→Runtime references, frozen at the ADR-002 baseline. This map
+    /// may only ever *shrink*: deleting entries as the coupling is paid down is
+    /// expected; adding one means a new boundary violation slipped in.
+    private static let baseline: [String: Set<String>] = [
+        "WPEDependencyMountResolver.swift": ["WPEPathSafety"],
+        "WPEDirectorySceneAssetProvider.swift": ["WPEPathSafety"],
+        "WPEDownloadArchiveReclaimer.swift": ["WPEPathSafety"],
+        "WPEMetalTextureLoader.swift": [
+            "WPEMetalTextureMetadataRegistry",
+            "WPETexAnimatedFrame",
+            "WPETexAnimatedTextureSource",
+            "WPETexLazyAnimatedTextureSource",
+            "WPEVideoTextureSource",
+        ],
+        "WPEMultiRootResourceResolver.swift": [
+            "WPEResolutionAttempt",
+            "WPEResolutionEvent",
+            "WPEResolutionOrigin",
+            "WPEResolutionOutcome",
+            "WPEResolutionTracer",
+        ],
+        "WPERenderGraphBuilder.swift": ["WPEMetalRenderExecutor", "WPEResolutionTracer"],
+        "WPERenderPipelineBuilder.swift": ["WPEResolutionTracer", "WPEShaderBuiltinMacros"],
+        "WPESceneDebugArtifacts.swift": ["WPEResolutionDiagnosticsSnapshot"],
+        "WPESceneDocumentParser.swift": ["WPETransformScriptEvaluator"],
+        "WPESceneProjectSchemaLoader.swift": ["WPEPathSafety"],
+        "WPEStorageInventory.swift": ["WPEPathSafety"],
+        "WPEStoragePaths.swift": ["WPEPathSafety"],
+        "WPEVideoTextureDiskCache.swift": ["WPEPathSafety"],
+        "WallpaperEngineCache.swift": ["WPEPathSafety"],
+        "WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy", "WPEPathSafety"],
+        "WallpaperEngineLibraryScanner.swift": ["WPEPathSafety"],
+        "WallpaperEngineProject.swift": ["WPEPathSafety"],
+        "Workshop/Doctor/SteamCMDDoctorService.swift": ["WPEPathSafety"],
+    ]
+
+    @Test("Infrastructure/ introduces no Runtime/ references beyond the ADR-002 baseline")
+    func infrastructureDoesNotReferenceRuntimeTypesBeyondBaseline() throws {
+        let runtimeTypes = try runtimeDeclaredTypeNames()
+        #expect(!runtimeTypes.isEmpty, "Runtime type extraction found nothing — scan is misconfigured")
+
+        var newCrossings: [String] = []
+        for file in try infrastructureSwiftFiles() {
+            let relativePath = file.path.replacingOccurrences(
+                of: infrastructureRoot.path + "/",
+                with: ""
+            )
+            let code = stripComments(try String(contentsOf: file, encoding: .utf8))
+            let allowed = Self.baseline[relativePath] ?? []
+
+            for type in runtimeTypes where !allowed.contains(type) {
+                guard containsIdentifier(type, in: code) else { continue }
+                newCrossings.append("\(relativePath) references Runtime type \(type)")
+            }
+        }
+
+        #expect(
+            newCrossings.isEmpty,
+            Comment(rawValue: """
+            New Infrastructure→Runtime coupling (ADR-002 forbids growth):
+            \(newCrossings.sorted().joined(separator: "\n"))
+            """)
+        )
+    }
+
+    @Test("Boundary baseline stays honest — no stale entries")
+    func baselineHasNoStaleEntries() throws {
+        let runtimeTypes = try runtimeDeclaredTypeNames()
+        var stale: [String] = []
+
+        for (relativePath, allowed) in Self.baseline {
+            let file = infrastructureRoot.appendingPathComponent(relativePath)
+            guard let code = try? String(contentsOf: file, encoding: .utf8) else {
+                stale.append("\(relativePath) (file no longer exists)")
+                continue
+            }
+            let stripped = stripComments(code)
+            for type in allowed where !runtimeTypes.contains(type) || !containsIdentifier(type, in: stripped) {
+                stale.append("\(relativePath): \(type)")
+            }
+        }
+
+        #expect(
+            stale.isEmpty,
+            Comment(rawValue: """
+            Baseline lists crossings that no longer exist — shrink the allow-list (ADR-002 lets it only shrink):
+            \(stale.sorted().joined(separator: "\n"))
+            """)
+        )
+    }
+
+    // MARK: - Repository source scanning
+
+    private var repoRoot: URL {
+        var url = URL(fileURLWithPath: #filePath)
+        while url.lastPathComponent != "LiveWallpaperTests" {
+            url.deleteLastPathComponent()
+        }
+        return url.deletingLastPathComponent()
+    }
+
+    private var infrastructureRoot: URL {
+        repoRoot.appendingPathComponent("LiveWallpaper/Infrastructure")
+    }
+
+    private func infrastructureSwiftFiles() throws -> [URL] {
+        try swiftFiles(under: infrastructureRoot)
+    }
+
+    private func runtimeDeclaredTypeNames() throws -> Set<String> {
+        let declaration = /^(?:public |internal |private |fileprivate |open )*(?:final )?(?:class|struct|enum|protocol|actor)\s+([A-Za-z_][A-Za-z0-9_]*)/
+        var names: Set<String> = []
+        for file in try swiftFiles(under: repoRoot.appendingPathComponent("LiveWallpaper/Runtime")) {
+            for line in try String(contentsOf: file, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false) {
+                if let match = try declaration.prefixMatch(in: line) {
+                    names.insert(String(match.output.1))
+                }
+            }
+        }
+        return names
+    }
+
+    private func swiftFiles(under root: URL) throws -> [URL] {
+        let manager = FileManager.default
+        guard let enumerator = manager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var collected: [URL] = []
+        for case let url as URL in enumerator where url.pathExtension == "swift" {
+            let isRegular = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+            if isRegular { collected.append(url) }
+        }
+        return collected
+    }
+
+    /// Whole-word (`\b…\b`) identifier search — a substring hit inside a longer
+    /// identifier (e.g. `WPEPath` inside `WPEPathSafety`) must not count.
+    private func containsIdentifier(_ identifier: String, in source: String) -> Bool {
+        guard !identifier.isEmpty else { return false }
+        func isIdentifierCharacter(_ character: Character) -> Bool {
+            character == "_" || character.isLetter || character.isNumber
+        }
+        var searchStart = source.startIndex
+        while let range = source.range(of: identifier, range: searchStart..<source.endIndex) {
+            let boundaryBefore = range.lowerBound == source.startIndex
+                || !isIdentifierCharacter(source[source.index(before: range.lowerBound)])
+            let boundaryAfter = range.upperBound == source.endIndex
+                || !isIdentifierCharacter(source[range.upperBound])
+            if boundaryBefore && boundaryAfter { return true }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    // MARK: - Comment stripping (so a type named only in prose never trips the scan)
+
+    private func stripComments(_ source: String) -> String {
+        stripLineComments(stripBlockComments(source))
+    }
+
+    private func stripBlockComments(_ source: String) -> String {
+        var result = ""
+        result.reserveCapacity(source.count)
+        var index = source.startIndex
+        var inString = false
+        var escaped = false
+        while index < source.endIndex {
+            let character = source[index]
+            let next = source.index(after: index)
+            if inString {
+                result.append(character)
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { inString = false }
+                index = next
+            } else if character == "\"" {
+                inString = true
+                result.append(character)
+                index = next
+            } else if character == "/", next < source.endIndex, source[next] == "*" {
+                index = source.index(after: next)
+                while index < source.endIndex {
+                    if source[index] == "*",
+                       source.index(after: index) < source.endIndex,
+                       source[source.index(after: index)] == "/" {
+                        index = source.index(index, offsetBy: 2)
+                        break
+                    }
+                    index = source.index(after: index)
+                }
+            } else {
+                result.append(character)
+                index = next
+            }
+        }
+        return result
+    }
+
+    private func stripLineComments(_ source: String) -> String {
+        source
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> Substring in
+                guard let commentStart = lineCommentStart(in: line) else { return line }
+                return line[line.startIndex..<commentStart]
+            }
+            .joined(separator: "\n")
+    }
+
+    private func lineCommentStart(in line: Substring) -> Substring.Index? {
+        var inString = false
+        var escaped = false
+        var index = line.startIndex
+        while index < line.endIndex {
+            let character = line[index]
+            if escaped {
+                escaped = false
+            } else if inString && character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                inString.toggle()
+            } else if !inString && character == "/" {
+                let next = line.index(after: index)
+                if next < line.endIndex && line[next] == "/" {
+                    return index
+                }
+            }
+            index = line.index(after: index)
+        }
+        return nil
     }
 }

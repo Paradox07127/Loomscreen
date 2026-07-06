@@ -40,7 +40,9 @@ public enum DesignTokens {
 
     /// Prefer Dynamic Type styles so text auto-scales with accessibility
     /// settings; only `badge` is fixed-size because it floats in tight,
-    /// fixed-geometry chips. Never inline `.font(.system(size:))`.
+    /// fixed-geometry chips. Never inline `.font(.system(size:))` on text —
+    /// standalone SF Symbol glyph sizing is the documented exemption
+    /// (DESIGN.md hard rule 1).
     public enum Typography {
         public static let badge = Font.system(.caption2).weight(.semibold)
 
