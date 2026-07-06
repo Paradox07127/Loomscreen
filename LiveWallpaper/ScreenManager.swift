@@ -661,13 +661,32 @@ final class ScreenManager {
         let oldScreens = screens
         let oldScreenIDs = Set(oldScreens.map(\.id))
         let newScreenIDs = Set(newScreens.map(\.id))
+        let oldFingerprintsByID = Dictionary(
+            oldScreens.map { ($0.id, $0.displayFingerprint) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for screenID in oldScreenIDs.subtracting(newScreenIDs) {
             if let screen = oldScreens.first(where: { $0.id == screenID }) {
                 Logger.info("Cleaning up removed screen \(screenID)", category: .screenManager)
                 releaseRuntimeSession(screen)
             }
-            
+
+        }
+
+        // A recycled/repurposed CGDirectDisplayID (same ID, different physical
+        // panel) reports a new displayFingerprint. That is an identity change:
+        // adopting the prior panel's session by ID alone would inherit the wrong
+        // wallpaper and bypass the fingerprint-aware config lookup, so treat it
+        // like a fresh display — release the stale session and reload below.
+        let identityChangedIDs = Set(newScreens.compactMap { newScreen -> CGDirectDisplayID? in
+            guard let oldFingerprint = oldFingerprintsByID[newScreen.id],
+                  oldFingerprint != newScreen.displayFingerprint else { return nil }
+            return newScreen.id
+        })
+        for screen in oldScreens where identityChangedIDs.contains(screen.id) {
+            Logger.info("Display \(screen.id) fingerprint changed — releasing prior panel's session", category: .screenManager)
+            releaseRuntimeSession(screen)
         }
 
         if !preserveRuntimeSessions {
@@ -675,11 +694,13 @@ final class ScreenManager {
                 releaseRuntimeSession(screen)
             }
         }
-        
+
         var updatedScreens = [Screen]()
 
         for newScreen in newScreens {
-            if preserveRuntimeSessions, let existingScreen = oldScreens.first(where: { $0.id == newScreen.id }) {
+            if preserveRuntimeSessions,
+               !identityChangedIDs.contains(newScreen.id),
+               let existingScreen = oldScreens.first(where: { $0.id == newScreen.id }) {
                 newScreen.adoptRuntimeSession(from: existingScreen)
             }
 
@@ -688,7 +709,8 @@ final class ScreenManager {
 
         screens = updatedScreens
 
-        for screen in newScreens where newScreenIDs.subtracting(oldScreenIDs).contains(screen.id) {
+        let reloadIDs = newScreenIDs.subtracting(oldScreenIDs).union(identityChangedIDs)
+        for screen in newScreens where reloadIDs.contains(screen.id) {
             Logger.info("Configuring new screen \(screen.id)", category: .screenManager)
             if restoresSavedWallpapersOnScreenRefresh {
                 loadConfigurationForScreen(screen)
@@ -781,6 +803,9 @@ final class ScreenManager {
         setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
         playbackCoordinator.refreshVideoAudioLeadership()
+        // A torn-down HTML leader must hand audio to a surviving same-source
+        // follower; the session is already reset above so it is excluded here.
+        htmlCoordinator.refreshAudioLeadership()
         refreshAppNapAssertion()
     }
 
@@ -996,6 +1021,11 @@ final class ScreenManager {
         } else if let session = session as? AmbientWallpaperSession {
             session.onRuntimeErrorChange = notify
         }
+        #if !LITE_BUILD
+        if let session = session as? SceneWallpaperSession {
+            session.onRuntimeErrorChange = notify
+        }
+        #endif
     }
 
     func wallpaperDisplayName(for screen: Screen) -> String? {
@@ -1848,6 +1878,11 @@ final class ScreenManager {
                 engineAssetsRootURL: engineRoot
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
+                // The old session was already torn down at the top of this
+                // method; without this the menu/inspector summary cache keeps
+                // showing the now-dead scene as active. Refresh so the screen
+                // reads as not-configured instead of silently going stale.
+                notifyWallpaperSessionChanged()
                 return
             }
             observeRuntimeErrors(for: sceneSession)

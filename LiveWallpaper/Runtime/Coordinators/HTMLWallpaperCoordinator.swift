@@ -68,6 +68,23 @@ final class HTMLWallpaperCoordinator {
         ).config
     }
 
+    /// Recomputes audio leadership across all live HTML sessions and pushes the
+    /// updated mute state into each without rebuilding it. Leadership is baked
+    /// once at session creation, so when a leader is torn down the surviving
+    /// same-source followers would otherwise stay muted forever; call this after
+    /// any HTML session is added or removed. Live-applies via `applyHTMLConfig`
+    /// (returns false only when storage/origin would need a rebuild, which a
+    /// pure mute change never triggers), so it is a no-op for those sessions.
+    func refreshAudioLeadership() {
+        for screen in screensProvider() {
+            guard screen.runtimeSession?.wallpaperType == .html,
+                  let applier = screen.runtimeSession as? any HTMLWallpaperConfigApplying,
+                  let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+                  case .html(let source, let htmlConfig) = config.activeWallpaper else { continue }
+            _ = applier.applyHTMLConfig(runtimeConfig(source: source, config: htmlConfig, for: screen))
+        }
+    }
+
     // MARK: - Public setters
 
     func setWallpaper(
