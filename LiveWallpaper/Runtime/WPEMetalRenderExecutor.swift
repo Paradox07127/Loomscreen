@@ -163,8 +163,8 @@ final class WPEMetalRenderExecutor {
     /// Per-scene output format: `.rgba16Float` for HDR scenes so >1 emissive
     /// survives to the bloom prefilter (an 8-bit target clamps at scene write,
     /// which killed the sun glow); SDR scenes keep the 8-bit sRGB target.
-    /// Known trade-off: `WPEMetalTextureSnapshotter` bails on non-rgba8 formats,
-    /// so HDR scenes produce no preview snapshot / first-frame.png.
+    /// `WPEMetalTextureSnapshotter` clamp+sRGB-encodes rgba16Float, so HDR
+    /// scenes get posters/first-frame.png too (fixed 2026-07-06).
     private var currentOutputPixelFormat: MTLPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
 
     /// Optional developer override for the per-puppet deferred-warp decision (see

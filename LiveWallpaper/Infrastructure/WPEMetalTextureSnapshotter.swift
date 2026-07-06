@@ -37,20 +37,30 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         guard texture.width > 0, texture.height > 0 else {
             return nil
         }
-        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+
+        let bytes: [UInt8]
+        switch texture.pixelFormat {
+        case .rgba8Unorm, .rgba8Unorm_srgb:
+            bytes = readRGBA8(texture)
+        case .bgra8Unorm, .bgra8Unorm_srgb:
+            var swizzled = readRGBA8(texture)
+            for index in stride(from: 0, to: swizzled.count, by: 4) {
+                swizzled.swapAt(index, index + 2)
+            }
+            bytes = swizzled
+        case .rgba16Float:
+            // Linear HDR output (bloom scenes): clamp to SDR and sRGB-encode so
+            // the poster approximates the tone-mapped frame the user sees.
+            bytes = convertRGBA16FloatToSRGB8(texture)
+        default:
+            Logger.warning(
+                "[snapshot] unsupported pixel format \(texture.pixelFormat.rawValue) (\(texture.width)x\(texture.height)) — no poster",
+                category: .wpeRender
+            )
             return nil
         }
 
-        let bytesPerPixel = 4
-        let bytesPerRow = texture.width * bytesPerPixel
-        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
-        texture.getBytes(
-            &bytes,
-            bytesPerRow: bytesPerRow,
-            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
-            mipmapLevel: 0
-        )
-
+        let bytesPerRow = texture.width * 4
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else {
             return nil
         }
@@ -77,6 +87,59 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
             cgImage: cgImage,
             size: CGSize(width: texture.width, height: texture.height)
         )
+    }
+
+    private static func readRGBA8(_ texture: MTLTexture) -> [UInt8] {
+        let bytesPerRow = texture.width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+        texture.getBytes(
+            &bytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+        return bytes
+    }
+
+    private static func convertRGBA16FloatToSRGB8(_ texture: MTLTexture) -> [UInt8] {
+        let pixelCount = texture.width * texture.height
+        var halves = [UInt16](repeating: 0, count: pixelCount * 4)
+        texture.getBytes(
+            &halves,
+            bytesPerRow: texture.width * 8,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+        var out = [UInt8](repeating: 0, count: pixelCount * 4)
+        for pixel in 0..<pixelCount {
+            let base = pixel * 4
+            for channel in 0..<3 {
+                let linear = min(max(float(fromHalfBits: halves[base + channel]), 0), 1)
+                out[base + channel] = UInt8(sRGBEncode(linear) * 255 + 0.5)
+            }
+            let alpha = min(max(float(fromHalfBits: halves[base + 3]), 0), 1)
+            out[base + 3] = UInt8(alpha * 255 + 0.5)
+        }
+        return out
+    }
+
+    /// Portable IEEE-754 half decode (Float16 the type is arm64-only in Swift).
+    private static func float(fromHalfBits bits: UInt16) -> Float {
+        let sign = Float(bits >> 15 == 0 ? 1 : -1)
+        let exponent = Int((bits >> 10) & 0x1F)
+        let mantissa = Int(bits & 0x3FF)
+        switch exponent {
+        case 0:
+            return sign * Float(mantissa) * exp2(-24)
+        case 0x1F:
+            return mantissa == 0 ? sign * .infinity : .nan
+        default:
+            return sign * Float(1024 + mantissa) * exp2(Float(exponent - 25))
+        }
+    }
+
+    private static func sRGBEncode(_ linear: Float) -> Float {
+        linear <= 0.0031308 ? linear * 12.92 : 1.055 * pow(linear, 1 / 2.4) - 0.055
     }
 }
 

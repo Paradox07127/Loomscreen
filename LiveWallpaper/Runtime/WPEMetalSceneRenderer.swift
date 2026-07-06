@@ -290,6 +290,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         ) {
             let source = WPEMetalTextureSnapshotter.SnapshotSource(texture: texture)
             let snapshotter = snapshotter
+            if !completed {
+                Logger.info("[live-poster] present command buffer not completed — poster skipped", category: .wpeRender)
+            }
             Task { [self, snapshotter] in
                 let image = completed ? await snapshotter.snapshotAsync(from: source) : nil
                 releaseSource()
@@ -415,6 +418,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// next natural frame; static scenes re-present the retained output texture.
     func captureLivePosterFromNextFrame() async -> NSImage? {
         guard didLoad, hasPresentedFrame, renderPipeline != nil, currentProfile == .quality else {
+            Logger.info(
+                "[live-poster] skipped: didLoad=\(didLoad) presented=\(hasPresentedFrame) pipeline=\(renderPipeline != nil) profile=\(String(describing: currentProfile))",
+                category: .wpeRender
+            )
             return nil
         }
         let id = UUID()
