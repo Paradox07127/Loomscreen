@@ -20,9 +20,14 @@ final class HTMLWebView: WKWebView {
         "Enter Enhanced Full Screen"
     ]
 
+    // The warn-long diagnostic reports ~450ms here regardless of body shape
+    // (closure 432 / for-where 472 / fully annotated 447 / EMPTY body 0):
+    // it's the Clang importer's first touch of the NSMenu surface in this
+    // target being attributed to this function, not solver time — benign,
+    // don't chase it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        menu.items.removeAll { item in
-            HTMLWebView.blockedMenuTitles.contains(item.title)
+        for item in menu.items where HTMLWebView.blockedMenuTitles.contains(item.title) {
+            menu.removeItem(item)
         }
     }
 }
