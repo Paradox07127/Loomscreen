@@ -1781,4 +1781,85 @@ struct WPEShaderTranspilerTests {
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
+
+    @Test("A block-commented `void main` above the real entry point is ignored")
+    func ignoresBlockCommentedMain() throws {
+        // Editing pattern: an old main is left as a /* */ block above the live one.
+        // Its braces and `void main` text must not be selected by locateMain. The
+        // commented body references an undeclared function, so if it were picked as
+        // main the emitted MSL would fail to compile — the compile gate proves the
+        // real main (whose distinct tint math survives) was chosen instead.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Tint;
+        in vec2 v_TexCoord;
+        /* void main() { gl_FragColor = commented_out_do_not_use(); } */
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Tint;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "block_commented_main",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
+        #expect(result.mslSource.contains("out_color") && result.mslSource.contains("g_Tint"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("A line-commented `void main` above the real entry point is ignored")
+    func ignoresLineCommentedMain() throws {
+        // The `{`/`}` on the commented line would also skew the brace match if
+        // comments weren't masked before locating main.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Tint;
+        in vec2 v_TexCoord;
+        // void main() { gl_FragColor = commented_out_do_not_use(); }
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Tint;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "line_commented_main",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
+        #expect(result.mslSource.contains("out_color") && result.mslSource.contains("g_Tint"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("`/*/` opens a block comment — the opener's `*` is not its own terminator")
+    func slashStarSlashOpensBlockComment() throws {
+        // If `/*/` were treated as self-closing, the rest of the comment would
+        // leak back in as code and the stray `/*` would swallow the real main.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Tint;
+        in vec2 v_TexCoord;
+        /*/ void main() { gl_FragColor = commented_out_do_not_use(); } /* same comment */
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * g_Tint;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "slash_star_slash_comment",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
+        #expect(result.mslSource.contains("out_color") && result.mslSource.contains("g_Tint"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
 }

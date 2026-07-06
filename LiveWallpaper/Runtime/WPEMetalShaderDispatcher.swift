@@ -4,6 +4,12 @@ import Metal
 
 /// Dispatches a prepared pass onto a Metal pipeline state. Shares the executor's
 /// pipeline cache; shader-input math and texture resolution live in `WPEMetalShaderInputs`.
+///
+/// Multi-input builtin cases (compose, genericimage4, godrays_combine) bind each
+/// resolved texture to a fixed fragment slot whose role is fixed per case (e.g. compose's
+/// slot 1 is the second compose source, genericimage4's slot 1 is a mask). The named
+/// `*Slot` constants at each call site document that per-case role; they are not a shared
+/// role vocabulary across cases.
 struct WPEMetalShaderDispatcher {
     let executor: WPEMetalRenderExecutor
 
@@ -199,6 +205,8 @@ struct WPEMetalShaderDispatcher {
                     index: 0
                 )
             } else {
+                let firstComposeSlot = 0
+                let secondComposeSlot = 1
                 let firstTexture = try WPEMetalShaderInputs.resolve(
                     reference: firstReference,
                     textures: textures,
@@ -219,8 +227,8 @@ struct WPEMetalShaderDispatcher {
                     colorPixelFormat: destination.texture.pixelFormat,
                     depthPixelFormat: depthPixelFormat
                 ))
-                encoder.setFragmentTexture(firstTexture, index: 0)
-                encoder.setFragmentTexture(secondTexture, index: 1)
+                encoder.setFragmentTexture(firstTexture, index: firstComposeSlot)
+                encoder.setFragmentTexture(secondTexture, index: secondComposeSlot)
                 var uniforms = WPESolidUniforms(color: WPEMetalShaderInputs.colorVector(for: pass))
                 encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESolidUniforms>.stride, index: 0)
                 if usesObjectQuad {
@@ -424,6 +432,8 @@ struct WPEMetalShaderDispatcher {
             }
 
         case "genericimage4":
+            let primarySlot = 0
+            let maskSlot = 1
             let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
@@ -432,7 +442,7 @@ struct WPEMetalShaderDispatcher {
                 colorPixelFormat: destination.texture.pixelFormat,
                 depthPixelFormat: depthPixelFormat
             ))
-            let primaryRef = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let primaryRef = pass.textureBindings[primarySlot] ?? pass.pass.textures[primarySlot] ?? pass.pass.source
             let primary = try WPEMetalShaderInputs.resolve(
                 reference: primaryRef,
                 textures: textures,
@@ -442,13 +452,13 @@ struct WPEMetalShaderDispatcher {
             WPESceneDebugArtifacts.shared.recordTextureBinding(
                 passID: pass.pass.id,
                 shader: pass.pass.shader,
-                slot: 0,
+                slot: primarySlot,
                 reference: primaryRef,
                 texture: primary,
                 fallbackToPrimary: false
             )
-            encoder.setFragmentTexture(primary, index: 0)
-            let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1]
+            encoder.setFragmentTexture(primary, index: primarySlot)
+            let maskRef = pass.textureBindings[maskSlot] ?? pass.pass.textures[maskSlot]
             let hasMask = maskRef != nil
             let mask: MTLTexture
             if let maskRef {
@@ -461,7 +471,7 @@ struct WPEMetalShaderDispatcher {
                 WPESceneDebugArtifacts.shared.recordTextureBinding(
                     passID: pass.pass.id,
                     shader: pass.pass.shader,
-                    slot: 1,
+                    slot: maskSlot,
                     reference: maskRef,
                     texture: mask,
                     fallbackToPrimary: false
@@ -471,13 +481,13 @@ struct WPEMetalShaderDispatcher {
                 WPESceneDebugArtifacts.shared.recordTextureBinding(
                     passID: pass.pass.id,
                     shader: pass.pass.shader,
-                    slot: 1,
+                    slot: maskSlot,
                     reference: nil,
                     texture: mask,
                     fallbackToPrimary: true
                 )
             }
-            encoder.setFragmentTexture(mask, index: 1)
+            encoder.setFragmentTexture(mask, index: maskSlot)
             var uniforms = executor.genericImageUniforms(
                 for: pass,
                 layer: layer,
@@ -1077,17 +1087,20 @@ struct WPEMetalShaderDispatcher {
             depthPixelFormat: depthPixelFormat
         ))
 
-        let raysReference = pass.textureBindings[0]
-            ?? pass.pass.binds[0]
-            ?? pass.pass.textures[0]
+        let raysSlot = 0
+        let albedoSlot = 1
+        let baseSlot = 2
+        let raysReference = pass.textureBindings[raysSlot]
+            ?? pass.pass.binds[raysSlot]
+            ?? pass.pass.textures[raysSlot]
             ?? pass.pass.source
-        let albedoReference = pass.textureBindings[1]
-            ?? pass.pass.binds[1]
-            ?? pass.pass.textures[1]
+        let albedoReference = pass.textureBindings[albedoSlot]
+            ?? pass.pass.binds[albedoSlot]
+            ?? pass.pass.textures[albedoSlot]
             ?? pass.pass.source
-        let baseReference = pass.textureBindings[2]
-            ?? pass.pass.binds[2]
-            ?? pass.pass.textures[2]
+        let baseReference = pass.textureBindings[baseSlot]
+            ?? pass.pass.binds[baseSlot]
+            ?? pass.pass.textures[baseSlot]
         let raysTexture = try WPEMetalShaderInputs.resolve(
             reference: raysReference,
             textures: textures,
@@ -1122,9 +1135,9 @@ struct WPEMetalShaderDispatcher {
                 level: .notice
             )
         }
-        encoder.setFragmentTexture(raysTexture, index: 0)
-        encoder.setFragmentTexture(albedoTexture, index: 1)
-        encoder.setFragmentTexture(baseTexture, index: 2)
+        encoder.setFragmentTexture(raysTexture, index: raysSlot)
+        encoder.setFragmentTexture(albedoTexture, index: albedoSlot)
+        encoder.setFragmentTexture(baseTexture, index: baseSlot)
 
         let combineWithBase = baseReference == nil ? UInt32(1) : UInt32(0)
         var uniforms = WPEGodraysCombineUniforms(useBase: combineWithBase)

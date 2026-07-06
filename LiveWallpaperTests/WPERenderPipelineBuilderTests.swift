@@ -866,6 +866,50 @@ struct WPERenderPipelineBuilderTests {
         #expect(abs(yRotated.angles.y - Double.pi / 2) < 0.0001)
     }
 
+    @Test("Live alpha override also updates a composelayer-group child's group-local alpha")
+    func liveAlphaOverrideUpdatesGroupLocalGeometry() {
+        func geometry(alpha: Double) -> WPERenderLayerGeometry {
+            WPERenderLayerGeometry(
+                origin: SIMD3<Double>(5, 7, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 40, height: 30),
+                alpha: alpha,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            )
+        }
+        // A composelayer-group child: its group-buffer pass is drawn from
+        // groupLocalGeometry, so a live fade must land there too (the executor
+        // otherwise draws the child at its authored alpha inside the group).
+        let child = WPERenderLayer(
+            objectID: "child",
+            objectName: "Child",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            parentObjectID: "group",
+            geometry: geometry(alpha: 1),
+            localGeometry: geometry(alpha: 1),
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: [],
+            groupRenderTarget: "_rt_layerGroup_group",
+            groupLocalGeometry: geometry(alpha: 1)
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(graphLayer: child, passes: [])
+        ])
+
+        let faded = pipeline.applyingLayerAlpha(["child": 0.25]).layers[0].graphLayer
+        #expect(abs(faded.geometry.alpha - 0.25) < 0.0001)
+        #expect(abs((faded.groupLocalGeometry?.alpha ?? -1) - 0.25) < 0.0001)
+        #expect(faded.groupLocalGeometry?.alphaAnimation == nil)
+        // Non-alpha fields of the group-local geometry are preserved.
+        #expect(faded.groupLocalGeometry?.origin == SIMD3<Double>(5, 7, 0))
+    }
+
     @Test("Prefers scene-provided source for WPE effect aliases")
     func prefersSceneProvidedSourceForWPEEffectAliases() throws {
         let fixture = try makeFixture(files: [

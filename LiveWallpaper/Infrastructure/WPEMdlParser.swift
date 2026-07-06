@@ -84,7 +84,7 @@ struct WPEPuppetMesh: Equatable, Sendable {
     }
 }
 
-struct WPEPuppetVertex: Equatable, Sendable {
+struct WPEPuppetVertex: Hashable, Sendable {
     /// Object-local target geometry. Do not derive this from `uv`: puppet textures can be atlases.
     let position: SIMD3<Float>
     let uv: SIMD2<Float>
@@ -132,7 +132,7 @@ struct WPEPuppetAttachment: Equatable, Sendable {
     }
 }
 
-struct WPEPuppetMeshPart: Equatable, Sendable {
+struct WPEPuppetMeshPart: Hashable, Sendable {
     let id: UInt32
     let start: Int
     let count: Int

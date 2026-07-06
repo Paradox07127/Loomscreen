@@ -167,7 +167,18 @@ struct WPERenderGraphBuilder: Sendable {
 
         let layersByID = Dictionary(layers.map { ($0.objectID, $0) }, uniquingKeysWith: { first, _ in first })
         var nearestGroupByLayer: [String: String] = [:]
-        for layer in layers where !groupIDs.contains(layer.objectID) {
+        // Group layers participate too: nearestComposelayerGroup walks from the
+        // parent up, so a nested inner group resolves to its outer ancestor (never
+        // itself), letting the inner composite land inside the outer buffer.
+        for layer in layers {
+            // A composelayer model with no in-graph descendant hosts runtime-only
+            // content (e.g. a cursor-particle wrapper): its composite is empty and
+            // the executor materializes a group's buffer only when the OWNING layer
+            // encodes, so rerouting it as a plain child writes into an ancestor
+            // buffer that doesn't exist yet and fails the whole scene (3554161528).
+            if candidateGroups.contains(layer.objectID), !groupIDs.contains(layer.objectID) {
+                continue
+            }
             if let groupID = nearestComposelayerGroup(
                 for: layer.objectID,
                 parentByID: parentByID,
@@ -201,7 +212,7 @@ struct WPERenderGraphBuilder: Sendable {
                 // as a picture-in-picture (3470764447's layer 249). Map both
                 // spellings to the group buffer; later passes keep `.previous`
                 // untouched (mid-chain it means the previous composite).
-                return layer
+                let composited = layer
                     .replacingLocalFBOs(localFBOs)
                     .replacingPasses(layer.passes.enumerated().map { index, pass in
                         let aliased = pass.replacingSceneAliasReferences(with: .fbo(groupTarget))
@@ -210,19 +221,26 @@ struct WPERenderGraphBuilder: Sendable {
                             : aliased
                     })
                     .withGroupCompositeSource(groupTarget)
+
+                // A nested inner group still composites its own buffer to `.scene`
+                // above; route that final output into the ancestor group's buffer
+                // so the outer group's effects/masking see the inner content.
+                guard let ancestorID = nearestGroupByLayer[layer.objectID],
+                      let ancestor = layersByID[ancestorID] else {
+                    return composited
+                }
+                return reroutingSceneOutput(
+                    of: composited,
+                    into: ancestor,
+                    layerGeometry: layer.geometry
+                )
             }
 
             guard let groupID = nearestGroupByLayer[layer.objectID],
                   let group = layersByID[groupID] else {
                 return layer
             }
-            let groupTarget = Self.layerGroupTargetName(objectID: groupID)
-            let groupGeometry = Self.groupLocalGeometry(for: layer.geometry, in: group.geometry)
-            return layer
-                .replacingPasses(layer.passes.map { pass in
-                    pass.target == .scene ? pass.replacingTarget(.fbo(name: groupTarget)) : pass
-                })
-                .withGroupRenderTarget(groupTarget, localGeometry: groupGeometry)
+            return reroutingSceneOutput(of: layer, into: group, layerGeometry: layer.geometry)
         }
 
         return Self.reorderedForComposelayerGroups(
@@ -230,6 +248,23 @@ struct WPERenderGraphBuilder: Sendable {
             groupIDs: groupIDs,
             nearestGroupByLayer: nearestGroupByLayer
         )
+    }
+
+    /// Redirects a layer's scene-targeting passes into `group`'s buffer and pins
+    /// its draw geometry to the group-local frame — the shared reroute for both
+    /// plain children and nested inner groups.
+    private func reroutingSceneOutput(
+        of layer: WPERenderLayer,
+        into group: WPERenderLayer,
+        layerGeometry: WPERenderLayerGeometry
+    ) -> WPERenderLayer {
+        let groupTarget = Self.layerGroupTargetName(objectID: group.objectID)
+        let groupGeometry = Self.groupLocalGeometry(for: layerGeometry, in: group.geometry)
+        return layer
+            .replacingPasses(layer.passes.map { pass in
+                pass.target == .scene ? pass.replacingTarget(.fbo(name: groupTarget)) : pass
+            })
+            .withGroupRenderTarget(groupTarget, localGeometry: groupGeometry)
     }
 
     private func nearestComposelayerGroup(
@@ -277,9 +312,31 @@ struct WPERenderGraphBuilder: Sendable {
             emitted.append(groupLayer)
         }
 
-        for layer in layers where pendingGroups.contains(layer.objectID) {
-            emitted.append(layer)
-            pendingGroups.remove(layer.objectID)
+        // Groups left pending here had a group as their own last descendant (skipped
+        // inline above); emit deeper groups first so an inner buffer renders before
+        // the ancestor group that samples it.
+        var depthByGroup: [String: Int] = [:]
+        func nestingDepth(_ id: String) -> Int {
+            if let cached = depthByGroup[id] { return cached }
+            var depth = 0
+            var current = nearestGroupByLayer[id]
+            var seen: Set<String> = []
+            while let ancestor = current, seen.insert(ancestor).inserted {
+                depth += 1
+                current = nearestGroupByLayer[ancestor]
+            }
+            depthByGroup[id] = depth
+            return depth
+        }
+        let trailing = layers.enumerated()
+            .filter { pendingGroups.contains($0.element.objectID) }
+            .sorted { lhs, rhs in
+                let lhsDepth = nestingDepth(lhs.element.objectID)
+                let rhsDepth = nestingDepth(rhs.element.objectID)
+                return lhsDepth != rhsDepth ? lhsDepth > rhsDepth : lhs.offset < rhs.offset
+            }
+        for entry in trailing where pendingGroups.remove(entry.element.objectID) != nil {
+            emitted.append(entry.element)
         }
         return emitted
     }
@@ -599,7 +656,10 @@ struct WPERenderGraphBuilder: Sendable {
     /// instead. Names the script never mentions still prune, so this doesn't
     /// reintroduce the all-variants-render regression (3226487183).
     private static func layerScriptControlledVisibilityIDs(in document: WPESceneDocument) -> Set<String> {
+        // Script hosts are non-renderable script containers that still drive other
+        // layers via getLayer(); mirror createLayerImageTemplateIDs and consult them.
         let scripts = document.imageObjects.compactMap(\.visibleScript)
+            + document.scriptHostObjects.map(\.visibleScript)
         guard !scripts.isEmpty else { return [] }
         let combined = scripts.joined(separator: "\n")
         var ids = Set<String>()
@@ -929,6 +989,7 @@ struct WPERenderGraphBuilder: Sendable {
         for effect in object.effects where effect.visible {
             let asset = try loadEffect(path: effect.fileRelativePath)
             context.localFBOs.append(contentsOf: asset.fbos)
+            let effectDeclaredFBONames = Set(asset.fbos.map(\.name))
             var overrideIndex = 0
             for effectPass in asset.passes {
                 let override = overrideIndex < effect.passOverrides.count
@@ -943,6 +1004,8 @@ struct WPERenderGraphBuilder: Sendable {
                         material.passes,
                         phase: .effect(file: effect.fileRelativePath),
                         override: override,
+                        overrideOwnerPath: effect.fileRelativePath,
+                        overrideDeclaredFBONames: effectDeclaredFBONames,
                         binds: effectPass.binds,
                         explicitTarget: effectPass.target.map { .fbo(name: $0) },
                         to: &context
@@ -962,6 +1025,8 @@ struct WPERenderGraphBuilder: Sendable {
                         [virtualPass],
                         phase: .command(file: effect.fileRelativePath),
                         override: override,
+                        overrideOwnerPath: effect.fileRelativePath,
+                        overrideDeclaredFBONames: effectDeclaredFBONames,
                         binds: effectPass.binds,
                         explicitTarget: target.map { .fbo(name: $0) },
                         to: &context
@@ -1121,13 +1186,21 @@ struct WPERenderGraphBuilder: Sendable {
         _ passes: [WPEMaterialPass],
         phase: WPERenderPassPhase,
         override: WPESceneEffectPassOverride?,
+        overrideOwnerPath: String = "",
+        overrideDeclaredFBONames: Set<String> = [],
         binds: [Int: WPETextureReference],
         explicitTarget: WPERenderTarget?,
         to context: inout LayerBuildContext
     ) throws {
         for materialPass in passes {
             let target = explicitTarget ?? .layerComposite(name: context.nextComposite)
-            var merged = materialPass.merging(override: override)
+            var merged = materialPass.merging(override: override) { path in
+                self.textureReference(
+                    path,
+                    ownerPath: overrideOwnerPath,
+                    declaredFBONames: overrideDeclaredFBONames
+                )
+            }
             merged = materialPassWithPuppetClipCompositeIfNeeded(merged, phase: phase, context: &context)
             let passID = "\(context.object.id).\(context.passes.count)"
             context.passes.append(WPERenderPass(
@@ -2055,17 +2128,14 @@ private struct WPEMaterialPass {
     let depthTest: String
     let depthWrite: String
 
-    func merging(override: WPESceneEffectPassOverride?) -> WPEMaterialPass {
+    func merging(
+        override: WPESceneEffectPassOverride?,
+        resolveTexture: (String) -> WPETextureReference
+    ) -> WPEMaterialPass {
         guard let override else { return self }
         var mergedTextures = textures
         for (index, path) in override.textures {
-            if path == "previous" {
-                mergedTextures[index] = .previous
-            } else if isImplicitFBOTextureName(path) {
-                mergedTextures[index] = .fbo(path)
-            } else {
-                mergedTextures[index] = .asset(path)
-            }
+            mergedTextures[index] = resolveTexture(path)
         }
 
         return WPEMaterialPass(

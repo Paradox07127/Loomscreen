@@ -154,6 +154,71 @@ struct WPERenderGraphBuilderTests {
         #expect(effectPass.constants["pulsespeed"]?.numberValue == 0.84)
     }
 
+    @Test("Effect override texture naming a declared FBO resolves to .fbo, not a raw asset")
+    func effectOverrideTextureResolvesDeclaredFBO() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/layer.json"], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [["shader": "genericimage2", "textures": ["layer_albedo"]]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+        // The effect declares a non-underscore render target ("blurbuffer"); a
+        // second pass reads it. isImplicitFBOTextureName only catches `_`-prefixed
+        // names, so resolving the override through textureReference (which also
+        // checks declaredFBONames) is what recognizes it as an FBO.
+        try writeJSON([
+            "fbos": [["name": "blurbuffer", "scale": 1, "format": "rgba8888"]],
+            "passes": [
+                [
+                    "material": "materials/effects/blur.json",
+                    "target": "blurbuffer",
+                    "bind": [["index": 0, "name": "previous"]]
+                ],
+                [
+                    "material": "materials/effects/combine.json",
+                    "bind": [["index": 0, "name": "previous"]]
+                ]
+            ]
+        ], to: root.appendingPathComponent("effects/blur/effect.json"))
+        try writeJSON([
+            "passes": [["shader": "effects/blur", "textures": ["layer_albedo"]]]
+        ], to: root.appendingPathComponent("materials/effects/blur.json"))
+        try writeJSON([
+            "passes": [["shader": "effects/combine", "textures": [NSNull()]]]
+        ], to: root.appendingPathComponent("materials/effects/combine.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "layer",
+                "name": "Layer",
+                "type": "image",
+                "image": "models/layer.json",
+                "effects": [[
+                    "id": 1,
+                    "file": "effects/blur/effect.json",
+                    "passes": [
+                        [:],
+                        // The user-facing override points the combine pass's slot 0
+                        // at the declared FBO by name (slot 0 = first array entry).
+                        ["textures": ["blurbuffer"]]
+                    ]
+                ]]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let combinePass = try #require(graph.layers.first?.passes.first { $0.shader == "effects/combine" })
+
+        #expect(combinePass.textures[0] == .fbo("blurbuffer"))
+    }
+
     @Test("Final pass without an explicit target composites to the scene framebuffer")
     func finalUntargetedPassTargetsScene() throws {
         let root = FileManager.default.temporaryDirectory
@@ -419,6 +484,202 @@ struct WPERenderGraphBuilderTests {
 
         let child = try #require(graph.layers.first { $0.objectID == "child" })
         #expect(child.passes.last?.target == .fbo(name: groupTarget))
+    }
+
+    @Test("Nested composelayer group composites into its ancestor group, not the scene")
+    func nestedComposelayerGroupCompositesIntoAncestorGroup() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["child_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+
+        // outer(composelayer) -> inner(composelayer) -> image. The image renders
+        // into inner's buffer; inner must composite into OUTER's buffer (not the
+        // live scene) so outer's effects/masking see the inner content.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                [
+                    "id": "outer",
+                    "name": "Outer",
+                    "type": "image",
+                    "image": "models/util/composelayer.json",
+                    "origin": "500 400 0",
+                    "size": "600 400 0"
+                ],
+                [
+                    "id": "inner",
+                    "name": "Inner",
+                    "type": "image",
+                    "image": "models/util/composelayer.json",
+                    "parent": "outer",
+                    "origin": "500 400 0",
+                    "size": "200 100 0"
+                ],
+                [
+                    "id": "child",
+                    "name": "Child",
+                    "type": "image",
+                    "image": "models/child.json",
+                    "parent": "inner",
+                    "origin": "500 400 0",
+                    "size": "40 30 0"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        let outerTarget = "_rt_layerGroup_outer"
+        let innerTarget = "_rt_layerGroup_inner"
+
+        let child = try #require(graph.layers.first { $0.objectID == "child" })
+        #expect(child.passes.last?.target == .fbo(name: innerTarget))
+        #expect(child.groupRenderTarget == innerTarget)
+
+        let inner = try #require(graph.layers.first { $0.objectID == "inner" })
+        // Inner samples its own buffer but draws its composite into the outer buffer.
+        #expect(inner.groupCompositeSource == innerTarget)
+        #expect(inner.groupRenderTarget == outerTarget)
+        #expect(inner.passes.last?.target == .fbo(name: outerTarget))
+        #expect(inner.passes.allSatisfy { $0.target != .scene })
+
+        let outer = try #require(graph.layers.first { $0.objectID == "outer" })
+        #expect(outer.groupCompositeSource == outerTarget)
+        #expect(outer.groupRenderTarget == nil)
+        #expect(outer.passes.last?.target == .scene)
+
+        // Producer-before-consumer: child before inner before outer.
+        let ids = graph.layers.map(\.objectID)
+        let childIdx = try #require(ids.firstIndex(of: "child"))
+        let innerIdx = try #require(ids.firstIndex(of: "inner"))
+        let outerIdx = try #require(ids.firstIndex(of: "outer"))
+        #expect(childIdx < innerIdx)
+        #expect(innerIdx < outerIdx)
+    }
+
+    @Test("Three-level composelayer group nesting keeps producer-before-consumer order")
+    func threeLevelNestedComposelayerGroupOrdering() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["child_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+
+        // outer -> mid -> inner -> image: both outer and mid land in the trailing
+        // emit (their own last descendant is a group), where raw input order
+        // would put the consumer group before its producer.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                ["id": "outer", "name": "Outer", "type": "image", "image": "models/util/composelayer.json", "origin": "500 400 0", "size": "600 400 0"],
+                ["id": "mid", "name": "Mid", "type": "image", "image": "models/util/composelayer.json", "parent": "outer", "origin": "500 400 0", "size": "400 300 0"],
+                ["id": "inner", "name": "Inner", "type": "image", "image": "models/util/composelayer.json", "parent": "mid", "origin": "500 400 0", "size": "200 100 0"],
+                ["id": "child", "name": "Child", "type": "image", "image": "models/child.json", "parent": "inner", "origin": "500 400 0", "size": "40 30 0"]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        let inner = try #require(graph.layers.first { $0.objectID == "inner" })
+        #expect(inner.groupRenderTarget == "_rt_layerGroup_mid")
+        let mid = try #require(graph.layers.first { $0.objectID == "mid" })
+        #expect(mid.groupRenderTarget == "_rt_layerGroup_outer")
+
+        // Producer-before-consumer through every level.
+        let ids = graph.layers.map(\.objectID)
+        let childIdx = try #require(ids.firstIndex(of: "child"))
+        let innerIdx = try #require(ids.firstIndex(of: "inner"))
+        let midIdx = try #require(ids.firstIndex(of: "mid"))
+        let outerIdx = try #require(ids.firstIndex(of: "outer"))
+        #expect(childIdx < innerIdx)
+        #expect(innerIdx < midIdx)
+        #expect(midIdx < outerIdx)
+    }
+
+    @Test("Childless nested composelayer is not rerouted into its ancestor group")
+    func childlessNestedComposelayerIsNotRerouted() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/util/composelayer.json"], to: root.appendingPathComponent("models/util/composelayer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                "textures": ["_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/util/composelayer.json"))
+        try writeJSON(["material": "materials/child.json"], to: root.appendingPathComponent("models/child.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["child_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/child.json"))
+
+        // 3554161528 shape: outer group -> childless inner composelayer (its real
+        // content is a runtime cursor particle, absent from the graph) + a plain
+        // image sibling. The childless inner must NOT be rerouted into outer —
+        // the executor materializes a group buffer only when the owner encodes,
+        // so an early empty write into it fails scene staging.
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
+            "objects": [
+                ["id": "outer", "name": "Outer", "type": "image", "image": "models/util/composelayer.json", "origin": "500 400 0", "size": "600 400 0", "dependencies": ["hollow"]],
+                ["id": "hollow", "name": "Hollow", "type": "image", "image": "models/util/composelayer.json", "parent": "outer", "origin": "500 400 0", "size": "200 100 0"],
+                ["id": "child", "name": "Child", "type": "image", "image": "models/child.json", "parent": "outer", "origin": "500 400 0", "size": "40 30 0"]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        let hollow = try #require(graph.layers.first { $0.objectID == "hollow" })
+        #expect(hollow.groupRenderTarget == nil)
+        #expect(hollow.passes.allSatisfy { $0.target != .fbo(name: "_rt_layerGroup_outer") })
+
+        // The plain sibling still routes into the group as before.
+        let child = try #require(graph.layers.first { $0.objectID == "child" })
+        #expect(child.groupRenderTarget == "_rt_layerGroup_outer")
     }
 
     @Test("Composelayer wrapping only a particle is dropped from the graph")
@@ -1261,6 +1522,51 @@ struct WPERenderGraphBuilderTests {
                 band("night", visible: false),
                 band("unrelated", visible: false),
                 band("post", visible: true, visibleScript: script)
+            ],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+        let ids = Set(graph.layers.map(\.objectID))
+
+        #expect(ids.contains("night"))
+        #expect(ids.contains("day"))
+        #expect(!ids.contains("unrelated"))
+    }
+
+    @Test("Script-host getLayer keeps referenced hidden layers, matching image-object scripts")
+    func scriptHostReferencedHiddenLayersSurvivePruning() throws {
+        // Same reveal-by-name pattern as above, but the script lives on a
+        // non-renderable scriptHostObject. layerScriptControlledVisibilityIDs must
+        // consult script hosts too (like createLayerImageTemplateIDs) or the host's
+        // getLayer("night") target is pruned → nothing to reveal → black.
+        let script = """
+        var displayVideo = ["day", "night"].map(v => thisScene.getLayer(v));
+        export function init() {}
+        export function update() {}
+        """
+        func band(_ id: String, visible: Bool) -> WPESceneImageObject {
+            WPESceneImageObject(
+                id: id, name: id,
+                imageRelativePath: "materials/\(id).png", materialRelativePath: nil,
+                origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1), angles: SIMD3<Double>(0, 0, 0),
+                visible: visible, alpha: 1, color: SIMD3<Double>(1, 1, 1), brightness: 1,
+                blendMode: .normal, alignment: .center, size: nil,
+                effects: [], animationLayers: []
+            )
+        }
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [
+                band("day", visible: true),
+                band("night", visible: false),
+                band("unrelated", visible: false)
+            ],
+            scriptHostObjects: [
+                WPESceneScriptHostObject(id: "host", name: "host", visibleScript: script)
             ],
             diagnostics: []
         )

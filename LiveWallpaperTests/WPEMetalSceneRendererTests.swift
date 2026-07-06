@@ -185,6 +185,29 @@ struct WPEMetalSceneRendererTests {
         #expect(answer == 42)
     }
 
+    @Test("Text content scripts keep an otherwise static scene on the continuous render loop")
+    func textContentScriptsKeepRendererLive() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Backdrop is a static solidcolor; the only per-frame liveness is the two
+        // text content scripts. Before they were counted, needsContinuousFrames
+        // was false and the scene froze at frame 0 (text stopped ticking).
+        let fixture = try MetalSceneFixture.hiddenComputeTextScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        let mtkView = try #require(renderer.nsView as? MTKView)
+        #expect(mtkView.isPaused == false)
+        #expect(mtkView.enableSetNeedsDisplay == false)
+    }
+
     @Test("Renders layers created by SceneScript")
     func rendersSceneScriptCreatedLayers() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

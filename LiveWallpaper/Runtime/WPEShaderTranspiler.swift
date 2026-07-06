@@ -654,20 +654,67 @@ struct WPEShaderTranspiler {
 
     /// Range covering everything from `void main()` through the matching closing brace.
     private static func locateMain(in source: String) -> Range<String.Index>? {
-        guard let keywordRange = source.range(of: "void main") else { return nil }
-        guard let openBrace = source.range(of: "{", range: keywordRange.upperBound..<source.endIndex) else {
+        // Discover on a comment-masked copy so a `/* void main() {} */` or `// void main`
+        // above the real entry point can't be selected, and so `{`/`}` inside comments
+        // don't skew the brace match. The mask is length-preserving, so offsets map 1:1
+        // back onto `source` for the returned range.
+        let masked = maskComments(source)
+        guard let keywordRange = masked.range(of: "void main") else { return nil }
+        guard let openBrace = masked.range(of: "{", range: keywordRange.upperBound..<masked.endIndex) else {
             return nil
         }
         var depth = 1
         var index = openBrace.upperBound
-        while index < source.endIndex && depth > 0 {
-            let ch = source[index]
+        while index < masked.endIndex && depth > 0 {
+            let ch = masked[index]
             if ch == "{" { depth += 1 }
             else if ch == "}" { depth -= 1 }
-            index = source.index(after: index)
+            index = masked.index(after: index)
         }
         guard depth == 0 else { return nil }
-        return keywordRange.lowerBound..<index
+        let lower = source.index(source.startIndex, offsetBy: masked.distance(from: masked.startIndex, to: keywordRange.lowerBound))
+        let upper = source.index(source.startIndex, offsetBy: masked.distance(from: masked.startIndex, to: index))
+        return lower..<upper
+    }
+
+    /// Replace `//` line comments and `/* */` block comments with spaces (newlines kept),
+    /// preserving length so indices into the result map directly onto the input. Strings
+    /// aren't tracked: GLSL has no string literals, so `//` and `/*` only ever open comments.
+    private static func maskComments(_ source: String) -> String {
+        var result = Array(source)
+        var i = 0
+        let count = result.count
+        while i < count {
+            let ch = result[i]
+            if ch == "/", i + 1 < count, result[i + 1] == "/" {
+                var j = i
+                while j < count, result[j] != "\n" {
+                    result[j] = " "
+                    j += 1
+                }
+                i = j
+            } else if ch == "/", i + 1 < count, result[i + 1] == "*" {
+                // Mask the two opener chars before scanning so the `*` of `/*`
+                // can't be taken as the start of `*/` (`/*/` opens a comment).
+                result[i] = " "
+                result[i + 1] = " "
+                var j = i + 2
+                while j < count {
+                    let closing = result[j] == "*" && j + 1 < count && result[j + 1] == "/"
+                    if result[j] != "\n" { result[j] = " " }
+                    j += 1
+                    if closing {
+                        if j < count, result[j] != "\n" { result[j] = " " }
+                        j += 1
+                        break
+                    }
+                }
+                i = j
+            } else {
+                i += 1
+            }
+        }
+        return String(result)
     }
 
     /// Strip the `void main() { ... }` wrapper and rebuild it as Metal-friendly statements.

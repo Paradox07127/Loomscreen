@@ -2408,7 +2408,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let self else { return }
             defer { self.onDemandVideoLoading.remove(key) }
             guard self.loadGeneration == generation else { return }
-            try? await self.loadDynamicTextureOnActor(path: key, layerName: key)
+            do {
+                try await self.loadDynamicTextureOnActor(path: key, layerName: key)
+            } catch {
+                Logger.warning("Scene \(self.descriptor.workshopID) [OnDemandVideo] rebuild failed for \(key): \(error)", category: .wpeRender)
+                return
+            }
             // Force-play the freshly-rebuilt (paused) source under the current
             // profile; a layer script re-issues its own play() next tick.
             guard self.loadGeneration == generation,
@@ -3253,6 +3258,15 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             renderPipeline = pipeline
                 .applyingLayerVisibility(liveLayerVisibility)
                 .applyingLayerAlpha(liveLayerAlpha)
+            // A static scene is paused with setNeedsDisplay disabled, so the flag
+            // below is inert and even a forced draw() re-presents the cached
+            // outputTexture. Render the patched pipeline once here so the toggle
+            // shows immediately instead of waiting for an unrelated live trigger.
+            if !needsContinuousFrames, let frame = try? renderCurrentFrame() {
+                outputTexture = frame
+                mtkView.draw()
+                return true
+            }
         }
         mtkView.setNeedsDisplay(mtkView.bounds)
         return true
@@ -3375,6 +3389,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             || !dynamicAnglesScriptInstances.isEmpty
             || !layerScriptInstances.isEmpty
             || !layerAlphaScriptInstances.isEmpty
+            // Text scripts tick per frame too (content writes `shared` state;
+            // visibility/alpha drive fades) — a scene whose only live driver is a
+            // text script must keep the loop running or it freezes at frame 0.
+            || !textScriptInstances.isEmpty
+            || !textVisibleScriptInstances.isEmpty
+            || !textAlphaScriptInstances.isEmpty
             || pointerDrivenContent
     }
 

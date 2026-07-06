@@ -495,6 +495,25 @@ private extension WPERenderLayer {
             color: g.color,
             brightness: g.brightness
         )
+        // The executor draws a composelayer-group child's group-buffer pass from
+        // groupLocalGeometry (alpha copied verbatim at bake time), so a live fade
+        // must land there too or the child renders at its authored alpha inside
+        // the group. Clear the animation for the same reason `overridden` does.
+        let overriddenGroupLocal = groupLocalGeometry.map { gl in
+            WPERenderLayerGeometry(
+                origin: gl.origin,
+                scale: gl.scale,
+                angles: gl.angles,
+                alignment: gl.alignment,
+                size: gl.size,
+                puppetMeshCenter: gl.puppetMeshCenter,
+                alpha: alpha,
+                alphaAnimation: nil,
+                color: gl.color,
+                brightness: gl.brightness,
+                shapePoints: gl.shapePoints
+            )
+        }
         return WPERenderLayer(
             objectID: objectID,
             objectName: objectName,
@@ -512,7 +531,7 @@ private extension WPERenderLayer {
             localFBOs: localFBOs,
             passes: passes,
             groupRenderTarget: groupRenderTarget,
-            groupLocalGeometry: groupLocalGeometry,
+            groupLocalGeometry: overriddenGroupLocal,
             groupCompositeSource: groupCompositeSource,
             parallaxDepth: parallaxDepth,
             sortIndex: sortIndex
