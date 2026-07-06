@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Metal
 import Observation
 
 struct WallpaperSessionSummaryCache: Equatable {
@@ -126,6 +127,13 @@ final class ScreenManager {
     /// to keep the MTKView clock at full rate in the background; released when
     /// the last session goes away. See `refreshAppNapAssertion()`.
     @ObservationIgnored private var renderingActivityToken: (any NSObjectProtocol)?
+    /// Retained handle for the Metal device-removal observer. Every live renderer
+    /// is built from `MTLCreateSystemDefaultDevice()`, so an eGPU / Thunderbolt-
+    /// dock GPU being pulled (or requested for removal) invalidates the device the
+    /// render pipelines still hold. We watch for that and rebuild the affected
+    /// sessions on a fresh device instead of letting Metal calls silently fail.
+    /// nonisolated(unsafe): assigned once during main-actor setup, touched again only in deinit.
+    @ObservationIgnored private nonisolated(unsafe) var metalDeviceObserver: (any NSObjectProtocol)?
     private enum UserAbsenceReason: Hashable {
         case screenLocked
         case displaySleep
@@ -345,7 +353,13 @@ final class ScreenManager {
         }
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
-    
+
+    deinit {
+        if let metalDeviceObserver {
+            MTLRemoveDeviceObserver(metalDeviceObserver)
+        }
+    }
+
     // MARK: - Observers Setup
     private func setupPowerMonitoring() {
         powerMonitor.powerSourcePublisher
@@ -461,6 +475,48 @@ final class ScreenManager {
                 self?.handleScreenUnlocked()
             }
             .store(in: &cleanupTasks)
+
+        setupMetalDeviceObserver()
+    }
+
+    /// Registers for Metal device add/remove events. The handler is invoked on an
+    /// arbitrary thread, so it hops to the main actor before touching state.
+    private func setupMetalDeviceObserver() {
+        guard metalDeviceObserver == nil else { return }
+        let result = MTLCopyAllDevicesWithObserver { [weak self] _, notification in
+            Task { @MainActor in
+                self?.handleMetalDeviceChange(notification)
+            }
+        }
+        metalDeviceObserver = result.observer
+    }
+
+    /// Rebuilds every render session on a fresh device when the one our pipelines
+    /// were built on is pulled. Scoped to removals: additions (a GPU coming back)
+    /// don't invalidate anything, and the periodic wake check already re-homes to
+    /// whatever default device exists.
+    private func handleMetalDeviceChange(_ notification: MTLDeviceNotificationName) {
+        switch notification {
+        case .removalRequested, .wasRemoved:
+            revalidateRenderDeviceHealth(reason: "Metal device removed")
+        default:
+            break
+        }
+    }
+
+    /// Cheap liveness probe for the system default device (what every renderer is
+    /// built from). If it can no longer be created, or it has dropped out of the
+    /// live device list, the held device is stale — rebuild all sessions through
+    /// the existing reload path so each re-acquires a valid device. A no-op while
+    /// the default device is still present, so it's safe to call on every wake.
+    private func revalidateRenderDeviceHealth(reason: String) {
+        guard screens.contains(where: { $0.runtimeSession != nil }) else { return }
+        let currentDefault = MTLCreateSystemDefaultDevice()
+        let liveRegistryIDs = Set(MTLCopyAllDevices().map(\.registryID))
+        let defaultIsHealthy = currentDefault.map { liveRegistryIDs.contains($0.registryID) } ?? false
+        guard !defaultIsHealthy else { return }
+        Logger.warning("\(reason): default Metal device unavailable — rebuilding render sessions", category: .lifecycle)
+        reloadAllScreens()
     }
 
     private func handleScreenLocked() {
@@ -718,6 +774,7 @@ final class ScreenManager {
     /// Tears down the live runtime session without touching persistence.
     private func releaseRuntimeSession(_ screen: Screen) {
         adaptiveFrameRateOcclusionThrottled[screen.id] = nil
+        suspendedScreenIDs.remove(screen.id)
         bumpTransition(for: screen.id)
         effectsCoordinator.cancelInflight(for: screen.id)
         transitionRegistry.cancelAssetReadiness(for: screen.id)
@@ -1043,6 +1100,7 @@ final class ScreenManager {
             playback.play()
         }
         updatePlaybackState()
+        refreshAppNapAssertion()
     }
 
     /// Master render gate. Toggles whether wallpaper pipelines exist at all:
@@ -1116,6 +1174,12 @@ final class ScreenManager {
     /// throttled on the lower exit threshold. Cleared on session release.
     @ObservationIgnored private var adaptiveFrameRateOcclusionThrottled: [CGDirectDisplayID: Bool] = [:]
 
+    /// Screens whose last-resolved profile was `.suspended`. Drives the App Nap
+    /// assertion: a session that is occluded/paused into `.suspended` no longer
+    /// needs the full-rate background clock, so it shouldn't keep the exemption
+    /// alive. Cleared on session release.
+    @ObservationIgnored private var suspendedScreenIDs: Set<CGDirectDisplayID> = []
+
     /// Single source of truth for resolving + applying the performance policy to
     /// one screen. Every raw signal is gathered here (via `policyInputs`), so no
     /// other type re-assembles the rule inputs — `PlaybackCoordinator` calls back
@@ -1123,12 +1187,14 @@ final class ScreenManager {
     @discardableResult
     func applyPerformancePolicy(to screen: Screen) -> WallpaperPerformanceProfile {
         let settings = SettingsManager.shared.loadGlobalSettings()
-        return resolveAndApplyPerformanceState(
+        let profile = resolveAndApplyPerformanceState(
             to: screen,
             settings: settings,
             applicationRuleActive: currentApplicationRuleActive(settings),
             frontmostExcluded: ApplicationPerformanceRuleEngine.isFrontmostExcluded(for: settings)
         )
+        refreshAppNapAssertion()
+        return profile
     }
 
     /// Resolves the universal suspend/quality profile and applies it together
@@ -1152,6 +1218,11 @@ final class ScreenManager {
             settings: settings
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
+        if profile == .suspended {
+            suspendedScreenIDs.insert(screen.id)
+        } else {
+            suspendedScreenIDs.remove(screen.id)
+        }
         applyAdaptiveFrameRate(to: screen, settings: settings)
         return profile
     }
@@ -1227,6 +1298,9 @@ final class ScreenManager {
                 frontmostExcluded: frontmostExcluded
             )
         }
+        // Suspend/resume transitions just changed which screens are actually
+        // drawing, so re-evaluate the App Nap exemption against the new profiles.
+        refreshAppNapAssertion()
         // A policy refresh always commits the derived session state, so observers
         // can't leave the SwiftUI layer out of sync with the render loops by
         // forgetting a trailing updatePlaybackState() call.
@@ -1234,12 +1308,21 @@ final class ScreenManager {
     }
 
     /// Hold a `.userInitiated` activity assertion whenever ≥1 wallpaper session
-    /// is live, so macOS doesn't App-Nap our background render loop down to
-    /// ~1fps when the user focuses another window. `.userInitiated` disables
-    /// App Nap only — it does NOT keep the display or system awake, so the Mac
-    /// still sleeps on its own schedule. Released once the last session ends.
+    /// is actively rendering, so macOS doesn't App-Nap our background render loop
+    /// down to ~1fps when the user focuses another window. `.userInitiated`
+    /// disables App Nap only — it does NOT keep the display or system awake, so
+    /// the Mac still sleeps on its own schedule. A session that the performance
+    /// policy has suspended (`.suspended` — occlusion, full-screen, game mode,
+    /// battery, memory pressure, user absence) is deliberately excluded: it isn't
+    /// drawing, so keeping the exemption alive would burn power for nothing. The
+    /// `guard`/`if let` pair below makes an unchanged desired state a no-op, so
+    /// this can be re-run freely on every policy pass without begin/end churn.
     private func refreshAppNapAssertion() {
-        let isRendering = screens.contains { $0.runtimeSession != nil }
+        let isRendering = screens.contains {
+            $0.runtimeSession != nil
+                && !suspendedScreenIDs.contains($0.id)
+                && ($0.playbackController?.userIntendsToPlay ?? true)
+        }
         if isRendering {
             guard renderingActivityToken == nil else { return }
             renderingActivityToken = ProcessInfo.processInfo.beginActivity(
@@ -1295,6 +1378,9 @@ final class ScreenManager {
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
         refreshScreens()
+        // A GPU pulled while asleep may not emit a removal notification we caught,
+        // so re-verify the render device here and rebuild if it's gone stale.
+        revalidateRenderDeviceHealth(reason: "System wake")
         powerMonitor.refreshPowerStatus()
         setUserAbsence(.systemSleep, present: false)
     }
@@ -1447,6 +1533,7 @@ final class ScreenManager {
             for target in screens {
                 var copy = sourceConfiguration
                 copy.screenID = target.id
+                copy.displayFingerprint = target.displayFingerprint
 
                 if target.id != screen.id {
                     releaseRuntimeSession(target)
@@ -1552,6 +1639,9 @@ final class ScreenManager {
         for target in screens where target.id != source.id {
             var copy = template
             copy.screenID = target.id
+            // Re-stamp with the TARGET's fingerprint; keeping the source's would
+            // make this row unreachable by fingerprint after a display-ID reshuffle.
+            copy.displayFingerprint = target.displayFingerprint
             releaseRuntimeSession(target)
             saveConfiguration(copy)
             restoreWallpaperSession(for: target, configuration: copy, preservingState: false)
@@ -1762,7 +1852,6 @@ final class ScreenManager {
             }
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
-            refreshAppNapAssertion()
             // Push the persisted playback inspector state into the freshly
             // installed scene session so the user's saved Frame Rate /
             // Mute / Volume take effect from the first frame instead of
@@ -1797,7 +1886,6 @@ final class ScreenManager {
 
         observeRuntimeErrors(for: session)
         screen.installRuntimeSession(session)
-        refreshAppNapAssertion()
         applyPerformancePolicy(to: screen)
         notifyWallpaperSessionChanged()
     }
