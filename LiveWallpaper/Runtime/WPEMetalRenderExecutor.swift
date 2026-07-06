@@ -460,6 +460,7 @@ final class WPEMetalRenderExecutor {
 
     func releaseTransientResources() {
         targetPool.releaseAll()
+        releaseBloomLevels()
         previousFrameHistory = nil
         invalidateStaticLayerCache()
         // Clip-role detection + activation diagnostics are keyed by objectID, which a reload can reuse
@@ -471,6 +472,7 @@ final class WPEMetalRenderExecutor {
         puppetPaletteCacheByObjectID.removeAll()
         lastLoggedPuppetSkinningReason.removeAll()
         bonePaletteBufferPool.drain()
+        puppetMeshBufferCache.removeAll()
         // Scene size / pipeline may change across a reload; drop the recycled
         // frame targets so the next render() re-allocates at the right size.
         outputTexturePool.removeAll()
@@ -3361,6 +3363,25 @@ final class WPEMetalRenderExecutor {
     /// (never executed by the GPU, so recycling them late is safe, early would be too).
     private var bonePaletteBuffersInFlight: [MTLBuffer] = []
 
+    /// Puppet mesh vertex/index topology is immutable for the scene's lifetime (skinning is applied
+    /// per-frame in the vertex shader via the bone palette, not by re-baking geometry), so the GPU
+    /// buffers are built once per mesh and reused every frame. Dropped on reload via
+    /// `releaseTransientResources`.
+    private struct PuppetMeshBufferKey: Hashable {
+        let materialPath: String
+        let clipMaskName: String?
+        // Full arrays (COW references, no copy): distinct meshes that share material,
+        // counts and part layout must still get their own GPU buffers.
+        let vertices: [WPEPuppetVertex]
+        let indices: [UInt16]
+        let parts: [WPEPuppetMeshPart]
+    }
+    private struct PuppetMeshBuffers {
+        let vertex: MTLBuffer
+        let index: MTLBuffer
+    }
+    private var puppetMeshBufferCache: [PuppetMeshBufferKey: PuppetMeshBuffers] = [:]
+
     /// See `PresentCompletionTexture`: `MTLBuffer` handles are thread-safe but not `Sendable`-annotated.
     private struct PaletteBufferRecycleBatch: @unchecked Sendable {
         let buffers: [MTLBuffer]
@@ -4002,39 +4023,11 @@ final class WPEMetalRenderExecutor {
         partSelection: PuppetPartSelection = .all
     ) throws {
         for mesh in meshes {
-            let vertices = mesh.vertices.map { vertex in
-                WPEMetalPuppetVertex(
-                    position: SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 0),
-                    uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0),
-                    skinBlendIndices: SIMD4<UInt32>(
-                        UInt32(max(vertex.skinBlendIndices.x, 0)),
-                        UInt32(max(vertex.skinBlendIndices.y, 0)),
-                        UInt32(max(vertex.skinBlendIndices.z, 0)),
-                        UInt32(max(vertex.skinBlendIndices.w, 0))
-                    ),
-                    skinBlendWeights: SIMD4<Float>(
-                        vertex.skinBlendWeights.x,
-                        vertex.skinBlendWeights.y,
-                        vertex.skinBlendWeights.z,
-                        vertex.skinBlendWeights.w
-                    )
-                )
-            }
-            let vertexBuffer = vertices.withUnsafeBytes { rawBuffer in
-                device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
-            }
-            guard let vertexBuffer else {
-                throw WPEMetalTextureLoaderError.textureAllocationFailed
-            }
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            let buffers = try puppetMeshBuffers(for: mesh)
+            encoder.setVertexBuffer(buffers.vertex, offset: 0, index: 0)
 
             let indices = mesh.indices
-            let indexBuffer = indices.withUnsafeBytes { rawBuffer in
-                device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
-            }
-            guard let indexBuffer else {
-                throw WPEMetalTextureLoaderError.textureAllocationFailed
-            }
+            let indexBuffer = buffers.index
 
             if mesh.parts.isEmpty {
                 guard partSelection.isAll else { continue }
@@ -4060,6 +4053,52 @@ final class WPEMetalRenderExecutor {
                 }
             }
         }
+    }
+
+    private func puppetMeshBuffers(for mesh: WPEPuppetMesh) throws -> PuppetMeshBuffers {
+        let key = PuppetMeshBufferKey(
+            materialPath: mesh.materialPath,
+            clipMaskName: mesh.clipMaskName,
+            vertices: mesh.vertices,
+            indices: mesh.indices,
+            parts: mesh.parts
+        )
+        if let cached = puppetMeshBufferCache[key] {
+            return cached
+        }
+
+        let vertices = mesh.vertices.map { vertex in
+            WPEMetalPuppetVertex(
+                position: SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 0),
+                uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0),
+                skinBlendIndices: SIMD4<UInt32>(
+                    UInt32(max(vertex.skinBlendIndices.x, 0)),
+                    UInt32(max(vertex.skinBlendIndices.y, 0)),
+                    UInt32(max(vertex.skinBlendIndices.z, 0)),
+                    UInt32(max(vertex.skinBlendIndices.w, 0))
+                ),
+                skinBlendWeights: SIMD4<Float>(
+                    vertex.skinBlendWeights.x,
+                    vertex.skinBlendWeights.y,
+                    vertex.skinBlendWeights.z,
+                    vertex.skinBlendWeights.w
+                )
+            )
+        }
+        let vertexBuffer = vertices.withUnsafeBytes { rawBuffer in
+            device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
+        }
+        let indexBuffer = mesh.indices.withUnsafeBytes { rawBuffer in
+            device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
+        }
+        guard let vertexBuffer, let indexBuffer else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        vertexBuffer.label = "wpe.puppet.vertices"
+        indexBuffer.label = "wpe.puppet.indices"
+        let buffers = PuppetMeshBuffers(vertex: vertexBuffer, index: indexBuffer)
+        puppetMeshBufferCache[key] = buffers
+        return buffers
     }
 
     /// Breaks the `_rt_*` scene-alias hazard.
@@ -5251,6 +5290,11 @@ final class WPEMetalRenderExecutor {
         (UserDefaults.standard.object(forKey: "WPEMetalSceneBloomEnabled") as? Bool) ?? true
 
     private var bloomLevelTextures: [MTLTexture] = []
+    /// Backs `bloomLevelTextures` from one placement heap (same `.tracked` mechanism as the FBO
+    /// aliasing pool) so the whole pyramid's memory is reclaimed in a single drop on reload. The
+    /// pyramid is regenerated from the scene output every frame, so it needs no cross-frame content
+    /// persistence — only the allocation is reused until the resolution/level count changes.
+    private var bloomLevelHeap: MTLHeap?
     private var bloomLevelBaseWidth = 0
     private var bloomLevelBaseHeight = 0
     private var bloomLevelPixelFormat: MTLPixelFormat = .invalid
@@ -5377,14 +5421,16 @@ final class WPEMetalRenderExecutor {
            bloomLevelRequestedCount == levelCount {
             return
         }
-        bloomLevelTextures = []
+        releaseBloomLevels()
         bloomLevelBaseWidth = output.width
         bloomLevelBaseHeight = output.height
         bloomLevelPixelFormat = output.pixelFormat
         bloomLevelRequestedCount = levelCount
+
+        var descriptors: [MTLTextureDescriptor] = []
         var width = output.width / 2
         var height = output.height / 2
-        for index in 0..<levelCount {
+        for _ in 0..<levelCount {
             guard width >= 8, height >= 8 else { break }
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: output.pixelFormat,
@@ -5394,12 +5440,51 @@ final class WPEMetalRenderExecutor {
             )
             descriptor.usage = [.renderTarget, .shaderRead]
             descriptor.storageMode = .private
-            guard let texture = device.makeTexture(descriptor: descriptor) else { break }
-            texture.label = "wpe.bloom.level\(index)"
-            bloomLevelTextures.append(texture)
+            descriptors.append(descriptor)
             width /= 2
             height /= 2
         }
+        guard !descriptors.isEmpty else { return }
+
+        var heapSize = 0
+        var maxAlign = 1
+        for descriptor in descriptors {
+            let sizeAndAlign = device.heapTextureSizeAndAlign(descriptor: descriptor)
+            guard sizeAndAlign.size > 0 else { heapSize = 0; break }
+            maxAlign = max(maxAlign, sizeAndAlign.align)
+            heapSize += Self.alignUp(sizeAndAlign.size, to: sizeAndAlign.align)
+        }
+        if heapSize > 0 {
+            let heapDescriptor = MTLHeapDescriptor()
+            heapDescriptor.type = .automatic
+            heapDescriptor.storageMode = .private
+            heapDescriptor.hazardTrackingMode = .tracked
+            heapDescriptor.size = Self.alignUp(heapSize + maxAlign, to: maxAlign)
+            bloomLevelHeap = device.makeHeap(descriptor: heapDescriptor)
+        }
+
+        for (index, descriptor) in descriptors.enumerated() {
+            let texture = bloomLevelHeap?.makeTexture(descriptor: descriptor)
+                ?? device.makeTexture(descriptor: descriptor)
+            guard let texture else { break }
+            texture.label = "wpe.bloom.level\(index)"
+            bloomLevelTextures.append(texture)
+        }
+    }
+
+    private func releaseBloomLevels() {
+        bloomLevelTextures = []
+        bloomLevelHeap = nil
+        bloomLevelBaseWidth = 0
+        bloomLevelBaseHeight = 0
+        bloomLevelPixelFormat = .invalid
+        bloomLevelRequestedCount = 0
+    }
+
+    private static func alignUp(_ size: Int, to alignment: Int) -> Int {
+        guard alignment > 0 else { return size }
+        let remainder = size % alignment
+        return remainder == 0 ? size : size + alignment - remainder
     }
 
     private static func logicalUVScale(for texture: MTLTexture?) -> SIMD2<Float> {
