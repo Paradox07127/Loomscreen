@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-final class CodexAgentSource: MonitorDataSource, @unchecked Sendable {
+final class CodexAgentSource: MonitorDataSource {
     let sourceID = "codex"
 
     private static let activePollInterval: TimeInterval = 1.5
@@ -9,11 +9,18 @@ final class CodexAgentSource: MonitorDataSource, @unchecked Sendable {
     private static let rescanInterval: TimeInterval = 10
     private static let endedRetention: TimeInterval = 2 * 60 * 60
 
+    /// Lifecycle state touched by `start`/`stop`. Lock-guarded so the type is
+    /// `Sendable` without relying on the caller serializing start/stop — matching
+    /// how the sibling `ClaudeAgentSource` confines the same state in an actor.
+    private struct Lifecycle {
+        var pollTask: Task<Void, Never>?
+        var didStartSecurityScope = false
+    }
+
     private let rootURL: URL
     private let cursorStore: MonitorTailCursorStore?
     private let usageLock = OSAllocatedUnfairLock(initialState: MonitorProviderUsage(costTodayUSD: nil, tokensToday: .zero))
-    private var pollTask: Task<Void, Never>?
-    private var didStartSecurityScope = false
+    private let lifecycle = OSAllocatedUnfairLock(initialState: Lifecycle())
 
     init(rootURL: URL, cursorStore: MonitorTailCursorStore? = nil) {
         self.rootURL = rootURL
@@ -21,22 +28,29 @@ final class CodexAgentSource: MonitorDataSource, @unchecked Sendable {
     }
 
     func start(sink: any MonitorSnapshotSink) async {
-        guard pollTask == nil else { return }
-        didStartSecurityScope = rootURL.startAccessingSecurityScopedResource()
-        pollTask = Task { [weak self] in
-            await self?.run(sink: sink)
+        lifecycle.withLock { state in
+            guard state.pollTask == nil else { return }
+            state.didStartSecurityScope = rootURL.startAccessingSecurityScopedResource()
+            state.pollTask = Task { [weak self] in
+                await self?.run(sink: sink)
+            }
         }
     }
 
     func stop() async {
-        guard let pollTask else { return }
-        self.pollTask = nil
-        pollTask.cancel()
-        await pollTask.value
+        let (task, wasScoped) = lifecycle.withLock { state -> (Task<Void, Never>?, Bool) in
+            let task = state.pollTask
+            let scoped = state.didStartSecurityScope
+            state.pollTask = nil
+            state.didStartSecurityScope = false
+            return (task, scoped)
+        }
+        guard let task else { return }
+        task.cancel()
+        await task.value
         cursorStore?.flush()
-        if didStartSecurityScope {
+        if wasScoped {
             rootURL.stopAccessingSecurityScopedResource()
-            didStartSecurityScope = false
         }
     }
 

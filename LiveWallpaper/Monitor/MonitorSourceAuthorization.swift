@@ -99,6 +99,10 @@ final class MonitorSourceAuthorization {
 
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
+            guard Self.isExpectedRoot(url, for: provider) else {
+                self.presentWrongFolderAlert(for: provider, chosen: url, window: window)
+                return
+            }
             if self.storeBookmark(for: provider, url: url) {
                 onGrant?()
             }
@@ -220,6 +224,47 @@ final class MonitorSourceAuthorization {
             url.stopAccessingSecurityScopedResource()
         }
         activeScopes.removeAll()
+    }
+
+    // MARK: - Selection validation
+
+    /// The grant must be the provider's own root (`~/.claude` / `~/.codex`), never
+    /// a broader parent the user might pick by mistake — the scanners derive their
+    /// fixed subpaths from this root, and a wider grant would hand the app a
+    /// read-only sandbox extension over unrelated files for the whole pipeline.
+    /// Symlinks on both sides are resolved so a linked root still matches.
+    /// Both sides derive from the real (unsandboxed) home; under app-sandbox
+    /// `homeDirectoryForCurrentUser` becomes the container home and this
+    /// equality would reject every legitimate grant — revisit on sandboxing.
+    private static func isExpectedRoot(_ url: URL, for provider: Provider) -> Bool {
+        let chosen = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let expected = defaultDirectory(for: provider).resolvingSymlinksInPath().standardizedFileURL.path
+        return chosen == expected
+    }
+
+    private func presentWrongFolderAlert(for provider: Provider, chosen: URL, window: NSWindow?) {
+        Logger.warning("Monitor: rejected grant outside \(provider.defaultDirectoryName): \(chosen.path)", category: .fileAccess)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(
+            localized: "That's not the expected folder",
+            defaultValue: "That's not the expected folder",
+            comment: "Monitor wallpaper AI-log access: title shown when the user grants a folder other than the provider's own root."
+        )
+        alert.informativeText = String(
+            localized: "Choose your \(provider.defaultDirectoryName) folder in your home directory. A wider folder can't be granted for the monitor wallpaper.",
+            comment: "Monitor wallpaper AI-log access: explanation shown when the chosen folder is not the provider root; %@ is a folder name like .claude or .codex."
+        )
+        alert.addButton(withTitle: String(
+            localized: "OK",
+            defaultValue: "OK",
+            comment: "Dismiss button on the monitor wallpaper wrong-folder alert."
+        ))
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
     }
 
     // MARK: - Defaults

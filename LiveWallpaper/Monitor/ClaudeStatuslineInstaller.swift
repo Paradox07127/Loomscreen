@@ -16,17 +16,22 @@ enum ClaudeStatuslineInstaller {
 
     /// The capture script body written to `~/.claude/livewallpaper-statusline.sh`.
     ///
-    /// It reads stdin once, writes it atomically (mktemp in the same dir + mv, so
-    /// a reader never sees a half-written file), then either execs a chained
-    /// statusline command passed as `$1` (re-feeding the payload on its stdin) or
-    /// prints a minimal fallback line (the model name) so the statusline still
-    /// shows something.
+    /// It reads stdin once, extracts ONLY the rate-limit fields the Monitor reads
+    /// (`rate_limits.five_hour`/`seven_day` used-percentage + reset time, plus the
+    /// top-level `timestamp`) into a fresh object, and writes that atomically
+    /// (mktemp in the same dir + mv, so a reader never sees a half-written file).
+    /// It never persists the rest of the statusline payload (workspace/account
+    /// metadata, transcript path, etc.). It then either execs a chained statusline
+    /// command passed as `$1` (re-feeding the ORIGINAL payload on its stdin so the
+    /// user's own statusline still gets everything) or prints a minimal fallback
+    /// line (the model name) so the statusline still shows something.
     static var captureScript: String {
         """
         #!/usr/bin/env bash
-        # Installed by LiveWallpaper — tees the Claude Code statusline payload to a
-        # file the Monitor reads, then chains through to your own statusline (if any).
-        # LiveWallpaper never edits this file; delete it to uninstall.
+        # Installed by LiveWallpaper — extracts just the Claude Code account
+        # rate-limit fields the Monitor reads into a file, then chains through to
+        # your own statusline (if any). LiveWallpaper never edits this file; delete
+        # it to uninstall.
         set -euo pipefail
 
         CLAUDE_DIR="${HOME}/.claude"
@@ -34,14 +39,39 @@ enum ClaudeStatuslineInstaller {
 
         payload="$(cat)"
 
+        # Whitelist only the rate-limit fields the app consumes; everything else in
+        # the payload is discarded and never written to disk. Falls back to an empty
+        # object if python3 is unavailable (the reader treats that as "no limits").
+        limits="$(
+          printf '%s' "${payload}" | /usr/bin/env python3 -c '
+        import json, sys
+        try:
+            src = json.load(sys.stdin)
+        except Exception:
+            print("{}"); sys.exit(0)
+        def pick(section):
+            out = {}
+            for k in ("used_percentage", "resets_at"):
+                if isinstance(section, dict) and k in section:
+                    out[k] = section[k]
+            return out
+        rl = src.get("rate_limits") if isinstance(src, dict) else None
+        rl = rl if isinstance(rl, dict) else {}
+        kept = {"rate_limits": {"five_hour": pick(rl.get("five_hour")), "seven_day": pick(rl.get("seven_day"))}}
+        if isinstance(src, dict) and "timestamp" in src:
+            kept["timestamp"] = src["timestamp"]
+        print(json.dumps(kept))
+        ' 2>/dev/null || printf '%s' '{}'
+        )"
+
         # Atomic publish: write a sibling temp file, then rename over the target.
         tmp="$(mktemp "${CLAUDE_DIR}/.\(payloadFileName).XXXXXX")"
-        printf '%s' "${payload}" > "${tmp}"
+        printf '%s' "${limits}" > "${tmp}"
         mv -f "${tmp}" "${OUT}"
 
         # Chain through to a pre-existing statusline command, re-feeding the
-        # payload. The whole command arrives as ONE shell-quoted argument and is
-        # run via `sh -c`, so pipes/args/env in the user's command survive.
+        # ORIGINAL payload. The whole command arrives as ONE shell-quoted argument
+        # and is run via `sh -c`, so pipes/args/env in the user's command survive.
         if [ "$#" -ge 1 ] && [ -n "${1:-}" ]; then
           printf '%s' "${payload}" | exec /bin/sh -c "$1"
         fi

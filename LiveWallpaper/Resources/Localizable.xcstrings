@@ -6182,6 +6182,36 @@
         }
       }
     },
+    "Choose your %@ folder in your home directory. A wider folder can't be granted for the monitor wallpaper." : {
+      "comment" : "Monitor wallpaper AI-log access: explanation shown when the chosen folder is not the provider root; %@ is a folder name like .claude or .codex.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose your %@ folder in your home directory. A wider folder can't be granted for the monitor wallpaper."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホームディレクトリ内の %@ フォルダを選択してください。モニター壁紙により広い範囲のフォルダは許可できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择主目录中的 %@ 文件夹。监控壁纸无法授权范围更大的文件夹。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請選擇家目錄中的 %@ 資料夾。監控桌布無法授權範圍更大的資料夾。"
+          }
+        }
+      }
+    },
     "Choose your Wallpaper Engine install folder. It must contain an assets folder." : {
       "comment" : "Wallpaper Engine assets folder access panel message.",
       "localizations" : {
@@ -29598,6 +29628,36 @@
         }
       }
     },
+    "Scene wallpaper failed to load" : {
+      "comment" : "Runtime error title.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scene wallpaper failed to load"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シーン壁紙を読み込めませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "场景壁纸加载失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "場景桌布載入失敗"
+          }
+        }
+      }
+    },
     "Scene wallpaper type" : {
       "localizations" : {
         "en" : {
@@ -34572,6 +34632,59 @@
         }
       }
     },
+    "The web renderer process crashed repeatedly." : {
+      "comment" : "Runtime error detail shown when an HTML wallpaper's WebKit content process keeps crashing and the retry budget is exhausted.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webレンダラープロセスが繰り返しクラッシュしました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页渲染进程反复崩溃。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網頁渲染處理程序反覆當機。"
+          }
+        }
+      }
+    },
+    "That's not the expected folder" : {
+      "comment" : "Monitor wallpaper AI-log access: title shown when the user grants a folder other than the provider's own root.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That's not the expected folder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想定されたフォルダではありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是预期的文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這不是預期的資料夾"
+          }
+        }
+      }
+    },
     "The Monitor can show how much of your Claude account's 5-hour and weekly limits you've used. Claude Code reports this to its statusline; the two steps below tee that data into a file the app reads. Your own statusline keeps working." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34621,6 +34734,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "網路似乎已離線。"
+          }
+        }
+      }
+    },
+    "The scene wallpaper failed to load." : {
+      "comment" : "Runtime error message.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The scene wallpaper failed to load."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シーン壁紙を読み込めませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "场景壁纸加载失败。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "場景桌布載入失敗。"
           }
         }
       }

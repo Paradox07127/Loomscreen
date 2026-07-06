@@ -28,6 +28,68 @@ struct SessionAggregateState: Codable, Sendable, Equatable {
     var lastStatusEventAt: Double?
     var lastTerminalEventIsTaskComplete: Bool?
 
+    // Identifying session metadata (repo/branch/model/session id) is deliberately
+    // NOT persisted: the on-disk cursor cache keeps only the resume status needed
+    // to fold new transcript lines, and re-derives identity from the live tail on
+    // the next poll. This keeps `MonitorTailCursors.json` free of the user's
+    // project names, branches, and account/session identifiers.
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case turnCount
+        case tokens
+        case startedAt
+        case lastEventAt
+        case lastToolName
+        case pendingToolUse
+        case lastAssistantStopReason
+        case sawPermissionRequest
+        case lastInboundAwaitsModel
+        case pendingApprovalAt
+        case lastApprovalClearAt
+        case lastStatusEventAt
+        case lastTerminalEventIsTaskComplete
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.provider = try container.decode(MonitorAgentProvider.self, forKey: .provider)
+        self.turnCount = try container.decodeIfPresent(Int.self, forKey: .turnCount) ?? 0
+        self.tokens = try container.decodeIfPresent(MonitorTokenTotals.self, forKey: .tokens) ?? .zero
+        self.startedAt = try container.decodeIfPresent(Double.self, forKey: .startedAt)
+        self.lastEventAt = try container.decodeIfPresent(Double.self, forKey: .lastEventAt)
+        self.lastToolName = try container.decodeIfPresent(String.self, forKey: .lastToolName)
+        self.pendingToolUse = try container.decodeIfPresent(Bool.self, forKey: .pendingToolUse)
+        self.lastAssistantStopReason = try container.decodeIfPresent(String.self, forKey: .lastAssistantStopReason)
+        self.sawPermissionRequest = try container.decodeIfPresent(Bool.self, forKey: .sawPermissionRequest)
+        self.lastInboundAwaitsModel = try container.decodeIfPresent(Bool.self, forKey: .lastInboundAwaitsModel)
+        self.pendingApprovalAt = try container.decodeIfPresent(Double.self, forKey: .pendingApprovalAt)
+        self.lastApprovalClearAt = try container.decodeIfPresent(Double.self, forKey: .lastApprovalClearAt)
+        self.lastStatusEventAt = try container.decodeIfPresent(Double.self, forKey: .lastStatusEventAt)
+        self.lastTerminalEventIsTaskComplete = try container.decodeIfPresent(Bool.self, forKey: .lastTerminalEventIsTaskComplete)
+        self.sessionId = nil
+        self.projectName = nil
+        self.gitBranch = nil
+        self.model = nil
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(turnCount, forKey: .turnCount)
+        try container.encode(tokens, forKey: .tokens)
+        try container.encodeIfPresent(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(lastEventAt, forKey: .lastEventAt)
+        try container.encodeIfPresent(lastToolName, forKey: .lastToolName)
+        try container.encodeIfPresent(pendingToolUse, forKey: .pendingToolUse)
+        try container.encodeIfPresent(lastAssistantStopReason, forKey: .lastAssistantStopReason)
+        try container.encodeIfPresent(sawPermissionRequest, forKey: .sawPermissionRequest)
+        try container.encodeIfPresent(lastInboundAwaitsModel, forKey: .lastInboundAwaitsModel)
+        try container.encodeIfPresent(pendingApprovalAt, forKey: .pendingApprovalAt)
+        try container.encodeIfPresent(lastApprovalClearAt, forKey: .lastApprovalClearAt)
+        try container.encodeIfPresent(lastStatusEventAt, forKey: .lastStatusEventAt)
+        try container.encodeIfPresent(lastTerminalEventIsTaskComplete, forKey: .lastTerminalEventIsTaskComplete)
+    }
+
     init(
         provider: MonitorAgentProvider,
         sessionId: String?,

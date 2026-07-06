@@ -45,7 +45,15 @@ struct MonitorTailCursorStoreTests {
 
         let loaded = MonitorTailCursorStore(directory: dir, debounceInterval: 60)
         #expect(loaded.state(for: transcript) == cursor)
-        #expect(loaded.aggregate(for: transcript, provider: .claude) == aggregate)
+        // Session identity metadata (sessionId/projectName/gitBranch/model) is
+        // deliberately NOT persisted — the on-disk cursor cache keeps only
+        // operational resume state. Everything else must round-trip.
+        var expected = aggregate
+        expected.sessionId = nil
+        expected.projectName = nil
+        expected.gitBranch = nil
+        expected.model = nil
+        #expect(loaded.aggregate(for: transcript, provider: .claude) == expected)
         #expect(loaded.aggregate(for: transcript, provider: .codex) == nil)
     }
 
