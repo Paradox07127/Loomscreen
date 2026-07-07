@@ -15323,6 +15323,7 @@
     },
     "general.orthogonalprojection is null — using perspective camera with 1920×1080 render size" : {
       "comment" : "Wallpaper Engine scene diagnostic when perspective projection is used.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -15352,6 +15353,7 @@
     },
     "general.orthogonalprojection missing — using 1920×1080" : {
       "comment" : "Wallpaper Engine scene diagnostic when default projection dimensions are used.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -23540,6 +23542,7 @@
     },
     "Particle object %@ has no particle file" : {
       "comment" : "Wallpaper Engine scene diagnostic. The placeholder is the particle object name.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -32427,6 +32430,7 @@
     },
     "Sound object %@ has no sound files" : {
       "comment" : "Wallpaper Engine scene diagnostic. The placeholder is the sound object name.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -34221,6 +34225,7 @@
     },
     "Text object %@ has no resolvable text" : {
       "comment" : "Wallpaper Engine scene diagnostic. The placeholder is the text object name.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -36178,6 +36183,7 @@
     },
     "Top-level effects are not yet rendered" : {
       "comment" : "Wallpaper Engine scene diagnostic when root-level effects are ignored.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {

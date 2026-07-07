@@ -1607,7 +1607,6 @@ struct InfrastructureRuntimeBoundaryTests {
         "WPERenderGraphBuilder.swift": ["WPEMetalRenderExecutor", "WPEResolutionTracer"],
         "WPERenderPipelineBuilder.swift": ["WPEResolutionTracer", "WPEShaderBuiltinMacros"],
         "WPESceneDebugArtifacts.swift": ["WPEResolutionDiagnosticsSnapshot"],
-        "WPESceneDocumentParser.swift": ["WPETransformScriptEvaluator"],
         "WPESceneProjectSchemaLoader.swift": ["WPEPathSafety"],
         "WPEStorageInventory.swift": ["WPEPathSafety"],
         "WPEStoragePaths.swift": ["WPEPathSafety"],

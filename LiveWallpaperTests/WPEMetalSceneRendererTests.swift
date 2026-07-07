@@ -25,6 +25,14 @@ struct WPEMetalSceneRendererTests {
         #expect(view.acceptsFirstMouse(for: nil) == true)
     }
 
+    @Test("Script async-tick kill-switch defaults ON and honors a bool override")
+    func scriptAsyncTickKillSwitchResolution() {
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: nil) == true)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: false) == false)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: true) == true)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: "junk") == true)
+    }
+
     @Test("Initializes with an MTKView when Metal is available")
     func initializesWithMTKView() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

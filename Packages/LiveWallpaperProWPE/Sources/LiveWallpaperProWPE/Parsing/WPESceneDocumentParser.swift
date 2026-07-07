@@ -1,6 +1,50 @@
-#if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
+
+/// Bake-time resolver for static transform scripts. Implemented by the app's
+/// JSContext-backed evaluator; the parser package cannot depend on the script
+/// runtime, so the dependency is inverted through this seam (ADR-002 step 2).
+public protocol WPESceneTransformScriptResolving {
+    func resolveVec3(
+        script: String,
+        properties: [String: WPESceneScriptPropertyValue],
+        seed: SIMD3<Double>
+    ) -> SIMD3<Double>?
+}
+
+/// Textual classification of WPE transform scripts, shared by the parser
+/// (bake static origins at parse time) and the runtime evaluator (execution guard).
+public enum WPETransformScriptStaticAnalysis {
+    /// Markers that make a transform script time/audio/random-driven and thus not
+    /// statically resolvable. Conservative: a false "dynamic" only leaves the
+    /// baked value untouched (no regression). Matching is CASE-SENSITIVE on
+    /// purpose — `update` contains a lowercase "date", so a case-insensitive
+    /// `Date` check would wrongly classify every origin script as dynamic.
+    private static let dynamicTokens = [
+        "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
+        "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
+        "input.cursorWorldPosition", "shared.", "shared["
+    ]
+
+    /// Static resolution runs during parsing, where retaining a hung JSContext is
+    /// worse than falling back to the baked value; loop/eval forms are rejected
+    /// conservatively and left to the dynamic transform path.
+    private static let staticExecutionBlocklistPatterns = [
+        #"\bwhile\s*\("#,
+        #"\bfor\s*\("#,
+        #"\bdo\s*\{"#,
+        #"\beval\s*\("#,
+        #"\bFunction\s*\("#
+    ]
+
+    public static func isStaticallyResolvable(_ script: String) -> Bool {
+        guard !dynamicTokens.contains(where: { script.contains($0) }) else { return false }
+        return !staticExecutionBlocklistPatterns.contains {
+            script.range(of: $0, options: .regularExpression) != nil
+        }
+    }
+}
 
 /// Stateless flexible parser for Wallpaper Engine `scene.json`. The shipping
 /// format mixes JSON objects, scalar arrays, and space-separated string
@@ -14,15 +58,12 @@ import Foundation
 ///   - Material/effect/animation metadata is preserved for renderer fallbacks
 ///     and future shader passes; unsupported objects and full FBO shader
 ///     pipelines still emit diagnostics so import can downgrade capability.
-enum WPESceneDocumentParser {
+public enum WPESceneDocumentParser {
 
-    static func parse(data: Data) throws -> WPESceneDocument {
-        try parse(data: data, userValues: [:])
-    }
-
-    static func parse(
+    public static func parse(
         data: Data,
-        userValues: [String: WallpaperEngineProjectPropertyValue]
+        userValues: [String: WallpaperEngineProjectPropertyValue],
+        makeTransformScriptResolver: (_ canvasWidth: Double, _ canvasHeight: Double) -> any WPESceneTransformScriptResolving
     ) throws -> WPESceneDocument {
         guard !data.isEmpty else {
             throw WPESceneDocumentError.invalidUTF8
@@ -71,7 +112,8 @@ enum WPESceneDocumentParser {
         let scriptResolvedOrigins = resolveScriptOrigins(
             rawObjects,
             canvasWidth: general.orthogonalProjection.width,
-            canvasHeight: general.orthogonalProjection.height
+            canvasHeight: general.orthogonalProjection.height,
+            makeResolver: makeTransformScriptResolver
         )
         let objectTransforms = resolvedObjectTransforms(
             rawObjects,
@@ -616,21 +658,22 @@ enum WPESceneDocumentParser {
     private static func resolveScriptOrigins(
         _ rawObjects: [[String: Any]],
         canvasWidth: Double,
-        canvasHeight: Double
+        canvasHeight: Double,
+        makeResolver: (Double, Double) -> any WPESceneTransformScriptResolving
     ) -> [String: SIMD3<Double>] {
         var pending: [(id: String, script: String, properties: [String: WPESceneScriptPropertyValue], seed: SIMD3<Double>)] = []
         for object in rawObjects {
             guard let id = objectID(in: object),
                   let origin = object["origin"] as? [String: Any],
                   let script = origin["script"] as? String, !script.isEmpty,
-                  WPETransformScriptEvaluator.isStaticallyResolvable(script) else { continue }
+                  WPETransformScriptStaticAnalysis.isStaticallyResolvable(script) else { continue }
             let properties = scriptPropertyValues(origin["scriptproperties"])
             let seed = parseVector3(resolveBoundTransformValue(origin["value"])) ?? SIMD3<Double>(0, 0, 0)
             pending.append((id, script, properties, seed))
         }
         guard !pending.isEmpty else { return [:] }
 
-        let evaluator = WPETransformScriptEvaluator(canvasWidth: canvasWidth, canvasHeight: canvasHeight)
+        let evaluator = makeResolver(canvasWidth, canvasHeight)
         var resolved: [String: SIMD3<Double>] = [:]
         resolved.reserveCapacity(pending.count)
         for item in pending {
@@ -944,10 +987,7 @@ enum WPESceneDocumentParser {
             guard WPEValueParser.strictBool(fallback) != nil else {
                 return fallback
             }
-            return WallpaperEngineProjectPropertySchema.sceneConditionMatches(
-                value: override,
-                condition: condition
-            )
+            return override.looselyMatches(.conditionLiteral(condition))
         }
 
         var resolved: [String: Any] = [:]
@@ -1502,7 +1542,7 @@ enum WPESceneDocumentParser {
     ) -> WPESceneTransformScript? {
         guard let transform = raw as? [String: Any],
               let script = transform["script"] as? String, !script.isEmpty,
-              preserveStaticallyResolvable || !WPETransformScriptEvaluator.isStaticallyResolvable(script) else {
+              preserveStaticallyResolvable || !WPETransformScriptStaticAnalysis.isStaticallyResolvable(script) else {
             return nil
         }
         let seed = parseVector3(resolveBoundTransformValue(transform["value"])) ?? SIMD3<Double>(0, 0, 0)
@@ -1679,7 +1719,7 @@ enum WPESceneDocumentParser {
     // MARK: - Primitive parsing
 
     /// Accepts JSON arrays of numbers, JSON dictionaries with x/y/z keys, or WPE's space-separated strings ("0.5 0 0").
-    static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
+    public static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
         WPEValueParser.vector3(raw)
     }
 
@@ -1789,4 +1829,3 @@ private struct SceneObjectTransform {
         return result
     }
 }
-#endif

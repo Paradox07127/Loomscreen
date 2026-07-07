@@ -68,3 +68,31 @@ public enum WallpaperEngineProjectPropertyValue: Codable, Equatable, Hashable, S
         }
     }
 }
+
+extension WallpaperEngineProjectPropertyValue {
+    /// A WPE condition literal (`"2"`, `"true"`, `"'x'"`) parsed with the same
+    /// bool/number/string coercion project-property visibility conditions use.
+    public static func conditionLiteral(_ raw: String) -> WallpaperEngineProjectPropertyValue {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        if trimmed.caseInsensitiveCompare("true") == .orderedSame { return .bool(true) }
+        if trimmed.caseInsensitiveCompare("false") == .orderedSame { return .bool(false) }
+        if let number = Double(trimmed) { return .number(number) }
+        return .string(trimmed)
+    }
+
+    /// Loose WPE equality: numeric tolerance, else cross-type `stringValue`
+    /// fallback so `.number(2)` matches `.string("2")` and a `"2"` literal.
+    public func looselyMatches(_ expected: WallpaperEngineProjectPropertyValue) -> Bool {
+        switch (self, expected) {
+        case (.bool(let lhs), .bool(let rhs)):
+            return lhs == rhs
+        case (.number(let lhs), .number(let rhs)):
+            return abs(lhs - rhs) < 0.000_001
+        case (.string(let lhs), .string(let rhs)):
+            return lhs == rhs
+        default:
+            return stringValue == expected.stringValue
+        }
+    }
+}

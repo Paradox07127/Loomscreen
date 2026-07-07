@@ -550,13 +550,13 @@ private enum ConditionEvaluator {
     }
 
     /// Loose equality between a property value and a single condition literal,
-    /// reusing `parseLiteral` (bool/number/string coercion) and `matches`
+    /// reusing `conditionLiteral` (bool/number/string coercion) and `matches`
     /// (number tolerance + cross-type `stringValue` fallback).
     static func matchesLiteral(
         value: WallpaperEngineProjectPropertyValue?,
         condition: String
     ) -> Bool {
-        value.matches(parseLiteral(condition))
+        value.matches(.conditionLiteral(condition))
     }
 
     private static func evaluateAndGroup(
@@ -594,11 +594,11 @@ private enum ConditionEvaluator {
             result = includeMatch
         } else if let range = clause.range(of: "==") {
             let key = propertyKey(from: String(clause[..<range.lowerBound]))
-            let expected = parseLiteral(String(clause[range.upperBound...]))
+            let expected = WallpaperEngineProjectPropertyValue.conditionLiteral(String(clause[range.upperBound...]))
             result = values[key].matches(expected)
         } else if let range = clause.range(of: "!=") {
             let key = propertyKey(from: String(clause[..<range.lowerBound]))
-            let expected = parseLiteral(String(clause[range.upperBound...]))
+            let expected = WallpaperEngineProjectPropertyValue.conditionLiteral(String(clause[range.upperBound...]))
             result = !values[key].matches(expected)
         } else {
             let key = propertyKey(from: clause)
@@ -631,7 +631,7 @@ private enum ConditionEvaluator {
             .dropFirst()
             .dropLast()
             .split(separator: ",")
-            .map { parseLiteral(String($0)) }
+            .map { WallpaperEngineProjectPropertyValue.conditionLiteral(String($0)) }
 
         return candidates.contains { values[key].matches($0) }
     }
@@ -648,14 +648,6 @@ private enum ConditionEvaluator {
         return trimmed
     }
 
-    private static func parseLiteral(_ raw: String) -> WallpaperEngineProjectPropertyValue {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        if trimmed.caseInsensitiveCompare("true") == .orderedSame { return .bool(true) }
-        if trimmed.caseInsensitiveCompare("false") == .orderedSame { return .bool(false) }
-        if let number = Double(trimmed) { return .number(number) }
-        return .string(trimmed)
-    }
 }
 
 private extension Optional where Wrapped == WallpaperEngineProjectPropertyValue {
@@ -675,17 +667,7 @@ private extension Optional where Wrapped == WallpaperEngineProjectPropertyValue 
     }
 
     func matches(_ expected: WallpaperEngineProjectPropertyValue) -> Bool {
-        guard let value = self else { return false }
-        switch (value, expected) {
-        case (.bool(let lhs), .bool(let rhs)):
-            return lhs == rhs
-        case (.number(let lhs), .number(let rhs)):
-            return abs(lhs - rhs) < 0.000_001
-        case (.string(let lhs), .string(let rhs)):
-            return lhs == rhs
-        default:
-            return value.stringValue == expected.stringValue
-        }
+        self?.looselyMatches(expected) ?? false
     }
 }
 
