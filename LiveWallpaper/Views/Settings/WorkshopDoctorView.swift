@@ -363,7 +363,7 @@ private struct BinaryPickerRow: View {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
                 if let path {
                     Text(path)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(DesignTokens.Typography.codeCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .truncationMode(.middle)

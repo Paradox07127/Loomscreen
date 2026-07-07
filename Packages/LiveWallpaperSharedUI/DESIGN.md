@@ -19,15 +19,18 @@ styles auto-scale with accessibility; `badge` is the only fixed size.
 | Token | Font | ≈pt | Use | Absorbs |
 | --- | --- | --- | --- | --- |
 | `badge` | `.caption2.semibold` | 10 | type pills, corner/thumbnail badges, status chips | 6, 8, 9, 10 |
-| `caption` | `.caption` | 11 | metadata, helper text | 11 |
-| `captionEmphasized` | `.caption.semibold` | 11 | emphasized metadata | — |
+| `caption` | `.caption` | 10 | metadata, helper text | 11 |
+| `captionEmphasized` | `.caption.semibold` | 10 | emphasized metadata | — |
 | `body` | `.body` | 13 | body copy, form labels | 12, 13 |
 | `bodyEmphasized` | `.body.semibold` | 13 | card / list-row titles | 13 (semibold) |
 | `sectionTitle` | `.title3.semibold` | 15 | group & inspector headers | 14, 15, 16 |
 | `pageTitle` | `.title2` | 17 | page / nav / sheet titles | 17, 18, 20, 22 |
 | `hero` | `.largeTitle` | 26 | empty-state / onboarding | 24–56 |
-| `metric` | `.caption.monospacedDigit()` | 11 | inline numeric readouts: slider %, fps, gauges | numeric readouts |
+| `metric` | `.caption.monospacedDigit()` | 10 | inline numeric readouts: slider %, fps, gauges | numeric readouts |
 | `code` | `.body.monospaced` | 13 | paths, commands, IDs, technical text | monospaced text |
+| `codeCaption` | `.caption.monospaced` | 10 | dense technical text: log lines, paths, IDs | caption-sized monospaced |
+
+> ≈pt = measured macOS text-style metrics at default size (caption1/caption2 = 10, subheadline = 11, callout = 12, body = 13). Lint tooling and exact-equivalence judgments must use these measured values.
 
 ## Color — `DesignTokens.Colors`
 

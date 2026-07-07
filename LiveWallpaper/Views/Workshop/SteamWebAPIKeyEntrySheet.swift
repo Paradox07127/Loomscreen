@@ -109,12 +109,12 @@ struct SteamWebAPIKeyEntrySheet: View {
                 if isShowingKey {
                     TextField("Paste your 32-character key", text: $apiKey)
                         .textFieldStyle(.plain)
-                        .font(.system(.body, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                         .textSelection(.enabled)
                 } else {
                     SecureField("Paste your 32-character key", text: $apiKey)
                         .textFieldStyle(.plain)
-                        .font(.system(.body, design: .monospaced))
+                        .font(DesignTokens.Typography.code)
                 }
             }
             .disabled(!hasReadTOU)

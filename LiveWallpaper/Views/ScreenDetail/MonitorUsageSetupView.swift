@@ -182,7 +182,7 @@ private struct SnippetBox: View {
 
     private var snippetText: some View {
         Text(snippet)
-            .font(.system(.caption, design: .monospaced))
+            .font(DesignTokens.Typography.codeCaption)
             .foregroundStyle(.primary)
             .textSelection(.enabled)
             .padding(DesignTokens.Spacing.sm)

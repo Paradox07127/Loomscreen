@@ -288,7 +288,7 @@ struct MenuBarContent: View {
             Button(action: invokeManageWindow) {
                 HStack(spacing: 7) {
                     Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(DesignTokens.Typography.bodyEmphasized)
                     Text("Manage")
                         .font(DesignTokens.Typography.bodyEmphasized)
                         .lineLimit(1)

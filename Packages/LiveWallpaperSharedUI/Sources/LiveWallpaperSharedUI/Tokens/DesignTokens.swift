@@ -63,6 +63,9 @@ public enum DesignTokens {
         public static let metric = Font.caption.monospacedDigit()
 
         public static let code = Font.system(.body, design: .monospaced)
+
+        /// Caption-scale `code` for dense technical text: log lines, paths, IDs.
+        public static let codeCaption = Font.system(.caption, design: .monospaced)
     }
 
     public enum Spacing {
