@@ -128,9 +128,20 @@ enum WorkshopDiagnosticRedactor {
         // IPv4 dotted quad.
         output = output.replacingOccurrences(of: #"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"#, with: "<ipv4>", options: .regularExpression)
 
-        // IPv6 (deliberately permissive — anything with 2+ colon-separated
-        // hex groups gets scrubbed; false-positive risk is acceptable in a
-        // diagnostic payload).
+        // Compressed IPv6 (`fe80::1`) — must run before the expanded rule,
+        // which only matches single-colon chains and would eat just the tail
+        // of a `::` form, leaking the routing prefix. The alternation requires
+        // ≥1 hex group (bare `::` survives); the flanking guards keep scope
+        // operators like `Foo::bar` intact.
+        output = output.replacingOccurrences(
+            of: #"(?<![A-Za-z0-9:])(?:[A-Fa-f0-9]{1,4}(?::[A-Fa-f0-9]{1,4})*::(?:[A-Fa-f0-9]{1,4}(?::[A-Fa-f0-9]{1,4})*)?|::[A-Fa-f0-9]{1,4}(?::[A-Fa-f0-9]{1,4})*)(?![A-Za-z0-9:])"#,
+            with: "<ipv6>",
+            options: .regularExpression
+        )
+
+        // IPv6 expanded form (deliberately permissive — anything with 2+
+        // colon-separated hex groups gets scrubbed; false-positive risk is
+        // acceptable in a diagnostic payload).
         output = output.replacingOccurrences(
             of: #"\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b"#,
             with: "<ipv6>",
