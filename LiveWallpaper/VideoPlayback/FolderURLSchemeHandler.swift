@@ -23,8 +23,9 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     nonisolated static let host = "wallpaper"
     nonisolated static let responseChunkSize = 64 * 1024
 
-    /// CSP applied to every response served from this handler. v2 baseline
-    /// from `docs/2026-05-28-steam-workshop-integration-plan.md` (Phase 4).
+    /// CSP attached to responses while `cspEnforcementEnabled` is on. v2
+    /// baseline from `docs/2026-05-28-steam-workshop-integration-plan.md`
+    /// (Phase 4).
     ///
     /// Hard wins kept regardless of audit outcome:
     /// - `frame-src 'none'` blocks clickjacking and nested document attacks.
@@ -55,9 +56,16 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// in `Report-Only` mode (via `CSPCompatibilityAuditTests`) so the
     /// wallpaper runs unimpeded while the browser still emits
     /// `securitypolicyviolation` events for the test corpus. `nil` (the
-    /// default) keeps the production enforced policy from
-    /// `contentSecurityPolicy`.
+    /// default) defers to `cspEnforcementEnabled`: the enforced policy from
+    /// `contentSecurityPolicy` when on, no CSP header when off.
     var cspOverride: ContentSecurityPolicyOverride?
+
+    /// Mirrors `HTMLConfig.cspEnforcementEnabled` for the owning session —
+    /// CSP is opt-in, so the default (`false`, matching the config default)
+    /// serves responses without a CSP header. `HTMLWallpaperView.apply(_:)`
+    /// pushes the value on every config apply and reloads on a flip, so all
+    /// requests after the reload observe the new state.
+    var cspEnforcementEnabled = false
 
     /// Directives + disposition held together so callers can't swap one field
     /// but forget the other.
@@ -199,11 +207,13 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
         // Snapshot the CSP for this request on the main thread so the detached
         // worker can attach it without crossing actor boundaries to read the
-        // mutable `cspOverride` property.
-        let cspHeader: (name: String, value: String) = {
+        // mutable `cspOverride` / `cspEnforcementEnabled` properties. `nil`
+        // (enforcement off, no test override) attaches no CSP header.
+        let cspHeader: (name: String, value: String)? = {
             if let override = cspOverride {
                 return (override.headerName, override.directives)
             }
+            guard cspEnforcementEnabled else { return nil }
             return ("Content-Security-Policy", Self.contentSecurityPolicy)
         }()
 
@@ -229,9 +239,11 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                 var headers = [
                     "Content-Type": mime,
                     "Content-Length": "\(contentLength)",
-                    "Accept-Ranges": "bytes",
-                    cspHeader.name: cspHeader.value
+                    "Accept-Ranges": "bytes"
                 ]
+                if let cspHeader {
+                    headers[cspHeader.name] = cspHeader.value
+                }
                 // Range-served audio / video subresources need ACAO so the
                 // page can `<audio>`/`<video>` them across nested iframes;
                 // the previous unconditional `*` also opened every text /

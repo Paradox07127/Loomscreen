@@ -410,6 +410,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = config.allowJavaScript
         allowMouseInteraction = config.allowMouseInteraction
+        // Same opt-in flag as the script-side CSP meta tag: folder/WPE scheme
+        // responses carry the CSP header only when enforcement is enabled.
+        // A flip lands in `needsDocumentStartReload` below, so the reloaded
+        // page's requests observe the new value.
+        folderHandler.cspEnforcementEnabled = config.cspEnforcementEnabled
 
         if currentDataStoreIsEphemeral != pendingEphemeral {
             let requested = pendingEphemeral ? "ephemeral" : "persistent"

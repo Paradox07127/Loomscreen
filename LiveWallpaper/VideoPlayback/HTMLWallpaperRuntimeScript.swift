@@ -896,7 +896,10 @@ enum HTMLWallpaperRuntimeScript {
     /// permits content from any HTTPS origin and inline scripts (most
     /// wallpapers fail catastrophically under strict CSP) while blocking
     /// data exfiltration via WebSockets / WebRTC / fetch to schemes other
-    /// than https/data/blob. Opt-in via `HTMLConfig.cspEnforcementEnabled`.
+    /// than https/data/blob. Opt-in via `HTMLConfig.cspEnforcementEnabled`,
+    /// which also gates the header-side CSP on folder/WPE scheme responses
+    /// (`FolderURLSchemeHandler.cspEnforcementEnabled`) — off means no CSP
+    /// from either path.
     static func cspInjection() -> String {
         return """
         (function () {

@@ -95,6 +95,57 @@ struct FolderURLSchemeHandlerLifecycleTests {
         #expect(task.totalReceivedBytes == payload.count)
     }
 
+    @Test("CSP enforcement on attaches the enforced Content-Security-Policy header")
+    func cspEnforcementOnAttachesHeader() async throws {
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("body {}".utf8).write(to: folder.appendingPathComponent("style.css"))
+
+        let handler = FolderURLSchemeHandler()
+        handler.cspEnforcementEnabled = true
+        handler.folderURL = folder
+
+        let request = subresourceRequest(
+            url: "livewallpaper://wallpaper/style.css",
+            mainDocument: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")"
+        )
+        let task = FakeURLSchemeTask(request: request)
+
+        handler.webView(WKWebView(), start: task)
+        try await waitUntilTaskCompletes(task)
+
+        let response = try #require(task.receivedResponse as? HTTPURLResponse)
+        #expect(
+            response.value(forHTTPHeaderField: "Content-Security-Policy")
+                == FolderURLSchemeHandler.contentSecurityPolicy
+        )
+    }
+
+    @Test("CSP enforcement off (the config default) omits the Content-Security-Policy header")
+    func cspEnforcementOffOmitsHeader() async throws {
+        let folder = makeTemporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("body {}".utf8).write(to: folder.appendingPathComponent("style.css"))
+
+        // Untouched handler: `cspEnforcementEnabled` must default to off,
+        // matching `HTMLConfig.cspEnforcementEnabled`'s default.
+        let handler = FolderURLSchemeHandler()
+        handler.folderURL = folder
+
+        let request = subresourceRequest(
+            url: "livewallpaper://wallpaper/style.css",
+            mainDocument: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")"
+        )
+        let task = FakeURLSchemeTask(request: request)
+
+        handler.webView(WKWebView(), start: task)
+        try await waitUntilTaskCompletes(task)
+
+        let response = try #require(task.receivedResponse as? HTTPURLResponse)
+        #expect(response.value(forHTTPHeaderField: "Content-Security-Policy") == nil)
+        #expect(response.value(forHTTPHeaderField: "Content-Security-Policy-Report-Only") == nil)
+    }
+
     @Test("Stop after start prevents finish from firing")
     func stopAfterStartCancelsDelivery() async throws {
         let folder = makeTemporaryFolder()
