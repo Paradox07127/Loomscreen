@@ -1889,7 +1889,8 @@ private extension WPERenderLayer {
             alpha: g.alpha,
             alphaAnimation: g.alphaAnimation,
             color: g.color,
-            brightness: g.brightness
+            brightness: g.brightness,
+            shapePoints: g.shapePoints
         )
         return WPERenderLayer(
             objectID: objectID,

@@ -28,17 +28,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         var noteNames: Set<String>
     }
 
-    private let waterWavesPathLock = NSLock()
-    private var waterWavesPathValue = "Inactive"
-    private var waterWavesPathStamp: TimeInterval = 0
-
-    func setWaterWavesPath(_ path: String) {
-        waterWavesPathLock.lock()
-        waterWavesPathValue = path
-        waterWavesPathStamp = ProcessInfo.processInfo.systemUptime
-        waterWavesPathLock.unlock()
-    }
-
     private var session: ActiveSession?
     private let sessionLock = NSLock()
     private let writeQueue = DispatchQueue(label: "wpe.scene.debug.artifacts", qos: .utility)

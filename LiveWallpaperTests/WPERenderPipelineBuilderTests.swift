@@ -19,6 +19,56 @@ struct WPERenderPipelineBuilderTests {
         #expect(WPEBuiltinShaderName.normalized("genericimage_custom", genericImageAsCopy: true) == "genericimage_custom")
     }
 
+    @Test("Script-driven alpha/transform rewrites keep shape:quad points")
+    func scriptAlphaAndTransformRewritesKeepShapeQuadPoints() throws {
+        // applyingAlpha/applyingTransform rebuild the geometry per script tick;
+        // like the attachment-follow rewrite, they must carry shapePoints or a
+        // scripted quad layer loses its perspective corners at runtime.
+        let points = [
+            SIMD2<Double>(0.4, 0.25),
+            SIMD2<Double>(0.6, 0.25),
+            SIMD2<Double>(0.94451, 0.83623),
+            SIMD2<Double>(0.09498, 0.88795)
+        ]
+        let layer = WPERenderLayer(
+            objectID: "96",
+            objectName: "beam",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(100, 200, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 200, height: 100),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1,
+                shapePoints: points
+            ),
+            compositeA: "_rt_imageLayerComposite_96_a",
+            compositeB: "_rt_imageLayerComposite_96_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(graphLayer: layer, passes: [])
+        ])
+
+        let faded = try #require(pipeline.applyingLayerAlpha(["96": 0.5]).layers.first).graphLayer
+        #expect(faded.geometry.alpha == 0.5)
+        #expect(faded.geometry.shapePoints == points)
+
+        let moved = try #require(pipeline.applyingLayerTransforms(
+            origins: ["96": SIMD3<Double>(150, 250, 0)],
+            scales: [:],
+            angles: [:]
+        ).layers.first).graphLayer
+        #expect(moved.geometry.origin == SIMD3<Double>(150, 250, 0))
+        #expect(moved.geometry.shapePoints == points)
+    }
+
     @Test("Builds prepared shader programs from render graph passes")
     func buildsPreparedShaderProgramsFromGraphPasses() throws {
         let fixture = try makeFixture(files: [

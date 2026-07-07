@@ -51,6 +51,46 @@ struct WPEMetalRenderExecutorTests {
         #expect(WPEMetalRenderExecutor.puppetDefaultsFlagOptional(key, suite: scratchSuite, standard: scratchStandard) == false)
     }
 
+    @Test("Attachment-follow origin rewrite keeps shape:quad points every frame")
+    func attachmentFollowOriginRewriteKeepsShapeQuadPoints() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        // Runtime dual of the graph builder's anchor rewrite: this one runs per
+        // frame whenever a puppet attachment resolves, so dropping a geometry
+        // field here strips it from every rendered frame even though the graph
+        // (and its tests) still carry it.
+        let points = [
+            SIMD2<Double>(0.4, 0.25),
+            SIMD2<Double>(0.6, 0.25),
+            SIMD2<Double>(0.94451, 0.83623),
+            SIMD2<Double>(0.09498, 0.88795)
+        ]
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(1000, 1300, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 200, height: 100),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1,
+            shapePoints: points
+        )
+        let layer = graphLayer(pass: solidPass(), geometry: geometry)
+
+        let followed = executor.replacingGeometryOrigin(
+            of: layer,
+            bySceneOffset: SIMD2<Float>(12, -8),
+            sceneSize: CGSize(width: 3840, height: 2160)
+        )
+
+        // The anchor delta moved the origin…
+        #expect(followed.geometry.origin == SIMD3<Double>(1012, 1292, 0))
+        // …and the perspective-quad corners survive the rebuild. Regression:
+        // they were dropped, collapsing the DIRECTDRAW beam to the object quad.
+        #expect(followed.geometry.shapePoints == points)
+    }
+
     @Test("Destination-reading blend modes load the existing attachment (incl. screen)")
     func destinationReadingBlendModesRequireExistingDestination() throws {
         // Screen/additive/multiply read the destination as their `dst` operand, so

@@ -2679,7 +2679,10 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    private func replacingGeometryOrigin(
+    // Internal (not private) so tests can cover the per-frame rewrite: it must
+    // carry every geometry field — dropping one (e.g. shapePoints) silently
+    // strips it from every rendered frame of an attachment-followed layer.
+    func replacingGeometryOrigin(
         of layer: WPERenderLayer,
         bySceneOffset delta: SIMD2<Float>,
         sceneSize: CGSize
@@ -2700,7 +2703,8 @@ final class WPEMetalRenderExecutor {
             alpha: geometry.alpha,
             alphaAnimation: geometry.alphaAnimation,
             color: geometry.color,
-            brightness: geometry.brightness
+            brightness: geometry.brightness,
+            shapePoints: geometry.shapePoints
         )
         return WPERenderLayer(
             objectID: layer.objectID,
@@ -5085,7 +5089,6 @@ final class WPEMetalRenderExecutor {
             )
         }
 
-        WPESceneDebugArtifacts.shared.setWaterWavesPath("Builtin")
         let maskResolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: maskTexture)
         var uniforms = WPEWaterWavesUniforms(
             time: time,
