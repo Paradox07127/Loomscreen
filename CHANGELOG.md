@@ -13,6 +13,27 @@ will be cut once the surface has stabilized through real-world use.
 Pro-edition (`LiveWallpaper.app`) release notes live separately and are
 not covered by this file.
 
+## [0.2.4] — 2026-07-07
+
+### Changed
+- Content-Security-Policy enforcement for folder and WPE web wallpapers is now
+  governed entirely by its opt-in toggle. With the toggle off (the default),
+  scheme responses no longer attach the enforced CSP header, so wallpapers that
+  legitimately need iframes or external frames render correctly; the WebKit
+  sandbox and custom-scheme isolation still apply. Enable the toggle to restore
+  the strict header.
+- Diagnostic bug reports now redact a broader set of identifiers — Steam IDs,
+  IPv4/IPv6 addresses (including compressed forms), local hostnames, and Steam
+  account/persona names — before they leave the app.
+
+### Fixed
+- Internal settings and typography refactors (the General settings screen was
+  split into per-section files; assorted inline fonts moved onto the design
+  tokens) with no intended visual change.
+- Additional WPE scene-rendering fixes landed in the shared codebase — off-frame
+  script evaluation, typed shader dispatch, and attachment/geometry handling —
+  which remain Pro-only at runtime in the Lite SKU.
+
 ## [0.2.3] — 2026-07-04
 
 ### Changed
@@ -145,7 +166,8 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.3...HEAD
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.4...HEAD
+[0.2.4]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.3...loomscreen-v0.2.4
 [0.2.3]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.2...loomscreen-v0.2.3
 [0.2.2]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.1...loomscreen-v0.2.2
 [0.2.1]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.2.0...loomscreen-v0.2.1
