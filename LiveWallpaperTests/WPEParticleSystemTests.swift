@@ -387,6 +387,53 @@ struct WPEParticleSystemTests {
         #expect(abs(pointer[0].rotationAndLife.x - 0.675) < 0.1)
     }
 
+    @Test("A seeded RNG makes particle spawn jitter reproducible run-to-run (oracle determinism)")
+    func seededParticleRNGIsDeterministic() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // RNG must actually affect the output: dispersal spread, per-particle size,
+        // lifetime, velocity and color are all sampled at spawn.
+        func makeDef() -> WPEParticleDefinition {
+            WPEParticleDefinition(
+                materialRelativePath: nil, maxCount: 64,
+                rate: 2000, startDelay: 0,
+                lifetimeMin: 2, lifetimeMax: 8,
+                sizeMin: 2, sizeMax: 12,
+                originOffset: SIMD3(0, 0, 0),
+                dispersalMin: 0, dispersalMax: 200,
+                velocityMin: SIMD3(-50, -50, 0), velocityMax: SIMD3(50, 50, 0),
+                colorMin: SIMD3(0, 0, 0), colorMax: SIMD3(255, 255, 255),
+                fadeInSeconds: 0.01
+            )
+        }
+        // Byte-exact snapshot of the LIVE instance slice (dead slots past
+        // `liveInstanceCount` hold stale memory and are not written each tick).
+        func liveSnapshot(seed: UInt64?) throws -> Data {
+            let system = try #require(WPEParticleSystem(definition: makeDef(), device: device, seed: seed))
+            system.tick(now: 0)
+            for step in 1...20 { system.tick(now: Double(step) * 0.05) }
+            let liveBytes = system.liveInstanceCount * MemoryLayout<WPEParticleInstance>.stride
+            #expect(liveBytes > 0)
+            return Data(bytes: system.instanceBuffer.contents(), count: liveBytes)
+        }
+        let a = try liveSnapshot(seed: 0x00AB_CDEF)
+        let b = try liveSnapshot(seed: 0x00AB_CDEF)
+        let c = try liveSnapshot(seed: 0x0012_3456)
+        #expect(a == b)   // same seed ⇒ byte-identical particle state
+        #expect(a != c)   // different seed ⇒ different jitter (the seed really drives it)
+    }
+
+    @Test("deterministicSeed is stable per input and unique across scene/object/order")
+    func deterministicSeedIsStableAndUnique() {
+        let base = WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 3)
+        #expect(base == WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123457", objectID: "42", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "43", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 4))
+        // The '\' field separator must prevent "12"+"3456" from colliding with "123"+"456".
+        #expect(WPEParticleSystem.deterministicSeed(workshopID: "12", objectID: "3456", sortIndex: 0)
+            != WPEParticleSystem.deterministicSeed(workshopID: "123", objectID: "456", sortIndex: 0))
+    }
+
     @Test("Gravity integrates over time, pulling a particle along the gravity vector")
     func gravityIntegrates() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

@@ -728,7 +728,7 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
     // MARK: - Texture metrics (best-effort, post-commit only)
 
     private func textureMetrics(_ texture: MTLTexture) -> (sha256: String, visualStats: [String: Any])? {
-        guard let data = rgba8Bytes(texture) else { return nil }
+        guard let data = readbackTextureBytes(texture) else { return nil }
         let stats = WPEMetalTextureVisualStats.analyze(texture: texture)
         let pixels = max(texture.width * texture.height, 1)
         let visualStats: [String: Any] = [
@@ -754,12 +754,22 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         ]
     }
 
-    private func rgba8Bytes(_ texture: MTLTexture) -> Data? {
-        // 4-byte RGBA/BGRA unorm only. Channel order does not matter for the hash
-        // (it is self-consistent across Mac runs); HDR/float RTs are skipped.
+    private func readbackTextureBytes(_ texture: MTLTexture) -> Data? {
+        // Deterministic readback for hashing. rgba8/bgra8 unorm are hashed raw (exact,
+        // no NaN/denormal). HDR rgba16Float is decoded to canonical clamped 8-bit
+        // FIRST: raw Float16 bytes are non-deterministic across runs (NaN payloads,
+        // ±0, denormals, and stale/aliased bytes in HDR targets' unwritten texels)
+        // even when the rendered image is identical — SDR scenes hash byte-stably,
+        // HDR ones did not. Clamp+quantize to the visual result removes that noise.
+        let isFloat16: Bool
+        let bytesPerPixel: Int
         switch texture.pixelFormat {
         case .rgba8Unorm, .rgba8Unorm_srgb, .bgra8Unorm, .bgra8Unorm_srgb:
-            break
+            bytesPerPixel = 4
+            isFloat16 = false
+        case .rgba16Float:
+            bytesPerPixel = 8
+            isFloat16 = true
         default:
             return nil
         }
@@ -773,18 +783,34 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
             )
             return nil
         }
-        let bytesPerRow = texture.width * 4
-        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
-        bytes.withUnsafeMutableBytes { ptr in
+        let width = texture.width
+        let height = texture.height
+        let bytesPerRow = width * bytesPerPixel
+        var raw = [UInt8](repeating: 0, count: bytesPerRow * height)
+        raw.withUnsafeMutableBytes { ptr in
             guard let base = ptr.baseAddress else { return }
             texture.getBytes(
                 base,
                 bytesPerRow: bytesPerRow,
-                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                from: MTLRegionMake2D(0, 0, width, height),
                 mipmapLevel: 0
             )
         }
-        return Data(bytes)
+        guard isFloat16 else { return Data(raw) }
+        // Float16 RGBA → canonical clamped 8-bit (the visual output). Non-finite
+        // (NaN/±Inf) and negatives collapse to 0; values ≥1 (incl. stale garbage in
+        // unwritten HDR texels) clamp to 255 — both deterministic across runs.
+        let componentCount = width * height * 4
+        var canonical = [UInt8](repeating: 0, count: componentCount)
+        raw.withUnsafeBytes { rawPtr in
+            let halfs = rawPtr.bindMemory(to: UInt16.self)
+            for index in 0..<componentCount {
+                let value = Float(Float16(bitPattern: halfs[index]))
+                let clamped = value.isFinite ? min(max(value, 0), 1) : 0
+                canonical[index] = UInt8((clamped * 255).rounded())
+            }
+        }
+        return Data(canonical)
     }
 
     // MARK: - Small helpers

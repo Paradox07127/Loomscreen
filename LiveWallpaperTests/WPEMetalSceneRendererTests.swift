@@ -414,6 +414,10 @@ struct WPEMetalSceneRendererTests {
 
     @Test("Computes runtime uniforms from clock pointer and performance profile during load render")
     func computesRuntimeUniformsDuringLoadRender() async throws {
+        // This test verifies the NORMAL frame-clock/pointer path; force the render oracle
+        // off so a developer's persisted `WPEOracleEnabled` can't freeze the clock/pointer.
+        WPEOracleMode.testingOverride = false
+        defer { WPEOracleMode.testingOverride = nil }
         let device = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }

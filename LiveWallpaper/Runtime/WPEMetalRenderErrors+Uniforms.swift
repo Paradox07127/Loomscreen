@@ -127,11 +127,6 @@ struct WPEComposeLayerUniforms {
     var flags: SIMD4<Float>
 }
 
-struct WPECopyUniforms {
-    var uvOffset: SIMD2<Float>
-    var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
-}
-
 /// How the final scene texture maps onto the screen drawable. Renderer-local
 /// (no dependency on `VideoFitMode`'s AVFoundation semantics); the session maps
 /// `VideoFitMode` onto this. `stretch` = legacy full-bleed (may distort);

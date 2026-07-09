@@ -18,6 +18,45 @@ struct WPEParticleRopeVertex {
     var color: SIMD4<Float>             // rgb 0…1, a = current alpha
 }
 
+/// Random source for particle spawn jitter. Value-typed so the existing
+/// `Double.random(in:using:&rng)` / `Int.random(...:using:&rng)` call sites
+/// compile unchanged — no existential opening, no heap allocation.
+///
+/// Production uses `.system` (the platform CSPRNG), byte-for-byte the historical
+/// behavior. The render oracle injects `.seeded` so a scene renders identically
+/// across runs — the prerequisite for same-machine before/after golden diffs.
+enum WPEParticleRNG: RandomNumberGenerator {
+    case system(SystemRandomNumberGenerator)
+    case seeded(SplitMix64)
+
+    mutating func next() -> UInt64 {
+        switch self {
+        case .system(var generator):
+            let value = generator.next()
+            self = .system(generator)
+            return value
+        case .seeded(var generator):
+            let value = generator.next()
+            self = .seeded(generator)
+            return value
+        }
+    }
+}
+
+/// Deterministic, allocation-free 64-bit generator (Vigna's SplitMix64). Used only
+/// under the render oracle to make particle spawn jitter reproducible run-to-run.
+struct SplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { self.state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
 /// One-shot world-space placement applied to a `WPEParticleSystem` at load time.
 ///
 /// **Coordinate convention: WPE author space is Y-up, bottom-left
@@ -235,7 +274,7 @@ final class WPEParticleSystem {
     private var hasEmittedBurst = false
     private var lastTickTime: Double?
     private var firstTickTime: Double?
-    private var rng: SystemRandomNumberGenerator
+    private var rng: WPEParticleRNG
     /// Cached gravity in render space (Y-up). Mirrors the velocity rule:
     /// flip emitter-local Y once, then apply the scene object's scale
     /// and rotation without translating.
@@ -273,6 +312,26 @@ final class WPEParticleSystem {
     /// on-device comparison against Windows.
     static let turbulentVelocityInitSpeed: Float = 150
 
+    /// Stable per-system oracle seed: reproducible across reloads, unique per
+    /// (scene, object, paint order). Uses FNV-1a for the scene id — NOT Swift's
+    /// `Hasher`, which is randomly salted per process and would break run-to-run
+    /// reproducibility. Only consulted when `WPEOracleMode.isEnabled`.
+    static func deterministicSeed(workshopID: String, objectID: String, sortIndex: Int) -> UInt64 {
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325  // FNV-1a 64-bit offset basis
+        let prime: UInt64 = 0x0000_0100_0000_01B3  // FNV-1a 64-bit prime
+        func mix(_ string: String) {
+            for byte in string.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* prime
+            }
+            hash ^= 0x5C  // '\' separator so mix("a")+mix("b") ≠ mix("ab")
+            hash = hash &* prime
+        }
+        mix(workshopID)
+        mix(objectID)
+        return hash ^ UInt64(bitPattern: Int64(sortIndex))
+    }
+
     private struct Particle {
         var position: SIMD3<Float>
         var velocity: SIMD3<Float>
@@ -304,7 +363,8 @@ final class WPEParticleSystem {
         device: MTLDevice,
         blendMode: WPEParticleBlendMode = .translucent,
         sceneTransform: WPEParticleSceneTransform = .identity,
-        spriteSheet: WPEParticleSpriteSheet? = nil
+        spriteSheet: WPEParticleSpriteSheet? = nil,
+        seed: UInt64? = nil
     ) {
         self.definition = definition
         self.blendMode = blendMode
@@ -350,7 +410,14 @@ final class WPEParticleSystem {
         } else {
             self.ropeVertexBuffer = nil
         }
-        self.rng = SystemRandomNumberGenerator()
+        // Production (seed == nil) keeps the system CSPRNG, byte-for-byte the
+        // historical spawn jitter. The oracle passes a stable seed for reproducible
+        // traces; see `WPEParticleSystem.deterministicSeed`.
+        if let seed {
+            self.rng = .seeded(SplitMix64(seed: seed))
+        } else {
+            self.rng = .system(SystemRandomNumberGenerator())
+        }
         // Y-up author space: gravity is used as authored (no flip), then
         // honored through the scene object's scale/rotation like velocity.
         let localGravity = SIMD3<Float>(

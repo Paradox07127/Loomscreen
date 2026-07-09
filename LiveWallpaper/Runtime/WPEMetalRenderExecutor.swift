@@ -430,7 +430,7 @@ final class WPEMetalRenderExecutor {
         let namedTextures: [String: MTLTexture]
     }
 
-    private struct TranslatedPipelineKey: Hashable {
+    fileprivate struct TranslatedPipelineKey: Hashable {
         let libraryID: ObjectIdentifier
         let vertexName: String
         let fragmentName: String
@@ -660,7 +660,13 @@ final class WPEMetalRenderExecutor {
         defer { if asyncSubmission && !didCommitAsync { inFlightSemaphore.signal() } }
         #if DEBUG
         scenePassDumps.removeAll()
-        let dumpScenePasses = sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false
+        // Collect per-pass scene-target snapshots when the workshopID-scoped dump
+        // flag matches OR the render oracle is on (which hashes every pass into the
+        // trace). Oracle collection forces particles standalone (below) — a render-
+        // encoder boundary change only, byte-identical composite, consistent across
+        // both before/after oracle runs.
+        let dumpScenePasses = (sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false)
+            || WPEOracleMode.perPassHashesEnabled
         dumpLayerPassesID = {
             let id = UserDefaults.standard.string(forKey: "WPEDumpLayerPasses")
             return (id?.isEmpty == false) ? id : nil
@@ -3134,9 +3140,8 @@ final class WPEMetalRenderExecutor {
         encoder.setFragmentTexture(sourceTexture, index: 0)
         // Premultiplied alpha (commit 968cf50) stays intact: the source layer/effect FBO is already
         // premultiplied, `wpe_copy_fragment` returns it unchanged, and `pass.pass.blending` is the
-        // graph's existing `premultiplied*` final scene blend.
-        var copyUniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
-        encoder.setFragmentBytes(&copyUniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
+        // graph's existing `premultiplied*` final scene blend. The copy fragment takes no fragment
+        // uniform buffer.
         try bindPuppetBonePalette(paletteState.bonePalette, encoder: encoder)
         encoder.setVertexBytes(
             &compositeUniforms,
@@ -3162,18 +3167,8 @@ final class WPEMetalRenderExecutor {
             ],
             vertexShaderName: "wpe_puppet_scene_composite_vertex",
             fragmentShaderName: "wpe_copy_fragment",
-            fragmentUniforms: [
-                WPECanonicalTraceRecorder.PuppetUniformInput(
-                    name: "uvOffsetAndPadding",
-                    type: "vec4",
-                    value: SIMD4<Float>(
-                        copyUniforms.uvOffset.x,
-                        copyUniforms.uvOffset.y,
-                        copyUniforms.padding.x,
-                        copyUniforms.padding.y
-                    )
-                )
-            ],
+            // wpe_copy_fragment is a 1:1 copy with no fragment uniform buffer.
+            fragmentUniforms: [],
             vertexUniforms: [
                 WPECanonicalTraceRecorder.PuppetUniformInput(
                     name: "localSizeAndMode",
@@ -4295,11 +4290,9 @@ final class WPEMetalRenderExecutor {
         )
         // Parallax is a geometry translation applied in object-quad scene
         // passes; raw-pointer UV shifts are intentionally not applied here.
-        // (Plain
-        // full-frame layers routed through this fullscreen copy don't parallax —
-        // see the camera-parallax limitations note.)
-        var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
+        // (Plain full-frame layers routed through this fullscreen copy don't
+        // parallax — see the camera-parallax limitations note.) The copy
+        // fragment samples 1:1 and takes no fragment uniform buffer.
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
@@ -5617,6 +5610,75 @@ final class WPEMetalRenderExecutor {
         }
         translatedPipelineCache[key] = state
         return state
+    }
+
+    /// One translated-shader pipeline combo to pre-compile off the render thread.
+    /// `@unchecked Sendable`: the Metal handles it carries (device, library, functions)
+    /// are all documented thread-safe — this lets the whole request cross into the
+    /// prewarm task group as one Sendable value, so no bare `MTLDevice` is captured.
+    struct WPETranslatedPipelinePrewarm: @unchecked Sendable {
+        let device: MTLDevice
+        let result: WPEShaderCompileResult
+        let vertexName: String?
+        let blendMode: String
+        let colorPixelFormat: MTLPixelFormat
+        let depthPixelFormat: MTLPixelFormat
+    }
+
+    /// Opaque, `Sendable` result of an off-thread pipeline pre-compile — wraps the private
+    /// cache key so the renderer can carry it across the task boundary and hand it back to
+    /// `seedTranslatedPipelines` without seeing the key type.
+    struct WPEPrewarmedPipeline: @unchecked Sendable {
+        fileprivate let key: TranslatedPipelineKey
+        fileprivate let state: MTLRenderPipelineState
+    }
+
+    /// Pure, thread-safe pipeline compile — mirrors `translatedPipelineState`'s descriptor
+    /// construction but does NO cache mutation, so it runs concurrently off-actor in the
+    /// prewarm task group. A pipeline is FULLY determined by its cache key, so a prewarmed
+    /// state is byte-identical to the lazy one — an imperfect (format/vertex) prediction
+    /// only costs a cache miss (the render thread rebuilds that one), never correctness.
+    /// Returns nil to skip (missing function / compile failure); the real first-frame render
+    /// re-hits and records it as today.
+    nonisolated static func buildTranslatedPipeline(
+        _ prewarm: WPETranslatedPipelinePrewarm
+    ) -> WPEPrewarmedPipeline? {
+        let result = prewarm.result
+        let resolvedVertexName = prewarm.vertexName ?? result.vertexFunctionName
+        let key = TranslatedPipelineKey(
+            libraryID: ObjectIdentifier(result.library),
+            vertexName: resolvedVertexName,
+            fragmentName: result.fragmentFunctionName,
+            blendMode: prewarm.blendMode.lowercased(),
+            colorPixelFormat: prewarm.colorPixelFormat.rawValue,
+            depthPixelFormat: prewarm.depthPixelFormat.rawValue
+        )
+        guard let vertex = result.library.makeFunction(name: resolvedVertexName)
+            ?? prewarm.device.makeDefaultLibrary()?.makeFunction(name: resolvedVertexName),
+              let fragment = result.library.makeFunction(name: result.fragmentFunctionName) else {
+            return nil
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let colorAttachment = descriptor.colorAttachments[0] else { return nil }
+        colorAttachment.pixelFormat = prewarm.colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = prewarm.depthPixelFormat
+        applyBlendMode(prewarm.blendMode.lowercased(), to: colorAttachment)
+        guard let state = try? prewarm.device.makeRenderPipelineState(descriptor: descriptor) else {
+            return nil
+        }
+        return WPEPrewarmedPipeline(key: key, state: state)
+    }
+
+    /// Seed pre-compiled pipeline states built by the parallel prewarm. Synchronous and
+    /// isolation-free (called on the render context before the first frame), so it never
+    /// sends the non-`Sendable` executor across an await. Idempotent: never overwrites a
+    /// key the render thread already built.
+    func seedTranslatedPipelines(_ prewarmed: [WPEPrewarmedPipeline]) {
+        for entry in prewarmed where translatedPipelineCache[entry.key] == nil {
+            translatedPipelineCache[entry.key] = entry.state
+        }
     }
 
     /// Phase 2D-H: pack a runtime uniform buffer matching the layout the transpiler emitted (every uniform takes 1-4 float4 slots).

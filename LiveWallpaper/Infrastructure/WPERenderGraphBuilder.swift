@@ -1996,20 +1996,6 @@ private extension WPETextureReference {
         }
         return replacement
     }
-
-    private static func isSceneAliasName(_ name: String) -> Bool {
-        switch name {
-        case "_rt_FullFrameBuffer",
-             "_rt_HalfFrameBuffer",
-             "_rt_QuarterFrameBuffer",
-             "_rt_imageLayerComposite":
-            return true
-        default:
-            return name.hasPrefix("_rt_EightBuffer")
-                || name.hasPrefix("_rt_Mip")
-                || name.hasPrefix("_rt_downscaled")
-        }
-    }
 }
 
 private extension WPERenderTarget {

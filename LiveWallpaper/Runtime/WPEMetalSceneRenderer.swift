@@ -300,6 +300,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var sceneRenderSize: CGSize = CGSize(width: 1, height: 1)
     private var cameraUniforms: WPEMetalCameraUniforms = .identity
     private var frameClock: WPEMetalFrameClock
+    /// Frozen frame globals when the render oracle is enabled (read once at load);
+    /// `nil` in production, so the real clock/pointer drive every frame unchanged.
+    private let oracleFrameOverride = WPEOracleMode.loadFrameOverride()
     private let pointerSampler: WPEMetalPointerSampler
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
@@ -1101,17 +1104,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// as `wpe-<id>-scenepass-NN-<passid>-WxH.png`, ordered by draw sequence.
     private func dumpScenePassesIfRequested(suffix: String = "") {
         let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
-            return
-        }
+        let pngRequested = (wantedID?.isEmpty == false) && wantedID == descriptor.workshopID
+        // Oracle mode attaches per-pass output hashes to the canonical trace even
+        // without the workshopID-scoped PNG flag, and skips the (expensive) PNG
+        // encode. `recordPassOutputs` matches by pass id, so passing the full dump
+        // list is idempotent.
+        guard pngRequested || WPEOracleMode.perPassHashesEnabled else { return }
         let dumps = executor.scenePassDumps
+        WPECanonicalTraceRecorder.shared.recordPassOutputs(dumps)
+        guard pngRequested else { return }
         Logger.notice(
             "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes\(suffix.isEmpty ? " (t0)" : " \(suffix)") for \(descriptor.workshopID)",
             category: .wpeRender
         )
-        #if !LITE_BUILD && DEBUG
-        WPECanonicalTraceRecorder.shared.recordPassOutputs(dumps)
-        #endif
         for (index, entry) in dumps.enumerated() {
             let safeLabel = entry.label
                 .replacingOccurrences(of: "/", with: "_")
@@ -1652,9 +1657,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let pointerIsInsideView = pointerSample.isInsideView
         let followPointerIsLive = mouseInteractionEnabled && pointerIsInsideView
         let clickPointerIsLive = mtkView.clickCaptureEnabled && pointerIsInsideView
-        let pointer = followPointerIsLive
+        // The oracle pins the pointer (self = center, fidelity = the replayed
+        // Windows cursor) so it never enters the trace as ambient state.
+        let pointer = oracleFrameOverride?.pointer ?? (followPointerIsLive
             ? pointerSample.position
-            : SIMD2<Double>(0.5, 0.5)
+            : SIMD2<Double>(0.5, 0.5))
         if !followPointerIsLive && previousPointerWasLive {
             for system in particleSystems where system.tracksPointer {
                 system.clearLiveParticles()
@@ -1665,6 +1672,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             profile: currentProfile,
             pointerPosition: pointer
         )
+        // Freeze wall-clock time and time-of-day to fixed values so two oracle runs
+        // of unchanged code produce byte-identical traces. Applied before parallax
+        // and the audio rebuild below, both of which read `uniforms.time`, so they
+        // inherit the frozen clock.
+        if let override = oracleFrameOverride {
+            uniforms = WPEMetalRuntimeUniforms(
+                time: override.time,
+                daytime: override.daytime,
+                brightness: uniforms.brightness,
+                pointerPosition: uniforms.pointerPosition
+            )
+        }
         // Compute once per frame (advances smoothing state); assigned below
         // after the audio path may have rebuilt `uniforms`.
         let parallaxFrame = cameraParallaxSmoother.frame(
@@ -1677,7 +1696,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // loopback of whatever is playing), not the scene's own sounds — those
         // are already in the system mix the tap captures. `soundRuntime` stays
         // a pure player. When capture is off the broker is silent (flat bars).
-        if SystemAudioCaptureManager.isCapturing {
+        if SystemAudioCaptureManager.isCapturing, oracleFrameOverride == nil {
             let audio = SystemAudioCaptureManager.broker.snapshot()
             if audioDebugLogEnabled {
                 audioDiagCounter += 1
@@ -3299,12 +3318,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 cols: 1, rows: 1, frameCount: 1, baseFrameRate: 0, isAlphaMask: true
             )
         }
+        // Under the render oracle, seed spawn jitter deterministically so the scene
+        // renders byte-identically run-to-run. `nil` in production ⇒ system CSPRNG.
+        let oracleSeed: UInt64? = WPEOracleMode.isEnabled
+            ? WPEParticleSystem.deterministicSeed(
+                workshopID: descriptor.workshopID, objectID: object.id, sortIndex: sortIndex)
+            : nil
         guard let system = WPEParticleSystem(
             definition: definition,
             device: executor.textureSourceDevice,
             blendMode: blendMode,
             sceneTransform: sceneTransform,
-            spriteSheet: spriteSheet
+            spriteSheet: spriteSheet,
+            seed: oracleSeed
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
@@ -3976,6 +4002,77 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard loadGeneration == generation else { return }
         executor.seedTranslatedShaderCache(warmed)
         debugStage("shader.prewarm.done", "warmed=\(warmed.count)/\(requests.count)")
+
+        // Second parallel phase: pre-build the pipeline STATES too. makeRenderPipelineState
+        // is the dominant residual first-frame cost (transpile/makeLibrary above are already
+        // warmed) and was still compiled lazily & serially on the render thread. Enumerate
+        // each pass's (shader, blend) against the scene's dominant color format and the two
+        // common vertex functions (fullscreen + object-quad); dedup by pipeline identity.
+        // Over-/under-prediction only changes the cache-hit rate, never correctness.
+        var resultByKey: [String: WPEShaderCompileResult] = [:]
+        for entry in warmed { resultByKey[entry.key] = entry.result }
+        let sceneColorFormat: MTLPixelFormat = cameraUniforms.sceneHDR
+            ? .rgba16Float
+            : WPEMetalRenderExecutor.outputPixelFormat
+        let vertexCandidates: [String?] = [nil, "wpe_object_quad_vertex"]
+        let prewarmDevice = executor.textureSourceDevice
+        var pipelinePrewarms: [WPEMetalRenderExecutor.WPETranslatedPipelinePrewarm] = []
+        var seenPipelineKeys = Set<String>()
+        for layer in pipeline.layers {
+            for pass in layer.passes where pass.shader?.isBuiltin == false {
+                guard let request = try? WPEMetalRenderExecutor.makeCompileRequest(for: pass, recordFailure: false),
+                      let result = resultByKey[request.translationCacheKey] else { continue }
+                let blend = pass.pass.blending
+                for vertexName in vertexCandidates {
+                    let dedup = "\(ObjectIdentifier(result.library))|\(vertexName ?? result.vertexFunctionName)|\(result.fragmentFunctionName)|\(blend.lowercased())|\(sceneColorFormat.rawValue)"
+                    guard seenPipelineKeys.insert(dedup).inserted else { continue }
+                    pipelinePrewarms.append(.init(
+                        device: prewarmDevice,
+                        result: result,
+                        vertexName: vertexName,
+                        blendMode: blend,
+                        colorPixelFormat: sceneColorFormat,
+                        depthPixelFormat: .invalid
+                    ))
+                }
+            }
+        }
+        guard loadGeneration == generation, !pipelinePrewarms.isEmpty else {
+            debugStage("pipeline.prewarm.done", "combos=0")
+            return
+        }
+        // Compile the pipeline states in parallel OFF the render thread (mirrors the
+        // translation task group above — captures only the `@unchecked Sendable` prewarm
+        // requests, never the executor), then seed synchronously before the first frame.
+        let pipeWidth = max(2, min(8, ProcessInfo.processInfo.activeProcessorCount - 1))
+        let built: [WPEMetalRenderExecutor.WPEPrewarmedPipeline] = await withTaskGroup(
+            of: WPEMetalRenderExecutor.WPEPrewarmedPipeline?.self
+        ) { group in
+            var next = 0
+            func spawn() -> Bool {
+                guard next < pipelinePrewarms.count else { return false }
+                let prewarm = pipelinePrewarms[next]
+                next += 1
+                group.addTask(priority: .userInitiated) {
+                    WPEMetalRenderExecutor.buildTranslatedPipeline(prewarm)
+                }
+                return true
+            }
+            for _ in 0..<pipeWidth where spawn() {}
+            var collected: [WPEMetalRenderExecutor.WPEPrewarmedPipeline] = []
+            while let entry = await group.next() {
+                if loadGeneration != generation {
+                    group.cancelAll()
+                    break
+                }
+                if let entry { collected.append(entry) }
+                _ = spawn()
+            }
+            return collected
+        }
+        guard loadGeneration == generation else { return }
+        executor.seedTranslatedPipelines(built)
+        debugStage("pipeline.prewarm.done", "combos=\(pipelinePrewarms.count) built=\(built.count)")
     }
 
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {

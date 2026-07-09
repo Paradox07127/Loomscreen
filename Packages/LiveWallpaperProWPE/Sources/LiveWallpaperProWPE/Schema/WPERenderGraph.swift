@@ -286,6 +286,26 @@ public enum WPETextureReference: Equatable, Sendable {
     case asset(String)
     case fbo(String)
     case previous
+
+    /// Canonical classifier for `_rt_*` names WPE's runtime aliases to the LIVE scene
+    /// texture rather than a discrete FBO allocation. Single source of truth shared by the
+    /// graph builder (Infrastructure) and the executor's shader inputs (Runtime) — both
+    /// import this Schema package, so neither crosses the Infra↔Runtime boundary. This list
+    /// was previously hand-copied in both places (ADR-001 B1: "应合一,最高优先" — a drift
+    /// between the two copies causes PiP / shine-white-out regressions).
+    public static func isSceneAliasName(_ name: String) -> Bool {
+        switch name {
+        case "_rt_FullFrameBuffer",
+             "_rt_HalfFrameBuffer",
+             "_rt_QuarterFrameBuffer",
+             "_rt_imageLayerComposite":
+            return true
+        default:
+            return name.hasPrefix("_rt_EightBuffer")
+                || name.hasPrefix("_rt_Mip")
+                || name.hasPrefix("_rt_downscaled")
+        }
+    }
 }
 
 public enum WPERenderTarget: Equatable, Sendable {

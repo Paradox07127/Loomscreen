@@ -35,6 +35,13 @@ struct WPERenderFlagRegistryTests {
         "WPEImageUniformDebugLog": "log-only toggle; never changes what renders",
         "WPELibrary.RootBookmark.v1": "persisted security-scoped bookmark blob, not a flag",
         "WPEMetalCaptureScene": "dump/trace toggle; records canonical oracle traces only",
+        "WPEOracleEnabled": "DEBUG-only render-oracle master toggle; inert in Release (seeds RNG + freezes the clock only for trace determinism)",
+        "WPEOracleFreezeTime": "DEBUG-only oracle frozen scene time; inert in Release",
+        "WPEOraclePerPassHashes": "DEBUG-only oracle per-pass hashing opt-in; inert in Release",
+        "WPEOracleReplayTime": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
+        "WPEOracleReplayDaytime": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
+        "WPEOracleReplayPointerX": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
+        "WPEOracleReplayPointerY": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
         "WPESceneDebugArtifactsEnabled": "dump/trace toggle; writes debug artifacts and extra logs only",
     ]
 
