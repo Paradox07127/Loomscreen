@@ -1144,7 +1144,7 @@ struct WPEMetalRenderExecutorTests {
         let textures = ["materials/base.png": source, "materials/mask.png": mask]
 
         // Builtin fallback path (WPEPreparedRenderPass.shader == nil → dispatch() switch
-        // → dispatchWaterWavesEffect → wpe_effect_waterwaves_fragment).
+        // → effect dispatch table waterwaves bind → wpe_effect_waterwaves_fragment).
         let builtinPipeline = WPEPreparedRenderPipeline(layers: [
             WPEPreparedRenderLayer(
                 graphLayer: graphLayer(pass: pass),

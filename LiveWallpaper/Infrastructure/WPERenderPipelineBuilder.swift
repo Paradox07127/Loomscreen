@@ -225,22 +225,33 @@ private struct WPEShaderSourceLoader: Sendable {
 
     private func builtinProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram? {
         let normalized = WPEBuiltinShaderName.normalized(shaderName)
-        switch normalized {
-        case "solidcolor":
+        switch WPEBuiltinShaderKind(rawValue: normalized) {
+        case .solidColor?:
             return solidColorProgram(shaderName: shaderName, combos: combos)
-        case "solidlayer":
+        case .solidLayer?:
             return solidLayerProgram(shaderName: shaderName, combos: combos)
-        case "copy":
+        case .copy?:
             return copyProgram(shaderName: shaderName, combos: combos)
-        case "compose":
+        case .compose?:
             return composeProgram(shaderName: shaderName, combos: combos)
-        default:
+        case .genericImage2?, .genericImage4?:
+            return genericImageProgram(shaderName: shaderName, combos: combos)
+        case .effectColorBalance?, .effectBlur?, .effectVignette?, .effectWater?,
+             .effectOpacity?, .effectScroll?, .effectPulse?, .effectIris?,
+             .effectWaterWaves?, .effectSpin?, .effectTint?, .effectFoliageSway?,
+             .effectWaterRipple?, .effectBlend?, .effectWaterFlow?,
+             .effectColorGrading?, .effectShimmer?, .effectShake?:
+            return copyProgram(shaderName: shaderName, combos: combos)
+        case .genericParticle?, nil:
+            // Open set: workshop customs (genericparticle is never emitted as a
+            // pass — particles draw via the executor's dedicated path). Keep the
+            // historical fallbacks verbatim: an effect_-prefixed custom loads as
+            // copy; the isGenericImageShader OR-branch stays for strict
+            // equivalence even though normalized() already folds those.
             if normalized.hasPrefix("effect_") {
                 return copyProgram(shaderName: shaderName, combos: combos)
             }
-            guard normalized == "genericimage2"
-                || normalized == "genericimage4"
-                || WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
+            guard WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
                 return nil
             }
             return genericImageProgram(shaderName: shaderName, combos: combos)

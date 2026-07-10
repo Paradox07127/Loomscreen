@@ -279,6 +279,16 @@ public enum WPERenderPassPhase: Equatable, Sendable {
     case material
     case effect(file: String)
     case command(file: String)
+
+    /// WPE's builtin full-frame copy command/material asset. The graph builder
+    /// synthesizes a `.command(file:)` pass with this string as both the phase's
+    /// file AND the pass's `shader` when relaying a layer's finished composite to
+    /// the scene target or a composelayer group buffer (`finalizedPasses`). The
+    /// executor's puppet defer-warp effect-chain detector (`hasEffectChain`)
+    /// excludes exactly this file so a synthesized copy-only puppet isn't
+    /// misclassified as "has an effect". Both sides MUST use this exact string —
+    /// ADR-001 appendix A #66.
+    public static let sceneCopyCommandFile = "materials/util/copy.json"
 }
 
 public enum WPETextureReference: Equatable, Sendable {

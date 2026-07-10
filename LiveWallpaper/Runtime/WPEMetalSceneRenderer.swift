@@ -4353,16 +4353,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func requiredTextureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {
-        switch normalizedBuiltinShaderName(pass.pass.shader) {
-        case "solidcolor", "solidlayer":
+        switch WPEBuiltinShaderKind(normalizing: pass.pass.shader) {
+        case .solidColor?, .solidLayer?:
             return []
 
-        case "compose":
+        case .compose?:
             let first = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let second = pass.textureBindings[1] ?? pass.pass.textures[1] ?? first
             return [first, second].filter(\.isExternalTextureReference)
 
-        case "genericimage4":
+        case .genericImage4?:
             let primary = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             var refs: [WPETextureReference] = [primary]
             if let mask = pass.textureBindings[1] ?? pass.pass.textures[1] {
@@ -4390,9 +4390,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
     }
 
-    private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
-    }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a raw texture so the caller can route MP4 video and multi-frame animations through dedicated dynamic sources.
     private func makeTextureResource(

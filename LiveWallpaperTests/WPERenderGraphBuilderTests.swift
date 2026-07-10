@@ -2584,6 +2584,68 @@ struct WPERenderGraphBuilderTests {
         #expect(WPERenderGraphBuilder.parseTexturePath("   ") == nil)
         #expect(WPERenderGraphBuilder.parseTexturePath("") == nil)
     }
+
+    // MARK: - ADR-001 B1 unified-contract sentinels
+
+    @Test("Scene copy command file contract string is frozen")
+    func sceneCopyCommandFileIsFrozen() {
+        // WPE external asset path — a hard external constraint, not a renameable
+        // internal symbol. This literal is the one place that still catches an
+        // accidental edit of the shared constant itself.
+        #expect(WPERenderPassPhase.sceneCopyCommandFile == "materials/util/copy.json")
+    }
+
+    @Test("rt-name families keep the bare scene alias and ping-pong vocabularies disjoint")
+    func renderTargetNameFamiliesStayDisjoint() {
+        // Bare `_rt_imageLayerComposite` is a SCENE ALIAS, never a ping-pong member…
+        #expect(WPERenderTargetNames.ImageLayerComposite.matches("_rt_imageLayerComposite") == false)
+        // …and a suffixed ping-pong name is never a scene alias.
+        #expect(WPETextureReference.isSceneAliasName("_rt_imageLayerComposite_1_a") == false)
+        // Round-trips: make → parse recovers the objectID.
+        let pair = WPERenderTargetNames.ImageLayerComposite.make(objectID: "42")
+        #expect(pair.a == "_rt_imageLayerComposite_42_a")
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: pair.b) == "42")
+        // PuppetClip base/source round-trip; base name itself reverse-parses to nil.
+        let base = WPERenderTargetNames.PuppetClip.make(objectID: "7")
+        #expect(base == "_rt_puppetClip_7")
+        #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 0) == base)
+        #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 2) == "_rt_puppetClip_7_s2")
+        #expect(WPERenderTargetNames.PuppetClip.baseName(of: "_rt_puppetClip_7_s2") == base)
+        #expect(WPERenderTargetNames.PuppetClip.baseName(of: base) == nil)
+        // Created-layer names never enter ImageLayerComposite's reverse-parse.
+        let created = WPERenderTargetNames.CreatedLayerComposite.make(key: "k")
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: created.a) == nil)
+        #expect(WPERenderTargetNames.LayerGroup.make(objectID: "9") == "_rt_layerGroup_9")
+        #expect(WPERenderTargetNames.LayerGroup.matches("_rt_layerGroup_9x") == true)
+    }
+
+    @Test("WPEBuiltinShaderKind(normalizing:) matches the string-comparison form it replaced")
+    func builtinShaderKindNormalizingInitEquivalence() {
+        // Typed judgment == old `normalized(x) == "literal"` judgment, for the
+        // 25 builtins plus representative open-set inputs (ADR-001 B1 batch 3).
+        for kind in WPEBuiltinShaderKind.allCases {
+            #expect(WPEBuiltinShaderKind(normalizing: kind.rawValue) == kind)
+        }
+        #expect(WPEBuiltinShaderKind(normalizing: "materials/genericimage4.json") == .genericImage4)
+        #expect(WPEBuiltinShaderKind(normalizing: "generic4") == .genericImage4)
+        // Only `materials/` is stripped — a `util/`-nested generic stays open-set.
+        #expect(WPEBuiltinShaderKind(normalizing: "materials/util/genericimage4.json") == nil)
+        #expect(WPEBuiltinShaderKind(normalizing: "workshop/12345/shaders/custom") == nil)
+        #expect(WPEBuiltinShaderKind(normalizing: "effect_someworkshopcustom") == nil)
+    }
+
+    @Test("Utility model kind classifies the three util paths and nothing else")
+    func utilityModelKindClassification() {
+        #expect(WPEUtilityModelKind.classify("models/util/composelayer.json") == .composeLayer)
+        #expect(WPEUtilityModelKind.classify("models/util/projectlayer.json") == .projectLayer)
+        #expect(WPEUtilityModelKind.classify("models/util/fullscreenlayer.json") == .fullScreenLayer)
+        // Authoring tolerances: dependency prefix, backslashes, case.
+        #expect(WPEUtilityModelKind.classify("../123456/models/util/composelayer.json") == .composeLayer)
+        #expect(WPEUtilityModelKind.classify("models\\util\\ProjectLayer.json") == .projectLayer)
+        // solidlayer is a separate GraphBuilder-only classification — must stay out.
+        #expect(WPEUtilityModelKind.classify("models/util/solidlayer.json") == nil)
+        #expect(WPEUtilityModelKind.classify("models/util/solidlayer_depthtest.json") == nil)
+    }
 }
 
 private extension Data {

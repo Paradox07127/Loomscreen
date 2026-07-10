@@ -19,10 +19,7 @@ enum WPEMetalSceneCaptureUtilityModels {
     /// (e.g. scene 3479521040's DoF layer was a `fullscreenlayer`). Tolerates a
     /// leading `../<dependencyID>/` resolver prefix.
     static func isSceneCaptureUtilityModelPath(_ path: String) -> Bool {
-        let stripped = strippedUtilityPath(path)
-        return stripped == "models/util/composelayer.json"
-            || stripped == "models/util/projectlayer.json"
-            || stripped == "models/util/fullscreenlayer.json"
+        WPEUtilityModelKind.isUtilityModelPath(path)
     }
 
     /// Output geometry for a scene-capture utility (passthrough) layer's scene
@@ -46,7 +43,7 @@ enum WPEMetalSceneCaptureUtilityModels {
         geometry: WPERenderLayerGeometry,
         sceneSize: CGSize
     ) -> OutputGeometry {
-        guard strippedUtilityPath(path) == "models/util/composelayer.json" else { return .fullscreen }
+        guard WPEUtilityModelKind.classify(path) == .composeLayer else { return .fullscreen }
         guard let size = geometry.size else { return .fullscreen }
         let sceneW = max(Float(sceneSize.width), 1)
         let sceneH = max(Float(sceneSize.height), 1)
@@ -71,32 +68,6 @@ enum WPEMetalSceneCaptureUtilityModels {
     private static func normalizedAbsoluteZTurn(_ radians: Float) -> Float {
         guard radians.isFinite else { return .infinity }
         return abs(radians.remainder(dividingBy: 2 * .pi))
-    }
-
-    /// `compute…` allocates 2–3 throwaway strings (replace + lowercase + split/join)
-    /// per call, on the per-pass utility-layer classification path every frame
-    /// (trace: 2.3–2.8% of one core). The result is invariant for a path → memoize.
-    /// Lock-guarded for the per-display render threads on the roadmap; capacity-capped.
-    private static let strippedUtilityPathCache = OSAllocatedUnfairLock(initialState: [String: String]())
-    private static let strippedUtilityPathCacheLimit = 512
-
-    private static func strippedUtilityPath(_ path: String) -> String {
-        strippedUtilityPathCache.withLock { cache in
-            if let cached = cache[path] { return cached }
-            let result = computeStrippedUtilityPath(path)
-            if cache.count >= strippedUtilityPathCacheLimit { cache.removeAll(keepingCapacity: true) }
-            cache[path] = result
-            return result
-        }
-    }
-
-    private static func computeStrippedUtilityPath(_ path: String) -> String {
-        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
-        if normalized.hasPrefix("../") {
-            let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
-            return parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
-        }
-        return normalized
     }
 }
 
@@ -592,8 +563,9 @@ final class WPEMetalRenderExecutor {
     }
 
     /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
-    /// (confirms the builtin effect_waterwaves path actually runs).
-    private var loggedWaterWavesDispatch = false
+    /// (confirms the builtin effect_waterwaves path actually runs). Internal —
+    /// flipped by the waterwaves `bind` closure in `WPEMetalEffectDispatchTable`.
+    var loggedWaterWavesDispatch = false
     /// Scene size (ortho-projection pixels) for the frame currently encoding.
     /// Stashed at frame start so `usesObjectQuadGeometry` can judge a
     /// scene-capture utility layer's footprint without threading `sceneSize`
@@ -912,7 +884,7 @@ final class WPEMetalRenderExecutor {
                     case .scene:
                         didEncode = true
                         continue
-                    case .fbo(let name) where name.hasPrefix("_rt_layerGroup_"):
+                    case .fbo(let name) where WPERenderTargetNames.LayerGroup.matches(name):
                         didEncode = true
                         continue
                     case .layerComposite, .fbo:
@@ -1812,7 +1784,7 @@ final class WPEMetalRenderExecutor {
             return true
         }
         if case .named(let name) = targetID,
-           Self.isLayerGroupTargetName(name) {
+           WPERenderTargetNames.LayerGroup.matches(name) {
             return true
         }
         return Self.blendModeRequiresExistingDestination(pass.pass.blending)
@@ -2003,8 +1975,16 @@ final class WPEMetalRenderExecutor {
                 descriptor.depthAttachment.loadAction = .clear
                 descriptor.depthAttachment.storeAction = .dontCare
             } else {
-                descriptor.depthAttachment.loadAction = shouldLoadExistingAttachment ? .load : .clear
+                // Depth is keyed independently of the color target (WPEMetalDepthTextureKey)
+                // and allocated fresh on first use per frame, so the color's
+                // `shouldLoadExistingAttachment` must NOT decide it: a bootstrapped
+                // (copy + markInitialized) color paired with a virgin depth texture would
+                // otherwise `.load` undefined GPU memory. `.load` only once this exact depth
+                // texture has been written earlier this frame.
+                let depthInitialized = frameState.hasInitialized(depth)
+                descriptor.depthAttachment.loadAction = depthInitialized ? .load : .clear
                 descriptor.depthAttachment.storeAction = .store
+                frameState.markInitialized(depth)
             }
             descriptor.depthAttachment.clearDepth = 1
         }
@@ -3491,7 +3471,7 @@ final class WPEMetalRenderExecutor {
     private func hasPuppetClipCompositeBinding(_ pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> Bool {
         guard Self.puppetClipCompositeEnabled else { return false }
         let slot8 = pass.textureBindings[8] ?? pass.pass.textures[8]
-        return slot8 == .fbo(Self.puppetClipRTName(objectID: layer.objectID))
+        return slot8 == .fbo(WPERenderTargetNames.PuppetClip.make(objectID: layer.objectID))
     }
 
     /// Resolves the WPE clip-composite routing for a genericimage4 puppet the builder flagged with a clip
@@ -3582,15 +3562,11 @@ final class WPEMetalRenderExecutor {
         passPhases.contains { phase in
             switch phase {
             case .effect: return true
-            case .command(let file): return file != sceneCopyCommandFile
+            case .command(let file): return file != WPERenderPassPhase.sceneCopyCommandFile
             case .material: return false
             }
         }
     }
-
-    /// File of the builder's synthesized rectangular copy-to-`.scene` command (see
-    /// `WPERenderLayer.finalizedPasses`); excluded from effect-chain detection.
-    private static let sceneCopyCommandFile = "materials/util/copy.json"
 
     /// True when this puppet actually renders via the clip composite. Gated on the SAME conditions as
     /// `puppetClipCompositePlan`/`encodePuppetClipCompositePassIfNeeded` — clip flag on, a genericimage4
@@ -3601,7 +3577,7 @@ final class WPEMetalRenderExecutor {
         // Match the EXACT builder-injected clip RT (`WPERenderGraphBuilder` skips injection when slot 8
         // is already authored), not just any non-nil slot 8 — otherwise a pre-existing authored slot 8
         // would falsely suppress the deferred warp for a clip pass that won't actually run.
-        let injectedClipRT = WPETextureReference.fbo(Self.puppetClipRTName(objectID: layer.objectID))
+        let injectedClipRT = WPETextureReference.fbo(WPERenderTargetNames.PuppetClip.make(objectID: layer.objectID))
         let hasInjectedClipPass = layer.passes.contains { pass in
             guard case .material = pass.phase,
                   WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.shader) == BuiltinShaderName.genericImage4 else {
@@ -3614,10 +3590,6 @@ final class WPEMetalRenderExecutor {
         guard meshes.count == 1, let mesh = meshes.first else { return false }
         return !resolvePuppetClipPairs(for: layer, model: model, mesh: mesh).isEmpty
     }
-
-    /// Canonical intermediate clip-mask RT name. MUST match `WPERenderGraphBuilder`'s injection
-    /// (`_rt_puppetClip_<objectID>`) so defer routing and clip planning agree on the same pass.
-    static func puppetClipRTName(objectID: String) -> String { "_rt_puppetClip_\(objectID)" }
 
     /// Cached clip-role detection. Keyed by `objectID` (not puppet path): detection depends on this
     /// object's animation layers, so two objects reusing the same puppet asset with different anims must
@@ -3922,7 +3894,7 @@ final class WPEMetalRenderExecutor {
         //    additional sources (e.g. a second eye) get derived RT names from the same base.
         var clipRTBySource: [UInt32: (id: WPEMetalTargetID, texture: MTLTexture)] = [:]
         for (index, sourceID) in plan.sourcePartIDs.enumerated() {
-            let rtName = index == 0 ? plan.clipTargetName : "\(plan.clipTargetName)_s\(index)"
+            let rtName = WPERenderTargetNames.PuppetClip.makeSource(base: plan.clipTargetName, index: index)
             let clipRT = try targetTexture(for: .fbo(name: rtName), layer: layer, frameState: &frameState)
             try encodePuppetClipCompositeDraw(
                 pass: pass, layer: layer, meshes: meshes,
@@ -4414,10 +4386,6 @@ final class WPEMetalRenderExecutor {
     private func isGroupRenderTarget(_ target: WPERenderTarget, layer: WPERenderLayer) -> Bool {
         guard case .fbo(let name) = target else { return false }
         return name == layer.groupRenderTarget
-    }
-
-    private static func isLayerGroupTargetName(_ name: String) -> Bool {
-        name.hasPrefix("_rt_layerGroup_")
     }
 
     func objectQuadSceneSize(
@@ -4981,217 +4949,6 @@ final class WPEMetalRenderExecutor {
         return cleared
     }
 
-    /// Phase 2D-E: shared dispatch path for single-input effect built-ins (opacity, scroll, pulse, iris, waterwaves).
-    func dispatchSingleSampleEffect<U: BitwiseCopyable>(
-        fragmentName: String,
-        pass: WPEPreparedRenderPass,
-        layer: WPERenderLayer,
-        destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        textures: [String: MTLTexture],
-        frameState: WPEMetalFrameState,
-        encoder: MTLRenderCommandEncoder,
-        depthPixelFormat: MTLPixelFormat,
-        uniforms: U
-    ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
-        encoder.setRenderPipelineState(try renderPipeline(
-            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
-            fragmentName: fragmentName,
-            blendMode: pass.pass.blending,
-            colorPixelFormat: destination.texture.pixelFormat,
-            depthPixelFormat: depthPixelFormat
-        ))
-        let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-        let texture = try WPEMetalShaderInputs.resolve(
-            reference: reference,
-            textures: textures,
-            frameState: frameState,
-            currentTargetID: destination.id
-        )
-        encoder.setFragmentTexture(texture, index: 0)
-        var local = uniforms
-        encoder.setFragmentBytes(&local, length: MemoryLayout<U>.stride, index: 0)
-        if usesObjectQuad {
-            var quadUniforms = objectQuadUniforms(
-                for: layer,
-                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
-                cameraParallax: frameState.cameraParallax,
-                sourceTexture: texture,
-                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
-            )
-            encoder.setVertexBytes(
-                &quadUniforms,
-                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
-                index: 1
-            )
-        }
-    }
-
-    /// WPE's waterwaves effect: a masked, time-driven UV displacement. The opacity mask in
-    /// texture slot 1 localizes the wave (so it ripples a character's hair, not the whole image).
-    func dispatchWaterWavesEffect(
-        pass: WPEPreparedRenderPass,
-        layer: WPERenderLayer,
-        destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        textures: [String: MTLTexture],
-        frameState: WPEMetalFrameState,
-        encoder: MTLRenderCommandEncoder,
-        depthPixelFormat: MTLPixelFormat,
-        time: Float,
-        speed: Float,
-        scale: Float,
-        strength: Float,
-        exponent: Float,
-        direction: SIMD2<Float>
-    ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
-        encoder.setRenderPipelineState(try renderPipeline(
-            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
-            fragmentName: "wpe_effect_waterwaves_fragment",
-            blendMode: pass.pass.blending,
-            colorPixelFormat: destination.texture.pixelFormat,
-            depthPixelFormat: depthPixelFormat
-        ))
-
-        let sourceReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-        let sourceTexture = try WPEMetalShaderInputs.resolve(
-            reference: sourceReference,
-            textures: textures,
-            frameState: frameState,
-            currentTargetID: destination.id
-        )
-        let maskReference = pass.textureBindings[1] ?? pass.pass.textures[1] ?? pass.pass.binds[1]
-        let maskTexture: MTLTexture
-        let hasMask: Float
-        if let maskReference {
-            maskTexture = try WPEMetalShaderInputs.resolve(
-                reference: maskReference,
-                textures: textures,
-                frameState: frameState,
-                currentTargetID: destination.id
-            )
-            hasMask = 1
-        } else {
-            maskTexture = sourceTexture
-            hasMask = 0
-        }
-        encoder.setFragmentTexture(sourceTexture, index: 0)
-        encoder.setFragmentTexture(maskTexture, index: 1)
-
-        if !loggedWaterWavesDispatch {
-            loggedWaterWavesDispatch = true
-            Logger.info(
-                "WPE waterwaves dispatch ran (builtin effect_waterwaves): hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
-                category: .wpeRender
-            )
-        }
-
-        let maskResolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: maskTexture)
-        var uniforms = WPEWaterWavesUniforms(
-            time: time,
-            speed: speed,
-            scale: scale,
-            strength: strength,
-            exponent: exponent,
-            directionX: direction.x,
-            directionY: direction.y,
-            hasMask: hasMask,
-            texture1Resolution: SIMD4<Float>(
-                Float(maskResolution.textureWidth),
-                Float(maskResolution.textureHeight),
-                Float(maskResolution.imageWidth),
-                Float(maskResolution.imageHeight)
-            )
-        )
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterWavesUniforms>.stride, index: 0)
-
-        if usesObjectQuad {
-            var quadUniforms = objectQuadUniforms(
-                for: layer,
-                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
-                sourceTexture: sourceTexture,
-                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
-            )
-            encoder.setVertexBytes(
-                &quadUniforms,
-                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
-                index: 1
-            )
-        }
-    }
-
-    /// WPE's opacity effect optionally carries an opacity mask in texture slot 1.
-    func dispatchOpacityEffect(
-        pass: WPEPreparedRenderPass,
-        layer: WPERenderLayer,
-        destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        textures: [String: MTLTexture],
-        frameState: WPEMetalFrameState,
-        encoder: MTLRenderCommandEncoder,
-        depthPixelFormat: MTLPixelFormat
-    ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
-        encoder.setRenderPipelineState(try renderPipeline(
-            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
-            fragmentName: "wpe_effect_opacity_fragment",
-            blendMode: pass.pass.blending,
-            colorPixelFormat: destination.texture.pixelFormat,
-            depthPixelFormat: depthPixelFormat
-        ))
-
-        let sourceReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-        let sourceTexture = try WPEMetalShaderInputs.resolve(
-            reference: sourceReference,
-            textures: textures,
-            frameState: frameState,
-            currentTargetID: destination.id
-        )
-        let maskReference = pass.textureBindings[1] ?? pass.pass.textures[1] ?? pass.pass.binds[1]
-        let maskTexture: MTLTexture
-        let hasMask: Float
-        if let maskReference {
-            maskTexture = try WPEMetalShaderInputs.resolve(
-                reference: maskReference,
-                textures: textures,
-                frameState: frameState,
-                currentTargetID: destination.id
-            )
-            hasMask = 1
-        } else {
-            maskTexture = sourceTexture
-            hasMask = 0
-        }
-
-        encoder.setFragmentTexture(sourceTexture, index: 0)
-        encoder.setFragmentTexture(maskTexture, index: 1)
-        var uniforms = WPEOpacityUniforms(
-            opacity: WPEMetalShaderInputs.floatScalar(
-                named: ["u_Opacity", "opacity", "amount", "alpha", "g_UserAlpha"],
-                in: pass,
-                default: 1
-            ),
-            hasMask: hasMask,
-            maskScaleX: Float(destination.texture.width) / Float(max(maskTexture.width, 1)),
-            maskScaleY: Float(destination.texture.height) / Float(max(maskTexture.height, 1))
-        )
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEOpacityUniforms>.stride, index: 0)
-
-        if usesObjectQuad {
-            var quadUniforms = objectQuadUniforms(
-                for: layer,
-                sceneSize: objectQuadSceneSize(for: pass, layer: layer, destination: destination, frameState: frameState),
-                cameraParallax: frameState.cameraParallax,
-                sourceTexture: sourceTexture,
-                cameraUniforms: objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
-            )
-            encoder.setVertexBytes(
-                &quadUniforms,
-                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
-                index: 1
-            )
-        }
-    }
-
     /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
     /// Developer-only image brightness/color diagnostic; gated by its own key so it
     /// is independent of the unrelated audio-reactive DSP log toggle.
@@ -5364,7 +5121,12 @@ final class WPEMetalRenderExecutor {
         ) throws {
             let descriptor = MTLRenderPassDescriptor()
             descriptor.colorAttachments[0].texture = destination
-            descriptor.colorAttachments[0].loadAction = blendMode == "normal" ? .dontCare : .load
+            // "disabled" = the prefilter/downsample passes fully overwrite the target
+            // (blending off, see applyBlendMode), so their prior content can be discarded.
+            // Was "normal", which fell through applyBlendMode to straight-alpha blend and
+            // read this .dontCare (undefined) destination whenever a source pixel had
+            // alpha < 1 — inert only because the bloom shaders hardcode alpha = 1.
+            descriptor.colorAttachments[0].loadAction = blendMode == "disabled" ? .dontCare : .load
             descriptor.colorAttachments[0].storeAction = .store
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
                 throw WPEMetalRenderExecutorError.commandBufferFailed
@@ -5388,7 +5150,7 @@ final class WPEMetalRenderExecutor {
             into: bloomLevelTextures[0],
             source: output,
             fragment: "wpe_bloom_prefilter_fragment",
-            blendMode: "normal",
+            blendMode: "disabled",
             uniforms: WPEBloomUniforms(
                 texelAndWeight: SIMD4<Float>(sceneTexel.x, sceneTexel.y, strength, 0),
                 blendParams: blendParams,
@@ -5402,7 +5164,7 @@ final class WPEMetalRenderExecutor {
                 into: bloomLevelTextures[level],
                 source: source,
                 fragment: "wpe_bloom_downsample_fragment",
-                blendMode: "normal",
+                blendMode: "disabled",
                 uniforms: WPEBloomUniforms(
                     texelAndWeight: SIMD4<Float>(t.x, t.y, 0, 0),
                     blendParams: .zero,
