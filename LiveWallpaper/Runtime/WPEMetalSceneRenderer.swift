@@ -1765,22 +1765,25 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             runtimeSeconds: uniforms.time
         )
         previousLayerScriptPointerFrame = layerScriptPointerFrame
-        for (objectID, instance) in layerScriptInstances {
+        // Sorted by objectID: these scripts cross-talk through shared state, so a
+        // stable tick order keeps the frame deterministic (oracle) and behaviour
+        // reproducible (dictionary order was arbitrary).
+        for (objectID, instance) in layerScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                 applyLayerScriptOutput(output, ownObjectID: objectID)
             }
         }
-        for (objectID, instance) in layerAlphaScriptInstances {
+        for (objectID, instance) in layerAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                 applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
             }
         }
-        for (objectID, instance) in textVisibleScriptInstances {
+        for (objectID, instance) in textVisibleScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                 applyTextScriptOutput(output, ownObjectID: objectID)
             }
         }
-        for (objectID, instance) in textAlphaScriptInstances {
+        for (objectID, instance) in textAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
                 liveTextAlpha[objectID] = output.own.alpha
             }
@@ -1808,19 +1811,21 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             || !dynamicAnglesScriptInstances.isEmpty else { return nil }
         var transforms = LiveScriptTransforms()
         transforms.origins.reserveCapacity(dynamicOriginScriptInstances.count)
-        for (objectID, instance) in dynamicOriginScriptInstances {
+        // Sorted by objectID for the same shared-state-determinism reason as the
+        // layer/text script loops above.
+        for (objectID, instance) in dynamicOriginScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let origin = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
                 transforms.origins[objectID] = origin
             }
         }
         transforms.scales.reserveCapacity(dynamicScaleScriptInstances.count)
-        for (objectID, instance) in dynamicScaleScriptInstances {
+        for (objectID, instance) in dynamicScaleScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let scale = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
                 transforms.scales[objectID] = scale
             }
         }
         transforms.angles.reserveCapacity(dynamicAnglesScriptInstances.count)
-        for (objectID, instance) in dynamicAnglesScriptInstances {
+        for (objectID, instance) in dynamicAnglesScriptInstances.sorted(by: { $0.key < $1.key }) {
             if let angle = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
                 // WPE's script API exposes `angles` in degrees; scene.json and the
                 // rotation math are radians (corpus-verified: all 353 nonzero static
@@ -1883,7 +1888,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private func tickTextContentScripts() -> [String: String] {
         var liveTextByID: [String: String] = [:]
         liveTextByID.reserveCapacity(textScriptInstances.count)
-        for (id, instance) in textScriptInstances {
+        // Sorted by objectID: hidden compute-scripts write `shared` state that the
+        // visible data texts then read (三体 3509243656), so tick order changes the
+        // rendered text. Dictionary order was arbitrary — a fixed order makes the
+        // oracle trace deterministic and the render reproducible.
+        for (id, instance) in textScriptInstances.sorted(by: { $0.key < $1.key }) {
             liveTextByID[id] = tickTextScript(instance)
         }
         return liveTextByID

@@ -23,11 +23,22 @@ enum WPEOracleMode {
     static var isEnabled: Bool {
         #if DEBUG
         if let testingOverride { return testingOverride }
+        // Under a test host only `testingOverride` counts: a developer's persisted
+        // WPEOracleEnabled=1 otherwise leaks into the suite and freezes the clock /
+        // seeds RNG inside unrelated renderer tests (a busy-wait-on-Date.now script
+        // test livelocked on exactly this).
+        if isRunningInTestHost { return false }
         return UserDefaults.standard.bool(forKey: "WPEOracleEnabled")
         #else
         return false
         #endif
     }
+
+    #if DEBUG
+    private static let isRunningInTestHost =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || NSClassFromString("XCTestCase") != nil
+    #endif
 
     /// Opt-in per-pass output hashing (`WPEOraclePerPassHashes`, default OFF). Capturing
     /// + reading back + hashing EVERY scene pass (dozens of up-to-4K textures) is the
@@ -54,6 +65,25 @@ enum WPEOracleMode {
         #endif
         return 6.0
     }
+
+    /// Wall-clock instant the oracle freezes the SCRIPT runtime + text-content
+    /// pipeline to. `loadFrameOverride` already freezes the engine's *scene* clock
+    /// and time-of-day, but Clock/Date TEXT scripts read the real *wall* clock via
+    /// JS `new Date()` / `Date.now()` (e.g. 三体 3509243656, 野火 3460973721, 凯尔希
+    /// 3462491575) — a capture straddling a minute boundary hashed differently.
+    /// Built in the local calendar so the rendered clock reads 10:09:08 on any
+    /// machine; the absolute instant is stable per process ⇒ two runs hash
+    /// identically. Inert in Release/Lite (every reader is gated on `isEnabled`).
+    static let frozenWallClock: Date = {
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 1; comps.day = 6
+        comps.hour = 10; comps.minute = 9; comps.second = 8
+        return Calendar.current.date(from: comps) ?? Date(timeIntervalSince1970: 1_767_694_148)
+    }()
+
+    /// `frozenWallClock` as JS epoch milliseconds, for freezing `Date.now()` /
+    /// `new Date()` inside script contexts.
+    static var frozenWallClockMillis: Double { frozenWallClock.timeIntervalSince1970 * 1000 }
 
     /// The frozen per-frame inputs an oracle run substitutes for wall-clock time,
     /// time-of-day, and the live cursor, so the trace never captures ambient state.

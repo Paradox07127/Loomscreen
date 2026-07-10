@@ -390,7 +390,9 @@ final class WPESceneScriptInstance {
 
         let engine = JSValue(newObjectIn: context)!
         let getTimeOfDay: @convention(block) () -> Double = {
-            let date = Date()
+            // Oracle freezes wall-clock so `engine.getTimeOfDay()` (day-fraction
+            // clock scripts) can't drift the trace across a minute boundary.
+            let date = WPEOracleMode.isEnabled ? WPEOracleMode.frozenWallClock : Date()
             let cal = Calendar.current
             let comps = cal.dateComponents([.hour, .minute, .second], from: date)
             let secs = Double((comps.hour ?? 0) * 3600 + (comps.minute ?? 0) * 60 + (comps.second ?? 0))
@@ -496,6 +498,32 @@ final class WPESceneScriptInstance {
             return proxy
         }
         context.setObject(createScriptProperties, forKeyedSubscript: "createScriptProperties" as NSString)
+
+        // Determinize the two ambient sources scene scripts read for CONTENT: the
+        // wall clock (Clock/Date texts via JS `new Date()` / `Date.now()`) and
+        // `Math.random`. The engine's *scene* clock is frozen elsewhere, but these
+        // JS globals bypass it — a capture crossing a minute boundary (or any RNG
+        // draw) hashed differently. The clock is VIRTUAL, not constant: frozen base
+        // + 1ms per call, advanced by call count only — a hard-frozen Date.now()
+        // livelocks any script that busy-waits on a deadline (`while(Date.now()<t)`),
+        // while call-count advancement stays byte-identical across runs (tick order
+        // is sorted) yet always lets deadlines pass. Installed before base classes +
+        // the module eval, so every read the script makes sees the injected globals.
+        // Oracle-only: in production this block is skipped, so the JS Date /
+        // Math.random the live wallpaper sees stay byte-for-byte unchanged.
+        if WPEOracleMode.isEnabled {
+            let frozenMillis = Int(WPEOracleMode.frozenWallClockMillis)
+            context.evaluateScript("""
+            ;(function(){var R=Date,F=\(frozenMillis),n=0;\
+            function now(){return F+(n++);}\
+            function D(){if(arguments.length===0)return new R(now());\
+            return new (Function.prototype.bind.apply(R,[null].concat([].slice.call(arguments))))();}\
+            D.prototype=R.prototype;D.now=now;D.parse=R.parse;D.UTC=R.UTC;Date=D;\
+            var s=0x9e3779b9>>>0;Math.random=function(){s=(s+0x6D2B79F5)|0;\
+            var t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;\
+            return((t^(t>>>14))>>>0)/4294967296;};})();
+            """)
+        }
     }
 }
 

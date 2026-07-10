@@ -792,7 +792,11 @@ final class WPEMetalRenderExecutor {
                     ) {
                         didEncode = true
                         #if DEBUG
-                        captureScenePassIfDumping(dumpScenePasses, label: "particle.\(system.sortIndex).\(traceIndex)", output: output, commandBuffer: commandBuffer)
+                        // Label MUST equal the trace passId `recordParticlePass`
+                        // emits (`particle.<traceIndex>`) so `recordPassOutputs`
+                        // matches by id and the flushed snapshot's hash lands on
+                        // this pass; the old `.<sortIndex>.` form never matched.
+                        captureScenePassIfDumping(dumpScenePasses, label: "particle.\(traceIndex)", output: output, commandBuffer: commandBuffer)
                         #endif
                     }
                     continue
