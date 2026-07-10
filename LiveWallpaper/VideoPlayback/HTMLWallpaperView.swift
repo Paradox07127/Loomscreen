@@ -47,10 +47,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var lastSource: HTMLSource?
     /// Capped by `HTMLConfig.maxRetries`; drives exponential backoff.
     private var consecutiveFailureCount: Int = 0
-    private var pendingRetryTask: Task<Void, Never>?
-    /// Repeating reload driver. `nil` when `refreshIntervalSeconds == 0` or
-    /// the view is suspended / torn down.
-    private var refreshTimerTask: Task<Void, Never>?
+    /// Generation-scoped package-index load. PKGV parsing is blocking file I/O,
+    /// so folder navigation waits for the utility-queue loader instead of doing
+    /// that work synchronously on MainActor.
+    private var packageBackingTask: Task<Void, Never>?
+    private var packageBackingGeneration: UInt64 = 0
+    private var restartPackageBackingAfterResume = false
+    /// Refresh/retry timing is kept outside the WebKit host so suspend can
+    /// cancel all live tasks and resume from a fresh interval without catch-up.
+    private lazy var reloadScheduler = HTMLReloadScheduler { [weak self] in
+        self?.reloadCurrentSource()
+    }
     private var isCleaningUp = false
     private var mediaPlaybackSuspended = false
     /// Observer token for `Notification.Name.developerModeDidChange`.
@@ -143,6 +150,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     deinit {
+        packageBackingTask?.cancel()
         let url = activeSecurityScopedURL
         if let url {
             Task { @MainActor in
@@ -603,24 +611,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// configured with the same refresh interval don't reload in lockstep —
     /// useful for dashboard-style wallpapers that hit a single API.
     private func applyRefreshInterval(_ seconds: Int) {
-        refreshTimerTask?.cancel()
-        refreshTimerTask = nil
-        guard seconds > 0, !isCleaningUp else { return }
-        let baseInterval = TimeInterval(seconds)
-        refreshTimerTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                let jitterRange = baseInterval * 0.1
-                let jitter = Double.random(in: -jitterRange...jitterRange)
-                let interval = max(1.0, baseInterval + jitter)
-                do {
-                    try await Task.sleep(for: .seconds(interval))
-                } catch {
-                    return
-                }
-                guard let self, !Task.isCancelled, !self.isCleaningUp else { return }
-                self.reloadCurrentSource()
-            }
-        }
+        guard !isCleaningUp else { return }
+        reloadScheduler.setRefreshInterval(seconds: TimeInterval(seconds))
     }
 
     func loadSource(_ source: HTMLSource) {
@@ -629,6 +621,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     /// Internal entry point distinguishing user-driven loads (which reset the retry budget) from `scheduleRetry` continuations (which keep the counter so backoff progresses).
     private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
+        packageBackingTask?.cancel()
+        packageBackingTask = nil
+        packageBackingGeneration &+= 1
+        let packageGeneration = packageBackingGeneration
         lastSource = source
         wallpaperEngineProjectKey = WallpaperEngineProjectIdentity.key(source: source)
         if resetFailureCount {
@@ -665,7 +661,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             // `scene.pkg`, the handler reads web assets straight from it
             // (loose siblings like `project.json` still fall back to the
             // folder). Must be set after `folderURL` (which clears it).
-            folderHandler.setPackageBacking(Self.packageBacking(forFolder: folderURL))
             guard let nonce = folderHandler.currentSessionNonce else {
                 Logger.error("HTML folder load: missing session nonce for \(indexFileName)", category: .screenManager)
                 return
@@ -676,7 +671,41 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 Logger.error("HTML folder load: failed to build scheme URL for \(indexFileName)", category: .screenManager)
                 return
             }
-            webView.load(URLRequest(url: url))
+            let request = URLRequest(url: url)
+            let pkgURL = folderURL.appendingPathComponent("scene.pkg")
+            guard FileManager.default.fileExists(atPath: pkgURL.path) else {
+                webView.load(request)
+                return
+            }
+            guard !mediaPlaybackSuspended else {
+                restartPackageBackingAfterResume = true
+                return
+            }
+
+            packageBackingTask = Task { [weak self] in
+                let backing: FolderURLSchemeHandler.PackageBacking?
+                do {
+                    backing = try await Self.packageBacking(forPackageURL: pkgURL)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    let reasonCode = (error as? WPEPackageError)?.stableReasonCode
+                        ?? "PKG_INDEX_LOAD_FAILED"
+                    Logger.info(
+                        "HTML folder load: scene.pkg rejected [\(reasonCode)] — serving loose files only",
+                        category: .screenManager
+                    )
+                    backing = nil
+                }
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isCleaningUp,
+                      self.packageBackingGeneration == packageGeneration,
+                      self.folderHandler.folderURL == folderURL else { return }
+                self.packageBackingTask = nil
+                self.folderHandler.setPackageBacking(backing)
+                self.webView.load(request)
+            }
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
             currentLocalReadAccessRoot = nil
@@ -689,27 +718,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// Detects an in-place `scene.pkg` inside a packaged web wallpaper's source
-    /// folder and parses its table of contents so the scheme handler can serve
-    /// web assets directly from the package. Returns `nil` for an unpacked
-    /// folder (no `scene.pkg`) or an unreadable/invalid package, in which case
-    /// the handler serves loose files only. Parsing reads just the header (it
-    /// seeks past the payload), so cost scales with entry count, not pkg size.
-    private static func packageBacking(forFolder folderURL: URL) -> FolderURLSchemeHandler.PackageBacking? {
-        let pkgURL = folderURL.appendingPathComponent("scene.pkg")
-        guard FileManager.default.fileExists(atPath: pkgURL.path) else { return nil }
-        do {
-            let handle = try FileHandle(forReadingFrom: pkgURL)
-            defer { try? handle.close() }
-            let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
-            return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: package)
-        } catch {
-            Logger.info(
-                "HTML folder load: scene.pkg present but not parseable (\(error)) — serving folder directly",
-                category: .screenManager
-            )
-            return nil
-        }
+    /// Parses a known in-place `scene.pkg` on the utility loader so the scheme
+    /// handler can serve web assets directly from it. The caller maps a typed
+    /// rejection to loose-file fallback. Cost scales with bounded index fields,
+    /// not payload size, and cancellation closes the prepared handle.
+    private static func packageBacking(
+        forPackageURL pkgURL: URL
+    ) async throws -> FolderURLSchemeHandler.PackageBacking {
+        let prepared = try await WPEPackageIndexLoader.load(from: pkgURL)
+        defer { try? prepared.handle.close() }
+        try Task.checkCancellation()
+        return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: prepared.package)
     }
 
     private func updateWallpaperEnginePropertyBridge(for folderURL: URL?, config: HTMLConfig? = nil) {
@@ -827,9 +846,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// is a remote `.url` (nil for local `.file`/`.folder`/`.inline`). It gates
     /// script-driven main-frame navigations (`.other`/`.reload`, e.g.
     /// `location.href = …`): a remote wallpaper is already a user-chosen web
-    /// origin and keeps following `http(s)` navigations/redirects, but a
-    /// local/inline wallpaper may never silently swap itself out for an external
-    /// `http(s)` page — only its own origin's redirects (same-scheme+host) pass.
+    /// origin and may follow only redirects/navigation that preserve its exact
+    /// scheme, host, and effective port. Local/inline content may never silently
+    /// swap itself out for an external `http(s)` page.
     nonisolated static func navigationDecision(
         for url: URL?,
         navigationType: WKNavigationType,
@@ -846,12 +865,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
             if url.scheme?.lowercased() == FolderURLSchemeHandler.scheme { return .allow }
             if isAllowedRemoteURL(url) {
-                // A remote wallpaper is an explicitly user-chosen web origin;
-                // redirect/`location.href` chains are normal, so keep allowing
-                // its http(s) navigations. A local/inline source has no remote
-                // origin — deny any external navigation it scripts, letting only
-                // a same-origin move through (harmless, e.g. hash/self reload).
-                if remoteSourceOrigin != nil { return .allow }
+                if let remoteSourceOrigin {
+                    return isSameOrigin(
+                        navigationURL: url,
+                        current: remoteSourceOrigin
+                    ) ? .allow : .cancel
+                }
                 return isSameOrigin(navigationURL: url, current: currentURL) ? .allow : .cancel
             }
             return .cancel
@@ -909,7 +928,14 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         guard !isCleaningUp else { return }
         guard mediaPlaybackSuspended != suspended else { return }
         mediaPlaybackSuspended = suspended
+        reloadScheduler.setSuspended(suspended)
         if suspended {
+            if packageBackingTask != nil {
+                packageBackingGeneration &+= 1
+                packageBackingTask?.cancel()
+                packageBackingTask = nil
+                restartPackageBackingAfterResume = true
+            }
             invokeLifecycleHook(.suspend)
             webView.setAllMediaPlaybackSuspended(true) {}
             captureSuspendSnapshot()
@@ -921,6 +947,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             notifyWallpaperEngineGeneralProperties(fps: 60)
             // Re-push the throttle ratio in case thermals shifted while suspended.
             applyRafThrottleRatio(rafThrottleRatio(for: ProcessInfo.processInfo.thermalState))
+            if restartPackageBackingAfterResume {
+                restartPackageBackingAfterResume = false
+                reloadCurrentSource()
+            }
         }
     }
 
@@ -1050,19 +1080,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private func scheduleRetry() {
         consecutiveFailureCount += 1
         let delaySeconds = pow(2.0, Double(consecutiveFailureCount - 1))
-        pendingRetryTask?.cancel()
-        pendingRetryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delaySeconds))
-            guard !Task.isCancelled, let self else { return }
-            self.pendingRetryTask = nil
-            self.reloadCurrentSource()
-        }
+        reloadScheduler.scheduleRetry(after: delaySeconds)
     }
 
     private func resetNavigationFailureState() {
         consecutiveFailureCount = 0
-        pendingRetryTask?.cancel()
-        pendingRetryTask = nil
+        reloadScheduler.cancelRetry()
     }
 
     private func navigationFailureURL(webView: WKWebView, error: NSError) -> URL {
@@ -1195,11 +1218,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     func cleanup() {
         isCleaningUp = true
+        packageBackingGeneration &+= 1
+        packageBackingTask?.cancel()
+        packageBackingTask = nil
+        restartPackageBackingAfterResume = false
         trackerBlockingRequested = false
-        pendingRetryTask?.cancel()
-        pendingRetryTask = nil
-        refreshTimerTask?.cancel()
-        refreshTimerTask = nil
+        reloadScheduler.invalidate()
         onError = nil
         #if !LITE_BUILD
         if let token = developerModeObserver {
@@ -1300,6 +1324,13 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
+        // Pin only the top-level document. Cross-origin subframes retain normal
+        // WebKit isolation and are required by legitimate dashboard widgets;
+        // they cannot replace the privileged wallpaper document itself.
+        if navigationAction.targetFrame?.isMainFrame == false {
+            decisionHandler(.allow)
+            return
+        }
         let decision = HTMLWallpaperView.navigationDecision(
             for: navigationAction.request.url,
             navigationType: navigationAction.navigationType,
