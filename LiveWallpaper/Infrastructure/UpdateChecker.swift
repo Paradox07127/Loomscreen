@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Lightweight launch-time update checker for the Loomscreen Lite SKU.
 ///
@@ -78,7 +77,6 @@ final class UpdateChecker {
     private static let skippedVersionKey = "loomscreen.update.skippedVersion"
     private static let defaults: UserDefaults = .standard
 
-    private let logger = Logger(subsystem: "com.loomscreen", category: "UpdateChecker")
     private let transport: any UpdateCheckerTransport
     private let now: @Sendable () -> Date
     private let currentVersion: SemanticVersion
@@ -122,7 +120,7 @@ final class UpdateChecker {
             // run the check instead of extending the suppression.
             let rolledBack = lastCheckedAt.map { attemptedAt < $0 } ?? false
             if !rolledBack, remaining > 0, remaining <= Self.throttleInterval {
-                logger.debug("Skipping update check (throttle window not elapsed).")
+                Logger.debug("Skipping update check (throttle window not elapsed).", category: .updates)
                 return
             }
         }
@@ -135,7 +133,7 @@ final class UpdateChecker {
         } catch {
             // Generic user-facing string so a hostile response can't smuggle
             // implementation details into the UI.
-            logger.error("Update check failed: \(String(describing: error), privacy: .private)")
+            Logger.error("Update check failed: \(String(describing: error))", category: .updates)
             status = .failed(reason: "Unable to check for updates right now.")
             scheduleNextEligible(after: Self.failureRetryInterval, from: attemptedAt)
         }
@@ -176,14 +174,14 @@ final class UpdateChecker {
         }
 
         guard let newest = candidates.max(by: { $0.version < $1.version }) else {
-            logger.debug("No published Loomscreen releases yet.")
+            Logger.debug("No published Loomscreen releases yet.", category: .updates)
             return .upToDate
         }
         guard newest.version > currentVersion else {
             return .upToDate
         }
         if newest.tagName == skippedVersionTag {
-            logger.debug("User has skipped \(newest.tagName, privacy: .public).")
+            Logger.debug("User has skipped \(newest.tagName).", category: .updates)
             return .upToDate
         }
         return .available(newest)

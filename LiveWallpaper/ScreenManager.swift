@@ -69,6 +69,14 @@ struct ScreenManagerStartupOptions: Equatable {
     }
 }
 
+/// The activity assertion used while at least one wallpaper is actively
+/// drawing. `userInitiatedAllowingIdleSystemSleep` keeps an LSUIElement app out
+/// of App Nap without adding the idle-system-sleep prevention bit carried by
+/// `.userInitiated`.
+enum WallpaperRenderingActivityPolicy {
+    static let options: ProcessInfo.ActivityOptions = .userInitiatedAllowingIdleSystemSleep
+}
+
 @MainActor @Observable
 final class ScreenManager {
     // MARK: - Properties
@@ -1281,16 +1289,15 @@ final class ScreenManager {
         commitWallpaperSessionState()
     }
 
-    /// Hold a `.userInitiated` activity assertion whenever ≥1 wallpaper session
-    /// is actively rendering, so macOS doesn't App-Nap our background render loop
-    /// down to ~1fps when the user focuses another window. `.userInitiated`
-    /// disables App Nap only — it does NOT keep the display or system awake, so
-    /// the Mac still sleeps on its own schedule. A session that the performance
-    /// policy has suspended (`.suspended` — occlusion, full-screen, game mode,
-    /// battery, memory pressure, user absence) is deliberately excluded: it isn't
-    /// drawing, so keeping the exemption alive would burn power for nothing. The
-    /// `guard`/`if let` pair below makes an unchanged desired state a no-op, so
-    /// this can be re-run freely on every policy pass without begin/end churn.
+    /// Hold an activity assertion whenever ≥1 wallpaper session is actively
+    /// rendering, so macOS doesn't App-Nap our background render loop down to
+    /// ~1fps when the user focuses another window. The allowing-idle-sleep
+    /// variant deliberately avoids a `PreventUserIdleSystemSleep` assertion, so
+    /// the Mac can still sleep on its own schedule. A session that the
+    /// performance policy has suspended (`.suspended` — occlusion, full-screen,
+    /// game mode, battery, memory pressure, user absence) is excluded because it
+    /// is not drawing. The guard/if-let pair makes an unchanged desired state a
+    /// no-op, so policy refreshes do not churn begin/end activity calls.
     private func refreshAppNapAssertion() {
         let isRendering = screens.contains {
             $0.runtimeSession != nil
@@ -1300,7 +1307,7 @@ final class ScreenManager {
         if isRendering {
             guard renderingActivityToken == nil else { return }
             renderingActivityToken = ProcessInfo.processInfo.beginActivity(
-                options: .userInitiated,
+                options: WallpaperRenderingActivityPolicy.options,
                 reason: "Rendering live wallpaper"
             )
         } else if let token = renderingActivityToken {

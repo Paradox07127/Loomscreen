@@ -115,6 +115,11 @@ docs/review/
 archived/
 CLAUDE.md
 
+# Keep the portable release gate; all other maintainer-local scripts remain ignored.
+!scripts/
+scripts/*
+!scripts/release_candidate_check.sh
+
 # Python bytecode
 __pycache__/
 *.pyc

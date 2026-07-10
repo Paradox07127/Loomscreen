@@ -1,7 +1,6 @@
 import AppKit
 import LiveWallpaperCore
 import WebKit
-import os
 
 /// Weak bridge between `WKUserContentController` (which retains its message
 /// handlers) and the view, so the standard controller→handler→view retain
@@ -33,8 +32,6 @@ private final class MonitorBridgeProxy: NSObject, WKScriptMessageHandler {
 final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, WallpaperResourceCleanable {
 
     private static let bridgeName = "monitorBridge"
-    private static let log = os.Logger(subsystem: "com.livewallpaper", category: "MonitorWallpaper")
-
     private let webView: WKWebView
     private let bridgeProxy: MonitorBridgeProxy
     private let configuration: MonitorWallpaperConfiguration
@@ -143,7 +140,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     private func loadDashboard() {
         guard let url = Bundle.main.url(forResource: "dashboard", withExtension: "html", subdirectory: "MonitorDashboard")
             ?? Bundle.main.url(forResource: "dashboard", withExtension: "html") else {
-            Self.log.error("Monitor dashboard.html missing from bundle; showing fallback")
+            Logger.error("Monitor dashboard.html missing from bundle; showing fallback", category: .general)
             fallbackLayerView.isHidden = false
             webView.isHidden = true
             return
@@ -191,7 +188,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
             startPump()
         case "focusSession":
             let id = (body["id"] as? String) ?? "<unknown>"
-            Self.log.info("Monitor: focusSession requested for \(id, privacy: .public)")
+            Logger.info("Monitor: focusSession requested", category: .general)
             if let sessionID = body["id"] as? String {
                 MonitorFocusRouter.focus(sessionID: sessionID)
             }
@@ -368,13 +365,13 @@ extension MonitorWallpaperView: WKNavigationDelegate {
             decisionHandler(.allow)
             return
         }
-        Self.log.warning("Monitor: blocked navigation to \(url.absoluteString, privacy: .public)")
+        Logger.warning("Monitor: blocked navigation to \(url.absoluteString)", category: .general)
         decisionHandler(.cancel)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !isCleaningUp, let url = allowedFileURL else { return }
-        Self.log.error("Monitor: WebContent process terminated; reloading dashboard")
+        Logger.error("Monitor: WebContent process terminated; reloading dashboard", category: .general)
         isReady = false
         stopPump()
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())

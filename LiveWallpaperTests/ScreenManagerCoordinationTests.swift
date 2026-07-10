@@ -8,6 +8,14 @@ import WebKit
 @MainActor
 struct ScreenManagerCoordinationTests {
 
+    @Test("Wallpaper rendering activity allows idle system sleep")
+    func renderingActivityAllowsIdleSystemSleep() {
+        let options = WallpaperRenderingActivityPolicy.options
+
+        #expect(options.contains(.userInitiatedAllowingIdleSystemSleep))
+        #expect(!options.contains(.idleSystemSleepDisabled))
+    }
+
     // MARK: - PlaybackTransitionRegistry
 
     @Test("bumpTransition starts at 1 and increments monotonically per screen")

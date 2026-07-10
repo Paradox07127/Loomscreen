@@ -114,11 +114,21 @@ public final class ResourceUtilities {
             )
         } catch let error as NSError {
             Logger.error(
-                "createBookmark failed [domain=\(error.domain) code=\(error.code)] for '\(url.lastPathComponent)' — \(error.localizedDescription); userInfo=\(error.userInfo)",
+                "createBookmark failed [\(safeErrorMetadata(error))] for '\(url.lastPathComponent)' — \(error.localizedDescription)",
                 category: .fileAccess
             )
             return nil
         }
+    }
+
+    /// NSError values may contain failing URLs, absolute paths, response
+    /// bodies, or credentials. Emit only stable classification and key names.
+    nonisolated static func safeErrorMetadata(_ error: NSError) -> String {
+        let contextKeys = error.userInfo.keys
+            .map { String(describing: $0) }
+            .sorted()
+            .joined(separator: ",")
+        return "domain=\(error.domain) code=\(error.code) contextKeys=\(contextKeys)"
     }
 
     public static func createLocalBookmark(for url: URL) -> Data? {
