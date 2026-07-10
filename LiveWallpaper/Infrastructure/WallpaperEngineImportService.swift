@@ -78,7 +78,7 @@ final class WallpaperEngineImportService {
         pkgURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
-        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+        guard let provider = try? await WPEPackageSceneAssetProvider.open(packageURL: pkgURL),
               provider.exists(atRelativePath: project.entryFile) else {
             return .rejected(reason: "Missing video entry \(project.entryFile) in package")
         }
@@ -194,7 +194,7 @@ final class WallpaperEngineImportService {
         pkgURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
-        if let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+        if let provider = try? await WPEPackageSceneAssetProvider.open(packageURL: pkgURL),
            provider.exists(atRelativePath: project.entryFile) {
             // Drop any stale prior extraction so the source `.pkg` is never
             // shadowed by a redundant, reclaimable copy.
@@ -326,7 +326,7 @@ final class WallpaperEngineImportService {
         sourceFolderURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult? {
-        guard let provider = try? WPEPackageSceneAssetProvider(packageURL: pkgURL),
+        guard let provider = try? await WPEPackageSceneAssetProvider.open(packageURL: pkgURL),
               let sceneData = try? provider.data(atRelativePath: project.entryFile) else {
             return nil
         }

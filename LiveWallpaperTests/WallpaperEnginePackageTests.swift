@@ -124,6 +124,95 @@ struct WallpaperEnginePackageTests {
         #expect(package.entries.first?.name == name)
     }
 
+    @Test("Rejects entry count above the production budget before allocating entries")
+    func rejectsEntryCountBudget() {
+        var data = Data()
+        appendU32(8, to: &data)
+        data.append(contentsOf: "PKGV0022".utf8)
+        appendU32(WallpaperEnginePackage.IndexLimits.production.maxEntryCount + 1, to: &data)
+
+        #expect(throws: WPEPackageError.resourceLimitExceeded(.entryCount)) {
+            try WallpaperEnginePackage.parseIndex(of: data)
+        }
+    }
+
+    @Test("Data and streaming parsers enforce aggregate name bytes")
+    func parsersEnforceAggregateNameBudget() throws {
+        let data = makePackage(entries: [
+            EntrySpec("12345678", [0x01]),
+            EntrySpec("abcdefgh", [0x02])
+        ])
+        var limits = WallpaperEnginePackage.IndexLimits.production
+        limits.maxAggregateNameBytes = 15
+
+        #expect(throws: WPEPackageError.resourceLimitExceeded(.aggregateNameBytes)) {
+            try WallpaperEnginePackage.parseIndex(of: data, limits: limits)
+        }
+
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("scene.pkg")
+        try data.write(to: url)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        #expect(throws: WPEPackageError.resourceLimitExceeded(.aggregateNameBytes)) {
+            try WallpaperEnginePackage.parseIndex(streamingFrom: handle, limits: limits)
+        }
+    }
+
+    @Test("Raw empty path components cannot bypass the path-depth budget")
+    func rejectsRawPathDepthBudget() {
+        let data = makePackage(entries: [EntrySpec("a////b", [0x01])])
+        var limits = WallpaperEnginePackage.IndexLimits.production
+        limits.maxPathDepth = 4
+
+        #expect(throws: WPEPackageError.resourceLimitExceeded(.pathDepth)) {
+            try WallpaperEnginePackage.parseIndex(of: data, limits: limits)
+        }
+    }
+
+    @Test("Case-insensitive index keys have an independent aggregate budget")
+    func rejectsLowercaseIndexBudget() {
+        let data = makePackage(entries: [
+            EntrySpec("AA.bin", [0x01]),
+            EntrySpec("BB.bin", [0x02])
+        ])
+        var limits = WallpaperEnginePackage.IndexLimits.production
+        limits.maxLowercaseIndexBytes = 11
+
+        #expect(throws: WPEPackageError.resourceLimitExceeded(.lowercaseIndexBytes)) {
+            try WallpaperEnginePackage.parseIndex(of: data, limits: limits)
+        }
+    }
+
+    @Test("Package parsing cooperatively cancels during the entry loop")
+    func packageParsingCancels() {
+        let entries = (0..<300).map { EntrySpec("assets/\($0).bin", [0x01]) }
+        let data = makePackage(entries: entries)
+        var cancellationChecks = 0
+
+        #expect(throws: CancellationError.self) {
+            try WallpaperEnginePackage.parseIndex(of: data) {
+                cancellationChecks += 1
+                return cancellationChecks == 2
+            }
+        }
+    }
+
+    @Test("Async package provider opens on the utility loader and remains readable")
+    func asyncPackageProviderOpen() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("scene.pkg")
+        try makePackage(entries: [EntrySpec("assets/value.bin", [0xde, 0xad])]).write(to: url)
+
+        let provider = try await WPEPackageSceneAssetProvider.open(packageURL: url)
+
+        #expect(try provider.data(atRelativePath: "assets/value.bin") == Data([0xde, 0xad]))
+    }
+
     @Test("Extract creates nested dirs")
     func extractCreatesNestedDirs() throws {
         let fileManager = FileManager.default
