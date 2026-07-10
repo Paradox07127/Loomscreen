@@ -394,12 +394,17 @@ private final class SteamCMDProcessGroup: @unchecked Sendable {
 }
 
 private final class SteamCMDPipeCapture: @unchecked Sendable {
+    /// One MiB per pipe keeps timeout/cancellation diagnostics useful without
+    /// allowing a noisy 20–90 minute SteamCMD run to retain all output in RAM.
+    static let retainedByteLimit = 1 << 20
+
     private let handle: FileHandle
     private let onProgress: SteamCMDProgressHandler?
     private let lock = NSLock()
     private let eof = DispatchSemaphore(value: 0)
-    private var data = Data()
+    private var outputTail = SteamCMDOutputTail(maxBytes: retainedByteLimit)
     private var lineBuffer = ""
+    private var semanticSummary = SteamCMDOutputSemanticSummary()
     private var didReachEOF = false
 
     init(handle: FileHandle, onProgress: SteamCMDProgressHandler? = nil) {
@@ -434,7 +439,7 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
 
     var string: String {
         lock.lock(); defer { lock.unlock() }
-        return String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        return semanticSummary.rendered(with: outputTail)
     }
 
     private func append(_ chunk: Data) {
@@ -446,9 +451,7 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        data.append(chunk)
-        guard onProgress != nil else { return nil }
-
+        outputTail.append(chunk)
         lineBuffer.append(String(decoding: chunk, as: UTF8.self))
         return drainCompletedProgressLines()
     }
@@ -458,8 +461,11 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
         let shouldSignal: Bool
 
         lock.lock()
-        if onProgress != nil, !lineBuffer.isEmpty {
-            progress = SteamCMDProcessRunner.parseDownloadProgressLine(lineBuffer)
+        if !lineBuffer.isEmpty {
+            semanticSummary.consume(lineBuffer)
+            progress = onProgress == nil
+                ? nil
+                : SteamCMDProcessRunner.parseDownloadProgressLine(lineBuffer)
             lineBuffer.removeAll(keepingCapacity: true)
         } else {
             progress = nil
@@ -478,13 +484,15 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
         while let terminator = lineBuffer.rangeOfCharacter(from: .newlines) {
             let line = String(lineBuffer[..<terminator.lowerBound])
             lineBuffer.removeSubrange(lineBuffer.startIndex..<terminator.upperBound)
-            if let progress = SteamCMDProcessRunner.parseDownloadProgressLine(line) {
+            semanticSummary.consume(line)
+            if onProgress != nil,
+               let progress = SteamCMDProcessRunner.parseDownloadProgressLine(line) {
                 latest = progress
             }
         }
 
-        if lineBuffer.count > 8192 {
-            lineBuffer = String(lineBuffer.suffix(8192))
+        if lineBuffer.count > 16_384 {
+            lineBuffer = String(lineBuffer.suffix(16_384))
         }
         return latest
     }
@@ -493,6 +501,142 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
         guard let progress else { return }
         onProgress?(progress.percent, progress.downloadedBytes, progress.totalBytes)
     }
+}
+
+/// Bounded semantic lines that business decisions currently derive from
+/// SteamCMD/codesign text. Keeping these separately prevents an early identity,
+/// login, entitlement, download, or build-id line from being evicted by a noisy
+/// diagnostic tail while avoiding retention of arbitrary full output.
+struct SteamCMDOutputSemanticSummary: Sendable {
+    private static let maxLineBytes = 4 * 1_024
+
+    private var identityLine: String?
+    private var cachedLoginLine: String?
+    private var loginResultLine: String?
+    private var cachedCredentialsMissingLine: String?
+    private var failureLine: String?
+    private var downloadResultLine: String?
+    private var subscriptionLine: String?
+    private var teamIdentifierLine: String?
+    private var codeFlagsLine: String?
+    private var publicBranchContext: [String] = []
+    private var publicBranchContextLinesRemaining = 0
+
+    mutating func consume(_ rawLine: String) {
+        let line = rawLine.trimmingCharacters(in: .newlines)
+        guard line.utf8.count <= Self.maxLineBytes else { return }
+        let startsPublicContext = line.contains(#""public""#)
+        if startsPublicContext {
+            publicBranchContextLinesRemaining = 16
+            publicBranchContext = []
+        }
+
+        if publicBranchContextLinesRemaining > 0 {
+            publicBranchContext.append(line)
+            publicBranchContextLinesRemaining -= 1
+        }
+
+        // Independent fixed slots prevent one repeated/fabricated marker class
+        // from exhausting storage needed by later real facts. Latest wins so
+        // the process's terminal state supersedes startup chatter.
+        if line.contains("Steam Console Client (c) Valve Corporation") { identityLine = line }
+        if line.contains("Logging in using cached credentials.") { cachedLoginLine = line }
+        if line.contains("Logging in user '") { loginResultLine = line }
+        if line.contains("Cached credentials not found.") { cachedCredentialsMissingLine = line }
+        if line.contains("FAILED (") { failureLine = line }
+        if line.contains("Success. Downloaded item ") || line.contains("ERROR! Download item ") {
+            downloadResultLine = line
+        }
+        if line.contains("No subscription") { subscriptionLine = line }
+        if line.contains("TeamIdentifier=") { teamIdentifierLine = line }
+        if line.contains("flags=0x") { codeFlagsLine = line }
+    }
+
+    func rendered(with tail: SteamCMDOutputTail) -> String {
+        guard tail.discardedByteCount > 0 else { return tail.string }
+        let facts = [
+            identityLine,
+            cachedLoginLine,
+            loginResultLine,
+            cachedCredentialsMissingLine,
+            failureLine,
+            downloadResultLine,
+            subscriptionLine,
+            teamIdentifierLine,
+            codeFlagsLine,
+        ].compactMap { $0 } + publicBranchContext
+        let summary = facts.isEmpty ? "" : facts.joined(separator: "\n") + "\n"
+        let marker = "[... \(tail.discardedByteCount) output bytes omitted; showing semantic lines and tail ...]\n"
+        return summary + marker + tail.string
+    }
+}
+
+/// Fixed-capacity byte ring used by both SteamCMD pipes. Capacity is allocated
+/// once, so even an adversarial stream of one-byte chunks cannot amplify object
+/// metadata beyond the configured byte budget.
+struct SteamCMDOutputTail: Sendable {
+    let maxBytes: Int
+
+    private(set) var retainedByteCount = 0
+    private(set) var discardedByteCount = 0
+    private var buffer: Data
+    private var writeIndex = 0
+
+    init(maxBytes: Int) {
+        self.maxBytes = max(0, maxBytes)
+        self.buffer = Data(repeating: 0, count: max(0, maxBytes))
+    }
+
+    mutating func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        guard maxBytes > 0 else {
+            discardedByteCount += chunk.count
+            return
+        }
+
+        if chunk.count >= maxBytes {
+            discardedByteCount += retainedByteCount + chunk.count - maxBytes
+            buffer.replaceSubrange(0..<maxBytes, with: chunk.suffix(maxBytes))
+            writeIndex = 0
+            retainedByteCount = maxBytes
+            return
+        }
+
+        let overflow = max(0, retainedByteCount + chunk.count - maxBytes)
+        discardedByteCount += overflow
+        retainedByteCount = min(maxBytes, retainedByteCount + chunk.count)
+
+        let firstWriteCount = min(chunk.count, maxBytes - writeIndex)
+        buffer.replaceSubrange(
+            writeIndex..<(writeIndex + firstWriteCount),
+            with: chunk.prefix(firstWriteCount)
+        )
+        let remaining = chunk.count - firstWriteCount
+        if remaining > 0 {
+            buffer.replaceSubrange(0..<remaining, with: chunk.suffix(remaining))
+        }
+        writeIndex = (writeIndex + chunk.count) % maxBytes
+    }
+
+    var data: Data {
+        guard retainedByteCount > 0 else { return Data() }
+        guard retainedByteCount == maxBytes else {
+            return Data(buffer.prefix(retainedByteCount))
+        }
+        guard writeIndex > 0 else { return buffer }
+
+        var result = Data()
+        result.reserveCapacity(maxBytes)
+        result.append(buffer[writeIndex...])
+        result.append(buffer[..<writeIndex])
+        return result
+    }
+
+    var string: String {
+        let bytes = data
+        return String(data: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
+    }
+
 }
 
 /// A FIFO counting semaphore for async/await. `acquire()` honors task

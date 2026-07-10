@@ -2,7 +2,6 @@
 import AppKit
 import Foundation
 import Observation
-import os
 
 /// Drives "Import from folder…" on the Installed tab — the same managed-library
 /// path a SteamCMD download takes, minus applying to a screen. Discovers every
@@ -20,7 +19,6 @@ final class WorkshopFolderImportCoordinator {
     @ObservationIgnored private var isIngesting = false
     @ObservationIgnored private let importService: WallpaperEngineImportService
     @ObservationIgnored private let fileManager: FileManager
-    @ObservationIgnored private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopFolderImport")
 
     init(
         importService: WallpaperEngineImportService = WallpaperEngineImportService(),
@@ -129,7 +127,7 @@ final class WorkshopFolderImportCoordinator {
         let libraryRoot = initialRoot.url.standardizedFileURL.resolvingSymlinksInPath()
         let appCacheRoot = WallpaperEngineCache.defaultRootURL.standardizedFileURL.resolvingSymlinksInPath()
         guard libraryRoot != appCacheRoot else {
-            logger.info("Workshop library scan skipped: root points at the app-managed WPE cache")
+            Logger.info("Workshop library scan skipped: root points at the app-managed WPE cache", category: .workshop)
             return 0
         }
 
@@ -140,7 +138,7 @@ final class WorkshopFolderImportCoordinator {
                 alreadyImportedWorkshopIDs: known
             )
         } catch {
-            logger.info("Workshop library scan failed: \(error.localizedDescription, privacy: .public)")
+            Logger.info("Workshop library scan failed: \(error.localizedDescription)", category: .workshop)
             return 0
         }
 
@@ -179,11 +177,11 @@ final class WorkshopFolderImportCoordinator {
                 )
                 return true
             case .rejected(let reason):
-                logger.info("Skipped a project during import: \(reason, privacy: .public)")
+                Logger.info("Skipped a project during import: \(reason)", category: .workshop)
                 return false
             }
         } catch {
-            logger.info("Failed to read a project during import: \(error.localizedDescription, privacy: .public)")
+            Logger.info("Failed to read a project during import: \(error.localizedDescription)", category: .workshop)
             return false
         }
     }

@@ -1,7 +1,6 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import Foundation
 import Observation
-import os
 
 /// Drives "Download" from the Workshop browse UI: runs the SteamCMD download
 /// through the configured Doctor, imports the result into the local library,
@@ -36,7 +35,6 @@ final class WorkshopDownloadCoordinator {
     /// superseded run's late callbacks/result would otherwise mutate the newer
     /// download's progress or phase.
     @ObservationIgnored private var attempts: [UInt64: UUID] = [:]
-    @ObservationIgnored private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopDownload")
 
     init(importService: WallpaperEngineImportService = WallpaperEngineImportService()) {
         self.importService = importService
@@ -166,7 +164,7 @@ final class WorkshopDownloadCoordinator {
                 WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil),
                 clearsDeleteTombstone: true
             )
-            logger.info("Imported downloaded Workshop item into the library")
+            Logger.info("Imported downloaded Workshop item into the library", category: .workshop)
             finish(itemID: itemID, title: title, phase: .succeeded)
         case .rejected(let reason):
             finish(itemID: itemID, title: title, phase: .failed(reason))
