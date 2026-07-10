@@ -5,11 +5,12 @@ import Foundation
 @Suite("PIISanitizer: regex branches")
 struct PIISanitizerTests {
 
-    @Test("Replaces /Users/<name> with /Users/<redacted>")
+    @Test("Collapses another user's absolute path to its leaf")
     func redactsHomeDirectorySegment() {
         let scrubbed = PIISanitizer.scrub("Failed to read /Users/alice/Movies/Sunset.mp4")
-        #expect(scrubbed.contains("/Users/<redacted>/Movies/Sunset.mp4"))
+        #expect(scrubbed.contains("<path>/Sunset.mp4"))
         #expect(!scrubbed.contains("alice"))
+        #expect(!scrubbed.contains("Movies"))
     }
 
     @Test("Replaces HOME prefix when set")
@@ -27,6 +28,30 @@ struct PIISanitizerTests {
         let scrubbed = PIISanitizer.scrub("Fetch https://cdn.x.com/a.mp4?token=abc&lat=37.78 failed")
         #expect(scrubbed.contains("https://cdn.x.com/a.mp4?<query-redacted>"))
         #expect(!scrubbed.contains("token=abc"))
+    }
+
+    @Test("Strips custom-scheme nonce and URL fragments")
+    func redactsCustomSchemeSecrets() {
+        let nonce = PIISanitizer.scrub(
+            "Failed livewallpaper://wallpaper/index.html?n=session-secret"
+        )
+        #expect(nonce.contains("livewallpaper://wallpaper/index.html?<query-redacted>"))
+        #expect(!nonce.contains("session-secret"))
+
+        let fragment = PIISanitizer.scrub("Redirect app://trusted/callback#access-token")
+        #expect(fragment.contains("app://trusted/callback#<fragment-redacted>"))
+        #expect(!fragment.contains("access-token"))
+    }
+
+    @Test("Collapses mounted and private absolute paths to their leaf")
+    func redactsNonHomeAbsolutePaths() {
+        let scrubbed = PIISanitizer.scrub(
+            "Copy /Volumes/Studio/ClientX/secret.mov via /private/var/folders/ab/session.json"
+        )
+        #expect(scrubbed.contains("<path>/secret.mov"))
+        #expect(scrubbed.contains("<path>/session.json"))
+        #expect(!scrubbed.contains("Studio"))
+        #expect(!scrubbed.contains("folders"))
     }
 
     @Test("Redacts file:// URLs entirely")
@@ -89,16 +114,12 @@ struct PIISanitizerTests {
         // Synthesize a *different* user whose path starts with the real home
         // string but continues past its component boundary. Under the sandboxed
         // test runner HOME is the container path, so build the expectation
-        // dynamically: only the /Users/<name> component gets redacted.
+        // dynamically; the complete absolute path is reduced to its leaf.
         let neighbor = home + "xyz/Movies/private.mov"
         let scrubbed = PIISanitizer.scrub(neighbor)
 
-        var parts = neighbor.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-        if parts.count > 2 { parts[2] = "<redacted>" }
-        let expected = parts.joined(separator: "/")
-
         #expect(!scrubbed.contains("~"))
-        #expect(scrubbed == expected)
+        #expect(scrubbed == "<path>/private.mov")
     }
 
     /// The running user's own home is still collapsed to `~` at a component

@@ -151,13 +151,11 @@ enum BugReporter {
 
     /// Pulls the most recent WARNING/ERROR/FAULT lines from `LogFileSink`
     /// (which holds the lock so we never observe a torn write or stale
-    /// rotation), then runs each line through `PIISanitizer.scrub` so home
-    /// paths, URL queries, lat/lon, and bearer/basic/token fragments are
-    /// masked before they leave the process.
+    /// rotation). The sink re-scrubs every returned line, including entries
+    /// written by older app versions, before it leaves Core.
     private static func sanitizedRecentLogLines() -> [String] {
         LogFileSink.shared
             .recentDiagnosticLines(maxLines: recentLogLineCount, maxLineLength: maxLogLineLength)
-            .map(PIISanitizer.scrub)
     }
 
     // MARK: - Side-effecting helpers (called from the sheet's button actions)

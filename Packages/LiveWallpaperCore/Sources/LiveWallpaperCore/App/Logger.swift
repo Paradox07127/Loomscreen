@@ -19,6 +19,8 @@ public final class Logger {
         case wpeResolver = "WPEResolver"
         case wpeRender = "WPERender"
         case audioCapture = "AudioCapture"
+        case workshop = "Workshop"
+        case updates = "Updates"
 
         public static let subsystem = "com.livewallpaper"
 
@@ -73,7 +75,7 @@ public final class Logger {
         #endif
 
         let fileName = (file as NSString).lastPathComponent
-        let body = message()
+        let body = sanitizedBody(message())
         category.logger.log(
             level: level.osLogType,
             "\(level.prefix, privacy: .public) [\(fileName, privacy: .public):\(line, privacy: .public)] \(function, privacy: .public) - \(body, privacy: .public)"
@@ -91,6 +93,12 @@ public final class Logger {
     /// `~/Library/Logs/LiveWallpaper/` directory could not be created.
     public static var persistentLogFileURL: URL? {
         LogFileSink.shared.fileURL
+    }
+
+    /// Single rendering boundary for both unified and persistent logs. Keep
+    /// this pure so privacy behavior remains testable without scraping Console.
+    static func sanitizedBody(_ message: String) -> String {
+        LogPrivacyRedactor.scrub(message)
     }
 
     // MARK: - Convenience Methods
