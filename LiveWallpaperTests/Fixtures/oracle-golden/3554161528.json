@@ -1,0 +1,465 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3554161528",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 47,
+  "passSequence": [
+    {
+      "passId": "28.1",
+      "shaderName": "effects/waterflow",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "28.2",
+      "shaderName": "effects/waterflow",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "particle.0",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.1",
+      "shaderName": "particle/translucent",
+      "topology": "particle"
+    },
+    {
+      "passId": "276.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "161.1",
+      "shaderName": "effects/shake",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "161.2",
+      "shaderName": "workshop/2718465779/effects/pulse_",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "232.1",
+      "shaderName": "effects/shake",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "232.2",
+      "shaderName": "workshop/2718465779/effects/pulse_",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "73.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "73.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "73.3",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "50.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "66.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.3",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.4",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.5",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.6",
+      "shaderName": "workshop/2718465779/effects/pulse_",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.7",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "66.9",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "particle.2",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.3",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "1738.1",
+      "shaderName": "workshop/3082978660/effects/Simple_Audio_Bars",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "particle.4",
+      "shaderName": "particle/translucent",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.5",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.6",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.7",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "1111.1",
+      "shaderName": "effects/blend",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1111.2",
+      "shaderName": "workshop/3083593512/effects/rounded_mask",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.1",
+      "shaderName": "workshop/2822917890/effects/light_map",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.2",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.3",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.4",
+      "shaderName": "workshop/2822917890/effects/down_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.5",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.6",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.7",
+      "shaderName": "workshop/2822917890/effects/down_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.8",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.9",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.10",
+      "shaderName": "workshop/2822917890/effects/down_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.11",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.12",
+      "shaderName": "workshop/2822917890/effects/blur_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.13",
+      "shaderName": "workshop/2822917890/effects/up_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.14",
+      "shaderName": "workshop/2822917890/effects/up_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.15",
+      "shaderName": "workshop/2822917890/effects/up_sample",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "999.16",
+      "shaderName": "workshop/2822917890/effects/apply",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "751.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_imageLayerComposite_1111_a": [
+      "pass-0029"
+    ],
+    "_rt_imageLayerComposite_1111_b": [
+      "pass-0028"
+    ],
+    "_rt_imageLayerComposite_161_a": [
+      "pass-0006"
+    ],
+    "_rt_imageLayerComposite_161_b": [
+      "pass-0005"
+    ],
+    "_rt_imageLayerComposite_1738_b": [
+      "pass-0023"
+    ],
+    "_rt_imageLayerComposite_232_a": [
+      "pass-0008"
+    ],
+    "_rt_imageLayerComposite_232_b": [
+      "pass-0007"
+    ],
+    "_rt_imageLayerComposite_28_b": [
+      "pass-0000"
+    ],
+    "_rt_imageLayerComposite_66_a": [
+      "pass-0018"
+    ],
+    "_rt_imageLayerComposite_66_b": [
+      "pass-0019"
+    ],
+    "_rt_imageLayerComposite_73_a": [
+      "pass-0010"
+    ],
+    "_rt_imageLayerComposite_73_b": [
+      "pass-0009"
+    ],
+    "_rt_imageLayerComposite_999_b": [
+      "pass-0045"
+    ],
+    "blur_end_16": [
+      "pass-0040"
+    ],
+    "blur_end_2": [
+      "pass-0031"
+    ],
+    "blur_end_4": [
+      "pass-0034"
+    ],
+    "blur_end_8": [
+      "pass-0037"
+    ],
+    "blur_start_16": [
+      "pass-0041"
+    ],
+    "blur_start_2": [
+      "pass-0044"
+    ],
+    "blur_start_4": [
+      "pass-0043"
+    ],
+    "blur_start_8": [
+      "pass-0042"
+    ],
+    "scene": [
+      "pass-0046"
+    ]
+  },
+  "uniformNames": [
+    "bonePalette",
+    "g_AlphaMultiply",
+    "g_Amp",
+    "g_AudioSpectrum32Left",
+    "g_AudioSpectrum32Right",
+    "g_BlendAngle",
+    "g_BlendOffset",
+    "g_BlendScale",
+    "g_Bounds",
+    "g_Direction",
+    "g_Exponent",
+    "g_FlowAmp",
+    "g_FlowPhaseScale",
+    "g_FlowSpeed",
+    "g_Friction",
+    "g_Multiply",
+    "g_Multiply2",
+    "g_Multiply3",
+    "g_Multiply4",
+    "g_Multiply5",
+    "g_Multiply6",
+    "g_NoiseAmount",
+    "g_NoiseSpeed",
+    "g_Offset",
+    "g_PhaseFeather",
+    "g_Power",
+    "g_PulseAmount",
+    "g_PulsePhase",
+    "g_PulseSpeed",
+    "g_PulseThresholds",
+    "g_Scale",
+    "g_Speed",
+    "g_SpriteSheet",
+    "g_Strength",
+    "g_TexelSize",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_Texture2Resolution",
+    "g_Texture3Resolution",
+    "g_Texture4Resolution",
+    "g_Texture5Resolution",
+    "g_Texture6Resolution",
+    "g_Time",
+    "g_TintColor1",
+    "g_TintColor2",
+    "g_UserAlpha",
+    "localSizeAndMode",
+    "meshCenterAndScaleSign",
+    "objectCenterAndSize",
+    "sceneSizeAndRotation",
+    "u_AASmoothness",
+    "u_Alpha",
+    "u_BarBounds",
+    "u_BarColor",
+    "u_BarCount",
+    "u_BarOpacity",
+    "u_BarSpacing",
+    "u_BorderWidth",
+    "u_CircleAngles",
+    "u_Color",
+    "u_CurveResolution",
+    "u_DynamicHiding",
+    "u_Radius",
+    "u_RadiusForH",
+    "u_SegmentCount",
+    "u_SegmentSpacing",
+    "u_SegmentThreshold",
+    "u_Size",
+    "u_Softness",
+    "u_TsOfHiding",
+    "u_VolumeFactor",
+    "u_alpha",
+    "u_gamma",
+    "u_minHeight",
+    "u_minHeightForC",
+    "u_rAASmoothness",
+    "u_radius",
+    "u_ratio",
+    "u_strength",
+    "u_threshold",
+    "u_tint"
+  ],
+  "comboKeys": [
+    "Anti-alias blurring",
+    "Anti-alias blurring ",
+    "Bar Color",
+    "Bar Count",
+    "Bar Spacing",
+    "Border Width",
+    "Border width",
+    "Circle Start/End Angles",
+    "Color",
+    "Curve Resolution",
+    "Dynamic Hiding Threshold",
+    "Lower/Upper Bar Bounds",
+    "Minimum Height (Will be multiplied by the bar width)",
+    "Minimum Height (Will be multiplied by the bar width) ",
+    "Radius",
+    "Radius (Too small will become solid)",
+    "Segment Count",
+    "Segment Spacing",
+    "Segment Threshold",
+    "Size",
+    "Softness",
+    "Threshold of Hiding",
+    "Tint",
+    "Volume Factor",
+    "alpha",
+    "amount",
+    "angle",
+    "blendangle",
+    "blendoffset",
+    "blendscale",
+    "bounds",
+    "direction",
+    "exponent",
+    "feather",
+    "friction",
+    "gamma",
+    "multiply",
+    "multiply2",
+    "multiply3",
+    "multiply4",
+    "multiply5",
+    "multiply6",
+    "noiseamount",
+    "noisespeed",
+    "offset",
+    "opacity",
+    "phase",
+    "phasescale",
+    "power",
+    "radius",
+    "ratio",
+    "scale",
+    "speed",
+    "strength",
+    "threshold",
+    "tinthigh",
+    "tintlow",
+    "ui_editor_properties_opacity"
+  ],
+  "particleSystemCount": 8,
+  "particleSystemIds": [
+    "particle.0",
+    "particle.1",
+    "particle.2",
+    "particle.3",
+    "particle.4",
+    "particle.5",
+    "particle.6",
+    "particle.7"
+  ]
+}

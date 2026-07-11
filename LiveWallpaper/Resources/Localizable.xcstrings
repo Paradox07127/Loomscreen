@@ -1,6 +1,246 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Freeze time" : {
+      "comment" : "Developer Tools section label above the WPE render oracle's frozen scene-time field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freeze time"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定時間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "冻结时间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "凍結時間"
+          }
+        }
+      }
+    },
+    "Oracle" : {
+      "comment" : "Developer Tools section header for the WPE render oracle controls.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        }
+      }
+    },
+    "Render oracle" : {
+      "comment" : "Developer Tools toggle title enabling the WPE render oracle (deterministic capture mode).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Render oracle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "レンダーオラクル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "渲染 Oracle"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "渲染 Oracle"
+          }
+        }
+      }
+    },
+    "Reveal trace" : {
+      "comment" : "Developer Tools button revealing the WPE render oracle trace output folder in Finder.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reveal trace"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "トレースを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示追踪文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示追蹤檔案"
+          }
+        }
+      }
+    },
+    "Seconds" : {
+      "comment" : "Developer Tools accessibility title for the WPE render oracle's freeze-time number field (visible placeholder is the literal default value).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seconds"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        }
+      }
+    },
+    "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value." : {
+      "comment" : "Developer Tools helper text under the render oracle toggle.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パーティクルRNGにシードを与え、フレームクロックを固定し、同一マシンでのリファクタリング安全性比較やWindows忠実度リプレイのために、パスごとと最終フレームのトレースハッシュを記録します。切り替え後はアプリを再起動してください — 実行中のインスタンスは古い値をキャッシュします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为粒子 RNG 播种、冻结帧时钟，并记录逐 pass 与最终帧的追踪哈希，用于同机重构安全性比对或 Windows 保真回放。切换后需重启应用——运行中的实例会缓存旧值。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為粒子 RNG 播種、凍結畫格時鐘，並記錄逐 pass 與最終畫面的追蹤雜湊，用於同機重構安全性比對或 Windows 保真回放。切換後需重新啟動應用程式——執行中的執行個體會快取舊值。"
+          }
+        }
+      }
+    },
+    "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank." : {
+      "comment" : "Developer Tools helper text explaining the WPE render oracle freeze-time field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オラクルが毎フレームを固定する、シーン内の合成時間です。空欄の場合はデフォルトで6秒になります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "场景内合成时间，Oracle 会将每一帧冻结在此时刻。留空时默认 6 秒。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "場景內合成時間，Oracle 會將每一畫格凍結在此時刻。留空時預設 6 秒。"
+          }
+        }
+      }
+    },
+    "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on." : {
+      "comment" : "Developer Tools helper text pointing to where WPE render oracle traces are written.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オラクルを有効にした状態でシーンを再読み込みすると、トレースは「トレースを表示」で開く scene-debug フォルダに書き込まれます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启 Oracle 后重新加载场景，追踪文件会写入“显示追踪文件”打开的 scene-debug 目录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 Oracle 後重新載入場景，追蹤檔案會寫入「顯示追蹤檔案」開啟的 scene-debug 目錄。"
+          }
+        }
+      }
+    },
     "" : {
       "localizations" : {
         "en" : {

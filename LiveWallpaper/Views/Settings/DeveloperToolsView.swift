@@ -11,6 +11,12 @@ struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
     @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: "WPEMetalCaptureScene") ?? []
     @State private var newCaptureID: String = ""
+    @State private var freezeTimeText: String = {
+        if let value = UserDefaults.standard.object(forKey: "WPEOracleFreezeTime") as? Double {
+            return String(value)
+        }
+        return ""
+    }()
 
     var body: some View {
         DetailPageScaffold(
@@ -38,6 +44,7 @@ struct DeveloperToolsView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             diagnosticsFlagsSection
+            oracleSection
         }
         .padding(16)
     }
@@ -135,6 +142,70 @@ struct DeveloperToolsView: View {
         guard let root = WPESceneDebugArtifacts.rootURL else { return }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         NSWorkspace.shared.activateFileViewerSelecting([root])
+    }
+
+    // MARK: - Oracle
+
+    /// Flag-and-reveal convenience for the WPE render oracle (`WPEOracleMode`): a
+    /// master toggle + the frozen scene-time it uses, both plain UserDefaults the
+    /// oracle already reads. No scene is run from here — capture still happens by
+    /// loading a scene in the app (self mode) or via `oracle.py fidelity` (see
+    /// `.claude/skills/wpe-oracle/references/self-oracle-runbook.md`).
+    private var oracleSection: some View {
+        GroupBox(label:
+            HStack {
+                Text("Oracle", comment: "Developer Tools section header for the WPE render oracle controls.")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    revealDebugArtifacts()
+                } label: {
+                    Label("Reveal trace", systemImage: "folder")
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: boolBinding("WPEOracleEnabled")) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Render oracle", comment: "Developer Tools toggle title enabling the WPE render oracle (deterministic capture mode).")
+                        Text("Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value.", comment: "Developer Tools helper text under the render oracle toggle.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Freeze time", comment: "Developer Tools section label above the WPE render oracle's frozen scene-time field.")
+                        .font(.callout.weight(.medium))
+                    Text("Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank.", comment: "Developer Tools helper text explaining the WPE render oracle freeze-time field.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        TextField("Seconds", text: $freezeTimeText, prompt: Text(verbatim: "6.0"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 120)
+                            .onSubmit { commitFreezeTime() }
+                        Button("Apply") { commitFreezeTime() }
+                    }
+                }
+
+                Text("Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on.", comment: "Developer Tools helper text pointing to where WPE render oracle traces are written.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 4)
+            .id(flagRefresh)
+        }
+    }
+
+    private func commitFreezeTime() {
+        let trimmed = freezeTimeText.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "WPEOracleFreezeTime")
+        } else if let value = Double(trimmed), value >= 0 {
+            UserDefaults.standard.set(value, forKey: "WPEOracleFreezeTime")
+        }
+        flagRefresh += 1
     }
 
     // MARK: - GPU capture

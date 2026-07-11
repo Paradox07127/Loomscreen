@@ -1,0 +1,111 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3470764447",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 4,
+  "passSequence": [
+    {
+      "passId": "290.1",
+      "shaderName": "workshop/3082978660/effects/Simple_Audio_Bars",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "290.2",
+      "shaderName": "effects/skew",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "2089.1",
+      "shaderName": "workshop/3219510589/effects/tint",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "2089.2",
+      "shaderName": "workshop/3082978660/effects/Simple_Audio_Bars",
+      "topology": "fullscreen-quad"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_imageLayerComposite_2089_a": [
+      "pass-0003"
+    ],
+    "_rt_imageLayerComposite_2089_b": [
+      "pass-0002"
+    ],
+    "_rt_imageLayerComposite_290_b": [
+      "pass-0000"
+    ],
+    "_rt_layerGroup_249": [
+      "pass-0001"
+    ]
+  },
+  "uniformNames": [
+    "g_AudioSpectrum32Left",
+    "g_AudioSpectrum32Right",
+    "g_BlendAlpha",
+    "g_Bottom",
+    "g_Direction",
+    "g_Left",
+    "g_Offset",
+    "g_Right",
+    "g_Scale",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_TextureReductionScale",
+    "g_TintColor",
+    "g_Top",
+    "u_AASmoothness",
+    "u_BarBounds",
+    "u_BarColor",
+    "u_BarCount",
+    "u_BarOpacity",
+    "u_BarSpacing",
+    "u_BorderWidth",
+    "u_CircleAngles",
+    "u_CurveResolution",
+    "u_DynamicHiding",
+    "u_Radius",
+    "u_RadiusForH",
+    "u_SegmentCount",
+    "u_SegmentSpacing",
+    "u_SegmentThreshold",
+    "u_TsOfHiding",
+    "u_VolumeFactor",
+    "u_minHeight",
+    "u_minHeightForC",
+    "u_rAASmoothness"
+  ],
+  "comboKeys": [
+    "Anti-alias blurring",
+    "Anti-alias blurring ",
+    "Bar Color",
+    "Bar Count",
+    "Bar Spacing",
+    "Border Width",
+    "Circle Start/End Angles",
+    "Curve Resolution",
+    "Dynamic Hiding Threshold",
+    "Lower/Upper Bar Bounds",
+    "Minimum Height (Will be multiplied by the bar width)",
+    "Minimum Height (Will be multiplied by the bar width) ",
+    "Radius",
+    "Radius (Too small will become solid)",
+    "Segment Count",
+    "Segment Spacing",
+    "Segment Threshold",
+    "Threshold of Hiding",
+    "Volume Factor",
+    "alpha",
+    "angle",
+    "bottom",
+    "color",
+    "left",
+    "offset",
+    "right",
+    "scale",
+    "top",
+    "ui_editor_properties_opacity"
+  ],
+  "particleSystemCount": 0,
+  "particleSystemIds": []
+}

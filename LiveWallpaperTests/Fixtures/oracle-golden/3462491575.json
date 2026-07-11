@@ -1,0 +1,443 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3462491575",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 35,
+  "passSequence": [
+    {
+      "passId": "704.1",
+      "shaderName": "workshop/2799421411/effects/audio_responsive_oscilloscope",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "704.2",
+      "shaderName": "effects/scroll",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "12867.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12867.2",
+      "shaderName": "effects/shake",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "13183.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "1607.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1607.3",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "1547.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1547.3",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "863.1",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "863.3",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "7426.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "7426.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "2548.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "638.1",
+      "shaderName": "workshop/3235948233/effects/auto_sway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "785.1",
+      "shaderName": "workshop/3235948233/effects/auto_sway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "2704.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "11895.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "11895.3",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "588.1",
+      "shaderName": "effects/opacity",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "1706.1",
+      "shaderName": "effects/shake",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "2975.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "3193.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "3364.1",
+      "shaderName": "effects/foliagesway",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "677.0",
+      "shaderName": "genericimage4",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "5350.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "5350.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "6132.1",
+      "shaderName": "workshop/3235948233/effects/auto_sway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "7042.1",
+      "shaderName": "workshop/3235948233/effects/auto_sway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "7741.1",
+      "shaderName": "workshop/3235948233/effects/auto_sway",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1489.1",
+      "shaderName": "effects/opacity",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "314.1",
+      "shaderName": "effects/lightshafts",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "particle.0",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.1",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.2",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_imageLayerComposite_11895_b": [
+      "pass-0017"
+    ],
+    "_rt_imageLayerComposite_12867_b": [
+      "pass-0002"
+    ],
+    "_rt_imageLayerComposite_1547_b": [
+      "pass-0007"
+    ],
+    "_rt_imageLayerComposite_1607_b": [
+      "pass-0005"
+    ],
+    "_rt_imageLayerComposite_5350_b": [
+      "pass-0025"
+    ],
+    "_rt_imageLayerComposite_6132_b": [
+      "pass-0027"
+    ],
+    "_rt_imageLayerComposite_638_b": [
+      "pass-0014"
+    ],
+    "_rt_imageLayerComposite_677_a": [
+      "pass-0024"
+    ],
+    "_rt_imageLayerComposite_7042_b": [
+      "pass-0028"
+    ],
+    "_rt_imageLayerComposite_704_b": [
+      "pass-0000"
+    ],
+    "_rt_imageLayerComposite_7426_b": [
+      "pass-0011"
+    ],
+    "_rt_imageLayerComposite_7741_b": [
+      "pass-0029"
+    ],
+    "_rt_imageLayerComposite_785_b": [
+      "pass-0015"
+    ],
+    "_rt_imageLayerComposite_863_b": [
+      "pass-0009"
+    ],
+    "_rt_layerGroup_1489": [
+      "pass-0026"
+    ],
+    "_rt_layerGroup_588": [
+      "pass-0018"
+    ],
+    "scene": []
+  },
+  "uniformNames": [
+    "alphaMaskUV",
+    "bonePalette",
+    "color",
+    "g_Amp",
+    "g_AudioSpectrum32Left",
+    "g_AudioSpectrum32Right",
+    "g_Bounds",
+    "g_ColorRaysEnd",
+    "g_ColorRaysStart",
+    "g_CornerWeights",
+    "g_Direction",
+    "g_DirectionWeights",
+    "g_DirectionalCompensation",
+    "g_EndAngle",
+    "g_Exponent",
+    "g_EyeColor",
+    "g_Feather",
+    "g_Friction",
+    "g_GlobalTimeOffset",
+    "g_GlobalWindOffset",
+    "g_Inertia",
+    "g_Intensity",
+    "g_NoiseAmount",
+    "g_NoiseScale",
+    "g_Phase",
+    "g_PhaseOffset",
+    "g_Point0",
+    "g_Point1",
+    "g_Point2",
+    "g_Point3",
+    "g_Power",
+    "g_Radius",
+    "g_Ratio",
+    "g_Rough",
+    "g_Scale",
+    "g_ScrollX",
+    "g_ScrollY",
+    "g_SigmentCount",
+    "g_Size1",
+    "g_Size2",
+    "g_Size3",
+    "g_Size4",
+    "g_Size5",
+    "g_SmoothDistance",
+    "g_Smoothness",
+    "g_Speed",
+    "g_SpinCenter1",
+    "g_SpinCenter2",
+    "g_SpinCenter3",
+    "g_SpinCenter4",
+    "g_SpinCenter5",
+    "g_StartAngle",
+    "g_Strength",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_Texture2Resolution",
+    "g_Time",
+    "g_TimeOffset1",
+    "g_TimeOffset2",
+    "g_TimeOffset3",
+    "g_TimeOffset4",
+    "g_TimeOffset5",
+    "g_UserAlpha",
+    "g_WindDirection1",
+    "g_WindDirection2",
+    "g_WindDirection3",
+    "g_WindDirection4",
+    "g_WindDirection5",
+    "g_WindDirection6",
+    "g_xFeather",
+    "localSizeAndMode",
+    "meshCenterAndPadding",
+    "meshCenterAndScaleSign",
+    "objectCenterAndSize",
+    "sceneSizeAndRotation",
+    "textureUVScale",
+    "u_Damping",
+    "u_FreqBalance",
+    "u_LRBalance",
+    "u_alpha",
+    "u_ampExponent",
+    "u_area",
+    "u_bloom",
+    "u_bounds",
+    "u_brightness",
+    "u_color",
+    "u_coord",
+    "u_direction",
+    "u_falloff",
+    "u_feather",
+    "u_flowSpeed",
+    "u_focus",
+    "u_freqExponent",
+    "u_gradientOffset",
+    "u_offset",
+    "u_position",
+    "u_ratio",
+    "u_rotation",
+    "u_scale",
+    "u_scope",
+    "u_sides",
+    "u_size",
+    "u_smoothness",
+    "u_thickness",
+    "u_whiteLevel"
+  ],
+  "comboKeys": [
+    "Amplitude",
+    "Amplitude exponent",
+    "Bass-treble balance",
+    "Brightness",
+    "Color",
+    "Falloff",
+    "Feather",
+    "Flow speed",
+    "Focus",
+    "Frequency exponent",
+    "Gradient offset",
+    "Height",
+    "Intensity",
+    "Left-right balance",
+    "Offset",
+    "Opacity",
+    "Position",
+    "Radius",
+    "Ratio",
+    "Rotation",
+    "Scope",
+    "Sides",
+    "Size",
+    "Smoothness",
+    "Thickness",
+    "White level",
+    "alpha",
+    "angle",
+    "angle1",
+    "angle2",
+    "angle3",
+    "angle4",
+    "angle5",
+    "angle6",
+    "audioBounds",
+    "bounds",
+    "center1",
+    "center2",
+    "center3",
+    "center4",
+    "center5",
+    "color",
+    "colorastart",
+    "colorend",
+    "colorwexponent",
+    "colorwintensity",
+    "cornerweights",
+    "direction",
+    "directionalCompensation",
+    "directionweights",
+    "exponent",
+    "friction",
+    "inertia",
+    "noiseamount",
+    "noisescale",
+    "phase",
+    "point0",
+    "point1",
+    "point2",
+    "point3",
+    "power",
+    "ratio",
+    "rayfeather",
+    "rayradius",
+    "rayscale",
+    "raysmoothness",
+    "rayspeed",
+    "rayzstartangle",
+    "rayzzendangle",
+    "repeat",
+    "rough",
+    "scale",
+    "scrolldirection",
+    "sigment",
+    "size1",
+    "size2",
+    "size3",
+    "size4",
+    "size5",
+    "smoothDistance",
+    "speed",
+    "speeduv",
+    "speedx",
+    "speedy",
+    "strength",
+    "timeoffset",
+    "timeoffset1",
+    "timeoffset2",
+    "timeoffset3",
+    "timeoffset4",
+    "timeoffset5",
+    "windDirectionOffset",
+    "xFeather",
+    "\u672b\u7aef\u963b\u5c3c"
+  ],
+  "particleSystemCount": 3,
+  "particleSystemIds": [
+    "particle.0",
+    "particle.1",
+    "particle.2"
+  ]
+}

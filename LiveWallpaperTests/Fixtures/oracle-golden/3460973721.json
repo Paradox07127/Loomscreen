@@ -1,0 +1,77 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3460973721",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 4,
+  "passSequence": [
+    {
+      "passId": "particle.0",
+      "shaderName": "particle/translucent",
+      "topology": "particle"
+    },
+    {
+      "passId": "53.1",
+      "shaderName": "effects/lightshafts",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "particle.1",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    },
+    {
+      "passId": "particle.2",
+      "shaderName": "particle/additive",
+      "topology": "particle"
+    }
+  ],
+  "renderTargetLineage": {
+    "scene": []
+  },
+  "uniformNames": [
+    "g_ColorRaysEnd",
+    "g_ColorRaysStart",
+    "g_EndAngle",
+    "g_Exponent",
+    "g_Feather",
+    "g_Intensity",
+    "g_NoiseAmount",
+    "g_NoiseScale",
+    "g_Point0",
+    "g_Point1",
+    "g_Point2",
+    "g_Point3",
+    "g_Radius",
+    "g_Scale",
+    "g_Smoothness",
+    "g_Speed",
+    "g_SpriteSheet",
+    "g_StartAngle",
+    "g_Time"
+  ],
+  "comboKeys": [
+    "colorastart",
+    "colorend",
+    "colorwexponent",
+    "colorwintensity",
+    "noiseamount",
+    "noisescale",
+    "point0",
+    "point1",
+    "point2",
+    "point3",
+    "rayfeather",
+    "rayradius",
+    "rayscale",
+    "raysmoothness",
+    "rayspeed",
+    "rayzstartangle",
+    "rayzzendangle"
+  ],
+  "particleSystemCount": 3,
+  "particleSystemIds": [
+    "particle.0",
+    "particle.1",
+    "particle.2"
+  ]
+}
