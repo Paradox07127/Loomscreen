@@ -25,51 +25,40 @@ struct WPEStaticTextureReloadThrottle: Equatable, Sendable {
 /// LRU bookkeeping for reloadable static source textures. The renderer owns the
 /// actual `MTLTexture` store; this only tracks resident byte estimates and
 /// recency so the frame path can evict inactive textures while protecting the
-/// paths the current frame samples.
+/// paths the current frame samples. Eviction policy: frame-driven sweep that
+/// never touches a protected (active this frame) path — see
+/// `evictOverBudget(protecting:)`. Bookkeeping itself lives in the shared
+/// `WPEMetalLRUByteBudget` core (see `WPEMetalStaticLayerCacheLRU` for the
+/// sibling cache with a different — reject-if-oversized — admission policy).
 struct WPEMetalTextureCacheLRU: Equatable, Sendable {
-    struct Entry: Equatable, Sendable {
-        let bytes: Int
-        let lastAccess: Int
-    }
+    private var core: WPEMetalLRUByteBudget<String>
 
-    let budgetBytes: Int
-    private(set) var totalBytes = 0
-    private(set) var entries: [String: Entry] = [:]
-    private var clock = 0
+    var budgetBytes: Int { core.budgetBytes }
+    var totalBytes: Int { core.totalBytes }
+    var entries: [String: WPEMetalLRUByteBudget<String>.Entry] { core.entries }
 
     init(budgetBytes: Int) {
-        self.budgetBytes = max(0, budgetBytes)
+        core = WPEMetalLRUByteBudget(budgetBytes: budgetBytes)
     }
 
     mutating func admit(_ key: String, bytes: Int) {
         guard bytes > 0 else {
-            remove(key)
+            core.remove(key)
             return
         }
-        clock += 1
-        if let existing = entries[key] {
-            totalBytes -= existing.bytes
-        }
-        entries[key] = Entry(bytes: bytes, lastAccess: clock)
-        totalBytes += bytes
+        core.record(key, bytes: bytes)
     }
 
     mutating func touch(_ key: String) {
-        guard let entry = entries[key] else { return }
-        clock += 1
-        entries[key] = Entry(bytes: entry.bytes, lastAccess: clock)
+        core.touch(key)
     }
 
     mutating func remove(_ key: String) {
-        if let existing = entries.removeValue(forKey: key) {
-            totalBytes -= existing.bytes
-        }
+        core.remove(key)
     }
 
     mutating func removeAll() {
-        entries.removeAll(keepingCapacity: false)
-        totalBytes = 0
-        clock = 0
+        core.removeAll()
     }
 
     /// Evict least-recently-used entries until within budget, never touching a
@@ -77,19 +66,7 @@ struct WPEMetalTextureCacheLRU: Equatable, Sendable {
     /// active texture resident rather than evicting one it is about to sample.
     @discardableResult
     mutating func evictOverBudget(protecting protected: Set<String>) -> [String] {
-        var evicted: [String] = []
-        while totalBytes > budgetBytes,
-              let victim = entries
-                .filter({ !protected.contains($0.key) })
-                .min(by: { lhs, rhs in
-                    lhs.value.lastAccess != rhs.value.lastAccess
-                        ? lhs.value.lastAccess < rhs.value.lastAccess
-                        : lhs.key < rhs.key
-                })?.key {
-            remove(victim)
-            evicted.append(victim)
-        }
-        return evicted
+        core.evictOverBudget(protecting: protected)
     }
 }
 #endif
