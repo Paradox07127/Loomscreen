@@ -341,6 +341,7 @@ public enum WPEPuppetAnimationEvaluator {
                     scale *= additiveScaleRatio(
                         current: additiveCurrent.scale,
                         bind: additiveBind.scale,
+                        base: scale,
                         weight: additive.weight
                     )
                 }
@@ -384,13 +385,26 @@ public enum WPEPuppetAnimationEvaluator {
     private static func additiveScaleRatio(
         current: SIMD3<Float>,
         bind: SIMD3<Float>,
+        base: SIMD3<Float>,
         weight: Float
     ) -> SIMD3<Float> {
-        func axis(_ current: Float, _ bind: Float) -> Float {
-            guard abs(bind) > 1e-6 else { return 1 }
+        func axis(_ current: Float, _ bind: Float, _ base: Float) -> Float {
+            guard abs(bind) > 1e-6 else {
+                // Zero authored bind scale = a collapsed-at-rest bone (e.g. 3226487183's eyelids,
+                // which inflate 0→1 over the blink). A delta ratio is undefined there, so lerp the
+                // running scale toward the layer's ABSOLUTE authored scale: weight 1 reproduces
+                // `current` exactly; the old `return 1` froze the bone at the base scale and tore
+                // the mixed-weight eye vertices against their normally-squishing neighbours.
+                guard abs(base) > 1e-6 else { return 1 }
+                return 1 + (current / base - 1) * weight
+            }
             return 1 + (current / bind - 1) * weight
         }
-        return SIMD3<Float>(axis(current.x, bind.x), axis(current.y, bind.y), axis(current.z, bind.z))
+        return SIMD3<Float>(
+            axis(current.x, bind.x, base.x),
+            axis(current.y, bind.y, base.y),
+            axis(current.z, bind.z, base.z)
+        )
     }
 
     public static func identityPalette(count: Int) -> [simd_float4x4] {
