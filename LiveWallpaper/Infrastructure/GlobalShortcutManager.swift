@@ -250,7 +250,9 @@ final class GlobalShortcutManager {
             case .monitor:
                 if var monitor = config.activeWallpaper.monitorConfiguration {
                     monitor.mouseInteractionEnabled = newEnabled
-                    manager.updateMonitorConfiguration(monitor, for: screen)
+                    // Click-through applies in place; use the non-restarting path so
+                    // toggling it doesn't rebuild the whole monitor session.
+                    manager.persistMonitorConfigurationFromBoard(monitor, for: screen)
                 }
             default:
                 break

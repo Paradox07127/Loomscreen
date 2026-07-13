@@ -3,14 +3,14 @@ import Darwin
 import Foundation
 import os
 
-/// Routes a monitor-dashboard "focus this session" request to the terminal /
+/// Routes a "focus this session" request (from the Fleet HUD) to the terminal /
 /// editor window that owns the agent process.
 ///
-/// The dashboard posts `{type:"focusSession", id:"<provider>:<id>"}`. For a
-/// Claude session we look up the recorded PID in `~/.claude/sessions/<PID>.json`,
-/// walk the parent-process chain until we reach a regular (Dock-visible) app —
-/// Terminal, iTerm2, WezTerm, VS Code, or Claude Code desktop all qualify — and
-/// activate it. Codex has no PID descriptors yet, so it is a logged no-op.
+/// The HUD hands us `"<provider>:<id>"`. For a Claude session we look up the
+/// recorded PID in `~/.claude/sessions/<PID>.json`, walk the parent-process chain
+/// until we reach a regular (Dock-visible) app — Terminal, iTerm2, WezTerm, VS Code,
+/// or Claude Code desktop all qualify — and activate it. Codex has no PID
+/// descriptors yet, so it is a logged no-op.
 ///
 /// The descriptor read and PID walk run off the main thread (a busy `sysctl`
 /// loop must not stall the wallpaper); only `NSRunningApplication.activate()`
@@ -43,7 +43,7 @@ enum MonitorFocusRouter {
         switch provider {
         case .codex:
             // Codex writes no `sessions/<PID>.json` descriptors, so there is no
-            // PID to resolve and nothing to activate. v1 limitation.
+            // PID to resolve and nothing to activate.
             log.info("Monitor focus: not supported for codex sessions yet")
         case .claude(let claudeSessionID):
             focusClaude(sessionID: claudeSessionID)

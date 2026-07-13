@@ -3,19 +3,34 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Inspector card for the Monitor wallpaper: module toggles plus the Pro-only
-/// AI-agent section (sessions + usage + read-only folder authorization).
+/// Inspector card for the Monitor wallpaper — the side panel for the board
+/// editor (Monitor v2). The board itself is edited in the preview area to the
+/// left (`MonitorBoardPreviewArea`, SPEC §4: preview = editor); this panel holds
+/// the surrounding controls, all funnelling through `ScreenManager`:
+///   • Board-level controls (refresh rate, mouse interaction, reduce-motion).
+///   • A list of placed widgets; selecting one opens its settings popover (size,
+///     remove, kind-specific options) that writes into the placement's options.
+///   • Usage-limit setup + folder authorization (Pro `.agentFleet` only).
 ///
-/// Edits mirror into a local draft, commit to `ScreenManager` immediately, and
-/// restart the wallpaper session so the renderer rebuilds under the new module
-/// mix (there is no in-place apply seam on the monitor view yet).
+/// It stays in sync with edits made ON the preview by re-reading the persisted
+/// board on `.wallpaperConfigurationDidChange`. The AI-agent surfaces stay gated
+/// on the Pro `.agentFleet` capability, exactly as the wallpaper view gates its
+/// placements.
 struct MonitorDetailView: View {
     let screen: Screen
     let screenManager: ScreenManager
     let featureCatalog: FeatureCatalog
 
     @AppStorage("Inspector.MonitorExpanded") private var isExpanded = true
-    @State private var config: MonitorWallpaperConfiguration = .default
+
+    /// The board config being edited. Seeded from the persisted config on appear
+    /// and re-seeded when live board edits arrive from the preview; every mutation
+    /// here writes back through `ScreenManager`.
+    @State private var draft: MonitorBoardConfiguration = .default
+
+    /// Placement currently open in the settings popover (by id), if any.
+    @State private var settingsWidgetID: UUID?
+
     @State private var claudeAuthorized = false
     @State private var codexAuthorized = false
     @State private var showUsageSetup = false
@@ -32,18 +47,12 @@ struct MonitorDetailView: View {
                 systemImage: "gauge.with.dots.needle.67percent",
                 isExpanded: $isExpanded
             ) {
-                VStack(spacing: 8) {
-                    systemMetricsRow
+                VStack(alignment: .leading, spacing: 12) {
+                    boardControlsSection
                     Divider()
-                    topProcessesRow
-                    Divider()
-                    mouseInteractionRow
+                    placedWidgetsSection
 
                     if agentFleetEnabled {
-                        Divider()
-                        agentsRow
-                        Divider()
-                        usageRow
                         Divider()
                         usageSetupRow
                         Divider()
@@ -54,38 +63,61 @@ struct MonitorDetailView: View {
         }
         .onAppear(perform: reload)
         .onChange(of: screen.id) { _, _ in reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
+            // Board edits made ON the preview persist without touching this panel;
+            // re-read so the instruments list + open popover track the board.
+            guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
+                  changedID == screen.id else { return }
+            reload()
+        }
         .sheet(isPresented: $showUsageSetup) {
             MonitorUsageSetupView(existingStatusLineCommand: detectedStatusLineCommand)
         }
     }
 
-    // MARK: - Rows
+    // MARK: - Board-level controls
 
-    private var systemMetricsRow: some View {
-        SettingRow(
-            icon: "cpu",
-            iconColor: .blue,
-            title: "System Metrics",
-            subtitle: "CPU, memory, network and disk"
-        ) {
-            Toggle("", isOn: binding(\.systemEnabled))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show system metrics"))
+    private var boardControlsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Arrange the board in the preview above — drag tiles, or add and remove instruments there.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            refreshRateRow
+            Divider()
+            mouseInteractionRow
+            Divider()
+            reduceMotionRow
         }
     }
 
-    private var topProcessesRow: some View {
+    private var refreshRateRow: some View {
         SettingRow(
-            icon: "list.bullet.rectangle",
-            iconColor: .teal,
-            title: "Top Processes",
-            subtitle: "Show the busiest processes"
+            icon: "arrow.triangle.2.circlepath",
+            iconColor: .blue,
+            title: "Refresh Rate",
+            subtitle: "How often the instruments sample"
         ) {
-            Toggle("", isOn: binding(\.showTopProcesses))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show top processes"))
+            HStack(spacing: 8) {
+                // Dragging updates only the local draft (live label); the value is
+                // committed ONCE on release. Committing on every tick would fire a
+                // config write per frame — a storm the live board must not endure.
+                Slider(
+                    value: Binding(
+                        get: { draft.refreshHz },
+                        set: { draft.refreshHz = MonitorBoardConfiguration.clampedRefreshHz($0) }
+                    ),
+                    in: 0.2...2.0,
+                    onEditingChanged: { editing in
+                        if !editing { commit(draft) }
+                    }
+                )
+                .frame(width: 120)
+                Text(verbatim: Self.refreshHzLabel(draft.refreshHz))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 46, alignment: .trailing)
+            }
         }
     }
 
@@ -94,42 +126,109 @@ struct MonitorDetailView: View {
             icon: "cursorarrow.rays",
             iconColor: .green,
             title: "Mouse Interaction",
-            subtitle: "Let the dashboard receive clicks (double-click a session to focus it)"
+            subtitle: "Let the wallpaper receive clicks instead of passing them to the desktop"
         ) {
-            Toggle("", isOn: binding(\.mouseInteractionEnabled))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Enable mouse interaction"))
+            Toggle("", isOn: Binding(
+                get: { draft.mouseInteractionEnabled },
+                set: { setMouseInteraction($0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .accessibilityLabel(Text("Enable mouse interaction"))
         }
     }
 
-    private var agentsRow: some View {
+    private var reduceMotionRow: some View {
         SettingRow(
-            icon: "brain",
-            iconColor: .orange,
-            title: "AI Agent Sessions",
-            subtitle: "Live Claude and Codex activity"
+            icon: "wind",
+            iconColor: .teal,
+            title: "Reduce Motion",
+            subtitle: "Still the animations on this board"
         ) {
-            Toggle("", isOn: binding(\.agentsEnabled))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show AI agent sessions"))
+            Picker("", selection: Binding(
+                get: { ReduceMotionChoice(draft.reduceMotionOverride) },
+                set: { setReduceMotion($0) }
+            )) {
+                Text("System").tag(ReduceMotionChoice.system)
+                Text("On").tag(ReduceMotionChoice.on)
+                Text("Off").tag(ReduceMotionChoice.off)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .accessibilityLabel(Text("Reduce motion"))
         }
     }
 
-    private var usageRow: some View {
-        SettingRow(
-            icon: "chart.bar",
-            iconColor: .purple,
-            title: "AI Usage",
-            subtitle: "Token and cost totals"
-        ) {
-            Toggle("", isOn: binding(\.usageEnabled))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show AI usage"))
+    // MARK: - Placed widgets list
+
+    @ViewBuilder
+    private var placedWidgetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Instruments")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if draft.widgets.isEmpty {
+                Text("No instruments yet — double-click the preview to edit, then add them from the catalog.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(draft.widgets) { placement in
+                        widgetRow(placement)
+                    }
+                }
+            }
         }
     }
+
+    private func widgetRow(_ placement: MonitorWidgetPlacement) -> some View {
+        Button {
+            settingsWidgetID = placement.id
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: MonitorWidgetFactory.icon(placement.kind))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(verbatim: MonitorWidgetFactory.displayName(placement.kind))
+                    .font(.body)
+                Spacer(minLength: 4)
+                Text(verbatim: placement.size.rawValue.uppercased())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "slider.horizontal.3")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(settingsWidgetID == placement.id ? Color.accentColor.opacity(0.12) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .popover(
+            isPresented: Binding(
+                get: { settingsWidgetID == placement.id },
+                set: { if !$0, settingsWidgetID == placement.id { settingsWidgetID = nil } }
+            ),
+            arrowEdge: .trailing
+        ) {
+            MonitorWidgetSettingsPopover(
+                placement: placement,
+                onUpdate: { updated in updatePlacement(updated) },
+                onRemove: { removeWidget(placement.id) }
+            )
+        }
+    }
+
+    // MARK: - AI-agent surfaces (Pro-gated)
 
     private var usageSetupRow: some View {
         SettingRow(
@@ -210,25 +309,65 @@ struct MonitorDetailView: View {
         Task { await MonitorRuntime.shared.refreshSources() }
     }
 
-    // MARK: - Binding + commit
+    // MARK: - Draft mutations (persist through ScreenManager)
 
-    private func binding(_ keyPath: WritableKeyPath<MonitorWallpaperConfiguration, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { config[keyPath: keyPath] },
-            set: { newValue in
-                var next = config
-                next[keyPath: keyPath] = newValue
-                config = next
-                screenManager.updateMonitorConfiguration(next, for: screen)
-            }
-        )
+    private func setMouseInteraction(_ enabled: Bool) {
+        var next = draft
+        next.mouseInteractionEnabled = enabled
+        commit(next)
     }
 
+    private func setReduceMotion(_ choice: ReduceMotionChoice) {
+        var next = draft
+        next.reduceMotionOverride = choice.override
+        commit(next)
+    }
+
+    private func updatePlacement(_ updated: MonitorWidgetPlacement) {
+        guard let index = draft.widgets.firstIndex(where: { $0.id == updated.id }) else { return }
+        var next = draft
+        next.widgets[index] = updated
+        commit(next)
+    }
+
+    private func removeWidget(_ id: UUID) {
+        guard draft.widgets.contains(where: { $0.id == id }) else { return }
+        var next = draft
+        next.widgets.removeAll { $0.id == id }
+        if settingsWidgetID == id { settingsWidgetID = nil }
+        commit(next)
+    }
+
+    /// Board-level edits made in THIS inspector go through the NON-restarting board
+    /// path (`persistMonitorConfigurationFromBoard`): every control here — refresh
+    /// rate, mouse interaction, reduce-motion, per-widget options — applies in place
+    /// on the live board and preview, so a full session rebuild (which would flicker
+    /// the wallpaper and churn its lease/window) is never warranted.
+    ///
+    /// The `draft` write is synchronous (so the control itself doesn't visually
+    /// snap back), but the `ScreenManager` call is deferred to the next runloop
+    /// tick: it reaches `wallpaperSessionState`, an `@Observable` property that
+    /// ancestor views (the toggle's own window) are still mid-update on when a
+    /// Binding's `set` fires (Toggle/Slider/Picker) — committing there synchronously
+    /// trips "Publishing changes from within view updates", the same class of bug
+    /// `scheduleMonitorOverlayReconcile` defers in `ScreenManager`.
+    private func commit(_ config: MonitorBoardConfiguration) {
+        draft = config
+        Task { @MainActor in
+            screenManager.persistMonitorConfigurationFromBoard(config, for: screen)
+        }
+    }
+
+    // MARK: - Loading
+
     private func reload() {
-        if case .monitor(let current)? = screenManager.getConfiguration(for: screen)?.activeWallpaper {
-            config = current
+        if case .monitor(let board)? = screenManager.getConfiguration(for: screen)?.activeWallpaper {
+            draft = board
         } else {
-            config = .default
+            draft = .default
+        }
+        if !draft.widgets.contains(where: { $0.id == settingsWidgetID }) {
+            settingsWidgetID = nil
         }
         refreshAuthorizationState()
     }
@@ -257,5 +396,39 @@ struct MonitorDetailView: View {
 
     private func hostWindow() -> NSWindow? {
         NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+    }
+
+    // MARK: - Formatting helpers
+
+    nonisolated static func refreshHzLabel(_ hz: Double) -> String {
+        let clamped = MonitorBoardConfiguration.clampedRefreshHz(hz)
+        return String(format: "%.1f Hz", clamped)
+    }
+
+}
+
+// MARK: - Reduce-motion tri-state
+
+/// Tri-state mapping for `reduceMotionOverride`: follow system (nil) / force on
+/// (true) / force off (false).
+enum ReduceMotionChoice: Hashable {
+    case system
+    case on
+    case off
+
+    init(_ override: Bool?) {
+        switch override {
+        case .none: self = .system
+        case .some(true): self = .on
+        case .some(false): self = .off
+        }
+    }
+
+    var override: Bool? {
+        switch self {
+        case .system: return nil
+        case .on: return true
+        case .off: return false
+        }
     }
 }

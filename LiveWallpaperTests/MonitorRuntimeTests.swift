@@ -33,6 +33,34 @@ struct MonitorRuntimeTests {
         #expect(await runtime.debugActiveLeaseCount == 0)
     }
 
+    @Test("updateOptions on a released lease can't resurrect it")
+    func updateOptionsNeverResurrects() async {
+        let runtime = MonitorRuntime()
+        let lease = UUID()
+
+        await runtime.acquire(leaseID: lease, options: quietOptions)
+        await runtime.release(leaseID: lease)
+        #expect(await runtime.debugActiveLeaseCount == 0)
+
+        // A stale option-refresh landing after the release (the P0-B race) must
+        // be a no-op, never recreate a pipeline no one owes a release for.
+        await runtime.updateOptions(leaseID: lease, options: quietOptions)
+        #expect(await runtime.debugActiveLeaseCount == 0)
+    }
+
+    @Test("updateOptions mutates a live lease without changing its count")
+    func updateOptionsRefreshesLiveLease() async {
+        let runtime = MonitorRuntime()
+        let lease = UUID()
+
+        await runtime.acquire(leaseID: lease, options: quietOptions)
+        var refreshed = quietOptions
+        refreshed.topProcesses = true
+        await runtime.updateOptions(leaseID: lease, options: refreshed)
+
+        #expect(await runtime.debugActiveLeaseCount == 1)
+    }
+
     @Test("Pipeline options are the union across all live leases")
     func mergedOptionsUnion() {
         var systemOnly = MonitorRuntimeOptions(system: true)

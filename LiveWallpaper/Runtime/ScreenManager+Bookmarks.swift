@@ -30,8 +30,11 @@ extension ScreenManager {
         case .scene(let descriptor):
             setSceneWallpaper(descriptor: descriptor, origin: bookmark.wpeOrigin, for: screen)
         case .monitor(let monitorConfig):
+            // Build the monitor session, then apply the bookmark's exact board
+            // config in place — no need to restart the session a second time (it
+            // was just built), and every board field applies live.
             switchToMonitorWallpaper(for: screen)
-            updateMonitorConfiguration(monitorConfig, for: screen)
+            persistMonitorConfigurationFromBoard(monitorConfig, for: screen)
         }
     }
 

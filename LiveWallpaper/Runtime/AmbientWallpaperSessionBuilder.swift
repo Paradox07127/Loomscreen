@@ -160,14 +160,16 @@ final class AmbientWallpaperSessionBuilder {
         return session
     }
 
-    /// Mounts the bundled first-party monitor dashboard. Ships in both SKUs;
+    /// Mounts the native Monitor v2 widget board. Ships in both SKUs;
     /// `agentFleetEnabled` (Pro-only) decides whether the AI-agent / usage
-    /// modules inside it are wired up — Lite passes `false` for a system-only
-    /// dashboard.
+    /// widgets are wired up — Lite passes `false` and the host strips those
+    /// placements. `onConfigurationEdited` carries committed board edits back to
+    /// the caller (ScreenManager) for persistence.
     func makeMonitorSession(
-        _ config: MonitorWallpaperConfiguration,
+        _ config: MonitorBoardConfiguration,
         agentFleetEnabled: Bool,
-        frame: CGRect
+        frame: CGRect,
+        onConfigurationEdited: @escaping (MonitorBoardConfiguration) -> Void
     ) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
         let monitorView = MonitorWallpaperView(
@@ -175,6 +177,7 @@ final class AmbientWallpaperSessionBuilder {
             configuration: config,
             agentFleetEnabled: agentFleetEnabled
         )
+        monitorView.onConfigurationEdited = onConfigurationEdited
         window.contentView = monitorView
         let session = AmbientWallpaperSession(window: window, wallpaperType: .monitor, performanceTarget: monitorView)
         // Click-through unless the per-screen toggle opts in; the view mirrors

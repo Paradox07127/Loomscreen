@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 struct MonitorRuntimeOptions: Sendable, Equatable {
     var system = true
@@ -7,7 +8,25 @@ struct MonitorRuntimeOptions: Sendable, Equatable {
     var topProcesses = false
     var claudeRoot: URL?
     var codexRoot: URL?
+    /// Widget kinds placed on the board across all screens sharing this lease.
+    /// `nil` (v1 callers) leaves the system source on its default demand gates;
+    /// a non-nil set drives `SystemMetricsSource.Options` so an expensive sampler
+    /// (GPU / top processes / ANE / accessories) only runs when a matching widget
+    /// is actually placed. Unioned across leases like every other option.
+    var activeWidgetKinds: Set<MonitorWidgetKind>?
 }
+
+/// Account-level usage-ledger fragment a source can optionally expose (per-model +
+/// per-day history + burn rates). Mirrors `MonitorUsageProviding`: composed by
+/// `MonitorRuntime` because no single source owns the cross-provider ledger.
+/// `MonitorProviderUsage` has no slot for this history, so it rides a separate
+/// seam that the runtime merges via `MonitorUsageRollup`.
+protocol MonitorUsageLedgerProviding: Sendable {
+    func currentUsageLedger() async -> MonitorUsageLedgerFragment
+}
+
+extension ClaudeAgentSource: MonitorUsageLedgerProviding {}
+extension CodexAgentSource: MonitorUsageLedgerProviding {}
 
 /// App-wide owner of the monitor data pipeline so N displays showing the Monitor
 /// wallpaper share one hub + one set of sources.
@@ -16,9 +35,11 @@ struct MonitorRuntimeOptions: Sendable, Equatable {
 /// releases that same ID. Because views issue both calls as fire-and-forget
 /// tasks, a release can reach the actor before its matching acquire — that early
 /// release is remembered and cancels the late acquire instead of leaving an
-/// orphaned pipeline. The pipeline always runs with the UNION of every live
-/// lease's options (so one system-only display can't strip agent modules from
-/// another), and rebuilds are chained through a single task so overlapping
+/// orphaned pipeline. Same-ID option changes go through `updateOptions` (never
+/// `acquire`) so a refresh that races the lease's own teardown can't resurrect a
+/// released lease. The pipeline always runs with the UNION of every live lease's
+/// options (so one system-only display can't strip agent modules from another),
+/// and rebuilds are chained through a single task so overlapping
 /// acquire/release/refresh calls never interleave mid-start.
 ///
 /// Agent/usage sources live in separate adapter files wired through
@@ -57,6 +78,18 @@ actor MonitorRuntime {
         await rebuild()
     }
 
+    /// Refresh an already-live lease's options WITHOUT creating one. Callers use
+    /// this (not `acquire`) for same-ID option changes so a refresh that races the
+    /// lease's own teardown can't resurrect a released lease: if the `release`
+    /// task wins, this update simply finds no lease and no-ops instead of
+    /// recreating an orphaned pipeline no one owes a release for. A live-lease
+    /// refresh (the common case) mutates in place and rebuilds as before.
+    func updateOptions(leaseID: UUID, options: MonitorRuntimeOptions) async {
+        guard leases[leaseID] != nil else { return }
+        leases[leaseID] = options
+        await rebuild()
+    }
+
     func release(leaseID: UUID) async {
         guard leases.removeValue(forKey: leaseID) != nil else {
             orphanedReleases.insert(leaseID)
@@ -82,8 +115,26 @@ actor MonitorRuntime {
             merged.topProcesses = merged.topProcesses || entry.topProcesses
             if merged.claudeRoot == nil { merged.claudeRoot = entry.claudeRoot }
             if merged.codexRoot == nil { merged.codexRoot = entry.codexRoot }
+            // Union the placed-widget sets: a kind demanded by ANY screen turns its
+            // sampler on. Absent on every lease ⇒ stays nil ⇒ default demand gates.
+            if let kinds = entry.activeWidgetKinds {
+                merged.activeWidgetKinds = (merged.activeWidgetKinds ?? []).union(kinds)
+            }
         }
         return merged
+    }
+
+    /// Map the union of placed widget kinds to the system source's per-concern
+    /// demand gates. Each expensive walk runs only when its widget is on the board.
+    static func systemOptions(for kinds: Set<MonitorWidgetKind>) -> SystemMetricsSource.Options {
+        SystemMetricsSource.Options(
+            gpu: kinds.contains(.gpu),
+            topProcesses: kinds.contains(.processes),
+            ane: kinds.contains(.aiEngine),
+            accessories: kinds.contains(.power),
+            sensors: kinds.contains(.cpu) || kinds.contains(.gpu)
+                || kinds.contains(.health) || kinds.contains(.power)
+        )
     }
 
     private func rebuild(force: Bool = false) async {
@@ -123,7 +174,14 @@ actor MonitorRuntime {
 
         var built: [any MonitorDataSource] = []
         if resolved.system {
-            built.append(SystemMetricsSource(includeTopProcesses: resolved.topProcesses))
+            if let kinds = resolved.activeWidgetKinds {
+                // Demand-gated: only build the samplers the placed widgets need.
+                built.append(SystemMetricsSource(options: Self.systemOptions(for: kinds)))
+            } else {
+                // v1 path: default demand gates (GPU + accessories on, ANE off),
+                // top processes driven by the legacy module toggle.
+                built.append(SystemMetricsSource(includeTopProcesses: resolved.topProcesses))
+            }
         }
         let factories = await MainActor.run { Self.extraSourceFactories }
         for factory in factories {
@@ -140,6 +198,10 @@ actor MonitorRuntime {
                 guard let provider = source as? any MonitorUsageProviding else { return nil }
                 return (source.sourceID, provider)
             }
+            // Ledger providers contribute per-model/per-day history + burn rates via
+            // a separate seam; merged here so the published snapshot carries the full
+            // ledger alongside today/quota. Same source instances, cheap cached reads.
+            let ledgerProviders: [any MonitorUsageLedgerProviding] = built.compactMap { $0 as? any MonitorUsageLedgerProviding }
             // Account rate limits ride in on the Claude Code statusline payload
             // teed into the (read-only) claude root by the user's capture script;
             // nil when no root is granted or the user hasn't installed it.
@@ -147,37 +209,80 @@ actor MonitorRuntime {
             if !providers.isEmpty || limitsReader != nil {
                 usageTask = Task { [hub] in
                     while !Task.isCancelled {
-                        var perProvider: [String: MonitorProviderUsage] = [:]
-                        var totalCost: Double?
-                        var totalTokens = MonitorTokenTotals.zero
-                        var sawTokens = false
-                        for entry in providers {
-                            let usage = await entry.provider.currentUsage()
-                            perProvider[entry.id] = usage
-                            if let cost = usage.costTodayUSD { totalCost = (totalCost ?? 0) + cost }
-                            if let tokens = usage.tokensToday {
-                                totalTokens = totalTokens + tokens
-                                sawTokens = true
-                            }
-                        }
+                        // Re-read limits each tick so the freshness window advances.
+                        let snapshot = await Self.composeUsageSnapshot(
+                            providers: providers,
+                            ledgerProviders: ledgerProviders,
+                            limits: limitsReader?.currentLimits(),
+                            now: Date()
+                        )
                         if Task.isCancelled { return }
-                        var snapshot = MonitorUsageSnapshot()
-                        snapshot.perProvider = perProvider.isEmpty ? nil : perProvider
-                        snapshot.costTodayUSD = totalCost
-                        snapshot.tokensToday = sawTokens ? totalTokens : nil
-                        if let limits = limitsReader?.currentLimits() {
-                            snapshot.limitsStale = limits.isStale ? true : nil
-                            snapshot.fiveHourUsedPercent = limits.fiveHourUsedPercent
-                            snapshot.fiveHourResetsAt = limits.fiveHourResetsAt
-                            snapshot.weekUsedPercent = limits.weekUsedPercent
-                            snapshot.weekResetsAt = limits.weekResetsAt
-                        }
                         await hub.updateUsage(snapshot)
                         try? await Task.sleep(for: .seconds(30))
                     }
                 }
             }
         }
+    }
+
+    /// Compose one published usage snapshot from the live providers: today/quota
+    /// from `MonitorUsageProviding`, per-model/per-day history + burn rates from the
+    /// `MonitorUsageLedgerProviding` fragments (pooled buckets rolled through
+    /// `MonitorUsageRollup`, per-provider burn rates summed nil-aware), and account
+    /// limits from the already-read `ClaudeRateLimits`. Pure aside from awaiting the
+    /// providers' cached reads — the test drives it with synthetic providers.
+    static func composeUsageSnapshot(
+        providers: [(id: String, provider: any MonitorUsageProviding)],
+        ledgerProviders: [any MonitorUsageLedgerProviding],
+        limits: ClaudeRateLimits?,
+        now: Date
+    ) async -> MonitorUsageSnapshot {
+        var perProvider: [String: MonitorProviderUsage] = [:]
+        var totalCost: Double?
+        var totalTokens = MonitorTokenTotals.zero
+        var sawTokens = false
+        for entry in providers {
+            let usage = await entry.provider.currentUsage()
+            perProvider[entry.id] = usage
+            if let cost = usage.costTodayUSD { totalCost = (totalCost ?? 0) + cost }
+            if let tokens = usage.tokensToday {
+                totalTokens = totalTokens + tokens
+                sawTokens = true
+            }
+        }
+
+        // Merge every provider's ledger fragment: pool file buckets for the
+        // perModel/dailyActivity rollup, sum the already-windowed per-provider burn
+        // rates (nil-aware, so nil+nil stays nil).
+        var ledgerBuckets: [MonitorFileUsageBuckets] = []
+        var tokenBurn: Double?
+        var costBurn: Double?
+        for provider in ledgerProviders {
+            let fragment = await provider.currentUsageLedger()
+            ledgerBuckets.append(contentsOf: fragment.fileBuckets)
+            if let rate = fragment.tokensPerHour { tokenBurn = (tokenBurn ?? 0) + rate }
+            if let rate = fragment.costPerHour { costBurn = (costBurn ?? 0) + rate }
+        }
+
+        var snapshot = MonitorUsageSnapshot()
+        snapshot.perProvider = perProvider.isEmpty ? nil : perProvider
+        snapshot.costTodayUSD = totalCost
+        snapshot.tokensToday = sawTokens ? totalTokens : nil
+        let rollup = MonitorUsageRollup.compose(files: ledgerBuckets, now: now.timeIntervalSince1970)
+        snapshot.perModel = rollup.perModel
+        snapshot.dailyActivity = rollup.dailyActivity
+        snapshot.tokenBurnRatePerHour = tokenBurn
+        snapshot.costBurnRatePerHour = costBurn
+        if let limits {
+            snapshot.limitsStale = limits.isStale ? true : nil
+            // Reader carries the payload's raw 0…100 `used_percentage`; the
+            // snapshot contract (ArcGauge/QuotaMeter) is a 0…1 fraction.
+            snapshot.fiveHourUsedPercent = limits.fiveHourUsedPercent.map { min(max($0 / 100, 0), 1) }
+            snapshot.fiveHourResetsAt = limits.fiveHourResetsAt
+            snapshot.weekUsedPercent = limits.weekUsedPercent.map { min(max($0 / 100, 0), 1) }
+            snapshot.weekResetsAt = limits.weekResetsAt
+        }
+        return snapshot
     }
 
     private func stopPipeline() async {

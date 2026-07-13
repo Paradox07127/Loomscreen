@@ -1,9 +1,13 @@
 import Foundation
 
-// MARK: - Monitor wallpaper data contract
-// These Codable structs ARE the JSON contract pushed into the bundled
-// dashboard via `window.__monitorPush(json)` — key names are load-bearing
-// for the JS side; never rename without bumping `schemaVersion`.
+// MARK: - Monitor wallpaper data contract (schema v2)
+// These Codable structs are the single snapshot contract consumed by the
+// native widget board and the HUD — key names are load-bearing; never rename
+// without bumping `schemaVersion`. Every v2 field is Optional so a v1
+// producer round-trips unchanged.
+//
+// Privacy invariant: status/counts/tool NAMES only. Never prompt text,
+// tool arguments, command output, or file diffs.
 
 enum MonitorAgentProvider: String, Codable, Sendable, CaseIterable {
     case claude
@@ -64,12 +68,105 @@ struct MonitorAgentSessionState: Codable, Sendable, Equatable, Identifiable {
     var turnCount: Int = 0
     var tokens: MonitorTokenTotals = .zero
     var costUSD: Double?
+
+    // v2 Fleet signals — all optional (schemaVersion 2)
+    /// Recent event timestamps (epoch seconds, ≤60 kept) for the tick track.
+    var recentEventTimes: [Double]?
+    /// Epoch seconds when status flipped to needsInput ("who is waiting on me").
+    var waitSince: Double?
+    /// Last-turn input tokens ÷ model context window (0…1); nil if unknown model.
+    var contextUsedPercent: Double?
+    /// Derived anomaly flag: "toolLoop" | "stale". Metadata-only derivation.
+    var warning: String?
+    var recentTools: [MonitorAgentToolEvent]?
+    var worktreeName: String?
+}
+
+/// One tool invocation, name-only (privacy invariant: never arguments).
+struct MonitorAgentToolEvent: Codable, Sendable, Equatable {
+    var name: String
+    var at: Double                    // epoch seconds
+    var ok: Bool?                     // false when the result carried is_error
 }
 
 struct MonitorProcessSample: Codable, Sendable, Equatable {
     var name: String
     var cpuPercent: Double
     var memBytes: UInt64
+    var pid: Int?
+    var bundleID: String?
+    var kind: String?                 // app | background | system
+}
+
+// MARK: System hardware identity + per-component detail (v2)
+
+struct MonitorCPUCoreGroup: Codable, Sendable, Equatable {
+    /// Real `hw.perflevelN.name` ("Super"/"Performance"/"Efficiency"/…) —
+    /// never a hardcoded P/E guess; "CPU" fallback when unavailable.
+    var name: String
+    var physicalCount: Int
+}
+
+struct MonitorCPUInfo: Codable, Sendable, Equatable {
+    var deviceName: String?           // machdep.cpu.brand_string
+    var coreCount: Int?               // hw.physicalcpu
+    var coreGroups: [MonitorCPUCoreGroup]?
+}
+
+struct MonitorMemoryBreakdown: Codable, Sendable, Equatable {
+    var appBytes: UInt64 = 0
+    var wiredBytes: UInt64 = 0
+    var compressedBytes: UInt64 = 0
+    var cachedFilesBytes: UInt64 = 0
+}
+
+struct MonitorNetworkInterface: Codable, Sendable, Equatable {
+    var name: String                  // "en0"
+    var rxBytesPerSec: Double = 0
+    var txBytesPerSec: Double = 0
+    var rxPacketsPerSec: Double?
+    var txPacketsPerSec: Double?
+    /// Cumulative since boot (if_data counters) — renderers show deltas.
+    var rxErrors: UInt64?
+    var txErrors: UInt64?
+    var rxDrops: UInt64?
+    var addresses: [String]?          // private IPs only (AF_INET/AF_INET6)
+    var isActive: Bool?               // NWPath-chosen or highest-traffic
+}
+
+struct MonitorNetworkPath: Codable, Sendable, Equatable {
+    var status: String = "unknown"    // satisfied | unsatisfied | requiresConnection | unknown
+    var interfaceType: String?        // wifi | wired | cellular | other
+    var isConstrained: Bool?
+    var isExpensive: Bool?
+}
+
+struct MonitorAccessoryBattery: Codable, Sendable, Equatable {
+    var name: String
+    var kind: String?                 // mouse | keyboard | trackpad | other
+    var percent: Double
+}
+
+struct MonitorANEProcess: Codable, Sendable, Equatable {
+    var name: String
+    var footprintBytes: UInt64
+}
+
+/// B-tier readings, only populated by the Pro-direct sensor helper (W-F).
+/// Absent field == this machine/OS generation doesn't expose it; renderers
+/// must degrade gracefully, never show 0 for a missing sensor.
+struct MonitorSensorReadings: Codable, Sendable, Equatable {
+    var cpuTempC: Double?
+    var gpuTempC: Double?
+    var socTempC: Double?
+    var cpuPowerW: Double?
+    var gpuPowerW: Double?
+    var aneWatts: Double?
+    var fanRPM: [Double]?
+    var perCoreFreqMHz: [Double]?
+    var dramReadBytesPerSec: Double?
+    var dramWriteBytesPerSec: Double?
+    var stale: Bool?
 }
 
 struct MonitorSystemSnapshot: Codable, Sendable, Equatable {
@@ -92,6 +189,27 @@ struct MonitorSystemSnapshot: Codable, Sendable, Equatable {
     var uptimeSeconds: Double = 0
     var loadAverage1: Double?
     var topProcesses: [MonitorProcessSample]?
+
+    // v2 additions — all optional (schemaVersion 2)
+    var cpuInfo: MonitorCPUInfo?
+    var cpuLoadAvg: [Double]?         // 1 / 5 / 15 min
+    var memBreakdown: MonitorMemoryBreakdown?
+    var gpuDeviceName: String?
+    var gpuCoreCount: Int?
+    var gpuSampledAt: Double?         // GPU sampled ~6s; renderers dim stale
+    var gpuRendererUtil: Double?      // 0…1
+    var gpuTilerUtil: Double?         // 0…1
+    var netInterfaces: [MonitorNetworkInterface]?
+    var netPath: MonitorNetworkPath?
+    var batteryIsCharged: Bool?
+    var powerSource: String?          // battery | ac | ups
+    var batteryMinutesRemaining: Double?   // IOPS -1 (calculating) maps to nil
+    var batteryMinutesToFull: Double?
+    var lowPowerMode: Bool?
+    var accessories: [MonitorAccessoryBattery]?
+    var aneProcesses: [MonitorANEProcess]?
+    var aneActive: Bool?
+    var sensors: MonitorSensorReadings?
 }
 
 struct MonitorProviderUsage: Codable, Sendable, Equatable {
@@ -108,12 +226,30 @@ struct MonitorUsageSnapshot: Codable, Sendable, Equatable {
     var weekUsedPercent: Double?
     var weekResetsAt: Double?
     /// True when the rate-limit capture file is older than its freshness window,
-    /// so the dashboard dims the quota block instead of presenting stale
+    /// so the Usage widget dims the quota block instead of presenting stale
     /// percentages as current.
     var limitsStale: Bool?
+
+    // v2 additions — all optional (schemaVersion 2)
+    var perModel: [MonitorUsageModelBreakdown]?
+    var dailyActivity: [MonitorUsageDayBucket]?
+    var tokenBurnRatePerHour: Double?
+    var costBurnRatePerHour: Double?
 }
 
-/// Per-source pipeline health, surfaced in the dashboard footer and the
+struct MonitorUsageModelBreakdown: Codable, Sendable, Equatable {
+    var model: String
+    var tokens: MonitorTokenTotals = .zero
+    var costUSD: Double?
+}
+
+struct MonitorUsageDayBucket: Codable, Sendable, Equatable {
+    var day: String                   // "YYYY-MM-DD" local calendar
+    var tokens: MonitorTokenTotals = .zero
+    var costUSD: Double?
+}
+
+/// Per-source pipeline health, surfaced by the Health widget and the
 /// settings pane ("未授权 / stale / ok").
 struct MonitorSourceHealth: Codable, Sendable, Equatable {
     var sourceID: String
@@ -123,9 +259,9 @@ struct MonitorSourceHealth: Codable, Sendable, Equatable {
 }
 
 /// The single object renderers see. `nil` module == module disabled;
-/// the dashboard must render a system-only hero layout when `agents == nil`.
+/// agent widgets render an unauthorized / empty state when `agents == nil`.
 struct MonitorSnapshot: Codable, Sendable, Equatable {
-    var schemaVersion: Int = 1
+    var schemaVersion: Int = 2
     var timestamp: Double = 0
     var system: MonitorSystemSnapshot?
     var agents: [MonitorAgentSessionState]?

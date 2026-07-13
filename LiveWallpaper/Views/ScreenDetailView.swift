@@ -271,6 +271,7 @@ struct ScreenDetailView: View {
                 screen: screen,
                 draft: $draft,
                 featureCatalog: featureCatalog,
+                screenManager: screenManager,
                 previewController: previewController,
                 isLoading: isLoading,
                 isDraggingOver: isDraggingOver,

@@ -12,9 +12,12 @@ struct MonitorHUDModelTests {
         project: String = "proj",
         status: MonitorAgentStatus,
         detail: String? = nil,
-        lastEventAt: Double = 1000
+        lastEventAt: Double = 1000,
+        waitSince: Double? = nil,
+        contextUsedPercent: Double? = nil,
+        warning: String? = nil
     ) -> MonitorAgentSessionState {
-        MonitorAgentSessionState(
+        var state = MonitorAgentSessionState(
             id: id,
             provider: provider,
             projectName: project,
@@ -23,6 +26,10 @@ struct MonitorHUDModelTests {
             lastEventAt: lastEventAt,
             processAlive: true
         )
+        state.waitSince = waitSince
+        state.contextUsedPercent = contextUsedPercent
+        state.warning = warning
+        return state
     }
 
     private func snapshot(_ agents: [MonitorAgentSessionState]?) -> MonitorSnapshot {
@@ -239,5 +246,212 @@ struct MonitorHUDModelTests {
             lastPublishAt: 1000
         )
         #expect(model.blocked?.glowIntensity == 0.5)
+    }
+
+    // MARK: - Wait duration (waitSince clock)
+
+    @Test("waiting seconds derive from waitSince, not lastEventAt")
+    func waitingSecondsUsesWaitSince() {
+        // waitSince is far older than lastEventAt; the wait clock must win so the
+        // HUD shows how long the session has actually been blocked.
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, lastEventAt: 1180, waitSince: 1000)
+            ]),
+            now: 1200,
+            lastPublishAt: 1200
+        )
+        #expect(model.blocked?.waitingSeconds == 200)
+    }
+
+    @Test("waiting seconds fall back to lastEventAt when waitSince absent")
+    func waitingSecondsFallsBackToLastEvent() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, lastEventAt: 1000, waitSince: nil)
+            ]),
+            now: 1150,
+            lastPublishAt: 1150
+        )
+        #expect(model.blocked?.waitingSeconds == 150)
+    }
+
+    // MARK: - Blocked selection: oldest wait first
+
+    @Test("blocked selection prefers the oldest wait when waitSince present")
+    func blockedPrefersOldestWait() {
+        // Two blocked sessions with wait clocks: the one waiting LONGEST (older
+        // waitSince) is the most urgent, regardless of lastEventAt recency.
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "recent", project: "recent-proj", status: .needsInput,
+                        lastEventAt: 1190, waitSince: 1150),
+                session(id: "oldest", project: "oldest-proj", status: .needsInput,
+                        lastEventAt: 1195, waitSince: 1000)
+            ]),
+            now: 1200,
+            lastPublishAt: 1200
+        )
+        #expect(model.blocked?.sessionID == "oldest")
+        #expect(model.blocked?.projectName == "oldest-proj")
+        #expect(model.blocked?.waitingSeconds == 200)
+    }
+
+    @Test("a session with a wait clock outranks one without")
+    func waitClockOutranksMissingClock() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                // No clock but very recent — under the OLD rule this would win.
+                session(id: "noclock", project: "noclock", status: .needsInput,
+                        lastEventAt: 1199, waitSince: nil),
+                // Has a clock (older wait) — the authoritative signal wins.
+                session(id: "clock", project: "clock", status: .needsInput,
+                        lastEventAt: 1100, waitSince: 1050)
+            ]),
+            now: 1200,
+            lastPublishAt: 1200
+        )
+        #expect(model.blocked?.sessionID == "clock")
+    }
+
+    // MARK: - Warning surfacing + priority
+
+    @Test("fleet warning surfaces from a warned running session (no block)")
+    func fleetWarningFromRunning() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .running, warning: "stale"),
+                session(id: "b", status: .running)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        // A warned-but-running fleet flags itself even though nothing is blocked.
+        #expect(model.warning == .stale)
+        #expect(model.presentation == .collapsed)
+        #expect(model.blocked == nil)
+    }
+
+    @Test("toolLoop outranks stale in the fleet warning")
+    func toolLoopOutranksStale() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .running, warning: "stale"),
+                session(id: "b", status: .running, warning: "toolLoop")
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(model.warning == .toolLoop)
+    }
+
+    @Test("no warning anywhere leaves the fleet warning nil (calm)")
+    func noWarningIsCalm() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .running),
+                session(id: "b", status: .idle)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(model.warning == nil)
+    }
+
+    @Test("unknown warning raw string maps to nil, not a phantom chip")
+    func unknownWarningRawIsNil() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([session(id: "a", status: .running, warning: "testFailing")]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(model.warning == nil)
+    }
+
+    @Test("blocked session carries its own warning through to the chip")
+    func blockedCarriesWarning() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, waitSince: 1000, warning: "toolLoop")
+            ]),
+            now: 1050,
+            lastPublishAt: 1050
+        )
+        #expect(model.blocked?.warning == .toolLoop)
+    }
+
+    // MARK: - Context pressure threshold gate
+
+    @Test("context pressure hint hidden below the threshold")
+    func contextPressureBelowThreshold() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, waitSince: 1000, contextUsedPercent: 0.5)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(model.blocked?.contextUsedPercent == 0.5)
+        #expect(model.blocked?.showsContextPressure == false)
+    }
+
+    @Test("context pressure hint shows at/above the threshold")
+    func contextPressureAtThreshold() {
+        let atThreshold = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, waitSince: 1000,
+                        contextUsedPercent: MonitorHUDModel.contextPressureThreshold)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(atThreshold.blocked?.showsContextPressure == true)
+
+        let above = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, waitSince: 1000, contextUsedPercent: 0.93)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(above.blocked?.showsContextPressure == true)
+    }
+
+    @Test("nil context percent never shows a pressure hint")
+    func contextPressureNilIsHidden() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "a", status: .needsInput, waitSince: 1000, contextUsedPercent: nil)
+            ]),
+            now: 1000,
+            lastPublishAt: 1000
+        )
+        #expect(model.blocked?.showsContextPressure == false)
+    }
+
+    // MARK: - Priority ordering with mixed states
+
+    @Test("mixed fleet: needsInput selected, warning surfaced, oldest wait wins")
+    func mixedStatesPriority() {
+        let model = MonitorHUDModel.make(
+            from: snapshot([
+                session(id: "run", status: .running, lastEventAt: 1195, warning: "toolLoop"),
+                session(id: "wait-new", project: "new", status: .needsInput,
+                        lastEventAt: 1190, waitSince: 1120),
+                session(id: "wait-old", project: "old", status: .needsInput,
+                        lastEventAt: 1150, waitSince: 1050, contextUsedPercent: 0.9),
+                session(id: "idle", status: .idle)
+            ]),
+            now: 1200,
+            lastPublishAt: 1200
+        )
+        // needsInput dominates the aggregate/presentation.
+        #expect(model.aggregate == .needsInput(2))
+        #expect(model.presentation == .needsInput)
+        // Oldest wait is surfaced, with its own context pressure.
+        #expect(model.blocked?.sessionID == "wait-old")
+        #expect(model.blocked?.showsContextPressure == true)
+        // The running session's tool-loop still flags the collapsed row.
+        #expect(model.warning == .toolLoop)
     }
 }

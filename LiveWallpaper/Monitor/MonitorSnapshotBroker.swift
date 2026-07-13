@@ -4,7 +4,7 @@ import os
 /// Hand-off point between the `MonitorDataHub` (single writer) and the per-display
 /// renderers (many readers, polling at their own cadence). A monotonically rising
 /// `generation` lets a reader ask "anything newer than what I last drew?" and get
-/// `nil` when there isn't, so an idle dashboard does no work between updates.
+/// `nil` when there isn't, so an idle board does no work between updates.
 ///
 /// Unlike `AudioSpectrumBroker` this never runs on a realtime thread, so a plain
 /// blocking lock is fine — the critical section is a struct copy, uncontended in

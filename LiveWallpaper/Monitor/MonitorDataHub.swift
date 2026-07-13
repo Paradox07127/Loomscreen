@@ -6,10 +6,10 @@ import Foundation
 /// publishes it to the broker — but no more than `throttleInterval` apart, so a burst
 /// of source updates collapses into at most one leading + one trailing publish.
 ///
-/// A module that has never reported stays `nil` in the composed snapshot (the
-/// dashboard reads `nil` as "module disabled / no data"). `setModuleEnabled` lets the
-/// runtime force a slot back to `nil` so a late in-flight update from a torn-down
-/// source can't resurrect a disabled module.
+/// A module that has never reported stays `nil` in the composed snapshot (renderers
+/// read `nil` as "module disabled / no data"). `setModuleEnabled` lets the runtime
+/// force a slot back to `nil` so a late in-flight update from a torn-down source
+/// can't resurrect a disabled module.
 actor MonitorDataHub: MonitorSnapshotSink {
     private let broker: MonitorSnapshotBroker
     private let throttleInterval: TimeInterval
@@ -111,7 +111,7 @@ actor MonitorDataHub: MonitorSnapshotSink {
 
     /// Merge every source's sessions, most attention-worthy first, then most
     /// recently active. `nil` (not empty) while no agent source has reported so the
-    /// dashboard can pick the system-only hero layout.
+    /// agent widgets can pick their unauthorized / empty state.
     private func composedAgents() -> [MonitorAgentSessionState]? {
         guard agentsEnabled, !agentsBySource.isEmpty else { return nil }
         let merged = agentsBySource.values.flatMap { $0 }

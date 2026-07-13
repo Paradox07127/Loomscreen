@@ -21,7 +21,12 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     public var savedSceneDescriptor: SceneDescriptor?
     /// Last applied monitor configuration — restored on type switch back to
     /// Monitor, mirroring `savedHTMLConfig` / `savedSceneDescriptor`.
-    public var savedMonitorConfiguration: MonitorWallpaperConfiguration?
+    public var savedMonitorConfiguration: MonitorBoardConfiguration?
+    /// The Monitor widget board as an ADDITIONAL overlay layer on this display,
+    /// independent of the active wallpaper type. `nil` (or `.enabled == false`)
+    /// means no overlay; the widget board floats over whatever wallpaper shows.
+    /// Defaulted so the existing designated inits need not thread it.
+    public var monitorOverlay: MonitorOverlayConfiguration? = nil
     public var playbackSpeed: Double
     public var fitMode: VideoFitMode
     public var videoDisplayMode: VideoDisplayMode = .perDisplay
@@ -81,6 +86,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case savedHTMLConfig
         case savedSceneDescriptor
         case savedMonitorConfiguration
+        case monitorOverlay
         case playbackSpeed
         case fitMode
         case videoDisplayMode
@@ -360,7 +366,12 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
         savedSceneDescriptor = try c.decodeIfPresent(SceneDescriptor.self, forKey: .savedSceneDescriptor)
-        savedMonitorConfiguration = try c.decodeIfPresent(MonitorWallpaperConfiguration.self, forKey: .savedMonitorConfiguration)
+        savedMonitorConfiguration = MonitorBoardConfiguration.decodeIfPresent(
+            from: c, forKey: .savedMonitorConfiguration
+        )
+        monitorOverlay = MonitorOverlayConfiguration.decodeIfPresent(
+            from: c, forKey: .monitorOverlay
+        )
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
         displayFingerprint = try c.decodeIfPresent(String.self, forKey: .displayFingerprint)
         // Absent in legacy / loose-video payloads → nil. Refined below from the
@@ -476,6 +487,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
         try c.encodeIfPresent(savedSceneDescriptor, forKey: .savedSceneDescriptor)
         try c.encodeIfPresent(savedMonitorConfiguration, forKey: .savedMonitorConfiguration)
+        try c.encodeIfPresent(monitorOverlay, forKey: .monitorOverlay)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
         try c.encode(videoDisplayMode, forKey: .videoDisplayMode)
@@ -541,7 +553,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         savedSceneDescriptor = resolved
     }
 
-    public mutating func updateMonitorConfiguration(_ config: MonitorWallpaperConfiguration) {
+    public mutating func updateMonitorConfiguration(_ config: MonitorBoardConfiguration) {
         guard case .monitor = activeWallpaper else { return }
         savedMonitorConfiguration = config
         activeWallpaper = .monitor(config)
