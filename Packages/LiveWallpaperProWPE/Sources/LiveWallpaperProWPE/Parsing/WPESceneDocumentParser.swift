@@ -826,6 +826,10 @@ public enum WPESceneDocumentParser {
         let font = unwrapString(dict["font"])
         let pointSize = unwrapDouble(dict["pointsize"]) ?? unwrapDouble(dict["fontsize"]) ?? 32
         let color = unwrapVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        // Generic object `brightness` — the same field image objects consume;
+        // WPE modulates text with it too (3460973721's Clock/Date/Day author
+        // 2.39/1.98/1.4), so dropping it discarded authored intensity.
+        let brightness = unwrapDouble(dict["brightness"]) ?? 1.0
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         // Script-driven alpha/visible (3509243656's login-intro texts) — the
         // renderer ticks these; the baked value above is only the seed.
@@ -884,6 +888,7 @@ public enum WPESceneDocumentParser {
             fontRelativePath: font,
             pointSize: max(1, pointSize),
             color: color,
+            brightness: max(0, brightness),
             alpha: max(0, min(alphaValue.value, 1)),
             alphaAnimation: alphaValue.animation,
             origin: origin,

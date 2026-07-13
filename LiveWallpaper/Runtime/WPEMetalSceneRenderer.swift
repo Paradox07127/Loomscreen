@@ -2103,14 +2103,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             width: entry.size.width * CGFloat(geometry.scale.x) * CGFloat(geometry.perspectiveSizeScale),
             height: entry.size.height * CGFloat(geometry.scale.y) * CGFloat(geometry.perspectiveSizeScale)
         )
+        // Object `brightness` folds into the tint exactly like an image layer's
+        // `rgb × brightness` (may exceed 1 — the fragment premultiplies in float,
+        // so >1 brightens antialiased edges before the UNORM store clamps).
+        let brightness = Float(max(liveObject.brightness, 0))
         return WPETextOverlayDraw(
             texture: entry.texture,
             centerInScenePixels: geometry.center,
             sizeInScenePixels: scaledSize,
             tint: SIMD3<Float>(
-                Float(liveObject.color.x),
-                Float(liveObject.color.y),
-                Float(liveObject.color.z)
+                Float(liveObject.color.x) * brightness,
+                Float(liveObject.color.y) * brightness,
+                Float(liveObject.color.z) * brightness
             ),
             alpha: Float(liveObject.alpha),
             rotation: geometry.rotation

@@ -287,6 +287,10 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let fontRelativePath: String?
     public let pointSize: Double
     public let color: SIMD3<Double>
+    /// Object-level `brightness` colour multiplier — the same generic field
+    /// image objects carry (3460973721's Clock/Date/Day author 2.39/1.98/1.4).
+    /// Multiplied into the text colour by both draw paths; 1 = unchanged.
+    public let brightness: Double
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let origin: SIMD3<Double>
@@ -351,6 +355,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         fontRelativePath: String?,
         pointSize: Double,
         color: SIMD3<Double>,
+        brightness: Double = 1,
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         origin: SIMD3<Double>,
@@ -387,6 +392,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.fontRelativePath = fontRelativePath
         self.pointSize = pointSize
         self.color = color
+        self.brightness = brightness
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation
         self.origin = origin
@@ -433,6 +439,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
             fontRelativePath: fontRelativePath,
             pointSize: pointSize,
             color: color,
+            brightness: brightness,
             alpha: liveAlpha,
             alphaAnimation: alphaAnimation,
             origin: origin,

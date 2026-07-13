@@ -1563,6 +1563,44 @@ struct WPESceneDocumentParserTests {
         #expect(dust.brightness == 1.0)
     }
 
+    @Test("Text object parses generic brightness (wildfire sample) and preserves it through withLiveText")
+    func textObjectParsesBrightness() throws {
+        // Mirrors 3460973721's Clock (brightness 2.39) / plain text (absent → 1).
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [
+            {
+              "id": 101,
+              "name": "Clock",
+              "type": "text",
+              "text": "12:34",
+              "brightness": 2.39,
+              "color": "1 1 1"
+            },
+            {
+              "id": 102,
+              "name": "Label",
+              "type": "text",
+              "text": "plain"
+            }
+          ]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        #expect(document.textObjects.count == 2)
+        let clock = try #require(document.textObjects.first { $0.id == "101" })
+        #expect(abs(clock.brightness - 2.39) < 0.0001)
+        let label = try #require(document.textObjects.first { $0.id == "102" })
+        #expect(label.brightness == 1.0)
+        // The per-frame live-text copy must not drop the field (ticking clocks
+        // would silently lose their authored brightness after the first tick).
+        let live = clock.withLiveText("12:35", alpha: 0.5)
+        #expect(abs(live.brightness - 2.39) < 0.0001)
+    }
+
     @Test("Particle object inherits parent transform from group object")
     func particleObjectInheritsParentTransform() throws {
         let json = """
