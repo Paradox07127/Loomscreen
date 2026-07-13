@@ -905,6 +905,12 @@ private struct WPEShaderSourceLoader: Sendable {
         // effect's strength). When the scene doesn't declare one it must
         // default to WHITE (= full effect everywhere) — a black/unbound slot
         // silently disables the effect (oracle: 3554161528 cloud bands froze).
+        // NOT subsumable by the sampler `"default"` annotation mechanism above:
+        // pulse.frag's opacity mask declares no default (only `mode:"opacitymask"`
+        // + paintdefaultcolor), and shake.frag's slot 2 is the TIMEOFFSET map
+        // (default util/black, dormant while the TIMEOFFSET combo stays 0) —
+        // the white-mask semantics come from WPE's opacitymask runtime rule,
+        // not from a shader-comment default.
         if usesWhiteOpacityMaskDefault(for: pass),
            !pass.textures.keys.contains(2), !pass.binds.keys.contains(2) {
             result[2] = .asset("util/white")
@@ -1113,10 +1119,35 @@ private struct WPEShaderSourceLoader: Sendable {
             // WPE 2.8 `font.frag` (+ workshop text shaders) call `ConvertSampleR8`
             // to read R8/alpha glyph coverage; an empty stub broke their translate.
             // Mirror WPE's GLSL path (`HLSL_SM30` never set in our pipeline → `.r`).
+            //
+            // FORMAT_* are WPE's texture-format enum constants (integer ABI values,
+            // matching the authoritative common_fragment.h). `formatcombo` shaders
+            // branch on them (`#if TEX2FORMAT == FORMAT_R8 || … == FORMAT_RG88` →
+            // replicate `.rrr`). Without this table `implicitConditionalDefines`
+            // auto-zeroed FORMAT_R8/FORMAT_RG88 *and* the missing TEXnFORMAT, so
+            // `0 == 0` forced every such shader down the single-channel branch —
+            // lightshafts sampled its RGBA gradient map as `.rrr` grayscale and the
+            // ×intensity beams saturated white instead of the gradient color.
+            // TEXnFORMAT still auto-defines to 0 (= FORMAT_RGBA8888), which matches
+            // the RGBA layout our texture loader uploads.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
             #define LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
             #define wpe_common_fragment_included 1
+
+            #define FORMAT_RGBA8888 0
+            #define FORMAT_RGB888 1
+            #define FORMAT_RGB565 2
+            #define FORMAT_ETC1_RGB8 3
+            #define FORMAT_DXT5 4
+            #define FORMAT_ETC2_RGBA8 5
+            #define FORMAT_DXT3 6
+            #define FORMAT_DXT1 7
+            #define FORMAT_RG88 8
+            #define FORMAT_R8 9
+            #define FORMAT_RG1616F 10
+            #define FORMAT_R16F 11
+            #define FORMAT_BC7 12
 
             float ConvertSampleR8(vec4 _sample) {
                 return _sample.r;
