@@ -333,6 +333,7 @@
     "g_NoiseAmount",
     "g_NoiseSpeed",
     "g_Offset",
+    "g_Overbright",
     "g_PhaseFeather",
     "g_Power",
     "g_PulseAmount",

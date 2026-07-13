@@ -37,6 +37,7 @@
     "g_Intensity",
     "g_NoiseAmount",
     "g_NoiseScale",
+    "g_Overbright",
     "g_Point0",
     "g_Point1",
     "g_Point2",

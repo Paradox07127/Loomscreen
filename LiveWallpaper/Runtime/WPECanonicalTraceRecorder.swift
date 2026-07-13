@@ -403,7 +403,8 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         sprite: MTLTexture?,
         blendMode: String,
         target: MTLTexture,
-        spriteSheet: (cols: Int, rows: Int, frames: Int, alphaMask: Bool)?
+        spriteSheet: (cols: Int, rows: Int, frames: Int, alphaMask: Bool)?,
+        overbright: Float
     ) {
         guard WPESceneDebugArtifacts.shared.isEnabled else { return }
         lock.lock()
@@ -436,11 +437,20 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         ]]
         var variables: [[String: Any]] = []
         if let sheet = spriteSheet {
-            variables = [[
+            variables.append([
                 "name": "g_SpriteSheet", "type": "vec4",
                 "value": [Double(sheet.cols), Double(sheet.rows), Double(sheet.frames), sheet.alphaMask ? 1.0 : 0.0]
-            ]]
+            ])
         }
+        // WPE's particle RDEF exposes g_Overbright/g_CutoutStart/g_CutoutEnd/g_Opacity;
+        // emitting the material's overbright multiplier by name closes most of the
+        // interface-name-set gap the fidelity diff's particle-pass Jaccard flagged
+        // (see self-oracle-runbook.md's seed-capture `firstDivergence`). Trace-only —
+        // no pixel is touched by this.
+        variables.append([
+            "name": "g_Overbright", "type": "float",
+            "value": Double(overbright)
+        ])
         let constantBuffer: [String: Any] = [
             "name": "particle", "stage": "fragment", "slot": 0, "variables": variables
         ]

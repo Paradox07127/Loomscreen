@@ -256,6 +256,7 @@
     "g_Intensity",
     "g_NoiseAmount",
     "g_NoiseScale",
+    "g_Overbright",
     "g_Phase",
     "g_PhaseOffset",
     "g_Point0",

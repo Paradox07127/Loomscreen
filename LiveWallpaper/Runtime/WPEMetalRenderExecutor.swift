@@ -240,6 +240,12 @@ final class WPEMetalRenderExecutor {
         let filter: MTLSamplerMinMagFilter = nearest ? .nearest : .linear
         descriptor.minFilter = filter
         descriptor.magFilter = filter
+        if WPEMetalTextureLoader.isMipChainEnabled {
+            // Default `.notMipmapped` samples level 0 only, matching today's
+            // level-0-only upload; opt in to trilinear filtering across the
+            // chain the loader now uploads under the same flag.
+            descriptor.mipFilter = .linear
+        }
         let address: MTLSamplerAddressMode = clamp ? .clampToEdge : .repeat
         descriptor.sAddressMode = address
         descriptor.tAddressMode = address
@@ -1252,7 +1258,8 @@ final class WPEMetalRenderExecutor {
             target: output,
             spriteSheet: system.spriteSheet.map {
                 (cols: $0.cols, rows: $0.rows, frames: $0.frameCount, alphaMask: $0.isAlphaMask)
-            }
+            },
+            overbright: system.overbright
         )
         if WPESceneDebugArtifacts.shared.isEnabled {
             WPESceneDebugArtifacts.shared.recordNoteOnce(

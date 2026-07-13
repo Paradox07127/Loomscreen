@@ -31,6 +31,30 @@ struct OracleCorpusCaptureTests {
         var scenes: [String]?
         /// Opt-in per-pass hashing (slow) — for LOCATING which pass first diverges.
         var perPass: Bool = false
+        /// Opt-in per-pass PNG dumps (`WPEDumpScenePasses` semantics, but set from
+        /// INSIDE the test host — an outside `defaults write` to the container plist
+        /// is a different cfprefsd domain and the sandboxed host never sees it).
+        var dumpPNGs: Bool = false
+
+        private enum CodingKeys: String, CodingKey {
+            case corpusRoot, label, scenes, perPass, dumpPNGs
+        }
+
+        /// Swift's compiler-synthesized `Decodable.init(from:)` does NOT fall back to a
+        /// property's `= default` for a missing key on a non-Optional field — it throws
+        /// `keyNotFound` instead. A config JSON written before `perPass`/`dumpPNGs`
+        /// existed (or hand-edited without them) would therefore fail to decode, and
+        /// the caller's `try?` turned that into a silent "no config — skipping", so the
+        /// capture never ran yet the test still passed. This hand-written initializer
+        /// applies the intended defaults via `decodeIfPresent` instead.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            corpusRoot = try container.decode(String.self, forKey: .corpusRoot)
+            label = try container.decodeIfPresent(String.self, forKey: .label) ?? "capture"
+            scenes = try container.decodeIfPresent([String].self, forKey: .scenes)
+            perPass = try container.decodeIfPresent(Bool.self, forKey: .perPass) ?? false
+            dumpPNGs = try container.decodeIfPresent(Bool.self, forKey: .dumpPNGs) ?? false
+        }
     }
 
     @MainActor
@@ -40,12 +64,16 @@ struct OracleCorpusCaptureTests {
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
         ).appendingPathComponent("LiveWallpaper")
         let configURL = base.appendingPathComponent("oracle-capture.json")
-        guard let data = try? Data(contentsOf: configURL),
-              let config = try? JSONDecoder().decode(Config.self, from: data),
-              !config.corpusRoot.isEmpty else {
+        // Absent file ⇒ this is the normal (non-opt-in) test run: skip cleanly, never
+        // fail the suite. A file that EXISTS but fails to decode is a real
+        // misconfiguration (typo'd key, wrong JSON shape) — let it throw so the test
+        // FAILS loudly instead of silently no-op'ing like a missing file would.
+        guard let data = try? Data(contentsOf: configURL) else {
             print("[oracle-capture] no \(configURL.path) — skipping.")
             return
         }
+        let config = try JSONDecoder().decode(Config.self, from: data)
+        try #require(!config.corpusRoot.isEmpty, "oracle-capture.json corpusRoot must not be empty")
         let root = URL(fileURLWithPath: config.corpusRoot)
         // NOT wiped between invocations: the corpus runs one scene PER PROCESS (fresh GPU
         // memory ⇒ deterministic — multi-scene-per-process inherits non-deterministic
@@ -68,6 +96,9 @@ struct OracleCorpusCaptureTests {
             WPESceneDebugArtifacts.shared.setEnabledForTesting(nil)
             if config.perPass {
                 UserDefaults.standard.removeObject(forKey: "WPEOraclePerPassHashes")
+            }
+            if config.dumpPNGs {
+                UserDefaults.standard.removeObject(forKey: "WPEDumpScenePasses")
             }
         }
 
@@ -110,6 +141,9 @@ struct OracleCorpusCaptureTests {
                 continue
             }
 
+            if config.dumpPNGs {
+                UserDefaults.standard.set(id, forKey: "WPEDumpScenePasses")
+            }
             let descriptor = SceneDescriptor(
                 workshopID: id,
                 cacheRelativePath: "wpe-oracle-cache/\(id)",
@@ -144,6 +178,36 @@ struct OracleCorpusCaptureTests {
         }
         print("=== oracle-capture: captured=\(captured) skipped=\(skipped) failed=\(failed) → \(outDir.path) ===")
         #expect(captured > 0, "no scene produced a trace — check corpus root / engine assets")
+    }
+
+    @Test("Config decode fills in defaults for keys a config file omits")
+    func configDecodeFillsDefaultsForMissingKeys() throws {
+        // Only corpusRoot — the shape of a config written before perPass/dumpPNGs/label
+        // existed. Must decode, not throw, with every omitted field at its intended default.
+        let json = Data(#"{"corpusRoot": "/tmp/corpus"}"#.utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        #expect(config.corpusRoot == "/tmp/corpus")
+        #expect(config.label == "capture")
+        #expect(config.scenes == nil)
+        #expect(config.perPass == false)
+        #expect(config.dumpPNGs == false)
+    }
+
+    @Test("Config decode throws on a malformed config instead of silently defaulting")
+    func configDecodeThrowsOnMalformedConfig() {
+        // corpusRoot is required with no default; a config file that exists but omits
+        // it (or has the wrong shape) must fail to decode so the caller's `try` — no
+        // longer swallowed by `try?` — turns it into a real test failure, not the
+        // same silent skip as a plain missing file.
+        let missingCorpusRoot = Data(#"{"label": "oops"}"#.utf8)
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(Config.self, from: missingCorpusRoot)
+        }
+
+        let wrongShape = Data(#"{"corpusRoot": 12345}"#.utf8)
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(Config.self, from: wrongShape)
+        }
     }
 
     /// Newest `scene-debug/<stamp>-<id>/trace.json` the recorder just wrote for this scene.

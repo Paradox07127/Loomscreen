@@ -297,6 +297,69 @@ struct WPEMetalTextureLoaderTests {
         #expect(frame0 !== frame2)
     }
 
+    @Test("Mip chain flag: multi-level payload uploads the full chain only when enabled")
+    func mipChainUploadRespectsFlag() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let level0Bytes = Data((0..<64).map { UInt8($0) })          // 4x4 RGBA8888
+        let level1Bytes = Data([9, 8, 7, 255, 6, 5, 4, 255, 3, 2, 1, 255, 0, 9, 8, 255])  // 2x2 RGBA8888
+        let multiLevelPayload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 4,
+                height: 4,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue,
+                format: .rgba8888,
+                mipmapCount: 2,
+                flags: 0
+            ),
+            mipmaps: [
+                WPETexTextureMipmap(index: 0, width: 4, height: 4, bytes: level0Bytes),
+                WPETexTextureMipmap(index: 1, width: 2, height: 2, bytes: level1Bytes)
+            ],
+            hasAnimationFrames: false
+        )
+
+        let defaults = UserDefaults.standard
+        let key = WPEMetalTextureLoader.mipChainDefaultsKey
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+
+        // OFF (default): level-0-only upload, byte-identical to today.
+        defaults.set(false, forKey: key)
+        let disabledTexture = try await WPEMetalTextureLoader(device: device)
+            .makeTexture(from: multiLevelPayload, label: "test-mipchain-off")
+        #expect(disabledTexture.mipmapLevelCount == 1)
+
+        // ON: full chain uploaded, and level 1's bytes match the payload (not level 0's).
+        defaults.set(true, forKey: key)
+        let enabledTexture = try await WPEMetalTextureLoader(device: device)
+            .makeTexture(from: multiLevelPayload, label: "test-mipchain-on")
+        #expect(enabledTexture.mipmapLevelCount == 2)
+        var readBack = [UInt8](repeating: 0, count: level1Bytes.count)
+        readBack.withUnsafeMutableBytes { raw in
+            enabledTexture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: 2 * 4,
+                from: MTLRegionMake2D(0, 0, 2, 2),
+                mipmapLevel: 1
+            )
+        }
+        #expect(Data(readBack) == level1Bytes)
+
+        // ON but only one decoded level: eligibility gate keeps the level-0-only path.
+        let singleLevelPayload = WPETexTexturePayload(
+            info: multiLevelPayload.info,
+            mipmaps: [WPETexTextureMipmap(index: 0, width: 4, height: 4, bytes: level0Bytes)],
+            hasAnimationFrames: false
+        )
+        let singleLevelTexture = try await WPEMetalTextureLoader(device: device)
+            .makeTexture(from: singleLevelPayload, label: "test-mipchain-single-level")
+        #expect(singleLevelTexture.mipmapLevelCount == 1)
+    }
+
     @Test("Upload queue semaphore bounds concurrent upload operations")
     func uploadQueueSemaphoreBoundsConcurrency() async throws {
         let probe = UploadConcurrencyProbe()

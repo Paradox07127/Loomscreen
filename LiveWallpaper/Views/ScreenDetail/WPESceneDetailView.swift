@@ -573,7 +573,7 @@ struct WPESceneDetailView: View {
     /// `WPERenderFlagRegistryTests` scans the renderer sources and fails when a
     /// key read there is neither listed here nor excluded there with a reason.
     private static let renderFlagKeys = [
-        "WPEMetalMemorylessDepthEnabled", "WPEMetalSerializeFrames",
+        "WPEMetalMemorylessDepthEnabled", "WPEMetalMipChainEnabled", "WPEMetalSerializeFrames",
         "WPEMetalPerspectiveNativeResolution", "WPEMetalSceneBloomEnabled",
         "WPEMetalStaticLayerCacheEnabled",
         "WPEMetalStaticLayerCacheBudgetMiB", "WPEMetalTextureCacheBudgetMiB",
