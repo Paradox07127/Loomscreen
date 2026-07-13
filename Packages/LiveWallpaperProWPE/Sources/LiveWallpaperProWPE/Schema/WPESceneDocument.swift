@@ -291,6 +291,10 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let alphaAnimation: WPESceneAnimatedValue?
     public let origin: SIMD3<Double>
     public let scale: SIMD3<Double>
+    /// Static author-space rotation (radians, `angles` in scene.json). Text
+    /// objects rotate like image layers — 2986828130's Clock/Date carry a
+    /// standalone z of 0.5236 (30°) with no parent chain.
+    public let angles: SIMD3<Double>
     public let visible: Bool
     public let horizontalAlignment: String
     public let verticalAlignment: String
@@ -351,6 +355,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         alphaAnimation: WPESceneAnimatedValue? = nil,
         origin: SIMD3<Double>,
         scale: SIMD3<Double>,
+        angles: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         visible: Bool,
         horizontalAlignment: String,
         verticalAlignment: String,
@@ -386,6 +391,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.alphaAnimation = alphaAnimation
         self.origin = origin
         self.scale = scale
+        self.angles = angles
         self.visible = visible
         self.horizontalAlignment = horizontalAlignment
         self.verticalAlignment = verticalAlignment
@@ -431,6 +437,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
             alphaAnimation: alphaAnimation,
             origin: origin,
             scale: scale,
+            angles: angles,
             visible: visible,
             horizontalAlignment: horizontalAlignment,
             verticalAlignment: verticalAlignment,
@@ -468,13 +475,17 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
+    /// Object-level `brightness` colour multiplier — the same generic field
+    /// image objects carry (WPE applies it to any renderable object). Rendered
+    /// by folding into the particle overbright uniform; 1 = unchanged.
+    public let brightness: Double
     /// Per-axis camera-parallax depth (WPE stores this as a Vec2 "x y"). Each
     /// axis scales independently, so "1 0" parallaxes horizontally only and
     /// "0 1" vertically only. `.zero` pins the layer (no parallax).
     public let parallaxDepth: SIMD2<Double>
     public let instanceOverride: WPESceneParticleInstanceOverride?
 
-    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, parallaxDepth: SIMD2<Double>, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
+    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, brightness: Double = 1, parallaxDepth: SIMD2<Double>, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
         self.id = id
         self.name = name
         self.particleRelativePath = particleRelativePath
@@ -485,6 +496,7 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation
         self.color = color
+        self.brightness = brightness
         self.parallaxDepth = parallaxDepth
         self.instanceOverride = instanceOverride
     }

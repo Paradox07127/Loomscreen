@@ -2250,6 +2250,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return max(0, Float(truncating: number))
     }
 
+    /// Effective particle colour multiplier: material overbright × the host
+    /// object's generic `brightness` (WPE modulates any renderable object with
+    /// it; particles fold it into the same overbright uniform, shader unchanged).
+    /// Clamped ≥ 0 — a negative authored brightness must not invert colours.
+    nonisolated static func particleOverbright(
+        material: Float?,
+        objectBrightness: Double
+    ) -> Float {
+        max(0, (material ?? 1.0) * Float(objectBrightness))
+    }
+
     /// Best-effort `.tex-json` sidecar lookup. The atlas slicing
     /// metadata WPE ships next to each `.tex` (cols/rows derived from
     /// the sequence frame size, plus the pixel format) lives in
@@ -3343,7 +3354,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
-        system.overbright = material?.overbright ?? 1.0
+        system.overbright = Self.particleOverbright(
+            material: material?.overbright,
+            objectBrightness: object.brightness
+        )
         system.isNestedChildSystem = isNestedChild
         if let groupEffect {
             system.groupOpacityMask = groupEffect.mask
@@ -4300,9 +4314,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     ///
     /// `zRotation` is the chain's composed z angle (radians, author-space CCW):
     /// WPE rotates text with its host (3470764447's 总组件角度 = -15° tilts the
-    /// whole clock stack). It is only non-zero when the live chain composes —
-    /// fully static chains keep the parse-time origin and render unrotated, the
-    /// pre-existing behavior.
+    /// whole clock stack). When the live chain composes, it is the chain's
+    /// composed angle; otherwise the parse-time WORLD angle stands — text
+    /// objects rotate like image layers, so a static `angles` in scene.json
+    /// (2986828130's Clock/Date 30° tilt) must not collapse to 0.
     private func liveTextWorldPlacement(
         _ object: WPESceneTextObject,
         scriptOrigins: [String: SIMD3<Double>],
@@ -4317,7 +4332,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard let parentID = object.parentObjectID,
               let localOrigin = ownLiveOrigin ?? object.localOrigin,
               !(scriptOrigins.isEmpty && scriptScales.isEmpty && scriptAngles.isEmpty) else {
-            return (ownLiveOrigin ?? object.origin, 0)
+            return (ownLiveOrigin ?? object.origin, object.angles.z)
         }
         var chain: [WPERenderObjectTransform] = []
         var cursor: String? = parentID
@@ -4328,7 +4343,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let hostLocal = transformHostLocalTransformsByID[id] else {
                 // Non-host ancestor (image layer): its motion isn't composable
                 // here — keep the parse-time origin rather than half-compose.
-                return (ownLiveOrigin ?? object.origin, 0)
+                return (ownLiveOrigin ?? object.origin, object.angles.z)
             }
             if scriptOrigins[id] != nil || scriptScales[id] != nil || scriptAngles[id] != nil {
                 chainIsLive = true
@@ -4340,7 +4355,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             ))
             cursor = objectParentByID[id]
         }
-        guard chainIsLive, !chain.isEmpty else { return (ownLiveOrigin ?? object.origin, 0) }
+        guard chainIsLive, !chain.isEmpty else {
+            return (ownLiveOrigin ?? object.origin, object.angles.z)
+        }
         var world = WPERenderObjectTransform(
             origin: localOrigin,
             scale: SIMD3<Double>(1, 1, 1),

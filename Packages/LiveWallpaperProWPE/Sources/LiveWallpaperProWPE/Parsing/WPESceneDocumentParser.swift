@@ -845,6 +845,9 @@ public enum WPESceneDocumentParser {
         }
         let origin = transform.origin
         let scale = transform.scale
+        // Text objects carry static `angles` like image layers (2986828130's
+        // Clock/Date tilt 30° standalone) — dropping it froze them unrotated.
+        let angles = transform.angles
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
@@ -885,6 +888,7 @@ public enum WPESceneDocumentParser {
             alphaAnimation: alphaValue.animation,
             origin: origin,
             scale: scale,
+            angles: angles,
             visible: visible,
             horizontalAlignment: horiz.lowercased(),
             verticalAlignment: vert.lowercased(),
@@ -1085,6 +1089,10 @@ public enum WPESceneDocumentParser {
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        // Generic object `brightness` — the same field image objects consume;
+        // WPE applies it to particles too, so dropping it discarded authored
+        // intensity.
+        let brightness = parseDouble(dict["brightness"]) ?? 1.0
         let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
         let instanceOverride = parseParticleInstanceOverride(
             dict["instanceoverride"] ?? dict["instanceOverride"]
@@ -1100,6 +1108,7 @@ public enum WPESceneDocumentParser {
             alpha: alphaValue.value,
             alphaAnimation: alphaValue.animation,
             color: color,
+            brightness: brightness,
             parallaxDepth: parallaxDepth,
             instanceOverride: instanceOverride
         )
