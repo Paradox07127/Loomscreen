@@ -9,7 +9,7 @@ public enum WallpaperContent: Equatable, Sendable {
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
-    case monitor(MonitorWallpaperConfiguration)
+    case monitor(MonitorBoardConfiguration)
 
     public static func video(bookmarkData: Data) -> WallpaperContent {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)
@@ -68,7 +68,7 @@ public enum WallpaperContent: Equatable, Sendable {
         return descriptor
     }
 
-    public var monitorConfiguration: MonitorWallpaperConfiguration? {
+    public var monitorConfiguration: MonitorBoardConfiguration? {
         guard case .monitor(let config) = self else { return nil }
         return config
     }
@@ -102,6 +102,14 @@ extension WallpaperContent: Codable {
 
     private enum MonitorCodingKeys: String, CodingKey {
         case config
+    }
+
+    /// Decodes the nested board `config`; an absent or unreadable `config` yields
+    /// the default board (never fails the surrounding decode).
+    private static func decodeMonitorConfig(
+        from nested: KeyedDecodingContainer<MonitorCodingKeys>
+    ) -> MonitorBoardConfiguration {
+        MonitorBoardConfiguration.decodeIfPresent(from: nested, forKey: .config) ?? .default
     }
 
     public init(from decoder: Decoder) throws {
@@ -143,8 +151,7 @@ extension WallpaperContent: Codable {
         }
 
         if let monitorNested = try? container.nestedContainer(keyedBy: MonitorCodingKeys.self, forKey: .monitor) {
-            let config = try monitorNested.decodeIfPresent(MonitorWallpaperConfiguration.self, forKey: .config) ?? .default
-            self = .monitor(config)
+            self = .monitor(Self.decodeMonitorConfig(from: monitorNested))
             return
         }
 

@@ -12,6 +12,10 @@ private enum HUDSignal {
     static let needsInput = Color(red: 0.959, green: 0.453, blue: 0.340) // coral  oklch(.705 .165 34)
     static let done = Color(red: 0.469, green: 0.771, blue: 0.599)       // sage   oklch(.76 .10 158)
     static let idle = Color(red: 0.470, green: 0.454, blue: 0.432)       // neutral oklch(.56 .010 76)
+    /// Warnings (tool-loop / stale) reuse the warm amber attention signal —
+    /// "burning / stuck" is an attention cue, distinct from the coral "needs you"
+    /// but not a new colour in the capsule's vocabulary.
+    static let warning = running
 
     static let ink = Color(red: 0.924, green: 0.907, blue: 0.875)
     static let inkFaint = Color(red: 0.413, green: 0.391, blue: 0.361)
@@ -114,6 +118,16 @@ struct MonitorHUDView: View {
                     .foregroundStyle(HUDSignal.inkFaint)
             }
 
+            // Subtle "who's stuck" affordance: one amber glyph when any live
+            // session is spinning-in-place (toolLoop) or quietly stalled (stale).
+            if let warning = model.warning {
+                Image(systemName: warningGlyph(warning))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(HUDSignal.warning)
+                    .help(warningLabel(warning))
+                    .accessibilityLabel(warningLabel(warning))
+            }
+
             Spacer(minLength: 8)
 
             HStack(spacing: 4) {
@@ -149,6 +163,16 @@ struct MonitorHUDView: View {
                     .foregroundStyle(HUDSignal.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                // "· 4m" — how long this session has been waiting on you.
+                if let waited = waitLabel(blocked) {
+                    Text(verbatim: "· \(waited)")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(HUDSignal.needsInput.opacity(0.85))
+                        .fixedSize()
+                        .accessibilityLabel(Text("waiting \(waited)", comment: "Fleet HUD: accessibility label for how long the blocked session has waited; %@ is a short duration like 4m."))
+                }
             }
 
             if let detail = blocked.detail, !detail.isEmpty {
@@ -157,6 +181,21 @@ struct MonitorHUDView: View {
                     .foregroundStyle(HUDSignal.inkFaint)
                     .lineLimit(1)
                     .truncationMode(.tail)
+            }
+
+            // Subtle affordances for the focused session: a warning chip
+            // ("who's stuck") and a near-compaction pressure hint. Both stay
+            // one-line and absent unless the signal fires (calm at rest).
+            if blocked.warning != nil || blocked.showsContextPressure {
+                HStack(spacing: 6) {
+                    if let warning = blocked.warning {
+                        warningChip(warning)
+                    }
+                    if blocked.showsContextPressure {
+                        contextPressureChip
+                    }
+                }
+                .padding(.top, 1)
             }
 
             if onFocus != nil {
@@ -257,5 +296,75 @@ struct MonitorHUDView: View {
         case .claude: return "sparkle"
         case .codex: return "chevron.left.forwardslash.chevron.right"
         }
+    }
+
+    // MARK: Warning + context-pressure affordances
+
+    /// Amber pill naming the focused session's anomaly (glyph + short word).
+    private func warningChip(_ warning: MonitorHUDModel.Warning) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: warningGlyph(warning))
+                .font(.system(size: 9, weight: .bold))
+            warningLabel(warning)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(HUDSignal.warning)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous).fill(HUDSignal.warning.opacity(0.16))
+        )
+        .overlay(
+            Capsule(style: .continuous).strokeBorder(HUDSignal.warning.opacity(0.4), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(warningLabel(warning))
+    }
+
+    /// Coral near-compaction hint — shown only past the context-pressure gate.
+    private var contextPressureChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "gauge.with.dots.needle.67percent")
+                .font(.system(size: 9, weight: .bold))
+            Text("context full", comment: "Fleet HUD: chip warning the focused session is near its context limit (compaction imminent).")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(HUDSignal.needsInput)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous).fill(HUDSignal.needsInput.opacity(0.14))
+        )
+        .overlay(
+            Capsule(style: .continuous).strokeBorder(HUDSignal.needsInput.opacity(0.38), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private func warningGlyph(_ warning: MonitorHUDModel.Warning) -> String {
+        switch warning {
+        case .toolLoop: return "arrow.triangle.2.circlepath"   // spinning in place
+        case .stale: return "clock.badge.exclamationmark"      // quiet stall
+        }
+    }
+
+    private func warningLabel(_ warning: MonitorHUDModel.Warning) -> Text {
+        switch warning {
+        case .toolLoop:
+            return Text("looping", comment: "Fleet HUD: warning chip — the agent is retrying one tool over and over (spinning in place).")
+        case .stale:
+            return Text("stalled", comment: "Fleet HUD: warning chip — the agent is running but has gone quiet (no events for a while).")
+        }
+    }
+
+    /// Compact wait duration in the HUD's existing age idiom (5s / 4m / 2h / 1d);
+    /// nil when the wait is under a second so the "· …" suffix stays clean.
+    private func waitLabel(_ blocked: MonitorHUDModel.BlockedSession) -> String? {
+        guard let seconds = blocked.waitingSeconds, seconds >= 1 else { return nil }
+        let s = Int(seconds)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        if s < 86400 { return "\(s / 3600)h" }
+        return "\(s / 86400)d"
     }
 }

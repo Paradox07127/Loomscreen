@@ -33,6 +33,24 @@ final class ClaudeAgentSource: MonitorDataSource {
     func currentUsage() async -> MonitorProviderUsage {
         await engine.currentUsage()
     }
+
+    /// Claude-only usage-ledger fragment (per-model + per-day history over the
+    /// trailing 14-day window, plus burn rates). The integrator merges this with
+    /// the Codex fragment into `MonitorUsageSnapshot.perModel/.dailyActivity/…`.
+    /// Kept separate from `currentUsage()` because `MonitorProviderUsage` has no
+    /// slot for the ledger (see integration notes / contract gap).
+    func currentUsageLedger() async -> MonitorUsageLedgerFragment {
+        await engine.currentUsageLedger()
+    }
+}
+
+/// Cross-provider usage-ledger fragment a source contributes: per-file daily
+/// buckets (already extracted, ready to roll up) plus its windowed burn rates.
+/// Merged by the integrator across providers so the rollup covers Claude+Codex.
+struct MonitorUsageLedgerFragment: Sendable, Equatable {
+    var fileBuckets: [MonitorFileUsageBuckets] = []
+    var tokensPerHour: Double?
+    var costPerHour: Double?
 }
 
 // MARK: - Engine (all mutable state, isolated)
@@ -52,6 +70,11 @@ private actor Engine {
 
     private var lastScan: Date = .distantPast
     private var consecutiveIOFailures = 0
+
+    // v2 Fleet + usage-ledger state (survives rescans, not per-model rotation).
+    private var waitTracker = MonitorFleetWaitTracker()
+    private let backfill = MonitorUsageBackfillCache()
+    private var burnWindow = MonitorBurnRateWindow()
 
     // Cadence.
     private static let activeInterval: TimeInterval = 1.5
@@ -211,7 +234,14 @@ private actor Engine {
         var states: [MonitorAgentSessionState] = []
         for (sessionId, model) in models {
             let alive = liveness[sessionId] ?? false
-            let state = model.snapshot(now: now, processAlive: alive)
+            var state = model.snapshot(now: now, processAlive: alive)
+            // Overlay the cross-scan wait clock: stamp the flip into needsInput with
+            // the session's last event time, carry it while blocked, clear otherwise.
+            state.waitSince = waitTracker.waitSince(
+                sessionID: state.id,
+                status: state.status,
+                eventTime: state.lastEventAt
+            )
             // Drop long-dead sessions from the surfaced list.
             if state.status == .ended,
                now.timeIntervalSince1970 - state.lastEventAt > Self.endedRetention {
@@ -219,8 +249,48 @@ private actor Engine {
             }
             states.append(state)
         }
+        waitTracker.retainOnly(Set(states.map(\.id)))
         states.sort { $0.lastEventAt > $1.lastEventAt }
         return states
+    }
+
+    /// Roll the trailing-14-day per-model/per-day history + burn rates for the
+    /// Claude root. Uses the memoized backfill cache (bounded rescan ≤ every 5 min)
+    /// so no full-history re-read happens per tick.
+    func currentUsageLedger() -> MonitorUsageLedgerFragment {
+        let now = Date()
+        let buckets: [MonitorFileUsageBuckets]
+        if backfill.shouldRefresh(now: now) {
+            let refs = ledgerFileRefs(now: now)
+            buckets = backfill.refresh(files: refs, now: now)
+        } else {
+            buckets = backfill.cachedBuckets()
+        }
+
+        // Burn-rate window rides on today's live token/cost totals.
+        let today = currentUsage()
+        let todayTokens = today.tokensToday ?? .zero
+        let cumulative = todayTokens.input + todayTokens.output + todayTokens.cacheRead + todayTokens.cacheWrite
+        burnWindow.record(at: now.timeIntervalSince1970, cumulativeTokens: cumulative, cumulativeCost: today.costTodayUSD)
+        let rates = burnWindow.rates()
+
+        return MonitorUsageLedgerFragment(
+            fileBuckets: buckets,
+            tokensPerHour: rates.tokensPerHour,
+            costPerHour: rates.costPerHour
+        )
+    }
+
+    /// Transcript files whose mtime is inside the ledger day window. Reuses the
+    /// scanner's discovery but with the 14-day lookback (not the 48h status one).
+    private func ledgerFileRefs(now: Date) -> [MonitorUsageFileRef] {
+        let lookback = TimeInterval(MonitorUsageRollup.dayWindow) * 24 * 3600
+        guard let candidates = try? scanner.discoverTranscripts(now: now, lookback: lookback, limit: 400) else {
+            return []
+        }
+        return candidates.map {
+            MonitorUsageFileRef(url: $0.url, provider: .claude, size: $0.sizeBytes, mtime: $0.modifiedAt)
+        }
     }
 
     func currentUsage() -> MonitorProviderUsage {

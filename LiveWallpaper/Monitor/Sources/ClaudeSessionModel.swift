@@ -24,8 +24,15 @@ struct ClaudeTranscriptLine {
     var model: String?
     var stopReason: String?
     var toolNames: [String]          // names of tool_use content blocks, in order
+    var toolUses: [ToolUse]          // tool_use blocks with their ids, in order
+    var toolResults: [ToolResult]    // tool_result blocks (paired back by tool_use_id)
     var hasTextOutput: Bool          // assistant emitted a text/thinking block
     var usage: Usage?                // flattened assistant token usage, if present
+
+    /// One tool_use content block, name + optional id (name only — never args).
+    struct ToolUse: Equatable { var name: String; var id: String? }
+    /// One tool_result content block: which tool_use it answers + error marker.
+    struct ToolResult: Equatable { var toolUseID: String?; var isError: Bool }
 
     /// Flattened assistant token usage. Reads only the four canonical top-level
     /// fields; nested `iterations`/`cache_creation` detail is ignored.
@@ -73,6 +80,8 @@ struct ClaudeTranscriptLine {
         self.stopReason = message?["stop_reason"] as? String
 
         var tools: [String] = []
+        var toolUses: [ToolUse] = []
+        var toolResults: [ToolResult] = []
         var sawText = false
         var sawToolResult = false
         var sawTextContentBlock = false
@@ -81,18 +90,27 @@ struct ClaudeTranscriptLine {
             for block in content {
                 switch block["type"] as? String {
                 case "tool_use":
-                    if let name = block["name"] as? String { tools.append(name) }
+                    if let name = block["name"] as? String {
+                        tools.append(name)
+                        toolUses.append(ToolUse(name: name, id: block["id"] as? String))
+                    }
                 case "text", "thinking":
                     sawText = true
                     sawTextContentBlock = true
                 case "tool_result":
                     sawToolResult = true
+                    // `is_error` is the only field read; the result content itself
+                    // (which may contain output) is never touched.
+                    let isError = (block["is_error"] as? Bool) ?? false
+                    toolResults.append(ToolResult(toolUseID: block["tool_use_id"] as? String, isError: isError))
                 default:
                     break
                 }
             }
         }
         self.toolNames = tools
+        self.toolUses = toolUses
+        self.toolResults = toolResults
         self.hasTextOutput = sawText
 
         if self.type == .assistant, let usageDict = message?["usage"] as? [String: Any] {
@@ -141,10 +159,20 @@ struct ClaudeSessionModel {
     private(set) var lastEventAt: Date?
     private(set) var startedAt: Date?
     private(set) var lastToolName: String?
+    private(set) var cwd: String?
 
     private(set) var pendingToolUse: Bool = false
     private(set) var lastAssistantStopReason: String?
     private(set) var sawPermissionRequest: Bool = false
+
+    // v2 Fleet raw material.
+    /// input + cacheRead of the LAST usage-bearing assistant event (context load).
+    private(set) var lastUsageInput: Int?
+    private(set) var lastUsageCacheRead: Int?
+    /// Recent event timestamps (epoch seconds), capped + ascending on read.
+    private(set) var recentEventTimes: [Double] = []
+    /// Recent tool_use events with ok resolved from the paired tool_result.
+    private(set) var recentTools: [MonitorAgentToolEvent] = []
 
     // Whether the most recent main-session line was a tool_result or a real user
     // prompt (i.e. the model is expected to act next) — a "running" signal per spec.
@@ -164,8 +192,17 @@ struct ClaudeSessionModel {
         if sessionId.isEmpty, let sid = line.sessionId { sessionId = sid }
         if let cwd = line.cwd, !cwd.isEmpty {
             projectName = (cwd as NSString).lastPathComponent
+            self.cwd = cwd
         }
         if let branch = line.gitBranch, !branch.isEmpty { gitBranch = branch }
+
+        // Any timestamped main-or-side line contributes a tick to the event track.
+        if let ts = line.timestamp?.timeIntervalSince1970 {
+            recentEventTimes.append(ts)
+            if recentEventTimes.count > MonitorFleetSignalDeriver.recentEventCap * 2 {
+                recentEventTimes = Array(recentEventTimes.suffix(MonitorFleetSignalDeriver.recentEventCap))
+            }
+        }
 
         // Sidechain (subagent) lines update freshness but never the main
         // session's turns, status inputs, or token/model attribution.
@@ -175,11 +212,17 @@ struct ClaudeSessionModel {
         case .assistant:
             if let model = line.model { self.model = model }
             accumulateTokens(from: line)
+            recordLastUsage(from: line)
+            recordToolUses(from: line)
             if let stop = line.stopReason { lastAssistantStopReason = stop }
             if let tool = line.toolNames.last {
                 // A tool_use with no following tool_result yet: the model is
-                // waiting on a tool, not on us.
-                lastToolName = tool
+                // waiting on a tool, not on us. The name is rendered verbatim as a
+                // "tool name" chip, so sanitize it before storing — a malformed
+                // transcript could otherwise smuggle prompt-like text here. If the
+                // name fails the allowlist we still know a tool is pending; we just
+                // don't surface a garbage detail (lastToolName stays nil).
+                lastToolName = MonitorFleetSignalDeriver.sanitizedToolName(tool)
                 pendingToolUse = true
             } else {
                 // An assistant text turn with no tool call ends the exchange; the
@@ -195,6 +238,7 @@ struct ClaudeSessionModel {
             if line.isToolResult {
                 // Tool result closes the loop opened by the matching tool_use and
                 // hands control back to the model.
+                applyToolResults(from: line)
                 pendingToolUse = false
                 lastInboundAwaitsModel = true
             } else if line.isRealUserPrompt {
@@ -225,6 +269,41 @@ struct ClaudeSessionModel {
         tokens.output += usage.output
         tokens.cacheRead += usage.cacheRead
         tokens.cacheWrite += usage.cacheWrite
+    }
+
+    /// Context load = the LAST usage-bearing assistant event's input + cache-read.
+    private mutating func recordLastUsage(from line: ClaudeTranscriptLine) {
+        guard let usage = line.usage else { return }
+        lastUsageInput = usage.input
+        lastUsageCacheRead = usage.cacheRead
+    }
+
+    /// Append each tool_use as an unresolved event (ok = nil) and keep the tail
+    /// bounded. Names only — arguments are never read, and each name is sanitized
+    /// (allowlist + length cap) before storing so nothing attacker-controlled ever
+    /// reaches the tool-name UI. A name that fails sanitization is dropped; the
+    /// paired tool_result then resolves the next remaining event (still positional
+    /// among the events we kept).
+    private mutating func recordToolUses(from line: ClaudeTranscriptLine) {
+        let at = line.timestamp?.timeIntervalSince1970 ?? lastEventAt?.timeIntervalSince1970 ?? 0
+        for use in line.toolUses {
+            guard let name = MonitorFleetSignalDeriver.sanitizedToolName(use.name) else { continue }
+            recentTools.append(MonitorAgentToolEvent(name: name, at: at, ok: nil))
+        }
+        if recentTools.count > MonitorFleetSignalDeriver.recentToolCap * 3 {
+            recentTools = Array(recentTools.suffix(MonitorFleetSignalDeriver.recentToolCap * 3))
+        }
+    }
+
+    /// Resolve `ok` on the tool events this user line's tool_results answer. The
+    /// wire event carries no id, so pairing is positional: each result resolves the
+    /// oldest still-unresolved event (Claude Code delivers results in call order).
+    /// Only `is_error` is read — result content is never inspected.
+    private mutating func applyToolResults(from line: ClaudeTranscriptLine) {
+        for result in line.toolResults {
+            guard let index = recentTools.firstIndex(where: { $0.ok == nil }) else { break }
+            recentTools[index].ok = !result.isError
+        }
     }
 
     // MARK: - Classification
@@ -269,21 +348,38 @@ struct ClaudeSessionModel {
     }
 
     func costUSD() -> Double? {
-        guard let model, let rate = Self.pricing(for: model) else { return nil }
-        let perMTok = 1_000_000.0
-        return (Double(tokens.input) * rate.input
-              + Double(tokens.output) * rate.output
-              + Double(tokens.cacheRead) * rate.cacheRead
-              + Double(tokens.cacheWrite) * rate.cacheWrite) / perMTok
+        guard let model else { return nil }
+        return MonitorTokenPricing.cost(model: model, tokens: tokens)
     }
+
+    /// Metadata-derived fleet signals (everything except waitSince, which the
+    /// owning source overlays from its cross-scan flip tracker).
+    func contextUsedPercent() -> Double? {
+        MonitorFleetSignalDeriver.contextUsedPercent(
+            lastInputTokens: lastUsageInput,
+            lastCacheReadTokens: lastUsageCacheRead,
+            model: model
+        )
+    }
+
+    var worktreeName: String? { MonitorWorktree.name(fromCwd: cwd) }
 
     /// Snapshot into the frozen wire type.
     func snapshot(now: Date, processAlive: Bool, freshnessTimeout: TimeInterval = 180) -> MonitorAgentSessionState {
-        MonitorAgentSessionState(
+        let currentStatus = status(now: now, processAlive: processAlive, freshnessTimeout: freshnessTimeout)
+        let tools = MonitorFleetSignalDeriver.trimmedTools(recentTools)
+        let warning = MonitorFleetSignalDeriver.warning(
+            recentTools: recentTools,
+            status: currentStatus,
+            processAlive: processAlive,
+            lastEventAt: lastEventAt?.timeIntervalSince1970,
+            now: now.timeIntervalSince1970
+        )
+        var state = MonitorAgentSessionState(
             id: "claude:\(sessionId)",
             provider: .claude,
             projectName: projectName ?? sessionId,
-            status: status(now: now, processAlive: processAlive, freshnessTimeout: freshnessTimeout),
+            status: currentStatus,
             statusDetail: statusDetail(now: now, processAlive: processAlive, freshnessTimeout: freshnessTimeout),
             model: model,
             gitBranch: gitBranch,
@@ -294,6 +390,12 @@ struct ClaudeSessionModel {
             tokens: tokens,
             costUSD: costUSD()
         )
+        state.recentEventTimes = MonitorFleetSignalDeriver.trimmedEventTimes(recentEventTimes)
+        state.recentTools = tools
+        state.contextUsedPercent = contextUsedPercent()
+        state.warning = warning
+        state.worktreeName = worktreeName
+        return state
     }
 
     func snapshotState() -> SessionAggregateState {

@@ -184,6 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MonitorHUDController.shared.applyPersistedStateAtStartup()
         }
 
+        // Monitor overlay layer: restore any per-display overlay the user left on,
+        // floating the widget board over whatever wallpaper each display shows.
+        if !runtimeOptions.isTesting {
+            manager.reconcileMonitorOverlays()
+        }
+
         Logger.notice("Application startup complete", category: .startup)
 
         if startupPlan.showSettingsOnLaunch {

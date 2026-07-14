@@ -10,6 +10,7 @@ struct ScreenDetailPreviewArea: View {
     let screen: Screen
     @Binding var draft: ScreenDetailDraftState
     let featureCatalog: FeatureCatalog
+    let screenManager: ScreenManager
     let previewController: InspectorPreviewController
     let isLoading: Bool
     let isDraggingOver: Bool
@@ -146,15 +147,17 @@ struct ScreenDetailPreviewArea: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Static placeholder for the Monitor wallpaper — no live WKWebView in the
-    /// inspector preview (v1); the dashboard only renders on the desktop layer.
-    /// Module toggles + authorization live in the inspector to the side.
+    /// The Monitor wallpaper's live board — the preview area IS the editor
+    /// (SPEC §4): the same `MonitorBoardHostView` the wallpaper renders, in edit
+    /// mode, fed from its own runtime lease. Drag / add / remove / resize persist
+    /// via the non-restarting board path (`persistMonitorConfigurationFromBoard`).
+    /// The inspector to the side keeps board controls, the instruments list, and
+    /// authorization.
     private var monitorContent: some View {
-        IllustratedEmptyState(
-            symbol: "gauge.with.dots.needle.67percent",
-            title: "System Monitor",
-            message: "A live system dashboard runs on your desktop. Adjust what it shows in the panel.",
-            symbolColor: Color(red: 0.98, green: 0.66, blue: 0.25)
+        MonitorBoardPreviewArea(
+            screen: screen,
+            screenManager: screenManager,
+            featureCatalog: featureCatalog
         )
         .padding(24)
     }

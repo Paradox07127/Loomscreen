@@ -9,7 +9,7 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
     case html(HTMLSource, HTMLConfig)
     case metalShader(ShaderSource)
     case scene(SceneDescriptor)
-    case monitor(MonitorWallpaperConfiguration)
+    case monitor(MonitorBoardConfiguration)
 
     public static func video(bookmarkData: Data) -> WallpaperSessionDefinition {
         .video(bookmarkData: bookmarkData, packageEntryName: nil)

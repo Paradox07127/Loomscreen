@@ -11,6 +11,13 @@ struct CodexSessionModel: Sendable {
     private(set) var lastToolName: String?
     private(set) var startedAt: Date?
     private(set) var lastTerminalEventIsTaskComplete = false
+    private(set) var cwd: String?
+
+    // v2 Fleet raw material.
+    private(set) var lastUsageInput: Int?
+    private(set) var lastUsageCacheRead: Int?
+    private(set) var recentEventTimes: [Double] = []
+    private(set) var recentTools: [MonitorAgentToolEvent] = []
 
     private var pendingApprovalAt: Date?
     private var lastApprovalClearAt: Date?
@@ -33,6 +40,10 @@ struct CodexSessionModel: Sendable {
         let timestamp = Self.timestamp(from: line, payload: payload)
         if let timestamp {
             markFresh(at: timestamp)
+            recentEventTimes.append(timestamp.timeIntervalSince1970)
+            if recentEventTimes.count > MonitorFleetSignalDeriver.recentEventCap * 2 {
+                recentEventTimes = Array(recentEventTimes.suffix(MonitorFleetSignalDeriver.recentEventCap))
+            }
         }
 
         if let discoveredModel = Self.discoveredModel(in: payload) {
@@ -75,6 +86,16 @@ struct CodexSessionModel: Sendable {
         return .unknown
     }
 
+    func contextUsedPercent() -> Double? {
+        MonitorFleetSignalDeriver.contextUsedPercent(
+            lastInputTokens: lastUsageInput,
+            lastCacheReadTokens: lastUsageCacheRead,
+            model: model
+        )
+    }
+
+    var worktreeName: String? { MonitorWorktree.name(fromCwd: cwd) }
+
     func sessionState(
         now: Date,
         processAlive: Bool,
@@ -83,11 +104,12 @@ struct CodexSessionModel: Sendable {
     ) -> MonitorAgentSessionState? {
         guard let lastEventAt else { return nil }
         let resolvedSessionId = sessionId ?? fallbackSessionId
-        return MonitorAgentSessionState(
+        let currentStatus = status(now: now, processAlive: processAlive)
+        var state = MonitorAgentSessionState(
             id: "codex:\(resolvedSessionId)",
             provider: .codex,
             projectName: projectName ?? fallbackProjectName,
-            status: status(now: now, processAlive: processAlive),
+            status: currentStatus,
             statusDetail: lastToolName,
             model: model,
             gitBranch: gitBranch,
@@ -98,6 +120,18 @@ struct CodexSessionModel: Sendable {
             tokens: tokens,
             costUSD: nil
         )
+        state.recentEventTimes = MonitorFleetSignalDeriver.trimmedEventTimes(recentEventTimes)
+        state.recentTools = MonitorFleetSignalDeriver.trimmedTools(recentTools)
+        state.contextUsedPercent = contextUsedPercent()
+        state.warning = MonitorFleetSignalDeriver.warning(
+            recentTools: recentTools,
+            status: currentStatus,
+            processAlive: processAlive,
+            lastEventAt: lastEventAt.timeIntervalSince1970,
+            now: now.timeIntervalSince1970
+        )
+        state.worktreeName = worktreeName
+        return state
     }
 
     func snapshotState() -> SessionAggregateState {
@@ -144,6 +178,7 @@ struct CodexSessionModel: Sendable {
         sessionId = Self.stringValue(payload["id"]) ?? Self.stringValue(payload["session_id"]) ?? sessionId
 
         if let cwd = Self.stringValue(payload["cwd"]) {
+            self.cwd = cwd
             let name = URL(fileURLWithPath: cwd).lastPathComponent
             if !name.isEmpty {
                 projectName = name
@@ -194,6 +229,14 @@ struct CodexSessionModel: Sendable {
     private mutating func ingestResponseItem(_ payload: [String: Any], timestamp: Date?) {
         guard let toolName = Self.toolName(from: payload) else { return }
         lastToolName = toolName
+        // Codex exposes no metadata-only success/failure marker on the call event
+        // (exit status lives in the tool output we deliberately never read), so ok
+        // stays nil rather than guessing.
+        let at = timestamp?.timeIntervalSince1970 ?? lastEventAt?.timeIntervalSince1970 ?? 0
+        recentTools.append(MonitorAgentToolEvent(name: toolName, at: at, ok: nil))
+        if recentTools.count > MonitorFleetSignalDeriver.recentToolCap * 3 {
+            recentTools = Array(recentTools.suffix(MonitorFleetSignalDeriver.recentToolCap * 3))
+        }
         if let timestamp {
             markTerminal(false, at: timestamp)
         }
@@ -203,19 +246,30 @@ struct CodexSessionModel: Sendable {
         if let info = payload["info"] as? [String: Any] {
             if let total = info["total_token_usage"] as? [String: Any] {
                 tokens = Self.tokenTotals(from: total)
+                recordLastUsage(from: total)
                 return
             }
             if let last = info["last_token_usage"] as? [String: Any] {
                 tokens = tokens + Self.tokenTotals(from: last)
+                recordLastUsage(from: last)
                 return
             }
         }
 
         if let total = payload["total_token_usage"] as? [String: Any] {
             tokens = Self.tokenTotals(from: total)
+            recordLastUsage(from: total)
         } else if let last = payload["last_token_usage"] as? [String: Any] {
             tokens = tokens + Self.tokenTotals(from: last)
+            recordLastUsage(from: last)
         }
+    }
+
+    /// Context load for Codex = the latest token_count's input + cached-input.
+    private mutating func recordLastUsage(from usage: [String: Any]) {
+        let totals = Self.tokenTotals(from: usage)
+        lastUsageInput = totals.input
+        lastUsageCacheRead = totals.cacheRead
     }
 
     // MARK: - State helpers
@@ -305,11 +359,9 @@ struct CodexSessionModel: Sendable {
     }
 
     private static func sanitizedToolName(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-")
-        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
-        let name = trimmed.split(separator: ".").last.map(String.init) ?? trimmed
+        // Shared allowlist + length-cap discipline (identical to the Claude path);
+        // the Codex-specific alias is applied on top.
+        guard let name = MonitorFleetSignalDeriver.sanitizedToolName(value) else { return nil }
         if name == "exec_command" {
             return "shell"
         }

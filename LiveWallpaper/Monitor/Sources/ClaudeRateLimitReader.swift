@@ -1,7 +1,7 @@
 import Foundation
 
 /// Account-level rate-limit percentages, already normalized to plain fields the
-/// dashboard understands. `resets_at` is always epoch seconds regardless of the
+/// Usage widget understands. `resets_at` is always epoch seconds regardless of the
 /// on-disk representation. Weekly reset is whatever the payload reports — never
 /// computed here.
 struct ClaudeRateLimits: Sendable, Equatable {

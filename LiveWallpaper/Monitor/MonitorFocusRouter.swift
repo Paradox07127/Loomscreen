@@ -1,21 +1,27 @@
 import AppKit
 import Darwin
 import Foundation
+import os
 
-/// Routes a monitor-dashboard "focus this session" request to the terminal /
+/// Routes a "focus this session" request (from the Fleet HUD) to the terminal /
 /// editor window that owns the agent process.
 ///
-/// The dashboard posts `{type:"focusSession", id:"<provider>:<id>"}`. For a
-/// Claude session we look up the recorded PID in `~/.claude/sessions/<PID>.json`,
-/// walk the parent-process chain until we reach a regular (Dock-visible) app —
-/// Terminal, iTerm2, WezTerm, VS Code, or Claude Code desktop all qualify — and
-/// activate it. Codex has no PID descriptors yet, so it is a logged no-op.
+/// The HUD hands us `"<provider>:<id>"`. For a Claude session we look up the
+/// recorded PID in `~/.claude/sessions/<PID>.json`, walk the parent-process chain
+/// until we reach a regular (Dock-visible) app — Terminal, iTerm2, WezTerm, VS Code,
+/// or Claude Code desktop all qualify — and activate it. Codex has no PID
+/// descriptors yet, so it is a logged no-op.
 ///
 /// The descriptor read and PID walk run off the main thread (a busy `sysctl`
 /// loop must not stall the wallpaper); only `NSRunningApplication.activate()`
 /// hops back to the main actor.
 @MainActor
 enum MonitorFocusRouter {
+    // `nonisolated` so the detached descriptor/PID-walk task and the nonisolated
+    // walker below can read them without hopping back to the main actor; both
+    // are immutable and `Logger` is `Sendable`.
+    nonisolated private static let log = Logger(subsystem: "com.livewallpaper", category: "MonitorFocus")
+
     /// Cap on how far up the process tree we walk before giving up — a healthy
     /// terminal → shell → agent chain is only a few hops; the cap guards against
     /// a pathological / cyclic table.
@@ -30,15 +36,15 @@ enum MonitorFocusRouter {
 
     static func focus(sessionID: String) {
         guard let provider = parseProvider(sessionID) else {
-            Logger.warning("Monitor focus: unrecognized session provider", category: .general)
+            log.warning("Monitor focus: unrecognized session id \(sessionID, privacy: .public)")
             return
         }
 
         switch provider {
         case .codex:
             // Codex writes no `sessions/<PID>.json` descriptors, so there is no
-            // PID to resolve and nothing to activate. v1 limitation.
-            Logger.info("Monitor focus: not supported for codex sessions yet", category: .general)
+            // PID to resolve and nothing to activate.
+            log.info("Monitor focus: not supported for codex sessions yet")
         case .claude(let claudeSessionID):
             focusClaude(sessionID: claudeSessionID)
         }
@@ -50,19 +56,19 @@ enum MonitorFocusRouter {
         // tiny JSON files), then move the unbounded parent-chain walk off-main.
         let descriptors = readClaudeDescriptors()
         guard !descriptors.isEmpty else {
-            Logger.info("Monitor focus: no Claude PID descriptors (grant missing or no live sessions)", category: .general)
+            log.info("Monitor focus: no Claude PID descriptors (grant missing or no live sessions)")
             return
         }
 
         Task.detached(priority: .userInitiated) {
             guard let leafPID = pid(forSessionID: sessionID, in: descriptors) else {
-                Logger.info("Monitor focus: no live PID for requested Claude session", category: .general)
+                Self.log.info("Monitor focus: no live PID for Claude session \(sessionID, privacy: .public)")
                 return
             }
             // Descriptors are forgeable JSON in the user's home; only walk and
             // activate when the leaf actually looks like a Claude CLI process.
             guard leafExecutableLooksLikeClaude(leafPID) else {
-                Logger.warning("Monitor focus: leaf pid \(leafPID) is not a claude/node/bun executable; refusing to activate", category: .general)
+                Self.log.warning("Monitor focus: leaf pid \(leafPID, privacy: .public) is not a claude/node/bun executable; refusing to activate")
                 return
             }
             let target = regularAncestorPID(from: leafPID)
@@ -99,12 +105,12 @@ enum MonitorFocusRouter {
     /// (e.g. a bare helper), this is a logged no-op.
     private static func activate(ownerPID: pid_t) {
         guard let app = NSRunningApplication(processIdentifier: ownerPID) else {
-            Logger.info("Monitor focus: pid \(ownerPID) has no NSRunningApplication; nothing to activate", category: .general)
+            log.info("Monitor focus: pid \(ownerPID, privacy: .public) has no NSRunningApplication; nothing to activate")
             return
         }
         app.activate()
         let bundleID = app.bundleIdentifier ?? "<unknown>"
-        Logger.info("Monitor focus: activated \(bundleID) (pid \(ownerPID))", category: .general)
+        log.info("Monitor focus: activated \(bundleID, privacy: .public) (pid \(ownerPID, privacy: .public))")
     }
 
     // MARK: - Pure helpers (unit-tested)

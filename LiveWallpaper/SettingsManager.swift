@@ -602,7 +602,7 @@ final class SettingsManager {
                 && !descriptor.cacheRelativePath.isEmpty
                 && !descriptor.entryFile.isEmpty
         case .monitor:
-            // Bundled dashboard + self-contained config — always valid.
+            // Native SwiftUI board + self-contained config — always valid.
             return true
         }
     }

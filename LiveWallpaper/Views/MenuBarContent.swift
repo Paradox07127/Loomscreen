@@ -44,6 +44,14 @@ struct MenuBarContent: View {
                 header
                 sectionDivider
                 displays
+                if screenManager.hasActiveMonitorWallpaper {
+                    sectionDivider
+                    editWidgetsRow
+                }
+                if featureCatalog.isEnabled(.monitorWallpaper) {
+                    sectionDivider
+                    monitorOverlaySection
+                }
                 if featureCatalog.isEnabled(.agentFleet) {
                     sectionDivider
                     fleetHUDRow
@@ -149,6 +157,46 @@ struct MenuBarContent: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// "Edit Widgets" entry, shown only while a Monitor wallpaper is live. Taps
+    /// enter board edit mode on every live Monitor board; the board's own Done
+    /// control exits. Mirrors the display row's icon-tile + label layout.
+    private var editWidgetsRow: some View {
+        Button(action: invokeEditMonitorWidgets) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 26, height: 26)
+                    .adaptiveGlassSurface(.roundedRectangle(8))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit Widgets")
+                        .font(DesignTokens.Typography.bodyEmphasized)
+                        .lineLimit(1)
+                    Text("Rearrange, add or remove monitor widgets")
+                        .font(DesignTokens.Typography.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MenuBarPressFeedbackStyle())
+        .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
+        .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
+        .frame(maxWidth: .infinity)
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
+        .help(Text("Enter edit mode on the Monitor wallpaper to rearrange, add or remove widgets"))
+        .accessibilityLabel(Text("Edit Widgets"))
+    }
+
     /// Pro-only floating HUD toggle. Mirrors the header master switch's control
     /// style (small `.switch`) and the display row's icon-tile + label layout.
     private var fleetHUDRow: some View {
@@ -192,6 +240,91 @@ struct MenuBarContent: View {
         .frame(maxWidth: .infinity)
         .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
         .help(Text("Show a floating capsule with live AI-agent fleet status on top of every space"))
+    }
+
+    // MARK: - Monitor overlay
+
+    private var overlayEnabled: Bool { screenManager.isMonitorOverlayEnabled }
+    private var overlayLevel: MonitorOverlayLevel { screenManager.monitorOverlayLevel }
+
+    /// Master toggle for the floating Monitor widget board, plus its layer / edit
+    /// controls when it's on. The board floats over whatever wallpaper each display
+    /// shows — independent of the wallpaper type.
+    @ViewBuilder
+    private var monitorOverlaySection: some View {
+        monitorOverlayToggleRow
+        if overlayEnabled {
+            monitorOverlayControlsRow
+        }
+    }
+
+    private var monitorOverlayToggleRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(overlayEnabled ? DesignTokens.Colors.Status.active : Color.secondary)
+                .frame(width: 26, height: 26)
+                .adaptiveGlassSurface(.roundedRectangle(8))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Monitor Overlay")
+                    .font(DesignTokens.Typography.bodyEmphasized)
+                    .lineLimit(1)
+                Text("Floating widget board over any wallpaper")
+                    .font(DesignTokens.Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: Binding(
+                get: { overlayEnabled },
+                set: { enabled in
+                    guard enabled != overlayEnabled else { return }
+                    screenManager.setMonitorOverlayEnabled(enabled)
+                }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Monitor Overlay"))
+            .accessibilityValue(overlayEnabled ? Text("On") : Text("Off"))
+            .accessibilityAddTraits(.isButton)
+        }
+        .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
+        .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
+        .frame(maxWidth: .infinity)
+        .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
+        .help(Text("Show the Monitor widget board as a floating layer over the current wallpaper"))
+    }
+
+    /// Layer (z-plane) picker + edit entry, shown only while the overlay is on.
+    private var monitorOverlayControlsRow: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: Binding(
+                get: { overlayLevel },
+                set: { screenManager.setMonitorOverlayLevel($0) }
+            )) {
+                Text("Desktop").tag(MonitorOverlayLevel.desktop)
+                Text("On Top").tag(MonitorOverlayLevel.front)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .accessibilityLabel(Text("Overlay layer"))
+
+            Button(action: invokeEditMonitorOverlayWidgets) {
+                Text("Edit Widgets")
+                    .font(DesignTokens.Typography.caption)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.borderless)
+            .help(Text("Rearrange, add or remove overlay widgets"))
+        }
+        .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
+        .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
+        .frame(maxWidth: .infinity)
     }
 
     private var usageStrip: some View {
@@ -498,6 +631,18 @@ struct MenuBarContent: View {
     private func invokeAddWallpaper() {
         dismiss()
         openSettingsAndAddWallpaper()
+    }
+
+    private func invokeEditMonitorWidgets() {
+        // Dismiss the popover so the board's edit chrome is unobstructed.
+        dismiss()
+        screenManager.setMonitorWidgetsEditing(true)
+    }
+
+    private func invokeEditMonitorOverlayWidgets() {
+        // Dismiss the popover so the overlay's edit chrome is unobstructed.
+        dismiss()
+        screenManager.setMonitorOverlayWidgetsEditing(true)
     }
 }
 
