@@ -443,7 +443,7 @@ struct PlaylistSection: View {
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.addVideos
-        let completion: ([URL]) -> Void = { urls in
+        panel.presentSheetOrModal { urls in
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
 
@@ -472,15 +472,6 @@ struct PlaylistSection: View {
             if skipped > 0 {
                 Logger.info("Playlist add: skipped \(skipped) duplicate(s)", category: .ui)
             }
-        }
-        if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
-            panel.beginSheetModal(for: parent) { response in
-                guard response == .OK else { return }
-                completion(panel.urls)
-            }
-        } else {
-            guard panel.runModal() == .OK else { return }
-            completion(panel.urls)
         }
     }
 
@@ -549,18 +540,17 @@ struct PlaylistSection: View {
         if removedPrimary || !working.contains(where: { $0.isPrimary }) {
             working[0].isPrimary = true
         }
-        guard let primaryIndex = working.firstIndex(where: { $0.isPrimary }) else { return }
-        let primary = working[primaryIndex].bookmark
-        let ordered = working.map(\.bookmark)
-        let extras = ordered.enumerated().compactMap { idx, b in idx == primaryIndex ? nil : b }
-
-        entries = working
-        playlistBookmarks = extras
-        screenManager.replacePlaylist(ordered: ordered, primary: primary, for: screen)
+        commitEntries(working)
     }
 
     /// Pure-reorder commit: preserves primary identity + currently playing video.
     private func applyOrder(_ newEntries: [PlaylistEntry]) {
+        commitEntries(newEntries)
+    }
+
+    /// Derive primary + ordered bookmarks + extras from the entries, then
+    /// persist the reordered playlist. Shared by the removal and reorder paths.
+    private func commitEntries(_ newEntries: [PlaylistEntry]) {
         guard let primaryIndex = newEntries.firstIndex(where: { $0.isPrimary }) else { return }
         let primary = newEntries[primaryIndex].bookmark
         let ordered = newEntries.map(\.bookmark)

@@ -9,6 +9,8 @@ import SwiftUI
 /// pull this view into the lightweight runtime, even though the Lite
 /// capability catalog has no `wpeImport`).
 struct WPEProjectCustomSettingsCard: View {
+    private typealias ValueLogic = WPEProjectPropertyValueLogic
+
     var screen: Screen
     var schema: WallpaperEngineProjectPropertySchema
     var projectKey: String?
@@ -123,13 +125,13 @@ struct WPEProjectCustomSettingsCard: View {
                 HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                     Slider(
                         value: numberBinding(for: property),
-                        in: sliderRange(for: property),
-                        step: sliderStep(for: property)
+                        in: ValueLogic.sliderRange(for: property),
+                        step: ValueLogic.sliderStep(for: property)
                     )
                     .frame(width: DesignTokens.Inspector.sliderWidth)
                     .controlSize(.small)
 
-                    Text(verbatim: formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
+                    Text(verbatim: ValueLogic.formattedNumber(value(for: property, values: values).numberValue ?? 0, for: property))
                         .font(DesignTokens.Typography.metric)
                         .foregroundStyle(.secondary)
                         .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
@@ -214,24 +216,7 @@ struct WPEProjectCustomSettingsCard: View {
         for property: WallpaperEngineProjectPropertySchema.Property,
         values: [String: WallpaperEngineProjectPropertyValue]
     ) -> WallpaperEngineProjectPropertyValue {
-        values[property.key] ?? fallbackValue(for: property)
-    }
-
-    private func fallbackValue(
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> WallpaperEngineProjectPropertyValue {
-        switch property.type {
-        case .bool:
-            return .bool(false)
-        case .slider:
-            return .number(property.minimum ?? 0)
-        case .combo:
-            return property.options.first?.value ?? .string("")
-        case .color:
-            return .string("1 1 1")
-        case .textinput, .file, .directory, .text, .group, .unsupported:
-            return .string("")
-        }
+        ValueLogic.value(for: property, in: values)
     }
 
     private func valueBinding(
@@ -241,7 +226,7 @@ struct WPEProjectCustomSettingsCard: View {
             get: {
                 projectOverrides[property.key]
                     ?? property.defaultValue
-                    ?? fallbackValue(for: property)
+                    ?? ValueLogic.fallbackValue(for: property)
             },
             set: { setProjectValue($0, for: property) }
         )
@@ -264,9 +249,9 @@ struct WPEProjectCustomSettingsCard: View {
                 let raw = valueBinding(for: property).wrappedValue.numberValue
                     ?? property.minimum
                     ?? 0
-                return clamp(raw, to: sliderRange(for: property))
+                return ValueLogic.clamp(raw, to: ValueLogic.sliderRange(for: property))
             },
-            set: { setProjectValue(.number(normalizedSliderValue($0, for: property)), for: property) }
+            set: { setProjectValue(.number(ValueLogic.normalizedSliderValue($0, for: property)), for: property) }
         )
     }
 
@@ -283,8 +268,8 @@ struct WPEProjectCustomSettingsCard: View {
         for property: WallpaperEngineProjectPropertySchema.Property
     ) -> Binding<CGColor> {
         Binding(
-            get: { cgColor(from: valueBinding(for: property).wrappedValue.stringValue) },
-            set: { setProjectValue(.string(colorString(from: $0)), for: property) }
+            get: { ValueLogic.cgColor(from: valueBinding(for: property).wrappedValue.stringValue) },
+            set: { setProjectValue(.string(ValueLogic.colorString(from: $0)), for: property) }
         )
     }
 
@@ -294,96 +279,13 @@ struct WPEProjectCustomSettingsCard: View {
     ) {
         var next = config
         var overrides = next.projectWallpaperEngineProperties(forProjectKey: projectKey)
-        if Self.matchesDefault(value: value, for: property) {
+        if ValueLogic.matchesDefault(value: value, for: property) {
             overrides.removeValue(forKey: property.key)
         } else {
             overrides[property.key] = value
         }
         next.setWallpaperEngineProjectProperties(overrides, forProjectKey: projectKey)
         apply(next)
-    }
-
-    /// Type-aware comparison that decides whether a freshly-edited value
-    /// should be persisted as an override or treated as "back to default".
-    /// Plain `==` on the enum is too strict for two cases:
-    ///
-    /// 1. **Slider values** — SwiftUI slider math reproduces the default
-    ///    `20` as `20.000000000000004` after one round-trip, which would
-    ///    permanently mark the slider as overridden.
-    /// 2. **Color values** — the ColorPicker may yield `"0.500000 0.500000
-    ///    0.500000"` for a default authored as `"0.5 0.5 0.5"`.
-    ///
-    /// Compare numerically per component within an epsilon so the Reset
-    /// affordance and the persisted override set both stay honest.
-    private static func matchesDefault(
-        value: WallpaperEngineProjectPropertyValue,
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> Bool {
-        guard let defaultValue = property.defaultValue else { return false }
-        let tolerance = 1e-6
-
-        switch (defaultValue, value) {
-        case (.bool(let lhs), .bool(let rhs)):
-            return lhs == rhs
-
-        case (.number(let lhs), .number(let rhs)):
-            return abs(lhs - rhs) <= tolerance
-
-        case (.string(let lhs), .string(let rhs)):
-            if property.type == .color {
-                let lhsComponents = colorComponents(from: lhs)
-                let rhsComponents = colorComponents(from: rhs)
-                // Compare the first three (RGB) components only. WPE
-                // authors mix `"r g b"`, `"#rrggbb"`, and `"#rrggbbaa"`
-                // freely, while SwiftUI's `ColorPicker` (with
-                // `supportsOpacity: false`) always rounds-trips three
-                // components — without trimming we would mark a default
-                // `#808080ff` as "different" from the picker's
-                // `"0.5 0.5 0.5"`.
-                guard lhsComponents.count >= 3, rhsComponents.count >= 3 else {
-                    return lhs == rhs
-                }
-                return zip(lhsComponents.prefix(3), rhsComponents.prefix(3))
-                    .allSatisfy { abs($0 - $1) <= tolerance }
-            }
-            return lhs == rhs
-
-        default:
-            return defaultValue == value
-        }
-    }
-
-    /// Parses `"r g b"` / hex / `#rrggbb` into 3-4 normalized components so
-    /// both equality and `cgColor(from:)` use one source of truth.
-    private static func colorComponents(from raw: String) -> [Double] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let hex = decodeHexColor(trimmed) {
-            return hex
-        }
-        let parts = trimmed.split(whereSeparator: { $0 == " " || $0 == "," })
-        let parsed = parts.compactMap { Double($0) }
-        guard parsed.count >= 3 else { return [] }
-        return parsed.prefix(4).map { min(max($0, 0), 1) }
-    }
-
-    /// Recognises WPE's other common color encoding (`"#rrggbb"`,
-    /// `"#rrggbbaa"`, or bare `"rrggbb"`) so authors who used either
-    /// notation interoperate with the SwiftUI ColorPicker round-trip.
-    private static func decodeHexColor(_ raw: String) -> [Double]? {
-        var hex = raw.lowercased()
-        if hex.hasPrefix("#") { hex.removeFirst() }
-        let allowedLengths: Set<Int> = [6, 8]
-        guard allowedLengths.contains(hex.count),
-              hex.allSatisfy({ "0123456789abcdef".contains($0) }) else {
-            return nil
-        }
-        let pairs = stride(from: 0, to: hex.count, by: 2).map { offset -> Double in
-            let start = hex.index(hex.startIndex, offsetBy: offset)
-            let end = hex.index(start, offsetBy: 2)
-            let byte = UInt8(hex[start..<end], radix: 16) ?? 0
-            return Double(byte) / 255.0
-        }
-        return pairs
     }
 
     private func apply(_ next: HTMLConfig) {
@@ -409,93 +311,6 @@ struct WPEProjectCustomSettingsCard: View {
 
     private var projectOverrides: [String: WallpaperEngineProjectPropertyValue] {
         config.projectWallpaperEngineProperties(forProjectKey: projectKey)
-    }
-
-    private func sliderRange(
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> ClosedRange<Double> {
-        let lower = property.minimum ?? 0
-        let upper = property.maximum ?? max(100, lower + 1)
-        if upper > lower { return lower...upper }
-        return lower...(lower + 1)
-    }
-
-    private func sliderStep(
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> Double {
-        if let step = property.step, step > 0 { return step }
-        return property.fraction ? 0.1 : 1
-    }
-
-    private func normalizedSliderValue(
-        _ raw: Double,
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> Double {
-        let range = sliderRange(for: property)
-        let clamped = clamp(raw, to: range)
-        let step = sliderStep(for: property)
-        guard step > 0 else { return clamped }
-        let stepped = ((clamped - range.lowerBound) / step).rounded() * step + range.lowerBound
-        return clamp(stepped, to: range)
-    }
-
-    private func formattedNumber(
-        _ value: Double,
-        for property: WallpaperEngineProjectPropertySchema.Property
-    ) -> String {
-        let decimals = property.fraction ? min(max(property.precision ?? 1, 0), 4) : 0
-        return String(format: "%.\(decimals)f", value)
-    }
-
-    private func clamp(_ value: Double, to range: ClosedRange<Double>) -> Double {
-        min(max(value, range.lowerBound), range.upperBound)
-    }
-
-    private func cgColor(from string: String) -> CGColor {
-        let components = Self.colorComponents(from: string)
-        guard components.count >= 3 else {
-            return CGColor(red: 1, green: 1, blue: 1, alpha: 1)
-        }
-        return CGColor(
-            red: clamp01(components[0]),
-            green: clamp01(components[1]),
-            blue: clamp01(components[2]),
-            alpha: 1
-        )
-    }
-
-    private func colorString(from color: CGColor) -> String {
-        let converted: CGColor
-        if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-           let srgb = color.converted(to: colorSpace, intent: .defaultIntent, options: nil) {
-            converted = srgb
-        } else {
-            converted = color
-        }
-
-        let components = converted.components ?? [1, 1, 1]
-        let red: Double
-        let green: Double
-        let blue: Double
-        if components.count >= 3 {
-            red = Double(components[0])
-            green = Double(components[1])
-            blue = Double(components[2])
-        } else {
-            red = Double(components.first ?? 1)
-            green = red
-            blue = red
-        }
-        return "\(trimmedColor(red)) \(trimmedColor(green)) \(trimmedColor(blue))"
-    }
-
-    private func trimmedColor(_ value: Double) -> String {
-        let clamped = clamp01(value)
-        return String(format: "%.6g", clamped)
-    }
-
-    private func clamp01(_ value: Double) -> Double {
-        min(max(value, 0), 1)
     }
 
     private func needsMouseInput(_ schema: WallpaperEngineProjectPropertySchema) -> Bool {

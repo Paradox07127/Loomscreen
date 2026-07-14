@@ -44,20 +44,28 @@ struct HTMLSourceSection: View {
     // MARK: - Segment Picker
 
     private enum SourceSegment: String, CaseIterable, Identifiable {
-        case url, local
+        case url, local, inline
         var id: String { rawValue }
 
+        /// User-pickable authoring segments. `.inline` is a read-only display
+        /// state for legacy inline-HTML sources, never a pickable option.
+        static let pickable: [SourceSegment] = [.url, .local]
+
+        /// `.inline` is excluded from `pickable`, so its label never renders. It
+        /// reuses the read-only pane's title rather than minting a segment string
+        /// that string extraction would surface as an untranslated catalog entry.
         var labelKey: LocalizedStringKey {
             switch self {
             case .url: return "URL"
             case .local: return "Local"
+            case .inline: return "Inline HTML content"
             }
         }
     }
 
     private var sourceSegmentPicker: some View {
         HStack(spacing: 0) {
-            ForEach(SourceSegment.allCases) { segment in
+            ForEach(SourceSegment.pickable) { segment in
                 Button {
                     let animation = DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))
                     withAnimation(animation) {
@@ -90,6 +98,25 @@ struct HTMLSourceSection: View {
         switch selectedSegment {
         case .url: urlField
         case .local: localPickerRow
+        case .inline: inlinePane
+        }
+    }
+
+    /// Read-only presentation for a legacy `.inline(html)` source: the raw
+    /// markup must not be surfaced through the URL field (editing it there
+    /// would silently rewrite the content). Tapping URL or Local switches to
+    /// authoring a replacement.
+    private var inlinePane: some View {
+        HStack(spacing: 8) {
+            summaryLine(icon: "chevron.left.forwardslash.chevron.right", text: Text("Inline HTML content"))
+
+            sourceChipsRow
+
+            Spacer(minLength: 0)
+
+            Text("Pick URL or Local to replace")
+                .font(DesignTokens.Typography.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -336,9 +363,11 @@ struct HTMLSourceSection: View {
             if urlInput != url.absoluteString { urlInput = url.absoluteString }
         case .file, .folder:
             if selectedSegment != .local { selectedSegment = .local }
-        case .inline(let html):
-            if selectedSegment != .url { selectedSegment = .url }
-            if urlInput != html { urlInput = html }
+        case .inline:
+            // Present inline HTML in its own read-only pane; never load raw
+            // markup into the URL field where an edit could rewrite it.
+            if selectedSegment != .inline { selectedSegment = .inline }
+            if !urlInput.isEmpty { urlInput = "" }
         }
     }
 

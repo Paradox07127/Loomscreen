@@ -128,7 +128,7 @@ struct MenuBarContent: View {
                         title: screen.name,
                         subtitle: displaySubtitleAttributed(for: screen, summary: summary),
                         subtitleAccessibilityText: displaySubtitleText(for: screen, summary: summary),
-                        iconName: displayIconName(for: summary.wallpaperType),
+                        iconName: WallpaperType.displaySymbolName(for: summary.wallpaperType),
                         visualState: visualState,
                         isPlaying: summary.activity == .active,
                         supportsPlayback: summary.supportsPlaybackControl,
@@ -405,23 +405,6 @@ struct MenuBarContent: View {
         }
     }
 
-    private func displayIconName(for type: WallpaperType?) -> String {
-        switch type {
-        case .html:
-            return "globe"
-        case .metalShader:
-            return "wand.and.stars"
-        case .scene:
-            return "cube.transparent"
-        case .video:
-            return "play.rectangle"
-        case .monitor:
-            return "gauge.with.dots.needle.67percent"
-        case nil:
-            return "display"
-        }
-    }
-
     private func displayVisualState(for activity: WallpaperSessionActivity) -> DisplayVisualState {
         switch activity {
         case .active:
@@ -559,20 +542,6 @@ private enum DisplayVisualState: Equatable {
             return "error"
         case .inactive:
             return "idle"
-        }
-    }
-}
-
-@MainActor
-enum PlaybackToggle {
-    static func toggle(_ playback: any WallpaperPlaybackControllable) {
-        // Toggle the user's intent, not the actual playing state: a
-        // policy-suspended video reads `isPlaying == false` even though the
-        // user still intends to play it.
-        if playback.userIntendsToPlay {
-            playback.pause()
-        } else {
-            playback.play()
         }
     }
 }

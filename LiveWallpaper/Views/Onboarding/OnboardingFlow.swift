@@ -70,8 +70,8 @@ struct OnboardingFlow: View {
             case .welcome:
                 OnboardingStepWelcome(nextStep: nextStep)
             case .pick:
-                OnboardingStepFirstWallpaper(
-                    policy: policy,
+                OnboardingPickerView(
+                    galleryActions: policy.galleryActions,
                     nextStep: nextStep,
                     skip: skipToDone,
                     openAppleAerials: showAppleAerials

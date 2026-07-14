@@ -102,10 +102,6 @@ struct WPEProjectSettingsPresentation: Equatable {
         }
     }
 
-    static func initiallyExpandedSectionIDs(for sections: [Section]) -> Set<String> {
-        []
-    }
-
     static func prunedSectionIDs(
         _ sectionIDs: Set<String>,
         for sections: [Section]

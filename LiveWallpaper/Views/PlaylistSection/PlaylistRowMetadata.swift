@@ -1,14 +1,11 @@
 import Foundation
 import CoreGraphics
 
-/// Async-loaded media metadata for a playlist row.
-///
-/// The view falls back to `folder` as the subtitle until the first real load
-/// completes, so the row never shows an empty subtitle on cold start.
+/// Async-loaded media metadata for a playlist row. All fields are populated by
+/// the same async load, so the row's subtitle is empty until it completes.
 struct PlaylistRowMetadata: Equatable, Sendable {
     var resolution: CGSize?
     var duration: TimeInterval?
-    /// Always available once the bookmark resolves.
     var folder: String?
 
     static let empty = PlaylistRowMetadata(resolution: nil, duration: nil, folder: nil)

@@ -31,6 +31,9 @@ struct WPECacheManagementView: View {
     /// Built once per refresh (NOT in the body path — resolving titles/types
     /// reads settings) and fed straight to the compact table.
     @State private var projectItems: [WPEStorageRowItem] = []
+    /// workshopID → import title, snapshotted per refresh so each legacy-cache
+    /// row resolves its display name in O(1) instead of re-scanning history.
+    @State private var cacheEntryTitles: [String: String] = [:]
     @State private var showingProjectsSheet = false
     @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
 
@@ -556,6 +559,10 @@ struct WPECacheManagementView: View {
         let snapshot = await cache.stats()
         stats = snapshot
         reachableIDs = WPESceneReachability.referencedWorkshopIDs()
+        cacheEntryTitles = Dictionary(
+            SettingsManager.shared.loadGlobalSettings().recentWPEImports.map { ($0.origin.workshopID, $0.origin.title) },
+            uniquingKeysWith: { first, _ in first }
+        )
         isLoading = false
         inventory = await Task.detached { WPEStorageInventory.compute() }.value
         projectItems = projectRowItems(inventory?.projects ?? [])
@@ -695,8 +702,7 @@ struct WPECacheManagementView: View {
 
 
     private func displayTitle(for workshopID: String) -> String {
-        let history = SettingsManager.shared.loadGlobalSettings().recentWPEImports
-        return history.first(where: { $0.origin.workshopID == workshopID })?.origin.title ?? workshopID
+        cacheEntryTitles[workshopID] ?? workshopID
     }
 
     private func rowSubtitle(for entry: WPECacheStats.Entry) -> String {

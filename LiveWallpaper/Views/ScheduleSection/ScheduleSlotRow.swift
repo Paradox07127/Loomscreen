@@ -169,7 +169,7 @@ struct ScheduleSlotRow: View {
 
     @ViewBuilder
     private var trailingMenu: some View {
-        Menu {
+        RowOverflowMenu(isHovering: isHovering) {
             videoPickMenu
             if slot.videoBookmarkData != nil {
                 Divider()
@@ -177,19 +177,7 @@ struct ScheduleSlotRow: View {
             }
             Divider()
             Button("Remove Slot", systemImage: "trash", role: .destructive, action: onRemove)
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 22)
-        .opacity(isHovering ? 1 : 0)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isHovering)
-        .accessibilityLabel(Text("More actions"))
     }
 
     @ViewBuilder

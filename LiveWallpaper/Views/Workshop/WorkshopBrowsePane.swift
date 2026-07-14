@@ -540,14 +540,10 @@ struct WorkshopBrowsePane: View {
         // Filters don't apply in creator- or tag-scoped mode.
         guard viewModel.creatorFilter == nil, viewModel.pinnedTag == nil else { return false }
         return !viewModel.searchInput.isEmpty
-            || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
-            || isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
-            || isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count)
-            || isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count)
-    }
-
-    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
-        !selected.isEmpty && selected.count < total
+            || WorkshopFilterMath.isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
+            || WorkshopFilterMath.isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
+            || WorkshopFilterMath.isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count)
+            || WorkshopFilterMath.isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count)
     }
 
     private var currentRateLimitRemaining: TimeInterval {
