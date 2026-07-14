@@ -21,6 +21,24 @@ struct MonitorHUDModel: Equatable {
         var id: MonitorAgentProvider { provider }
     }
 
+    /// A derived anomaly a session is exhibiting, surfaced as one subtle chip.
+    /// Mirrors `MonitorAgentSessionState.warning` string values, but typed so the
+    /// view maps it to a glyph/label without string-matching in the UI layer.
+    enum Warning: Equatable {
+        /// Spinning in place — the agent keeps retrying one tool (burning, no progress).
+        case toolLoop
+        /// Quiet stall — running + alive but silent past the stale threshold.
+        case stale
+
+        init?(raw: String?) {
+            switch raw {
+            case "toolLoop": self = .toolLoop
+            case "stale": self = .stale
+            default: return nil
+            }
+        }
+    }
+
     /// The single blocked session surfaced in the expanded state.
     struct BlockedSession: Equatable {
         let sessionID: String
@@ -28,9 +46,17 @@ struct MonitorHUDModel: Equatable {
         let projectName: String
         /// Tool-name / short verb only (already privacy-redacted upstream).
         let detail: String?
-        /// Seconds the session has been waiting, if `startedAt`/`lastEventAt`
-        /// let us derive it — used to decay the breathing glow after 60s.
+        /// Seconds the session has been waiting. Prefers `waitSince` (the
+        /// authoritative flip-into-needsInput clock); falls back to `lastEventAt`
+        /// when the producer predates the v2 signal. Drives the "· 4m" wait
+        /// enrichment and decays the breathing glow after 60s.
         let waitingSeconds: Double?
+        /// This session's own anomaly, if any — surfaced as a chip in the urgent
+        /// section alongside the wait time.
+        let warning: Warning?
+        /// Last-turn context fill (0…1); the view shows a pressure hint only once
+        /// it crosses `contextPressureThreshold` (near-compaction), else nothing.
+        let contextUsedPercent: Double?
     }
 
     let presentation: Presentation
@@ -39,6 +65,11 @@ struct MonitorHUDModel: Equatable {
     /// a semantic case the view localizes.
     let aggregate: Aggregate
     let blocked: BlockedSession?
+    /// The single most urgent anomaly across live sessions, surfaced as a subtle
+    /// collapsed-row chip so "who's stuck" reads at a glance even when nobody is
+    /// blocked. nil = calm (no warning glyph). Populated independently of
+    /// `blocked` so a warned-but-running fleet still flags itself.
+    let warning: Warning?
     /// True when the broker hasn't published in `staleThreshold`; the view dims
     /// and appends a "stale" note.
     let isStale: Bool
@@ -61,6 +92,7 @@ struct MonitorHUDModel: Equatable {
         providerDots: [],
         aggregate: .noSessions,
         blocked: nil,
+        warning: nil,
         isStale: false
     )
 }
@@ -71,6 +103,10 @@ extension MonitorHUDModel {
 
     /// After this long unhandled, the coral breathing glow decays (~50%).
     static let glowDecayThreshold: TimeInterval = 60
+
+    /// Context fill at/above which the HUD shows a near-compaction pressure hint
+    /// for the focused session. Below it: nothing (calm).
+    static let contextPressureThreshold: Double = 0.8
 
     /// Sessions in these states are "live" for provider-dot / counting purposes.
     /// `.ended` sessions linger in the snapshot briefly but shouldn't inflate
@@ -101,6 +137,7 @@ extension MonitorHUDModel {
                 providerDots: [],
                 aggregate: .noSessions,
                 blocked: nil,
+                warning: nil,
                 isStale: stale
             )
         }
@@ -109,6 +146,7 @@ extension MonitorHUDModel {
         let aggregate = aggregate(from: live)
         let blocked = selectBlocked(from: live, now: now)
         let presentation: Presentation = (blocked != nil) ? .needsInput : .collapsed
+        let warning = fleetWarning(from: live)
         let stale = isStale(now: now, lastPublishAt: lastPublishAt)
 
         return MonitorHUDModel(
@@ -116,6 +154,7 @@ extension MonitorHUDModel {
             providerDots: dots,
             aggregate: aggregate,
             blocked: blocked,
+            warning: warning,
             isStale: stale
         )
     }
@@ -151,28 +190,64 @@ extension MonitorHUDModel {
         return .mixed
     }
 
-    /// Highest `attentionPriority`, then most recent `lastEventAt`, restricted to
-    /// blocked sessions (the only ones worth surfacing in the expanded state).
+    /// The blocked session most worth surfacing. Priority = **oldest wait first**:
+    /// the one that has been blocking the user longest is the most urgent (SPEC
+    /// §3.2.4, "needsInput 排首"). Uses `waitSince` — the authoritative
+    /// flip-into-needsInput clock — so it doesn't get reset by unrelated late
+    /// events. Sessions carrying `waitSince` outrank any that lack it; among those
+    /// lacking it we keep the legacy tie-break (most recent `lastEventAt`), so a
+    /// pre-v2 producer behaves exactly as before.
     private static func selectBlocked(
         from live: [MonitorAgentSessionState],
         now: Double
     ) -> BlockedSession? {
         let blocked = live.filter { $0.status == .needsInput }
-        guard let winner = blocked.max(by: { lhs, rhs in
-            if lhs.status.attentionPriority != rhs.status.attentionPriority {
-                return lhs.status.attentionPriority < rhs.status.attentionPriority
-            }
-            return lhs.lastEventAt < rhs.lastEventAt
-        }) else { return nil }
+        guard let winner = blocked.max(by: isLessUrgentBlocked) else { return nil }
 
-        let waiting = max(0, now - winner.lastEventAt)
+        // Prefer the real wait clock; fall back to lastEventAt for v1 producers.
+        let waitStart = winner.waitSince ?? winner.lastEventAt
+        let waiting = max(0, now - waitStart)
         return BlockedSession(
             sessionID: winner.id,
             provider: winner.provider,
             projectName: winner.projectName,
             detail: winner.statusDetail,
-            waitingSeconds: waiting
+            waitingSeconds: waiting,
+            warning: Warning(raw: winner.warning),
+            contextUsedPercent: winner.contextUsedPercent
         )
+    }
+
+    /// Ordering predicate for `max(by:)` over blocked sessions: returns true when
+    /// `lhs` is LESS urgent than `rhs` (so `max` yields the most urgent).
+    /// - A session with `waitSince` always outranks one without it.
+    /// - Both with `waitSince`: the **older** (smaller) wait wins.
+    /// - Neither: the more recent `lastEventAt` wins (legacy behavior preserved).
+    private static func isLessUrgentBlocked(
+        _ lhs: MonitorAgentSessionState,
+        _ rhs: MonitorAgentSessionState
+    ) -> Bool {
+        switch (lhs.waitSince, rhs.waitSince) {
+        case let (l?, r?):
+            // Older wait = more urgent → lhs less urgent when its wait is newer.
+            return l > r
+        case (nil, .some):
+            return true          // lhs (no clock) is less urgent than rhs (has clock)
+        case (.some, nil):
+            return false         // lhs (has clock) is more urgent
+        case (nil, nil):
+            return lhs.lastEventAt < rhs.lastEventAt
+        }
+    }
+
+    /// The single most urgent anomaly across live sessions, for the collapsed-row
+    /// chip. toolLoop ("burning in place") outranks stale ("quiet stall"), matching
+    /// the deriver's own precedence. nil when the fleet is calm.
+    private static func fleetWarning(from live: [MonitorAgentSessionState]) -> Warning? {
+        let warnings = live.compactMap { Warning(raw: $0.warning) }
+        if warnings.contains(.toolLoop) { return .toolLoop }
+        if warnings.contains(.stale) { return .stale }
+        return nil
     }
 }
 
@@ -184,5 +259,12 @@ extension MonitorHUDModel.BlockedSession {
         guard let waitingSeconds else { return 1 }
         guard waitingSeconds >= MonitorHUDModel.glowDecayThreshold else { return 1 }
         return 0.5
+    }
+
+    /// True only when the focused session is near compaction — the gate for the
+    /// pressure hint. Below the threshold (or unknown) the view shows nothing.
+    var showsContextPressure: Bool {
+        guard let contextUsedPercent else { return false }
+        return contextUsedPercent >= MonitorHUDModel.contextPressureThreshold
     }
 }

@@ -20,6 +20,7 @@ final class CodexAgentSource: MonitorDataSource {
     private let rootURL: URL
     private let cursorStore: MonitorTailCursorStore?
     private let usageLock = OSAllocatedUnfairLock(initialState: MonitorProviderUsage(costTodayUSD: nil, tokensToday: .zero))
+    private let ledgerLock = OSAllocatedUnfairLock(initialState: MonitorUsageLedgerFragment())
     private let lifecycle = OSAllocatedUnfairLock(initialState: Lifecycle())
 
     init(rootURL: URL, cursorStore: MonitorTailCursorStore? = nil) {
@@ -64,6 +65,9 @@ final class CodexAgentSource: MonitorDataSource {
         var models: [URL: CodexSessionModel] = [:]
         var files: [CodexSessionScanner.SessionFile] = []
         var lastScan = Date.distantPast
+        var waitTracker = MonitorFleetWaitTracker()
+        let backfill = MonitorUsageBackfillCache()
+        var burnWindow = MonitorBurnRateWindow()
 
         while !Task.isCancelled {
             let now = Date()
@@ -140,8 +144,10 @@ final class CodexAgentSource: MonitorDataSource {
                 }
             }
 
-            let sessions = Self.sessionStates(modelsByURL: models, files: files, now: now)
-            setCurrentUsage(Self.usageSnapshot(from: Array(models.values), now: now))
+            let sessions = Self.sessionStates(modelsByURL: models, files: files, now: now, waitTracker: &waitTracker)
+            let usage = Self.usageSnapshot(from: Array(models.values), now: now)
+            setCurrentUsage(usage)
+            refreshLedger(models: models, files: files, backfill: backfill, burnWindow: &burnWindow, usage: usage, now: now)
             await sink.updateAgents(sourceID: sourceID, sessions: sessions)
             if pollHadError {
                 await sink.updateHealth(Self.health(state: "error", detail: "Failed to read Codex sessions", at: now))
@@ -159,14 +165,132 @@ final class CodexAgentSource: MonitorDataSource {
         }
     }
 
+    /// Codex usage-ledger fragment (per-model + per-day history + burn rates),
+    /// merged by the integrator with the Claude fragment. See contract-gap note.
+    func currentUsageLedger() -> MonitorUsageLedgerFragment {
+        ledgerLock.withLock { $0 }
+    }
+
+    /// Refresh the cached ledger fragment: bounded 14-day backfill (≤ every 5 min)
+    /// over the Codex session tree plus the windowed burn rate off today's totals.
+    private func refreshLedger(
+        models: [URL: CodexSessionModel],
+        files: [CodexSessionScanner.SessionFile],
+        backfill: MonitorUsageBackfillCache,
+        burnWindow: inout MonitorBurnRateWindow,
+        usage: MonitorProviderUsage,
+        now: Date
+    ) {
+        let buckets: [MonitorFileUsageBuckets]
+        if backfill.shouldRefresh(now: now) {
+            buckets = backfill.refresh(files: Self.ledgerFileRefs(rootURL: rootURL, now: now), now: now)
+        } else {
+            buckets = backfill.cachedBuckets()
+        }
+        let today = usage.tokensToday ?? .zero
+        let cumulative = today.input + today.output + today.cacheRead + today.cacheWrite
+        burnWindow.record(at: now.timeIntervalSince1970, cumulativeTokens: cumulative, cumulativeCost: usage.costTodayUSD)
+        let rates = burnWindow.rates()
+        let fragment = MonitorUsageLedgerFragment(
+            fileBuckets: buckets,
+            tokensPerHour: rates.tokensPerHour,
+            costPerHour: rates.costPerHour
+        )
+        ledgerLock.withLock { $0 = fragment }
+    }
+
+    /// Enumerate `rollout-*.jsonl` inside the ledger day window, with size for the
+    /// memo fingerprint. Codex stores sessions in date-sharded `YYYY/MM/DD`
+    /// directories, so the walk prunes whole day-shards older than the cutoff
+    /// before descending — a multi-month history never gets fully scanned every
+    /// 5 minutes. A cap+sort mirrors `ClaudeAgentSource.ledgerFileRefs`'s 400 limit
+    /// as a safety belt (and covers any non-sharded stragglers).
+    static let ledgerFileLimit = 400
+
+    static func ledgerFileRefs(rootURL: URL, now: Date) -> [MonitorUsageFileRef] {
+        let sessionsURL = rootURL.appendingPathComponent("sessions", isDirectory: true)
+        let cutoff = now.addingTimeInterval(-TimeInterval(MonitorUsageRollup.dayWindow) * 24 * 3600)
+        // Compare on day granularity so a file written any time on the cutoff day
+        // still survives the directory prune (its dir date == cutoff's day start).
+        let cutoffDay = Calendar.current.startOfDay(for: cutoff)
+        let dayURLs = dateShardedDayDirectories(under: sessionsURL, onOrAfter: cutoffDay)
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
+        let fileManager = FileManager.default
+        var refs: [MonitorUsageFileRef] = []
+        for dayURL in dayURLs {
+            guard let entries = try? fileManager.contentsOfDirectory(
+                at: dayURL, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+            ) else { continue }
+            for url in entries {
+                guard url.lastPathComponent.hasPrefix("rollout-"), url.pathExtension == "jsonl",
+                      let values = try? url.resourceValues(forKeys: keys),
+                      values.isRegularFile == true,
+                      let mtime = values.contentModificationDate, mtime >= cutoff else { continue }
+                refs.append(MonitorUsageFileRef(
+                    url: url, provider: .codex,
+                    size: UInt64(values.fileSize ?? 0), mtime: mtime
+                ))
+            }
+        }
+        guard refs.count > ledgerFileLimit else { return refs }
+        return Array(refs.sorted { $0.mtime > $1.mtime }.prefix(ledgerFileLimit))
+    }
+
+    /// Resolve the `sessions/YYYY/MM/DD` leaf directories whose date is on or
+    /// after `cutoffDay`, pruning older year/month/day shards without descending.
+    /// Any directory level that doesn't parse as a date component is kept (walked)
+    /// so an unexpected layout degrades to a normal — still bounded — scan rather
+    /// than silently dropping files.
+    private static func dateShardedDayDirectories(under sessionsURL: URL, onOrAfter cutoffDay: Date) -> [URL] {
+        let calendar = Calendar.current
+        let cutoff = calendar.dateComponents([.year, .month, .day], from: cutoffDay)
+        let fileManager = FileManager.default
+
+        func children(_ url: URL) -> [URL] {
+            (try? fileManager.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+            ))?.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true } ?? []
+        }
+
+        var days: [URL] = []
+        for yearURL in children(sessionsURL) {
+            let year = Int(yearURL.lastPathComponent)
+            if let year, let cutoffYear = cutoff.year, year < cutoffYear { continue }
+            for monthURL in children(yearURL) {
+                let month = Int(monthURL.lastPathComponent)
+                if let year, let month, let cutoffYear = cutoff.year, let cutoffMonth = cutoff.month,
+                   year == cutoffYear, month < cutoffMonth { continue }
+                for dayURL in children(monthURL) {
+                    if let year, let month, let day = Int(dayURL.lastPathComponent),
+                       let dayDate = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+                       dayDate < cutoffDay { continue }
+                    days.append(dayURL)
+                }
+            }
+        }
+        return days
+    }
+
+    /// Overload retained for existing tests that don't exercise the wait clock.
     static func sessionStates(
         modelsByURL: [URL: CodexSessionModel],
         files: [CodexSessionScanner.SessionFile],
         now: Date
     ) -> [MonitorAgentSessionState] {
-        files.compactMap { file in
+        var tracker = MonitorFleetWaitTracker()
+        return sessionStates(modelsByURL: modelsByURL, files: files, now: now, waitTracker: &tracker)
+    }
+
+    static func sessionStates(
+        modelsByURL: [URL: CodexSessionModel],
+        files: [CodexSessionScanner.SessionFile],
+        now: Date,
+        waitTracker: inout MonitorFleetWaitTracker
+    ) -> [MonitorAgentSessionState] {
+        let states = files.compactMap { file -> MonitorAgentSessionState? in
             guard let model = modelsByURL[file.url],
-                  let state = model.sessionState(
+                  var state = model.sessionState(
                     now: now,
                     processAlive: file.processAlive,
                     fallbackSessionId: fallbackSessionId(for: file.url),
@@ -174,6 +298,11 @@ final class CodexAgentSource: MonitorDataSource {
                   ) else {
                 return nil
             }
+            state.waitSince = waitTracker.waitSince(
+                sessionID: state.id,
+                status: state.status,
+                eventTime: state.lastEventAt
+            )
 
             if state.status == .ended,
                now.timeIntervalSince(Date(timeIntervalSince1970: state.lastEventAt)) > endedRetention {
@@ -187,6 +316,8 @@ final class CodexAgentSource: MonitorDataSource {
             }
             return lhs.id < rhs.id
         }
+        waitTracker.retainOnly(Set(states.map(\.id)))
+        return states
     }
 
     static func usageSnapshot(

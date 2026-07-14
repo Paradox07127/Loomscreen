@@ -49,6 +49,45 @@ struct CodexAgentSourceTests {
         #expect(!scannedURLs.contains(ignoredURL))
     }
 
+    @Test("Ledger file refs prune date-shards outside the 14-day window")
+    func ledgerFileRefsPruneOldShards() throws {
+        let root = try Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let calendar = Calendar.current
+        let now = Date()
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+
+        // Files placed by the day-shard their date falls in, so the directory
+        // prune (not just the mtime filter) is what excludes the old ones.
+        func shardURL(daysAgo: Int, name: String) throws -> URL {
+            let date = calendar.date(byAdding: .day, value: -daysAgo, to: now)!
+            let comps = calendar.dateComponents([.year, .month, .day], from: date)
+            let url = sessions
+                .appendingPathComponent(String(format: "%04d", comps.year!), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", comps.month!), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", comps.day!), isDirectory: true)
+                .appendingPathComponent(name)
+            try Self.writeFile(url, contents: "{}\n", modificationDate: date)
+            return url
+        }
+
+        let todayURL = try shardURL(daysAgo: 0, name: "rollout-today.jsonl")
+        let inWindowURL = try shardURL(daysAgo: 10, name: "rollout-recent.jsonl")
+        let oldURL = try shardURL(daysAgo: 40, name: "rollout-old.jsonl")
+        // Non-rollout files in an in-window shard are ignored.
+        _ = try shardURL(daysAgo: 1, name: "notes.txt")
+
+        let refs = CodexAgentSource.ledgerFileRefs(rootURL: root, now: now)
+        let urls = Set(refs.map(\.url.lastPathComponent))
+
+        #expect(urls.contains(todayURL.lastPathComponent))
+        #expect(urls.contains(inWindowURL.lastPathComponent))
+        #expect(!urls.contains(oldURL.lastPathComponent))
+        #expect(!urls.contains("notes.txt"))
+        #expect(refs.allSatisfy { $0.provider == .codex })
+    }
+
     @Test("Ended sessions older than two hours are pruned from agent snapshots")
     func endedPruning() {
         let now = Date(timeIntervalSince1970: 20_000)

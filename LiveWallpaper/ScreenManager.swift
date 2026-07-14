@@ -551,6 +551,7 @@ final class ScreenManager {
             }
         }
         playbackCoordinator.refreshVideoRendering()
+        reconcileMonitorOverlays()
     }
     
     private func setupMemoryMonitoring() {
@@ -1759,16 +1760,156 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
-    /// Push an edited Monitor configuration and restart the wallpaper session so
-    /// the renderer rebuilds under the new module mix. There is no in-place apply
-    /// seam on the monitor view yet, so this always rebuilds (like scene edits).
-    func updateMonitorConfiguration(_ config: MonitorWallpaperConfiguration, for screen: Screen) {
+    /// Persist a board configuration WITHOUT restarting the session — used both for
+    /// edits made on the LIVE wallpaper (drag / add / remove / resize; the board
+    /// already reflects them) and for inspector-side edits (refresh rate, mouse,
+    /// reduce-motion, per-widget options). A full session rebuild would tear down
+    /// the board the user is editing and churn the wallpaper lease/window for
+    /// changes that all apply in place, so instead we persist and push the config
+    /// into every live monitor view for this screen via its non-restarting
+    /// `apply(configuration:)` (which no-ops when nothing changed, so a
+    /// live-board-originated edit round-tripping back here doesn't rebuild).
+    func persistMonitorConfigurationFromBoard(_ config: MonitorBoardConfiguration, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         guard case .monitor(let current) = configuration.activeWallpaper else { return }
         guard current != config else { return }
         configuration.updateMonitorConfiguration(config)
         saveConfiguration(configuration)
-        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+        // Push into the live wallpaper so an inspector-originated edit takes effect
+        // immediately (the live view doesn't observe the persistence notification).
+        for view in liveMonitorBoardViews(for: screen) {
+            view.apply(configuration: config)
+        }
+        notifyWallpaperSessionChanged()
+    }
+
+    // MARK: - Monitor overlay layer
+
+    /// Reconcile the Monitor overlay for every live display against its persisted
+    /// `monitorOverlay` config. Runs on startup, screen-set / frame changes, and
+    /// after an overlay setting is toggled: tears down overlays for gone or disabled
+    /// displays and creates/updates the rest. Idempotent.
+    func reconcileMonitorOverlays() {
+        MonitorOverlayController.shared.onOverlayEdited = { [weak self] screenID, board in
+            self?.persistMonitorOverlayBoard(board, screenID: screenID)
+        }
+        MonitorOverlayController.shared.retainOnly(Set(screens.map(\.id)))
+        let agentFleetEnabled = featureCatalog.isEnabled(.agentFleet)
+        for screen in screens {
+            let overlay = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.monitorOverlay
+            let frame = displayRegistry.findNSScreen(for: screen.id)?.frame ?? screen.frame
+            MonitorOverlayController.shared.apply(
+                overlay: overlay,
+                screenID: screen.id,
+                screenFrame: frame,
+                agentFleetEnabled: agentFleetEnabled
+            )
+        }
+    }
+
+    /// Reconcile on the NEXT runloop tick. Menu controls (the overlay toggle /
+    /// layer picker) mutate config inside a SwiftUI action; running the reconcile
+    /// there would push the board's observable state DURING the view update
+    /// ("Publishing changes from within view updates"). Deferring moves the whole
+    /// create/apply/push chain out of that cycle. Idempotent, so coalescing rapid
+    /// toggles is harmless.
+    private func scheduleMonitorOverlayReconcile() {
+        Task { @MainActor [weak self] in self?.reconcileMonitorOverlays() }
+    }
+
+    /// Persist an overlay board edit made ON the floating overlay back into the
+    /// screen's `monitorOverlay`. The edit already shows on the overlay, so this
+    /// only writes it through — no push-back needed.
+    private func persistMonitorOverlayBoard(_ board: MonitorBoardConfiguration, screenID: CGDirectDisplayID) {
+        guard let screen = screens.first(where: { $0.id == screenID }),
+              var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
+        var overlay = configuration.monitorOverlay ?? .default
+        guard overlay.board != board else { return }
+        overlay.board = board
+        configuration.monitorOverlay = overlay
+        saveConfiguration(configuration)
+    }
+
+    /// True when at least one display has its Monitor overlay switched on.
+    var isMonitorOverlayEnabled: Bool {
+        screens.contains { screen in
+            configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.monitorOverlay?.enabled == true
+        }
+    }
+
+    /// Toggle the Monitor overlay on every display (menu-bar master switch).
+    func setMonitorOverlayEnabled(_ enabled: Bool) {
+        for screen in screens {
+            guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { continue }
+            var overlay = configuration.monitorOverlay ?? .default
+            guard overlay.enabled != enabled else { continue }
+            overlay.enabled = enabled
+            configuration.monitorOverlay = overlay
+            saveConfiguration(configuration)
+        }
+        scheduleMonitorOverlayReconcile()
+    }
+
+    /// The active overlay z-plane (first enabled display's, else the default).
+    var monitorOverlayLevel: MonitorOverlayLevel {
+        for screen in screens {
+            if let overlay = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.monitorOverlay,
+               overlay.enabled {
+                return overlay.level
+            }
+        }
+        return .desktop
+    }
+
+    /// Set the overlay z-plane on every display.
+    func setMonitorOverlayLevel(_ level: MonitorOverlayLevel) {
+        for screen in screens {
+            guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { continue }
+            var overlay = configuration.monitorOverlay ?? .default
+            guard overlay.level != level else { continue }
+            overlay.level = level
+            configuration.monitorOverlay = overlay
+            saveConfiguration(configuration)
+        }
+        scheduleMonitorOverlayReconcile()
+    }
+
+    /// Enter widget edit mode on every active overlay (menu-bar driven). The
+    /// board's own Done control also exits.
+    func setMonitorOverlayWidgetsEditing(_ editing: Bool) {
+        MonitorOverlayController.shared.setEditing(editing)
+    }
+
+    /// True when at least one overlay panel is currently on screen.
+    var hasActiveMonitorOverlay: Bool { MonitorOverlayController.shared.hasActiveOverlay }
+
+    /// True when at least one screen is currently running a Monitor wallpaper —
+    /// drives the menu-bar "Edit Widgets" entry's visibility.
+    var hasActiveMonitorWallpaper: Bool {
+        screens.contains { $0.runtimeSession?.wallpaperType == .monitor }
+    }
+
+    /// Enter/exit widget edit mode on every live Monitor board. The board's own
+    /// Done control also exits, so this is a fire-once "enter" from the menu bar.
+    func setMonitorWidgetsEditing(_ editing: Bool) {
+        for view in liveMonitorBoardViews() {
+            view.setEditing(editing)
+        }
+    }
+
+    private func liveMonitorBoardViews() -> [MonitorWallpaperView] {
+        screens.compactMap { screen in
+            guard screen.runtimeSession?.wallpaperType == .monitor else { return nil }
+            return screen.runtimeSession?.wallpaperWindow?.contentView as? MonitorWallpaperView
+        }
+    }
+
+    private func liveMonitorBoardViews(for screen: Screen) -> [MonitorWallpaperView] {
+        guard screen.runtimeSession?.wallpaperType == .monitor,
+              let view = screen.runtimeSession?.wallpaperWindow?.contentView as? MonitorWallpaperView else {
+            return []
+        }
+        return [view]
     }
 
     func setSceneWallpaper(descriptor: SceneDescriptor, origin: WPEOrigin?, for screen: Screen) {
@@ -1860,7 +2001,11 @@ final class ScreenManager {
             session = ambientSessionBuilder.makeMonitorSession(
                 monitorConfig,
                 agentFleetEnabled: featureCatalog.isEnabled(.agentFleet),
-                frame: screen.frame
+                frame: screen.frame,
+                onConfigurationEdited: { [weak self, weak screen] edited in
+                    guard let self, let screen else { return }
+                    self.persistMonitorConfigurationFromBoard(edited, for: screen)
+                }
             )
             Logger.info("Set monitor wallpaper for screen \(screen.id) [agentFleet=\(featureCatalog.isEnabled(.agentFleet))]", category: .screenManager)
         case .video:

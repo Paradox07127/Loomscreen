@@ -27,7 +27,10 @@ enum MonitorSourceRegistration {
         guard !registered else { return }
         registered = true
         MonitorRuntime.extraSourceFactories.append { options in
-            guard options.agents else { return [] }
+            // Usage alone must still build the session sources — they feed the
+            // token/cost ledger; the hub's module gating keeps agent-session
+            // publication off when only usage is enabled.
+            guard options.agents || options.usage else { return [] }
             let cursorStore = sharedCursorStore
             var sources: [any MonitorDataSource] = []
             if let root = options.claudeRoot {
