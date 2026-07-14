@@ -39,7 +39,7 @@ struct WorkshopBrowseCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion, useGlass: true)
+        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { isHovered = $0 }
         .help(item.title)
@@ -191,7 +191,6 @@ struct WorkshopBrowseCard: View {
         case .scene: return "cube.transparent.fill"
         case .video: return "play.rectangle.fill"
         case .web: return "globe"
-        case .all: return nil
         }
     }
 

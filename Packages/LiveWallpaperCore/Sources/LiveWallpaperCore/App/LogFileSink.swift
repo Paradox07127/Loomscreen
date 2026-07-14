@@ -29,10 +29,16 @@ public final class LogFileSink: @unchecked Sendable {
     private var writeHandle: FileHandle?
     private var cachedSize: UInt64 = 0
 
-    private init() {
+    private convenience init() {
+        self.init(fileURL: Self.prepareLogFileURL())
+    }
+
+    /// Internal injection seam for package tests. Production always uses the
+    /// prepared 0600 runtime log returned by `prepareLogFileURL()`.
+    init(fileURL: URL?) {
         formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        fileURL = Self.prepareLogFileURL()
+        self.fileURL = fileURL
         if let url = fileURL,
            let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64 {
             cachedSize = size
@@ -53,7 +59,7 @@ public final class LogFileSink: @unchecked Sendable {
         }
     }
 
-    public func record(
+    func record(
         category: Logger.Category,
         level: Logger.Level,
         message: String,
@@ -66,7 +72,8 @@ public final class LogFileSink: @unchecked Sendable {
         let timestamp = formatter.string(from: Date())
         let levelTag = Self.levelTag(level)
         let fileName = (file as NSString).lastPathComponent
-        let entry = "\(timestamp) [\(category.rawValue)] [\(levelTag)] \(fileName):\(line) — \(message)\n"
+        let safeMessage = Self.sanitizedMessage(message)
+        let entry = "\(timestamp) [\(category.rawValue)] [\(levelTag)] \(fileName):\(line) — \(safeMessage)\n"
 
         lock.lock()
         defer { lock.unlock() }
@@ -171,12 +178,19 @@ public final class LogFileSink: @unchecked Sendable {
             .filter { line in
                 line.contains("[WARNING]") || line.contains("[ERROR]") || line.contains("[FAULT]")
             }
+            // Re-scrub on read so diagnostics written by older app versions
+            // cannot leak when included in a new bug report.
+            .map(Self.sanitizedMessage)
             .map { line in
                 line.count > maxLineLength
                     ? String(line.prefix(maxLineLength)) + "…"
                     : line
             }
         return Array(matching.suffix(maxLines))
+    }
+
+    static func sanitizedMessage(_ message: String) -> String {
+        LogPrivacyRedactor.scrub(message)
     }
 
     private static func prepareLogFileURL() -> URL? {

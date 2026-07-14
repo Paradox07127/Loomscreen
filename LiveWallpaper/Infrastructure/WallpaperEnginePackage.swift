@@ -10,6 +10,20 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         let dataSize: UInt64
     }
 
+    /// Tunable policy boundary for untrusted PKGV indexes. The defaults are an
+    /// emergency compatibility ceiling, not a claim about ordinary corpus size;
+    /// callers/tests can inject a narrower policy without changing the parser.
+    struct IndexLimits: Sendable, Equatable {
+        var maxEntryCount: UInt32 = 262_144
+        var maxEntryNameBytes: UInt32 = 1_024
+        var maxAggregateNameBytes = 32 * 1_024 * 1_024
+        var maxLowercaseIndexBytes = 32 * 1_024 * 1_024
+        var maxHeaderBytes = 64 * 1_024 * 1_024
+        var maxPathDepth = 64
+
+        static let production = IndexLimits()
+    }
+
     let magic: String
     let entries: [Entry]
     let dataStart: UInt64
@@ -18,23 +32,23 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     /// large packages + multi-root fallback cascades). First match wins.
     let nameIndex: [String: Entry]
 
-    init(magic: String, entries: [Entry], dataStart: UInt64) {
+    private init(
+        magic: String,
+        entries: [Entry],
+        dataStart: UInt64,
+        nameIndex: [String: Entry]
+    ) {
         self.magic = magic
         self.entries = entries
         self.dataStart = dataStart
-        var index: [String: Entry] = [:]
-        index.reserveCapacity(entries.count)
-        for entry in entries where index[entry.name.lowercased()] == nil {
-            index[entry.name.lowercased()] = entry
-        }
-        self.nameIndex = index
+        self.nameIndex = nameIndex
     }
 
     /// Max bytes for an entry name (a full relative path in UTF-8). The old cap
     /// of 255 wrongly rejected legitimate packages: a path with multi-byte CJK
     /// components easily exceeds 255 *bytes* (e.g. a `sounds/<long Chinese name>`
     /// path). Allow a generous bound while still rejecting wildly misaligned reads.
-    static let maxEntryNameBytes: UInt32 = 1024
+    static let maxEntryNameBytes = IndexLimits.production.maxEntryNameBytes
     /// Per-component cap when writing to disk. APFS rejects a single path
     /// component over 255 UTF-8 bytes, so over-long components are shortened on
     /// extraction (see `filesystemSafeEntryName`).
@@ -43,9 +57,13 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     /// claiming an absurd count. Generous enough for any real package (even
     /// large frame-sequence scenes); `reserveCapacity` is clamped separately so
     /// a bogus count can't pre-allocate wildly.
-    static let maxEntryCount: UInt32 = 262_144
+    static let maxEntryCount = IndexLimits.production.maxEntryCount
 
-    static func parseIndex(of data: Data) throws -> Self {
+    static func parseIndex(
+        of data: Data,
+        limits: IndexLimits = .production,
+        shouldCancel: () -> Bool = { false }
+    ) throws -> Self {
         var cursor = 0
         let magicLength = try data.wpeReadU32(cursor: &cursor)
         guard magicLength >= 4 && magicLength <= 16 else {
@@ -58,43 +76,69 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
 
         let entryCount = try data.wpeReadU32(cursor: &cursor)
-        guard entryCount <= Self.maxEntryCount else {
-            throw WPEPackageError.invalidMagic("entryCount:\(entryCount)")
-        }
+        try validateEntryCount(entryCount, limits: limits)
 
         var entries: [Entry] = []
         entries.reserveCapacity(min(Int(entryCount), 65_536))
         var seenNames = Set<String>()
+        var nameIndex: [String: Entry] = [:]
+        nameIndex.reserveCapacity(min(Int(entryCount), 65_536))
+        var aggregateNameBytes = 0
+        var lowercaseIndexBytes = 0
 
         for index in 0..<Int(entryCount) {
+            try checkCancellation(index: index, shouldCancel: shouldCancel)
             let nameLength = try data.wpeReadU32(cursor: &cursor)
-            guard nameLength >= 1 && nameLength <= Self.maxEntryNameBytes else {
+            guard nameLength >= 1 && nameLength <= limits.maxEntryNameBytes else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
+
+            try accountIndexBudget(
+                nameByteCount: Int(nameLength),
+                headerBytes: cursor + Int(nameLength) + 8,
+                aggregateNameBytes: &aggregateNameBytes,
+                limits: limits
+            )
 
             let name = try data.wpeReadEntryName(cursor: &cursor, length: Int(nameLength), index: index)
             guard !name.isEmpty else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
-            let canonicalName = try Self.canonicalEntryName(name, index: index)
+            let canonicalName = try Self.canonicalEntryName(
+                name,
+                index: index,
+                maxPathDepth: limits.maxPathDepth
+            )
             guard seenNames.insert(canonicalName).inserted else {
                 throw WPEPackageError.duplicateEntry(name: canonicalName)
             }
+            let lookupKey = try accountLowercaseIndexBudget(
+                canonicalName,
+                aggregateBytes: &lowercaseIndexBytes,
+                limits: limits
+            )
 
             let offset = UInt64(try data.wpeReadU32(cursor: &cursor))
             let size = UInt64(try data.wpeReadU32(cursor: &cursor))
-            entries.append(Entry(name: canonicalName, dataOffset: offset, dataSize: size))
+            let entry = Entry(name: canonicalName, dataOffset: offset, dataSize: size)
+            entries.append(entry)
+            if nameIndex[lookupKey] == nil { nameIndex[lookupKey] = entry }
         }
 
         let dataStart = UInt64(cursor)
-        let package = Self(magic: magic, entries: entries, dataStart: dataStart)
-        for entry in entries {
+        let package = Self(magic: magic, entries: entries, dataStart: dataStart, nameIndex: nameIndex)
+        for (index, entry) in entries.enumerated() {
+            try checkCancellation(index: index, shouldCancel: shouldCancel)
             _ = try package.dataRange(for: entry, in: data)
         }
         return package
     }
 
-    static func parseIndex(streamingFrom handle: FileHandle) throws -> Self {
+    static func parseIndex(
+        streamingFrom handle: FileHandle,
+        limits: IndexLimits = .production,
+        shouldCancel: () -> Bool = { false }
+    ) throws -> Self {
         let totalLength: UInt64
         do {
             totalLength = try handle.seekToEnd()
@@ -103,58 +147,77 @@ struct WallpaperEnginePackage: Sendable, Equatable {
             throw WPEPackageError.truncatedHeader
         }
 
-        var headerData = Data()
-        var cursor = 0
-
-        try Self.streamAppend(into: &headerData, from: handle, count: 4)
-        let magicLength = try headerData.wpeReadU32(cursor: &cursor)
+        var headerBytes = 0
+        let magicLength = try streamReadU32(from: handle, headerBytes: &headerBytes)
         guard magicLength >= 4 && magicLength <= 16 else {
             throw WPEPackageError.invalidMagic("length:\(magicLength)")
         }
 
-        try Self.streamAppend(into: &headerData, from: handle, count: Int(magicLength))
-        let magic = try headerData.wpeReadString(cursor: &cursor, length: Int(magicLength))
+        let magic = try streamReadString(
+            from: handle,
+            count: Int(magicLength),
+            headerBytes: &headerBytes,
+            invalidUTF8: .invalidMagic("nonUTF8")
+        )
         guard magic.hasPrefix("PKGV") else {
             throw WPEPackageError.invalidMagic(magic)
         }
 
-        try Self.streamAppend(into: &headerData, from: handle, count: 4)
-        let entryCount = try headerData.wpeReadU32(cursor: &cursor)
-        guard entryCount <= Self.maxEntryCount else {
-            throw WPEPackageError.invalidMagic("entryCount:\(entryCount)")
-        }
+        let entryCount = try streamReadU32(from: handle, headerBytes: &headerBytes)
+        try validateEntryCount(entryCount, limits: limits)
 
         var entries: [Entry] = []
         entries.reserveCapacity(min(Int(entryCount), 65_536))
         var seenNames = Set<String>()
+        var nameIndex: [String: Entry] = [:]
+        nameIndex.reserveCapacity(min(Int(entryCount), 65_536))
+        var aggregateNameBytes = 0
+        var lowercaseIndexBytes = 0
 
         for index in 0..<Int(entryCount) {
-            try Self.streamAppend(into: &headerData, from: handle, count: 4)
-            let nameLength = try headerData.wpeReadU32(cursor: &cursor)
-            guard nameLength >= 1 && nameLength <= Self.maxEntryNameBytes else {
+            try checkCancellation(index: index, shouldCancel: shouldCancel)
+            let nameLength = try streamReadU32(from: handle, headerBytes: &headerBytes)
+            guard nameLength >= 1 && nameLength <= limits.maxEntryNameBytes else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
 
-            try Self.streamAppend(into: &headerData, from: handle, count: Int(nameLength))
-            let name = try headerData.wpeReadEntryName(
-                cursor: &cursor,
-                length: Int(nameLength),
-                index: index
+            try accountIndexBudget(
+                nameByteCount: Int(nameLength),
+                headerBytes: headerBytes + Int(nameLength) + 8,
+                aggregateNameBytes: &aggregateNameBytes,
+                limits: limits
+            )
+            let name = try streamReadString(
+                from: handle,
+                count: Int(nameLength),
+                headerBytes: &headerBytes,
+                invalidUTF8: .invalidEntryName(index: index)
             )
             guard !name.isEmpty else { throw WPEPackageError.invalidEntryName(index: index) }
-            let canonicalName = try Self.canonicalEntryName(name, index: index)
+            let canonicalName = try Self.canonicalEntryName(
+                name,
+                index: index,
+                maxPathDepth: limits.maxPathDepth
+            )
             guard seenNames.insert(canonicalName).inserted else {
                 throw WPEPackageError.duplicateEntry(name: canonicalName)
             }
+            let lookupKey = try accountLowercaseIndexBudget(
+                canonicalName,
+                aggregateBytes: &lowercaseIndexBytes,
+                limits: limits
+            )
 
-            try Self.streamAppend(into: &headerData, from: handle, count: 8)
-            let offset = UInt64(try headerData.wpeReadU32(cursor: &cursor))
-            let size = UInt64(try headerData.wpeReadU32(cursor: &cursor))
-            entries.append(Entry(name: canonicalName, dataOffset: offset, dataSize: size))
+            let offset = UInt64(try streamReadU32(from: handle, headerBytes: &headerBytes))
+            let size = UInt64(try streamReadU32(from: handle, headerBytes: &headerBytes))
+            let entry = Entry(name: canonicalName, dataOffset: offset, dataSize: size)
+            entries.append(entry)
+            if nameIndex[lookupKey] == nil { nameIndex[lookupKey] = entry }
         }
 
-        let dataStart = UInt64(cursor)
-        for entry in entries {
+        let dataStart = UInt64(headerBytes)
+        for (index, entry) in entries.enumerated() {
+            try checkCancellation(index: index, shouldCancel: shouldCancel)
             let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
             let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)
             guard !startOverflow, !endOverflow,
@@ -168,7 +231,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         } catch {
             throw WPEPackageError.truncatedHeader
         }
-        return Self(magic: magic, entries: entries, dataStart: dataStart)
+        return Self(magic: magic, entries: entries, dataStart: dataStart, nameIndex: nameIndex)
     }
 
     func extractAll(streamingFrom handle: FileHandle, to rootURL: URL) throws {
@@ -248,13 +311,79 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
     }
 
-    private static func streamAppend(into buffer: inout Data, from handle: FileHandle, count: Int) throws {
+    private static func validateEntryCount(_ count: UInt32, limits: IndexLimits) throws {
+        guard count <= limits.maxEntryCount else {
+            throw WPEPackageError.resourceLimitExceeded(.entryCount)
+        }
+    }
+
+    private static func accountIndexBudget(
+        nameByteCount: Int,
+        headerBytes: Int,
+        aggregateNameBytes: inout Int,
+        limits: IndexLimits
+    ) throws {
+        let (nextNameBytes, overflow) = aggregateNameBytes.addingReportingOverflow(nameByteCount)
+        guard !overflow, nextNameBytes <= limits.maxAggregateNameBytes else {
+            throw WPEPackageError.resourceLimitExceeded(.aggregateNameBytes)
+        }
+        guard headerBytes <= limits.maxHeaderBytes else {
+            throw WPEPackageError.resourceLimitExceeded(.headerBytes)
+        }
+        aggregateNameBytes = nextNameBytes
+    }
+
+    private static func accountLowercaseIndexBudget(
+        _ canonicalName: String,
+        aggregateBytes: inout Int,
+        limits: IndexLimits
+    ) throws -> String {
+        let lookupKey = canonicalName.lowercased()
+        let (nextBytes, overflow) = aggregateBytes.addingReportingOverflow(lookupKey.utf8.count)
+        guard !overflow, nextBytes <= limits.maxLowercaseIndexBytes else {
+            throw WPEPackageError.resourceLimitExceeded(.lowercaseIndexBytes)
+        }
+        aggregateBytes = nextBytes
+        return lookupKey
+    }
+
+    private static func checkCancellation(index: Int, shouldCancel: () -> Bool) throws {
+        if index.isMultiple(of: 256), shouldCancel() {
+            throw CancellationError()
+        }
+    }
+
+    private static func streamReadU32(from handle: FileHandle, headerBytes: inout Int) throws -> UInt32 {
+        let data = try streamRead(from: handle, count: 4, headerBytes: &headerBytes)
+        var cursor = 0
+        return try data.wpeReadU32(cursor: &cursor)
+    }
+
+    private static func streamReadString(
+        from handle: FileHandle,
+        count: Int,
+        headerBytes: inout Int,
+        invalidUTF8: WPEPackageError
+    ) throws -> String {
+        let data = try streamRead(from: handle, count: count, headerBytes: &headerBytes)
+        guard let value = String(data: data, encoding: .utf8) else { throw invalidUTF8 }
+        return value
+    }
+
+    private static func streamRead(
+        from handle: FileHandle,
+        count: Int,
+        headerBytes: inout Int
+    ) throws -> Data {
         guard count >= 0 else { throw WPEPackageError.truncatedHeader }
-        guard count > 0 else { return }
+        let (nextHeaderBytes, overflow) = headerBytes.addingReportingOverflow(count)
+        guard !overflow else { throw WPEPackageError.resourceLimitExceeded(.headerBytes) }
+        guard count > 0 else { return Data() }
         guard let chunk = try handle.read(upToCount: count), chunk.count == count else {
             throw WPEPackageError.truncatedHeader
         }
-        buffer.append(chunk)
+        headerBytes = nextHeaderBytes
+        return chunk
     }
 
     /// Atomic extraction: writes into `<root>.inflight` first, then swaps via `<root>.replaced` so a partially extracted directory is never observed at `rootURL`.
@@ -399,9 +528,19 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         .joined(separator: "/")
     }
 
-    private static func canonicalEntryName(_ name: String, index: Int) throws -> String {
+    private static func canonicalEntryName(
+        _ name: String,
+        index: Int,
+        maxPathDepth: Int
+    ) throws -> String {
         guard !name.hasPrefix("/") else {
             throw WPEPackageError.pathTraversal(name: name)
+        }
+        let rawDepth = name.utf8.reduce(into: 1) { count, byte in
+            if byte == 0x2f { count += 1 }
+        }
+        guard rawDepth <= maxPathDepth else {
+            throw WPEPackageError.resourceLimitExceeded(.pathDepth)
         }
         let components = name.split(separator: "/", omittingEmptySubsequences: false)
         var canonical: [String] = []
@@ -428,6 +567,14 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     }
 }
 
+enum WPEPackageResourceLimit: String, Equatable, Sendable {
+    case entryCount = "PKG_LIMIT_ENTRY_COUNT"
+    case aggregateNameBytes = "PKG_LIMIT_NAME_BYTES"
+    case lowercaseIndexBytes = "PKG_LIMIT_INDEX_KEY_BYTES"
+    case headerBytes = "PKG_LIMIT_HEADER_BYTES"
+    case pathDepth = "PKG_LIMIT_PATH_DEPTH"
+}
+
 enum WPEPackageError: Error, Equatable, Sendable {
     case truncatedHeader
     case invalidMagic(String)
@@ -435,6 +582,19 @@ enum WPEPackageError: Error, Equatable, Sendable {
     case entryOutOfBounds(name: String)
     case pathTraversal(name: String)
     case duplicateEntry(name: String)
+    case resourceLimitExceeded(WPEPackageResourceLimit)
+
+    var stableReasonCode: String {
+        switch self {
+        case .truncatedHeader: return "PKG_TRUNCATED_HEADER"
+        case .invalidMagic: return "PKG_INVALID_MAGIC"
+        case .invalidEntryName: return "PKG_INVALID_ENTRY_NAME"
+        case .entryOutOfBounds: return "PKG_ENTRY_OUT_OF_BOUNDS"
+        case .pathTraversal: return "PKG_PATH_TRAVERSAL"
+        case .duplicateEntry: return "PKG_DUPLICATE_ENTRY"
+        case .resourceLimitExceeded(let limit): return limit.rawValue
+        }
+    }
 }
 
 fileprivate extension Data {

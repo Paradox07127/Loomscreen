@@ -146,4 +146,57 @@ enum WPEBuiltinShaderName {
         return false
     }
 }
+
+/// Typed identity for the builtin shader names `dispatch` matches by exact
+/// string equality (ADR-001 step 0: typed identity + decomposition, strictly
+/// behavior-preserving). Raw values are fixed-point outputs of
+/// `WPEBuiltinShaderName.normalized`; case order mirrors the legacy switch.
+/// Names matched by pattern rather than exact equality stay string checks on
+/// the custom/transpiled fallback path: `godrays_combine` (equality-or-suffix
+/// match in `dispatchCustomShader`), the wave/flutter substring check
+/// (diagnostics only), and the raw `commands/copy` spelling probed inside the
+/// copy case body. `WPEMetalShaderDispatcherTests` pins the exact raw-value
+/// set. Lives here (Infrastructure, beside its normalizer fixed-point source)
+/// so the graph/pipeline builders' judgment sites don't add Infra→Runtime
+/// coupling (ADR-002 boundary guard).
+enum WPEBuiltinShaderKind: String, CaseIterable {
+    case solidColor = "solidcolor"
+    case solidLayer = "solidlayer"
+    case copy = "copy"
+    case compose = "compose"
+    case effectColorBalance = "effect_colorbalance"
+    case effectBlur = "effect_blur"
+    case effectVignette = "effect_vignette"
+    case effectWater = "effect_water"
+    case genericImage2 = "genericimage2"
+    case genericImage4 = "genericimage4"
+    case effectOpacity = "effect_opacity"
+    case effectScroll = "effect_scroll"
+    case effectPulse = "effect_pulse"
+    case effectIris = "effect_iris"
+    case effectWaterWaves = "effect_waterwaves"
+    case effectSpin = "effect_spin"
+    case effectTint = "effect_tint"
+    case effectFoliageSway = "effect_foliagesway"
+    case effectWaterRipple = "effect_waterripple"
+    case effectBlend = "effect_blend"
+    case effectWaterFlow = "effect_waterflow"
+    case effectColorGrading = "effect_color_grading"
+    case effectShimmer = "effect_shimmer"
+    case genericParticle = "genericparticle"
+    case effectShake = "effect_shake"
+}
+
+extension WPEBuiltinShaderKind {
+    /// The judgment-site form shared by dispatcher, graph builder, and renderer
+    /// preload: normalize an authored shader name once, then match the typed
+    /// builtin identity. `nil` = open-set custom (workshop) shader. Uses the
+    /// identity-preserving normalizer variant (`genericImageAsCopy: false`) —
+    /// the same one every judgment site already used (ADR-001 B1). Never write
+    /// the normalized string back into `WPERenderPass.shader`: custom shaders'
+    /// disk paths, cache keys, and diagnostics all need the authored string.
+    init?(normalizing shaderName: String) {
+        self.init(rawValue: WPEBuiltinShaderName.normalized(shaderName))
+    }
+}
 #endif

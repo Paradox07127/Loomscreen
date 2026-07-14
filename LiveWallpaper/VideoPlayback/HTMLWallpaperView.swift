@@ -10,7 +10,7 @@ import WebKit
 final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Properties
-    private let webView: HTMLWebView
+    let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
     private var allowMouseInteraction = false
     /// Re-entry guard for trackpad-gesture forwarders. When we forward
@@ -20,9 +20,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// recurse until the stack overflows (`EXC_BAD_ACCESS` in `magnify`
     /// was the first reproducer; the other three were latent).
     private var isForwardingGesture = false
-    private var compiledTrackerRuleList: WKContentRuleList?
-    private var hasTrackerRulesAttached = false
-    private var trackerBlockingRequested = false
+    var compiledTrackerRuleList: WKContentRuleList?
+    var hasTrackerRulesAttached = false
+    var trackerBlockingRequested = false
     private var activeSecurityScopedURL: URL?
     /// `WKWebsiteDataStore` is locked at WKWebView init time. We track which
     /// store the live view is using vs what config now requests so subsequent
@@ -32,7 +32,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var pendingEphemeral: Bool
     /// Tracks the last applied `HTMLConfig` so re-`apply()` calls with the
     /// same toggles skip the user-script teardown / re-install.
-    private var lastAppliedConfig: HTMLConfig?
+    var lastAppliedConfig: HTMLConfig?
     private var wallpaperEnginePropertyBootstrapScript: String?
     /// Cached schema for the active project's `project.json`. Re-read on
     /// folder swap inside `updateWallpaperEnginePropertyBridge(for:)`, so
@@ -46,13 +46,20 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var wallpaperEngineProjectKey: String?
     private var lastSource: HTMLSource?
     /// Capped by `HTMLConfig.maxRetries`; drives exponential backoff.
-    private var consecutiveFailureCount: Int = 0
-    private var pendingRetryTask: Task<Void, Never>?
-    /// Repeating reload driver. `nil` when `refreshIntervalSeconds == 0` or
-    /// the view is suspended / torn down.
-    private var refreshTimerTask: Task<Void, Never>?
-    private var isCleaningUp = false
-    private var mediaPlaybackSuspended = false
+    var consecutiveFailureCount: Int = 0
+    /// Generation-scoped package-index load. PKGV parsing is blocking file I/O,
+    /// so folder navigation waits for the utility-queue loader instead of doing
+    /// that work synchronously on MainActor.
+    private var packageBackingTask: Task<Void, Never>?
+    private var packageBackingGeneration: UInt64 = 0
+    private var restartPackageBackingAfterResume = false
+    /// Refresh/retry timing is kept outside the WebKit host so suspend can
+    /// cancel all live tasks and resume from a fresh interval without catch-up.
+    lazy var reloadScheduler = HTMLReloadScheduler { [weak self] in
+        self?.reloadCurrentSource()
+    }
+    var isCleaningUp = false
+    var mediaPlaybackSuspended = false
     /// Observer token for `Notification.Name.developerModeDidChange`.
     /// Held so live HTML wallpapers can flip `WKWebView.isInspectable` in
     /// place without rebuilding the session. Removed in `cleanup()` and
@@ -79,7 +86,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Snapshot overlay shown on top of the WKWebView while suspended, so
     /// the desktop keeps a static last-frame image even though the
     /// renderer is fully paused. Hidden under normal playback.
-    private let snapshotOverlay: NSImageView = {
+    let snapshotOverlay: NSImageView = {
         let view = NSImageView()
         view.imageScaling = .scaleAxesIndependently
         view.imageAlignment = .alignCenter
@@ -91,7 +98,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Generation counter for snapshot capture — async snapshot replies
     /// older than the latest profile-flip request are discarded so a stale
     /// `webView.takeSnapshot` callback can't overwrite a fresh resume.
-    private var snapshotGeneration: UInt64 = 0
+    var snapshotGeneration: UInt64 = 0
     /// Observer token for `ProcessInfo.thermalStateDidChangeNotification`.
     /// HTMLWallpaperView subscribes directly so it can drive the RAF
     /// throttle on `.fair` independently of the global suspend/quality
@@ -143,6 +150,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     deinit {
+        packageBackingTask?.cancel()
         let url = activeSecurityScopedURL
         if let url {
             Task { @MainActor in
@@ -410,6 +418,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = config.allowJavaScript
         allowMouseInteraction = config.allowMouseInteraction
+        // Same opt-in flag as the script-side CSP meta tag: folder/WPE scheme
+        // responses carry the CSP header only when enforcement is enabled.
+        // A flip lands in `needsDocumentStartReload` below, so the reloaded
+        // page's requests observe the new value.
+        folderHandler.cspEnforcementEnabled = config.cspEnforcementEnabled
 
         if currentDataStoreIsEphemeral != pendingEphemeral {
             let requested = pendingEphemeral ? "ephemeral" : "persistent"
@@ -598,24 +611,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// configured with the same refresh interval don't reload in lockstep —
     /// useful for dashboard-style wallpapers that hit a single API.
     private func applyRefreshInterval(_ seconds: Int) {
-        refreshTimerTask?.cancel()
-        refreshTimerTask = nil
-        guard seconds > 0, !isCleaningUp else { return }
-        let baseInterval = TimeInterval(seconds)
-        refreshTimerTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                let jitterRange = baseInterval * 0.1
-                let jitter = Double.random(in: -jitterRange...jitterRange)
-                let interval = max(1.0, baseInterval + jitter)
-                do {
-                    try await Task.sleep(for: .seconds(interval))
-                } catch {
-                    return
-                }
-                guard let self, !Task.isCancelled, !self.isCleaningUp else { return }
-                self.reloadCurrentSource()
-            }
-        }
+        guard !isCleaningUp else { return }
+        reloadScheduler.setRefreshInterval(seconds: TimeInterval(seconds))
     }
 
     func loadSource(_ source: HTMLSource) {
@@ -624,6 +621,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     /// Internal entry point distinguishing user-driven loads (which reset the retry budget) from `scheduleRetry` continuations (which keep the counter so backoff progresses).
     private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
+        packageBackingTask?.cancel()
+        packageBackingTask = nil
+        packageBackingGeneration &+= 1
+        let packageGeneration = packageBackingGeneration
         lastSource = source
         wallpaperEngineProjectKey = WallpaperEngineProjectIdentity.key(source: source)
         if resetFailureCount {
@@ -660,7 +661,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             // `scene.pkg`, the handler reads web assets straight from it
             // (loose siblings like `project.json` still fall back to the
             // folder). Must be set after `folderURL` (which clears it).
-            folderHandler.setPackageBacking(Self.packageBacking(forFolder: folderURL))
             guard let nonce = folderHandler.currentSessionNonce else {
                 Logger.error("HTML folder load: missing session nonce for \(indexFileName)", category: .screenManager)
                 return
@@ -671,7 +671,41 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 Logger.error("HTML folder load: failed to build scheme URL for \(indexFileName)", category: .screenManager)
                 return
             }
-            webView.load(URLRequest(url: url))
+            let request = URLRequest(url: url)
+            let pkgURL = folderURL.appendingPathComponent("scene.pkg")
+            guard FileManager.default.fileExists(atPath: pkgURL.path) else {
+                webView.load(request)
+                return
+            }
+            guard !mediaPlaybackSuspended else {
+                restartPackageBackingAfterResume = true
+                return
+            }
+
+            packageBackingTask = Task { [weak self] in
+                let backing: FolderURLSchemeHandler.PackageBacking?
+                do {
+                    backing = try await Self.packageBacking(forPackageURL: pkgURL)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    let reasonCode = (error as? WPEPackageError)?.stableReasonCode
+                        ?? "PKG_INDEX_LOAD_FAILED"
+                    Logger.info(
+                        "HTML folder load: scene.pkg rejected [\(reasonCode)] — serving loose files only",
+                        category: .screenManager
+                    )
+                    backing = nil
+                }
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isCleaningUp,
+                      self.packageBackingGeneration == packageGeneration,
+                      self.folderHandler.folderURL == folderURL else { return }
+                self.packageBackingTask = nil
+                self.folderHandler.setPackageBacking(backing)
+                self.webView.load(request)
+            }
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
             currentLocalReadAccessRoot = nil
@@ -684,27 +718,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// Detects an in-place `scene.pkg` inside a packaged web wallpaper's source
-    /// folder and parses its table of contents so the scheme handler can serve
-    /// web assets directly from the package. Returns `nil` for an unpacked
-    /// folder (no `scene.pkg`) or an unreadable/invalid package, in which case
-    /// the handler serves loose files only. Parsing reads just the header (it
-    /// seeks past the payload), so cost scales with entry count, not pkg size.
-    private static func packageBacking(forFolder folderURL: URL) -> FolderURLSchemeHandler.PackageBacking? {
-        let pkgURL = folderURL.appendingPathComponent("scene.pkg")
-        guard FileManager.default.fileExists(atPath: pkgURL.path) else { return nil }
-        do {
-            let handle = try FileHandle(forReadingFrom: pkgURL)
-            defer { try? handle.close() }
-            let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
-            return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: package)
-        } catch {
-            Logger.info(
-                "HTML folder load: scene.pkg present but not parseable (\(error)) — serving folder directly",
-                category: .screenManager
-            )
-            return nil
-        }
+    /// Parses a known in-place `scene.pkg` on the utility loader so the scheme
+    /// handler can serve web assets directly from it. The caller maps a typed
+    /// rejection to loose-file fallback. Cost scales with bounded index fields,
+    /// not payload size, and cancellation closes the prepared handle.
+    private static func packageBacking(
+        forPackageURL pkgURL: URL
+    ) async throws -> FolderURLSchemeHandler.PackageBacking {
+        let prepared = try await WPEPackageIndexLoader.load(from: pkgURL)
+        defer { try? prepared.handle.close() }
+        try Task.checkCancellation()
+        return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: prepared.package)
     }
 
     private func updateWallpaperEnginePropertyBridge(for folderURL: URL?, config: HTMLConfig? = nil) {
@@ -822,9 +846,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// is a remote `.url` (nil for local `.file`/`.folder`/`.inline`). It gates
     /// script-driven main-frame navigations (`.other`/`.reload`, e.g.
     /// `location.href = …`): a remote wallpaper is already a user-chosen web
-    /// origin and keeps following `http(s)` navigations/redirects, but a
-    /// local/inline wallpaper may never silently swap itself out for an external
-    /// `http(s)` page — only its own origin's redirects (same-scheme+host) pass.
+    /// origin and may follow only redirects/navigation that preserve its exact
+    /// scheme, host, and effective port. Local/inline content may never silently
+    /// swap itself out for an external `http(s)` page.
     nonisolated static func navigationDecision(
         for url: URL?,
         navigationType: WKNavigationType,
@@ -841,12 +865,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
             if url.scheme?.lowercased() == FolderURLSchemeHandler.scheme { return .allow }
             if isAllowedRemoteURL(url) {
-                // A remote wallpaper is an explicitly user-chosen web origin;
-                // redirect/`location.href` chains are normal, so keep allowing
-                // its http(s) navigations. A local/inline source has no remote
-                // origin — deny any external navigation it scripts, letting only
-                // a same-origin move through (harmless, e.g. hash/self reload).
-                if remoteSourceOrigin != nil { return .allow }
+                if let remoteSourceOrigin {
+                    return isSameOrigin(
+                        navigationURL: url,
+                        current: remoteSourceOrigin
+                    ) ? .allow : .cancel
+                }
                 return isSameOrigin(navigationURL: url, current: currentURL) ? .allow : .cancel
             }
             return .cancel
@@ -904,7 +928,14 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         guard !isCleaningUp else { return }
         guard mediaPlaybackSuspended != suspended else { return }
         mediaPlaybackSuspended = suspended
+        reloadScheduler.setSuspended(suspended)
         if suspended {
+            if packageBackingTask != nil {
+                packageBackingGeneration &+= 1
+                packageBackingTask?.cancel()
+                packageBackingTask = nil
+                restartPackageBackingAfterResume = true
+            }
             invokeLifecycleHook(.suspend)
             webView.setAllMediaPlaybackSuspended(true) {}
             captureSuspendSnapshot()
@@ -916,6 +947,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             notifyWallpaperEngineGeneralProperties(fps: 60)
             // Re-push the throttle ratio in case thermals shifted while suspended.
             applyRafThrottleRatio(rafThrottleRatio(for: ProcessInfo.processInfo.thermalState))
+            if restartPackageBackingAfterResume {
+                restartPackageBackingAfterResume = false
+                reloadCurrentSource()
+            }
         }
     }
 
@@ -936,57 +971,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             HTMLWallpaperRuntimeScript.wallpaperEngineGeneralProperties(fps: fps),
             completionHandler: nil
         )
-    }
-
-    // MARK: - Snapshot Overlay
-
-    /// Upper bound on the suspend-snapshot bitmap width in pixels. The overlay
-    /// only shows a static last-frame stretched to the view's point size, so
-    /// there's no visible gain in retaining a full backing-pixel capture — on a
-    /// 5K panel that would be a ~50 MB `NSImage` held per suspended screen,
-    /// working against the very memory-relief the suspend is meant to provide.
-    private static let maxSuspendSnapshotWidth: CGFloat = 1920
-
-    /// Hides the webView behind the snapshot so WebKit can stop updating the
-    /// compositor surface. Generation-counted to discard stale captures that
-    /// arrive after a resume.
-    private func captureSuspendSnapshot() {
-        snapshotGeneration &+= 1
-        let generation = snapshotGeneration
-        let snapshotConfig = WKSnapshotConfiguration()
-        snapshotConfig.afterScreenUpdates = false
-        // Cap the capture to point-width (downsampled from backing pixels) and
-        // an absolute ceiling so multiple high-DPI screens can't each pin a
-        // full-resolution bitmap while suspended.
-        let pointWidth = webView.bounds.width
-        if pointWidth > 0 {
-            snapshotConfig.snapshotWidth = NSNumber(
-                value: Double(min(pointWidth, Self.maxSuspendSnapshotWidth))
-            )
-        }
-        webView.takeSnapshot(with: snapshotConfig) { [weak self] image, _ in
-            Task { @MainActor [weak self] in
-                guard let self,
-                      !self.isCleaningUp,
-                      self.mediaPlaybackSuspended,
-                      self.snapshotGeneration == generation,
-                      let image else { return }
-                self.applySnapshotOverlay(image: image)
-            }
-        }
-    }
-
-    private func applySnapshotOverlay(image: NSImage) {
-        snapshotOverlay.image = image
-        snapshotOverlay.frame = bounds
-        snapshotOverlay.isHidden = false
-        webView.isHidden = true
-    }
-
-    private func hideSnapshotOverlay() {
-        snapshotOverlay.isHidden = true
-        snapshotOverlay.image = nil
-        webView.isHidden = false
     }
 
     // MARK: - Thermal Throttle (P2)
@@ -1032,116 +1016,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     private func reportError(_ error: WallpaperRuntimeError) {
         onError?(error)
-    }
-
-    /// Returns `true` when a retry was scheduled and the caller should skip `reportError`.
-    private func shouldRetryNavigationFailure() -> Bool {
-        let maxRetries = max(0, lastAppliedConfig?.maxRetries ?? 0)
-        guard consecutiveFailureCount < maxRetries else { return false }
-        scheduleRetry()
-        return true
-    }
-
-    private func scheduleRetry() {
-        consecutiveFailureCount += 1
-        let delaySeconds = pow(2.0, Double(consecutiveFailureCount - 1))
-        pendingRetryTask?.cancel()
-        pendingRetryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delaySeconds))
-            guard !Task.isCancelled, let self else { return }
-            self.pendingRetryTask = nil
-            self.reloadCurrentSource()
-        }
-    }
-
-    private func resetNavigationFailureState() {
-        consecutiveFailureCount = 0
-        pendingRetryTask?.cancel()
-        pendingRetryTask = nil
-    }
-
-    private func navigationFailureURL(webView: WKWebView, error: NSError) -> URL {
-        if let url = webView.url {
-            return url
-        }
-        if let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
-            return url
-        }
-        return URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
-    }
-
-    // MARK: - Tracker Blocking
-
-    /// App 启动时调用一次：把 tracker 规则编译进 `WKContentRuleListStore`， 后续每个实例直接 `lookUp`，省去 50–200ms 的同步编译。
-    static func precompileTrackerRules() {
-        WKContentRuleListStore.default()?.compileContentRuleList(
-            forIdentifier: trackerRuleListIdentifier,
-            encodedContentRuleList: trackerRuleListJSON
-        ) { _, error in
-            if let error {
-                Logger.warning(
-                    "Tracker rule list precompile failed: \(error.localizedDescription)",
-                    category: .screenManager
-                )
-            }
-        }
-    }
-
-    private func applyTrackerBlocking(enabled: Bool) {
-        trackerBlockingRequested = enabled
-        let controller = webView.configuration.userContentController
-        if !enabled {
-            if let existing = compiledTrackerRuleList, hasTrackerRulesAttached {
-                controller.remove(existing)
-                hasTrackerRulesAttached = false
-            }
-            return
-        }
-        if let cached = compiledTrackerRuleList {
-            if !hasTrackerRulesAttached {
-                controller.add(cached)
-                hasTrackerRulesAttached = true
-            }
-            return
-        }
-        WKContentRuleListStore.default()?.lookUpContentRuleList(
-            forIdentifier: HTMLWallpaperView.trackerRuleListIdentifier
-        ) { [weak self] list, _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.trackerBlockingRequested else { return }
-                if let list {
-                    self.attachTrackerList(list)
-                } else {
-                    self.compileAndAttachTrackerList()
-                }
-            }
-        }
-    }
-
-    private func compileAndAttachTrackerList() {
-        WKContentRuleListStore.default()?.compileContentRuleList(
-            forIdentifier: HTMLWallpaperView.trackerRuleListIdentifier,
-            encodedContentRuleList: HTMLWallpaperView.trackerRuleListJSON
-        ) { [weak self] list, error in
-            Task { @MainActor [weak self] in
-                guard let self, self.trackerBlockingRequested else { return }
-                if let error {
-                    Logger.warning(
-                        "Tracker rule list compile failed: \(error.localizedDescription)",
-                        category: .screenManager
-                    )
-                }
-                guard let list else { return }
-                self.attachTrackerList(list)
-            }
-        }
-    }
-
-    private func attachTrackerList(_ list: WKContentRuleList) {
-        compiledTrackerRuleList = list
-        guard !hasTrackerRulesAttached else { return }
-        webView.configuration.userContentController.add(list)
-        hasTrackerRulesAttached = true
     }
 
     // MARK: - Layout
@@ -1190,11 +1064,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     func cleanup() {
         isCleaningUp = true
+        packageBackingGeneration &+= 1
+        packageBackingTask?.cancel()
+        packageBackingTask = nil
+        restartPackageBackingAfterResume = false
         trackerBlockingRequested = false
-        pendingRetryTask?.cancel()
-        pendingRetryTask = nil
-        refreshTimerTask?.cancel()
-        refreshTimerTask = nil
+        reloadScheduler.invalidate()
         onError = nil
         #if !LITE_BUILD
         if let token = developerModeObserver {
@@ -1218,11 +1093,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         stopActiveSecurityScope()
         snapshotOverlay.image = nil
         snapshotOverlay.isHidden = true
-    }
-
-    private func shouldIgnoreNavigationFailure(_ error: NSError) -> Bool {
-        if isCleaningUp { return true }
-        return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
     }
 
     // MARK: - Bookmark Resolution
@@ -1251,36 +1121,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         return url
     }
 
-    // MARK: - Tracker Rule List
-
-    private static let trackerRuleListIdentifier = "LiveWallpaper.HTMLWallpaper.TrackerRules.v1"
-
-    /// Common analytics/ad hosts blocked before the renderer sees them.
-    private static let trackerRuleListJSON = """
-    [
-      {
-        "trigger": {
-          "url-filter": ".*",
-          "if-domain": [
-            "*google-analytics.com",
-            "*googletagmanager.com",
-            "*doubleclick.net",
-            "*facebook.net",
-            "*scorecardresearch.com",
-            "*hotjar.com",
-            "*mixpanel.com",
-            "*segment.com",
-            "*segment.io",
-            "*amplitude.com",
-            "*fullstory.com",
-            "*adservice.google.com",
-            "*adsystem.com"
-          ]
-        },
-        "action": { "type": "block" }
-      }
-    ]
-    """
 }
 
 extension HTMLWallpaperView: WallpaperPerformanceConfigurable {}
@@ -1295,6 +1135,13 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
+        // Pin only the top-level document. Cross-origin subframes retain normal
+        // WebKit isolation and are required by legitimate dashboard widgets;
+        // they cannot replace the privileged wallpaper document itself.
+        if navigationAction.targetFrame?.isMainFrame == false {
+            decisionHandler(.allow)
+            return
+        }
         let decision = HTMLWallpaperView.navigationDecision(
             for: navigationAction.request.url,
             navigationType: navigationAction.navigationType,

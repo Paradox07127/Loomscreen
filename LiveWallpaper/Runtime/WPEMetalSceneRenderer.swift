@@ -100,6 +100,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         UserDefaults.standard.object(forKey: "WPEMetalIntroPhaseAlignEnabled") as? Bool ?? true
     }
 
+    /// ADR-003 step 1 kill-switch: async latest-snapshot script ticks (the frame
+    /// path never waits on a script engine queue). Frozen at first use; default
+    /// ON. `defaults write <bundle> WPEScriptAsyncTickEnabled -bool NO` restores
+    /// the legacy bounded-blocking ticks on the next launch.
+    private static let scriptAsyncTickEnabled: Bool = resolvedScriptAsyncTickEnabled(
+        manualValue: UserDefaults.standard.object(forKey: "WPEScriptAsyncTickEnabled")
+    )
+
+    nonisolated static func resolvedScriptAsyncTickEnabled(manualValue: Any?) -> Bool {
+        manualValue as? Bool ?? true
+    }
+
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
@@ -150,6 +162,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// GPU MSDF text renderer (Milestone D). Built only when the engine's
     /// `font.frag` resolves; nil → text falls back to the CoreText overlay.
     private var msdfTextRenderer: WPEMSDFTextRenderer?
+    /// Suppresses repeat `drawMSDFText` failure logs within a failure streak
+    /// (mirrors `didLogFrameFailure`) — a persistently-failing MSDF combo
+    /// falls back to CoreText every frame and must not flood the log.
+    private var didLogMSDFTextDrawFailure = false
     private var textObjects: [WPESceneTextObject] = []
     /// Phase 2D-O: audio runtime publishing live FFT bins into the
     /// runtime uniform that audio-reactive shaders sample. Optional —
@@ -167,7 +183,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Layer (image-object) SceneScripts keyed by objectID — visible-scripts that
     /// drive a layer's visibility/alpha and its video texture (e.g. an intro that
     /// plays once then hides). Empty for the common no-layer-script scene.
-    private var layerScriptInstances: [String: WPELayerScriptInstance] = [:]
+    private var layerScriptInstances: [String: WPELayerScriptInstance] = [:] {
+        didSet { cachedInstalledScriptLayerIDs = nil }
+    }
     /// TEXT objects' own visible/alpha SceneScripts (3509243656's login-intro
     /// texts fade themselves out) — same machinery as image layer scripts, but
     /// outputs land in `liveTextVisibility`/`liveTextAlpha` for the text loop.
@@ -179,17 +197,29 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private var sceneScriptSharedState: WPESharedScriptState?
     /// Image-object alpha field scripts keyed by objectID. These return an alpha
     /// scalar from `update(value)` and intentionally do not affect visibility.
-    private var layerAlphaScriptInstances: [String: WPELayerScriptInstance] = [:]
+    private var layerAlphaScriptInstances: [String: WPELayerScriptInstance] = [:] {
+        didSet { cachedInstalledScriptLayerIDs = nil }
+    }
     /// Image-object origin SceneScripts keyed by objectID. These are dynamic
     /// transform scripts, e.g. cursor-follow flowers that assign
     /// `origin = input.cursorWorldPosition` every frame.
-    private var dynamicOriginScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    private var dynamicOriginScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:] {
+        didSet { cachedInstalledScriptLayerIDs = nil }
+    }
     /// Image-object scale SceneScripts keyed by objectID. Used by scenes that
     /// drive body sizes or link lengths from shared simulation state.
-    private var dynamicScaleScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    private var dynamicScaleScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:] {
+        didSet { cachedInstalledScriptLayerIDs = nil }
+    }
     /// Image-object angles SceneScripts keyed by objectID. Used by camera/control
     /// rigs such as drag-to-rotate scene roots.
-    private var dynamicAnglesScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:]
+    private var dynamicAnglesScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:] {
+        didSet { cachedInstalledScriptLayerIDs = nil }
+    }
+    /// Memoized load-scoped part of `staticCacheExcludedLayerIDs` (the five
+    /// installed-script key sets above). Cleared via `didSet` on EVERY mutation
+    /// of those dictionaries, so no install/teardown path can leave it stale.
+    private var cachedInstalledScriptLayerIDs: Set<String>?
     /// Non-rendered transform hosts keyed by objectID. These are WPE `solid`
     /// groups that move/render no pixels themselves but compose into child layers.
     private var transformHostLocalTransformsByID: [String: WPERenderObjectTransform] = [:]
@@ -258,10 +288,25 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// the executor uses to look up `MTLTexture` for each pass. Populated
     /// during `performLoad()`; refreshed each render via
     /// `texturesForCurrentFrame(time:pipeline:)` so the executor sees the live frame.
-    private var dynamicTextureSources: [String: WPEDynamicTextureSource] = [:]
+    private var dynamicTextureSources: [String: WPEDynamicTextureSource] = [:] {
+        didSet { cachedDynamicTextureNames = nil }
+    }
+    /// Memoized `Set(dynamicTextureSources.keys)` for the per-frame render call.
+    /// All mutations are cold (load, lazy video rebuild, residency release,
+    /// teardown) and each clears this via `didSet`; the frame path only reads.
+    private var cachedDynamicTextureNames: Set<String>?
+    private var dynamicTextureNames: Set<String> {
+        if let cached = cachedDynamicTextureNames { return cached }
+        let names = Set(dynamicTextureSources.keys)
+        cachedDynamicTextureNames = names
+        return names
+    }
     private var sceneRenderSize: CGSize = CGSize(width: 1, height: 1)
     private var cameraUniforms: WPEMetalCameraUniforms = .identity
     private var frameClock: WPEMetalFrameClock
+    /// Frozen frame globals when the render oracle is enabled (read once at load);
+    /// `nil` in production, so the real clock/pointer drive every frame unchanged.
+    private let oracleFrameOverride = WPEOracleMode.loadFrameOverride()
     private let pointerSampler: WPEMetalPointerSampler
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
@@ -897,6 +942,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // sources exist; runs each script's init() to seed visibility/alpha and
         // suppress auto-play on script-owned video sources.
         loadLayerScripts(from: document)
+        // First-evaluation seeding, in WPE order: script hosts (pure compute
+        // producers, e.g. 3509243656's MAIN n-body sim writing shared.xx*/ktime)
+        // update once FIRST, then transform + text consumers seed. Seeding texts
+        // inside loadTextOverlays ran consumers before the producer existed —
+        // tooltip scripts threw and the `time` script NaN-poisoned itself.
+        seedSceneScriptsAfterLoad(from: document)
         try Task.checkCancellation()
 
         // Audio startup is deferred to after the first frame (see below): the
@@ -1063,17 +1114,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// as `wpe-<id>-scenepass-NN-<passid>-WxH.png`, ordered by draw sequence.
     private func dumpScenePassesIfRequested(suffix: String = "") {
         let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
-            return
-        }
+        let pngRequested = (wantedID?.isEmpty == false) && wantedID == descriptor.workshopID
+        // Oracle mode attaches per-pass output hashes to the canonical trace even
+        // without the workshopID-scoped PNG flag, and skips the (expensive) PNG
+        // encode. `recordPassOutputs` matches by pass id, so passing the full dump
+        // list is idempotent.
+        guard pngRequested || WPEOracleMode.perPassHashesEnabled else { return }
         let dumps = executor.scenePassDumps
+        WPECanonicalTraceRecorder.shared.recordPassOutputs(dumps)
+        guard pngRequested else { return }
         Logger.notice(
             "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes\(suffix.isEmpty ? " (t0)" : " \(suffix)") for \(descriptor.workshopID)",
             category: .wpeRender
         )
-        #if !LITE_BUILD && DEBUG
-        WPECanonicalTraceRecorder.shared.recordPassOutputs(dumps)
-        #endif
         for (index, entry) in dumps.enumerated() {
             let safeLabel = entry.label
                 .replacingOccurrences(of: "/", with: "_")
@@ -1103,7 +1156,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
     private func dumpTextureToPNG(_ rawTexture: MTLTexture, basename: String) {
         let texture: MTLTexture
+        var overrideBytes: [UInt8]?
         if rawTexture.pixelFormat == .rgba8Unorm || rawTexture.pixelFormat == .rgba8Unorm_srgb {
+            texture = rawTexture
+        } else if rawTexture.pixelFormat == .rgba16Float {
+            // The sampling fallback below renders HDR float targets black; the
+            // snapshotter's CPU clamp+sRGB conversion is the correct viewer.
+            overrideBytes = WPEMetalTextureSnapshotter.convertRGBA16FloatToSRGB8(rawTexture)
             texture = rawTexture
         } else if let decoded = executor.debugDecodeToRGBA(rawTexture) {
             // BC/DXT/RG88/R8 etc. — decode by sampling into rgba8 so we can view it.
@@ -1117,13 +1176,19 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
         let bytesPerPixel = 4
         let bytesPerRow = texture.width * bytesPerPixel
-        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
-        texture.getBytes(
-            &bytes,
-            bytesPerRow: bytesPerRow,
-            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
-            mipmapLevel: 0
-        )
+        let bytes: [UInt8]
+        if let overrideBytes {
+            bytes = overrideBytes
+        } else {
+            var readback = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+            texture.getBytes(
+                &readback,
+                bytesPerRow: bytesPerRow,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+            bytes = readback
+        }
 
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else {
             Logger.info("[gpu-dump] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
@@ -1447,11 +1512,164 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         return false
     }
 
+    // MARK: Script tick dispatch (ADR-003 step 1)
+
+    private func tickLayerScript(
+        _ instance: WPELayerScriptInstance,
+        runtimeSeconds: Double,
+        pointerFrame: WPEPointerFrame
+    ) -> WPELayerScriptOutput? {
+        Self.scriptAsyncTickEnabled
+            ? instance.liveTick(runtimeSeconds: runtimeSeconds, pointerFrame: pointerFrame)
+            : instance.tick(runtimeSeconds: runtimeSeconds, pointerFrame: pointerFrame)
+    }
+
+    private func tickTransformScript(
+        _ instance: WPEDynamicTransformScriptInstance,
+        pointer: SIMD2<Double>,
+        runtimeSeconds: Double
+    ) -> SIMD3<Double>? {
+        Self.scriptAsyncTickEnabled
+            ? instance.liveTick(pointerPosition: pointer, runtimeSeconds: runtimeSeconds)
+            : instance.tick(pointerPosition: pointer, runtimeSeconds: runtimeSeconds)
+    }
+
+    private func tickTextScript(_ instance: WPESceneScriptInstance) -> String {
+        Self.scriptAsyncTickEnabled ? instance.liveTickString() : instance.tickString()
+    }
+
+    /// Cursor events fire inside the frame path, so async mode enqueues them
+    /// fire-and-forget (the output drains through the next frame's tick) and
+    /// returns nil; legacy mode returns the output for immediate application.
+    private func dispatchScriptCursorEvent(
+        _ instance: WPELayerScriptInstance,
+        event: WPELayerScriptCursorEvent,
+        pointerFrame: WPEPointerFrame,
+        runtimeSeconds: Double
+    ) -> WPELayerScriptOutput? {
+        guard Self.scriptAsyncTickEnabled else {
+            return instance.dispatchCursorEvent(
+                event,
+                pointerFrame: pointerFrame,
+                runtimeSeconds: runtimeSeconds
+            )
+        }
+        instance.liveDispatchCursorEvent(
+            event,
+            pointerFrame: pointerFrame,
+            runtimeSeconds: runtimeSeconds
+        )
+        return nil
+    }
+
+    /// Load/settings property pushes stay bounded-synchronous in both modes; the
+    /// superseding variant additionally folds the result through the async slot.
+    private func applyScriptUserProperties(
+        _ instance: WPELayerScriptInstance,
+        _ properties: [String: WPESceneScriptPropertyValue],
+        runtimeSeconds: Double? = nil
+    ) -> WPELayerScriptOutput? {
+        Self.scriptAsyncTickEnabled
+            ? instance.applyUserPropertiesSuperseding(properties, runtimeSeconds: runtimeSeconds)
+            : instance.applyUserProperties(properties, runtimeSeconds: runtimeSeconds)
+    }
+
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
     private func renderCurrentFrame() throws -> MTLTexture {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
+        let frameContext = sampleFrameContext()
+        let uniforms = frameContext.uniforms
+        var framePipeline = applyingLayerScriptTicks(
+            to: pipeline,
+            uniforms: uniforms,
+            layerScriptPointerFrame: frameContext.layerScriptPointerFrame
+        )
+        // Kept around past the pipeline application so the text-overlay pass can
+        // re-compose text anchors through the SAME live parent transforms.
+        var liveTransforms = LiveScriptTransforms()
+        if let ticked = tickDynamicTransformScripts(
+            pointer: frameContext.pointer,
+            time: uniforms.time
+        ) {
+            liveTransforms = ticked
+            framePipeline = framePipeline.applyingLayerTransforms(
+                origins: ticked.origins,
+                scales: ticked.scales,
+                angles: ticked.angles,
+                parentByID: objectParentByID,
+                hostTransforms: transformHostLocalTransformsByID
+            )
+        }
+        // Hover hit-testing AFTER live transforms: the pads follow the moving
+        // bodies (per-star cursorEnter → shared.cretN → label fade-in), so the
+        // rects must come from this frame's transformed geometry.
+        dispatchLayerHoverEvents(
+            pointer: frameContext.followPointerIsLive ? frameContext.pointer : nil,
+            pipeline: framePipeline,
+            pointerFrame: frameContext.layerScriptPointerFrame,
+            runtimeSeconds: uniforms.time
+        )
+        if !liveCreatedLayers.isEmpty {
+            framePipeline = framePipeline.addingCreatedLayers(
+                liveCreatedLayers,
+                templatesByImagePath: createdLayerTemplatesByImagePath
+            )
+        }
+        lastFramePipeline = framePipeline
+        // Keep only currently-visible on-demand videos resident (releases hidden
+        // ones, rebuilds revealed ones). No-op unless the scene has releasable
+        // videos; reads the final per-frame visibility so it covers script-,
+        // user-property- and condition-driven switches alike.
+        reconcileVideoResidency(framePipeline)
+        tickParticleSystems(
+            time: uniforms.time,
+            followPointerIsLive: frameContext.followPointerIsLive,
+            pointer: frameContext.pointer
+        )
+        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: framePipeline)
+        let frame = try executor.render(
+            pipeline: framePipeline,
+            size: sceneRenderSize,
+            textures: currentTextures,
+            dynamicTextureNames: dynamicTextureNames,
+            dynamicLayerIDs: staticCacheExcludedLayerIDs,
+            runtimeUniforms: uniforms,
+            cameraUniforms: cameraUniforms,
+            sceneID: descriptor.workshopID,
+            particleSystems: particleSystems,
+            particleTextures: particleTextures,
+            particleNormalTextures: particleNormalTextures,
+            particleParallax: frameContext.parallaxFrame
+        )
+        let liveTextByID = tickTextContentScripts()
+        try drawLiveTextOverlays(
+            onto: frame,
+            uniforms: uniforms,
+            liveTextByID: liveTextByID,
+            transforms: liveTransforms,
+            parallaxFrame: frameContext.parallaxFrame
+        )
+        #if DEBUG
+        maybeDumpScenePassesOverTime(time: uniforms.time, composite: frame)
+        #endif
+        return frame
+    }
+
+    /// Per-frame inputs shared by the script/particle/encode stages, computed
+    /// once at the top of `renderCurrentFrame`.
+    private struct FrameContext {
+        let uniforms: WPEMetalRuntimeUniforms
+        let pointer: SIMD2<Double>
+        let followPointerIsLive: Bool
+        let layerScriptPointerFrame: WPEPointerFrame
+        let parallaxFrame: WPECameraParallaxFrame
+    }
+
+    /// Samples the pointer, advances the frame clock/parallax smoothing, folds in
+    /// live audio spectra, and derives the pointer frame layer scripts see.
+    private func sampleFrameContext() -> FrameContext {
         // Pin follow-cursor effects to center when disabled, or when the
         // global cursor belongs to another display. Click capture stays
         // independent because Interaction can be enabled without Follow Cursor.
@@ -1461,9 +1679,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let pointerIsInsideView = pointerSample.isInsideView
         let followPointerIsLive = mouseInteractionEnabled && pointerIsInsideView
         let clickPointerIsLive = mtkView.clickCaptureEnabled && pointerIsInsideView
-        let pointer = followPointerIsLive
+        // The oracle pins the pointer (self = center, fidelity = the replayed
+        // Windows cursor) so it never enters the trace as ambient state.
+        let pointer = oracleFrameOverride?.pointer ?? (followPointerIsLive
             ? pointerSample.position
-            : SIMD2<Double>(0.5, 0.5)
+            : SIMD2<Double>(0.5, 0.5))
         if !followPointerIsLive && previousPointerWasLive {
             for system in particleSystems where system.tracksPointer {
                 system.clearLiveParticles()
@@ -1474,6 +1694,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             profile: currentProfile,
             pointerPosition: pointer
         )
+        // Freeze wall-clock time and time-of-day to fixed values so two oracle runs
+        // of unchanged code produce byte-identical traces. Applied before parallax
+        // and the audio rebuild below, both of which read `uniforms.time`, so they
+        // inherit the frozen clock.
+        if let override = oracleFrameOverride {
+            uniforms = WPEMetalRuntimeUniforms(
+                time: override.time,
+                daytime: override.daytime,
+                brightness: uniforms.brightness,
+                pointerPosition: uniforms.pointerPosition
+            )
+        }
         // Compute once per frame (advances smoothing state); assigned below
         // after the audio path may have rebuilt `uniforms`.
         let parallaxFrame = cameraParallaxSmoother.frame(
@@ -1486,7 +1718,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // loopback of whatever is playing), not the scene's own sounds — those
         // are already in the system mix the tap captures. `soundRuntime` stays
         // a pure player. When capture is off the broker is silent (flat bars).
-        if SystemAudioCaptureManager.isCapturing {
+        if SystemAudioCaptureManager.isCapturing, oracleFrameOverride == nil {
             let audio = SystemAudioCaptureManager.broker.snapshot()
             if audioDebugLogEnabled {
                 audioDiagCounter += 1
@@ -1528,309 +1760,357 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         uniforms.pointerClick = clickPointerIsLive ? layerScriptPointerFrame : .neutral
         previousPointer = pointer
         lastRuntimeUniforms = uniforms
-        var framePipeline = pipeline
-        // Tick layer SceneScripts (e.g. a video intro that plays once then hides):
-        // each drives its layer's visibility/alpha + video playback. Gated so a
-        // scene with no layer scripts pays nothing (no per-frame pipeline rebuild).
-        if !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty
-            || !textVisibleScriptInstances.isEmpty || !textAlphaScriptInstances.isEmpty {
-            dispatchLayerCursorEvents(
-                from: previousLayerScriptPointerFrame,
-                to: layerScriptPointerFrame,
-                runtimeSeconds: uniforms.time
-            )
-            previousLayerScriptPointerFrame = layerScriptPointerFrame
-            for (objectID, instance) in layerScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
-                    applyLayerScriptOutput(output, ownObjectID: objectID)
-                }
-            }
-            for (objectID, instance) in layerAlphaScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
-                    applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
-                }
-            }
-            for (objectID, instance) in textVisibleScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
-                    applyTextScriptOutput(output, ownObjectID: objectID)
-                }
-            }
-            for (objectID, instance) in textAlphaScriptInstances {
-                if let output = instance.tick(runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
-                    liveTextAlpha[objectID] = output.own.alpha
-                }
-            }
-            updateIntroPhaseAlign()
-            framePipeline = framePipeline
-                .applyingLayerVisibility(liveLayerVisibility)
-                .applyingLayerAlpha(liveLayerAlpha)
+        return FrameContext(
+            uniforms: uniforms,
+            pointer: pointer,
+            followPointerIsLive: followPointerIsLive,
+            layerScriptPointerFrame: layerScriptPointerFrame,
+            parallaxFrame: parallaxFrame
+        )
+    }
+
+    /// Tick layer SceneScripts (e.g. a video intro that plays once then hides):
+    /// each drives its layer's visibility/alpha + video playback. Gated so a
+    /// scene with no layer scripts pays nothing (no per-frame pipeline rebuild).
+    private func applyingLayerScriptTicks(
+        to pipeline: WPEPreparedRenderPipeline,
+        uniforms: WPEMetalRuntimeUniforms,
+        layerScriptPointerFrame: WPEPointerFrame
+    ) -> WPEPreparedRenderPipeline {
+        guard !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty
+            || !textVisibleScriptInstances.isEmpty || !textAlphaScriptInstances.isEmpty else {
+            return pipeline
         }
-        // Lifted out of the `if` so the text-overlay block below can re-compose
-        // text anchors through the SAME live parent transforms.
-        var liveScriptOrigins: [String: SIMD3<Double>] = [:]
-        var liveScriptScales: [String: SIMD3<Double>] = [:]
-        var liveScriptAngles: [String: SIMD3<Double>] = [:]
-        if !dynamicOriginScriptInstances.isEmpty
-            || !dynamicScaleScriptInstances.isEmpty
-            || !dynamicAnglesScriptInstances.isEmpty {
-            liveScriptOrigins.reserveCapacity(dynamicOriginScriptInstances.count)
-            for (objectID, instance) in dynamicOriginScriptInstances {
-                if let origin = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
-                    liveScriptOrigins[objectID] = origin
-                }
-            }
-            liveScriptScales.reserveCapacity(dynamicScaleScriptInstances.count)
-            for (objectID, instance) in dynamicScaleScriptInstances {
-                if let scale = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
-                    liveScriptScales[objectID] = scale
-                }
-            }
-            liveScriptAngles.reserveCapacity(dynamicAnglesScriptInstances.count)
-            for (objectID, instance) in dynamicAnglesScriptInstances {
-                if let angle = instance.tick(pointerPosition: pointer, runtimeSeconds: uniforms.time) {
-                    // WPE's script API exposes `angles` in degrees; scene.json and the
-                    // rotation math are radians (corpus-verified: all 353 nonzero static
-                    // angles ≤ 2π). Convert only at this boundary — the instance's
-                    // lastValue stays in script-space degrees so `value.y += k`
-                    // accumulation matches WPE (3509243656 universe spin was 57.3× fast).
-                    liveScriptAngles[objectID] = angle * (.pi / 180)
-                }
-            }
-            framePipeline = framePipeline.applyingLayerTransforms(
-                origins: liveScriptOrigins,
-                scales: liveScriptScales,
-                angles: liveScriptAngles,
-                parentByID: objectParentByID,
-                hostTransforms: transformHostLocalTransformsByID
-            )
-        }
-        // Hover hit-testing AFTER live transforms: the pads follow the moving
-        // bodies (per-star cursorEnter → shared.cretN → label fade-in), so the
-        // rects must come from this frame's transformed geometry.
-        dispatchLayerHoverEvents(
-            pointer: followPointerIsLive ? pointer : nil,
-            pipeline: framePipeline,
-            pointerFrame: layerScriptPointerFrame,
+        dispatchLayerCursorEvents(
+            from: previousLayerScriptPointerFrame,
+            to: layerScriptPointerFrame,
             runtimeSeconds: uniforms.time
         )
-        if !liveCreatedLayers.isEmpty {
-            framePipeline = framePipeline.addingCreatedLayers(
-                liveCreatedLayers,
-                templatesByImagePath: createdLayerTemplatesByImagePath
-            )
-        }
-        lastFramePipeline = framePipeline
-        // Keep only currently-visible on-demand videos resident (releases hidden
-        // ones, rebuilds revealed ones). No-op unless the scene has releasable
-        // videos; reads the final per-frame visibility so it covers script-,
-        // user-property- and condition-driven switches alike.
-        reconcileVideoResidency(framePipeline)
-        // Particles tick (CPU sim) BEFORE the layer composite so the executor can
-        // interleave their draws at each system's scene paint index.
-        if !particleSystems.isEmpty {
-            // Cursor in the centered render frame (Y-up), or nil when Follow
-            // Cursor is off/outside this renderer — drives pointer-locked
-            // particle control points (emitter-follow + controlpointattract).
-            // Center-relative so it matches `WPEParticleSceneTransform`'s
-            // coordinate space.
-            let particlePointer: SIMD2<Float>? = followPointerIsLive
-                ? SIMD2<Float>(
-                    Float((pointer.x - 0.5) * sceneRenderSize.width),
-                    Float((0.5 - pointer.y) * sceneRenderSize.height)
-                )
-                : nil
-            // Parents precede their children in `particleSystems` (DFS
-            // registration order), so a parent's `primaryLiveParticlePosition`
-            // is already this-frame-fresh when its event-follow child ticks.
-            for system in particleSystems {
-                system.pointerCentered = particlePointer
-                if let parent = system.followParent {
-                    if let followPosition = parent.primaryLiveParticlePosition {
-                        system.injectedControlPoints[system.followControlPointID] = followPosition
-                    } else {
-                        system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
-                    }
-                } else if system.requiresFollowParent {
-                    // Parent missing (failed to register or weak ref gone): keep
-                    // the follow gate so the orphan stays disabled instead of
-                    // spawning at a wrong static origin.
-                    system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
-                }
-                system.tick(now: uniforms.time)
+        previousLayerScriptPointerFrame = layerScriptPointerFrame
+        // Sorted by objectID: these scripts cross-talk through shared state, so a
+        // stable tick order keeps the frame deterministic (oracle) and behaviour
+        // reproducible (dictionary order was arbitrary).
+        for (objectID, instance) in layerScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+                applyLayerScriptOutput(output, ownObjectID: objectID)
             }
         }
-        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: framePipeline)
-        let frame = try executor.render(
-            pipeline: framePipeline,
-            size: sceneRenderSize,
-            textures: currentTextures,
-            dynamicTextureNames: Set(dynamicTextureSources.keys),
-            dynamicLayerIDs: staticCacheExcludedLayerIDs,
-            runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms,
-            sceneID: descriptor.workshopID,
-            particleSystems: particleSystems,
-            particleTextures: particleTextures,
-            particleNormalTextures: particleNormalTextures,
-            particleParallax: parallaxFrame
-        )
-        // WPE runs a text object's script regardless of its visibility. Several
-        // scenes (e.g. 三体 3509243656) use a HIDDEN text object purely as a
-        // COMPUTE script that writes shared state — civilisation stats, ranking,
-        // temperature — which the VISIBLE data texts then read via `value =
-        // shared.txtN`. Ticking only visible objects left that shared state unset,
-        // so every derived readout rendered blank. Tick every script here (for its
-        // side effects on `shared`), independent of whether it will be drawn.
+        for (objectID, instance) in layerAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+                applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
+            }
+        }
+        for (objectID, instance) in textVisibleScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+                applyTextScriptOutput(output, ownObjectID: objectID)
+            }
+        }
+        for (objectID, instance) in textAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+                liveTextAlpha[objectID] = output.own.alpha
+            }
+        }
+        updateIntroPhaseAlign()
+        return pipeline
+            .applyingLayerVisibility(liveLayerVisibility)
+            .applyingLayerAlpha(liveLayerAlpha)
+    }
+
+    private struct LiveScriptTransforms {
+        var origins: [String: SIMD3<Double>] = [:]
+        var scales: [String: SIMD3<Double>] = [:]
+        var angles: [String: SIMD3<Double>] = [:]
+    }
+
+    /// Ticks the dynamic origin/scale/angles scripts; nil when the scene has none
+    /// (the pipeline keeps its parse-time transforms).
+    private func tickDynamicTransformScripts(
+        pointer: SIMD2<Double>,
+        time: Double
+    ) -> LiveScriptTransforms? {
+        guard !dynamicOriginScriptInstances.isEmpty
+            || !dynamicScaleScriptInstances.isEmpty
+            || !dynamicAnglesScriptInstances.isEmpty else { return nil }
+        var transforms = LiveScriptTransforms()
+        transforms.origins.reserveCapacity(dynamicOriginScriptInstances.count)
+        // Sorted by objectID for the same shared-state-determinism reason as the
+        // layer/text script loops above.
+        for (objectID, instance) in dynamicOriginScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let origin = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+                transforms.origins[objectID] = origin
+            }
+        }
+        transforms.scales.reserveCapacity(dynamicScaleScriptInstances.count)
+        for (objectID, instance) in dynamicScaleScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let scale = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+                transforms.scales[objectID] = scale
+            }
+        }
+        transforms.angles.reserveCapacity(dynamicAnglesScriptInstances.count)
+        for (objectID, instance) in dynamicAnglesScriptInstances.sorted(by: { $0.key < $1.key }) {
+            if let angle = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+                // WPE's script API exposes `angles` in degrees; scene.json and the
+                // rotation math are radians (corpus-verified: all 353 nonzero static
+                // angles ≤ 2π). Convert only at this boundary — the instance's
+                // lastValue stays in script-space degrees so `value.y += k`
+                // accumulation matches WPE (3509243656 universe spin was 57.3× fast).
+                transforms.angles[objectID] = angle * (.pi / 180)
+            }
+        }
+        return transforms
+    }
+
+    /// Particles tick (CPU sim) BEFORE the layer composite so the executor can
+    /// interleave their draws at each system's scene paint index.
+    private func tickParticleSystems(
+        time: Double,
+        followPointerIsLive: Bool,
+        pointer: SIMD2<Double>
+    ) {
+        guard !particleSystems.isEmpty else { return }
+        // Cursor in the centered render frame (Y-up), or nil when Follow
+        // Cursor is off/outside this renderer — drives pointer-locked
+        // particle control points (emitter-follow + controlpointattract).
+        // Center-relative so it matches `WPEParticleSceneTransform`'s
+        // coordinate space.
+        let particlePointer: SIMD2<Float>? = followPointerIsLive
+            ? SIMD2<Float>(
+                Float((pointer.x - 0.5) * sceneRenderSize.width),
+                Float((0.5 - pointer.y) * sceneRenderSize.height)
+            )
+            : nil
+        // Parents precede their children in `particleSystems` (DFS
+        // registration order), so a parent's `primaryLiveParticlePosition`
+        // is already this-frame-fresh when its event-follow child ticks.
+        for system in particleSystems {
+            system.pointerCentered = particlePointer
+            if let parent = system.followParent {
+                if let followPosition = parent.primaryLiveParticlePosition {
+                    system.injectedControlPoints[system.followControlPointID] = followPosition
+                } else {
+                    system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
+                }
+            } else if system.requiresFollowParent {
+                // Parent missing (failed to register or weak ref gone): keep
+                // the follow gate so the orphan stays disabled instead of
+                // spawning at a wrong static origin.
+                system.injectedControlPoints.removeValue(forKey: system.followControlPointID)
+            }
+            system.tick(now: time)
+        }
+    }
+
+    /// WPE runs a text object's script regardless of its visibility. Several
+    /// scenes (e.g. 三体 3509243656) use a HIDDEN text object purely as a
+    /// COMPUTE script that writes shared state — civilisation stats, ranking,
+    /// temperature — which the VISIBLE data texts then read via `value =
+    /// shared.txtN`. Ticking only visible objects left that shared state unset,
+    /// so every derived readout rendered blank. Tick every script here (for its
+    /// side effects on `shared`), independent of whether it will be drawn.
+    private func tickTextContentScripts() -> [String: String] {
         var liveTextByID: [String: String] = [:]
         liveTextByID.reserveCapacity(textScriptInstances.count)
-        for (id, instance) in textScriptInstances {
-            liveTextByID[id] = instance.tickString()
+        // Sorted by objectID: hidden compute-scripts write `shared` state that the
+        // visible data texts then read (三体 3509243656), so tick order changes the
+        // rendered text. Dictionary order was arbitrary — a fixed order makes the
+        // oracle trace deterministic and the render reproducible.
+        for (id, instance) in textScriptInstances.sorted(by: { $0.key < $1.key }) {
+            liveTextByID[id] = tickTextScript(instance)
         }
-        if let textRenderer, !textObjects.isEmpty {
-            // CoreText draws for objects that don't take the MSDF path this frame.
-            var draws: [WPETextOverlayDraw] = []
-            var msdfPayloads: [WPEMSDFTextDrawPayload] = []
-            // Objects that DID take the MSDF path this frame, kept so their
-            // CoreText fallback can be rasterized LAZILY only if the MSDF pass
-            // throws (an all-or-nothing recovery). On the happy path they never
-            // pay a redundant CoreText rasterize.
-            var deferredMSDFObjects: [(object: WPESceneTextObject, geometry: WPETextOverlayGeometry)] = []
-            draws.reserveCapacity(textObjects.count)
-            // Own live visibility AND the live ancestor chain: a script hiding a
-            // parent GROUP (489 加载信息) must take its text children along —
-            // parse-time folding only covered the static state.
-            for object in textObjects
-            where (liveTextVisibility[object.id] ?? object.visible) && ancestorChainVisible(object.id) {
-                let resolvedAlpha = liveTextAlpha[object.id] ?? object.resolvedAlpha(at: uniforms.time)
-                guard resolvedAlpha > 0 else { continue }
-                let liveText = liveTextByID[object.id] ?? object.text
-                let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
-                // A text anchored under script-driven transform hosts (menu
-                // panels following the view) must re-compose its LOCAL origin
-                // through the live parent chain — the parse-time world origin
-                // freezes it at the load-time panel position.
-                let livePlacement = liveTextWorldPlacement(
-                    liveObject,
-                    scriptOrigins: liveScriptOrigins,
-                    scriptScales: liveScriptScales,
-                    scriptAngles: liveScriptAngles
-                )
-                let liveOrigin = livePlacement.origin
-                let liveRotation = Float(livePlacement.zRotation)
-                let textParallax = parallaxFrame.pixelOffset(
-                    depth: liveObject.parallaxDepth,
-                    sceneSize: sceneRenderSize
-                )
-                let scale = SIMD2<Float>(
-                    Float(max(liveObject.scale.x, 0.0001)),
-                    Float(max(liveObject.scale.y, 0.0001))
-                )
-                // Perspective scenes (orthogonalprojection:null) author text
-                // origins in world units, so they must project through the same
-                // camera as image quads (WPEMetalRenderExecutor.perspectiveObjectQuadUniforms).
-                // Treating them as pixels pushed every x≈0 label ~960px off-screen.
-                // Ortho scenes keep the pixel-space placement clocks/date overlays rely on.
-                let center: SIMD2<Float>
-                let perspectiveSizeScale: Float
-                if cameraUniforms.usesPerspectiveProjection {
-                    guard let projection = cameraUniforms.projectedCenterInScenePixels(
-                        worldPoint: liveOrigin,
-                        sceneSize: sceneRenderSize
-                    ) else { continue }
-                    center = projection.center + SIMD2<Float>(textParallax.x, textParallax.y)
-                    perspectiveSizeScale = projection.depthScale
-                } else {
-                    let halfWidth = Double(sceneRenderSize.width) * 0.5
-                    let halfHeight = Double(sceneRenderSize.height) * 0.5
-                    center = SIMD2<Float>(
-                        Float(liveOrigin.x - halfWidth) + textParallax.x,
-                        Float(liveOrigin.y - halfHeight) + textParallax.y
-                    )
-                    perspectiveSizeScale = 1
-                }
-                let geometry = WPETextOverlayGeometry(
-                    center: center, scale: scale, perspectiveSizeScale: perspectiveSizeScale,
-                    rotation: liveRotation
-                )
-                // Prefer the GPU MSDF path. Only rasterize CoreText when MSDF
-                // can't build a payload this frame (glyphs still warming, or an
-                // unsupported object) — the eager per-frame CoreText rasterize
-                // for every object (even MSDF-happy ones) was pure redundant work.
-                // In perspective the projected `center` (scene-centered, +Y up)
-                // already carries parallax; convert it into the MSDF path's
-                // absolute top-left pixel space so both text paths land at the
-                // same screen point. The ortho live-recomposed origin is author
-                // space (+Y up) like `object.origin`, so it needs the SAME
-                // top-left flip + parallax fold the MSDF transform applies to
-                // non-overridden origins — passing it raw y-mirrored every text
-                // object the moment MSDF took over from CoreText (3470764447's
-                // clock stack teleported up and reversed its line order).
-                let msdfOriginOverride: SIMD2<Double>? = cameraUniforms.usesPerspectiveProjection
-                    ? SIMD2<Double>(
-                        Double(center.x) + Double(sceneRenderSize.width) * 0.5,
-                        Double(sceneRenderSize.height) * 0.5 - Double(center.y)
-                    )
-                    : (liveOrigin == liveObject.origin
-                        ? nil
-                        : SIMD2<Double>(
-                            liveOrigin.x + Double(textParallax.x),
-                            Double(sceneRenderSize.height) - (liveOrigin.y + Double(textParallax.y))
-                        ))
-                if let payload = msdfTextRenderer?.drawPayload(
-                    for: liveObject,
+        return liveTextByID
+    }
+
+    /// Rasterizes and composites the frame's text overlays (MSDF-first, CoreText
+    /// fallback) atop the rendered scene.
+    private func drawLiveTextOverlays(
+        onto frame: MTLTexture,
+        uniforms: WPEMetalRuntimeUniforms,
+        liveTextByID: [String: String],
+        transforms: LiveScriptTransforms,
+        parallaxFrame: WPECameraParallaxFrame
+    ) throws {
+        guard let textRenderer, !textObjects.isEmpty else { return }
+        // CoreText draws for objects that don't take the MSDF path this frame.
+        var draws: [WPETextOverlayDraw] = []
+        var msdfPayloads: [WPEMSDFTextDrawPayload] = []
+        // Objects that DID take the MSDF path this frame, kept so their
+        // CoreText fallback can be rasterized LAZILY only if the MSDF pass
+        // throws (an all-or-nothing recovery). On the happy path they never
+        // pay a redundant CoreText rasterize.
+        var deferredMSDFObjects: [(object: WPESceneTextObject, geometry: WPETextOverlayGeometry)] = []
+        draws.reserveCapacity(textObjects.count)
+        // Own live visibility AND the live ancestor chain: a script hiding a
+        // parent GROUP (489 加载信息) must take its text children along —
+        // parse-time folding only covered the static state.
+        for object in textObjects
+        where (liveTextVisibility[object.id] ?? object.visible) && ancestorChainVisible(object.id) {
+            let resolvedAlpha = liveTextAlpha[object.id] ?? object.resolvedAlpha(at: uniforms.time)
+            guard resolvedAlpha > 0 else { continue }
+            let liveText = liveTextByID[object.id] ?? object.text
+            let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
+            guard let placement = textOverlayPlacement(
+                for: liveObject,
+                transforms: transforms,
+                parallaxFrame: parallaxFrame
+            ) else { continue }
+            // Prefer the GPU MSDF path. Only rasterize CoreText when MSDF
+            // can't build a payload this frame (glyphs still warming, or an
+            // unsupported object) — the eager per-frame CoreText rasterize
+            // for every object (even MSDF-happy ones) was pure redundant work.
+            if let payload = msdfTextRenderer?.drawPayload(
+                for: liveObject,
+                sceneSize: sceneRenderSize,
+                parallaxOffset: cameraUniforms.usesPerspectiveProjection
+                    ? .zero
+                    : placement.textParallax,
+                originOverride: placement.msdfOriginOverride,
+                sizeScale: Double(placement.geometry.perspectiveSizeScale),
+                rotation: placement.zRotation
+            ) {
+                msdfPayloads.append(payload)
+                deferredMSDFObjects.append((liveObject, placement.geometry))
+            } else if let draw = coreTextOverlayDraw(
+                for: liveObject, geometry: placement.geometry, textRenderer: textRenderer
+            ) {
+                draws.append(draw)
+            }
+        }
+        var msdfSucceeded = false
+        if !msdfPayloads.isEmpty {
+            do {
+                try executor.drawMSDFText(
+                    payloads: msdfPayloads,
                     sceneSize: sceneRenderSize,
-                    parallaxOffset: cameraUniforms.usesPerspectiveProjection
-                        ? .zero
-                        : SIMD2<Float>(textParallax.x, textParallax.y),
-                    originOverride: msdfOriginOverride,
-                    sizeScale: Double(perspectiveSizeScale),
-                    rotation: livePlacement.zRotation
-                ) {
-                    msdfPayloads.append(payload)
-                    deferredMSDFObjects.append((liveObject, geometry))
-                } else if let draw = coreTextOverlayDraw(
-                    for: liveObject, geometry: geometry, textRenderer: textRenderer
+                    output: frame
+                )
+                msdfSucceeded = true
+                didLogMSDFTextDrawFailure = false
+            } catch {
+                msdfSucceeded = false
+                // This used to fail silently — every affected frame fell back to
+                // CoreText with zero signal that MSDF was even attempted. Log the
+                // first failure of a streak (mirrors didLogFrameFailure) so a
+                // persistently-broken combo/pipeline is diagnosable instead of
+                // looking like MSDF was simply never enabled.
+                if !didLogMSDFTextDrawFailure {
+                    Logger.warning(
+                        "Scene \(descriptor.workshopID) MSDF text draw failed (\(msdfPayloads.count) payload(s)), falling back to CoreText: \(error)",
+                        category: .wpeRender
+                    )
+                    didLogMSDFTextDrawFailure = true
+                }
+                debugStage("text.msdf.drawFailed", "count=\(msdfPayloads.count) error=\(error)")
+            }
+        }
+        // If the MSDF pass threw, rasterize CoreText for the MSDF objects NOW
+        // (lazily) so no text silently disappears — the safety net is
+        // preserved, just no longer paid for on every happy-path frame.
+        if !msdfSucceeded, !msdfPayloads.isEmpty {
+            for entry in deferredMSDFObjects {
+                if let draw = coreTextOverlayDraw(
+                    for: entry.object, geometry: entry.geometry, textRenderer: textRenderer
                 ) {
                     draws.append(draw)
                 }
             }
-            var msdfSucceeded = false
-            if !msdfPayloads.isEmpty {
-                do {
-                    try executor.drawMSDFText(
-                        payloads: msdfPayloads,
-                        sceneSize: sceneRenderSize,
-                        output: frame
-                    )
-                    msdfSucceeded = true
-                } catch {
-                    msdfSucceeded = false
-                }
-            }
-            // If the MSDF pass threw, rasterize CoreText for the MSDF objects NOW
-            // (lazily) so no text silently disappears — the safety net is
-            // preserved, just no longer paid for on every happy-path frame.
-            if !msdfSucceeded, !msdfPayloads.isEmpty {
-                for entry in deferredMSDFObjects {
-                    if let draw = coreTextOverlayDraw(
-                        for: entry.object, geometry: entry.geometry, textRenderer: textRenderer
-                    ) {
-                        draws.append(draw)
-                    }
-                }
-            }
-            if !draws.isEmpty {
-                try executor.drawTextOverlays(
-                    overlays: draws,
-                    sceneSize: sceneRenderSize,
-                    output: frame
-                )
-            }
         }
-        #if DEBUG
-        maybeDumpScenePassesOverTime(time: uniforms.time, composite: frame)
-        #endif
-        return frame
+        if !draws.isEmpty {
+            try executor.drawTextOverlays(
+                overlays: draws,
+                sceneSize: sceneRenderSize,
+                output: frame
+            )
+        }
+    }
+
+    /// A text object's composed screen placement for this frame: the overlay
+    /// geometry both text paths share, plus the MSDF-space origin override and
+    /// parallax. nil when a perspective projection rejects the world point.
+    private struct WPETextOverlayPlacement {
+        let geometry: WPETextOverlayGeometry
+        let msdfOriginOverride: SIMD2<Double>?
+        let textParallax: SIMD2<Float>
+        let zRotation: Double
+    }
+
+    private func textOverlayPlacement(
+        for liveObject: WPESceneTextObject,
+        transforms: LiveScriptTransforms,
+        parallaxFrame: WPECameraParallaxFrame
+    ) -> WPETextOverlayPlacement? {
+        // A text anchored under script-driven transform hosts (menu
+        // panels following the view) must re-compose its LOCAL origin
+        // through the live parent chain — the parse-time world origin
+        // freezes it at the load-time panel position.
+        let livePlacement = liveTextWorldPlacement(
+            liveObject,
+            scriptOrigins: transforms.origins,
+            scriptScales: transforms.scales,
+            scriptAngles: transforms.angles
+        )
+        let liveOrigin = livePlacement.origin
+        let liveRotation = Float(livePlacement.zRotation)
+        let textParallax = parallaxFrame.pixelOffset(
+            depth: liveObject.parallaxDepth,
+            sceneSize: sceneRenderSize
+        )
+        let scale = SIMD2<Float>(
+            Float(max(liveObject.scale.x, 0.0001)),
+            Float(max(liveObject.scale.y, 0.0001))
+        )
+        // Perspective scenes (orthogonalprojection:null) author text
+        // origins in world units, so they must project through the same
+        // camera as image quads (WPEMetalRenderExecutor.perspectiveObjectQuadUniforms).
+        // Treating them as pixels pushed every x≈0 label ~960px off-screen.
+        // Ortho scenes keep the pixel-space placement clocks/date overlays rely on.
+        let center: SIMD2<Float>
+        let perspectiveSizeScale: Float
+        if cameraUniforms.usesPerspectiveProjection {
+            guard let projection = cameraUniforms.projectedCenterInScenePixels(
+                worldPoint: liveOrigin,
+                sceneSize: sceneRenderSize
+            ) else { return nil }
+            center = projection.center + SIMD2<Float>(textParallax.x, textParallax.y)
+            perspectiveSizeScale = projection.depthScale
+        } else {
+            let halfWidth = Double(sceneRenderSize.width) * 0.5
+            let halfHeight = Double(sceneRenderSize.height) * 0.5
+            center = SIMD2<Float>(
+                Float(liveOrigin.x - halfWidth) + textParallax.x,
+                Float(liveOrigin.y - halfHeight) + textParallax.y
+            )
+            perspectiveSizeScale = 1
+        }
+        let geometry = WPETextOverlayGeometry(
+            center: center, scale: scale, perspectiveSizeScale: perspectiveSizeScale,
+            rotation: liveRotation
+        )
+        // In perspective the projected `center` (scene-centered, +Y up)
+        // already carries parallax; convert it into the MSDF path's
+        // absolute top-left pixel space so both text paths land at the
+        // same screen point. The ortho live-recomposed origin is author
+        // space (+Y up) like `object.origin`, so it needs the SAME
+        // top-left flip + parallax fold the MSDF transform applies to
+        // non-overridden origins — passing it raw y-mirrored every text
+        // object the moment MSDF took over from CoreText (3470764447's
+        // clock stack teleported up and reversed its line order).
+        let msdfOriginOverride: SIMD2<Double>? = cameraUniforms.usesPerspectiveProjection
+            ? SIMD2<Double>(
+                Double(center.x) + Double(sceneRenderSize.width) * 0.5,
+                Double(sceneRenderSize.height) * 0.5 - Double(center.y)
+            )
+            : (liveOrigin == liveObject.origin
+                ? nil
+                : SIMD2<Double>(
+                    liveOrigin.x + Double(textParallax.x),
+                    Double(sceneRenderSize.height) - (liveOrigin.y + Double(textParallax.y))
+                ))
+        return WPETextOverlayPlacement(
+            geometry: geometry,
+            msdfOriginOverride: msdfOriginOverride,
+            textParallax: SIMD2<Float>(textParallax.x, textParallax.y),
+            zRotation: livePlacement.zRotation
+        )
     }
 
     /// The already-computed placement of a text object this frame, shared by the
@@ -1859,14 +2139,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             width: entry.size.width * CGFloat(geometry.scale.x) * CGFloat(geometry.perspectiveSizeScale),
             height: entry.size.height * CGFloat(geometry.scale.y) * CGFloat(geometry.perspectiveSizeScale)
         )
+        // Object `brightness` folds into the tint exactly like an image layer's
+        // `rgb × brightness` (may exceed 1 — the fragment premultiplies in float,
+        // so >1 brightens antialiased edges before the UNORM store clamps).
+        let brightness = Float(max(liveObject.brightness, 0))
         return WPETextOverlayDraw(
             texture: entry.texture,
             centerInScenePixels: geometry.center,
             sizeInScenePixels: scaledSize,
             tint: SIMD3<Float>(
-                Float(liveObject.color.x),
-                Float(liveObject.color.y),
-                Float(liveObject.color.z)
+                Float(liveObject.color.x) * brightness,
+                Float(liveObject.color.y) * brightness,
+                Float(liveObject.color.z) * brightness
             ),
             alpha: Float(liveObject.alpha),
             rotation: geometry.rotation
@@ -1916,6 +2200,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     scriptProperties: object.scriptProperties,
                     shared: sharedState
                 )
+                // Seeding happens in seedSceneScriptsAfterLoad() — AFTER the
+                // layer/script-host instances exist and have produced their
+                // first `shared` state, never here (WPE evaluation order).
                 textScriptInstances[object.id] = instance
             } catch {
                 Logger.warning("Scene \(descriptor.workshopID) [TextScript] init failed for \(object.name): \(error)", category: .wpeRender)
@@ -2001,6 +2288,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         if raw is Bool { return 1.0 }
         guard let number = raw as? NSNumber else { return 1.0 }
         return max(0, Float(truncating: number))
+    }
+
+    /// Effective particle colour multiplier: material overbright × the host
+    /// object's generic `brightness` (WPE modulates any renderable object with
+    /// it; particles fold it into the same overbright uniform, shader unchanged).
+    /// Clamped ≥ 0 — a negative authored brightness must not invert colours.
+    nonisolated static func particleOverbright(
+        material: Float?,
+        objectBrightness: Double
+    ) -> Float {
+        max(0, (material ?? 1.0) * Float(objectBrightness))
     }
 
     /// Best-effort `.tex-json` sidecar lookup. The atlas slicing
@@ -2157,7 +2455,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
-                if let output = instance.applyUserProperties(userProperties) {
+                if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
@@ -2175,7 +2473,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
-                if let output = instance.applyUserProperties(userProperties) {
+                if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
@@ -2194,7 +2492,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 layerAlphaScriptInstances[object.id] = instance
                 applyLayerAlphaScriptOutput(instance.initialOutput, ownObjectID: object.id)
-                if let output = instance.applyUserProperties(userProperties) {
+                if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerAlphaScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
@@ -2212,7 +2510,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 textVisibleScriptInstances[object.id] = instance
                 applyTextScriptOutput(instance.initialOutput, ownObjectID: object.id)
-                if let output = instance.applyUserProperties(userProperties) {
+                if let output = applyScriptUserProperties(instance, userProperties) {
                     applyTextScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
@@ -2231,7 +2529,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 )
                 textAlphaScriptInstances[object.id] = instance
                 liveTextAlpha[object.id] = instance.initialOutput.own.alpha
-                if let output = instance.applyUserProperties(userProperties) {
+                if let output = applyScriptUserProperties(instance, userProperties) {
                     liveTextAlpha[object.id] = output.own.alpha
                 }
             } catch {
@@ -2254,6 +2552,50 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         for (name, state) in output.others {
             guard let targetID = layerObjectIDByName[name] else { continue }
             applyLayerScriptState(state, objectID: targetID)
+        }
+    }
+
+    /// One deterministic "frame 0" evaluation pass over the scene's scripts, run
+    /// once at the end of load — PRODUCERS FIRST. WPE ticks every script serially
+    /// in scene-object order each frame, so a `shared`-consuming script never
+    /// evaluates before the producers that precede it. Our per-load seeding used
+    /// to run inside each loader (texts before the layer scripts even existed);
+    /// a consumer's first evaluation then read an empty `shared` — worst case
+    /// permanently corrupting its own module state (3509243656's `time` script
+    /// accumulates `undefined` arithmetic into NaN, and its self-reset keys off
+    /// `shared.xntime === undefined`, which that same broken tick already set to
+    /// NaN — "frozen at NaN Years" forever). Order here: script hosts (pure
+    /// compute producers, e.g. MAIN's n-body sim writing shared.xx*/ktime) run
+    /// one update() each, then transform + text-content consumers seed.
+    /// Async mode only: legacy sync ticks already run layer scripts before text
+    /// scripts inside every frame, so their first frame is producer-first.
+    private func seedSceneScriptsAfterLoad(from document: WPESceneDocument) {
+        guard Self.scriptAsyncTickEnabled else { return }
+        // 1. Script hosts: one bounded synchronous update() each, in scene
+        //    order, applied exactly like a frame tick.
+        for host in document.scriptHostObjects {
+            guard let instance = layerScriptInstances[host.id] else { continue }
+            if let output = instance.tick(runtimeSeconds: 0, pointerFrame: .neutral) {
+                applyLayerScriptOutput(output, ownObjectID: host.id)
+            }
+        }
+        // 2. Transform scripts, neutral pointer (the frame path's
+        //    follow-cursor-off default) — first frame shows the scripted
+        //    transform instead of popping from the baked value.
+        let neutralPointer = SIMD2<Double>(0.5, 0.5)
+        for instances in [
+            dynamicOriginScriptInstances,
+            dynamicScaleScriptInstances,
+            dynamicAnglesScriptInstances
+        ] {
+            for (_, instance) in instances.sorted(by: { $0.key < $1.key }) {
+                instance.seedAsyncTick(pointerPosition: neutralPointer)
+            }
+        }
+        // 3. Text-content scripts, in scene-object order (hidden compute texts
+        //    write shared.txtN that later data texts read — 三体's 日志).
+        for object in textObjects {
+            textScriptInstances[object.id]?.seedAsyncTick()
         }
     }
 
@@ -2284,7 +2626,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         } + document.textObjects.compactMap { object -> (String, WPESceneTransformScript)? in
             // TEXT objects with a dynamic origin (3509243656's tooltip labels
             // that track their star via `shared.xxN`). Ticked into the same
-            // `liveScriptOrigins` map the overlay loop reads.
+            // live-origins map the overlay loop reads.
             object.originScript.map { (object.id, $0) }
         }
         let scaleScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
@@ -2323,13 +2665,17 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         ) {
             for (objectID, script) in scripts {
                 do {
-                    instances[objectID] = try WPEDynamicTransformScriptInstance(
+                    let instance = try WPEDynamicTransformScriptInstance(
                         script: script.script,
                         scriptProperties: script.scriptProperties,
                         seed: script.seed,
                         canvasSize: canvasSize,
                         shared: sharedState
                     )
+                    // Seeded in seedSceneScriptsAfterLoad() — after the script
+                    // hosts have produced their first `shared` state (a tooltip
+                    // origin script reading `shared.xxN` must not run first).
+                    instances[objectID] = instance
                 } catch {
                     Logger.warning("Scene \(descriptor.workshopID) [\(label)] init failed for \(objectID): \(error)", category: .wpeRender)
                 }
@@ -2539,8 +2885,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 let previous = layerHoverStates[objectID] ?? false
                 guard inside != previous else { continue }
                 layerHoverStates[objectID] = inside
-                if let output = instance.dispatchCursorEvent(
-                    inside ? .enter : .leave,
+                if let output = dispatchScriptCursorEvent(
+                    instance,
+                    event: inside ? .enter : .leave,
                     pointerFrame: pointerFrame,
                     runtimeSeconds: runtimeSeconds
                 ) {
@@ -2633,8 +2980,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
         for event in events {
             for (objectID, instance) in layerScriptInstances {
-                if let output = instance.dispatchCursorEvent(
-                    event,
+                if let output = dispatchScriptCursorEvent(
+                    instance,
+                    event: event,
                     pointerFrame: current,
                     runtimeSeconds: runtimeSeconds
                 ) {
@@ -2642,8 +2990,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 }
             }
             for (objectID, instance) in layerAlphaScriptInstances {
-                if let output = instance.dispatchCursorEvent(
-                    event,
+                if let output = dispatchScriptCursorEvent(
+                    instance,
+                    event: event,
                     pointerFrame: current,
                     runtimeSeconds: runtimeSeconds
                 ) {
@@ -2704,15 +3053,29 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private var staticCacheExcludedLayerIDs: Set<String> {
-        Self.staticCacheExcludedLayerIDs(
+        var ids = installedScriptLayerIDs
+        guard !liveCreatedLayers.isEmpty || !liveLayerAlpha.isEmpty else { return ids }
+        ids.formUnion(liveCreatedLayers.keys)
+        ids.formUnion(liveLayerAlpha.keys)
+        return ids
+    }
+
+    /// The exclusion set's load-scoped part, memoized. `liveCreatedLayers` and
+    /// `liveLayerAlpha` deliberately stay OUT of the cache — scripts grow them
+    /// mid-frame, so their keys are unioned live above every frame.
+    private var installedScriptLayerIDs: Set<String> {
+        if let cached = cachedInstalledScriptLayerIDs { return cached }
+        let ids = Self.staticCacheExcludedLayerIDs(
             originScriptIDs: dynamicOriginScriptInstances.keys,
             scaleScriptIDs: dynamicScaleScriptInstances.keys,
             anglesScriptIDs: dynamicAnglesScriptInstances.keys,
-            liveCreatedLayerIDs: liveCreatedLayers.keys,
+            liveCreatedLayerIDs: EmptyCollection<String>(),
             layerScriptIDs: layerScriptInstances.keys,
             alphaScriptIDs: layerAlphaScriptInstances.keys,
-            scriptAlphaOverriddenIDs: liveLayerAlpha.keys
+            scriptAlphaOverriddenIDs: EmptyCollection<String>()
         )
+        cachedInstalledScriptLayerIDs = ids
+        return ids
     }
 
     /// True unless some ancestor is currently hidden. Each ancestor's CURRENT
@@ -3056,16 +3419,26 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                 cols: 1, rows: 1, frameCount: 1, baseFrameRate: 0, isAlphaMask: true
             )
         }
+        // Under the render oracle, seed spawn jitter deterministically so the scene
+        // renders byte-identically run-to-run. `nil` in production ⇒ system CSPRNG.
+        let oracleSeed: UInt64? = WPEOracleMode.isEnabled
+            ? WPEParticleSystem.deterministicSeed(
+                workshopID: descriptor.workshopID, objectID: object.id, sortIndex: sortIndex)
+            : nil
         guard let system = WPEParticleSystem(
             definition: definition,
             device: executor.textureSourceDevice,
             blendMode: blendMode,
             sceneTransform: sceneTransform,
-            spriteSheet: spriteSheet
+            spriteSheet: spriteSheet,
+            seed: oracleSeed
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
         system.sortIndex = sortIndex
-        system.overbright = material?.overbright ?? 1.0
+        system.overbright = Self.particleOverbright(
+            material: material?.overbright,
+            objectBrightness: object.brightness
+        )
         system.isNestedChildSystem = isNestedChild
         if let groupEffect {
             system.groupOpacityMask = groupEffect.mask
@@ -3113,7 +3486,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             s += "velocityMin=\(d.velocityMin) velocityMax=\(d.velocityMax)\n"
             s += "gravity=\(d.gravity) drag=\(d.drag)\n"
             s += "rotation=[\(d.rotationMin),\(d.rotationMax)] angularVel=[\(d.angularVelocityMin),\(d.angularVelocityMax)] angularForceZ=\(d.angularForceZ)\n"
-            s += "turbulence: speed=[\(d.turbulenceSpeedMin),\(d.turbulenceSpeedMax)] scale=\(d.turbulenceScale) mask=\(d.turbulenceMask)\n"
+            if let tvi = d.turbulentVelocityInit {
+                s += "turbVelInit: speed=[\(tvi.speedMin),\(tvi.speedMax)] scale=\(tvi.scale) offset=\(tvi.offset)\n"
+            }
+            if let turb = d.turbulence {
+                s += "turbulenceOp: speed=[\(turb.speedMin),\(turb.speedMax)] scale=\(turb.scale) timescale=\(turb.timescale) mask=\(turb.mask)\n"
+            }
             s += "sceneTransform: renderOrigin=\(sceneTransform.renderOrigin) objectScale=\(sceneTransform.objectScale) objectAngleZ=\(sceneTransform.objectAngleZ)\n"
             WPESceneDebugArtifacts.shared.recordNote(name: "particle-def-\(idx).txt", contents: s)
         }
@@ -3248,7 +3626,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             )
             if !changed.isEmpty {
                 for (objectID, instance) in layerScriptInstances {
-                    if let output = instance.applyUserProperties(
+                    if let output = applyScriptUserProperties(
+                        instance,
                         changed,
                         runtimeSeconds: lastRuntimeUniforms?.time
                     ) {
@@ -3256,7 +3635,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     }
                 }
                 for (objectID, instance) in layerAlphaScriptInstances {
-                    if let output = instance.applyUserProperties(
+                    if let output = applyScriptUserProperties(
+                        instance,
                         changed,
                         runtimeSeconds: lastRuntimeUniforms?.time
                     ) {
@@ -3264,7 +3644,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     }
                 }
                 for (objectID, instance) in textVisibleScriptInstances {
-                    if let output = instance.applyUserProperties(
+                    if let output = applyScriptUserProperties(
+                        instance,
                         changed,
                         runtimeSeconds: lastRuntimeUniforms?.time
                     ) {
@@ -3272,7 +3653,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     }
                 }
                 for (objectID, instance) in textAlphaScriptInstances {
-                    if let output = instance.applyUserProperties(
+                    if let output = applyScriptUserProperties(
+                        instance,
                         changed,
                         runtimeSeconds: lastRuntimeUniforms?.time
                     ) {
@@ -3729,6 +4111,77 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard loadGeneration == generation else { return }
         executor.seedTranslatedShaderCache(warmed)
         debugStage("shader.prewarm.done", "warmed=\(warmed.count)/\(requests.count)")
+
+        // Second parallel phase: pre-build the pipeline STATES too. makeRenderPipelineState
+        // is the dominant residual first-frame cost (transpile/makeLibrary above are already
+        // warmed) and was still compiled lazily & serially on the render thread. Enumerate
+        // each pass's (shader, blend) against the scene's dominant color format and the two
+        // common vertex functions (fullscreen + object-quad); dedup by pipeline identity.
+        // Over-/under-prediction only changes the cache-hit rate, never correctness.
+        var resultByKey: [String: WPEShaderCompileResult] = [:]
+        for entry in warmed { resultByKey[entry.key] = entry.result }
+        let sceneColorFormat: MTLPixelFormat = cameraUniforms.sceneHDR
+            ? .rgba16Float
+            : WPEMetalRenderExecutor.outputPixelFormat
+        let vertexCandidates: [String?] = [nil, "wpe_object_quad_vertex"]
+        let prewarmDevice = executor.textureSourceDevice
+        var pipelinePrewarms: [WPEMetalRenderExecutor.WPETranslatedPipelinePrewarm] = []
+        var seenPipelineKeys = Set<String>()
+        for layer in pipeline.layers {
+            for pass in layer.passes where pass.shader?.isBuiltin == false {
+                guard let request = try? WPEMetalRenderExecutor.makeCompileRequest(for: pass, recordFailure: false),
+                      let result = resultByKey[request.translationCacheKey] else { continue }
+                let blend = pass.pass.blending
+                for vertexName in vertexCandidates {
+                    let dedup = "\(ObjectIdentifier(result.library))|\(vertexName ?? result.vertexFunctionName)|\(result.fragmentFunctionName)|\(blend.lowercased())|\(sceneColorFormat.rawValue)"
+                    guard seenPipelineKeys.insert(dedup).inserted else { continue }
+                    pipelinePrewarms.append(.init(
+                        device: prewarmDevice,
+                        result: result,
+                        vertexName: vertexName,
+                        blendMode: blend,
+                        colorPixelFormat: sceneColorFormat,
+                        depthPixelFormat: .invalid
+                    ))
+                }
+            }
+        }
+        guard loadGeneration == generation, !pipelinePrewarms.isEmpty else {
+            debugStage("pipeline.prewarm.done", "combos=0")
+            return
+        }
+        // Compile the pipeline states in parallel OFF the render thread (mirrors the
+        // translation task group above — captures only the `@unchecked Sendable` prewarm
+        // requests, never the executor), then seed synchronously before the first frame.
+        let pipeWidth = max(2, min(8, ProcessInfo.processInfo.activeProcessorCount - 1))
+        let built: [WPEMetalRenderExecutor.WPEPrewarmedPipeline] = await withTaskGroup(
+            of: WPEMetalRenderExecutor.WPEPrewarmedPipeline?.self
+        ) { group in
+            var next = 0
+            func spawn() -> Bool {
+                guard next < pipelinePrewarms.count else { return false }
+                let prewarm = pipelinePrewarms[next]
+                next += 1
+                group.addTask(priority: .userInitiated) {
+                    WPEMetalRenderExecutor.buildTranslatedPipeline(prewarm)
+                }
+                return true
+            }
+            for _ in 0..<pipeWidth where spawn() {}
+            var collected: [WPEMetalRenderExecutor.WPEPrewarmedPipeline] = []
+            while let entry = await group.next() {
+                if loadGeneration != generation {
+                    group.cancelAll()
+                    break
+                }
+                if let entry { collected.append(entry) }
+                _ = spawn()
+            }
+            return collected
+        }
+        guard loadGeneration == generation else { return }
+        executor.seedTranslatedPipelines(built)
+        debugStage("pipeline.prewarm.done", "combos=\(pipelinePrewarms.count) built=\(built.count)")
     }
 
     private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
@@ -3947,9 +4400,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     ///
     /// `zRotation` is the chain's composed z angle (radians, author-space CCW):
     /// WPE rotates text with its host (3470764447's 总组件角度 = -15° tilts the
-    /// whole clock stack). It is only non-zero when the live chain composes —
-    /// fully static chains keep the parse-time origin and render unrotated, the
-    /// pre-existing behavior.
+    /// whole clock stack). When the live chain composes, it is the chain's
+    /// composed angle; otherwise the parse-time WORLD angle stands — text
+    /// objects rotate like image layers, so a static `angles` in scene.json
+    /// (2986828130's Clock/Date 30° tilt) must not collapse to 0.
     private func liveTextWorldPlacement(
         _ object: WPESceneTextObject,
         scriptOrigins: [String: SIMD3<Double>],
@@ -3964,7 +4418,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         guard let parentID = object.parentObjectID,
               let localOrigin = ownLiveOrigin ?? object.localOrigin,
               !(scriptOrigins.isEmpty && scriptScales.isEmpty && scriptAngles.isEmpty) else {
-            return (ownLiveOrigin ?? object.origin, 0)
+            return (ownLiveOrigin ?? object.origin, object.angles.z)
         }
         var chain: [WPERenderObjectTransform] = []
         var cursor: String? = parentID
@@ -3975,7 +4429,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             guard let hostLocal = transformHostLocalTransformsByID[id] else {
                 // Non-host ancestor (image layer): its motion isn't composable
                 // here — keep the parse-time origin rather than half-compose.
-                return (ownLiveOrigin ?? object.origin, 0)
+                return (ownLiveOrigin ?? object.origin, object.angles.z)
             }
             if scriptOrigins[id] != nil || scriptScales[id] != nil || scriptAngles[id] != nil {
                 chainIsLive = true
@@ -3987,7 +4441,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             ))
             cursor = objectParentByID[id]
         }
-        guard chainIsLive, !chain.isEmpty else { return (ownLiveOrigin ?? object.origin, 0) }
+        guard chainIsLive, !chain.isEmpty else {
+            return (ownLiveOrigin ?? object.origin, object.angles.z)
+        }
         var world = WPERenderObjectTransform(
             origin: localOrigin,
             scale: SIMD3<Double>(1, 1, 1),
@@ -4000,16 +4456,16 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     }
 
     private func requiredTextureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {
-        switch normalizedBuiltinShaderName(pass.pass.shader) {
-        case "solidcolor", "solidlayer":
+        switch WPEBuiltinShaderKind(normalizing: pass.pass.shader) {
+        case .solidColor?, .solidLayer?:
             return []
 
-        case "compose":
+        case .compose?:
             let first = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let second = pass.textureBindings[1] ?? pass.pass.textures[1] ?? first
             return [first, second].filter(\.isExternalTextureReference)
 
-        case "genericimage4":
+        case .genericImage4?:
             let primary = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             var refs: [WPETextureReference] = [primary]
             if let mask = pass.textureBindings[1] ?? pass.pass.textures[1] {
@@ -4037,9 +4493,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
     }
 
-    private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
-    }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a raw texture so the caller can route MP4 video and multi-frame animations through dedicated dynamic sources.
     private func makeTextureResource(

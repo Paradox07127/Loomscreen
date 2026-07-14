@@ -1,0 +1,781 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3226487183",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 101,
+  "passSequence": [
+    {
+      "passId": "57.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "59.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "63.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "63.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "934.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.2",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.3",
+      "shaderName": "effects/depthparallax",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.4",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.5",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.6",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.7",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.8",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.9",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.10",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.11",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "934.13",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "1028.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1028.2",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1028.3",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "876.1",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.2",
+      "shaderName": "effects/depthparallax",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.3",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.4",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.5",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.6",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.7",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.8",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.9",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.10",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "876.11",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "1467.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "1095.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.3",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.4",
+      "shaderName": "effects/shake",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.5",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.6",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.7",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1095.9",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "840.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.2",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.3",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.4",
+      "shaderName": "effects/depthparallax",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.5",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.6",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.7",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.8",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.9",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.10",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.11",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.12",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.13",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "840.15",
+      "shaderName": "materials/util/copy.json",
+      "topology": "indexed-triangle-list"
+    },
+    {
+      "passId": "1420.1",
+      "shaderName": "effects/iris",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "4680.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.3",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.4",
+      "shaderName": "effects/shake",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.5",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.6",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4680.7",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.2",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.3",
+      "shaderName": "effects/depthparallax",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.4",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.5",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.6",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.7",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.8",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.9",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.10",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.11",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4699.12",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4749.1",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.2",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.3",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.4",
+      "shaderName": "effects/shake",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.5",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.6",
+      "shaderName": "effects/waterwaves",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1239.7",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.1",
+      "shaderName": "effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.2",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.3",
+      "shaderName": "effects/depthparallax",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.4",
+      "shaderName": "effects/waterripple",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.5",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.6",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.7",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "12741.8",
+      "shaderName": "workshop/3206438810/effects/multistage_wave",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "3503.1",
+      "shaderName": "effects/iris",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "2522.1",
+      "shaderName": "workshop/2423877731/effects/chromatic_aberration",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "104906.1",
+      "shaderName": "effects/opacity",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "4604.1",
+      "shaderName": "workshop/2962751255/effects/blend",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4604.2",
+      "shaderName": "workshop/2962751255/effects/blend",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "4604.3",
+      "shaderName": "workshop/2962751255/effects/blendgradient",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "115975.1",
+      "shaderName": "effects/opacity",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "38.1",
+      "shaderName": "effects/localcontrast_downsample4",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "38.2",
+      "shaderName": "effects/localcontrast_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "38.3",
+      "shaderName": "effects/localcontrast_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "38.4",
+      "shaderName": "effects/localcontrast_combine",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "38.5",
+      "shaderName": "workshop/2812601803/effects/tone_mapping",
+      "topology": "fullscreen-quad"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_QuarterCompoBuffer1": [
+      "pass-0098"
+    ],
+    "_rt_QuarterCompoBuffer2": [
+      "pass-0097"
+    ],
+    "_rt_imageLayerComposite_1028_a": [
+      "pass-0017"
+    ],
+    "_rt_imageLayerComposite_1028_b": [
+      "pass-0016"
+    ],
+    "_rt_imageLayerComposite_1095_a": [
+      "pass-0036"
+    ],
+    "_rt_imageLayerComposite_1095_b": [
+      "pass-0037"
+    ],
+    "_rt_imageLayerComposite_1239_a": [
+      "pass-0079"
+    ],
+    "_rt_imageLayerComposite_1239_b": [
+      "pass-0080"
+    ],
+    "_rt_imageLayerComposite_12741_a": [
+      "pass-0088"
+    ],
+    "_rt_imageLayerComposite_12741_b": [
+      "pass-0087"
+    ],
+    "_rt_imageLayerComposite_2522_b": [
+      "pass-0090"
+    ],
+    "_rt_imageLayerComposite_3503_b": [
+      "pass-0089"
+    ],
+    "_rt_imageLayerComposite_38_a": [
+      "pass-0100"
+    ],
+    "_rt_imageLayerComposite_38_b": [
+      "pass-0099"
+    ],
+    "_rt_imageLayerComposite_4604_a": [
+      "pass-0093"
+    ],
+    "_rt_imageLayerComposite_4604_b": [
+      "pass-0094"
+    ],
+    "_rt_imageLayerComposite_4680_a": [
+      "pass-0059"
+    ],
+    "_rt_imageLayerComposite_4680_b": [
+      "pass-0060"
+    ],
+    "_rt_imageLayerComposite_4699_a": [
+      "pass-0072"
+    ],
+    "_rt_imageLayerComposite_4699_b": [
+      "pass-0071"
+    ],
+    "_rt_imageLayerComposite_4749_b": [
+      "pass-0073"
+    ],
+    "_rt_imageLayerComposite_63_b": [
+      "pass-0002"
+    ],
+    "_rt_imageLayerComposite_840_a": [
+      "pass-0050"
+    ],
+    "_rt_imageLayerComposite_840_b": [
+      "pass-0051"
+    ],
+    "_rt_imageLayerComposite_876_a": [
+      "pass-0028"
+    ],
+    "_rt_imageLayerComposite_876_b": [
+      "pass-0027"
+    ],
+    "_rt_imageLayerComposite_934_a": [
+      "pass-0013"
+    ],
+    "_rt_imageLayerComposite_934_b": [
+      "pass-0014"
+    ],
+    "_rt_layerGroup_115975": [
+      "pass-0091"
+    ],
+    "_rt_layerGroup_2522": [
+      "pass-0053"
+    ],
+    "scene": [
+      "pass-0095"
+    ]
+  },
+  "uniformNames": [
+    "bonePalette",
+    "g_AlphaMultiply",
+    "g_Amount",
+    "g_Amp",
+    "g_AnimationSpeed",
+    "g_AudioBounds",
+    "g_AudioFrequencyMax",
+    "g_AudioFrequencyMin",
+    "g_AudioMultiply",
+    "g_AudioPower",
+    "g_AudioSpectrum16Left",
+    "g_AudioSpectrum16Right",
+    "g_BlendAngle",
+    "g_BlendOffset",
+    "g_BlendScale",
+    "g_Bounds",
+    "g_Center",
+    "g_Direction",
+    "g_DirectionOffset",
+    "g_EdgeBrightness",
+    "g_EdgeColor",
+    "g_Exponent",
+    "g_EyeColor",
+    "g_Friction",
+    "g_GradientScale",
+    "g_Multiply",
+    "g_Multiply2",
+    "g_Multiply3",
+    "g_Multiply4",
+    "g_Multiply5",
+    "g_Multiply6",
+    "g_NoiseAmount",
+    "g_NoiseSpeed",
+    "g_ParallaxPosition",
+    "g_PhaseOffset",
+    "g_PointerPosition",
+    "g_Power",
+    "g_PulseAmount",
+    "g_PulsePhase",
+    "g_PulseSpeed",
+    "g_PulseThresholds",
+    "g_Ratio",
+    "g_Rough",
+    "g_Scale",
+    "g_Screen",
+    "g_ScrollSpeed",
+    "g_Sensitivity",
+    "g_Size1",
+    "g_Size2",
+    "g_SpecularColor",
+    "g_SpecularPower",
+    "g_SpecularStrength",
+    "g_Speed",
+    "g_SpinCenter1",
+    "g_SpinCenter2",
+    "g_Strength",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_Texture2Resolution",
+    "g_Texture3Resolution",
+    "g_Texture4Resolution",
+    "g_Texture5Resolution",
+    "g_Texture6Resolution",
+    "g_Time",
+    "g_TimeOffset1",
+    "g_TimeOffset2",
+    "g_TintColor1",
+    "g_TintColor2",
+    "g_UserAlpha",
+    "g_maskFeather",
+    "g_substageBoundaryFeather",
+    "g_vLinkageStrength",
+    "localSizeAndMode",
+    "meshCenterAndScaleSign",
+    "objectCenterAndSize",
+    "sceneSizeAndRotation",
+    "u_alpha",
+    "u_bOffset",
+    "u_caOpacity",
+    "u_colorNormalize",
+    "u_displayGamma",
+    "u_displayInitGamma",
+    "u_exposureAdjustment",
+    "u_gOffset",
+    "u_linearAngle",
+    "u_linearStrength",
+    "u_lumaSaturation",
+    "u_pointerSpeed",
+    "u_rOffset",
+    "u_shiftSpeed",
+    "u_shoulderStrength",
+    "u_toeDenominator",
+    "u_toeNumerator",
+    "u_toeStrength",
+    "u_whiteAdjustment"
+  ],
+  "comboKeys": [
+    "Alpha",
+    "Blue Channel Offset",
+    "Corrected display gamma",
+    "Exposure adjustment",
+    "Factor",
+    "Green Channel Offset",
+    "Initial display gamma",
+    "Linear angle",
+    "Linear strength",
+    "Luminance saturation",
+    "Opacity",
+    "Red Channel Offset",
+    "Shoulder strength",
+    "Toe denominator",
+    "Toe numerator",
+    "Toe strength",
+    "White level adjustment",
+    "alpha",
+    "amount",
+    "angle1",
+    "angle2",
+    "animationspeed",
+    "audioamount",
+    "audiobounds",
+    "audioexponent",
+    "blendangle",
+    "blendoffset",
+    "blendscale",
+    "bounds",
+    "center",
+    "center1",
+    "center2",
+    "color",
+    "direction",
+    "directionOffset",
+    "edgebrightness",
+    "edgecolor",
+    "exponent",
+    "feather",
+    "frequencymax",
+    "frequencymin",
+    "friction",
+    "gradientscale",
+    "multiply",
+    "multiply2",
+    "multiply3",
+    "multiply4",
+    "multiply5",
+    "multiply6",
+    "noiseamount",
+    "noisespeed",
+    "phase",
+    "pointerspeed",
+    "power",
+    "ratio",
+    "ripplespecularcolor",
+    "ripplespecularpower",
+    "ripplespecularstrength",
+    "ripplestrength",
+    "rough",
+    "scale",
+    "scrolldirection",
+    "scrollspeed",
+    "sens",
+    "size1",
+    "size2",
+    "speed",
+    "strength",
+    "substageBoundaryFeather",
+    "tinthigh",
+    "tintlow",
+    "vLinkageStrength"
+  ],
+  "particleSystemCount": 0,
+  "particleSystemIds": []
+}

@@ -132,19 +132,23 @@ struct WorkshopInstalledView: View {
                     entry: entry,
                     screens: screenManager.screens,
                     activeScreenIDs: activeScreenIDs(for: entry),
-                    isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
-                    canBookmark: canAddBookmark(entry),
-                    hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
-                    canUpdate: doctor.isDownloadReady,
-                    onApply: { apply(entry, to: $0) },
-                    onApplyToAll: { applyToAll(entry) },
-                    onUpdate: { updateEntry(entry) },
-                    onToggleBookmark: { toggleBookmark(entry) },
-                    onShowInFinder: { showInFinder(entry) },
-                    onDelete: { pendingDelete = entry },
-                    onSelectTag: onBrowseTag.map { browse in
-                        { tag in selectedEntry = nil; browse(tag) }
-                    }
+                    state: WPEInstalledInspectorContent.ItemState(
+                        isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
+                        canBookmark: canAddBookmark(entry),
+                        hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
+                        canUpdate: doctor.isDownloadReady
+                    ),
+                    actions: WPEInstalledInspectorContent.Actions(
+                        onApply: { apply(entry, to: $0) },
+                        onApplyToAll: { applyToAll(entry) },
+                        onUpdate: { updateEntry(entry) },
+                        onToggleBookmark: { toggleBookmark(entry) },
+                        onShowInFinder: { showInFinder(entry) },
+                        onDelete: { pendingDelete = entry },
+                        onSelectTag: onBrowseTag.map { browse in
+                            { tag in selectedEntry = nil; browse(tag) }
+                        }
+                    )
                 )
             } else {
                 installedInspectorPlaceholder
@@ -200,7 +204,7 @@ struct WorkshopInstalledView: View {
                     totalCount: entries.count
                 ) {
                     HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
-                        filtersToggle
+                        WorkshopFiltersToggle(isExpanded: $showFilters, activeFilterCount: activeFilterCount)
 
                         Spacer(minLength: 0)
 
@@ -395,40 +399,13 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Filters panel (origin + storage)
 
-    private var filtersToggle: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) { showFilters.toggle() }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "line.3.horizontal.decrease")
-                Text("Filters")
-                if activeFilterCount > 0 {
-                    Text(verbatim: "\(activeFilterCount)")
-                        .font(DesignTokens.Typography.badge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor, in: Capsule())
-                }
-                Image(systemName: showFilters ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(DesignTokens.Typography.caption)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help(Text("Filter options"))
-        .accessibilityLabel(Text("Filters"))
-    }
-
     private var installedFilterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            filterRow("Type") {
+            WorkshopFilterRow("Type") {
                 typeChipRow
             }
 
-            filterRow("Source") {
+            WorkshopFilterRow("Source") {
                 HStack(spacing: 6) {
                     ForEach(InstalledSource.allCases) { source in
                         WorkshopFilterChip(
@@ -442,7 +419,7 @@ struct WorkshopInstalledView: View {
                 }
             }
 
-            filterRow("Storage") {
+            WorkshopFilterRow("Storage") {
                 HStack(spacing: 6) {
                     ForEach(InstalledStorageKind.allCases) { storage in
                         WorkshopFilterChip(
@@ -469,35 +446,16 @@ struct WorkshopInstalledView: View {
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
-    private func filterRow<Content: View>(
-        _ title: LocalizedStringKey,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
-            Text(title)
-                .font(DesignTokens.Typography.badge)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .frame(width: 74, alignment: .leading)
-                .padding(.top, 4)
-            content()
-        }
-    }
-
     private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
         if set.contains(value) { set.remove(value) } else { set.insert(value) }
     }
 
     private var activeFilterCount: Int {
         var count = 0
-        if isNarrowed(selectedTypes, total: WPELibraryTypeKind.allCases.count) { count += 1 }
-        if isNarrowed(selectedSources, total: InstalledSource.allCases.count) { count += 1 }
-        if isNarrowed(selectedStorage, total: InstalledStorageKind.allCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(selectedTypes, total: WPELibraryTypeKind.allCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(selectedSources, total: InstalledSource.allCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(selectedStorage, total: InstalledStorageKind.allCases.count) { count += 1 }
         return count
-    }
-
-    private func isNarrowed<T>(_ set: Set<T>, total: Int) -> Bool {
-        !set.isEmpty && set.count < total
     }
 
     private func resetFilters() {
@@ -1007,21 +965,34 @@ enum WPEInstalledLibrarySorter {
 /// Trailing detail inspector for an installed item. Apply happens here
 /// (per-display via the mini-map, or "All"); drag-onto-display is the quick path.
 private struct WPEInstalledInspectorContent: View {
+    /// Derived boolean state for the item (bookmark + update availability),
+    /// grouped so the caller sets a labelled bundle rather than four loose
+    /// same-typed flags. (Named `ItemState`, not `State`, so it doesn't shadow
+    /// SwiftUI's `@State` property wrapper inside this view.)
+    struct ItemState {
+        let isBookmarked: Bool
+        let canBookmark: Bool
+        let hasUpdate: Bool
+        let canUpdate: Bool
+    }
+
+    /// Per-item callbacks. `onSelectTag` is wired only when tags should be
+    /// tappable (jump to Browse Online by tag).
+    struct Actions {
+        let onApply: (Screen) -> Void
+        let onApplyToAll: () -> Void
+        let onUpdate: () -> Void
+        let onToggleBookmark: () -> Void
+        let onShowInFinder: () -> Void
+        let onDelete: () -> Void
+        let onSelectTag: ((String) -> Void)?
+    }
+
     let entry: WPEHistoryEntry
     let screens: [Screen]
     let activeScreenIDs: Set<CGDirectDisplayID>
-    let isBookmarked: Bool
-    let canBookmark: Bool
-    let hasUpdate: Bool
-    let canUpdate: Bool
-    let onApply: (Screen) -> Void
-    let onApplyToAll: () -> Void
-    let onUpdate: () -> Void
-    let onToggleBookmark: () -> Void
-    let onShowInFinder: () -> Void
-    let onDelete: () -> Void
-    /// Wired when tags should be tappable (jump to Browse Online by tag).
-    let onSelectTag: ((String) -> Void)?
+    let state: ItemState
+    let actions: Actions
 
     @Environment(\.openURL) private var openURL
     @State private var showingApplyPopover = false
@@ -1059,7 +1030,7 @@ private struct WPEInstalledInspectorContent: View {
                         }
                     }
                     metaRow
-                    if hasUpdate { updateSection }
+                    if state.hasUpdate { updateSection }
                     unsupportedWarning
                     if !activeScreenIDs.isEmpty { inUseRow }
 
@@ -1118,12 +1089,12 @@ private struct WPEInstalledInspectorContent: View {
 
             Spacer(minLength: DesignTokens.Spacing.sm)
 
-            if canBookmark || isBookmarked {
+            if state.canBookmark || state.isBookmarked {
                 plainIconButton(
-                    isBookmarked ? "Remove Bookmark" : "Add Bookmark",
-                    systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
-                    tint: isBookmarked ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary),
-                    action: onToggleBookmark
+                    state.isBookmarked ? "Remove Bookmark" : "Add Bookmark",
+                    systemImage: state.isBookmarked ? "bookmark.fill" : "bookmark",
+                    tint: state.isBookmarked ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary),
+                    action: actions.onToggleBookmark
                 )
             }
             if let url = steamURL {
@@ -1175,14 +1146,14 @@ private struct WPEInstalledInspectorContent: View {
             case .downloading, .importing:
                 updateProgressRow
             default:
-                Button(action: onUpdate) {
+                Button(action: actions.onUpdate) {
                     Label(isUpdateRetry ? "Retry Update" : "Update", systemImage: "arrow.down.circle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(!canUpdate)
-                .help(canUpdate
+                .disabled(!state.canUpdate)
+                .help(state.canUpdate
                       ? Text("Re-download the latest version from Steam")
                       : Text("Set up SteamCMD in Settings → Workshop to enable updates."))
 
@@ -1191,7 +1162,7 @@ private struct WPEInstalledInspectorContent: View {
                         .font(.caption)
                         .foregroundStyle(DesignTokens.Colors.Status.danger)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if !canUpdate {
+                } else if !state.canUpdate {
                     Text("Updates use SteamCMD (Settings → Workshop → SteamCMD Doctor).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1249,8 +1220,8 @@ private struct WPEInstalledInspectorContent: View {
     private var applySection: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             applyControl
-            plainIconButton("Show in Finder", systemImage: "folder", tint: AnyShapeStyle(.secondary), size: 15, action: onShowInFinder)
-            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(DesignTokens.Colors.Status.danger), size: 15, action: onDelete)
+            plainIconButton("Show in Finder", systemImage: "folder", tint: AnyShapeStyle(.secondary), size: 15, action: actions.onShowInFinder)
+            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(DesignTokens.Colors.Status.danger), size: 15, action: actions.onDelete)
         }
     }
 
@@ -1265,7 +1236,7 @@ private struct WPEInstalledInspectorContent: View {
             .disabled(true)
             .help(Text("Open a display first, then apply"))
         } else if screens.count == 1, let only = screens.first {
-            Button { onApply(only) } label: {
+            Button { actions.onApply(only) } label: {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
             }
@@ -1281,8 +1252,8 @@ private struct WPEInstalledInspectorContent: View {
                 WorkshopApplyTargetPicker(
                     screens: screens,
                     activeScreenIDs: activeScreenIDs,
-                    onPick: { onApply($0); showingApplyPopover = false },
-                    onAll: { onApplyToAll(); showingApplyPopover = false }
+                    onPick: { actions.onApply($0); showingApplyPopover = false },
+                    onAll: { actions.onApplyToAll(); showingApplyPopover = false }
                 )
             }
         }
@@ -1323,7 +1294,7 @@ private struct WPEInstalledInspectorContent: View {
     /// Tappable accent chip when `onSelectTag` is wired; otherwise inert.
     @ViewBuilder
     private func tagChip(_ tag: String) -> some View {
-        if let onSelectTag {
+        if let onSelectTag = actions.onSelectTag {
             Button { onSelectTag(tag) } label: {
                 Text(verbatim: tag)
                     .font(DesignTokens.Typography.badge)

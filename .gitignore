@@ -114,6 +114,17 @@ skills/
 docs/review/
 archived/
 CLAUDE.md
+LiveWallpaperTests/Fixtures
+# Except the machine-independent oracle structural-fingerprint golden net (a few
+# KB of JSON, no pixels) — see .claude/skills/wpe-oracle/references/self-oracle-runbook.md.
+!LiveWallpaperTests/Fixtures/
+LiveWallpaperTests/Fixtures/*
+!LiveWallpaperTests/Fixtures/oracle-golden/
+
+# Keep the portable release gate; all other maintainer-local scripts remain ignored.
+!scripts/
+scripts/*
+!scripts/release_candidate_check.sh
 
 # Python bytecode
 __pycache__/

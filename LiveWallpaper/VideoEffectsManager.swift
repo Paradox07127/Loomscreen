@@ -72,9 +72,10 @@ final class VideoEffectsManager {
         params: FilterParameters,
         frameDuration: CMTime
     ) async throws -> AVVideoComposition {
+        let chain = VideoFilterChain(params: params)
         let applier: @Sendable (AVCIImageFilteringParameters) async throws -> AVCIImageFilteringResult = { parameters in
             let sourceExtent = parameters.sourceImage.extent
-            let filtered = applyFilters(to: parameters.sourceImage.clampedToExtent(), params: params)
+            let filtered = chain.apply(to: parameters.sourceImage.clampedToExtent())
             return AVCIImageFilteringResult(resultImage: filtered.cropped(to: sourceExtent))
         }
 
@@ -107,55 +108,17 @@ final class VideoEffectsManager {
         params: FilterParameters,
         frameDuration: CMTime
     ) async throws -> AVVideoComposition {
+        let chain = VideoFilterChain(params: params)
         let mutable = AVMutableVideoComposition(
             asset: asset,
             applyingCIFiltersWithHandler: { request in
                 let sourceExtent = request.sourceImage.extent
-                let filtered = applyFilters(to: request.sourceImage.clampedToExtent(), params: params)
+                let filtered = chain.apply(to: request.sourceImage.clampedToExtent())
                 request.finish(with: filtered.cropped(to: sourceExtent), context: nil)
             }
         )
         mutable.frameDuration = frameDuration
         return mutable
-    }
-
-    // MARK: - Filter pipeline
-
-    nonisolated private static func applyFilters(
-        to source: CIImage,
-        params: FilterParameters
-    ) -> CIImage {
-        var image = source
-
-        if params.blurRadius > 0, let f = CIFilter(name: "CIGaussianBlur") {
-            f.setValue(image, forKey: kCIInputImageKey)
-            f.setValue(params.blurRadius, forKey: kCIInputRadiusKey)
-            image = f.outputImage ?? image
-        }
-
-        if params.saturation != 1.0 || params.brightness != 0, let f = CIFilter(name: "CIColorControls") {
-            f.setValue(image, forKey: kCIInputImageKey)
-            f.setValue(params.saturation, forKey: kCIInputSaturationKey)
-            f.setValue(params.brightness, forKey: kCIInputBrightnessKey)
-            image = f.outputImage ?? image
-        }
-
-        let warmth = params.autoTimeTint ? warmthForCurrentHour() : params.warmth
-        if warmth != 6500, let f = CIFilter(name: "CITemperatureAndTint") {
-            f.setValue(image, forKey: kCIInputImageKey)
-            f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-            f.setValue(CIVector(x: CGFloat(warmth), y: 0), forKey: "inputTargetNeutral")
-            image = f.outputImage ?? image
-        }
-
-        if params.vignetteIntensity > 0, let f = CIFilter(name: "CIVignette") {
-            f.setValue(image, forKey: kCIInputImageKey)
-            f.setValue(params.vignetteIntensity, forKey: kCIInputIntensityKey)
-            f.setValue(max(params.vignetteIntensity * 2, 1.0), forKey: kCIInputRadiusKey)
-            image = f.outputImage ?? image
-        }
-
-        return image
     }
 
     // MARK: - Time-of-Day Warmth
@@ -169,5 +132,93 @@ final class VideoEffectsManager {
         case 20..<23: return 3500
         default:      return 3000
         }
+    }
+}
+
+/// Per-composition CIFilter chain, built once and reused across frames instead
+/// of reconstructing filters via `CIFilter(name:)` on every decoded frame.
+/// AVFoundation does not document serial delivery for the per-frame filtering
+/// callbacks and `CIFilter` is not thread-safe, so input mutation is guarded by
+/// a lock; `outputImage` snapshots inputs into the returned `CIImage`, so the
+/// lock never spans actual rendering.
+private final class VideoFilterChain: @unchecked Sendable {
+    private let params: FilterParameters
+    private let lock = NSLock()
+    private let blur: CIFilter?
+    private let colorControls: CIFilter?
+    private let temperature: CIFilter?
+    private let vignette: CIFilter?
+    private var appliedWarmth: Double?
+
+    init(params: FilterParameters) {
+        self.params = params
+
+        if params.blurRadius > 0, let f = CIFilter(name: "CIGaussianBlur") {
+            f.setValue(params.blurRadius, forKey: kCIInputRadiusKey)
+            blur = f
+        } else {
+            blur = nil
+        }
+
+        if params.saturation != 1.0 || params.brightness != 0, let f = CIFilter(name: "CIColorControls") {
+            f.setValue(params.saturation, forKey: kCIInputSaturationKey)
+            f.setValue(params.brightness, forKey: kCIInputBrightnessKey)
+            colorControls = f
+        } else {
+            colorControls = nil
+        }
+
+        // With autoTimeTint the effective warmth changes at hour boundaries, so
+        // the filter must exist even when the current hour maps to neutral.
+        if params.autoTimeTint || params.warmth != 6500, let f = CIFilter(name: "CITemperatureAndTint") {
+            f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+            temperature = f
+        } else {
+            temperature = nil
+        }
+
+        if params.vignetteIntensity > 0, let f = CIFilter(name: "CIVignette") {
+            f.setValue(params.vignetteIntensity, forKey: kCIInputIntensityKey)
+            f.setValue(max(params.vignetteIntensity * 2, 1.0), forKey: kCIInputRadiusKey)
+            vignette = f
+        } else {
+            vignette = nil
+        }
+    }
+
+    func apply(to source: CIImage) -> CIImage {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var image = source
+
+        if let f = blur {
+            f.setValue(image, forKey: kCIInputImageKey)
+            image = f.outputImage ?? image
+        }
+
+        if let f = colorControls {
+            f.setValue(image, forKey: kCIInputImageKey)
+            image = f.outputImage ?? image
+        }
+
+        if let f = temperature {
+            let warmth = params.autoTimeTint ? VideoEffectsManager.warmthForCurrentHour() : params.warmth
+            if warmth != 6500 {
+                if warmth != appliedWarmth {
+                    f.setValue(CIVector(x: CGFloat(warmth), y: 0), forKey: "inputTargetNeutral")
+                    appliedWarmth = warmth
+                }
+                f.setValue(image, forKey: kCIInputImageKey)
+                image = f.outputImage ?? image
+            }
+        }
+
+        if let f = vignette {
+            f.setValue(image, forKey: kCIInputImageKey)
+            image = f.outputImage ?? image
+        }
+
+        return image
     }
 }

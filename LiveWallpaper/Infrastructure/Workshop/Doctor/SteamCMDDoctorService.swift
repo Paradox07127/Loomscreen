@@ -4,7 +4,6 @@ import CryptoKit
 import Foundation
 import LiveWallpaperCore
 import Observation
-import os
 
 enum DoctorProbeKind: String, Sendable, CaseIterable, Identifiable {
     case binaryIdentity
@@ -159,7 +158,6 @@ final class SteamCMDDoctorService {
     @ObservationIgnored private let runner: SteamCMDProcessRunner
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let fileManager: FileManager
-    @ObservationIgnored private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopDoctor")
 
     var probes: [DoctorProbeKind: DoctorProbeReport]
     var state: DoctorState = .idle
@@ -232,7 +230,7 @@ final class SteamCMDDoctorService {
         for kind in DoctorProbeKind.allCases where kind != .workingDirectory {
             setProbe(kind, status: .notRun)
         }
-        logger.info("Bound SteamCMD binary")
+        Logger.info("Bound SteamCMD binary", category: .workshop)
         await runProbe(.binaryIdentity)
     }
 
@@ -336,7 +334,7 @@ final class SteamCMDDoctorService {
         // license cache, so any change invalidates both downstream probes.
         setProbe(.cachedLogin, status: .notRun)
         setProbe(.wallpaperEngineOwnership, status: .notRun)
-        logger.info("Bound SteamCMD workdir (shared=\(isSharedSteamLibrary, privacy: .public))")
+        Logger.info("Bound SteamCMD workdir (shared=\(isSharedSteamLibrary))", category: .workshop)
         await runProbe(.workingDirectory)
     }
 

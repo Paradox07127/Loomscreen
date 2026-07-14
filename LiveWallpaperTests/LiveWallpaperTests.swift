@@ -854,7 +854,7 @@ struct ScreenConfigurationDecoderTests {
         #expect(decoded.htmlConfig?.allowMouseInteraction == false)
         #expect(decoded.htmlConfig?.blockTrackers == true)
         #expect(decoded.screenID == 42)
-        #expect(decoded.preferredVideoBookmarkData == nil)
+        #expect(decoded.videoBookmarkData == nil)
     }
 
     @Test("HTML wallpaper config persists customised toggles")
@@ -907,7 +907,7 @@ struct ScreenConfigurationDecoderTests {
 
         #expect(decoded.htmlSource == .url(URL(string: "https://example.com")!))
         #expect(decoded.htmlConfig == .default)
-        #expect(decoded.preferredVideoBookmarkData == nil)
+        #expect(decoded.videoBookmarkData == nil)
     }
 
     @Test("Switching from HTML back to video restores the saved bookmark")
@@ -923,7 +923,7 @@ struct ScreenConfigurationDecoderTests {
 
         #expect(restored == true)
         #expect(configuration.activeWallpaper == .video(bookmarkData: bookmark))
-        #expect(configuration.preferredVideoBookmarkData == bookmark)
+        #expect(configuration.videoBookmarkData == bookmark)
     }
 
     @Test("setAsLockScreen persists across encode/decode")

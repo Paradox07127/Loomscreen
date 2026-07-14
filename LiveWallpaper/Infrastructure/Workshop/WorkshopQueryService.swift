@@ -1,7 +1,6 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import CryptoKit
 import Foundation
-import os
 
 enum WorkshopSortMode: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
     case mostPopular
@@ -303,8 +302,6 @@ actor WorkshopQueryService {
     private let keychain: WorkshopKeychainStore
     private let session: URLSession
     private let cache: WorkshopQueryCache
-    private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopQuery")
-
     private var inflight: [String: Task<WorkshopQueryPage, Error>] = [:]
     private var tokenBucket = tokenCapacity
     private var tokenRefilledAt = Date()
@@ -417,7 +414,7 @@ actor WorkshopQueryService {
 
     private func performQuery(_ request: WorkshopQueryRequest, apiKey: String) async throws -> WorkshopQueryPage {
         let url = try buildQueryURL(for: request, apiKey: apiKey)
-        logger.info("📡 Workshop query → \(Self.redactedURLString(url), privacy: .public)")
+        Logger.info("Workshop query started: \(Self.redactedURLString(url))", category: .workshop)
 
         for attempt in 0..<Self.maxAttempts {
             try Task.checkCancellation()
@@ -441,7 +438,7 @@ actor WorkshopQueryService {
 
             if http.statusCode != 200 {
                 let snippet = String(decoding: data.prefix(300), as: UTF8.self)
-                logger.error("❌ Workshop query HTTP \(http.statusCode, privacy: .public): \(snippet, privacy: .public)")
+                Logger.error("Workshop query HTTP \(http.statusCode): \(snippet)", category: .workshop)
             }
 
             switch http.statusCode {
@@ -571,7 +568,7 @@ actor WorkshopQueryService {
     private func sleepBeforeRetry(attempt: Int, retryAfter: TimeInterval?) async throws {
         let exponential = min(60, pow(2, Double(attempt)) + Double.random(in: 0...1))
         let delay = retryAfter.map { min(60, max($0, exponential)) } ?? exponential
-        logger.debug("Workshop query retry scheduled after \(delay, privacy: .public) s")
+        Logger.debug("Workshop query retry scheduled after \(delay) s", category: .workshop)
         try await Self.sleep(seconds: delay)
     }
 
@@ -586,7 +583,7 @@ actor WorkshopQueryService {
             envelope = try JSONDecoder().decode(QueryFilesEnvelope.self, from: data)
         } catch {
             let snippet = String(decoding: data.prefix(300), as: UTF8.self)
-            logger.error("❌ Workshop decode failed: \(String(describing: error), privacy: .public) — body: \(snippet, privacy: .public)")
+            Logger.error("Workshop decode failed: \(String(describing: error)) — body: \(snippet)", category: .workshop)
             throw WorkshopQueryError.responseParseFailure
         }
         if Self.messageIndicatesDisabled(envelope.response.resultmsg) {
@@ -595,18 +592,18 @@ actor WorkshopQueryService {
         // Steam omits `publishedfiledetails` entirely when a query has zero
         // results — treat that as an empty page, not a schema error.
         guard let details = envelope.response.publishedfiledetails else {
-            logger.warning("⚠️ Workshop query: no publishedfiledetails (total=\(envelope.response.total?.value ?? -1, privacy: .public)) — treating as empty page")
+            Logger.warning("Workshop query: no publishedfiledetails (total=\(envelope.response.total?.value ?? -1)) — treating as empty page", category: .workshop)
             return WorkshopQueryPage(items: [], nextCursor: nil, totalAvailable: envelope.response.total?.value)
         }
-        let items = details.compactMap { Self.item(from: $0, logger: logger) }
+        let items = details.compactMap(Self.item(from:))
         let nextCursor = envelope.response.next_cursor?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmptyWorkshopQuery
-        logger.info("📡 Workshop query OK: \(items.count, privacy: .public) items (total=\(envelope.response.total?.value ?? -1, privacy: .public))")
+        Logger.info("Workshop query OK: \(items.count) items (total=\(envelope.response.total?.value ?? -1))", category: .workshop)
         return WorkshopQueryPage(items: items, nextCursor: nextCursor, totalAvailable: envelope.response.total?.value)
     }
 
-    private static func item(from payload: QueryFilesPayload, logger: os.Logger) -> WorkshopQueryItem? {
+    private static func item(from payload: QueryFilesPayload) -> WorkshopQueryItem? {
         guard let idString = payload.publishedfileid?.value, let id = UInt64(idString) else { return nil }
 
         var previewURL: URL?
@@ -616,7 +613,7 @@ actor WorkshopQueryService {
                 previewURL = url
             case .rejected(let reason):
                 let redacted = WorkshopDiagnosticRedactor.redact(candidate)
-                logger.warning("Rejected Workshop query preview URL (\(reason.rawValue, privacy: .public)): \(redacted, privacy: .public)")
+                Logger.warning("Rejected Workshop query preview URL (\(reason.rawValue)): \(redacted)", category: .workshop)
             }
         }
 

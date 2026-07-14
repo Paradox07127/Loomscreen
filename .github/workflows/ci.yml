@@ -1,0 +1,142 @@
+name: CI
+
+# Build gate for both SKUs. The previous CI (release-loomscreen.yml, deleted in
+# 3324b442) pinned Xcode 16.2 on macos-15 and died compiling
+# LiveWallpaperSharedUI: AdaptiveGlass.swift uses macOS 26 SDK APIs
+# (glassEffect / GlassEffectContainer / .buttonStyle(.glass)) that do not exist
+# in the macOS 15.x SDKs shipped with Xcode 16.x — #available gates the
+# runtime, not the compile. This workflow pins Xcode 26.6 (17F113) on the
+# macos-26 image, matching the local dev toolchain exactly.
+#
+# No secrets, no signing, no publishing — pure compile/test gate.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run-app-tests:
+        description: 'Also run the LiveWallpaperTests bundle (Pro scheme; slow, experimental on hosted runners)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Xcode 26.6 (17F113) == the toolchain used for local dev builds.
+  # Available on the macos-26 image (default there is 26.5 until 2026-07-21).
+  # If GitHub ever retires this version, the "Verify toolchain" step lists
+  # what is installed so the pin can be bumped in one place.
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  build:
+    name: Build ${{ matrix.sku }} (${{ matrix.scheme }})
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sku: pro
+            scheme: LiveWallpaper
+          - sku: lite
+            scheme: LiveWallpaperLite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify toolchain
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i macos
+
+      - name: Build ${{ matrix.scheme }}
+        run: |
+          set -o pipefail
+          if command -v xcbeautify >/dev/null 2>&1; then
+            formatter=(xcbeautify)
+          else
+            formatter=(cat)
+          fi
+          xcodebuild build \
+            -project LiveWallpaper.xcodeproj \
+            -scheme '${{ matrix.scheme }}' \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-${{ matrix.sku }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_EMIT_LOC_STRINGS=NO \
+            2>&1 | tee "$RUNNER_TEMP/build-${{ matrix.sku }}.log" \
+            | "${formatter[@]}"
+
+      - name: Tail raw build log on failure
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/build-${{ matrix.sku }}.log" || true
+
+  package-tests:
+    # Mirrors the SwiftPM section of scripts/release_candidate_check.sh:
+    # every package that owns a test target, sequential to avoid shared
+    # compiler/module-cache contention.
+    name: Swift package tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify toolchain
+        run: xcodebuild -version
+
+      - name: Run package tests (sequential)
+        run: |
+          set -euo pipefail
+          for package in LiveWallpaperCore LiveWallpaperProWPE LiveWallpaperVideoWeb; do
+            echo "== $package =="
+            swift test \
+              --package-path "Packages/$package" \
+              --scratch-path "$RUNNER_TEMP/SwiftPM/$package"
+          done
+
+  app-tests:
+    # Opt-in only (Actions tab -> CI -> Run workflow -> check the box).
+    # The LiveWallpaperTests bundle is large and some tests touch
+    # Metal/display; reliability on virtualized hosted runners is unproven.
+    # Signing: no Apple cert on the runner, so force ad-hoc manual signing —
+    # same approach scripts/release-app.sh uses for release archives.
+    name: App unit tests (Pro scheme, opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.run-app-tests
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify toolchain
+        run: xcodebuild -version
+
+      - name: Run LiveWallpaperTests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project LiveWallpaper.xcodeproj \
+            -scheme LiveWallpaper \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-tests" \
+            -only-testing:LiveWallpaperTests \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            SWIFT_EMIT_LOC_STRINGS=NO

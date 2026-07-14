@@ -63,6 +63,27 @@ struct WPEMSDFTextPipelineTests {
         #expect(material.uniforms["g_RenderVar3"]?.vectorValue == [0, 0, 0, 0])
     }
 
+    @Test("Object brightness multiplies fill, outline, and shadow colours (not alpha/offsets)")
+    func fontMaterialAppliesObjectBrightness() {
+        let object = WPESceneTextObject(
+            id: "t", name: "T", text: "Hi",
+            fontRelativePath: nil, pointSize: 32,
+            color: SIMD3<Double>(1, 0.5, 0.25), brightness: 2, alpha: 0.8,
+            origin: SIMD3<Double>(0, 0, 0), scale: SIMD3<Double>(1, 1, 1),
+            visible: true, horizontalAlignment: "center", verticalAlignment: "middle",
+            maxWidth: nil, parallaxDepth: SIMD2<Double>(0, 0),
+            outlineSize: 3, outlineColor: SIMD3<Double>(0, 1, 0),
+            blurSize: 0, shadowSize: 4, shadowColor: SIMD3<Double>(0, 0, 1),
+            shadowOffset: SIMD2<Double>(5, -6), letterSpacing: 1
+        )
+        let material = WPEMSDFFontMaterial.make(object: object, parameters: WPEMSDFParameters())
+        // rgb × 2 with >1 headroom preserved; alpha untouched.
+        #expect(material.uniforms["g_Color4"]?.vectorValue == [2, 1, 0.5, 0.8])
+        // Outline/shadow colours scale too; the packed offsets in .w must not.
+        #expect(material.uniforms["g_RenderVar1"]?.vectorValue == [0, 2, 0, 5])
+        #expect(material.uniforms["g_RenderVar2"]?.vectorValue == [0, 0, 2, -6])
+    }
+
     @Test("Layout produces one six-vertex quad per glyph grouped by atlas page")
     func layoutProducesQuadsPerGlyph() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

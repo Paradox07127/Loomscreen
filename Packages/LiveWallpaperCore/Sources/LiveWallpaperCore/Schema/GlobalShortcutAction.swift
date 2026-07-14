@@ -80,25 +80,6 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
         }
     }
 
-    public var displayDescription: String {
-        switch self {
-        case .togglePlayback:
-            return AppLanguagePreference.localizedString("Pause every active wallpaper, or resume them all.")
-        case .nextWallpaper:
-            return AppLanguagePreference.localizedString("Advance the playlist on the display under the cursor.")
-        case .previousWallpaper:
-            return AppLanguagePreference.localizedString("Step the playlist back on the display under the cursor.")
-        case .toggleMute:
-            return AppLanguagePreference.localizedString("Mute or unmute video and scene wallpapers.")
-        case .toggleMouseInteraction:
-            return AppLanguagePreference.localizedString("Turn pointer and click input on or off for scene and web wallpapers.")
-        case .toggleWallpapers:
-            return AppLanguagePreference.localizedString("Hide every wallpaper to reveal the desktop, or bring them back.")
-        case .reloadWallpapers:
-            return AppLanguagePreference.localizedString("Force every display to re-render its wallpaper.")
-        }
-    }
-
     /// Default binding shipped on first launch.
     public static func defaultBinding(for action: GlobalShortcutAction) -> GlobalShortcutBinding? {
         switch action {

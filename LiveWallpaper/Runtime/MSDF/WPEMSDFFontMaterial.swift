@@ -12,11 +12,16 @@ enum WPEMSDFFontMaterial {
         let outlineEnabled = object.outlineSize > 0
         let blurEnabled = object.blurSize > 0
         let shadowEnabled = object.shadowSize > 0 || object.shadowOffset.x != 0 || object.shadowOffset.y != 0
+        // Object `brightness` scales the whole rendered text layer (image-layer
+        // `rgb × brightness` semantics). The shader output is linear in the
+        // fill/outline/shadow colours, so multiplying each input — AFTER the
+        // 0...1 base clamp, keeping >1 headroom — equals output × brightness.
+        let brightness = max(object.brightness, 0)
         let uniforms: [String: WPESceneShaderConstantValue] = [
             "g_Color4": .vector([
-                clamped(object.color.x),
-                clamped(object.color.y),
-                clamped(object.color.z),
+                clamped(object.color.x) * brightness,
+                clamped(object.color.y) * brightness,
+                clamped(object.color.z) * brightness,
                 clamped(object.alpha)
             ]),
             "g_RenderVar0": .vector([
@@ -26,15 +31,15 @@ enum WPEMSDFFontMaterial {
                 max(object.shadowSize, 0)
             ]),
             "g_RenderVar1": .vector([
-                clamped(object.outlineColor.x),
-                clamped(object.outlineColor.y),
-                clamped(object.outlineColor.z),
+                clamped(object.outlineColor.x) * brightness,
+                clamped(object.outlineColor.y) * brightness,
+                clamped(object.outlineColor.z) * brightness,
                 object.shadowOffset.x
             ]),
             "g_RenderVar2": .vector([
-                clamped(object.shadowColor.x),
-                clamped(object.shadowColor.y),
-                clamped(object.shadowColor.z),
+                clamped(object.shadowColor.x) * brightness,
+                clamped(object.shadowColor.y) * brightness,
+                clamped(object.shadowColor.z) * brightness,
                 object.shadowOffset.y
             ]),
             "g_RenderVar3": .vector([shadowEnabled ? 1 : 0, 0, 0, 0]),

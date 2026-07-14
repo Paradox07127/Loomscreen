@@ -1,6 +1,105 @@
 #if !LITE_BUILD
 import Foundation
 import JavaScriptCore
+import os
+
+/// Latest-completed-outcome exchange between a script engine's serial queue and
+/// the frame thread (ADR-003 step 1). The queue publishes each finished
+/// evaluation; the frame drains the newest unconsumed one — `takeLatest()`
+/// returning nil is the "nothing new, keep last" sentinel. `combine` folds a
+/// not-yet-consumed outcome into the next publish so one-shot payloads (layer
+/// video commands) survive being superseded, and the monotonic generation
+/// guarantees an outcome consumed once can never resurface.
+final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
+    private struct State: Sendable {
+        var pending: Outcome?
+        var publishedGeneration: UInt64 = 0
+        var consumedGeneration: UInt64 = 0
+        var tickStartedAtUptimeNanos: UInt64?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let combine: @Sendable (_ pending: Outcome, _ newer: Outcome) -> Outcome
+
+    init(
+        combine: @escaping @Sendable (_ pending: Outcome, _ newer: Outcome) -> Outcome = { _, newer in newer }
+    ) {
+        self.combine = combine
+    }
+
+    /// Frame side: the newest unconsumed outcome (consumes it), or nil (keep last).
+    func takeLatest() -> Outcome? {
+        state.withLock { s in
+            guard s.publishedGeneration > s.consumedGeneration else { return nil }
+            s.consumedGeneration = s.publishedGeneration
+            defer { s.pending = nil }
+            return s.pending
+        }
+    }
+
+    /// Frame side: claims the single tick in flight; false = one is still running,
+    /// so the caller skips scheduling this frame (natural back-pressure).
+    func beginTick() -> Bool {
+        state.withLock { s in
+            guard s.tickStartedAtUptimeNanos == nil else { return false }
+            s.tickStartedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
+            return true
+        }
+    }
+
+    /// Watchdog probe: how long the in-flight tick has been running, when that
+    /// exceeds `budget`; nil while idle or within budget.
+    func inFlightTickSeconds(exceeding budget: TimeInterval) -> TimeInterval? {
+        state.withLock { s in
+            guard let started = s.tickStartedAtUptimeNanos else { return nil }
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- started) / 1_000_000_000
+            return elapsed > budget ? elapsed : nil
+        }
+    }
+
+    /// Queue side: a frame tick finished (also releases the in-flight claim).
+    func publishTick(_ outcome: Outcome) {
+        state.withLock { s in
+            s.tickStartedAtUptimeNanos = nil
+            Self.store(outcome, into: &s, combine: combine)
+        }
+    }
+
+    /// Queue side: an event/property evaluation finished (holds no tick claim).
+    func publishEvent(_ outcome: Outcome) {
+        state.withLock { s in Self.store(outcome, into: &s, combine: combine) }
+    }
+
+    /// Caller side, after a bounded synchronous evaluation whose result the
+    /// caller applies directly: folds any unconsumed outcome into it and marks
+    /// everything consumed, so an older pending tick can't clobber the newer
+    /// synchronous result a frame later.
+    func supersede(with outcome: Outcome) -> Outcome {
+        state.withLock { s in
+            var merged = outcome
+            if s.publishedGeneration > s.consumedGeneration, let pending = s.pending {
+                merged = combine(pending, outcome)
+            }
+            s.pending = nil
+            s.publishedGeneration += 1
+            s.consumedGeneration = s.publishedGeneration
+            return merged
+        }
+    }
+
+    private static func store(
+        _ outcome: Outcome,
+        into s: inout State,
+        combine: (_ pending: Outcome, _ newer: Outcome) -> Outcome
+    ) {
+        if s.publishedGeneration > s.consumedGeneration, let pending = s.pending {
+            s.pending = combine(pending, outcome)
+        } else {
+            s.pending = outcome
+        }
+        s.publishedGeneration += 1
+    }
+}
 
 /// Sandboxed evaluator for one WPE SceneScript module. Each scripted
 /// scene field (text content, origin, color, alpha, …) gets its own
@@ -29,6 +128,8 @@ final class WPESceneScriptInstance {
     private let tickBudget: TimeInterval
     private var isPoisoned = false
     private(set) var lastValue: String
+    private let asyncOutcomeSlot = WPESceneScriptOutcomeSlot<String?>()
+    private var didWarnTickOverBudget = false
 
     /// Engines whose worker is stuck inside JS. Retained forever — see the
     /// class doc. Bounded by the number of hostile scripts ever loaded.
@@ -92,6 +193,44 @@ final class WPESceneScriptInstance {
         return lastValue
     }
 
+    // MARK: Async tick (ADR-003 step 1)
+
+    /// Load-path seeding: one bounded synchronous tick so the first frame shows
+    /// the scripted value instead of popping the authored placeholder.
+    func seedAsyncTick() {
+        guard hasUpdateFunction, !isPoisoned else { return }
+        guard let outcome = engine.tick(lastValue: lastValue, budget: tickBudget) else {
+            isPoisoned = true
+            Self.quarantine.append(engine)
+            Logger.warning(
+                "SceneScript update() exceeded \(tickBudget)s — script frozen at its last value",
+                category: .wpeRender
+            )
+            return
+        }
+        asyncOutcomeSlot.publishEvent(outcome)
+    }
+
+    /// Frame-path tick, async mode: applies the newest COMPLETED engine outcome,
+    /// schedules the next tick when none is in flight, and never waits.
+    func liveTickString() -> String {
+        guard hasUpdateFunction, !isPoisoned else { return lastValue }
+        if let fresh = asyncOutcomeSlot.takeLatest(), let newValue = fresh {
+            lastValue = newValue
+        }
+        if asyncOutcomeSlot.beginTick() {
+            engine.tickAsync(lastValue: lastValue, publishTo: asyncOutcomeSlot)
+        } else if !didWarnTickOverBudget,
+                  let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
+            didWarnTickOverBudget = true
+            Logger.warning(
+                "SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last value until it completes",
+                category: .wpeRender
+            )
+        }
+        return lastValue
+    }
+
     /// Owns the JSContext and the only thread allowed to touch it. The class
     /// is `@unchecked Sendable` because `context`/`updateFunction` are only
     /// ever accessed on `queue`; callers exchange plain `String`s.
@@ -132,6 +271,14 @@ final class WPESceneScriptInstance {
             runWithBudget(budget) { self.tickOnQueue(lastValue: lastValue) }
         }
 
+        /// Async-mode frame tick: runs on the engine queue and publishes the
+        /// completed outcome; the frame thread never waits on it.
+        func tickAsync(lastValue: String, publishTo slot: WPESceneScriptOutcomeSlot<String?>) {
+            queue.async {
+                slot.publishTick(self.tickOnQueue(lastValue: lastValue))
+            }
+        }
+
         private func runWithBudget<T>(
             _ budget: TimeInterval,
             _ work: @escaping @Sendable () -> T
@@ -161,7 +308,7 @@ final class WPESceneScriptInstance {
                 guard let self, !self.didLogException else { return }
                 self.didLogException = true
                 Logger.warning(
-                    "Text SceneScript raised an uncaught JS exception — text frozen at its last value: \(ex?.toString() ?? "unknown")",
+                    "Text SceneScript raised an uncaught JS exception — keeping last value; update() retries each tick (logged once): \(ex?.toString() ?? "unknown")",
                     category: .wpeRender
                 )
             }
@@ -243,7 +390,9 @@ final class WPESceneScriptInstance {
 
         let engine = JSValue(newObjectIn: context)!
         let getTimeOfDay: @convention(block) () -> Double = {
-            let date = Date()
+            // Oracle freezes wall-clock so `engine.getTimeOfDay()` (day-fraction
+            // clock scripts) can't drift the trace across a minute boundary.
+            let date = WPEOracleMode.isEnabled ? WPEOracleMode.frozenWallClock : Date()
             let cal = Calendar.current
             let comps = cal.dateComponents([.hour, .minute, .second], from: date)
             let secs = Double((comps.hour ?? 0) * 3600 + (comps.minute ?? 0) * 60 + (comps.second ?? 0))
@@ -349,6 +498,32 @@ final class WPESceneScriptInstance {
             return proxy
         }
         context.setObject(createScriptProperties, forKeyedSubscript: "createScriptProperties" as NSString)
+
+        // Determinize the two ambient sources scene scripts read for CONTENT: the
+        // wall clock (Clock/Date texts via JS `new Date()` / `Date.now()`) and
+        // `Math.random`. The engine's *scene* clock is frozen elsewhere, but these
+        // JS globals bypass it — a capture crossing a minute boundary (or any RNG
+        // draw) hashed differently. The clock is VIRTUAL, not constant: frozen base
+        // + 1ms per call, advanced by call count only — a hard-frozen Date.now()
+        // livelocks any script that busy-waits on a deadline (`while(Date.now()<t)`),
+        // while call-count advancement stays byte-identical across runs (tick order
+        // is sorted) yet always lets deadlines pass. Installed before base classes +
+        // the module eval, so every read the script makes sees the injected globals.
+        // Oracle-only: in production this block is skipped, so the JS Date /
+        // Math.random the live wallpaper sees stay byte-for-byte unchanged.
+        if WPEOracleMode.isEnabled {
+            let frozenMillis = Int(WPEOracleMode.frozenWallClockMillis)
+            context.evaluateScript("""
+            ;(function(){var R=Date,F=\(frozenMillis),n=0;\
+            function now(){return F+(n++);}\
+            function D(){if(arguments.length===0)return new R(now());\
+            return new (Function.prototype.bind.apply(R,[null].concat([].slice.call(arguments))))();}\
+            D.prototype=R.prototype;D.now=now;D.parse=R.parse;D.UTC=R.UTC;Date=D;\
+            var s=0x9e3779b9>>>0;Math.random=function(){s=(s+0x6D2B79F5)|0;\
+            var t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;\
+            return((t^(t>>>14))>>>0)/4294967296;};})();
+            """)
+        }
     }
 }
 
@@ -456,6 +631,10 @@ final class WPELayerScriptInstance {
     private let tickBudget: TimeInterval
     private var isPoisoned = false
     let initialOutput: WPELayerScriptOutput
+    private let asyncOutcomeSlot = WPESceneScriptOutcomeSlot<WPELayerScriptOutput>(
+        combine: { WPELayerScriptInstance.mergedOutputs(pending: $0, newer: $1) }
+    )
+    private var didWarnTickOverBudget = false
 
     private static var quarantine: [LayerEngine] = []
 
@@ -571,6 +750,103 @@ final class WPELayerScriptInstance {
         return output
     }
 
+    // MARK: Async tick (ADR-003 step 1)
+
+    /// Frame-path tick, async mode: drains the newest COMPLETED output (ticks,
+    /// cursor events and property pushes all publish into the same slot, so the
+    /// drained value is already merged in engine-queue order) and schedules the
+    /// next `update()` when none is in flight. Never waits; nil = nothing new
+    /// (the caller keeps the last applied state).
+    func liveTick(
+        runtimeSeconds: Double? = nil,
+        pointerFrame: WPEPointerFrame? = nil
+    ) -> WPELayerScriptOutput? {
+        guard !isPoisoned else { return nil }
+        let fresh = asyncOutcomeSlot.takeLatest()
+        if hasUpdateFunction {
+            if asyncOutcomeSlot.beginTick() {
+                engine.tickAsync(
+                    runtimeSeconds: runtimeSeconds,
+                    pointerFrame: pointerFrame,
+                    publishTo: asyncOutcomeSlot
+                )
+            } else if !didWarnTickOverBudget,
+                      let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
+                didWarnTickOverBudget = true
+                Logger.warning(
+                    "Layer SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last state until it completes",
+                    category: .wpeRender
+                )
+            }
+        }
+        return fresh
+    }
+
+    /// Async-mode cursor event: fire-and-forget onto the engine queue; the
+    /// handler's output publishes into the slot and is applied by the next
+    /// frame's `liveTick` drain, so the frame path never waits on it.
+    func liveDispatchCursorEvent(
+        _ event: WPELayerScriptCursorEvent,
+        pointerFrame: WPEPointerFrame,
+        runtimeSeconds: Double? = nil
+    ) {
+        guard !isPoisoned else { return }
+        engine.dispatchCursorEventAsync(
+            event,
+            pointerFrame: pointerFrame,
+            runtimeSeconds: runtimeSeconds,
+            publishTo: asyncOutcomeSlot
+        )
+    }
+
+    /// Async-mode companion to `applyUserProperties` (load/settings paths, still
+    /// bounded-synchronous): folds the result through the outcome slot so a
+    /// pending tick published BEFORE the property push can't clobber it a frame
+    /// later — its one-shot video commands are merged in instead of lost.
+    /// Waits 2× the tick budget: the push queues behind any in-flight async
+    /// tick, which the frame watchdog tolerates warn-only for up to one budget,
+    /// so a slow-but-finite tick draining first must not poison the script here.
+    @discardableResult
+    func applyUserPropertiesSuperseding(
+        _ properties: [String: WPESceneScriptPropertyValue],
+        runtimeSeconds: Double? = nil
+    ) -> WPELayerScriptOutput? {
+        guard !isPoisoned, !properties.isEmpty else { return nil }
+        let budget = tickBudget * 2
+        guard let output = engine.applyUserProperties(
+            properties,
+            runtimeSeconds: runtimeSeconds,
+            budget: budget
+        ) else {
+            isPoisoned = true
+            Self.quarantine.append(engine)
+            Logger.warning("Layer SceneScript applyUserProperties() exceeded \(budget)s — frozen", category: .wpeRender)
+            return nil
+        }
+        return asyncOutcomeSlot.supersede(with: output)
+    }
+
+    /// Newest-wins state + accumulated one-shot video commands. `newer` ran later
+    /// on the engine's serial queue, so its assignment flags and created-layer
+    /// list are supersets of `pending`'s; only the video commands (and
+    /// command-only `others` entries the newer run no longer reports) need carrying.
+    nonisolated static func mergedOutputs(
+        pending: WPELayerScriptOutput,
+        newer: WPELayerScriptOutput
+    ) -> WPELayerScriptOutput {
+        var merged = newer
+        merged.own.videoCommands = pending.own.videoCommands + newer.own.videoCommands
+        for (name, pendingState) in pending.others {
+            if var newerState = merged.others[name] {
+                newerState.videoCommands = pendingState.videoCommands + newerState.videoCommands
+                merged.others[name] = newerState
+            } else {
+                merged.others[name] = pendingState
+            }
+        }
+        return merged
+    }
+
     private final class LayerEngine: @unchecked Sendable {
         enum SetupOutcome {
             case ready(hasUpdate: Bool, output: WPELayerScriptOutput)
@@ -672,6 +948,38 @@ final class WPELayerScriptInstance {
         ) -> WPELayerScriptOutput? {
             runWithBudget(budget) {
                 self.applyUserPropertiesOnQueue(properties, runtimeSeconds: runtimeSeconds)
+            }
+        }
+
+        /// Async-mode frame tick: runs on the engine queue and publishes the
+        /// completed output; the frame thread never waits on it.
+        func tickAsync(
+            runtimeSeconds: Double?,
+            pointerFrame: WPEPointerFrame?,
+            publishTo slot: WPESceneScriptOutcomeSlot<WPELayerScriptOutput>
+        ) {
+            queue.async {
+                slot.publishTick(self.tickOnQueue(
+                    runtimeSeconds: runtimeSeconds,
+                    pointerFrame: pointerFrame
+                ))
+            }
+        }
+
+        /// Async-mode cursor event: same handler as the synchronous path, but the
+        /// output is published to the slot instead of returned to a waiting caller.
+        func dispatchCursorEventAsync(
+            _ event: WPELayerScriptCursorEvent,
+            pointerFrame: WPEPointerFrame,
+            runtimeSeconds: Double?,
+            publishTo slot: WPESceneScriptOutcomeSlot<WPELayerScriptOutput>
+        ) {
+            queue.async {
+                slot.publishEvent(self.dispatchCursorEventOnQueue(
+                    event,
+                    pointerFrame: pointerFrame,
+                    runtimeSeconds: runtimeSeconds
+                ))
             }
         }
 
@@ -1167,7 +1475,9 @@ extension WPESceneScriptPropertyValue {
 /// scene, used for cross-script coordination (e.g. a media-player widget's
 /// settings/visibility state). Each script's `JSContext` is isolated, so `shared`
 /// can't be one JSValue; it's a host-owned, lock-guarded store that per-context
-/// `shared` Proxies read/write. Values cross contexts as primitives.
+/// `shared` Proxies read/write. Values cross contexts as detached COPIES, so
+/// container mutation is re-published to the store by `wpeInstallSharedState`'s
+/// write-back proxy rather than relying on reference identity.
 final class WPESharedScriptState: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String: Any] = [:]
@@ -1192,7 +1502,21 @@ private func wpeBridgeJSValueToHost(_ value: JSValue) -> Any? {
 }
 
 /// Install `shared` as a Proxy whose traps route to `store`, so every script in
-/// the scene reads/writes the same primitives across isolated contexts.
+/// the scene reads/writes the same state across isolated contexts.
+///
+/// A raw `__sharedGet` hands back a DETACHED copy (values cross the host bridge
+/// by value — `JSValue.toObject()`), so WPE's reference semantics on containers
+/// were silently dropped: `shared.log.push(x)` mutated a temporary and the store
+/// never saw it. 三体 3509243656's 日志 (object 1227) keeps its whole civilisation
+/// state in `shared.logEntries` / `shared.civilizationRecords` / `shared.lastStates`
+/// — every `push`/`unshift` and field write vanished, so the log and the survival
+/// leaderboard stayed permanently empty while the primitive counters ticked on.
+///
+/// Fix: object/array reads return a write-back Proxy bound to the ROOT key. Any
+/// mutating method, property set, or delete — at any depth, including on an
+/// element handed out by `find()` — re-publishes the whole root container to the
+/// store. Primitives keep the direct fast path (no proxy allocation); they are
+/// the hot reads (`shared.xx1`…) and already round-tripped correctly.
 private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JSContext) {
     let get: @convention(block) (String) -> Any? = { store.get($0) }
     let set: @convention(block) (String, JSValue) -> Void = { key, value in
@@ -1201,8 +1525,39 @@ private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JS
     context.setObject(get, forKeyedSubscript: "__sharedGet" as NSString)
     context.setObject(set, forKeyedSubscript: "__sharedSet" as NSString)
     _ = context.evaluateScript("""
+    var __sharedMutators = {
+        push: 1, pop: 1, shift: 1, unshift: 1, splice: 1, sort: 1, reverse: 1,
+        fill: 1, copyWithin: 1, add: 1, clear: 1, delete: 1, set: 1
+    };
+    function __sharedWrap(rootKey, root, node) {
+        if (node === null || typeof node !== 'object') { return node; }
+        return new Proxy(node, {
+            get: function(t, p) {
+                var v = t[p];
+                // Symbol-keyed access (Symbol.iterator → spread/for-of) must stay
+                // raw: wrapping the iterator protocol breaks it for no benefit,
+                // since iteration itself never mutates.
+                if (typeof p === 'symbol') {
+                    return (typeof v === 'function') ? v.bind(t) : v;
+                }
+                if (typeof v === 'function') {
+                    return function() {
+                        var res = v.apply(t, arguments);
+                        if (__sharedMutators[p] === 1) { __sharedSet(rootKey, root); }
+                        return __sharedWrap(rootKey, root, res);
+                    };
+                }
+                return __sharedWrap(rootKey, root, v);
+            },
+            set: function(t, p, v) { t[p] = v; __sharedSet(rootKey, root); return true; },
+            deleteProperty: function(t, p) { delete t[p]; __sharedSet(rootKey, root); return true; }
+        });
+    }
     var shared = new Proxy({}, {
-        get: function(_t, k) { return __sharedGet(k); },
+        get: function(_t, k) {
+            var v = __sharedGet(k);
+            return (v !== null && typeof v === 'object') ? __sharedWrap(k, v, v) : v;
+        },
         set: function(_t, k, v) { __sharedSet(k, v); return true; },
         has: function(_t, k) { return __sharedGet(k) !== undefined; }
     });
@@ -1334,29 +1689,6 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         poisonLock.lock(); poisoned = true; poisonLock.unlock()
     }
 
-    /// Markers that make a transform script time/audio/random-driven and thus not
-    /// statically resolvable. Conservative: a false "dynamic" only leaves the
-    /// baked value untouched (no regression). Matching is CASE-SENSITIVE on
-    /// purpose — `update` contains a lowercase "date", so a case-insensitive
-    /// `Date` check would wrongly classify every origin script as dynamic.
-    private static let dynamicTokens = [
-        "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
-        "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
-        "input.cursorWorldPosition", "shared.", "shared["
-    ]
-
-    /// Static transform resolution runs during parsing, where retaining a hung
-    /// JSContext is worse than falling back to the baked value. Conservative
-    /// rejection is acceptable here: these scripts can still be handled by the
-    /// dynamic transform path when they genuinely need live evaluation.
-    private static let staticExecutionBlocklistPatterns = [
-        #"\bwhile\s*\("#,
-        #"\bfor\s*\("#,
-        #"\bdo\s*\{"#,
-        #"\beval\s*\("#,
-        #"\bFunction\s*\("#
-    ]
-
     /// `evaluationBudget` covers the first call's cold context bootstrap
     /// (installSandbox + base classes + module eval) plus `update()`, so it is
     /// generous enough never to falsely time out a legitimate script while still
@@ -1366,11 +1698,9 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         self.evaluationBudget = evaluationBudget
     }
 
+    // Heuristics live with the package parser so bake-time and runtime agree.
     static func isStaticallyResolvable(_ script: String) -> Bool {
-        guard !dynamicTokens.contains(where: { script.contains($0) }) else { return false }
-        return !staticExecutionBlocklistPatterns.contains {
-            script.range(of: $0, options: .regularExpression) != nil
-        }
+        WPETransformScriptStaticAnalysis.isStaticallyResolvable(script)
     }
 
     /// Returns the script-computed vec3, or nil if the script is dynamic, fails to
@@ -1482,6 +1812,12 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
     private let tickBudget: TimeInterval
     private var lastValue: SIMD3<Double>
     private var isPoisoned = false
+    private let asyncOutcomeSlot = WPESceneScriptOutcomeSlot<SIMD3<Double>?>()
+    /// Latest completed inner result: nil mirrors the legacy "script returned no
+    /// value this tick" contract (caller falls back to the baked transform).
+    private var lastAsyncInner: SIMD3<Double>?
+    private var hasAsyncOutcome = false
+    private var didWarnTickOverBudget = false
 
     init(
         script: String,
@@ -1542,6 +1878,55 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         return result
     }
 
+    // MARK: Async tick (ADR-003 step 1)
+
+    /// Load-path seeding: one bounded synchronous tick so the first frame uses
+    /// the scripted transform instead of popping from the baked value.
+    func seedAsyncTick(pointerPosition: SIMD2<Double>, runtimeSeconds: Double? = nil) {
+        guard !isPoisoned else { return }
+        guard let outcome = engine.tick(
+            currentValue: lastValue,
+            pointerPosition: pointerPosition,
+            runtimeSeconds: runtimeSeconds,
+            budget: tickBudget
+        ) else {
+            isPoisoned = true
+            return
+        }
+        asyncOutcomeSlot.publishEvent(outcome)
+    }
+
+    /// Frame-path tick, async mode. Returns the latest known scripted value —
+    /// while a tick is in flight the previous result persists (keep-last); a
+    /// completed inner-nil maps to nil exactly like the legacy contract.
+    func liveTick(pointerPosition: SIMD2<Double>, runtimeSeconds: Double? = nil) -> SIMD3<Double>? {
+        guard !isPoisoned else { return nil }
+        if let fresh = asyncOutcomeSlot.takeLatest() {
+            hasAsyncOutcome = true
+            lastAsyncInner = fresh
+            if let fresh {
+                lastValue = fresh
+            }
+        }
+        if asyncOutcomeSlot.beginTick() {
+            engine.tickAsync(
+                currentValue: lastValue,
+                pointerPosition: pointerPosition,
+                runtimeSeconds: runtimeSeconds,
+                publishTo: asyncOutcomeSlot
+            )
+        } else if !didWarnTickOverBudget,
+                  let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
+            didWarnTickOverBudget = true
+            Logger.warning(
+                "Transform SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last transform until it completes",
+                category: .wpeRender
+            )
+        }
+        guard hasAsyncOutcome else { return nil }
+        return lastAsyncInner == nil ? nil : lastValue
+    }
+
     private final class Engine: @unchecked Sendable {
         enum SetupOutcome {
             case ready
@@ -1585,6 +1970,23 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
                     pointerPosition: pointerPosition,
                     runtimeSeconds: runtimeSeconds
                 )
+            }
+        }
+
+        /// Async-mode frame tick: runs on the engine queue and publishes the
+        /// completed outcome; the frame thread never waits on it.
+        func tickAsync(
+            currentValue: SIMD3<Double>,
+            pointerPosition: SIMD2<Double>,
+            runtimeSeconds: Double?,
+            publishTo slot: WPESceneScriptOutcomeSlot<SIMD3<Double>?>
+        ) {
+            queue.async {
+                slot.publishTick(self.tickOnQueue(
+                    currentValue: currentValue,
+                    pointerPosition: pointerPosition,
+                    runtimeSeconds: runtimeSeconds
+                ))
             }
         }
 

@@ -11,8 +11,6 @@ public enum WPEScenePreflightTier: String, Codable, Equatable, Sendable {
     /// (e.g. an effect lands on a built-in fragment shader that doesn't
     /// exactly match the WPE original).
     case degradedPlayable
-    /// Scene declares custom GLSL — needs the WPE→MSL translator to play.
-    case shaderTranslationRequired
     /// Scene needs a runtime subsystem that's not implemented yet
     /// (particle, text, sound, light, animation layer / puppet warp).
     case runtimeSystemsRequired
@@ -26,8 +24,6 @@ public enum WPEScenePreflightTier: String, Codable, Equatable, Sendable {
             return String(localized: "Native", defaultValue: "Native", comment: "Scene preflight tier label.")
         case .degradedPlayable:
             return String(localized: "Approximate", defaultValue: "Approximate", comment: "Scene preflight tier label.")
-        case .shaderTranslationRequired:
-            return String(localized: "Needs shader translation", defaultValue: "Needs shader translation", comment: "Scene preflight tier label.")
         case .runtimeSystemsRequired:
             return String(localized: "Needs runtime systems", defaultValue: "Needs runtime systems", comment: "Scene preflight tier label.")
         case .unsupported:

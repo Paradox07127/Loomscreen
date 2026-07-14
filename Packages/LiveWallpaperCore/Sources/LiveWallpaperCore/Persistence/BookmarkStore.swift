@@ -125,29 +125,19 @@ public final class BookmarkStore {
     }
 
     public static func defaultLabel(for content: WallpaperContent, sourceDisplayName: String? = nil) -> String {
-        switch content {
-        case .video:
-            if let trimmed = sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !trimmed.isEmpty {
-                return trimmed
-            }
-            return "Video"
-        case .html(let source, _):
-            return source.displayName
-        case .metalShader(let source):
-            switch source {
-            case .builtin(let preset): return preset.localizedTitle
-            case .custom:              return String(localized: "Custom Shader", comment: "Bookmark label for a user-imported Metal shader.")
-            }
-        case .scene(let descriptor):
-            return String(localized: "Scene \(descriptor.workshopID)", comment: "Default bookmark label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
-        case .monitor:
-            // Monitor wallpapers aren't user-bookmarkable in v1; this branch
-            // only exists to keep the switch exhaustive.
-            return "Monitor"
+        if let name = nonResolvingSourceDisplayName(for: content) {
+            return name
         }
+        if let trimmed = sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !trimmed.isEmpty {
+            return trimmed
+        }
+        return "Video"
     }
 
+    /// Single source of truth for the content→display-name mapping.
+    /// `.video` returns nil because its name needs either the caller-supplied
+    /// label (`defaultLabel`) or a bookmark resolve (`defaultSourceDisplayName`).
     public static func nonResolvingSourceDisplayName(for content: WallpaperContent) -> String? {
         switch content {
         case .video:
@@ -162,25 +152,16 @@ public final class BookmarkStore {
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         case .monitor:
+            // Monitor wallpapers aren't user-bookmarkable in v1; this branch
+            // only exists to keep the switch exhaustive.
             return "Monitor"
         }
     }
 
     public static func defaultSourceDisplayName(for content: WallpaperContent) -> String? {
-        switch content {
-        case .video(let bookmarkData, _):
+        if case .video(let bookmarkData, _) = content {
             return ResourceUtilities.resolveBookmarkName(bookmarkData)
-        case .html(let source, _):
-            return source.displayName
-        case .metalShader(let source):
-            switch source {
-            case .builtin(let preset): return preset.localizedTitle
-            case .custom:              return String(localized: "Custom Shader", comment: "Bookmark label for a user-imported Metal shader.")
-            }
-        case .scene(let descriptor):
-            return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
-        case .monitor:
-            return "Monitor"
         }
+        return nonResolvingSourceDisplayName(for: content)
     }
 }

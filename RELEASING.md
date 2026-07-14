@@ -30,24 +30,17 @@ a public update feature and do not rely on it for release delivery.
 
 ## Preflight
 
-Minimum checks before creating artifacts:
+Run the complete sequential gate before creating artifacts:
 
 ```sh
-xcodebuild test \
-  -project LiveWallpaper.xcodeproj \
-  -scheme LiveWallpaper \
-  -destination 'platform=macOS'
-
-xcodebuild build \
-  -project LiveWallpaper.xcodeproj \
-  -scheme LiveWallpaperLite \
-  -destination 'platform=macOS'
-
-git diff --check
+scripts/release_candidate_check.sh
 ```
 
-If the maintainer-local `scripts/release_candidate_check.sh` helper is present,
-run it as the fuller release gate.
+The script runs the Core, ProWPE, and VideoWeb package tests, signed Pro tests,
+the Lite build, release build-setting/privacy checks, and `git diff --check`.
+Package, Pro, and Lite checks are deliberately sequential to avoid shared build
+database and compiler-cache contention. Maintainer-local audit/i18n helpers may
+be run in addition, but are not required by this portable gate.
 
 ## Manual packaging
 

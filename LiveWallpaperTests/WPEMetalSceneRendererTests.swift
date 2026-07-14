@@ -25,6 +25,14 @@ struct WPEMetalSceneRendererTests {
         #expect(view.acceptsFirstMouse(for: nil) == true)
     }
 
+    @Test("Script async-tick kill-switch defaults ON and honors a bool override")
+    func scriptAsyncTickKillSwitchResolution() {
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: nil) == true)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: false) == false)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: true) == true)
+        #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: "junk") == true)
+    }
+
     @Test("Initializes with an MTKView when Metal is available")
     func initializesWithMTKView() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -406,6 +414,10 @@ struct WPEMetalSceneRendererTests {
 
     @Test("Computes runtime uniforms from clock pointer and performance profile during load render")
     func computesRuntimeUniformsDuringLoadRender() async throws {
+        // This test verifies the NORMAL frame-clock/pointer path; force the render oracle
+        // off so a developer's persisted `WPEOracleEnabled` can't freeze the clock/pointer.
+        WPEOracleMode.testingOverride = false
+        defer { WPEOracleMode.testingOverride = nil }
         let device = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }

@@ -45,6 +45,30 @@ final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Send
         self.handle = handle
     }
 
+    /// Async construction seam for MainActor import/session paths. Blocking
+    /// open/index work runs on `WPEPackageIndexLoader`'s utility queue and the
+    /// already-positioned handle is transferred into the provider.
+    static func open(
+        packageURL: URL,
+        limits: WallpaperEnginePackage.IndexLimits = .production
+    ) async throws -> WPEPackageSceneAssetProvider {
+        let prepared = try await WPEPackageIndexLoader.load(from: packageURL, limits: limits)
+        do {
+            try Task.checkCancellation()
+        } catch {
+            try? prepared.handle.close()
+            throw error
+        }
+        return WPEPackageSceneAssetProvider(prepared: prepared)
+    }
+
+    private init(prepared: WPEPackageIndexLoader.PreparedPackage) {
+        self.stagingRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("\(Self.stagingDirectoryNamePrefix)\(UUID().uuidString)", isDirectory: true)
+        self.package = prepared.package
+        self.handle = prepared.handle
+    }
+
     deinit {
         try? handle.close()
         try? FileManager.default.removeItem(at: stagingRoot)

@@ -48,13 +48,13 @@ struct SparkleIntegrationTests {
     func appSourceKeepsSparkleMarkedAsTestingOnly() throws {
         let configuration = try Self.projectFile("LiveWallpaper/Infrastructure/SparkleUpdateConfiguration.swift")
         let panel = try Self.projectFile("LiveWallpaper/Views/Settings/SparkleUpdateTestPanel.swift")
-        let generalSettings = try Self.projectFile("LiveWallpaper/Views/GeneralSettingsView.swift")
+        let aboutTab = try Self.projectFile("LiveWallpaper/Views/GeneralSettingsAboutTab.swift")
 
         #expect(configuration.contains("static let isPublicDistributionEnabled = false"))
         #expect(configuration.contains("!isPublicDistributionEnabled"))
         #expect(configuration.contains("SparkleTestManualChecksEnabled"))
         #expect(panel.contains(".disabled(!configuration.manualChecksEnabled)"))
-        #expect(generalSettings.contains("if SparkleUpdateConfiguration.manualChecksEnabled"))
+        #expect(aboutTab.contains("if SparkleUpdateConfiguration.manualChecksEnabled"))
     }
 
     private static func plistDictionary(_ relativePath: String, filePath: String = #filePath) throws -> [String: Any] {

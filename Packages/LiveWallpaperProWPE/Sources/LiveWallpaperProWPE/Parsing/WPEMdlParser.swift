@@ -1,16 +1,16 @@
-#if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 import simd
 
-struct WPEPuppetModel: Equatable, Sendable {
-    let version: Int
-    let meshes: [WPEPuppetMesh]
-    let bones: [WPEPuppetBone]
-    let animations: [WPEPuppetAnimation]
+public struct WPEPuppetModel: Equatable, Sendable {
+    public let version: Int
+    public let meshes: [WPEPuppetMesh]
+    public let bones: [WPEPuppetBone]
+    public let animations: [WPEPuppetAnimation]
     /// MDAT anchors mapping a named scene attachment (e.g. 头部/脖颈/胸部) to a bone + bind transform.
-    let attachments: [WPEPuppetAttachment]
+    public let attachments: [WPEPuppetAttachment]
 
-    init(
+    public init(
         version: Int,
         meshes: [WPEPuppetMesh],
         bones: [WPEPuppetBone] = [],
@@ -25,13 +25,13 @@ struct WPEPuppetModel: Equatable, Sendable {
     }
 
     /// Clip-mask texture name if any mesh declares an MDLV clip section (genericimage4 clipping).
-    var clipMaskName: String? {
+    public var clipMaskName: String? {
         meshes.lazy.compactMap(\.clipMaskName).first
     }
 }
 
-struct WPEMdlParseAudit: Equatable, Sendable {
-    enum SectionKind: Equatable, Sendable {
+public struct WPEMdlParseAudit: Equatable, Sendable {
+    public enum SectionKind: Equatable, Sendable {
         case mdlvHeader
         case mdlvMesh
         case mdls
@@ -39,37 +39,37 @@ struct WPEMdlParseAudit: Equatable, Sendable {
         case mdla
     }
 
-    struct KnownSkip: Equatable, Sendable {
-        let label: String
-        let range: Range<Int>
+    public struct KnownSkip: Equatable, Sendable {
+        public let label: String
+        public let range: Range<Int>
     }
 
-    struct SectionRecord: Equatable, Sendable {
-        let kind: SectionKind
-        let label: String
-        let range: Range<Int>
-        let intentionallySkippedRanges: [KnownSkip]
+    public struct SectionRecord: Equatable, Sendable {
+        public let kind: SectionKind
+        public let label: String
+        public let range: Range<Int>
+        public let intentionallySkippedRanges: [KnownSkip]
     }
 
-    struct Gap: Equatable, Sendable {
-        let range: Range<Int>
+    public struct Gap: Equatable, Sendable {
+        public let range: Range<Int>
     }
 
-    let sections: [SectionRecord]
-    let unexplainedGaps: [Gap]
-    let trailingLeftover: Range<Int>?
+    public let sections: [SectionRecord]
+    public let unexplainedGaps: [Gap]
+    public let trailingLeftover: Range<Int>?
 }
 
-struct WPEPuppetMesh: Equatable, Sendable {
-    let materialPath: String
-    let vertices: [WPEPuppetVertex]
-    let indices: [UInt16]
-    let parts: [WPEPuppetMeshPart]
+public struct WPEPuppetMesh: Equatable, Sendable {
+    public let materialPath: String
+    public let vertices: [WPEPuppetVertex]
+    public let indices: [UInt16]
+    public let parts: [WPEPuppetMeshPart]
     /// Clip-mask texture name from the MDLV clip section that follows the part table
     /// (e.g. `masks/clipping_mask_39cb32c5`), used by the genericimage4 clip-composite path.
-    let clipMaskName: String?
+    public let clipMaskName: String?
 
-    init(
+    public init(
         materialPath: String,
         vertices: [WPEPuppetVertex],
         indices: [UInt16],
@@ -84,14 +84,14 @@ struct WPEPuppetMesh: Equatable, Sendable {
     }
 }
 
-struct WPEPuppetVertex: Hashable, Sendable {
+public struct WPEPuppetVertex: Hashable, Sendable {
     /// Object-local target geometry. Do not derive this from `uv`: puppet textures can be atlases.
-    let position: SIMD3<Float>
-    let uv: SIMD2<Float>
-    let skinBlendIndices: SIMD4<Int32>
-    let skinBlendWeights: SIMD4<Float>
+    public let position: SIMD3<Float>
+    public let uv: SIMD2<Float>
+    public let skinBlendIndices: SIMD4<Int32>
+    public let skinBlendWeights: SIMD4<Float>
 
-    init(
+    public init(
         position: SIMD3<Float>,
         uv: SIMD2<Float>,
         skinBlendIndices: SIMD4<Int32> = SIMD4<Int32>(0, 0, 0, 0),
@@ -104,15 +104,15 @@ struct WPEPuppetVertex: Hashable, Sendable {
     }
 }
 
-struct WPEPuppetBone: Equatable, Sendable {
-    let index: Int
-    let parentIndex: Int?
+public struct WPEPuppetBone: Equatable, Sendable {
+    public let index: Int
+    public let parentIndex: Int?
     /// Raw MDLS metadata retained for future runtime animation. Parser must not bake it into MDLV vertices.
-    let rawMatrix: [Float]
+    public let rawMatrix: [Float]
     /// Raw MDLS bone-name cstring (often a rig-physics JSON blob). Stored verbatim; not parsed here.
-    let name: String
+    public let name: String
 
-    init(index: Int, parentIndex: Int?, rawMatrix: [Float], name: String = "") {
+    public init(index: Int, parentIndex: Int?, rawMatrix: [Float], name: String = "") {
         self.index = index
         self.parentIndex = parentIndex
         self.rawMatrix = rawMatrix
@@ -120,74 +120,114 @@ struct WPEPuppetBone: Equatable, Sendable {
     }
 }
 
-struct WPEPuppetAttachment: Equatable, Sendable {
-    let name: String
-    let boneIndex: Int
+public struct WPEPuppetAttachment: Equatable, Sendable {
+    public let name: String
+    public let boneIndex: Int
     /// MDAT0001 bind transform in the parent puppet's model space, stored as 16 little-endian
     /// f32 in column-major simd/Metal order.
-    let bindMatrix: [Float]
+    public let bindMatrix: [Float]
 
-    var matrix: simd_float4x4 {
+    public init(name: String, boneIndex: Int, bindMatrix: [Float]) {
+        self.name = name
+        self.boneIndex = boneIndex
+        self.bindMatrix = bindMatrix
+    }
+
+    public var matrix: simd_float4x4 {
         WPEMdlParser.matrix(fromColumnMajorFloats: bindMatrix) ?? matrix_identity_float4x4
     }
 }
 
-struct WPEPuppetMeshPart: Hashable, Sendable {
-    let id: UInt32
-    let start: Int
-    let count: Int
+public struct WPEPuppetMeshPart: Hashable, Sendable {
+    public let id: UInt32
+    public let start: Int
+    public let count: Int
+
+    public init(id: UInt32, start: Int, count: Int) {
+        self.id = id
+        self.start = start
+        self.count = count
+    }
 }
 
 /// Baked skeletal animation from the MDLA section. Channels are stored in MDLS bone
 /// order; each keyframe is a per-frame TRS transform (no curve interpolation in the file).
-struct WPEPuppetAnimation: Equatable, Sendable {
-    let id: Int
-    let name: String
+public struct WPEPuppetAnimation: Equatable, Sendable {
+    public let id: Int
+    public let name: String
     /// Playback mode from the file; "loop" drives the wrap in `sampledFrameIndex`.
-    let mode: String
-    let fps: Float
-    let frameCount: Int
-    let channels: [WPEPuppetAnimChannel]
+    public let mode: String
+    public let fps: Float
+    public let frameCount: Int
+    public let channels: [WPEPuppetAnimChannel]
+
+    public init(id: Int, name: String, mode: String, fps: Float, frameCount: Int, channels: [WPEPuppetAnimChannel]) {
+        self.id = id
+        self.name = name
+        self.mode = mode
+        self.fps = fps
+        self.frameCount = frameCount
+        self.channels = channels
+    }
 }
 
-struct WPEPuppetAnimChannel: Equatable, Sendable {
+public struct WPEPuppetAnimChannel: Equatable, Sendable {
     /// Skin-bone/channel index from MDLA (channels appear in bone order; no explicit id in
     /// the file). Usually matches MDLS bone order, but `WPEPuppetModel.bones` may be empty or
     /// malformed while channels stay usable — channels double as the skin skeleton (channel
     /// index == skin-blend index), with keyframe 0 as the bind pose.
-    let boneIndex: Int
-    let keyframes: [WPEPuppetAnimKey]
+    public let boneIndex: Int
+    public let keyframes: [WPEPuppetAnimKey]
+
+    public init(boneIndex: Int, keyframes: [WPEPuppetAnimKey]) {
+        self.boneIndex = boneIndex
+        self.keyframes = keyframes
+    }
 }
 
-struct WPEPuppetAnimKey: Equatable, Sendable {
-    let frame: Int
+public struct WPEPuppetAnimKey: Equatable, Sendable {
+    public let frame: Int
     /// Baked PARENT-LOCAL transform. Frame 0 is the bind local transform for the matching
     /// MDLS bone; world space is recovered by composing the parent channels' transforms.
-    let translation: SIMD3<Float>
-    let euler: SIMD3<Float>
-    let scale: SIMD3<Float>
+    public let translation: SIMD3<Float>
+    public let euler: SIMD3<Float>
+    public let scale: SIMD3<Float>
+
+    public init(frame: Int, translation: SIMD3<Float>, euler: SIMD3<Float>, scale: SIMD3<Float>) {
+        self.frame = frame
+        self.translation = translation
+        self.euler = euler
+        self.scale = scale
+    }
 }
 
 /// One resolved puppet animation layer: an animation plus its playback `rate`, `blend` weight,
 /// and whether it composes additively over the base layer (e.g. a blink/face layer over idle sway).
-struct WPEPuppetAnimationLayer: Equatable, Sendable {
-    let animation: WPEPuppetAnimation
-    let rate: Double
-    let additive: Bool
-    let blend: Float
+public struct WPEPuppetAnimationLayer: Equatable, Sendable {
+    public let animation: WPEPuppetAnimation
+    public let rate: Double
+    public let additive: Bool
+    public let blend: Float
+
+    public init(animation: WPEPuppetAnimation, rate: Double, additive: Bool, blend: Float) {
+        self.animation = animation
+        self.rate = rate
+        self.additive = additive
+        self.blend = blend
+    }
 }
 
 /// Skinning `palette` plus the diagnostics the render gate uses to decide whether skinning is
 /// safe to enable for this puppet.
-struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
-    enum TransformSpace: String, Equatable, Sendable {
+public struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
+    public enum TransformSpace: String, Equatable, Sendable {
         case parentLocal
     }
 
-    let palette: [simd_float4x4]
-    let paletteCount: Int
-    let transformSpace: TransformSpace?
-    let parentChannelMapSucceeded: Bool
+    public let palette: [simd_float4x4]
+    public let paletteCount: Int
+    public let transformSpace: TransformSpace?
+    public let parentChannelMapSucceeded: Bool
 
     static let empty = WPEPuppetPaletteEvaluation(
         palette: [],
@@ -204,8 +244,8 @@ struct WPEPuppetPaletteEvaluation: Equatable, Sendable {
 /// delta-from-bind on top in TRS space (translation/euler added, scale multiplied), weighted by
 /// `blend`. Frame 0 of every layer is the bind pose, so the palette is identity there (regression
 /// guard against the P0 static draw).
-enum WPEPuppetAnimationEvaluator {
-    static func palette(
+public enum WPEPuppetAnimationEvaluator {
+    public static func palette(
         for animation: WPEPuppetAnimation,
         bones: [WPEPuppetBone] = [],
         at time: Double
@@ -217,7 +257,7 @@ enum WPEPuppetAnimationEvaluator {
         )
     }
 
-    static func palette(
+    public static func palette(
         layers: [WPEPuppetAnimationLayer],
         bones: [WPEPuppetBone],
         at time: Double
@@ -225,7 +265,7 @@ enum WPEPuppetAnimationEvaluator {
         evaluate(layers: layers, bones: bones, at: time).palette
     }
 
-    static func paletteEvaluation(
+    public static func paletteEvaluation(
         layers: [WPEPuppetAnimationLayer],
         bones: [WPEPuppetBone],
         at time: Double
@@ -301,6 +341,7 @@ enum WPEPuppetAnimationEvaluator {
                     scale *= additiveScaleRatio(
                         current: additiveCurrent.scale,
                         bind: additiveBind.scale,
+                        base: scale,
                         weight: additive.weight
                     )
                 }
@@ -344,16 +385,29 @@ enum WPEPuppetAnimationEvaluator {
     private static func additiveScaleRatio(
         current: SIMD3<Float>,
         bind: SIMD3<Float>,
+        base: SIMD3<Float>,
         weight: Float
     ) -> SIMD3<Float> {
-        func axis(_ current: Float, _ bind: Float) -> Float {
-            guard abs(bind) > 1e-6 else { return 1 }
+        func axis(_ current: Float, _ bind: Float, _ base: Float) -> Float {
+            guard abs(bind) > 1e-6 else {
+                // Zero authored bind scale = a collapsed-at-rest bone (e.g. 3226487183's eyelids,
+                // which inflate 0→1 over the blink). A delta ratio is undefined there, so lerp the
+                // running scale toward the layer's ABSOLUTE authored scale: weight 1 reproduces
+                // `current` exactly; the old `return 1` froze the bone at the base scale and tore
+                // the mixed-weight eye vertices against their normally-squishing neighbours.
+                guard abs(base) > 1e-6 else { return 1 }
+                return 1 + (current / base - 1) * weight
+            }
             return 1 + (current / bind - 1) * weight
         }
-        return SIMD3<Float>(axis(current.x, bind.x), axis(current.y, bind.y), axis(current.z, bind.z))
+        return SIMD3<Float>(
+            axis(current.x, bind.x, base.x),
+            axis(current.y, bind.y, base.y),
+            axis(current.z, bind.z, base.z)
+        )
     }
 
-    static func identityPalette(count: Int) -> [simd_float4x4] {
+    public static func identityPalette(count: Int) -> [simd_float4x4] {
         Array(repeating: matrix_identity_float4x4, count: max(count, 1))
     }
 
@@ -363,7 +417,7 @@ enum WPEPuppetAnimationEvaluator {
     /// atop an exploded MDLS bind, where the frame-0 palette must instead unfold the sheet.
     /// A channel lacking a raw bone matrix or a frame-0 key counts as NOT matching: the identity
     /// fast path must be proven for every channel, never assumed on missing data.
-    static func baseFrameMatchesRawBind(channels: [WPEPuppetAnimChannel], bones: [WPEPuppetBone]) -> Bool {
+    public static func baseFrameMatchesRawBind(channels: [WPEPuppetAnimChannel], bones: [WPEPuppetBone]) -> Bool {
         let rawByBone = rawMatricesByBone(bones)
         guard !rawByBone.isEmpty else { return true }
         for channel in channels {
@@ -384,7 +438,7 @@ enum WPEPuppetAnimationEvaluator {
     /// data). Uses the FIRST animation's frame-0: a character sheet's animations all start from the
     /// same authored reference pose (corpus-verified equal to ~0.05 across a puppet's clips), so the
     /// scene-selected base animation would give the same anchor within authoring noise.
-    static func assembledBindWorldByBone(model: WPEPuppetModel) -> [Int: simd_float4x4] {
+    public static func assembledBindWorldByBone(model: WPEPuppetModel) -> [Int: simd_float4x4] {
         let baseChannels = model.animations.first?.channels ?? []
         let useFrame0 = !baseChannels.isEmpty
             && !baseFrameMatchesRawBind(channels: baseChannels, bones: model.bones)
@@ -448,7 +502,7 @@ enum WPEPuppetAnimationEvaluator {
         return max(channels.count, maxBoneIndex + 1, 1)
     }
 
-    static func matrixIsFinite(_ matrix: simd_float4x4) -> Bool {
+    public static func matrixIsFinite(_ matrix: simd_float4x4) -> Bool {
         for column in [matrix.columns.0, matrix.columns.1, matrix.columns.2, matrix.columns.3]
         where !(column.x.isFinite && column.y.isFinite && column.z.isFinite && column.w.isFinite) {
             return false
@@ -510,7 +564,7 @@ enum WPEPuppetAnimationEvaluator {
         return parentChannel
     }
 
-    static func hasUsableHierarchy(layers: [WPEPuppetAnimationLayer], bones: [WPEPuppetBone]) -> Bool {
+    public static func hasUsableHierarchy(layers: [WPEPuppetAnimationLayer], bones: [WPEPuppetBone]) -> Bool {
         guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return false }
         return parentChannelMap(channels: base.animation.channels, bones: bones) != nil
     }
@@ -592,7 +646,7 @@ enum WPEPuppetAnimationEvaluator {
         return palette
     }
 
-    static func sampledFrameIndex(for animation: WPEPuppetAnimation, at time: Double) -> Int {
+    public static func sampledFrameIndex(for animation: WPEPuppetAnimation, at time: Double) -> Int {
         let fps = Double(animation.fps)
         guard fps.isFinite, fps > 0 else { return 0 }
         let playableFrameCount = max(animation.frameCount, 1)
@@ -600,7 +654,18 @@ enum WPEPuppetAnimationEvaluator {
         guard frameValue.isFinite, frameValue < Double(Int.max) else { return 0 }
         let rawFrame = max(Int(frameValue), 0)
         let mode = animation.mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return mode == "loop" ? rawFrame % playableFrameCount : min(rawFrame, playableFrameCount - 1)
+        if mode == "loop" {
+            return rawFrame % playableFrameCount
+        }
+        if mode == "mirror" {
+            // Ping-pong: 0,1,...,N-1,N-2,...,1,0,1,... — a full period revisits both end frames
+            // once each rather than holding on them, so the period is 2*(N-1), not 2*N.
+            guard playableFrameCount > 1 else { return 0 }
+            let period = 2 * (playableFrameCount - 1)
+            let phase = rawFrame % period
+            return phase < playableFrameCount ? phase : period - phase
+        }
+        return min(rawFrame, playableFrameCount - 1)
     }
 
     private static func matrix(
@@ -745,7 +810,7 @@ private final class WPEMdlParseAuditRecorder {
     }
 }
 
-enum WPEMdlParser {
+public enum WPEMdlParser {
     /// Counts come straight from untrusted Workshop bytes: a crafted header claiming up to
     /// 0xFFFFFFFF entries would drive `reserveCapacity` into a multi-GB allocation (OOM trap)
     /// before the read loop could fail naturally on truncation. Caps sit far above the corpus
@@ -753,11 +818,11 @@ enum WPEMdlParser {
     private static let maxMeshCount: UInt32 = 4_096
     private static let maxBoneCount: UInt32 = 4_096
 
-    static func parse(data: Data) throws -> WPEPuppetModel {
+    public static func parse(data: Data) throws -> WPEPuppetModel {
         try parse(data: data, auditRecorder: nil)
     }
 
-    static func parse(data: Data, audit: inout WPEMdlParseAudit?) throws -> WPEPuppetModel {
+    public static func parse(data: Data, audit: inout WPEMdlParseAudit?) throws -> WPEPuppetModel {
         audit = nil
         let auditRecorder = WPEMdlParseAuditRecorder(dataCount: data.count)
         let model = try parse(data: data, auditRecorder: auditRecorder)
@@ -1242,7 +1307,7 @@ enum WPEMdlParser {
         return bones
     }
 
-    static func matrix(fromColumnMajorFloats values: [Float]) -> simd_float4x4? {
+    public static func matrix(fromColumnMajorFloats values: [Float]) -> simd_float4x4? {
         guard values.count >= 16 else { return nil }
         return simd_float4x4(
             SIMD4<Float>(values[0], values[1], values[2], values[3]),
@@ -1291,7 +1356,7 @@ enum WPEMdlParser {
                 throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
             }
             let boneIndex = Int(try reader.readUInt16())
-            let name = try reader.readCString()
+            let name = try reader.readCString(sectionEnd: sectionEnd)
             guard reader.currentOffset + 16 * MemoryLayout<Float>.size <= sectionEnd else {
                 throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
             }
@@ -1469,7 +1534,7 @@ private enum WPEMdlMeshFlags {
     static let skinBlendWeights: UInt32 = 0x1000000
 }
 
-enum WPEMdlParserError: Error, Equatable, Sendable {
+public enum WPEMdlParserError: Error, Equatable, Sendable {
     case invalidHeader
     case implausibleCount(section: String, count: UInt32, limit: UInt32)
     case truncated(offset: Int, requested: Int, available: Int)
@@ -1556,6 +1621,26 @@ private struct WPEMdlBinaryReader {
             offset += 1
         }
         guard offset < data.count else {
+            throw WPEMdlParserError.unterminatedString(offset: start)
+        }
+        let bytes = data[start..<offset]
+        offset += 1
+        guard let string = String(bytes: bytes, encoding: .utf8) else {
+            throw WPEMdlParserError.invalidString(offset: start)
+        }
+        return string
+    }
+
+    /// Section-bounded `readCString`. A malformed/truncated name whose terminator
+    /// lies past `sectionEnd` fails fast on the existing `unterminatedString`
+    /// path instead of scanning (and UTF-8 decoding) the rest of the file.
+    mutating func readCString(sectionEnd: Int) throws -> String {
+        let start = offset
+        let limit = min(sectionEnd, data.count)
+        while offset < limit, data[offset] != 0 {
+            offset += 1
+        }
+        guard offset < limit else {
             throw WPEMdlParserError.unterminatedString(offset: start)
         }
         let bytes = data[start..<offset]
@@ -1740,4 +1825,3 @@ private struct WPEMdlBinaryReader {
         }
     }
 }
-#endif

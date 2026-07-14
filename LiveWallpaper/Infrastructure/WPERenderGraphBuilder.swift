@@ -191,7 +191,7 @@ struct WPERenderGraphBuilder: Sendable {
 
         let transformed = layers.map { layer -> WPERenderLayer in
             if groupIDs.contains(layer.objectID) {
-                let groupTarget = Self.layerGroupTargetName(objectID: layer.objectID)
+                let groupTarget = WPERenderTargetNames.LayerGroup.make(objectID: layer.objectID)
                 let groupSize = layer.geometry.size
                 let fbo = WPERenderFBO(
                     name: groupTarget,
@@ -258,7 +258,7 @@ struct WPERenderGraphBuilder: Sendable {
         into group: WPERenderLayer,
         layerGeometry: WPERenderLayerGeometry
     ) -> WPERenderLayer {
-        let groupTarget = Self.layerGroupTargetName(objectID: group.objectID)
+        let groupTarget = WPERenderTargetNames.LayerGroup.make(objectID: group.objectID)
         let groupGeometry = Self.groupLocalGeometry(for: layerGeometry, in: group.geometry)
         return layer
             .replacingPasses(layer.passes.map { pass in
@@ -717,7 +717,7 @@ struct WPERenderGraphBuilder: Sendable {
         for effect in object.effects where effect.visible {
             for passOverride in effect.passOverrides {
                 for texture in passOverride.textures.values {
-                    if let id = layerID(fromCompositeName: texture) {
+                    if let id = WPERenderTargetNames.ImageLayerComposite.layerID(from: texture) {
                         ids.insert(id)
                     }
                 }
@@ -809,24 +809,8 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private static func layerID(fromCompositeName name: String) -> String? {
-        let prefix = "_rt_imageLayerComposite_"
-        guard name.hasPrefix(prefix),
-              name.hasSuffix("_a") || name.hasSuffix("_b") else {
-            return nil
-        }
-        let start = name.index(name.startIndex, offsetBy: prefix.count)
-        let end = name.index(name.endIndex, offsetBy: -2)
-        guard start < end else { return nil }
-        return String(name[start..<end])
-    }
-
-    private static func layerGroupTargetName(objectID: String) -> String {
-        "_rt_layerGroup_\(objectID)"
-    }
-
     private static func isComposelayerModelPath(_ path: String) -> Bool {
-        strippedUtilityPath(path) == "models/util/composelayer.json"
+        WPEUtilityModelKind.classify(path) == .composeLayer
     }
 
     /// IDs of `composelayer` objects whose descendants include a particle system
@@ -916,9 +900,12 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     private static func isFullFramePassthroughUtilityPath(_ path: String) -> Bool {
-        let stripped = strippedUtilityPath(path)
-        return stripped == "models/util/fullscreenlayer.json"
-            || stripped == "models/util/projectlayer.json"
+        // Exhaustive switch, NOT array-contains: composelayer must stay excluded
+        // (it can become a group/particle wrapper; these two cannot).
+        switch WPEUtilityModelKind.classify(path) {
+        case .projectLayer, .fullScreenLayer: return true
+        case .composeLayer, nil: return false
+        }
     }
 
     /// IDs of `fullscreenlayer` / `projectlayer` utility layers with NO visible
@@ -945,13 +932,6 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private static func strippedUtilityPath(_ path: String) -> String {
-        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
-        guard normalized.hasPrefix("../") else { return normalized }
-        let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
-        return parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
-    }
-
     private func buildLayer(
         object: WPESceneImageObject,
         finalUntargetedPassToScene: Bool,
@@ -960,8 +940,9 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
-        let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
+        let composite = WPERenderTargetNames.ImageLayerComposite.make(objectID: object.id)
+        let compositeA = composite.a
+        let compositeB = composite.b
 
         var context = LayerBuildContext(
             object: object,
@@ -1309,12 +1290,12 @@ struct WPERenderGraphBuilder: Sendable {
               Self.puppetClipCompositeEnabled,
               context.model.requiresFinalSceneComposite,
               let clipMaskName = context.model.puppetClipMaskName,
-              WPEBuiltinShaderName.normalized(pass.shader) == "genericimage4",
+              WPEBuiltinShaderKind(normalizing: pass.shader) == .genericImage4,
               pass.textures[8] == nil else {
             return pass
         }
         // Shared name so the executor's defer routing matches this exact injected RT (no format drift).
-        let clipTargetName = WPEMetalRenderExecutor.puppetClipRTName(objectID: context.object.id)
+        let clipTargetName = WPERenderTargetNames.PuppetClip.make(objectID: context.object.id)
         if !context.localFBOs.contains(where: { $0.name == clipTargetName }) {
             // Half-res clip mask RT, matching WPE (1920×1080 for a 3840×2160 capture).
             context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 2, format: "rgba8888"))
@@ -1374,7 +1355,7 @@ struct WPERenderGraphBuilder: Sendable {
                     // routing it to the bundled `solidcolor` material blew out
                     // 3719111841's audio-line base to opaque white, hiding the
                     // whole background behind the (otherwise correct) line.
-                    shader: "solidlayer",
+                    shader: WPEBuiltinShaderKind.solidLayer.rawValue,
                     textures: [:],
                     constants: [
                         "g_Color": .vector([color.x, color.y, color.z, object.alpha])
@@ -1637,8 +1618,8 @@ private struct LayerBuildContext {
             }
             return finalized + [WPERenderPass(
                 id: "\(object.id).\(finalized.count)",
-                phase: .command(file: "materials/util/copy.json"),
-                shader: "materials/util/copy.json",
+                phase: .command(file: WPERenderPassPhase.sceneCopyCommandFile),
+                shader: WPERenderPassPhase.sceneCopyCommandFile,
                 source: finalSource,
                 target: .layerComposite(name: compositeA),
                 textures: [0: finalSource],
@@ -1678,8 +1659,8 @@ private struct LayerBuildContext {
                 : finalSource
             finalized.append(WPERenderPass(
                 id: "\(object.id).\(finalized.count)",
-                phase: .command(file: "materials/util/copy.json"),
-                shader: "materials/util/copy.json",
+                phase: .command(file: WPERenderPassPhase.sceneCopyCommandFile),
+                shader: WPERenderPassPhase.sceneCopyCommandFile,
                 source: sceneSource,
                 target: .scene,
                 textures: [0: sceneSource],
@@ -1889,7 +1870,8 @@ private extension WPERenderLayer {
             alpha: g.alpha,
             alphaAnimation: g.alphaAnimation,
             color: g.color,
-            brightness: g.brightness
+            brightness: g.brightness,
+            shapePoints: g.shapePoints
         )
         return WPERenderLayer(
             objectID: objectID,
@@ -1994,20 +1976,6 @@ private extension WPETextureReference {
             return self
         }
         return replacement
-    }
-
-    private static func isSceneAliasName(_ name: String) -> Bool {
-        switch name {
-        case "_rt_FullFrameBuffer",
-             "_rt_HalfFrameBuffer",
-             "_rt_QuarterFrameBuffer",
-             "_rt_imageLayerComposite":
-            return true
-        default:
-            return name.hasPrefix("_rt_EightBuffer")
-                || name.hasPrefix("_rt_Mip")
-                || name.hasPrefix("_rt_downscaled")
-        }
     }
 }
 

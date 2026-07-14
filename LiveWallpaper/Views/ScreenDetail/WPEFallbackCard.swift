@@ -107,7 +107,7 @@ struct WPEFallbackCard: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(verbatim: id)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(DesignTokens.Typography.codeCaption)
                             .textSelection(.enabled)
                         Spacer()
                         Button {

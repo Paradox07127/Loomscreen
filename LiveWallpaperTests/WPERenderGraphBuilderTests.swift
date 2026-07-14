@@ -341,6 +341,77 @@ struct WPERenderGraphBuilderTests {
         ])
     }
 
+    @Test("Attachment-anchor origin rewrite keeps shape:quad points on the layer geometry")
+    func attachmentAnchorRewriteKeepsShapeQuadPoints() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(root: root, path: "models/body.json", puppetPath: "models/body_puppet.mdl")
+        // Fitting mesh (local range [200,1600]x[300,1900] inside 2000x2000, so no
+        // crop rewrite), all vertices skinned to bone 0 -> anchor offset = the
+        // skinned centroid (-100, 100).
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -800, minY: -700, maxX: 600, maxY: 900),
+            anchor: (name: "头部", boneIndex: 0),
+            to: root.appendingPathComponent("models/body_puppet.mdl")
+        )
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/lightshafts.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/lightshafts/effect.json"))
+        try writeJSON([
+            "passes": [["shader": "effects/lightshafts", "blending": "normal"]]
+        ], to: root.appendingPathComponent("materials/effects/lightshafts.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 7, "name": "body", "type": "image", "image": "models/body.json",
+                    "origin": "1000 1000 0", "size": "2000 2000", "scale": "1 1 1"
+                ],
+                [
+                    "id": 96, "name": "beam", "shape": "quad",
+                    "origin": "100 200 0", "parent": 7, "attachment": "头部",
+                    "effects": [[
+                        "id": 97,
+                        "file": "effects/lightshafts/effect.json",
+                        "visible": true,
+                        "passes": [[
+                            "combos": ["DIRECTDRAW": 1, "RENDERING": 1],
+                            "constantshadervalues": [
+                                "point0": "0.4 0.25",
+                                "point1": "0.6 0.25",
+                                "point2": "0.94451 0.83623",
+                                "point3": "0.09498 0.88795"
+                            ]
+                        ]]
+                    ]]
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let beam = try #require(graph.layers.first { $0.objectID == "96" })
+
+        // The anchor rewrite ran: parent-composed origin (1100, 1200) + anchor offset (-100, 100).
+        #expect(beam.geometry.origin == SIMD3<Double>(1000, 1300, 0))
+        // Regression: the rewritten geometry must keep the perspective-quad corners.
+        #expect(beam.geometry.shapePoints == [
+            SIMD2<Double>(0.4, 0.25),
+            SIMD2<Double>(0.6, 0.25),
+            SIMD2<Double>(0.94451, 0.83623),
+            SIMD2<Double>(0.09498, 0.88795)
+        ])
+    }
+
     @Test("Composelayer with children renders subtree into a local group target")
     func composelayerWithChildrenBuildsLocalGroupTarget() throws {
         let root = FileManager.default.temporaryDirectory
@@ -2435,12 +2506,13 @@ struct WPERenderGraphBuilderTests {
 
     private func writePuppetFixture(
         vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)],
+        anchor: (name: String, boneIndex: UInt16)? = nil,
         to url: URL
     ) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        try makePuppetModelData(vertices: vertices).write(to: url)
+        try makePuppetModelData(vertices: vertices, anchor: anchor).write(to: url)
     }
 
     private func boundsVertices(
@@ -2454,7 +2526,10 @@ struct WPERenderGraphBuilderTests {
         ]
     }
 
-    private func makePuppetModelData(vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)]) -> Data {
+    private func makePuppetModelData(
+        vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)],
+        anchor: (name: String, boneIndex: UInt16)? = nil
+    ) -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0023".utf8))
         data.appendLittleEndian(UInt32(0x80000900))
@@ -2482,6 +2557,20 @@ struct WPERenderGraphBuilderTests {
         data.appendLittleEndian(UInt32(0))
         data.appendLittleEndian(UInt32(0))
         data.appendLittleEndian(UInt32(indices.count))
+
+        if let anchor {
+            data.append(contentsOf: Array("MDAT0001".utf8))
+            data.append(UInt8(0))
+            data.appendLittleEndian(UInt32.max) // sectionEnd -> clamps to data count
+            data.appendLittleEndian(UInt16(1))
+            data.appendLittleEndian(anchor.boneIndex)
+            data.appendCString(anchor.name)
+            for column in 0..<4 {
+                for row in 0..<4 {
+                    data.appendLittleEndian(Float(column == row ? 1 : 0))
+                }
+            }
+        }
         return data
     }
 
@@ -2494,6 +2583,68 @@ struct WPERenderGraphBuilderTests {
         #expect(WPERenderGraphBuilder.parseTexturePath("layer_albedo") == "layer_albedo")
         #expect(WPERenderGraphBuilder.parseTexturePath("   ") == nil)
         #expect(WPERenderGraphBuilder.parseTexturePath("") == nil)
+    }
+
+    // MARK: - ADR-001 B1 unified-contract sentinels
+
+    @Test("Scene copy command file contract string is frozen")
+    func sceneCopyCommandFileIsFrozen() {
+        // WPE external asset path — a hard external constraint, not a renameable
+        // internal symbol. This literal is the one place that still catches an
+        // accidental edit of the shared constant itself.
+        #expect(WPERenderPassPhase.sceneCopyCommandFile == "materials/util/copy.json")
+    }
+
+    @Test("rt-name families keep the bare scene alias and ping-pong vocabularies disjoint")
+    func renderTargetNameFamiliesStayDisjoint() {
+        // Bare `_rt_imageLayerComposite` is a SCENE ALIAS, never a ping-pong member…
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: "_rt_imageLayerComposite") == nil)
+        // …and a suffixed ping-pong name is never a scene alias.
+        #expect(WPETextureReference.isSceneAliasName("_rt_imageLayerComposite_1_a") == false)
+        // Round-trips: make → parse recovers the objectID.
+        let pair = WPERenderTargetNames.ImageLayerComposite.make(objectID: "42")
+        #expect(pair.a == "_rt_imageLayerComposite_42_a")
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: pair.b) == "42")
+        // PuppetClip base/source round-trip; base name itself reverse-parses to nil.
+        let base = WPERenderTargetNames.PuppetClip.make(objectID: "7")
+        #expect(base == "_rt_puppetClip_7")
+        #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 0) == base)
+        #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 2) == "_rt_puppetClip_7_s2")
+        #expect(WPERenderTargetNames.PuppetClip.baseName(of: "_rt_puppetClip_7_s2") == base)
+        #expect(WPERenderTargetNames.PuppetClip.baseName(of: base) == nil)
+        // Created-layer names never enter ImageLayerComposite's reverse-parse.
+        let created = WPERenderTargetNames.CreatedLayerComposite.make(key: "k")
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: created.a) == nil)
+        #expect(WPERenderTargetNames.LayerGroup.make(objectID: "9") == "_rt_layerGroup_9")
+        #expect(WPERenderTargetNames.LayerGroup.matches("_rt_layerGroup_9x") == true)
+    }
+
+    @Test("WPEBuiltinShaderKind(normalizing:) matches the string-comparison form it replaced")
+    func builtinShaderKindNormalizingInitEquivalence() {
+        // Typed judgment == old `normalized(x) == "literal"` judgment, for the
+        // 25 builtins plus representative open-set inputs (ADR-001 B1 batch 3).
+        for kind in WPEBuiltinShaderKind.allCases {
+            #expect(WPEBuiltinShaderKind(normalizing: kind.rawValue) == kind)
+        }
+        #expect(WPEBuiltinShaderKind(normalizing: "materials/genericimage4.json") == .genericImage4)
+        #expect(WPEBuiltinShaderKind(normalizing: "generic4") == .genericImage4)
+        // Only `materials/` is stripped — a `util/`-nested generic stays open-set.
+        #expect(WPEBuiltinShaderKind(normalizing: "materials/util/genericimage4.json") == nil)
+        #expect(WPEBuiltinShaderKind(normalizing: "workshop/12345/shaders/custom") == nil)
+        #expect(WPEBuiltinShaderKind(normalizing: "effect_someworkshopcustom") == nil)
+    }
+
+    @Test("Utility model kind classifies the three util paths and nothing else")
+    func utilityModelKindClassification() {
+        #expect(WPEUtilityModelKind.classify("models/util/composelayer.json") == .composeLayer)
+        #expect(WPEUtilityModelKind.classify("models/util/projectlayer.json") == .projectLayer)
+        #expect(WPEUtilityModelKind.classify("models/util/fullscreenlayer.json") == .fullScreenLayer)
+        // Authoring tolerances: dependency prefix, backslashes, case.
+        #expect(WPEUtilityModelKind.classify("../123456/models/util/composelayer.json") == .composeLayer)
+        #expect(WPEUtilityModelKind.classify("models\\util\\ProjectLayer.json") == .projectLayer)
+        // solidlayer is a separate GraphBuilder-only classification — must stay out.
+        #expect(WPEUtilityModelKind.classify("models/util/solidlayer.json") == nil)
+        #expect(WPEUtilityModelKind.classify("models/util/solidlayer_depthtest.json") == nil)
     }
 }
 

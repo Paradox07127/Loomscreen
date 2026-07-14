@@ -59,7 +59,7 @@ struct WPEParticleSystemTests {
 
         let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
 
-        #expect(def.childRelativePaths == [
+        #expect(def.childReferences.map(\.relativePath) == [
             "particles/presets/leaves2b.json",
             "particles/presets/leaves2b.json"
         ])
@@ -130,12 +130,11 @@ struct WPEParticleSystemTests {
             lifetimeMin: 20, lifetimeMax: 20,
             sizeMin: 100, sizeMax: 110,
             originOffset: SIMD3(350, 750, 0),
-            dispersalMin: 0, dispersalMax: 750,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(750, 750, 750),
             velocityMin: SIMD3(-200, -100, 0), velocityMax: SIMD3(-300, -15, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 236, 0),
             fadeInSeconds: 0.1,
-            turbulenceSpeedMin: 35,
-            turbulenceSpeedMax: 100
+            turbulentVelocityInit: WPEParticleTurbulentVelocityInit(speedMin: 35, speedMax: 100)
         )
         let override = WPESceneParticleInstanceOverride(
             count: 0.2,
@@ -155,7 +154,8 @@ struct WPEParticleSystemTests {
         #expect(abs(scaled.sizeMin - 69) < 0.0001)
         #expect(abs(scaled.sizeMax - 75.9) < 0.0001)
         #expect(abs(scaled.velocityMin.x - (-264)) < 0.0001)
-        #expect(abs(scaled.turbulenceSpeedMax - 132) < 0.0001)
+        // `speed` override (1.32) scales the turbulence seed speed: 100 × 1.32 = 132.
+        #expect(abs((scaled.turbulentVelocityInit?.speedMax ?? 0) - 132) < 0.0001)
         #expect(abs(scaled.alphaMin - 0.03) < 0.0001)
         #expect(abs(scaled.alphaMax - 0.03) < 0.0001)
         // `colorn` multiplies the authored colour (÷255) instead of replacing it:
@@ -180,7 +180,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 5, lifetimeMax: 5,
             sizeMin: 4, sizeMax: 4,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1
@@ -205,7 +205,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 4, sizeMax: 4,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1
@@ -227,7 +227,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 4, sizeMax: 4,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1,
@@ -264,7 +264,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1
@@ -283,7 +283,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1
@@ -364,7 +364,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 4, sizeMax: 4,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.01,
@@ -387,6 +387,53 @@ struct WPEParticleSystemTests {
         #expect(abs(pointer[0].rotationAndLife.x - 0.675) < 0.1)
     }
 
+    @Test("A seeded RNG makes particle spawn jitter reproducible run-to-run (oracle determinism)")
+    func seededParticleRNGIsDeterministic() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // RNG must actually affect the output: dispersal spread, per-particle size,
+        // lifetime, velocity and color are all sampled at spawn.
+        func makeDef() -> WPEParticleDefinition {
+            WPEParticleDefinition(
+                materialRelativePath: nil, maxCount: 64,
+                rate: 2000, startDelay: 0,
+                lifetimeMin: 2, lifetimeMax: 8,
+                sizeMin: 2, sizeMax: 12,
+                originOffset: SIMD3(0, 0, 0),
+                dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(200, 200, 200),
+                velocityMin: SIMD3(-50, -50, 0), velocityMax: SIMD3(50, 50, 0),
+                colorMin: SIMD3(0, 0, 0), colorMax: SIMD3(255, 255, 255),
+                fadeInSeconds: 0.01
+            )
+        }
+        // Byte-exact snapshot of the LIVE instance slice (dead slots past
+        // `liveInstanceCount` hold stale memory and are not written each tick).
+        func liveSnapshot(seed: UInt64?) throws -> Data {
+            let system = try #require(WPEParticleSystem(definition: makeDef(), device: device, seed: seed))
+            system.tick(now: 0)
+            for step in 1...20 { system.tick(now: Double(step) * 0.05) }
+            let liveBytes = system.liveInstanceCount * MemoryLayout<WPEParticleInstance>.stride
+            #expect(liveBytes > 0)
+            return Data(bytes: system.instanceBuffer.contents(), count: liveBytes)
+        }
+        let a = try liveSnapshot(seed: 0x00AB_CDEF)
+        let b = try liveSnapshot(seed: 0x00AB_CDEF)
+        let c = try liveSnapshot(seed: 0x0012_3456)
+        #expect(a == b)   // same seed ⇒ byte-identical particle state
+        #expect(a != c)   // different seed ⇒ different jitter (the seed really drives it)
+    }
+
+    @Test("deterministicSeed is stable per input and unique across scene/object/order")
+    func deterministicSeedIsStableAndUnique() {
+        let base = WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 3)
+        #expect(base == WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123457", objectID: "42", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "43", sortIndex: 3))
+        #expect(base != WPEParticleSystem.deterministicSeed(workshopID: "123456", objectID: "42", sortIndex: 4))
+        // The '\' field separator must prevent "12"+"3456" from colliding with "123"+"456".
+        #expect(WPEParticleSystem.deterministicSeed(workshopID: "12", objectID: "3456", sortIndex: 0)
+            != WPEParticleSystem.deterministicSeed(workshopID: "123", objectID: "456", sortIndex: 0))
+    }
+
     @Test("Gravity integrates over time, pulling a particle along the gravity vector")
     func gravityIntegrates() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -396,7 +443,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.01,
@@ -428,7 +475,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 5, lifetimeMax: 5,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0, // bypass the fade-in envelope
@@ -456,7 +503,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.0,
@@ -490,7 +537,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -536,12 +583,35 @@ struct WPEParticleSystemTests {
         }
         """#
         let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
-        #expect(def.turbulenceSpeedMin == 35)
-        #expect(def.turbulenceSpeedMax == 100)
-        #expect(def.turbulenceScale == 0.5)
-        #expect(def.turbulenceOffset == 3)
-        #expect(def.turbulenceTimescale == 0.02)
-        #expect(def.turbulencePhaseMax > 6.2)
+        let tvi = try #require(def.turbulentVelocityInit)
+        #expect(tvi.speedMin == 35)
+        #expect(tvi.speedMax == 100)
+        #expect(tvi.scale == 0.5)
+        #expect(tvi.offset == 3)
+        #expect(tvi.timescale == 0.02)
+        #expect(tvi.phaseMax > 6.2)
+        // The initializer must NOT be conflated with the operator.
+        #expect(def.turbulence == nil)
+    }
+
+    @Test("Parser fills engine defaults for a sparse turbulent-velocity initializer")
+    func parserTurbulentVelocityDefaults() throws {
+        // wildfireembers authors ONLY `scale`; every other field must take the
+        // reference-renderer engine defaults (speed 100…250), not zero.
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "initializer": [{"name": "turbulentvelocityrandom", "scale": 0.3}]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        let tvi = try #require(def.turbulentVelocityInit)
+        #expect(tvi.scale == 0.3)
+        #expect(tvi.speedMin == 100)
+        #expect(tvi.speedMax == 250)
+        #expect(tvi.timescale == 1)
+        #expect(tvi.forward == SIMD3<Double>(0, 1, 0))
     }
 
     @Test("Parser captures turbulence operator parameters")
@@ -557,11 +627,46 @@ struct WPEParticleSystemTests {
         """#
         let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
 
-        #expect(def.turbulenceSpeedMin == 750)
-        #expect(def.turbulenceSpeedMax == 900)
-        #expect(def.turbulenceMask.x == 0.5)
-        #expect(def.turbulenceMask.y == 4)
-        #expect(def.turbulenceMask.z == 0)
+        let turb = try #require(def.turbulence)
+        #expect(turb.speedMin == 750)
+        #expect(turb.speedMax == 900)
+        #expect(turb.mask.x == 0.5)
+        #expect(turb.mask.y == 4)
+        #expect(turb.mask.z == 0)
+        // The operator must NOT be conflated with the initializer.
+        #expect(def.turbulentVelocityInit == nil)
+    }
+
+    @Test("Initializer and operator turbulence parse independently without clobbering")
+    func parserTurbulenceInitAndOperatorIndependent() throws {
+        // The ember preset declares BOTH: a sparse initializer (offset/scale only)
+        // and a strong operator (speed 250…1000). Before the split, the operator's
+        // speed leaked into the initializer's seed and vice versa.
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "initializer": [{"name": "turbulentvelocityrandom", "offset": -0.5, "scale": 0.1}],
+            "operator": [
+                {"name": "movement"},
+                {"name": "turbulence", "speedmin": 250, "speedmax": 1000,
+                 "timescale": 50, "mask": "1 0.4 0"}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        let tvi = try #require(def.turbulentVelocityInit)
+        let turb = try #require(def.turbulence)
+        // Initializer keeps its authored offset/scale and the engine-default speed…
+        #expect(tvi.offset == -0.5)
+        #expect(tvi.scale == 0.1)
+        #expect(tvi.speedMin == 100)
+        #expect(tvi.speedMax == 250)
+        // …while the operator's much stronger speed stays on the operator only.
+        #expect(turb.speedMin == 250)
+        #expect(turb.speedMax == 1000)
+        #expect(turb.timescale == 50)
+        #expect(turb.mask.y == 0.4)
     }
 
     @Test("Parser reads perspective flag (flags & 4)")
@@ -625,7 +730,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 5, lifetimeMax: 5,
             sizeMin: 10, sizeMax: 10,
             originOffset: SIMD3(100, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -669,7 +774,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -680,13 +785,14 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
-            turbulenceSpeedMin: 50, turbulenceSpeedMax: 50,
-            turbulenceScale: 0.1, turbulenceTimescale: 1,
-            turbulencePhaseMin: 1, turbulencePhaseMax: 1
+            turbulence: WPEParticleTurbulenceOperator(
+                speedMin: 50, speedMax: 50, scale: 0.1, timescale: 1,
+                phaseMin: 1, phaseMax: 1, mask: SIMD3<Double>(1, 1, 0)
+            )
         )
         let calmSystem = try #require(WPEParticleSystem(definition: calmDef, device: device))
         let stormySystem = try #require(WPEParticleSystem(definition: stormyDef, device: device))
@@ -716,20 +822,19 @@ struct WPEParticleSystemTests {
             "initializer": [{"name": "turbulentvelocityrandom", "offset": 0.5, "scale": 0.1}]
         }
         """#.utf8)))
-        #expect(seeded.hasTurbulentVelocityInit)
+        #expect(seeded.turbulentVelocityInit != nil)
         let plain = try #require(WPEParticleDefinitionParser.parse(data: Data(#"""
         {"maxcount": 8, "emitter": [{"name": "boxrandom", "rate": 10}]}
         """#.utf8)))
-        #expect(!plain.hasTurbulentVelocityInit)
+        #expect(plain.turbulentVelocityInit == nil)
     }
 
     @Test("turbulentvelocityrandom seeds a travelling velocity (embers leave the box)")
     func turbulentVelocityInitSeedsMotion() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Ember-style: point spawn, zero base velocity, NO turbulence operator
-        // (speedMax 0). The only Y-motion source is the seed. Without it the
-        // sparks are stuck at spawn Y (invisible below-screen); with it they
-        // travel out of the box.
+        // Ember-style: point spawn, zero base velocity, no operator. The seed is
+        // the only motion source — without it the sparks are stuck at the spawn
+        // point; with it they travel out of the box.
         func makeDef(seed: Bool) -> WPEParticleDefinition {
             WPEParticleDefinition(
                 materialRelativePath: nil, maxCount: 32,
@@ -737,35 +842,261 @@ struct WPEParticleSystemTests {
                 lifetimeMin: 10, lifetimeMax: 10,
                 sizeMin: 1, sizeMax: 1,
                 originOffset: SIMD3(0, 0, 0),
-                dispersalMin: 0, dispersalMax: 0,
+                dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
                 velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
                 colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
                 fadeInSeconds: 0,
-                hasTurbulentVelocityInit: seed
+                turbulentVelocityInit: seed ? WPEParticleTurbulentVelocityInit() : nil
             )
         }
-        // Spread of Y across live particles: a point emitter with zero base
-        // velocity keeps every spark on the SAME Y line unless the seed gives
-        // each a distinct travelling velocity.
-        func spreadY(_ def: WPEParticleDefinition) throws -> Float {
-            let system = try #require(WPEParticleSystem(definition: def, device: device))
-            for step in 1...6 { system.tick(now: Double(step) * 0.1) }
-            let n = system.liveInstanceCount
-            try #require(n >= 8)
+        // DISPLACEMENT from each particle's own spawn point, not the batch's Y
+        // spread: the seed aims one system-wide gust (see the coherence test), so
+        // every spark leaves along roughly the SAME direction and the fan-out is
+        // only the speed spread. A Y-spread assertion would ride on whichever way
+        // that one gust happens to blow — near-horizontal ⇒ vacuous failure.
+        func maxTravel(_ def: WPEParticleDefinition) throws -> Float {
+            let system = try #require(WPEParticleSystem(definition: def, device: device, seed: 0xEE1B_0A75))
             let buf = system.instanceBuffer.contents()
                 .bindMemory(to: WPEParticleInstance.self, capacity: 32)
-            var lo: Float = .greatestFiniteMagnitude
-            var hi: Float = -.greatestFiniteMagnitude
+            system.tick(now: 0)     // dt=0, no spawn
+            system.tick(now: 0.1)   // spawn (integration loop already ran)
+            let n = system.liveInstanceCount
+            try #require(n >= 8)
+            let spawned = (0..<n).map { SIMD2(buf[$0].positionAndSize.x, buf[$0].positionAndSize.y) }
+            // dt is clamped to 0.1/tick, so travel takes several ticks.
+            for step in 2...6 { system.tick(now: Double(step) * 0.1) }
+            var travel: Float = 0
             for i in 0..<n {
-                let y = buf[i].positionAndSize.y
-                lo = Swift.min(lo, y); hi = Swift.max(hi, y)
+                let p = SIMD2(buf[i].positionAndSize.x, buf[i].positionAndSize.y)
+                travel = Swift.max(travel, simd_length(p - spawned[i]))
             }
-            return hi - lo
+            return travel
         }
-        let stuck = try spreadY(makeDef(seed: false))
-        let travelled = try spreadY(makeDef(seed: true))
-        #expect(stuck < 0.01, "no seed → all sparks stay on one Y line (spread \(stuck))")
-        #expect(travelled > 10, "seed → sparks fan out in Y (spread \(travelled))")
+        let stuck = try maxTravel(makeDef(seed: false))
+        let travelled = try maxTravel(makeDef(seed: true))
+        #expect(stuck < 0.01, "no seed → sparks never leave the spawn point (travel \(stuck))")
+        // speed ∈ 100…250 over 0.5s ⇒ ≥50px whichever way the gust points.
+        #expect(travelled > 40, "seed → sparks travel away from spawn (travel \(travelled))")
+    }
+
+    @Test("turbulentvelocityrandom aims ONE system-wide gust, not a per-particle scatter")
+    func turbulentVelocityInitIsOneGust() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // WPE keeps ONE noise sample point per system and only nudges it along its
+        // own curl streamline per spawn, so leaves born together ride the same
+        // gust. Sampling a fresh random point per particle (what we used to do)
+        // leaves the ensemble average intact but scatters each leaf on its own —
+        // measurably a different wallpaper.
+        let alignment = try Self.meanGustAlignment(device: device, timescale: 1)
+        // Modelled against the real curl field over 200 independent 5-system
+        // groups: one gust ⇒ ≥0.82, per-particle sampling ⇒ ≤0.26.
+        #expect(alignment > 0.7, "particles must share one gust direction (alignment \(alignment))")
+    }
+
+    @Test("turbulentvelocityrandom timescale sets how fast the gust turns")
+    func turbulentVelocityInitTimescaleDrivesWalk() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // `timescale` divides the sample point's step (0.005/timescale per 0.01s of
+        // emit interval): a fast field (small timescale ⇒ long strides across the
+        // noise) re-aims the gust between spawns, a slow one holds it fixed.
+        // `timescale` was parsed but unused until the sample point started walking.
+        let fast = try Self.meanGustAlignment(device: device, timescale: 0.01)
+        let slow = try Self.meanGustAlignment(device: device, timescale: 100)
+        // Modelled over 200 groups: fast ≤0.44, slow ≡1.000.
+        #expect(fast < 0.6, "a fast field must re-aim the gust between spawns (\(fast))")
+        #expect(slow > 0.9, "a slow field must hold one gust (\(slow))")
+    }
+
+    /// How tightly one system's simultaneously-spawned particles agree on a
+    /// direction (1 = one gust, ~0 = every particle its own way), averaged over
+    /// five independently seeded systems.
+    ///
+    /// Averaging is what makes the threshold safe rather than lucky: the instance
+    /// buffer only carries x/y, and `scale: 2` (unrestricted cone — so the cone
+    /// limit can't manufacture agreement by squeezing everything toward +Y) lets a
+    /// gust point near ±Z, whose xy projection is degenerate and reads as noise.
+    /// That hits a minority of seeds; the 5-system mean rides over it.
+    private static func meanGustAlignment(device: MTLDevice, timescale: Double) throws -> Float {
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 32,
+            rate: 100_000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            turbulentVelocityInit: WPEParticleTurbulentVelocityInit(
+                speedMin: 100, speedMax: 250, scale: 2, timescale: timescale, offset: 0
+            )
+        )
+        var total: Float = 0
+        let seeds: [UInt64] = [0x6057_1234, 0x7A1E_5CA1, 0xBEEF_0001, 0x1EAF_FA11, 0xC0FF_EE42]
+        for seed in seeds {
+            let system = try #require(WPEParticleSystem(definition: def, device: device, seed: seed))
+            let dirs = try seededSpawnDirections(system, capacity: 32)
+            try #require(dirs.count >= 24)
+            let mean = simd_normalize(dirs.reduce(SIMD2<Float>.zero, +) / Float(dirs.count))
+            total += dirs.map { simd_dot($0, mean) }.reduce(0, +) / Float(dirs.count)
+        }
+        return total / Float(seeds.count)
+    }
+
+    /// Seeded spawn directions of a one-tick batch: spawn every particle on a
+    /// single tick, then take one shared integration step so each displacement is
+    /// `v·dt`. Reading positions directly would instead measure `renderOrigin`
+    /// (-0.5,-0.5 under the identity transform), and the spawn tick itself
+    /// integrates nothing (its loop runs before the spawn).
+    private static func seededSpawnDirections(
+        _ system: WPEParticleSystem, capacity: Int
+    ) throws -> [SIMD2<Float>] {
+        let buf = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: capacity)
+        system.tick(now: 0)     // dt=0, no spawn
+        system.tick(now: 0.1)   // spawn
+        let n = system.liveInstanceCount
+        let spawned = (0..<n).map { SIMD2(buf[$0].positionAndSize.x, buf[$0].positionAndSize.y) }
+        system.tick(now: 0.2)   // one integration step
+        return (0..<n).compactMap { i in
+            let delta = SIMD2(buf[i].positionAndSize.x, buf[i].positionAndSize.y) - spawned[i]
+            return simd_length(delta) > 1e-4 ? simd_normalize(delta) : nil
+        }
+    }
+
+    @Test("turbulentvelocityrandom offset≈3 drives the stream DOWNWARD (leaves fall, not rise)")
+    func turbulentVelocityOffsetFallsDown() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // The leaves preset authors offset=3 (≈172°), rotating the +Y stream to
+        // nearly -Y so the average spawn velocity points DOWN. gravity is 0 and
+        // there is no operator, so the seed direction is the only Y source.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 200,
+            rate: 20000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            turbulentVelocityInit: WPEParticleTurbulentVelocityInit(
+                speedMin: 35, speedMax: 100, scale: 0.5, offset: 3
+            )
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device, seed: 0x5EED_1EAF))
+        func meanY() -> Float {
+            let n = system.liveInstanceCount
+            let buf = system.instanceBuffer.contents()
+                .bindMemory(to: WPEParticleInstance.self, capacity: 200)
+            var sum: Float = 0
+            for i in 0..<n { sum += buf[i].positionAndSize.y }
+            return sum / Float(n)
+        }
+        system.tick(now: 0)       // dt=0, no spawn
+        system.tick(now: 0.01)    // spawn (not integrated this tick)
+        try #require(system.liveInstanceCount >= 32)
+        let spawnY = meanY()
+        system.tick(now: 0.11)    // one integration step
+        let movedY = meanY()
+        // Measure DISPLACEMENT, not absolute Y: every particle spawns at the
+        // identity transform's renderOrigin (-0.5), so an absolute `y < 0` check
+        // would pass vacuously even for an upward seed. Only the displacement
+        // reflects the seeded velocity direction.
+        let displacement = movedY - spawnY
+        #expect(
+            displacement < -1,
+            "offset=3 must seed a DOWNWARD stream; spawnY=\(spawnY) movedY=\(movedY) Δ=\(displacement)"
+        )
+    }
+
+    @Test("An initializer-only system gets no per-frame turbulence sway (leaves drift straight)")
+    func initializerOnlyHasNoOperatorSway() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Only the initializer (fixed downward seed, no cone spread), NO operator.
+        // With a fixed velocity and no wind, motion is a straight line (constant
+        // velocity ⇒ equal per-step displacement). The operator is the only
+        // per-frame force; without it the increments must not vary.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 4,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
+            velocityMin: SIMD3(0, -80, 0), velocityMax: SIMD3(0, -80, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            // scale 0 ⇒ the seed collapses onto `forward` with no cone spread, so
+            // the seed adds no extra velocity component beyond the fixed -80 Y.
+            turbulentVelocityInit: WPEParticleTurbulentVelocityInit(
+                speedMin: 0, speedMax: 0, scale: 0
+            )
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device, seed: 1))
+        func y0() -> Float {
+            system.instanceBuffer.contents()
+                .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0].positionAndSize.y
+        }
+        // Sample three positions a full integration step apart and assert EQUAL
+        // increments: constant velocity ⇔ zero per-frame force. A stray
+        // drag/gravity/repeated-seed force would bend the path and make them differ.
+        //
+        // Increments (not a `y(2t) == 2·y(t)` ratio) because motion here is affine,
+        // not proportional, for two reasons that both bite:
+        //   1. the first tick has dt=0 so nothing spawns, and the particle spawns on
+        //      the second tick AFTER the integration loop — so it isn't moved until
+        //      the tick after that (the spawn frame has zero steps, not one);
+        //   2. `WPEParticleSceneTransform.identity` is a 1×1 scene, so renderOrigin
+        //      is (-0.5,-0.5) — particles start at y=-0.5, not 0.
+        // Differencing cancels both.
+        system.tick(now: 0)      // dt=0, no spawn
+        system.tick(now: 0.1)    // spawn (not integrated this tick)
+        system.tick(now: 0.2)    // step 1
+        let y1 = y0()
+        system.tick(now: 0.3)    // step 2
+        let y2 = y0()
+        system.tick(now: 0.4)    // step 3
+        let y3 = y0()
+        #expect(y1 < 0, "particle should be falling, y1=\(y1)")
+        #expect(
+            abs((y3 - y2) - (y2 - y1)) < 0.001,
+            "expected constant-velocity motion (equal increments), y1=\(y1) y2=\(y2) y3=\(y3)"
+        )
+    }
+
+    @Test("Turbulence operator path is reproducible under a fixed seed")
+    func turbulenceOperatorIsReproducibleUnderSeed() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        func makeDef() -> WPEParticleDefinition {
+            WPEParticleDefinition(
+                materialRelativePath: nil, maxCount: 64,
+                rate: 3000, startDelay: 0,
+                lifetimeMin: 4, lifetimeMax: 8,
+                sizeMin: 2, sizeMax: 6,
+                originOffset: SIMD3(0, 0, 0),
+                dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(50, 50, 0),
+                velocityMin: SIMD3(-20, -20, 0), velocityMax: SIMD3(20, 20, 0),
+                colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+                fadeInSeconds: 0.01,
+                drag: 1.5,
+                turbulentVelocityInit: WPEParticleTurbulentVelocityInit(scale: 0.1, offset: -0.5),
+                turbulence: WPEParticleTurbulenceOperator(
+                    speedMin: 250, speedMax: 1000, scale: 0.002, timescale: 50,
+                    phaseMin: 5, phaseMax: 50, mask: SIMD3<Double>(1, 0.4, 0)
+                )
+            )
+        }
+        func snapshot(seed: UInt64) throws -> Data {
+            let system = try #require(WPEParticleSystem(definition: makeDef(), device: device, seed: seed))
+            system.tick(now: 0)
+            for step in 1...20 { system.tick(now: Double(step) * 0.05) }
+            let bytes = system.liveInstanceCount * MemoryLayout<WPEParticleInstance>.stride
+            #expect(bytes > 0)
+            return Data(bytes: system.instanceBuffer.contents(), count: bytes)
+        }
+        #expect(try snapshot(seed: 0xCAFE_F00D) == snapshot(seed: 0xCAFE_F00D))
+        #expect(try snapshot(seed: 0xCAFE_F00D) != snapshot(seed: 0x0BAD_BEEF))
     }
 
     @Test("alphafade timings are lifetime fractions, not seconds")
@@ -784,7 +1115,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1, // 10% lifetime
@@ -818,7 +1149,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 5, lifetimeMax: 5,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.05
@@ -840,7 +1171,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(100, 0, 0), velocityMax: SIMD3(100, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.05
@@ -866,7 +1197,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 5, lifetimeMax: 5,
             sizeMin: 3, sizeMax: 5,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 512,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(512, 512, 512),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.1
@@ -877,7 +1208,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 2, lifetimeMax: 2,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -914,7 +1245,6 @@ struct WPEParticleSystemTests {
         #expect(def.controlPoints.first(where: { $0.id == 0 })?.pointerLocked == true)
         #expect(def.controlPoints.first(where: { $0.id == 1 })?.pointerLocked == false)
         #expect(def.emitterTracksPointer == true)
-        #expect(def.usesPointer == true)
         #expect(def.attractors.isEmpty)
     }
 
@@ -939,7 +1269,6 @@ struct WPEParticleSystemTests {
         #expect(attractor.controlPointID == 1)
         #expect(attractor.scale == -5000)
         #expect(attractor.threshold == 64)
-        #expect(def.usesPointer == true)            // attractor references pointer-locked id 1
     }
 
     @Test("controlpointattract repels particles away from a pointer-locked cursor (scene 3554161528 mechanism)")
@@ -951,7 +1280,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -988,7 +1317,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.05,
@@ -1151,7 +1480,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 10, sizeMax: 10,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1179,7 +1508,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1211,7 +1540,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1250,7 +1579,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(128, 128, 128), colorMax: SIMD3(128, 128, 128),
             fadeInSeconds: 0,
@@ -1283,7 +1612,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1315,7 +1644,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1336,7 +1665,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 10, lifetimeMax: 10,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1379,7 +1708,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 50, sizeMax: 50,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1406,7 +1735,7 @@ struct WPEParticleSystemTests {
                 lifetimeMin: 100, lifetimeMax: 100,
                 sizeMin: 50, sizeMax: 50,
                 originOffset: SIMD3(0, 0, 0),
-                dispersalMin: 0, dispersalMax: 0,
+                dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
                 velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
                 colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
                 fadeInSeconds: 0
@@ -1435,7 +1764,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 50, sizeMax: 50,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0,
@@ -1506,7 +1835,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1528,7 +1857,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1549,7 +1878,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1581,7 +1910,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1599,7 +1928,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 1, lifetimeMax: 1,
             sizeMin: 1, sizeMax: 1,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0
@@ -1624,6 +1953,22 @@ struct WPEParticleSystemTests {
             fromConstants: ["ui_editor_properties_overbright": -3]) == 0)
     }
 
+    @Test("object brightness multiplies material overbright into the particle uniform")
+    func objectBrightnessMultipliesOverbright() {
+        // Object brightness alone (no material overbright) — the wildfire-style case.
+        #expect(abs(WPEMetalSceneRenderer.particleOverbright(
+            material: nil, objectBrightness: 2.0) - 2.0) < 0.0001)
+        // Both present: multiply, not replace.
+        #expect(abs(WPEMetalSceneRenderer.particleOverbright(
+            material: 1.5, objectBrightness: 2.0) - 3.0) < 0.0001)
+        // Defaults compose to exactly 1 — zero visual change for the corpus.
+        #expect(WPEMetalSceneRenderer.particleOverbright(
+            material: nil, objectBrightness: 1.0) == 1.0)
+        // Negative authored brightness clamps to 0 (never inverts colour).
+        #expect(WPEMetalSceneRenderer.particleOverbright(
+            material: 1.0, objectBrightness: -2.0) == 0)
+    }
+
     private func stillParticleDefinition(
         maxCount: Int = 4,
         rate: Double = 1000,
@@ -1639,8 +1984,8 @@ struct WPEParticleSystemTests {
             sizeMin: 1,
             sizeMax: 1,
             originOffset: originOffset,
-            dispersalMin: 0,
-            dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0),
+            dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0),
             velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255),
@@ -1689,7 +2034,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 10, sizeMax: 10,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 200, 0), velocityMax: SIMD3(0, 200, 0),
             colorMin: SIMD3(85, 153, 255), colorMax: SIMD3(85, 153, 255),
             fadeInSeconds: 0
@@ -1738,7 +2083,7 @@ struct WPEParticleSystemTests {
             lifetimeMin: 100, lifetimeMax: 100,
             sizeMin: 10, sizeMax: 10,
             originOffset: SIMD3(0, 0, 0),
-            dispersalMin: 0, dispersalMax: 0,
+            dispersalMin: SIMD3<Double>(0, 0, 0), dispersalMax: SIMD3<Double>(0, 0, 0),
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(85, 153, 255), colorMax: SIMD3(85, 153, 255),
             fadeInSeconds: 0

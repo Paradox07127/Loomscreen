@@ -92,19 +92,11 @@ enum WPEMetalShaderInputs {
         return nil
     }
 
-    /// True for `_rt_*` names that WPE's runtime aliases to the live scene texture rather than a discrete FBO allocation.
+    /// True for `_rt_*` names that WPE's runtime aliases to the live scene texture rather
+    /// than a discrete FBO allocation. Forwards to the canonical single source of truth in
+    /// the Schema package (shared with the graph builder — ADR-001 B1 list unification).
     static func isSceneAliasName(_ name: String) -> Bool {
-        switch name {
-        case "_rt_FullFrameBuffer",
-             "_rt_HalfFrameBuffer",
-             "_rt_QuarterFrameBuffer",
-             "_rt_imageLayerComposite":
-            return true
-        default:
-            return name.hasPrefix("_rt_EightBuffer")
-                || name.hasPrefix("_rt_Mip")
-                || name.hasPrefix("_rt_downscaled")
-        }
+        WPETextureReference.isSceneAliasName(name)
     }
 
     static func normalizedBuiltinShaderName(_ shaderName: String) -> String {
@@ -138,15 +130,6 @@ enum WPEMetalShaderInputs {
             }
         }
         return defaultValue
-    }
-
-    /// The full-frame copy never shifts its sample UVs: camera parallax is a
-    /// geometry translation applied in `objectQuadUniforms` (scene-targeted
-    /// passes only), so the copy fragment samples 1:1. (The old raw-pointer UV
-    /// shift was removed — it double-shifted non-identity copies and moved layers
-    /// even when parallax was off.)
-    static func copyUniforms() -> WPECopyUniforms {
-        WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
     }
 
     /// Standard sRGB EOTF used by Metal's `_srgb` pixel formats.

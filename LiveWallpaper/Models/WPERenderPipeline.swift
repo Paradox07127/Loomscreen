@@ -408,8 +408,8 @@ private extension WPERenderLayer {
             animationLayers: [],
             geometry: dynamicGeometry,
             localGeometry: dynamicGeometry,
-            compositeA: "_rt_createdLayerComposite_\(state.key)_a",
-            compositeB: "_rt_createdLayerComposite_\(state.key)_b",
+            compositeA: WPERenderTargetNames.CreatedLayerComposite.make(key: state.key).a,
+            compositeB: WPERenderTargetNames.CreatedLayerComposite.make(key: state.key).b,
             localFBOs: [],
             passes: [pass],
             groupRenderTarget: nil,
@@ -493,7 +493,8 @@ private extension WPERenderLayer {
             alpha: alpha,
             alphaAnimation: nil,
             color: g.color,
-            brightness: g.brightness
+            brightness: g.brightness,
+            shapePoints: g.shapePoints
         )
         // The executor draws a composelayer-group child's group-buffer pass from
         // groupLocalGeometry (alpha copied verbatim at bake time), so a live fade
@@ -580,7 +581,8 @@ private extension WPERenderLayerGeometry {
             alpha: alpha,
             alphaAnimation: alphaAnimation,
             color: color,
-            brightness: brightness
+            brightness: brightness,
+            shapePoints: shapePoints
         )
     }
 }

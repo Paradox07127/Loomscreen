@@ -28,17 +28,6 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         var noteNames: Set<String>
     }
 
-    private let waterWavesPathLock = NSLock()
-    private var waterWavesPathValue = "Inactive"
-    private var waterWavesPathStamp: TimeInterval = 0
-
-    func setWaterWavesPath(_ path: String) {
-        waterWavesPathLock.lock()
-        waterWavesPathValue = path
-        waterWavesPathStamp = ProcessInfo.processInfo.systemUptime
-        waterWavesPathLock.unlock()
-    }
-
     private var session: ActiveSession?
     private let sessionLock = NSLock()
     private let writeQueue = DispatchQueue(label: "wpe.scene.debug.artifacts", qos: .utility)
@@ -79,7 +68,9 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         let testingOverride = testingEnabledOverride
         testingEnabledOverrideLock.unlock()
         if let testingOverride { return testingOverride }
-        return UserDefaults.standard.bool(forKey: Self.defaultsKey)
+        // The render oracle needs the canonical trace recorder to run, so enabling
+        // oracle mode implies artifacts are enabled (no need to set both defaults).
+        return UserDefaults.standard.bool(forKey: Self.defaultsKey) || WPEOracleMode.isEnabled
         #else
         return false
         #endif

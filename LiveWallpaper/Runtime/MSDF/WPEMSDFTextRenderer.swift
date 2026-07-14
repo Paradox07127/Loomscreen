@@ -33,6 +33,10 @@ final class WPEMSDFTextRenderer {
     private let generator: WPEMSDFGlyphGenerator
     private let layout = WPEMSDFTextLayout()
     private var registeredFonts: Set<String> = []
+    /// Objects whose font.frag combo request has already logged a failure — a
+    /// permanently-unsupported combo would otherwise retry (and fail) every
+    /// single frame, and this used to fail with zero signal at all.
+    private var loggedShaderRequestFailures: Set<String> = []
     /// Memoizes the box-fit font size per (text, font, box) state — `drawPayload`
     /// runs every frame and the fit otherwise re-created a CTFont + CTLine each
     /// time. A ticking clock cycles through a small set of texts, so this stays
@@ -115,7 +119,19 @@ final class WPEMSDFTextRenderer {
         }
 
         let font = resolveFont(for: object)
-        guard let request = try? shaderRequest(comboValues: material.combos) else { return nil }
+        guard let request = try? shaderRequest(comboValues: material.combos) else {
+            // Used to fail silently (`try?` swallows the compile error) — the
+            // object fell back to CoreText every frame with no way to tell
+            // "combo won't compile" apart from "glyphs still warming".
+            if loggedShaderRequestFailures.insert(object.id).inserted {
+                WPESceneDebugArtifacts.shared.appendLog(
+                    "[text.msdf] font.frag combo request failed for \(object.id) (\(object.name)) "
+                        + "combos=\(material.combos) — falling back to CoreText",
+                    level: .warning
+                )
+            }
+            return nil
+        }
 
         // Glyph generation is ALWAYS asynchronous (off-main). The first layout of
         // an uncached object returns nil (→ CoreText for a frame or two) while its

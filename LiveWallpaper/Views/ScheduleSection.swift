@@ -267,16 +267,13 @@ struct ScheduleSection: View {
         highlighted.insert(slotID)
         conflictHighlightGeneration += 1
         let generation = conflictHighlightGeneration
-        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
-            conflictHighlight = highlighted
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard generation == conflictHighlightGeneration else { return }
-            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                conflictHighlight.removeAll()
-            }
-        }
+        flashTransientState(
+            setAnimation: .snappy(duration: 0.18),
+            delay: .milliseconds(1500),
+            isCurrent: { generation == conflictHighlightGeneration },
+            set: { conflictHighlight = highlighted },
+            clear: { conflictHighlight.removeAll() }
+        )
     }
 
     private func removeSlot(_ slotID: UUID) {
@@ -328,14 +325,13 @@ struct ScheduleSection: View {
     }
 
     private func addCustomSlot() {
+        let noFreeRangeMessage = String(
+            localized: "No free time range. Adjust an existing slot first.",
+            defaultValue: "No free time range. Adjust an existing slot first.",
+            comment: "Schedule error shown when Add Slot cannot find a gap of at least 2 hours."
+        )
         guard let free = SchedulePolicy.findFreeRange(in: scheduleSlots, minHours: 2) else {
-            flashAddError(
-                String(
-                    localized: "No free time range. Adjust an existing slot first.",
-                    defaultValue: "No free time range. Adjust an existing slot first.",
-                    comment: "Schedule error shown when Add Slot cannot find a gap of at least 2 hours."
-                )
-            )
+            flashAddError(noFreeRangeMessage)
             return
         }
         let normalizedStart = free.start % 24
@@ -348,13 +344,7 @@ struct ScheduleSection: View {
         // `screenManager.updateScheduleSlots` and writing junk to disk.
         guard normalizedStart != normalizedEnd,
               SchedulePolicy.conflicts(slot: candidate, against: scheduleSlots).isEmpty else {
-            flashAddError(
-                String(
-                    localized: "No free time range. Adjust an existing slot first.",
-                    defaultValue: "No free time range. Adjust an existing slot first.",
-                    comment: "Schedule error shown when Add Slot cannot find a gap of at least 2 hours."
-                )
-            )
+            flashAddError(noFreeRangeMessage)
             return
         }
         scheduleSlots.append(candidate)
@@ -389,14 +379,32 @@ struct ScheduleSection: View {
     private func flashAddError(_ message: String) {
         addErrorGeneration += 1
         let generation = addErrorGeneration
-        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-            addSlotErrorMessage = message
+        flashTransientState(
+            setAnimation: .snappy(duration: 0.2),
+            delay: .seconds(3),
+            isCurrent: { generation == addErrorGeneration },
+            set: { addSlotErrorMessage = message },
+            clear: { addSlotErrorMessage = nil }
+        )
+    }
+
+    /// Generation-guarded transient UI state: animate `set` in now, then clear
+    /// it after `delay` unless a newer flash (per `isCurrent`) superseded it.
+    private func flashTransientState(
+        setAnimation: Animation,
+        delay: Duration,
+        isCurrent: @escaping () -> Bool,
+        set: () -> Void,
+        clear: @escaping () -> Void
+    ) {
+        withAnimation(DesignTokens.motion(reduceMotion, setAnimation)) {
+            set()
         }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            guard generation == addErrorGeneration else { return }
+            try? await Task.sleep(for: delay)
+            guard isCurrent() else { return }
             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                addSlotErrorMessage = nil
+                clear()
             }
         }
     }
@@ -410,14 +418,8 @@ struct ScheduleSection: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.setVideo
-        if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
-            panel.beginSheetModal(for: parent) { response in
-                guard response == .OK else { return }
-                assignVideo(urls: panel.urls, to: slotID)
-            }
-        } else {
-            guard panel.runModal() == .OK else { return }
-            assignVideo(urls: panel.urls, to: slotID)
+        panel.presentSheetOrModal { urls in
+            assignVideo(urls: urls, to: slotID)
         }
     }
 

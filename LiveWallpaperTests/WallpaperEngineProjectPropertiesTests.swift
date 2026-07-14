@@ -386,7 +386,11 @@ struct WallpaperEngineProjectPropertiesTests {
         let presentation = WPEProjectSettingsPresentation(schema: schema, overrides: [:])
 
         #expect(!presentation.sections.isEmpty)
-        #expect(WPEProjectSettingsPresentation.initiallyExpandedSectionIDs(for: presentation.sections).isEmpty)
+        // With no section pre-expanded, only the section headers render.
+        #expect(presentation.rows(expandedSectionIDs: []).allSatisfy { row in
+            if case .sectionHeader = row { return true }
+            return false
+        })
     }
 
     @Test("Scene settings presentation flattens expanded sections into all stable rows")

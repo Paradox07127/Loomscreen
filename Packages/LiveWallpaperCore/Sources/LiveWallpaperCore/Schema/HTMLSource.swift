@@ -194,11 +194,6 @@ public enum HTMLSource: Codable, Equatable, Sendable {
         return false
     }
 
-    /// HTML sources are restored when the user switches back from video/shader modes.
-    public var isRestorableHTMLSource: Bool {
-        true
-    }
-
     /// Stable identity used to detect the same source running on multiple
     /// screens (multi-instance audio + GPU avoidance). Equatable already
     /// gives us comparison; this gives us a Dictionary key.

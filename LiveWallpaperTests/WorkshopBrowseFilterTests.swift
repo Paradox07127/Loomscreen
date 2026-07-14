@@ -92,18 +92,16 @@ struct WorkshopBrowseFilterTests {
 
     @Test("Content-type filter maps to the right tag")
     func contentTypeTags() {
-        #expect(WorkshopContentTypeFilter.all.requiredTags.isEmpty)
         #expect(WorkshopContentTypeFilter.scene.requiredTags == ["Scene"])
         #expect(WorkshopContentTypeFilter.video.requiredTags == ["Video"])
         #expect(WorkshopContentTypeFilter.web.requiredTags == ["Web"])
         #expect(WorkshopContentTypeFilter.scene.tag == "Scene")
-        #expect(WorkshopContentTypeFilter.all.tag == nil)
     }
 
     @Test("Selectable cases exclude the no-restriction sentinels")
     func selectableCases() {
-        // The deselect-to-narrow model never offers the old `.all` / `.any`
-        // sentinels as concrete chips.
+        // The deselect-to-narrow model never offers a `.any` sentinel as a
+        // concrete chip; content type has no sentinel, so all cases are selectable.
         #expect(WorkshopContentTypeFilter.selectableCases == [.scene, .video, .web])
         #expect(!WorkshopResolutionFilter.selectableCases.contains(.any))
     }

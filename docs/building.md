@@ -34,13 +34,15 @@ Pick a scheme and `⌘R`.
 ## Before opening a PR
 
 ```bash
-xcodebuild test  -project LiveWallpaper.xcodeproj -scheme LiveWallpaper    -destination 'platform=macOS'
-xcodebuild build -project LiveWallpaper.xcodeproj -scheme LiveWallpaperLite -destination 'platform=macOS'
+scripts/release_candidate_check.sh
 ```
 
-Both must pass. The unit suite enforces runtime invariants (localization coverage,
-particle/render behavior, etc.); if a change needs to diverge from one, call it out
-in the PR description.
+The release-candidate gate runs the Core, ProWPE, and VideoWeb Swift package
+tests first, then the signed Pro app tests, then the Lite build. These checks are
+intentionally sequential; do not start Pro and Lite separately in parallel.
+The suites enforce runtime invariants (localization coverage, particle/render
+behavior, etc.); if a change needs to diverge from one, call it out in the PR
+description.
 
 ## Packaging a release
 

@@ -570,13 +570,17 @@ struct WPESceneDetailView: View {
     /// Render-behaviour `defaults` knobs surfaced in bug reports so dev-vs-user
     /// flag drift ("works on my machine") is visible. Only explicitly-set keys
     /// print; the curated list excludes pure dump/trace toggles.
+    /// `WPERenderFlagRegistryTests` scans the renderer sources and fails when a
+    /// key read there is neither listed here nor excluded there with a reason.
     private static let renderFlagKeys = [
-        "WPEMetalMemorylessDepthEnabled", "WPEMetalSerializeFrames",
+        "WPEMetalMemorylessDepthEnabled", "WPEMetalMipChainEnabled", "WPEMetalSerializeFrames",
+        "WPEMetalPerspectiveNativeResolution", "WPEMetalSceneBloomEnabled",
         "WPEMetalStaticLayerCacheEnabled",
         "WPEMetalStaticLayerCacheBudgetMiB", "WPEMetalTextureCacheBudgetMiB",
         "WPEMetalIntroPhaseAlignEnabled", "WPEEnableMSDFText", "WPEParallaxGain",
         "WPEParticlePrewarmEnabled", "WPEPuppetAttachmentBindAnchor",
-        "WPEPuppetClipComposite", "WPEPuppetDeferMeshWarp"
+        "WPEPuppetClipComposite", "WPEPuppetDeferMeshWarp",
+        "WPEScriptAsyncTickEnabled"
     ]
 
     private static func nonDefaultRenderFlags() -> [String] {
@@ -769,7 +773,7 @@ private struct DiagnosticLogSheet: View {
     private var terminal: some View {
         ScrollView(.vertical) {
             Text(rendered ?? AttributedString(log))
-                .font(.system(.caption, design: .monospaced))
+                .font(DesignTokens.Typography.codeCaption)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)

@@ -1,0 +1,166 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3660962877",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 6,
+  "passSequence": [
+    {
+      "passId": "935.1",
+      "shaderName": "workshop/3082978660/effects/Simple_Audio_Bars",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "715.1",
+      "shaderName": "workshop/3573886911/effects/frame_builder_by_gariam",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "722.1",
+      "shaderName": "workshop/3573886911/effects/frame_builder_by_gariam",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1080.1",
+      "shaderName": "workshop/3449579583/effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "1080.2",
+      "shaderName": "workshop/3449579583/effects/opacity",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "918.1",
+      "shaderName": "workshop/3124095265/effects/fade",
+      "topology": "fullscreen-quad"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_imageLayerComposite_1080_a": [
+      "pass-0004"
+    ],
+    "_rt_imageLayerComposite_1080_b": [
+      "pass-0003"
+    ],
+    "_rt_imageLayerComposite_715_b": [
+      "pass-0001"
+    ],
+    "_rt_imageLayerComposite_722_b": [
+      "pass-0002"
+    ],
+    "_rt_imageLayerComposite_918_b": [
+      "pass-0005"
+    ],
+    "_rt_imageLayerComposite_935_b": [
+      "pass-0000"
+    ]
+  },
+  "uniformNames": [
+    "g_AudioSpectrum32Left",
+    "g_AudioSpectrum32Right",
+    "g_Direction",
+    "g_Offset",
+    "g_Scale",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_UserAlpha",
+    "u_AASmoothness",
+    "u_Alpha",
+    "u_BarBounds",
+    "u_BarColor",
+    "u_BarCount",
+    "u_BarOpacity",
+    "u_BarSpacing",
+    "u_BorderWidth",
+    "u_BottomWidth",
+    "u_CircleAngles",
+    "u_CurveResolution",
+    "u_DynamicHiding",
+    "u_FrameAlpha",
+    "u_FrameColor",
+    "u_InAlpha",
+    "u_InColor",
+    "u_LeftWidth",
+    "u_MarkerColor",
+    "u_Notch1",
+    "u_Notch2",
+    "u_Notch3",
+    "u_Notch4",
+    "u_NotchSize",
+    "u_NotchSize2",
+    "u_OutAlpha",
+    "u_OutColor",
+    "u_Radius",
+    "u_RadiusForH",
+    "u_RightWidth",
+    "u_SegmentCount",
+    "u_SegmentSpacing",
+    "u_SegmentThreshold",
+    "u_Softness",
+    "u_Thickness",
+    "u_TopWidth",
+    "u_TsOfHiding",
+    "u_VolumeFactor",
+    "u_extrudeEdge",
+    "u_minHeight",
+    "u_minHeightForC",
+    "u_opacity",
+    "u_position",
+    "u_rAASmoothness",
+    "u_refResolution",
+    "u_rotation",
+    "u_size"
+  ],
+  "comboKeys": [
+    "Anti-alias blurring",
+    "Anti-alias blurring ",
+    "Bar Color",
+    "Bar Count",
+    "Bar Spacing",
+    "Border Width",
+    "Bottom Fade Width",
+    "Bottom left",
+    "Bottom right",
+    "Circle Start/End Angles",
+    "Curve Resolution",
+    "Dynamic Hiding Threshold",
+    "Edge extrude",
+    "Left Fade Width",
+    "Lower/Upper Bar Bounds",
+    "Minimum Height (Will be multiplied by the bar width)",
+    "Minimum Height (Will be multiplied by the bar width) ",
+    "Notch 2 offset",
+    "Notch size",
+    "Radius",
+    "Radius (Too small will become solid)",
+    "Reference resolution",
+    "Right Fade Width",
+    "Segment Count",
+    "Segment Spacing",
+    "Segment Threshold",
+    "Thickness",
+    "Threshold of Hiding",
+    "Top Fade Width",
+    "Top left",
+    "Top right",
+    "Volume Factor",
+    "[Debug] Marker Color",
+    "alpha",
+    "angle",
+    "frameAlpha",
+    "frameColor",
+    "inColor",
+    "insideAlpha",
+    "offset",
+    "outAlpha",
+    "outColor",
+    "scale",
+    "ui_editor_properties_opacity",
+    "ui_editor_properties_position",
+    "ui_editor_properties_rotation",
+    "ui_editor_properties_size",
+    "ui_settings_gfx_antialiasing"
+  ],
+  "particleSystemCount": 0,
+  "particleSystemIds": []
+}

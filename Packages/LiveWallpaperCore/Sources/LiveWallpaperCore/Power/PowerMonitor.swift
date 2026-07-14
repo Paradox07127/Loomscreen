@@ -132,7 +132,9 @@ public final class PowerMonitor {
     private func startBatteryMonitoring() {
         stopBatteryMonitoring()
         batteryCheckTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            self?.updateBatteryLevel()
+            Task { @MainActor [weak self] in
+                self?.updateBatteryLevel()
+            }
         }
         batteryCheckTimer?.tolerance = 30
     }

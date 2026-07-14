@@ -85,25 +85,10 @@ final class WPEMetalRenderTargetPool {
         layer: WPERenderLayer,
         sceneSize: CGSize
     ) -> CGSize? {
-        let localFBOName = inheritedPuppetClipBaseName(for: fboName) ?? fboName
+        let localFBOName = WPERenderTargetNames.PuppetClip.baseName(of: fboName) ?? fboName
         guard !WPEMetalShaderInputs.isSceneAliasName(fboName),
               layer.localFBOs.contains(where: { $0.name == localFBOName }) else { return nil }
         return layerCompositeSize(for: layer, sceneSize: sceneSize)
-    }
-
-    /// Additional clip-source RTs are named `<base>_sN` by the executor. They must inherit the base
-    /// clip FBO's scale/format while keeping their own target name so each source gets a distinct
-    /// texture.
-    private static func inheritedPuppetClipBaseName(for name: String) -> String? {
-        let prefix = "_rt_puppetClip_"
-        guard name.hasPrefix(prefix),
-              let suffixStart = name.range(of: "_s", options: .backwards)?.lowerBound else {
-            return nil
-        }
-        let suffix = name[name.index(suffixStart, offsetBy: 2)...]
-        guard !suffix.isEmpty, suffix.allSatisfy(\.isNumber) else { return nil }
-        let base = String(name[..<suffixStart])
-        return base.count > prefix.count ? base : nil
     }
 
     private let device: MTLDevice
@@ -206,7 +191,7 @@ final class WPEMetalRenderTargetPool {
         case .layerComposite(let name):
             spec = WPERenderFBO(name: name, scale: 1, format: "rgba8888")
         case .fbo(let name):
-            let lookupName = Self.inheritedPuppetClipBaseName(for: name) ?? name
+            let lookupName = WPERenderTargetNames.PuppetClip.baseName(of: name) ?? name
             if let inherited = declaredFBOs[lookupName] ?? layer.localFBOs.first(where: { $0.name == lookupName }) {
                 spec = WPERenderFBO(
                     name: name,
@@ -314,7 +299,7 @@ final class WPEMetalRenderTargetPool {
         case .layerComposite(let name):
             return WPERenderFBO(name: name, scale: 1, format: "rgba8888")
         case .fbo(let name):
-            let lookupName = Self.inheritedPuppetClipBaseName(for: name) ?? name
+            let lookupName = WPERenderTargetNames.PuppetClip.baseName(of: name) ?? name
             if let inherited = declaredFBOs[lookupName] ?? layer.localFBOs.first(where: { $0.name == lookupName }) {
                 return WPERenderFBO(
                     name: name,

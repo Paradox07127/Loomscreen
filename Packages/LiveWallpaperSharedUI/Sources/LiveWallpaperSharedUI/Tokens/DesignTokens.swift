@@ -63,6 +63,9 @@ public enum DesignTokens {
         public static let metric = Font.caption.monospacedDigit()
 
         public static let code = Font.system(.body, design: .monospaced)
+
+        /// Caption-scale `code` for dense technical text: log lines, paths, IDs.
+        public static let codeCaption = Font.system(.caption, design: .monospaced)
     }
 
     public enum Spacing {
@@ -174,6 +177,8 @@ public enum DesignTokens {
         public static let shadowRadius: CGFloat = 12
         public static let shadowOpacity: Double = 0.18
         public static let shadowYOffset: CGFloat = 4
+        /// Accent-tinted glow behind the selected gallery tile.
+        public static let selectedShadowOpacity: Double = 0.22
 
         /// Resting elevation values for gallery tiles — keep a faint always-on
         /// shadow so hover smoothly interpolates instead of popping from flat.

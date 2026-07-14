@@ -1,0 +1,200 @@
+{
+  "schema": "wpe.oracle.fingerprint.v1",
+  "workshopId": "3509243656",
+  "sourceTraceSchema": "wpe.trace.v1",
+  "passCount": 15,
+  "passSequence": [
+    {
+      "passId": "300.1",
+      "shaderName": "effects/pulse",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "294.1",
+      "shaderName": "effects/pulse",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "2073.1",
+      "shaderName": "effects/pulse",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "249.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "264.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "281.1",
+      "shaderName": "effects/waterwaves",
+      "topology": "object-quad"
+    },
+    {
+      "passId": "421.1",
+      "shaderName": "effects/godrays_downsample2",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.2",
+      "shaderName": "effects/godrays_cast",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.3",
+      "shaderName": "effects/godrays_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.4",
+      "shaderName": "effects/godrays_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.6",
+      "shaderName": "effects/pulse",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.7",
+      "shaderName": "effects/blur_radial_gaussian",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.8",
+      "shaderName": "workshop/2821337237/effects/shadow_map",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.9",
+      "shaderName": "workshop/2821337237/effects/crt_screen",
+      "topology": "fullscreen-quad"
+    },
+    {
+      "passId": "421.10",
+      "shaderName": "effects/filmgrain",
+      "topology": "fullscreen-quad"
+    }
+  ],
+  "renderTargetLineage": {
+    "_rt_HalfCompoBuffer1": [
+      "pass-0008"
+    ],
+    "_rt_HalfCompoBuffer2": [
+      "pass-0009"
+    ],
+    "_rt_imageLayerComposite_421_a": [
+      "pass-0013"
+    ],
+    "_rt_imageLayerComposite_421_b": [
+      "pass-0011"
+    ],
+    "render_target": [
+      "pass-0012"
+    ],
+    "scene": [
+      "pass-0014"
+    ]
+  },
+  "uniformNames": [
+    "g_Center",
+    "g_ColorRays",
+    "g_Direction",
+    "g_Exponent",
+    "g_Intensity",
+    "g_Length",
+    "g_NoiseAlpha",
+    "g_NoiseAmount",
+    "g_NoisePower",
+    "g_NoiseScale",
+    "g_NoiseSmoothness",
+    "g_NoiseSpeed",
+    "g_Point0",
+    "g_Point1",
+    "g_Point2",
+    "g_Point3",
+    "g_Power",
+    "g_PulseAmount",
+    "g_PulsePhase",
+    "g_PulseSpeed",
+    "g_PulseThresholds",
+    "g_Scale",
+    "g_Speed",
+    "g_Strength",
+    "g_TexelSize",
+    "g_Texture0Resolution",
+    "g_Texture1Resolution",
+    "g_Texture2Resolution",
+    "g_Threshold",
+    "g_Time",
+    "g_TintColor1",
+    "g_TintColor2",
+    "u_Center",
+    "u_Scale",
+    "u_alpha",
+    "u_amount1",
+    "u_amount2",
+    "u_bloom",
+    "u_borders",
+    "u_brightness",
+    "u_curvature",
+    "u_frequency",
+    "u_noise",
+    "u_offset2",
+    "u_resolution",
+    "u_saturation",
+    "u_size1",
+    "u_strength1",
+    "u_strength2",
+    "u_vignette"
+  ],
+  "comboKeys": [
+    "Border size",
+    "Brightness",
+    "Curvature",
+    "Frequency",
+    "Light bleed",
+    "Opacity",
+    "Resolution",
+    "Saturation",
+    "Scan line count",
+    "Size",
+    "Static noise",
+    "Vignette",
+    "amount",
+    "blurscale",
+    "bounds",
+    "center",
+    "color",
+    "direction",
+    "exponent",
+    "flicker amount",
+    "flicker offset",
+    "flicker strength",
+    "noiseamount",
+    "noisescale",
+    "noisesmoothness",
+    "noisespeed",
+    "phase",
+    "point0",
+    "point1",
+    "point2",
+    "point3",
+    "power",
+    "rayintensity",
+    "raylength",
+    "raythreshold",
+    "scale",
+    "scan line strength",
+    "speed",
+    "strength",
+    "tinthigh",
+    "tintlow"
+  ],
+  "particleSystemCount": 0,
+  "particleSystemIds": []
+}

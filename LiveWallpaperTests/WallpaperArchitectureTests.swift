@@ -245,22 +245,50 @@ struct AppRuntimeOptionsTests {
 @Suite("Menu bar playback controls")
 @MainActor
 struct MenuBarPlaybackControlTests {
-    @Test("Toggle helper pauses a playing wallpaper exactly once")
+    /// Exercises the shipping toggle path (`ScreenManager.togglePlayback(for:)`,
+    /// the one the menu bar calls) rather than a standalone helper copy.
+    private func makeManager() -> ScreenManager {
+        ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            displayRegistry: FakeDisplayRegistry()
+        ))
+    }
+
+    private func makeScreen(installing playback: FakePlaybackController) -> Screen? {
+        guard let nsScreen = NSScreen.screens.first else { return nil }
+        let screen = Screen(nsScreen: nsScreen)
+        screen.installRuntimeSession(playback)
+        return screen
+    }
+
+    @Test("Toggle pauses a playing wallpaper exactly once")
     func togglePausesPlayingWallpaperOnce() {
         let playback = FakePlaybackController(isPlaying: true)
+        guard let screen = makeScreen(installing: playback) else {
+            Issue.record("No NSScreen available for test")
+            return
+        }
 
-        PlaybackToggle.toggle(playback)
+        makeManager().togglePlayback(for: screen)
 
         #expect(!playback.isPlaying)
         #expect(playback.pauseCount == 1)
         #expect(playback.playCount == 0)
     }
 
-    @Test("Toggle helper plays a paused wallpaper exactly once")
+    @Test("Toggle plays a paused wallpaper exactly once")
     func togglePlaysPausedWallpaperOnce() {
         let playback = FakePlaybackController(isPlaying: false)
+        guard let screen = makeScreen(installing: playback) else {
+            Issue.record("No NSScreen available for test")
+            return
+        }
 
-        PlaybackToggle.toggle(playback)
+        makeManager().togglePlayback(for: screen)
 
         #expect(playback.isPlaying)
         #expect(playback.playCount == 1)
@@ -273,8 +301,12 @@ struct MenuBarPlaybackControlTests {
         // user still intends to play. Toggling must pause (flip intent off),
         // not "resume" by chasing the suppressed isPlaying state.
         let playback = FakePlaybackController(isPlaying: false, userIntendsToPlay: true)
+        guard let screen = makeScreen(installing: playback) else {
+            Issue.record("No NSScreen available for test")
+            return
+        }
 
-        PlaybackToggle.toggle(playback)
+        makeManager().togglePlayback(for: screen)
 
         #expect(!playback.userIntendsToPlay)
         #expect(playback.pauseCount == 1)
@@ -1607,7 +1639,6 @@ struct InfrastructureRuntimeBoundaryTests {
         "WPERenderGraphBuilder.swift": ["WPEMetalRenderExecutor", "WPEResolutionTracer"],
         "WPERenderPipelineBuilder.swift": ["WPEResolutionTracer", "WPEShaderBuiltinMacros"],
         "WPESceneDebugArtifacts.swift": ["WPEResolutionDiagnosticsSnapshot"],
-        "WPESceneDocumentParser.swift": ["WPETransformScriptEvaluator"],
         "WPESceneProjectSchemaLoader.swift": ["WPEPathSafety"],
         "WPEStorageInventory.swift": ["WPEPathSafety"],
         "WPEStoragePaths.swift": ["WPEPathSafety"],

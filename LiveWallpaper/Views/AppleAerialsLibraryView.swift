@@ -226,12 +226,8 @@ struct AppleAerialsLibraryView: View {
     }
 
     private func applyToAll(_ asset: AerialAsset) {
-        guard let url = resolveScopedURL(asset.bookmarkData) else {
-            Logger.error("Failed to resolve aerial bookmark; user may need to reconnect", category: .fileAccess)
-            return
-        }
         for screen in screenManager.screens {
-            screenManager.setVideo(url: url, bookmarkData: asset.bookmarkData, for: screen)
+            apply(asset, to: screen)
         }
     }
 

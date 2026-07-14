@@ -20,7 +20,7 @@ struct TerminalCommandPanel: View {
         HStack(alignment: .center, spacing: DesignTokens.Spacing.md) {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(previewCommand)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(DesignTokens.Typography.codeCaption)
                     .foregroundStyle(.primary)
                     .padding(.vertical, DesignTokens.Spacing.xxs)
                     .textSelection(.enabled)

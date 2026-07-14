@@ -49,8 +49,9 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
             }
             bytes = swizzled
         case .rgba16Float:
-            // Linear HDR output (bloom scenes): clamp to SDR and sRGB-encode so
-            // the poster approximates the tone-mapped frame the user sees.
+            // Linear HDR output (bloom scenes): clamp to SDR and sRGB-encode —
+            // the same clamp the unorm drawable applies at present, so the poster
+            // matches the frame the user sees.
             bytes = convertRGBA16FloatToSRGB8(texture)
         default:
             Logger.warning(
@@ -101,7 +102,9 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         return bytes
     }
 
-    private static func convertRGBA16FloatToSRGB8(_ texture: MTLTexture) -> [UInt8] {
+    /// Internal (not private): the renderer's DEBUG PNG dump path reuses it — the
+    /// sampling fallback there renders float targets black.
+    static func convertRGBA16FloatToSRGB8(_ texture: MTLTexture) -> [UInt8] {
         let pixelCount = texture.width * texture.height
         var halves = [UInt16](repeating: 0, count: pixelCount * 4)
         texture.getBytes(

@@ -62,6 +62,91 @@ struct WorkshopDownloadTests {
         #expect(SteamCMDProcessRunner.parseDownloadProgressLine("Update state (0x5) verifying install") == nil)
         #expect(SteamCMDProcessRunner.parseDownloadProgressLine("progress: nope (1 / 2)") == nil)
     }
+
+    @Test("SteamCMD output retention is a bounded tail")
+    func steamCMDOutputTailIsBounded() {
+        var tail = SteamCMDOutputTail(maxBytes: 32)
+        tail.append(Data("discard-me-".utf8))
+        tail.append(Data("0123456789abcdefghijklmnopqrstuv-final".utf8))
+
+        #expect(tail.retainedByteCount == 32)
+        #expect(tail.discardedByteCount > 0)
+        #expect(tail.string == "6789abcdefghijklmnopqrstuv-final")
+    }
+
+    @Test("SteamCMD output tail stays bounded across 100 MiB of streamed chunks")
+    func steamCMDOutputTailStaysBoundedForHostileOutput() {
+        let limit = 1 << 20
+        let chunk = Data(repeating: 0x41, count: limit)
+        var tail = SteamCMDOutputTail(maxBytes: limit)
+
+        for _ in 0..<100 {
+            tail.append(chunk)
+            #expect(tail.retainedByteCount <= limit)
+        }
+        tail.append(Data("FINAL-DIAGNOSTIC".utf8))
+
+        #expect(tail.retainedByteCount == limit)
+        #expect(tail.discardedByteCount > 99 * limit)
+        #expect(tail.string.hasSuffix("FINAL-DIAGNOSTIC"))
+    }
+
+    @Test("SteamCMD output tail has fixed capacity under one-byte chunks")
+    func steamCMDOutputTailHandlesTinyChunks() {
+        var tail = SteamCMDOutputTail(maxBytes: 1_024)
+        for value in 0..<250_000 {
+            tail.append(Data([UInt8(truncatingIfNeeded: value)]))
+        }
+
+        #expect(tail.retainedByteCount == 1_024)
+        #expect(tail.data.count == 1_024)
+        #expect(tail.discardedByteCount == 250_000 - 1_024)
+    }
+
+    @Test("SteamCMD semantic facts survive diagnostic-tail eviction")
+    func steamCMDSemanticFactsSurviveTailEviction() {
+        var summary = SteamCMDOutputSemanticSummary()
+        summary.consume("Steam Console Client (c) Valve Corporation - version 1700000000")
+        summary.consume(#"Success. Downloaded item 123 to "/tmp/item""#)
+        var tail = SteamCMDOutputTail(maxBytes: 32)
+        tail.append(Data(repeating: 0x78, count: 4_096))
+
+        let output = summary.rendered(with: tail)
+        #expect(output.contains("Steam Console Client (c) Valve Corporation"))
+        #expect(output.contains("Success. Downloaded item 123"))
+        #expect(output.contains("output bytes omitted"))
+    }
+
+    @Test("SteamCMD public build id survives diagnostic-tail eviction")
+    func steamCMDPublicBuildIDSurvivesTailEviction() {
+        var summary = SteamCMDOutputSemanticSummary()
+        summary.consume(#"    "public""#)
+        summary.consume("    {")
+        summary.consume(#"        "buildid"    "24681012""#)
+        summary.consume("    }")
+        var tail = SteamCMDOutputTail(maxBytes: 32)
+        tail.append(Data(repeating: 0x78, count: 4_096))
+
+        let output = summary.rendered(with: tail)
+        #expect(SteamCMDDoctorService.parsePublicBuildID(fromAppInfo: output) == "24681012")
+    }
+
+    @Test("Repeated public contexts cannot exhaust independent semantic slots")
+    func repeatedPublicContextsCannotExhaustSemanticSlots() {
+        var summary = SteamCMDOutputSemanticSummary()
+        for value in 0..<1_000 {
+            summary.consume(#""public""#)
+            summary.consume(#""buildid" "\#(value)""#)
+        }
+        summary.consume("Steam Console Client (c) Valve Corporation - version 1700000000")
+        summary.consume(#"Success. Downloaded item 123 to "/tmp/item""#)
+        var tail = SteamCMDOutputTail(maxBytes: 16)
+        tail.append(Data(repeating: 0x78, count: 1_024))
+
+        let output = summary.rendered(with: tail)
+        #expect(output.contains("Steam Console Client (c) Valve Corporation"))
+        #expect(output.contains("Success. Downloaded item 123"))
+    }
 }
 
 @Suite("SteamCMD binary resolution")

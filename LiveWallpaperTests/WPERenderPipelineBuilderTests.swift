@@ -19,6 +19,56 @@ struct WPERenderPipelineBuilderTests {
         #expect(WPEBuiltinShaderName.normalized("genericimage_custom", genericImageAsCopy: true) == "genericimage_custom")
     }
 
+    @Test("Script-driven alpha/transform rewrites keep shape:quad points")
+    func scriptAlphaAndTransformRewritesKeepShapeQuadPoints() throws {
+        // applyingAlpha/applyingTransform rebuild the geometry per script tick;
+        // like the attachment-follow rewrite, they must carry shapePoints or a
+        // scripted quad layer loses its perspective corners at runtime.
+        let points = [
+            SIMD2<Double>(0.4, 0.25),
+            SIMD2<Double>(0.6, 0.25),
+            SIMD2<Double>(0.94451, 0.83623),
+            SIMD2<Double>(0.09498, 0.88795)
+        ]
+        let layer = WPERenderLayer(
+            objectID: "96",
+            objectName: "beam",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(100, 200, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 200, height: 100),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1,
+                shapePoints: points
+            ),
+            compositeA: "_rt_imageLayerComposite_96_a",
+            compositeB: "_rt_imageLayerComposite_96_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(graphLayer: layer, passes: [])
+        ])
+
+        let faded = try #require(pipeline.applyingLayerAlpha(["96": 0.5]).layers.first).graphLayer
+        #expect(faded.geometry.alpha == 0.5)
+        #expect(faded.geometry.shapePoints == points)
+
+        let moved = try #require(pipeline.applyingLayerTransforms(
+            origins: ["96": SIMD3<Double>(150, 250, 0)],
+            scales: [:],
+            angles: [:]
+        ).layers.first).graphLayer
+        #expect(moved.geometry.origin == SIMD3<Double>(150, 250, 0))
+        #expect(moved.geometry.shapePoints == points)
+    }
+
     @Test("Builds prepared shader programs from render graph passes")
     func buildsPreparedShaderProgramsFromGraphPasses() throws {
         let fixture = try makeFixture(files: [
@@ -703,6 +753,81 @@ struct WPERenderPipelineBuilderTests {
         #expect(fragmentSource.contains("wpe_common_fragment_included"))
         #expect(fragmentSource.contains("float ConvertSampleR8"))
         #expect(fragmentSource.contains("#include") == false)
+    }
+
+    @Test("common_fragment.h FORMAT_* constants keep formatcombo branches off the R8 path")
+    func commonFragmentFormatConstantsKeepFormatcomboBranchesOffR8() throws {
+        // lightshafts.frag (and every `formatcombo` shader) branches on
+        // `#if TEX2FORMAT == FORMAT_R8 || TEX2FORMAT == FORMAT_RG88` to pick
+        // `.rrr` replication for single/dual-channel gradient maps. Before the
+        // stub carried WPE's FORMAT_* table, implicitConditionalDefines zeroed
+        // FORMAT_R8/FORMAT_RG88 alongside the missing TEXnFORMAT, so `0 == 0`
+        // forced the grayscale branch and RGBA gradients rendered white.
+        let fixture = try makeFixture(files: [
+            "shaders/effects/shafts_like.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/shafts_like.frag": """
+            #include "common_fragment.h"
+            uniform sampler2D g_Texture2; // {"default":"gradient/gradient_iridescent","formatcombo":true}
+            void main() {
+            #if TEX2FORMAT == FORMAT_R8 || TEX2FORMAT == FORMAT_RG88
+                vec3 gradColor = texSample2D(g_Texture2, vec2(0.5)).rrr;
+            #else
+                vec3 gradColor = texSample2D(g_Texture2, vec2(0.5)).rgb;
+            #endif
+                gl_FragColor = vec4(gradColor, 1.0);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                geometry: .identity,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/shafts/effect.json"),
+                        shader: "effects/shafts_like",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let pass = try #require(pipeline.layers.first?.passes.first)
+        let fragmentSource = try #require(pass.shader?.fragmentSource)
+
+        // The stub supplies WPE's real enum values …
+        #expect(fragmentSource.contains("#define FORMAT_R8 9"))
+        #expect(fragmentSource.contains("#define FORMAT_RG88 8"))
+        // … so the auto-define pass must not zero them anymore.
+        #expect(fragmentSource.contains("#define FORMAT_R8 0") == false)
+        #expect(fragmentSource.contains("#define FORMAT_RG88 0") == false)
+        // The missing per-slot format combo still auto-defines to 0, which is
+        // FORMAT_RGBA8888 — the layout the texture loader uploads.
+        #expect(fragmentSource.contains("#define TEX2FORMAT 0"))
+        // And the unbound slot still resolves the shader-declared default.
+        #expect(pass.textureBindings[2] == WPETextureReference.asset("gradient/gradient_iridescent"))
     }
 
     @Test("Treats generic image shader variants as builtins")

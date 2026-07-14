@@ -279,6 +279,16 @@ public enum WPERenderPassPhase: Equatable, Sendable {
     case material
     case effect(file: String)
     case command(file: String)
+
+    /// WPE's builtin full-frame copy command/material asset. The graph builder
+    /// synthesizes a `.command(file:)` pass with this string as both the phase's
+    /// file AND the pass's `shader` when relaying a layer's finished composite to
+    /// the scene target or a composelayer group buffer (`finalizedPasses`). The
+    /// executor's puppet defer-warp effect-chain detector (`hasEffectChain`)
+    /// excludes exactly this file so a synthesized copy-only puppet isn't
+    /// misclassified as "has an effect". Both sides MUST use this exact string —
+    /// ADR-001 appendix A #66.
+    public static let sceneCopyCommandFile = "materials/util/copy.json"
 }
 
 public enum WPETextureReference: Equatable, Sendable {
@@ -286,6 +296,26 @@ public enum WPETextureReference: Equatable, Sendable {
     case asset(String)
     case fbo(String)
     case previous
+
+    /// Canonical classifier for `_rt_*` names WPE's runtime aliases to the LIVE scene
+    /// texture rather than a discrete FBO allocation. Single source of truth shared by the
+    /// graph builder (Infrastructure) and the executor's shader inputs (Runtime) — both
+    /// import this Schema package, so neither crosses the Infra↔Runtime boundary. This list
+    /// was previously hand-copied in both places (ADR-001 B1: "应合一,最高优先" — a drift
+    /// between the two copies causes PiP / shine-white-out regressions).
+    public static func isSceneAliasName(_ name: String) -> Bool {
+        switch name {
+        case "_rt_FullFrameBuffer",
+             "_rt_HalfFrameBuffer",
+             "_rt_QuarterFrameBuffer",
+             "_rt_imageLayerComposite":
+            return true
+        default:
+            return name.hasPrefix("_rt_EightBuffer")
+                || name.hasPrefix("_rt_Mip")
+                || name.hasPrefix("_rt_downscaled")
+        }
+    }
 }
 
 public enum WPERenderTarget: Equatable, Sendable {

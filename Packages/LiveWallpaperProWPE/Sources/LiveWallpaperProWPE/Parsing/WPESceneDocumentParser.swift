@@ -1,6 +1,50 @@
-#if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
+
+/// Bake-time resolver for static transform scripts. Implemented by the app's
+/// JSContext-backed evaluator; the parser package cannot depend on the script
+/// runtime, so the dependency is inverted through this seam (ADR-002 step 2).
+public protocol WPESceneTransformScriptResolving {
+    func resolveVec3(
+        script: String,
+        properties: [String: WPESceneScriptPropertyValue],
+        seed: SIMD3<Double>
+    ) -> SIMD3<Double>?
+}
+
+/// Textual classification of WPE transform scripts, shared by the parser
+/// (bake static origins at parse time) and the runtime evaluator (execution guard).
+public enum WPETransformScriptStaticAnalysis {
+    /// Markers that make a transform script time/audio/random-driven and thus not
+    /// statically resolvable. Conservative: a false "dynamic" only leaves the
+    /// baked value untouched (no regression). Matching is CASE-SENSITIVE on
+    /// purpose — `update` contains a lowercase "date", so a case-insensitive
+    /// `Date` check would wrongly classify every origin script as dynamic.
+    private static let dynamicTokens = [
+        "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
+        "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
+        "input.cursorWorldPosition", "shared.", "shared["
+    ]
+
+    /// Static resolution runs during parsing, where retaining a hung JSContext is
+    /// worse than falling back to the baked value; loop/eval forms are rejected
+    /// conservatively and left to the dynamic transform path.
+    private static let staticExecutionBlocklistPatterns = [
+        #"\bwhile\s*\("#,
+        #"\bfor\s*\("#,
+        #"\bdo\s*\{"#,
+        #"\beval\s*\("#,
+        #"\bFunction\s*\("#
+    ]
+
+    public static func isStaticallyResolvable(_ script: String) -> Bool {
+        guard !dynamicTokens.contains(where: { script.contains($0) }) else { return false }
+        return !staticExecutionBlocklistPatterns.contains {
+            script.range(of: $0, options: .regularExpression) != nil
+        }
+    }
+}
 
 /// Stateless flexible parser for Wallpaper Engine `scene.json`. The shipping
 /// format mixes JSON objects, scalar arrays, and space-separated string
@@ -14,15 +58,12 @@ import Foundation
 ///   - Material/effect/animation metadata is preserved for renderer fallbacks
 ///     and future shader passes; unsupported objects and full FBO shader
 ///     pipelines still emit diagnostics so import can downgrade capability.
-enum WPESceneDocumentParser {
+public enum WPESceneDocumentParser {
 
-    static func parse(data: Data) throws -> WPESceneDocument {
-        try parse(data: data, userValues: [:])
-    }
-
-    static func parse(
+    public static func parse(
         data: Data,
-        userValues: [String: WallpaperEngineProjectPropertyValue]
+        userValues: [String: WallpaperEngineProjectPropertyValue],
+        makeTransformScriptResolver: (_ canvasWidth: Double, _ canvasHeight: Double) -> any WPESceneTransformScriptResolving
     ) throws -> WPESceneDocument {
         guard !data.isEmpty else {
             throw WPESceneDocumentError.invalidUTF8
@@ -71,17 +112,23 @@ enum WPESceneDocumentParser {
         let scriptResolvedOrigins = resolveScriptOrigins(
             rawObjects,
             canvasWidth: general.orthogonalProjection.width,
-            canvasHeight: general.orthogonalProjection.height
+            canvasHeight: general.orthogonalProjection.height,
+            makeResolver: makeTransformScriptResolver
         )
+        // One canonical id→object index feeds every downstream pass (transforms,
+        // visibility, hierarchy, attachments). Later duplicates win — matching the
+        // paint-order map below — so a malformed duplicate-id document resolves
+        // every field from a single source object instead of mixing first/last.
+        let objectsByID = indexObjectsByID(rawObjects)
         let objectTransforms = resolvedObjectTransforms(
-            rawObjects,
+            objectsByID,
             scriptOrigins: scriptResolvedOrigins
         )
         // Effective visibility folds each object's own `visible` with its ancestor
         // groups', so a child of a condition-hidden group is hidden too.
-        let objectVisibility = resolvedObjectVisibility(rawObjects)
-        let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
-        let inheritedAttachments = inheritedGroupAttachments(rawObjects)
+        let objectVisibility = resolvedObjectVisibility(objectsByID)
+        let (objectParentByID, ownVisibilityByID) = objectHierarchy(from: objectsByID)
+        let inheritedAttachments = inheritedGroupAttachments(from: objectsByID)
         var imageObjects: [WPESceneImageObject] = []
         var scriptHostObjects: [WPESceneScriptHostObject] = []
         var transformHostObjects: [WPESceneTransformHostObject] = []
@@ -274,17 +321,30 @@ enum WPESceneDocumentParser {
         )
     }
 
+    /// Canonical id→object index. A later duplicate id wins so every downstream
+    /// pass resolves the same source object for a given id; well-formed WPE
+    /// exports carry unique ids, so this only matters for malformed documents.
+    private static func indexObjectsByID(
+        _ rawObjects: [[String: Any]]
+    ) -> [String: [String: Any]] {
+        var objectsByID: [String: [String: Any]] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object) else { continue }
+            objectsByID[id] = object
+        }
+        return objectsByID
+    }
+
     /// Parent id and OWN baked `visible` for every object (groups included). The
     /// renderer walks the parent chain live so a layer script can't show a layer
     /// under a currently-hidden ancestor (group toggle, condition, or live image
     /// toggle alike) — its `getParent()` is a neutral always-visible stub.
     private static func objectHierarchy(
-        _ rawObjects: [[String: Any]]
+        from objectsByID: [String: [String: Any]]
     ) -> (parents: [String: String], ownVisibility: [String: Bool]) {
         var parents: [String: String] = [:]
         var ownVisibility: [String: Bool] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object) else { continue }
+        for (id, object) in objectsByID {
             ownVisibility[id] = parseBool(object["visible"]) ?? true
             if let parent = parentID(in: object), parent != id {
                 parents[id] = parent
@@ -300,31 +360,42 @@ enum WPESceneDocumentParser {
     /// layer), the exact shape the static anchor-offset and runtime attachment-follow
     /// paths already handle for directly-attached layers.
     private static func inheritedGroupAttachments(
-        _ rawObjects: [[String: Any]]
+        from objectsByID: [String: [String: Any]]
     ) -> [String: (name: String, parentID: String)] {
-        var byID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), byID[id] == nil else { continue }
-            byID[id] = object
+        // Each group node's nearest inherited attachment is a property of its
+        // position in the group chain, not of the image that starts the walk, so
+        // memoize it once instead of re-walking the whole chain per unattached
+        // image (previously O(objects × chain-depth) on deep group hierarchies).
+        var memo: [String: (name: String, parentID: String)?] = [:]
+
+        func inherited(groupID: String, stack: Set<String>) -> (name: String, parentID: String)? {
+            if let cached = memo[groupID] { return cached }
+            guard !stack.contains(groupID),
+                  let group = objectsByID[groupID],
+                  objectKindResolution(for: group).primary == .unknown else {
+                return nil
+            }
+            let resolved: (name: String, parentID: String)?
+            if let attachment = nonEmptyString(group["attachment"]) ?? nonEmptyString(group["anchor"]),
+               let groupParentID = parentID(in: group) {
+                resolved = (attachment, groupParentID)
+            } else if let parent = parentID(in: group) {
+                resolved = inherited(groupID: parent, stack: stack.union([groupID]))
+            } else {
+                resolved = nil
+            }
+            memo[groupID] = resolved
+            return resolved
         }
+
         var result: [String: (name: String, parentID: String)] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object),
-                  objectKindResolution(for: object).primary == .image,
+        for (id, object) in objectsByID {
+            guard objectKindResolution(for: object).primary == .image,
                   nonEmptyString(object["attachment"]) == nil,
-                  nonEmptyString(object["anchor"]) == nil else { continue }
-            var current = parentID(in: object)
-            var seen: Set<String> = []
-            while let ancestorID = current,
-                  seen.insert(ancestorID).inserted,
-                  let ancestor = byID[ancestorID] {
-                guard objectKindResolution(for: ancestor).primary == .unknown else { break }
-                if let attachment = nonEmptyString(ancestor["attachment"]) ?? nonEmptyString(ancestor["anchor"]),
-                   let groupParentID = parentID(in: ancestor) {
-                    result[id] = (attachment, groupParentID)
-                    break
-                }
-                current = parentID(in: ancestor)
+                  nonEmptyString(object["anchor"]) == nil,
+                  let parent = parentID(in: object) else { continue }
+            if let attachment = inherited(groupID: parent, stack: []) {
+                result[id] = attachment
             }
         }
         return result
@@ -482,15 +553,9 @@ enum WPESceneDocumentParser {
     }
 
     private static func resolvedObjectTransforms(
-        _ rawObjects: [[String: Any]],
+        _ objectsByID: [String: [String: Any]],
         scriptOrigins: [String: SIMD3<Double>] = [:]
     ) -> [String: SceneObjectTransform] {
-        var objectsByID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
-            objectsByID[id] = object
-        }
-
         var memo: [String: SceneObjectTransform] = [:]
 
         func resolve(id: String, stack: Set<String>) -> SceneObjectTransform {
@@ -573,14 +638,8 @@ enum WPESceneDocumentParser {
     /// both the horizontal and vertical variant show at once. Mirrors the image
     /// graph's `hasHiddenAncestor`, but covers group containers and text too.
     private static func resolvedObjectVisibility(
-        _ rawObjects: [[String: Any]]
+        _ objectsByID: [String: [String: Any]]
     ) -> [String: Bool] {
-        var objectsByID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
-            objectsByID[id] = object
-        }
-
         var memo: [String: Bool] = [:]
 
         func resolve(id: String, stack: Set<String>) -> Bool {
@@ -616,21 +675,22 @@ enum WPESceneDocumentParser {
     private static func resolveScriptOrigins(
         _ rawObjects: [[String: Any]],
         canvasWidth: Double,
-        canvasHeight: Double
+        canvasHeight: Double,
+        makeResolver: (Double, Double) -> any WPESceneTransformScriptResolving
     ) -> [String: SIMD3<Double>] {
         var pending: [(id: String, script: String, properties: [String: WPESceneScriptPropertyValue], seed: SIMD3<Double>)] = []
         for object in rawObjects {
             guard let id = objectID(in: object),
                   let origin = object["origin"] as? [String: Any],
                   let script = origin["script"] as? String, !script.isEmpty,
-                  WPETransformScriptEvaluator.isStaticallyResolvable(script) else { continue }
+                  WPETransformScriptStaticAnalysis.isStaticallyResolvable(script) else { continue }
             let properties = scriptPropertyValues(origin["scriptproperties"])
             let seed = parseVector3(resolveBoundTransformValue(origin["value"])) ?? SIMD3<Double>(0, 0, 0)
             pending.append((id, script, properties, seed))
         }
         guard !pending.isEmpty else { return [:] }
 
-        let evaluator = WPETransformScriptEvaluator(canvasWidth: canvasWidth, canvasHeight: canvasHeight)
+        let evaluator = makeResolver(canvasWidth, canvasHeight)
         var resolved: [String: SIMD3<Double>] = [:]
         resolved.reserveCapacity(pending.count)
         for item in pending {
@@ -746,14 +806,14 @@ enum WPESceneDocumentParser {
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
-        let text: String?
+        let authoredText: String?
         var textScript: String?
         var textScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         switch raw {
         case let value as String:
-            text = value
+            authoredText = value
         case let nested as [String: Any]:
-            text = (nested["value"] as? String) ?? (nested["text"] as? String)
+            authoredText = (nested["value"] as? String) ?? (nested["text"] as? String)
             if let script = nested["script"] as? String, !script.isEmpty {
                 textScript = script
                 // The scene's per-object scriptProperty overrides (already
@@ -762,9 +822,14 @@ enum WPESceneDocumentParser {
                 textScriptProperties = scriptPropertyValues(nested["scriptproperties"])
             }
         default:
-            text = nil
+            authoredText = nil
         }
-        guard let text, !text.isEmpty else {
+        // A script-driven text object may author an EMPTY placeholder — its
+        // update() computes the real string (3509243656's `time` display authors
+        // "" and is the scene's only `shared.xntime` producer; dropping it froze
+        // every consumer text). WPE runs the script regardless of the authored
+        // value, so only SCRIPTLESS objects with no resolvable text are dropped.
+        guard authoredText?.isEmpty == false || textScript != nil else {
             let objectName = dict["name"] as? String ?? "?"
             diagnostics.append(.init(
                 severity: .warning,
@@ -775,6 +840,7 @@ enum WPESceneDocumentParser {
             ))
             return nil
         }
+        let text = authoredText ?? ""
         let id = (dict["id"] as? String)
             ?? (dict["id"] as? Int).map(String.init)
             ?? (dict["name"] as? String)
@@ -783,6 +849,10 @@ enum WPESceneDocumentParser {
         let font = unwrapString(dict["font"])
         let pointSize = unwrapDouble(dict["pointsize"]) ?? unwrapDouble(dict["fontsize"]) ?? 32
         let color = unwrapVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        // Generic object `brightness` — the same field image objects consume;
+        // WPE modulates text with it too (3460973721's Clock/Date/Day author
+        // 2.39/1.98/1.4), so dropping it discarded authored intensity.
+        let brightness = unwrapDouble(dict["brightness"]) ?? 1.0
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         // Script-driven alpha/visible (3509243656's login-intro texts) — the
         // renderer ticks these; the baked value above is only the seed.
@@ -802,6 +872,9 @@ enum WPESceneDocumentParser {
         }
         let origin = transform.origin
         let scale = transform.scale
+        // Text objects carry static `angles` like image layers (2986828130's
+        // Clock/Date tilt 30° standalone) — dropping it froze them unrotated.
+        let angles = transform.angles
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
@@ -838,10 +911,12 @@ enum WPESceneDocumentParser {
             fontRelativePath: font,
             pointSize: max(1, pointSize),
             color: color,
+            brightness: max(0, brightness),
             alpha: max(0, min(alphaValue.value, 1)),
             alphaAnimation: alphaValue.animation,
             origin: origin,
             scale: scale,
+            angles: angles,
             visible: visible,
             horizontalAlignment: horiz.lowercased(),
             verticalAlignment: vert.lowercased(),
@@ -944,10 +1019,7 @@ enum WPESceneDocumentParser {
             guard WPEValueParser.strictBool(fallback) != nil else {
                 return fallback
             }
-            return WallpaperEngineProjectPropertySchema.sceneConditionMatches(
-                value: override,
-                condition: condition
-            )
+            return override.looselyMatches(.conditionLiteral(condition))
         }
 
         var resolved: [String: Any] = [:]
@@ -1045,6 +1117,10 @@ enum WPESceneDocumentParser {
         let visible = effectiveVisible ?? (parseBool(dict["visible"]) ?? true)
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        // Generic object `brightness` — the same field image objects consume;
+        // WPE applies it to particles too, so dropping it discarded authored
+        // intensity.
+        let brightness = parseDouble(dict["brightness"]) ?? 1.0
         let parallaxDepth = parseParallaxDepth(dict["parallaxDepth"] ?? dict["parallaxdepth"])
         let instanceOverride = parseParticleInstanceOverride(
             dict["instanceoverride"] ?? dict["instanceOverride"]
@@ -1060,6 +1136,7 @@ enum WPESceneDocumentParser {
             alpha: alphaValue.value,
             alphaAnimation: alphaValue.animation,
             color: color,
+            brightness: brightness,
             parallaxDepth: parallaxDepth,
             instanceOverride: instanceOverride
         )
@@ -1502,7 +1579,7 @@ enum WPESceneDocumentParser {
     ) -> WPESceneTransformScript? {
         guard let transform = raw as? [String: Any],
               let script = transform["script"] as? String, !script.isEmpty,
-              preserveStaticallyResolvable || !WPETransformScriptEvaluator.isStaticallyResolvable(script) else {
+              preserveStaticallyResolvable || !WPETransformScriptStaticAnalysis.isStaticallyResolvable(script) else {
             return nil
         }
         let seed = parseVector3(resolveBoundTransformValue(transform["value"])) ?? SIMD3<Double>(0, 0, 0)
@@ -1679,7 +1756,7 @@ enum WPESceneDocumentParser {
     // MARK: - Primitive parsing
 
     /// Accepts JSON arrays of numbers, JSON dictionaries with x/y/z keys, or WPE's space-separated strings ("0.5 0 0").
-    static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
+    public static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
         WPEValueParser.vector3(raw)
     }
 
@@ -1789,4 +1866,3 @@ private struct SceneObjectTransform {
         return result
     }
 }
-#endif

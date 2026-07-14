@@ -167,34 +167,13 @@ struct AerialThumbnailCard: View {
         }
     }
 
-    @ViewBuilder
     private var applyControl: some View {
-        if screens.count == 1, let only = screens.first {
-            Button { onApply(only) } label: { applyIcon }
-            .buttonStyle(.plain)
-            .help(Text("Apply"))
-        } else if screens.count > 1 {
-            Menu {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { onApply(screen) }
-                }
-                Divider()
-                Button("Apply to All Displays", action: onApplyToAll)
-            } label: { applyIcon }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(Text("Apply"))
-        }
-    }
-
-    private var applyIcon: some View {
-        Image(systemName: "play.fill")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
-            .background(Circle().fill(Color.accentColor.opacity(0.95)))
-            .overlay(Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        LibraryTileApplyControl(
+            screens: screens,
+            tint: .accentColor,
+            onApply: onApply,
+            onApplyToAll: onApplyToAll
+        )
     }
 
     // MARK: Context menu

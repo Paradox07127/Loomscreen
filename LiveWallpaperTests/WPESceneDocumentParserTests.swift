@@ -300,6 +300,51 @@ struct WPESceneDocumentParserTests {
         #expect(text.origin == SIMD3<Double>(15, 17, 0))
     }
 
+    @Test("Text object static angles parse (standalone z tilt, no parent chain)")
+    func textObjectStaticAnglesParse() throws {
+        // 2986828130's Clock: a top-level text object carrying `angles`
+        // "0 0 0.5236" (30° z tilt) with no parent. The angle was dropped at
+        // parse time, so the clock rendered unrotated on both text paths.
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160]],
+            "objects": [
+                [
+                    "id": 130,
+                    "name": "Clock",
+                    "text": "12:34",
+                    "anchor": "none",
+                    "origin": "234.58234 491.26196 0.00000",
+                    "angles": "0.00000 0.00000 0.52360",
+                    "scale": "0.75389 0.75389 0.75389"
+                ],
+                [
+                    "id": 200,
+                    "name": "group",
+                    "origin": "0 0 0",
+                    "angles": "0 0 0.25"
+                ],
+                [
+                    "id": 201,
+                    "name": "ChildLabel",
+                    "text": "child",
+                    "parent": 200,
+                    "origin": "0 0 0",
+                    "angles": "0 0 0.5"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data)
+        let clock = try #require(document.textObjects.first { $0.id == "130" })
+        #expect(abs(clock.angles.z - 0.5236) < 0.0001)
+        #expect(clock.parentObjectID == nil)
+        // Parented text composes the parse-time world angle through the chain
+        // (SceneObjectTransform.combining adds angles).
+        let child = try #require(document.textObjects.first { $0.id == "201" })
+        #expect(abs(child.angles.z - 0.75) < 0.0001)
+    }
+
     @Test("HDR bloom settings parse from general (user-bound values unwrapped)")
     func hdrBloomSettingsParse() throws {
         let payload: [String: Any] = [
@@ -1483,6 +1528,77 @@ struct WPESceneDocumentParserTests {
         #expect(abs(color.x - 192) < 0.001)
         #expect(abs(color.y - 192) < 0.001)
         #expect(abs(color.z - 192) < 0.001)
+    }
+
+    @Test("Particle object parses generic brightness (default 1)")
+    func particleObjectParsesBrightness() throws {
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [
+            {
+              "id": 46,
+              "name": "Embers",
+              "type": "particle",
+              "particle": "particles/presets/wildfire.json",
+              "brightness": 2.0
+            },
+            {
+              "id": 47,
+              "name": "Dust",
+              "type": "particle",
+              "particle": "particles/presets/dust.json"
+            }
+          ]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        #expect(document.particleObjects.count == 2)
+        let embers = try #require(document.particleObjects.first { $0.id == "46" })
+        #expect(embers.brightness == 2.0)
+        // Absent field must stay exactly 1 — zero visual change for the corpus.
+        let dust = try #require(document.particleObjects.first { $0.id == "47" })
+        #expect(dust.brightness == 1.0)
+    }
+
+    @Test("Text object parses generic brightness (wildfire sample) and preserves it through withLiveText")
+    func textObjectParsesBrightness() throws {
+        // Mirrors 3460973721's Clock (brightness 2.39) / plain text (absent → 1).
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [
+            {
+              "id": 101,
+              "name": "Clock",
+              "type": "text",
+              "text": "12:34",
+              "brightness": 2.39,
+              "color": "1 1 1"
+            },
+            {
+              "id": 102,
+              "name": "Label",
+              "type": "text",
+              "text": "plain"
+            }
+          ]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        #expect(document.textObjects.count == 2)
+        let clock = try #require(document.textObjects.first { $0.id == "101" })
+        #expect(abs(clock.brightness - 2.39) < 0.0001)
+        let label = try #require(document.textObjects.first { $0.id == "102" })
+        #expect(label.brightness == 1.0)
+        // The per-frame live-text copy must not drop the field (ticking clocks
+        // would silently lose their authored brightness after the first tick).
+        let live = clock.withLiveText("12:35", alpha: 0.5)
+        #expect(abs(live.brightness - 2.39) < 0.0001)
     }
 
     @Test("Particle object inherits parent transform from group object")

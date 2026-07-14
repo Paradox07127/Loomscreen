@@ -158,6 +158,55 @@ struct WPEPuppetAnimationEvaluatorTests {
         #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 2.0 / 30.0) == 0)
     }
 
+    @Test("Clamp (any non-loop, non-mirror mode) holds the last frame instead of wrapping or bouncing")
+    func clampModeHoldsLastFrame() {
+        let anim = animation(frameCount: 4, mode: "clamp", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        let fps = 30.0
+        let expected = [0, 1, 2, 3, 3, 3, 3]
+        for (rawFrame, want) in expected.enumerated() {
+            let time = Double(rawFrame) / fps
+            #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: time) == want)
+        }
+    }
+
+    @Test("Mirror mode ping-pongs the sampled frame index instead of freezing on the last frame")
+    func mirrorModeBounces() {
+        // N=4 → period 2*(4-1)=6: 0,1,2,3,2,1,0,1,2,3,2,1,0,...
+        let anim = animation(frameCount: 4, mode: "mirror", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        let fps = 30.0
+        let expected = [0, 1, 2, 3, 2, 1, 0, 1, 2, 3, 2, 1, 0]
+        for (rawFrame, want) in expected.enumerated() {
+            let time = Double(rawFrame) / fps
+            #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: time) == want)
+        }
+    }
+
+    @Test("Mirror mode is case-insensitive and tolerates surrounding whitespace")
+    func mirrorModeNormalizesCasingAndWhitespace() {
+        let anim = animation(frameCount: 3, mode: " Mirror ", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        // N=3 → period 2*(3-1)=4: 0,1,2,1,0,1,2,1,0,...
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 0) == 0)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 1.0 / 30.0) == 1)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 2.0 / 30.0) == 2)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 3.0 / 30.0) == 1)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 4.0 / 30.0) == 0)
+    }
+
+    @Test("Mirror mode with a single frame never divides by a zero period")
+    func mirrorModeSingleFrame() {
+        let anim = animation(frameCount: 1, mode: "mirror", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 0) == 0)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 5.0 / 30.0) == 0)
+    }
+
     @Test("Pure-translation channel skins by the per-frame delta from the bind pose")
     func translationDeltaMatrix() {
         let anim = animation(frameCount: 2, mode: "loop", channels: [
@@ -196,6 +245,44 @@ struct WPEPuppetAnimationEvaluatorTests {
         let skinned = blended[0] * SIMD4<Float>(0, 2, 0, 1)
         #expect(abs(skinned.y - 1.0) < 1e-5)
         #expect(abs(skinned.x) < 1e-5)
+    }
+
+    @Test("Additive layer with a ZERO bind scale follows the authored absolute scale (eyelid inflate)")
+    func additiveZeroBindScaleFollowsAuthoredAbsolute() {
+        // 3226487183's eyelid rig: the blink layer's frame-0 scale is 0 (lid collapsed at rest) and
+        // the clip inflates it to 1 mid-blink. A bind-relative ratio is undefined at 0; the old
+        // guard returned ratio 1 and froze the lid at the base scale for the whole blink.
+        let base = animation(frameCount: 3, mode: "loop", channels: [channel([
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1))
+        ])])
+        let blink = animation(frameCount: 3, mode: "loop", channels: [channel([
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(0, 0, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 0.5, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(0, 0, 1))
+        ])])
+        func layers(blend: Float) -> [WPEPuppetAnimationLayer] {
+            [
+                WPEPuppetAnimationLayer(animation: base, rate: 1, additive: false, blend: 1),
+                WPEPuppetAnimationLayer(animation: blink, rate: 1, additive: true, blend: blend)
+            ]
+        }
+        // Mid-blink (frame 1): composed scale follows the authored absolute (Sx 1, Sy 0.5).
+        let peak = WPEPuppetAnimationEvaluator.palette(layers: layers(blend: 1), bones: [], at: 1.0 / 30.0)
+        let peakSkinned = peak[0] * SIMD4<Float>(3, 2, 0, 1)
+        #expect(abs(peakSkinned.x - 3.0) < 1e-5)
+        #expect(abs(peakSkinned.y - 1.0) < 1e-5)
+        // Back at the authored rest value (frame 2, past the frame-0 identity fast path): the lid
+        // must collapse to the authored scale 0, not freeze at the base's full size.
+        let rest = WPEPuppetAnimationEvaluator.palette(layers: layers(blend: 1), bones: [], at: 2.0 / 30.0)
+        let restSkinned = rest[0] * SIMD4<Float>(3, 2, 0, 1)
+        #expect(abs(restSkinned.x) < 1e-5)
+        #expect(abs(restSkinned.y) < 1e-5)
+        // Half blend lerps the running base scale toward the authored absolute: 1 + (0.5-1)*0.5 = 0.75.
+        let half = WPEPuppetAnimationEvaluator.palette(layers: layers(blend: 0.5), bones: [], at: 1.0 / 30.0)
+        let halfSkinned = half[0] * SIMD4<Float>(3, 2, 0, 1)
+        #expect(abs(halfSkinned.y - 2.0 * 0.75) < 1e-5)
     }
 
     @Test("A parent bone's rotation propagates through the hierarchy into a child bone's palette")

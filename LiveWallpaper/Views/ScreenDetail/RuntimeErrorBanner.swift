@@ -25,7 +25,7 @@ struct RuntimeErrorBanner: View {
                     .lineLimit(2)
                 if let subtitle = error.subtitlePath, !subtitle.isEmpty {
                     Text(verbatim: PIISanitizer.scrub(subtitle))
-                        .font(.system(.caption, design: .monospaced))
+                        .font(DesignTokens.Typography.codeCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

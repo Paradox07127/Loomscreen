@@ -73,7 +73,7 @@ struct PlaylistRow: View {
                     .truncationMode(.middle)
                     .help(Text(verbatim: entry.name))
 
-                Text(verbatim: subtitleText)
+                Text(verbatim: metadata.subtitle)
                     .font(DesignTokens.Typography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -156,30 +156,13 @@ struct PlaylistRow: View {
                     .help(Text("Primary entry"))
             }
 
-            Menu {
+            RowOverflowMenu(isHovering: isHovering) {
                 rowMenuItems
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 22)
-            .opacity(isHovering ? 1 : 0)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isHovering)
         }
     }
 
     // MARK: - Visual style
-
-    private var subtitleText: String {
-        let composed = metadata.subtitle
-        if !composed.isEmpty { return composed }
-        return metadata.folder ?? ""
-    }
 
     private var rowBackground: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)

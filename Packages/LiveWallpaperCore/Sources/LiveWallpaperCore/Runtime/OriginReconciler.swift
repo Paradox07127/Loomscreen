@@ -16,9 +16,6 @@ public enum OriginReconciliationEvent: Sendable {
     /// `WallpaperContent` is supplied for reconcilers that want to short-
     /// circuit no-op transitions.
     case userReplacedActiveWallpaper(previous: WallpaperContent?)
-    /// Active bookmark was refreshed (re-resolved) without changing identity;
-    /// reconcilers should not drop the origin on this event.
-    case refreshedBookmark(Data)
 }
 
 /// Pluggable strategy for keeping `ScreenConfiguration.wpeOrigin` consistent

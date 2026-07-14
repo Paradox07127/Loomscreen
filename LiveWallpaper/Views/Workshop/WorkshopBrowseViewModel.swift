@@ -3,7 +3,6 @@ import Foundation
 import Observation
 
 enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
-    case all
     case scene
     case video
     case web
@@ -12,7 +11,6 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .all: return String(localized: "All", comment: "Workshop content-type filter: no type restriction.")
         case .scene: return String(localized: "Scene", comment: "Workshop content-type filter: scene wallpapers.")
         case .video: return String(localized: "Video", comment: "Workshop content-type filter: video wallpapers.")
         case .web: return String(localized: "Web", comment: "Workshop content-type filter: web wallpapers.")
@@ -21,15 +19,13 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
 
     var requiredTags: [String] {
         switch self {
-        case .all: return []
         case .scene: return ["Scene"]
         case .video: return ["Video"]
         case .web: return ["Web"]
         }
     }
 
-    /// Excludes `.all`, which was only the old single-select "no restriction" sentinel.
-    static var selectableCases: [WorkshopContentTypeFilter] { [.scene, .video, .web] }
+    static var selectableCases: [WorkshopContentTypeFilter] { allCases }
 
     var tag: String? { requiredTags.first }
 }

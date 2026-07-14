@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import CoreGraphics
+import Foundation
 import Metal
 import MetalKit
 
@@ -10,6 +11,26 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
     private let device: MTLDevice
     private let capabilities: WPEMetalTextureCapabilities
     private let uploadQueue: WPEMetalTextureUploadQueue
+
+    /// Corpus profile: ~47% of `.tex` assets ship a pre-baked mip chain that the
+    /// decoder already decompresses in full (`payload.mipmaps`), but the upload
+    /// path below only ever wrote level 0 — minified sampling of those textures
+    /// aliases instead of filtering down the chain. Default OFF so the existing
+    /// level-0-only upload (and constexpr/builtin-shader sampling) stays
+    /// byte-identical; ON also requires `WPEMetalRenderExecutor
+    /// .customShaderSamplerState` to opt its `.mipFilter` in under the same
+    /// flag — builtin shaders' samplers are `constexpr` (compiled ahead of
+    /// time) and cannot be flag-gated, so ON only benefits transpiled/custom
+    /// shader sampling. Read fresh (not cached) each call: texture uploads
+    /// happen once per unique texture at scene load, not per frame, so a
+    /// `UserDefaults` read here is not a hot-path cost — unlike the sibling
+    /// per-load-cached flags elsewhere in the renderer, this one takes effect
+    /// without restarting.
+    static let mipChainDefaultsKey = "WPEMetalMipChainEnabled"
+    static var isMipChainEnabled: Bool { readMipChainEnabled() }
+    static func readMipChainEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: mipChainDefaultsKey)
+    }
 
     init(
         device: MTLDevice,
@@ -174,12 +195,21 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
 
         let mapping = try WPEMetalTextureFormatMapper.mapping(
             for: format, capabilities: capabilities, colorSpace: colorSpace)
+        // Only the level-0 payload is guaranteed present; a real chain needs
+        // more than one decoded level before the flag has anything to do.
+        let mipChainEligible = Self.isMipChainEnabled && payload.mipmaps.count > 1
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: mapping.pixelFormat,
             width: mip.width,
             height: mip.height,
-            mipmapped: false
+            mipmapped: mipChainEligible
         )
+        if mipChainEligible {
+            // The container's chain may be shorter than the full log2 chain
+            // `mipmapped: true` would otherwise imply — bound it to exactly
+            // the levels we have decoded bytes for.
+            descriptor.mipmapLevelCount = payload.mipmaps.count
+        }
         descriptor.usage = [.shaderRead]
         descriptor.storageMode = .shared
         // RG88 particle glow sprites sample as LUMINANCE_ALPHA → (R, R, R, G): R
@@ -219,6 +249,31 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
                 withBytes: baseAddress,
                 bytesPerRow: bytesPerRow
             )
+        }
+
+        if mipChainEligible {
+            for level in payload.mipmaps.dropFirst() {
+                let levelExpected = format.expectedByteCount(width: level.width, height: level.height)
+                guard level.bytes.count >= levelExpected else {
+                    throw WPEMetalTextureLoaderError.malformedPayload(
+                        "mip bytes \(level.bytes.count) smaller than expected \(levelExpected) (level \(level.index))"
+                    )
+                }
+                let levelBytesPerRow = try Self.bytesPerRow(width: level.width, mapping: mapping)
+                try level.bytes.withUnsafeBytes { raw in
+                    guard let baseAddress = raw.baseAddress else {
+                        throw WPEMetalTextureLoaderError.malformedPayload(
+                            "Empty mipmap bytes baseAddress (level \(level.index))"
+                        )
+                    }
+                    texture.replace(
+                        region: MTLRegionMake2D(0, 0, level.width, level.height),
+                        mipmapLevel: level.index,
+                        withBytes: baseAddress,
+                        bytesPerRow: levelBytesPerRow
+                    )
+                }
+            }
         }
         return texture
     }

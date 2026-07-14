@@ -348,6 +348,63 @@ struct HTMLWallpaperNavigationPolicyTests {
         #expect(decision == .cancel)
     }
 
+    @Test("Remote source rejects scripted cross-origin navigation")
+    func remoteSourceRejectsCrossOriginNavigation() {
+        let source = URL(string: "https://trusted.example/wallpaper")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(string: "https://attacker.example/payload")!,
+            navigationType: .other,
+            currentURL: source,
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil,
+            remoteSourceOrigin: source
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Remote source allows same-origin navigation with an implicit default port")
+    func remoteSourceAllowsSameOriginNavigation() {
+        let source = URL(string: "https://trusted.example:443/wallpaper")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(string: "https://trusted.example/redirected")!,
+            navigationType: .other,
+            currentURL: source,
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil,
+            remoteSourceOrigin: source
+        )
+        #expect(decision == .allow)
+    }
+
+    @Test("Remote source rejects navigation to a different effective port")
+    func remoteSourceRejectsDifferentPort() {
+        let source = URL(string: "https://trusted.example/wallpaper")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(string: "https://trusted.example:8443/payload")!,
+            navigationType: .other,
+            currentURL: source,
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil,
+            remoteSourceOrigin: source
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Remote source trust stays pinned after current URL changes")
+    func remoteSourceTrustDoesNotFollowCurrentURL() {
+        let source = URL(string: "https://trusted.example/wallpaper")!
+        let attacker = URL(string: "https://attacker.example/landing")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(string: "https://attacker.example/next")!,
+            navigationType: .reload,
+            currentURL: attacker,
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil,
+            remoteSourceOrigin: source
+        )
+        #expect(decision == .cancel)
+    }
+
     @Test("Inline source rejects file:// navigation")
     func inlineSourceRejectsFileURL() {
         let target = URL(fileURLWithPath: "/private/var/db/secret")

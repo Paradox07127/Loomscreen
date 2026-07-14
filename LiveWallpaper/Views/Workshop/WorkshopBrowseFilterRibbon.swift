@@ -72,7 +72,11 @@ struct WorkshopBrowseFilterRibbon: View {
         HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
             searchField
 
-            filtersToggle
+            WorkshopFiltersToggle(
+                isExpanded: $isFilterPanelExpanded,
+                activeFilterCount: activeFilterCount,
+                isDisabled: controlsDisabled
+            )
 
             Spacer(minLength: DesignTokens.Spacing.sm)
 
@@ -115,37 +119,6 @@ struct WorkshopBrowseFilterRibbon: View {
         .help(Text("Time frame applies to Most Popular"))
     }
 
-    private var filtersToggle: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) { isFilterPanelExpanded.toggle() }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "line.3.horizontal.decrease")
-                Text("Filters")
-                if activeFilterCount > 0 {
-                    Text(verbatim: "\(activeFilterCount)")
-                        .font(DesignTokens.Typography.badge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor, in: Capsule())
-                }
-                Image(systemName: isFilterPanelExpanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(DesignTokens.Typography.caption)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(controlsDisabled)
-        .help(Text("Filter options"))
-        .accessibilityLabel(Text("Filters"))
-        .accessibilityValue(activeFilterCount > 0
-            ? Text("\(activeFilterCount) active")
-            : Text("None active"))
-    }
-
     // MARK: - Expanding filter panel
 
     private var filterPanel: some View {
@@ -154,7 +127,7 @@ struct WorkshopBrowseFilterRibbon: View {
             // the layout above it.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-                    filterRow("Type") {
+                    WorkshopFilterRow("Type") {
                         HStack(spacing: 6) {
                             ForEach(WorkshopContentTypeFilter.selectableCases) { type in
                                 WorkshopFilterChip(
@@ -168,7 +141,7 @@ struct WorkshopBrowseFilterRibbon: View {
                         }
                     }
 
-                    filterRow("Maturity") {
+                    WorkshopFilterRow("Maturity") {
                         HStack(spacing: 6) {
                             ForEach(WorkshopAgeRatingFilter.allCases) { rating in
                                 WorkshopFilterChip(
@@ -182,7 +155,7 @@ struct WorkshopBrowseFilterRibbon: View {
                         }
                     }
 
-                    filterRow("Resolution") {
+                    WorkshopFilterRow("Resolution") {
                         chipFlow {
                             ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
                                 WorkshopFilterChip(
@@ -196,7 +169,7 @@ struct WorkshopBrowseFilterRibbon: View {
                         }
                     }
 
-                    filterRow("Genre") {
+                    WorkshopFilterRow("Genre") {
                         chipFlow {
                             ForEach(WorkshopGenre.allTags, id: \.self) { tag in
                                 WorkshopFilterChip(
@@ -233,23 +206,6 @@ struct WorkshopBrowseFilterRibbon: View {
         .padding(.bottom, DesignTokens.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-
-    private func filterRow<Content: View>(
-        _ title: LocalizedStringKey,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        // Top-aligned so the category label pins to the first chip row when the
-        // chips wrap onto several lines (Genre / Resolution).
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
-            Text(title)
-                .font(DesignTokens.Typography.badge)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .frame(width: 74, alignment: .leading)
-                .padding(.top, 4)
-            content()
-        }
     }
 
     /// Wrapping chip row (replaces a horizontal scroll that hid most options
@@ -328,15 +284,11 @@ struct WorkshopBrowseFilterRibbon: View {
     /// (selecting all == no filter). Surfaced as the Filters badge.
     private var activeFilterCount: Int {
         var count = 0
-        if isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count) { count += 1 }
-        if isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count) { count += 1 }
-        if isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count) { count += 1 }
-        if isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count) { count += 1 }
+        if WorkshopFilterMath.isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count) { count += 1 }
         return count
-    }
-
-    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
-        !selected.isEmpty && selected.count < total
     }
 
     private var timeFrameApplies: Bool {

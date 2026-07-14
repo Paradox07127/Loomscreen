@@ -6,20 +6,13 @@ import SwiftUI
 /// `.confirmDestructive($action)`.
 public enum DestructiveAction: Identifiable, Equatable {
     case removePlaylistItem(isLast: Bool, displayName: String)
-    case clearScene(sceneName: String, displayName: String)
     case removeSceneHistory(sceneName: String)
     case deleteBookmark(bookmarkName: String)
-    case applyBookmarkToAll(bookmarkName: String, displayCount: Int)
     case removeScheduleSlot(slotLabel: String)
     case disableSchedule(slotCount: Int)
     case clearUnusedWallpapers(itemCount: Int, byteSize: String)
     case clearAllStorageCaches(byteSize: String)
     case clearSceneVideoCache(byteSize: String)
-    case forgetWorkshopLibrary(path: String)
-    case forgetEngineAssets(path: String)
-    case removeHistoryEntry(name: String)
-    case clearAllShortcuts
-    case resetShortcut(commandName: String)
     case clearAllWPECache(projectCount: Int, byteSize: String)
     case removeWPECacheEntry(displayName: String)
     case applyConfigurationToAllDisplays(otherCount: Int)
@@ -30,20 +23,13 @@ public enum DestructiveAction: Identifiable, Equatable {
     public var id: String {
         switch self {
         case .removePlaylistItem(let isLast, let name): return "removePlaylistItem-\(isLast)-\(name)"
-        case .clearScene(let s, let d): return "clearScene-\(s)-\(d)"
         case .removeSceneHistory(let s): return "removeSceneHistory-\(s)"
         case .deleteBookmark(let n): return "deleteBookmark-\(n)"
-        case .applyBookmarkToAll(let n, let c): return "applyBookmarkToAll-\(n)-\(c)"
         case .removeScheduleSlot(let l): return "removeScheduleSlot-\(l)"
         case .disableSchedule(let c): return "disableSchedule-\(c)"
         case .clearUnusedWallpapers(let i, let b): return "clearUnusedWallpapers-\(i)-\(b)"
         case .clearAllStorageCaches(let b): return "clearAllStorageCaches-\(b)"
         case .clearSceneVideoCache(let b): return "clearSceneVideoCache-\(b)"
-        case .forgetWorkshopLibrary(let p): return "forgetWorkshopLibrary-\(p)"
-        case .forgetEngineAssets(let p): return "forgetEngineAssets-\(p)"
-        case .removeHistoryEntry(let n): return "removeHistoryEntry-\(n)"
-        case .clearAllShortcuts: return "clearAllShortcuts"
-        case .resetShortcut(let n): return "resetShortcut-\(n)"
         case .clearAllWPECache(let c, let b): return "clearAllWPECache-\(c)-\(b)"
         case .removeWPECacheEntry(let n): return "removeWPECacheEntry-\(n)"
         case .applyConfigurationToAllDisplays(let c): return "applyConfigurationToAllDisplays-\(c)"
@@ -57,20 +43,13 @@ public enum DestructiveAction: Identifiable, Equatable {
         switch self {
         case .removePlaylistItem(let isLast, _):
             return isLast ? "Remove the last playlist item?" : "Remove this playlist item?"
-        case .clearScene:                return "Clear the Scene wallpaper?"
         case .removeSceneHistory:        return "Remove this scene from history?"
         case .deleteBookmark:            return "Delete this bookmark?"
-        case .applyBookmarkToAll:        return "Apply to all displays?"
         case .removeScheduleSlot:        return "Remove this schedule slot?"
         case .disableSchedule:           return "Disable schedule?"
         case .clearUnusedWallpapers:     return "Clear unused wallpapers?"
         case .clearAllStorageCaches:      return "Clear all storage caches?"
         case .clearSceneVideoCache:       return "Clear scene video texture cache?"
-        case .forgetWorkshopLibrary:     return "Forget scene library?"
-        case .forgetEngineAssets:        return "Forget external scene-format install folder?"
-        case .removeHistoryEntry:        return "Remove from history?"
-        case .clearAllShortcuts:         return "Reset all keyboard shortcuts?"
-        case .resetShortcut:             return "Reset this shortcut?"
         case .clearAllWPECache:          return "Clear all cached scene projects?"
         case .removeWPECacheEntry:       return "Remove this cache entry?"
         case .applyConfigurationToAllDisplays: return "Apply this wallpaper to every other display?"
@@ -86,14 +65,10 @@ public enum DestructiveAction: Identifiable, Equatable {
             return isLast
                 ? "This is the only wallpaper in the playlist. Removing it will clear the wallpaper on \(displayName)."
                 : "The item will be removed from the playlist. Other displays using this video keep their copy."
-        case .clearScene(let sceneName, let displayName):
-            return "Removing \(sceneName) will return \(displayName) to its saved wallpaper. The scene cache stays on disk."
         case .removeSceneHistory(let sceneName):
             return "\(sceneName) won't appear in your recent history anymore. The local cache is kept."
         case .deleteBookmark(let name):
             return "'\(name)' will be removed from your library. Displays using this bookmark fall back to their saved wallpaper."
-        case .applyBookmarkToAll(let name, let count):
-            return "'\(name)' will replace the current wallpaper on \(count) displays. Existing assignments are saved and can be restored from history."
         case .removeScheduleSlot(let slotLabel):
             return "The \(slotLabel) slot will be removed. Wallpapers outside this window keep their schedules."
         case .disableSchedule(let count):
@@ -104,16 +79,6 @@ public enum DestructiveAction: Identifiable, Equatable {
             return "Removes \(byteSize) of reclaimable cache files. Active wallpapers keep their source assignments and rebuild cached files when needed."
         case .clearSceneVideoCache(let byteSize):
             return "Deletes \(byteSize) of extracted scene video files. Scenes re-extract the video textures the next time they render."
-        case .forgetWorkshopLibrary(let path):
-            return "The library at '\(path)' will be unlinked. Local scene caches are kept; you can re-link the folder later."
-        case .forgetEngineAssets(let path):
-            return "The external scene-format install folder at '\(path)' will be unlinked. Scenes that depend on shared engine framework files will fail to render until you grant access again."
-        case .removeHistoryEntry(let name):
-            return "'\(name)' will be removed from your recent items. The underlying file or scene is not deleted."
-        case .clearAllShortcuts:
-            return "All custom keyboard shortcuts revert to the LiveWallpaper defaults."
-        case .resetShortcut(let commandName):
-            return "The shortcut for '\(commandName)' returns to its default key combination."
         case .clearAllWPECache(let count, let byteSize):
             return "Removes \(count) legacy extracted project\(count == 1 ? "" : "s") · \(byteSize). Original source folders are untouched; wallpapers whose source is still available read in place from it instead."
         case .removeWPECacheEntry(let displayName):
@@ -133,20 +98,13 @@ public enum DestructiveAction: Identifiable, Equatable {
         switch self {
         case .removePlaylistItem(let isLast, _):
             return isLast ? "Remove & Clear" : "Remove"
-        case .clearScene:                return "Clear Scene"
         case .removeSceneHistory:        return "Remove"
         case .deleteBookmark:            return "Delete"
-        case .applyBookmarkToAll:        return "Apply to All"
         case .removeScheduleSlot:        return "Remove Slot"
         case .disableSchedule:           return "Disable Schedule"
         case .clearUnusedWallpapers(let itemCount, _): return "Clear \(itemCount) Items"
         case .clearAllStorageCaches:      return "Clear All Caches"
         case .clearSceneVideoCache:       return "Clear Video Cache"
-        case .forgetWorkshopLibrary:     return "Forget Library"
-        case .forgetEngineAssets:        return "Forget Engine Folder"
-        case .removeHistoryEntry:        return "Remove"
-        case .clearAllShortcuts:         return "Reset All"
-        case .resetShortcut:             return "Reset"
         case .clearAllWPECache:          return "Clear All"
         case .removeWPECacheEntry:       return "Remove"
         case .applyConfigurationToAllDisplays: return "Apply to All Displays"

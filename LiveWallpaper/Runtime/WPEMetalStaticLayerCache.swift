@@ -110,65 +110,42 @@ enum WPEMetalStaticLayerClassifier {
     }
 }
 
-/// LRU bookkeeping for the cache's VRAM budget, separated from the texture store.
+/// LRU bookkeeping for the cache's VRAM budget, separated from the texture
+/// store. Eviction policy: reject an oversized single entry outright, else
+/// admit and evict inline (unprotected — a static-layer composite has no
+/// "active this frame" exemption, unlike `WPEMetalTextureCacheLRU`).
+/// Bookkeeping itself lives in the shared `WPEMetalLRUByteBudget` core.
 struct WPEMetalStaticLayerCacheLRU: Equatable, Sendable {
-    struct Entry: Equatable, Sendable {
-        let bytes: Int
-        let lastAccess: Int
-    }
+    private var core: WPEMetalLRUByteBudget<String>
 
-    let budgetBytes: Int
-    private(set) var totalBytes = 0
-    private(set) var entries: [String: Entry] = [:]
-    private var clock = 0
+    var budgetBytes: Int { core.budgetBytes }
+    var totalBytes: Int { core.totalBytes }
+    var entries: [String: WPEMetalLRUByteBudget<String>.Entry] { core.entries }
 
     init(budgetBytes: Int) {
-        self.budgetBytes = max(0, budgetBytes)
+        core = WPEMetalLRUByteBudget(budgetBytes: budgetBytes)
     }
 
     mutating func touch(_ key: String) {
-        guard let entry = entries[key] else { return }
-        clock += 1
-        entries[key] = Entry(bytes: entry.bytes, lastAccess: clock)
+        core.touch(key)
     }
 
     @discardableResult
     mutating func admit(_ key: String, bytes: Int) -> [String] {
-        guard bytes > 0, bytes <= budgetBytes else {
-            remove(key)
+        guard bytes > 0, bytes <= core.budgetBytes else {
+            core.remove(key)
             return []
         }
-        clock += 1
-        if let existing = entries[key] {
-            totalBytes -= existing.bytes
-        }
-        entries[key] = Entry(bytes: bytes, lastAccess: clock)
-        totalBytes += bytes
-
-        var evicted: [String] = []
-        while totalBytes > budgetBytes,
-              let victim = entries.min(by: { lhs, rhs in
-                  if lhs.value.lastAccess != rhs.value.lastAccess {
-                      return lhs.value.lastAccess < rhs.value.lastAccess
-                  }
-                  return lhs.key < rhs.key
-              })?.key {
-            remove(victim)
-            evicted.append(victim)
-        }
-        return evicted
+        core.record(key, bytes: bytes)
+        return core.evictOverBudget(protecting: [])
     }
 
     mutating func remove(_ key: String) {
-        if let existing = entries.removeValue(forKey: key) {
-            totalBytes -= existing.bytes
-        }
+        core.remove(key)
     }
 
     mutating func removeAll() {
-        entries.removeAll(keepingCapacity: false)
-        totalBytes = 0
-        clock = 0
+        core.removeAll()
     }
 }
 

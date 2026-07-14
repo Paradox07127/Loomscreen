@@ -1141,6 +1141,67 @@ struct WPESceneScriptRuntimeTests {
         #expect(reader.initialOutput.own.visible == true)
     }
 
+    /// 三体 3509243656's 日志 (object 1227) keeps its whole civilisation state in
+    /// `shared` CONTAINERS and mutates them in place: `logEntries.unshift(...)`,
+    /// `civilizationRecords.push(...)`, `lastStates.<field> = ...`. Values cross the
+    /// host bridge by copy, so without a write-back proxy every mutation hit a
+    /// detached temporary — the log and the survival leaderboard stayed empty
+    /// forever while the primitive counters ticked on.
+    @Test("shared container mutations round-trip across scripts")
+    func sharedContainerMutationsPersist() throws {
+        let store = WPESharedScriptState()
+        _ = try WPELayerScriptInstance(script: """
+        export function init() {
+            shared.logEntries = [];
+            shared.records = [];
+            shared.lastStates = { rocheLimit: '' };
+        }
+        export function update() {
+            shared.logEntries.unshift('entry');
+            shared.records.push({ number: 1, lifespan: 8 });
+            shared.lastStates.rocheLimit = '大撕裂';
+        }
+        """, shared: store)
+        .tick()
+        // Read into locals and guard every deref: a regression leaves these
+        // undefined, and an uncaught TypeError would abort init() BEFORE the
+        // assignment — leaving `visible` at its default and passing spuriously.
+        let reader = try WPELayerScriptInstance(script: """
+        export function init() {
+            const le = shared.logEntries, rc = shared.records, ls = shared.lastStates;
+            thisLayer.visible = !!le && le.length === 1
+                && !!rc && rc.length === 1 && rc[0].lifespan === 8
+                && !!ls && ls.rocheLimit === '大撕裂';
+        }
+        export function update() {}
+        """, shared: store)
+        #expect(reader.initialOutput.own.visible == true)
+    }
+
+    /// `civilizationRecords.find(r => ...).lifespan = n` — 1227 live-updates the
+    /// running civilisation's lifespan through an element handed out by `find()`,
+    /// so the write-back must reach the ROOT container from any depth.
+    @Test("shared element mutation via find() writes back to the store")
+    func sharedNestedElementMutationPersists() throws {
+        let store = WPESharedScriptState()
+        _ = try WPELayerScriptInstance(script: """
+        export function init() { shared.records = [{ number: 2, lifespan: 0 }]; }
+        export function update() {
+            const r = shared.records.find(x => x.number === 2);
+            if (r) { r.lifespan = 99; }
+        }
+        """, shared: store)
+        .tick()
+        let reader = try WPELayerScriptInstance(script: """
+        export function init() {
+            const rc = shared.records;
+            thisLayer.visible = !!rc && rc.length === 1 && rc[0].lifespan === 99;
+        }
+        export function update() {}
+        """, shared: store)
+        #expect(reader.initialOutput.own.visible == true)
+    }
+
     @Test("applyUserProperties can seed shared state from scriptProperties")
     func applyUserPropertiesSeedsSharedState() throws {
         let store = WPESharedScriptState()
@@ -1275,5 +1336,311 @@ struct WPESceneScriptRuntimeTests {
         #expect(store.get("x") as? Double == 80)
         #expect(store.get("y") as? Double == 20)
         #expect(upOutput.own.alpha == 1)
+    }
+
+    // MARK: - Async latest-snapshot ticks (ADR-003 step 1)
+
+    @Test("Outcome slot: newest wins, consume-once, in-flight back-pressure")
+    func outcomeSlotSemantics() {
+        let slot = WPESceneScriptOutcomeSlot<Int>()
+        #expect(slot.takeLatest() == nil)
+        slot.publishEvent(1)
+        slot.publishEvent(2)
+        // The newer publish supersedes the older one; the older can never win.
+        #expect(slot.takeLatest() == 2)
+        // Consumed → the keep-last sentinel until something new completes.
+        #expect(slot.takeLatest() == nil)
+        #expect(slot.beginTick())
+        // One tick in flight → natural back-pressure, no second claim.
+        #expect(!slot.beginTick())
+        slot.publishTick(3)
+        #expect(slot.beginTick())
+        slot.publishTick(4)
+        #expect(slot.takeLatest() == 4)
+        // A bounded synchronous evaluation folds + consumes pending outcomes, so
+        // an older pending tick can't resurface after the newer applied result.
+        slot.publishEvent(5)
+        #expect(slot.supersede(with: 6) == 6)
+        #expect(slot.takeLatest() == nil)
+    }
+
+    @Test("Layer outputs merge: video commands accumulate, newest state wins")
+    func layerOutputMergePreservesVideoCommands() {
+        let pending = WPELayerScriptOutput(
+            own: WPELayerScriptState(visible: false, alpha: 0.25, videoCommands: [.play]),
+            others: [
+                "loop": WPELayerScriptState(
+                    visible: true, alpha: 1, videoCommands: [.seek(0)],
+                    visibleAssigned: false, alphaAssigned: false
+                ),
+                "both": WPELayerScriptState(visible: false, alpha: 0, videoCommands: [.pause])
+            ]
+        )
+        let newer = WPELayerScriptOutput(
+            own: WPELayerScriptState(visible: true, alpha: 1, videoCommands: [.stop]),
+            others: ["both": WPELayerScriptState(visible: true, alpha: 0.5, videoCommands: [])]
+        )
+        let merged = WPELayerScriptInstance.mergedOutputs(pending: pending, newer: newer)
+        #expect(merged.own.visible == true)
+        #expect(merged.own.videoCommands == [.play, .stop])
+        #expect(merged.others["both"]?.visible == true)
+        #expect(merged.others["both"]?.videoCommands == [.pause])
+        // A command-only entry the newer run no longer reports is still carried.
+        #expect(merged.others["loop"]?.videoCommands == [.seek(0)])
+    }
+
+    @Test("Async text tick never blocks on a slow script and still publishes late")
+    func asyncTickDoesNotBlockOnSlowScript() async throws {
+        let script = """
+        var n = 0;
+        export function update(value) {
+            n += 1;
+            if (n === 1) { return 'fast-1'; }
+            if (n === 2) {
+                var t0 = Date.now();
+                while (Date.now() - t0 < 500) {}
+                return 'slow-2';
+            }
+            return 'tick-' + n;
+        }
+        """
+        // Budget 0.1s < the 0.5s busy loop: legacy would abandon + poison; the
+        // async watchdog only warns and the late result must still publish.
+        let instance = try WPESceneScriptInstance(
+            script: script,
+            initialValue: "seed",
+            tickBudget: 0.1
+        )
+        instance.seedAsyncTick()
+        // Drains the seed outcome and schedules the slow tick 2.
+        #expect(instance.liveTickString() == "fast-1")
+        let clock = ContinuousClock()
+        let start = clock.now
+        let duringBusy = instance.liveTickString()
+        let elapsed = clock.now - start
+        #expect(elapsed < .milliseconds(50))
+        // Keep-last sentinel while the tick is in flight.
+        #expect(duringBusy == "fast-1")
+        var sawSlowResult = false
+        for _ in 0..<600 {
+            if instance.liveTickString() == "slow-2" {
+                sawSlowResult = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(sawSlowResult)
+    }
+
+    @Test("Seeded text script serves the scripted value on the first live tick")
+    func textSeedAvoidsPlaceholderPop() throws {
+        let instance = try WPESceneScriptInstance(
+            script: "export function update(value) { return 'scripted'; }",
+            initialValue: "placeholder"
+        )
+        instance.seedAsyncTick()
+        #expect(instance.liveTickString() == "scripted")
+    }
+
+    @Test("Kill-switch legacy path: synchronous tick returns the fresh result immediately")
+    func legacySynchronousTickReturnsImmediately() throws {
+        // With WPEScriptAsyncTickEnabled=false the renderer calls tickString()
+        // directly — the result of THIS tick is available synchronously.
+        let instance = try WPESceneScriptInstance(
+            script: "export function update(value) { return value + '!'; }",
+            initialValue: "x"
+        )
+        #expect(instance.tickString() == "x!")
+        #expect(instance.tickString() == "x!!")
+    }
+
+    @Test("Seeded transform script serves its scripted value on the first live tick")
+    func transformSeedAvoidsFirstFramePop() throws {
+        let script = """
+        export function update(value) { value.x = value.x + 1; return value; }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(10, 20, 30),
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+        instance.seedAsyncTick(pointerPosition: SIMD2<Double>(0.5, 0.5))
+        let first = instance.liveTick(pointerPosition: SIMD2<Double>(0.5, 0.5))
+        #expect(first == SIMD3<Double>(11, 20, 30))
+    }
+
+    @Test("Async transform ticks chain lastValue like the legacy path")
+    func asyncTransformChainsLastValue() async throws {
+        let script = """
+        export function update(value) { value.x = value.x + 1; return value; }
+        """
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: script,
+            seed: SIMD3<Double>(10, 20, 30),
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+        instance.seedAsyncTick(pointerPosition: SIMD2<Double>(0.5, 0.5))
+        #expect(instance.liveTick(pointerPosition: SIMD2<Double>(0.5, 0.5)) == SIMD3<Double>(11, 20, 30))
+        // The tick scheduled above fed on lastValue=11; while it is in flight the
+        // previous result persists (never a pop back to the baked seed).
+        var sawChainedResult = false
+        for _ in 0..<200 {
+            let value = instance.liveTick(pointerPosition: SIMD2<Double>(0.5, 0.5))
+            if value == SIMD3<Double>(12, 20, 30) {
+                sawChainedResult = true
+                break
+            }
+            #expect(value == SIMD3<Double>(11, 20, 30))
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        #expect(sawChainedResult)
+    }
+
+    @Test("Async cursor event outcome drains through the next liveTick")
+    func asyncCursorEventDrainsThroughLiveTick() throws {
+        let script = """
+        export function cursorDown() {
+            thisLayer.getVideoTexture().play();
+            thisLayer.alpha = 0.25;
+        }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        let frame = WPEPointerFrame(
+            position: SIMD2<Double>(0.5, 0.5),
+            clickPosition: SIMD2<Double>(0.5, 0.5),
+            isDown: true,
+            isRightDown: false
+        )
+        instance.liveDispatchCursorEvent(.down, pointerFrame: frame)
+        // Bounded synchronous engine call as a queue fence: it runs AFTER the
+        // event handler on the serial queue, so the event outcome has published
+        // by the time it returns (the legacy path never touches the slot).
+        _ = instance.tick(pointerFrame: frame)
+        let output = try #require(instance.liveTick(pointerFrame: frame))
+        #expect(output.own.videoCommands.contains(.play))
+        #expect(output.own.alpha == 0.25)
+    }
+
+    @Test("Superseding property push folds a pending tick's video commands")
+    func supersedingPropertyPushFoldsPendingTick() throws {
+        let script = """
+        var started = false;
+        export function update() {
+            if (!started) { started = true; thisLayer.getVideoTexture().play(); }
+            thisLayer.visible = true;
+        }
+        """
+        let instance = try WPELayerScriptInstance(script: script)
+        // Nothing completed yet — schedules tick 1, which issues .play.
+        #expect(instance.liveTick() == nil)
+        // Enqueued behind tick 1 on the serial queue, so tick 1 has published by
+        // the time this bounded call returns; the fold must carry its .play.
+        let merged = try #require(instance.applyUserPropertiesSuperseding(["k": .bool(true)]))
+        #expect(merged.own.videoCommands.contains(.play))
+        #expect(merged.own.visible == true)
+        // Everything consumed — the older tick can't resurface a frame later.
+        #expect(instance.liveTick() == nil)
+    }
+
+    @Test("Superseding property push waits out an in-flight slow tick without poisoning")
+    func supersedingPropertyPushWaitsOutInFlightSlowTick() throws {
+        let script = """
+        var n = 0;
+        export function update() {
+            n += 1;
+            if (n === 1) {
+                var t0 = Date.now();
+                while (Date.now() - t0 < 700) {}
+                thisLayer.getVideoTexture().play();
+            }
+            thisLayer.visible = true;
+        }
+        export function applyUserProperties(p) { thisLayer.alpha = 0.5; }
+        """
+        // 0.7s busy loop: past the 0.5s tick budget (queued behind it, a plain
+        // bounded push would time out and poison — the async watchdog merely
+        // warns for the same tick) yet 0.3s clear of the superseding path's 2×
+        // (1.0s) window, so scheduler noise can't tip the wait over.
+        let instance = try WPELayerScriptInstance(script: script, tickBudget: 0.5)
+        // Nothing completed yet — schedules the slow tick 1.
+        #expect(instance.liveTick() == nil)
+        // Enqueued behind the busy tick on the serial queue: the push must wait
+        // it out and still fold the tick's published .play command in.
+        let merged = try #require(instance.applyUserPropertiesSuperseding(["k": .bool(true)]))
+        #expect(merged.own.alpha == 0.5)
+        #expect(merged.own.videoCommands.contains(.play))
+        #expect(merged.own.visible == true)
+        // Not poisoned: a follow-up push on the now-idle queue still runs.
+        #expect(instance.applyUserPropertiesSuperseding(["k": .bool(false)]) != nil)
+    }
+
+    // MARK: - Consumer-before-producer recovery (3509243656 三体)
+
+    @Test("Text script that throws on unset shared state recovers on a later tick")
+    func textScriptRecoversOnceSharedStateArrives() throws {
+        // 3509243656's tooltip scripts read `shared.xx1.toFixed(2)` — before the
+        // MAIN sim's first update() they throw (undefined.toFixed). The engine
+        // must keep the last value AND retry: once the producer writes the key,
+        // the very next tick recovers. A permanently-frozen instance here is the
+        // regression this test locks out.
+        let shared = WPESharedScriptState()
+        let script = """
+        export function update(value) {
+            return '[' + shared.xx1.toFixed(2) + ']';
+        }
+        """
+        let instance = try WPESceneScriptInstance(
+            script: script,
+            initialValue: "placeholder",
+            shared: shared
+        )
+        // Producer hasn't run: the tick throws inside JS, value stays put.
+        #expect(instance.tickString() == "placeholder")
+        // Producer (script-host layer script) writes the shared key cross-context…
+        let producer = try WPELayerScriptInstance(
+            script: "export function update() { shared.xx1 = 1.5; }",
+            shared: shared
+        )
+        _ = producer.tick(runtimeSeconds: 0, pointerFrame: .neutral)
+        // …and the consumer's next retry succeeds.
+        #expect(instance.tickString() == "[1.50]")
+    }
+
+    @Test("Parser keeps a script-driven text object whose authored value is empty")
+    func parserKeepsScriptedTextWithEmptyAuthoredValue() throws {
+        // 3509243656's `time` object authors "" and computes the string in
+        // update() — it is the scene's ONLY shared.xntime producer. Dropping it
+        // for the empty placeholder froze every consumer text in the scene.
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [
+                {
+                    "id": 345,
+                    "name": "time",
+                    "text": {
+                        "script": "export function update(value) { return '1 Years'; }",
+                        "value": ""
+                    },
+                    "origin": "0 0 0"
+                },
+                {
+                    "id": 346,
+                    "name": "empty-static",
+                    "text": {"value": ""},
+                    "origin": "0 0 0"
+                }
+            ]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        // Scripted empty text survives with an empty initial value…
+        let scripted = try #require(document.textObjects.first(where: { $0.id == "345" }))
+        #expect(scripted.text.isEmpty)
+        #expect(scripted.textScript?.isEmpty == false)
+        // …while a scriptless empty text is still dropped.
+        #expect(!document.textObjects.contains(where: { $0.id == "346" }))
     }
 }
