@@ -52,7 +52,7 @@ struct MonitorBoardRootView: View {
             let boardSize = proxy.size
             let geometry = MonitorBoardGeometry(
                 boardSize: boardSize,
-                columns: model.currentConfiguration.gridColumns,
+                referenceWidth: model.referenceWidth,
                 topInsetFraction: model.topInsetFraction
             )
 

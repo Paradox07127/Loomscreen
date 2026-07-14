@@ -40,13 +40,25 @@ struct MonitorBoardConfigDecodeTests {
     @Test("A widgets-only config keeps exactly the placements it lists")
     func widgetsOnlyConfigKeepsPlacements() throws {
         let json = """
-        {"monitor":{"config":{"widgets":[{"kind":"clock","size":"s","x":0.1,"y":0.1}]}}}
+        {"monitor":{"config":{"widgets":[{"kind":"network","size":"s","x":0.1,"y":0.1}]}}}
         """
         guard case .monitor(let board) = try decodeContent(json) else {
             Issue.record("Expected .monitor content")
             return
         }
-        #expect(board.widgets.map(\.kind) == [.clock])
+        #expect(board.widgets.map(\.kind) == [.network])
+    }
+
+    @Test("A retired kind (clock/health) is dropped on decode, keeping the rest")
+    func retiredKindsAreDropped() throws {
+        let json = """
+        {"monitor":{"config":{"widgets":[{"kind":"clock","size":"s","x":0.1,"y":0.1},{"kind":"health","size":"s","x":0.3,"y":0.1},{"kind":"cpu","size":"m","x":0.5,"y":0.1}]}}}
+        """
+        guard case .monitor(let board) = try decodeContent(json) else {
+            Issue.record("Expected .monitor content")
+            return
+        }
+        #expect(board.widgets.map(\.kind) == [.cpu])
     }
 
     // MARK: - Graceful fallback

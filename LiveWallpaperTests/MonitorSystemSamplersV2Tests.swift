@@ -9,6 +9,28 @@ import Darwin
 @Suite("Monitor system samplers v2")
 struct MonitorSystemSamplersV2Tests {
 
+    // MARK: - Top-level PID resolution (app aggregation)
+
+    @Test("A helper resolves up to its top-level app, stopping below launchd")
+    func topLevelPIDWalksToApp() {
+        // 100 = Chrome (parent launchd), 200/201 = its helpers, 300 = a lone XPC
+        // service parented directly by launchd.
+        let parents: [Int32: Int32] = [100: 1, 200: 100, 201: 200, 300: 1]
+        #expect(SystemMetricsSamplers.topLevelPID(201, parents: parents) == 100)
+        #expect(SystemMetricsSamplers.topLevelPID(200, parents: parents) == 100)
+        #expect(SystemMetricsSamplers.topLevelPID(100, parents: parents) == 100)
+        #expect(SystemMetricsSamplers.topLevelPID(300, parents: parents) == 300)
+    }
+
+    @Test("Unknown parent or a cycle terminates instead of looping")
+    func topLevelPIDGuardsCyclesAndGaps() {
+        // 500's parent 600 isn't in the map → stops at 500; 700<->800 cycle terminates.
+        let parents: [Int32: Int32] = [500: 600, 700: 800, 800: 700]
+        #expect(SystemMetricsSamplers.topLevelPID(500, parents: parents) == 600)
+        let cyclic = SystemMetricsSamplers.topLevelPID(700, parents: parents)
+        #expect(cyclic == 700 || cyclic == 800)
+    }
+
     // MARK: - Memory breakdown formula (synthetic vm_statistics64)
 
     private func makeVMStats(

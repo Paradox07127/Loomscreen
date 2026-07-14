@@ -67,8 +67,10 @@ struct MirroredAreaChart: View {
     private func area(_ pts: [CGPoint], mid: CGFloat) -> Path {
         var p = Path()
         guard let first = pts.first, let last = pts.last else { return p }
+        // Explicit lines, not `addLines` (whose implicit `move` would drop the
+        // mid-baseline start and fill a chord instead of the area to the axis).
         p.move(to: CGPoint(x: first.x, y: mid))
-        p.addLines(pts)
+        for point in pts { p.addLine(to: point) }
         p.addLine(to: CGPoint(x: last.x, y: mid))
         p.closeSubpath()
         return p

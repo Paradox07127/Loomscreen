@@ -8,7 +8,7 @@ import SwiftUI
 /// The grain is generated ONCE into a cached `Image` at panel size — a seeded
 /// pseudo-random speckle at whisper opacity, never redrawn per frame.
 struct MonitorPanelChrome: ViewModifier {
-    var cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault
+    var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
 
     func body(content: Content) -> some View {
         content
@@ -46,7 +46,7 @@ struct MonitorPanelChrome: ViewModifier {
 
 extension View {
     /// Wrap a widget's content in the standard Ambient-Instrument panel body.
-    func monitorPanelChrome(cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault) -> some View {
+    func monitorPanelChrome(cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius) -> some View {
         modifier(MonitorPanelChrome(cornerRadius: cornerRadius))
     }
 }
@@ -55,7 +55,7 @@ extension View {
 /// tiled at whisper opacity via `overlay` blend. The bitmap is rebuilt only when
 /// the panel size changes, so `body` stays cheap.
 struct MonitorGrain: View {
-    var cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault
+    var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
     var opacity: Double = 0.022
 
     var body: some View {

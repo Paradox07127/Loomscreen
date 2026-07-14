@@ -1,26 +1,32 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Native 1:1 replica of the Memory widget from the approved design
-/// (`.claude/plan/monitor-design/index.html`, `buildMemorySection`).
+/// Native replica of the Memory widget from the approved design
+/// (`.claude/plan/monitor-design/index.html`, `buildMemorySection`), revised by
+/// the on-device review.
 ///
-/// Hero read = memory **pressure** (a discrete state), never "% used" — Apple's
-/// own stance: free RAM ≠ fast (memory-verdict ④). The tank's liquid level is
-/// used%, but its tint follows *pressure*, not level. `memUsedBytes` is already
-/// the Activity-Monitor formula (App + Wired + Compressed; Cached Files excluded),
-/// so it matches what the user sees in Activity Monitor.
+/// Pressure stays a first-class signal (Apple's stance: free RAM ≠ fast,
+/// memory-verdict ④) but is carried ONLY by the discrete chip/dot — never by
+/// chart colour. History is coloured by CATEGORY: the trend stacks
+/// App/Wired/Compressed as bands in the same tones as the Activity-Monitor
+/// breakdown bar, with the used% curve as the top edge. `memUsedBytes` is
+/// already the Activity-Monitor formula (App + Wired + Compressed; Cached
+/// Files excluded), so the top edge ≈ the bands' sum.
 ///
-/// - S (2×2): a vertical tank (level = used%, tint = pressure) beside the pressure
-///   state as the hero read, used% as context, and a swap chip when relevant.
-/// - M (4×2): used/total hero + pressure chip, the Activity-Monitor breakdown bar
-///   (App/Wired/Compressed/Cached Files/Swap), a valued legend, and a ~60s used%
-///   micro-trend whose stroke is coloured per discrete pressure segment.
-/// - L (4×4, `mem_l`): NO tank. Hero + pressure chip + swap caption on one row,
-///   then the SAME merged curve widened to a ~120s window with a normal/warn/crit
-///   swatch legend, the AM breakdown (bar + legend), and a "Top by memory" RSS
-///   list (`topProcesses` re-ranked by `memBytes`, top-5) — the two M charts fold
-///   into one hero visual and the extra height buys a process ranking, never
-///   bigger type (SPEC §3.0 3-size-cap).
+/// Sizes are Apple's fixed widget frames (S 170×170 / M 364×170 / L 364×376);
+/// the type scale is cell-derived (frame ÷ 2·rowSpan), the CPU widget's idiom.
+///
+/// - S (170×170): a purely graphical tank (level = used%, tint = pressure)
+///   beside used% as the hero read, the pressure word as a dot-tagged secondary
+///   line, and a swap chip when relevant.
+/// - M (364×170): used/total hero + pressure chip, the AM breakdown bar with a
+///   3-column valued legend, and a ~60s stacked category micro-trend.
+/// - L (364×376, `mem_l`): NO tank. Hero + pressure chip + swap caption on one
+///   row, the stacked trend widened to a ~120s window (the breakdown legend
+///   below explains its colours), the AM breakdown (bar + legend), and a
+///   "Top by memory" list (`topProcesses` re-ranked by `memBytes`, top-5, each
+///   row name + cpu% + GiB in fixed right-aligned columns) — the extra height
+///   buys a process ranking, never bigger type (SPEC §3.0 3-size-cap).
 struct MonitorMemoryWidgetView: View {
     let context: MonitorWidgetContext
 
@@ -31,7 +37,10 @@ struct MonitorMemoryWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cellHeight = geo.size.height
+            // Fixed Apple frames: S/M span one board row, L two — dividing by
+            // 2·rowSpan recovers the mock's cell-derived type scale (CPU idiom).
+            let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
+            let cellHeight = geo.size.height / (2 * rowSpan)
             MonitorWidgetContainer(
                 label: "MEM",
                 cellHeight: cellHeight,
@@ -58,55 +67,49 @@ struct MonitorMemoryWidgetView: View {
         }
     }
 
-    // MARK: - S (2×2): tank + pressure hero
+    // MARK: - S (2×2): tank + used% hero
 
     @ViewBuilder
     private func small(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        let usedFraction = memUsedFraction
         HStack(alignment: .center, spacing: 10) {
-            TankGauge(level: usedFraction, pressure: pressure,
+            // Purely graphical — no in-tank readout (on-device review).
+            TankGauge(level: memUsedFraction, pressure: pressure,
                       cornerRadius: max(6, cellHeight * 0.06))
                 .frame(width: 40)
-                .overlay(alignment: .topTrailing) {
-                    // used% caption riding just inside the tank top-right
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text(verbatim: "\(usedPercentInt)")
-                        Text(verbatim: "%")
-                            .font(MonitorDesign.captionFont(size: scale.caption * 0.62))
-                            .foregroundStyle(MonitorDesign.inkFaint)
-                    }
-                    .font(MonitorDesign.subFont(size: scale.caption))
-                    .monospacedDigit()
-                    .foregroundStyle(MonitorDesign.inkMuted)
-                    .shadow(color: .black.opacity(0.6), radius: 1, y: 1)
-                    .padding(4)
-                }
 
             VStack(alignment: .leading, spacing: 3) {
                 Spacer(minLength: 0)
-                // PRESSURE is the hero read. The word (Normal/Warning/Critical) is
-                // localized via the app's existing catalog keys.
-                Text(MonitorMemoryWidgetView.pressureDisplayKey(pressure))
-                    .font(MonitorDesign.heroFont(size: scale.hero * 0.62))
-                    .foregroundStyle(pressureHeroColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(verbatim: "PRESSURE")
+                // used% is the S hero read; the "%" is a separately-styled unit
+                // (CPU hero idiom) so the numeral carries the weight.
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(verbatim: "\(usedPercentInt)")
+                        .font(MonitorDesign.heroFont(size: scale.hero * 0.86))
+                        .foregroundStyle(MonitorDesign.inkPrimary)
+                    Text(verbatim: "%")
+                        .font(MonitorDesign.heroFont(size: scale.hero * 0.86 * 0.4))
+                        .foregroundStyle(MonitorDesign.inkFaint)
+                }
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                Text(verbatim: "USED")
                     .font(MonitorDesign.labelFont(size: scale.label))
                     .tracking(MonitorDesign.labelTracking(size: scale.label))
                     .foregroundStyle(MonitorDesign.inkFaint)
-                // used% integrates as context, not the hero. The "%" is notation
-                // (verbatim); "used" is a word (localized).
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(verbatim: "\(usedPercentInt)%")
-                        .foregroundStyle(MonitorDesign.inkMuted)
-                    Text("used")
-                        .font(MonitorDesign.captionFont(size: scale.sub * 0.62))
-                        .foregroundStyle(MonitorDesign.inkFaint)
+                // Pressure demotes to a dot-tagged secondary line; the word
+                // (Normal/Warning/Critical) stays localized via existing keys.
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(pressureDotColor)
+                        .frame(width: scale.label * 0.6, height: scale.label * 0.6)
+                        .shadow(color: pressureDotColor.opacity(0.7), radius: 2)
+                    Text(MonitorMemoryWidgetView.pressureDisplayKey(pressure))
+                        .font(MonitorDesign.subFont(size: scale.sub * 0.78))
+                        .foregroundStyle(pressureHeroColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                .font(MonitorDesign.subFont(size: scale.sub * 0.9))
-                .monospacedDigit()
                 .padding(.top, 1)
                 if showsSwap {
                     // "Swap" reuses the app's existing catalog key; the "N.NG"
@@ -115,6 +118,7 @@ struct MonitorMemoryWidgetView: View {
                         .font(MonitorDesign.labelFont(size: scale.label))
                         .tracking(scale.label * 0.06)
                         .foregroundStyle(MonitorDesign.signalSteel)
+                        .monitorChip(scale)
                 }
                 Spacer(minLength: 0)
             }
@@ -133,27 +137,21 @@ struct MonitorMemoryWidgetView: View {
             HStack(alignment: .center, spacing: 6) {
                 heroLine(scale: scale, factor: 0.86)
                 Spacer(minLength: 4)
-                PressureChip(pressure: pressure, labelSize: scale.label)
+                PressureChip(pressure: pressure, scale: scale)
             }
 
-            breakdownBlock(scale: scale)
+            // 3-col legend: the 125pt content box leaves ~40pt for the trend, so
+            // the legend flattens to two rows instead of three.
+            breakdownBlock(scale: scale, legendColumns: 3)
 
-            // Used% micro-trend (window size from the `historyWindow` option,
-            // default 60s), stroke coloured per discrete pressure segment.
-            HStack {
-                Text(verbatim: "USED · \(pressureWindowSamples)s")
-                    .font(MonitorDesign.labelFont(size: scale.label))
-                    .tracking(MonitorDesign.labelTracking(size: scale.label))
-                    .foregroundStyle(MonitorDesign.inkFaint)
-                Spacer()
-                Text("colour = pressure")
-                    .font(MonitorDesign.captionFont(size: scale.label * 0.92))
-                    .foregroundStyle(MonitorDesign.inkFaint.opacity(0.85))
-            }
-            PressureCurve(
-                used: recentUsed,
-                pressure: recentPressure,
-                reduceMotion: context.reduceMotion
+            // Category-stacked micro-trend (window from the `historyWindow`
+            // option, default 60s) — the legend above already explains the
+            // App/Wired/Compressed tones, so no chart-corner chip.
+            MemoryStackChart(
+                app: recentSeries(\.memAppFraction),
+                wired: recentSeries(\.memWiredFraction),
+                compressed: recentSeries(\.memCompressedFraction),
+                used: recentSeries(\.memUsedFraction)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(minHeight: 22)
@@ -173,39 +171,36 @@ struct MonitorMemoryWidgetView: View {
             HStack(alignment: .center, spacing: 8) {
                 heroLine(scale: scale, factor: 0.9)
                 Spacer(minLength: 6)
-                HStack(spacing: 8) {
-                    PressureChip(pressure: pressure, labelSize: scale.label)
-                    if showsSwap {
-                        swapCaption(scale: scale)
+                if showsSwap {
+                    // The 332pt row can't always take hero + chip + swap side by
+                    // side (long localized pressure words); stacked-trailing costs
+                    // no height — the hero line already sets the row.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            PressureChip(pressure: pressure, scale: scale)
+                            swapCaption(scale: scale)
+                        }
+                        VStack(alignment: .trailing, spacing: 3) {
+                            PressureChip(pressure: pressure, scale: scale)
+                            swapCaption(scale: scale)
+                        }
                     }
+                } else {
+                    PressureChip(pressure: pressure, scale: scale)
                 }
             }
 
-            // The merged pressure-coloured used% curve, widened to `historyWindow`
-            // (default 120s at L) with a normal/warn/crit swatch legend.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    HStack(spacing: 4) {
-                        Text(verbatim: "USED% · \(pressureWindowSamples)s")
-                            .font(MonitorDesign.labelFont(size: scale.label))
-                            .tracking(MonitorDesign.labelTracking(size: scale.label))
-                            .foregroundStyle(MonitorDesign.inkFaint)
-                        Text("colour = pressure")
-                            .font(MonitorDesign.captionFont(size: scale.label * 0.92))
-                            .foregroundStyle(MonitorDesign.inkFaint.opacity(0.85))
-                    }
-                    Spacer()
-                    PressureLegend(labelSize: scale.label)
-                }
-                PressureCurve(
-                    used: recentUsed,
-                    pressure: recentPressure,
-                    reduceMotion: context.reduceMotion
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .frame(minHeight: 46)
-            }
-            .frame(minHeight: 66)
+            // The stacked category trend widened to `historyWindow` (default
+            // 120s at L). Its colours are keyed by the breakdown legend below —
+            // no separate chart legend or "colour = pressure" chip.
+            MemoryStackChart(
+                app: recentSeries(\.memAppFraction),
+                wired: recentSeries(\.memWiredFraction),
+                compressed: recentSeries(\.memCompressedFraction),
+                used: recentSeries(\.memUsedFraction)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minHeight: 56)
 
             breakdownBlock(scale: scale, headerLabel: "BREAKDOWN")
 
@@ -230,6 +225,7 @@ struct MonitorMemoryWidgetView: View {
         .font(MonitorDesign.captionFont(size: scale.label * 0.96))
         .monospacedDigit()
         .lineLimit(1)
+        .monitorChip(scale)
     }
 
     /// The Activity-Monitor breakdown bar + valued legend, shared by M and L.
@@ -237,7 +233,9 @@ struct MonitorMemoryWidgetView: View {
     /// alone still carries the true proportions, just without the per-segment
     /// GiB readout.
     @ViewBuilder
-    private func breakdownBlock(scale: MonitorDesign.TypeScale, headerLabel: String? = nil) -> some View {
+    private func breakdownBlock(
+        scale: MonitorDesign.TypeScale, headerLabel: String? = nil, legendColumns: Int = 2
+    ) -> some View {
         if let breakdown = system?.memBreakdown, let total = memTotalBytes, total > 0 {
             let segments = MonitorMemoryWidgetView.segments(
                 breakdown: breakdown, swap: system?.swapUsedBytes ?? 0, total: total
@@ -254,7 +252,8 @@ struct MonitorMemoryWidgetView: View {
                                        breakdown: breakdown, total: total))
                     .frame(height: scale.caption * 1.05)
                 if !breakdownCompact {
-                    MemoryBreakdownLegend(segments: segments, labelSize: scale.label)
+                    MemoryBreakdownLegend(segments: segments, labelSize: scale.label,
+                                          columns: legendColumns)
                 }
             }
         }
@@ -340,23 +339,28 @@ struct MonitorMemoryWidgetView: View {
         }
     }
 
-    /// Most-recent samples of the used fraction for the M/L trend, sized by
-    /// `pressureWindowSamples` (M defaults to 60, L to 120 — mock `mem_m`/`mem_l`).
-    private var recentUsed: [Double] {
-        Array(context.history.memUsedFraction.suffix(pressureWindowSamples))
+    /// The S secondary line's pressure dot — same signal tones as `PressureChip`.
+    private var pressureDotColor: Color {
+        switch pressure {
+        case .normal: return MonitorDesign.signalSage
+        case .warn: return MonitorDesign.signalAmber
+        case .critical: return MonitorDesign.signalCoral
+        }
     }
 
-    /// Pressure levels aligned to `recentUsed` (same suffix window).
-    private var recentPressure: [Int] {
-        Array(context.history.memPressure.suffix(pressureWindowSamples))
-            .map { MonitorMemoryWidgetView.pressureLevel($0) }
+    /// Most-recent samples of a history series for the M/L trend, sized by
+    /// `trendWindowSamples`. All four memory series are ingested/trimmed in
+    /// lockstep, so equal suffixes stay sample-aligned.
+    private func recentSeries(_ series: KeyPath<MonitorHistorySnapshot, [Double]>) -> [Double] {
+        Array(context.history[keyPath: series].suffix(trendWindowSamples))
     }
 
     /// The `historyWindow` widget option (seconds), resolved against a
-    /// size-specific default. The board samples at ~1Hz, so seconds ≈ samples —
-    /// the same simplifying assumption every other Monitor widget's trend label
-    /// already makes. (Field contract: mock index.html:3641 `Memory{historyWindow}`.)
-    private var pressureWindowSamples: Int {
+    /// size-specific default (M 60, L 120 — mock `mem_m`/`mem_l`). The board
+    /// samples at ~1Hz, so seconds ≈ samples — the same simplifying assumption
+    /// every other Monitor widget's trend label already makes. (Field contract:
+    /// mock index.html:3641 `Memory{historyWindow}`.)
+    private var trendWindowSamples: Int {
         let fallback = context.placement.size == .large ? 120 : 60
         return MonitorMemoryWidgetView.historyWindowSamples(
             optionSeconds: context.placement.options["historyWindow"]?.numberValue,
@@ -395,20 +399,13 @@ struct MonitorMemoryWidgetView: View {
         }
     }
 
-    /// Discrete level for the pressure-coloured curve (0 normal / 1 warn / 2 crit).
+    /// Discrete pressure level (0 normal / 1 warn / 2 crit). The UI no longer
+    /// colours the trend by pressure; kept because the contract is pinned by tests.
     nonisolated static func pressureLevel(_ raw: String?) -> Int {
         switch pressure(raw) {
         case .normal: return 0
         case .warn: return 1
         case .critical: return 2
-        }
-    }
-
-    nonisolated static func pressureLabel(_ p: MonitorPressure) -> String {
-        switch p {
-        case .normal: return "normal"
-        case .warn: return "warning"
-        case .critical: return "critical"
         }
     }
 
@@ -469,6 +466,14 @@ struct MonitorMemoryWidgetView: View {
         return min(1, max(0, Double(bytes) / Double(top)))
     }
 
+    /// cpu% column for the Top-by-memory rows: whole-number "N%" when the
+    /// sample carries a reading, an en-dash when it doesn't — the column keeps
+    /// its reserved width either way so the GiB column never shifts.
+    nonisolated static func cpuColumnText(_ cpuPercent: Double) -> String {
+        guard cpuPercent.isFinite, cpuPercent > 0 else { return "–" }
+        return "\(Int(cpuPercent.rounded()))%"
+    }
+
     /// One Activity-Monitor breakdown segment (fraction is 0…1 of total RAM).
     struct Segment: Identifiable, Equatable {
         enum Kind: String {
@@ -523,10 +528,9 @@ struct MonitorMemoryWidgetView: View {
         return min(1, max(0, 1 - ramUsed / max(total, 1)))
     }
 
-    /// Split a used% curve into runs of constant pressure. Each run shares its
-    /// boundary sample with the next so the line stays continuous but the colour
-    /// switch is crisp (mock's `pressureCurveChart` per-segment idiom). Returns
-    /// index ranges into `used` paired with the pressure level for that run.
+    /// Split a series into runs of constant pressure, each sharing its boundary
+    /// sample with the next. No longer drawn (the trend now stacks categories);
+    /// kept because the contract is pinned by tests.
     nonisolated static func pressureRuns(count: Int, level: (Int) -> Int) -> [(range: ClosedRange<Int>, level: Int)] {
         guard count > 0 else { return [] }
         var runs: [(ClosedRange<Int>, Int)] = []
@@ -551,7 +555,9 @@ struct MonitorMemoryWidgetView: View {
 /// Discrete pressure state chip (never a %). Ported from `.pchip`.
 private struct PressureChip: View {
     var pressure: MonitorPressure
-    var labelSize: CGFloat
+    var scale: MonitorDesign.TypeScale
+
+    private var labelSize: CGFloat { scale.label }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -567,12 +573,7 @@ private struct PressureChip: View {
                 .font(MonitorDesign.labelFont(size: labelSize))
                 .foregroundStyle(valueColor)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(
-            Capsule().fill(chipFill)
-                .overlay(Capsule().strokeBorder(chipStroke, lineWidth: 1))
-        )
+        .monitorChip(scale)
         .fixedSize()
     }
 
@@ -590,68 +591,6 @@ private struct PressureChip: View {
         case .warn: return MonitorDesign.oklch(0.90, 0.05, 46)
         case .critical: return MonitorDesign.oklch(0.92, 0.06, 38)
         }
-    }
-
-    private var chipFill: Color {
-        switch pressure {
-        case .normal: return MonitorDesign.oklch(0.28, 0.03, 158, alpha: 0.24)
-        case .warn: return MonitorDesign.oklch(0.30, 0.05, 44, alpha: 0.28)
-        case .critical: return MonitorDesign.oklch(0.32, 0.06, 34, alpha: 0.30)
-        }
-    }
-
-    private var chipStroke: Color {
-        switch pressure {
-        case .normal: return MonitorDesign.oklch(0.44, 0.07, 158, alpha: 0.60)
-        case .warn: return MonitorDesign.oklch(0.50, 0.11, 44, alpha: 0.75)
-        case .critical: return MonitorDesign.oklch(0.50, 0.13, 34, alpha: 0.80)
-        }
-    }
-}
-
-/// The shared normal/warn/crit stroke tones — one source of truth for the M/L
-/// curve (`PressureCurve`) and the L legend swatches (`PressureLegend`), ported
-/// 1:1 from the mock's `PCURVE` array.
-private enum PressureTone {
-    static let colors: [Color] = [
-        MonitorDesign.oklch(0.82, 0.09, 158),   // normal → sage
-        MonitorDesign.oklch(0.83, 0.135, 78),   // warn   → amber
-        MonitorDesign.oklch(0.72, 0.16, 34),    // crit   → coral
-    ]
-
-    static func color(_ p: MonitorPressure) -> Color {
-        switch p {
-        case .normal: return colors[0]
-        case .warn: return colors[1]
-        case .critical: return colors[2]
-        }
-    }
-}
-
-/// The L curve's normal/warn/crit swatch legend (mock's `.pbleg`) — so the
-/// per-segment colour coding is self-explaining beside the merged curve.
-/// Labels reuse the existing "Normal"/"Warning"/"Critical" catalog keys
-/// (the mock's abbreviated "warn"/"crit" would need new strings).
-private struct PressureLegend: View {
-    var labelSize: CGFloat
-
-    private static let states: [MonitorPressure] = [.normal, .warn, .critical]
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(Array(Self.states.enumerated()), id: \.offset) { _, state in
-                HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(PressureTone.color(state))
-                        .frame(width: labelSize * 0.6, height: labelSize * 0.6)
-                    Text(MonitorMemoryWidgetView.pressureDisplayKey(state))
-                        .font(MonitorDesign.captionFont(size: labelSize * 0.94))
-                        .foregroundStyle(MonitorDesign.inkFaint)
-                }
-            }
-        }
-        .lineLimit(1)
-        .fixedSize()
     }
 }
 
@@ -736,13 +675,16 @@ private struct MemoryBreakdownBar: View {
 private struct MemoryBreakdownLegend: View {
     var segments: [MonitorMemoryWidgetView.Segment]
     var labelSize: CGFloat
+    /// 2 at L (mock's grid), 3 at M — the 125pt M content box only affords two
+    /// legend rows, so the 332pt width absorbs the extra column instead.
+    var columns: Int = 2
 
-    private var columns: [GridItem] {
-        [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 10), count: max(1, columns))
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 3) {
+        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 3) {
             ForEach(segments) { seg in
                 HStack(spacing: 5) {
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -758,6 +700,7 @@ private struct MemoryBreakdownLegend: View {
                         .font(MonitorDesign.captionFont(size: labelSize))
                         .foregroundStyle(MonitorDesign.inkFaint)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .truncationMode(.tail)
                     Spacer(minLength: 2)
                     Text(verbatim: gib(seg.bytes))
@@ -778,8 +721,9 @@ private struct MemoryBreakdownLegend: View {
 
 /// One RSS-ranked row (mock `.proc .pr`, memory column repurposed): a leading
 /// glyph + truncating name, an inline bar sharing the App segment's warm-gold
-/// gradient (same tone family as the AM breakdown's "App" slice), and the GiB
-/// readout. Bar length is this row's RSS ÷ the busiest shown row's RSS.
+/// gradient, then cpu% and GiB in FIXED-width right-aligned columns — the name
+/// truncates, the numbers never do (on-device review: the rightmost value must
+/// not clip, and the columns must not shift between rows).
 private struct MemoryTopProcessRow: View {
     var proc: MonitorProcessSample
     var topBytes: UInt64
@@ -808,14 +752,22 @@ private struct MemoryTopProcessRow: View {
                             MonitorMemoryWidgetView.processBarFraction(proc.memBytes, top: topBytes))))
                 }
             }
-            .frame(width: scale.caption * 3.6, height: scale.caption * 0.42)
+            .frame(width: scale.caption * 3.0, height: scale.caption * 0.42)
+
+            // cpu% column — sized for a multi-core "NNN%"; dim when not carried.
+            Text(verbatim: MonitorMemoryWidgetView.cpuColumnText(proc.cpuPercent))
+                .font(MonitorDesign.subFont(size: scale.caption * 0.94))
+                .monospacedDigit()
+                .foregroundStyle(proc.cpuPercent > 0 ? MonitorDesign.inkMuted : MonitorDesign.inkFaint)
+                .frame(width: scale.caption * 2.9, alignment: .trailing)
 
             Text(verbatim: gib(proc.memBytes))
                 .font(MonitorDesign.subFont(size: scale.caption * 0.94))
                 .monospacedDigit()
                 .foregroundStyle(AMSegmentStyle.legendColor(.app))
-                .frame(width: scale.caption * 2.3, alignment: .trailing)
+                .frame(width: scale.caption * 3.3, alignment: .trailing)
         }
+        .lineLimit(1)
     }
 
     private func gib(_ bytes: UInt64) -> String {
@@ -823,94 +775,93 @@ private struct MemoryTopProcessRow: View {
     }
 }
 
-// MARK: - Pressure-coloured used% curve (M + L trend)
+// MARK: - Category-stacked used% history (M + L trend)
 
-/// A single used% curve whose height is used% (continuous) and whose stroke colour
-/// is the discrete pressure level in effect at each instant — cut into per-pressure
-/// runs sharing boundary vertices (mock's `pressureCurveChart`). Soft area fill per
-/// run; a now-dot marks the head coloured to the current pressure. Shared by M
-/// (60s default window) and L (120s default window) — only the window length
-/// and the surrounding chrome (swatch legend at L) differ.
-private struct PressureCurve: View {
+/// Stacked App/Wired/Compressed bands (fractions of total RAM) in the SAME
+/// tones as the AM breakdown bar, so the breakdown legend explains this chart
+/// too — a local port of the CPU widget's `CPUStackChart` idiom. The used%
+/// curve is stroked separately as the crisp top edge: used ≈ the bands' sum
+/// (AM formula), and the edge stays honest on ticks that carried no breakdown
+/// (bands collapse to 0, the total curve remains). Fixed 0…1 axis; a neutral
+/// now-dot marks the head — pressure never colours this chart.
+private struct MemoryStackChart: View {
+    var app: [Double]
+    var wired: [Double]
+    var compressed: [Double]
     var used: [Double]
-    /// Pressure level per sample (0 normal / 1 warn / 2 crit), aligned to `used`.
-    var pressure: [Int]
-    var reduceMotion: Bool
 
-    private static let strokeColors: [Color] = PressureTone.colors
-    private static let fillOpacity: [Double] = [0.26, 0.34, 0.40]
-
-    private func level(_ i: Int) -> Int {
-        guard i < pressure.count else { return 0 }
-        return min(2, max(0, pressure[i]))
-    }
+    private static let inset: CGFloat = 4
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            if used.count >= 2 {
-                let pts = points(w: w, h: h)
-                let runs = MonitorMemoryWidgetView.pressureRuns(count: used.count) { level($0) }
+            let n = min(min(app.count, wired.count), min(compressed.count, used.count))
+            if n >= 2 {
+                let a = Array(app.suffix(n)), wi = Array(wired.suffix(n))
+                let c = Array(compressed.suffix(n)), u = Array(used.suffix(n))
                 ZStack {
                     baseline(w: w, h: h)
-                    ForEach(Array(runs.enumerated()), id: \.offset) { _, run in
-                        let slice = Array(pts[run.range])
-                        let lv = run.level
-                        areaPath(slice, height: h)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Self.strokeColors[lv].opacity(Self.fillOpacity[lv]),
-                                        Self.strokeColors[lv].opacity(0.02),
-                                    ],
-                                    startPoint: .top, endPoint: .bottom
-                                )
-                            )
-                        linePath(slice)
-                            .stroke(Self.strokeColors[lv],
-                                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    Canvas { ctx, size in
+                        draw(ctx, size: size, a: a, wi: wi, c: c, u: u, n: n)
                     }
-                    if let last = pts.last {
-                        let lv = level(used.count - 1)
-                        Circle()
-                            .fill(Self.strokeColors[lv])
-                            .frame(width: 6, height: 6)
-                            .position(last)
-                            .shadow(color: Self.strokeColors[lv].opacity(0.6), radius: 3)
-                    }
+                    Circle()
+                        .fill(MonitorDesign.inkMuted)
+                        .frame(width: 6, height: 6)
+                        .position(x: w, y: y(u[n - 1], h: h))
+                        .shadow(color: MonitorDesign.inkMuted.opacity(0.6), radius: 3)
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: used)
             } else {
                 baseline(w: w, h: h)
             }
         }
     }
 
-    private func points(w: CGFloat, h: CGFloat) -> [CGPoint] {
-        let n = used.count
-        guard n >= 2 else { return [] }
-        // Used% is a fixed 0…1 axis with a little vertical inset (honest, stable).
-        let inset: CGFloat = 4
-        return used.enumerated().map { i, v in
-            let x = CGFloat(i) / CGFloat(n - 1) * w
-            let f = min(1, max(0, v))
-            let y = h - CGFloat(f) * (h - inset * 2) - inset
-            return CGPoint(x: x, y: y)
+    private func y(_ f: Double, h: CGFloat) -> CGFloat {
+        h - CGFloat(min(1, max(0, f))) * (h - Self.inset * 2) - Self.inset
+    }
+
+    private func draw(_ ctx: GraphicsContext, size: CGSize,
+                      a: [Double], wi: [Double], c: [Double], u: [Double], n: Int) {
+        let w = size.width, h = size.height
+        func X(_ i: Int) -> CGFloat { CGFloat(i) / CGFloat(n - 1) * w }
+        func Y(_ f: Double) -> CGFloat { y(f, h: h) }
+
+        var appTop = [CGPoint](), wiredTop = [CGPoint](), compTop = [CGPoint](), usedTop = [CGPoint]()
+        for i in 0..<n {
+            appTop.append(CGPoint(x: X(i), y: Y(a[i])))
+            wiredTop.append(CGPoint(x: X(i), y: Y(a[i] + wi[i])))
+            compTop.append(CGPoint(x: X(i), y: Y(a[i] + wi[i] + c[i])))
+            usedTop.append(CGPoint(x: X(i), y: Y(u[i])))
         }
-    }
 
-    private func linePath(_ pts: [CGPoint]) -> Path {
-        var p = Path(); p.addLines(pts); return p
-    }
-
-    private func areaPath(_ pts: [CGPoint], height: CGFloat) -> Path {
-        var p = Path()
-        guard let first = pts.first, let last = pts.last else { return p }
-        p.move(to: CGPoint(x: first.x, y: height))
-        p.addLines(pts)
-        p.addLine(to: CGPoint(x: last.x, y: height))
-        p.closeSubpath()
-        return p
+        func area(_ tops: [CGPoint]) -> Path {
+            var p = Path()
+            // Explicit lineTos: `addLines` would `move` to the first sample and
+            // fill a chord instead of the true area down to the baseline.
+            p.move(to: CGPoint(x: 0, y: Y(0)))
+            for point in tops { p.addLine(to: point) }
+            p.addLine(to: CGPoint(x: w, y: Y(0)))
+            p.closeSubpath()
+            return p
+        }
+        // Paint taller cumulatives first so each lower band covers its slice.
+        let bands: [([CGPoint], MonitorMemoryWidgetView.Segment.Kind, Double)] = [
+            (compTop, .compressed, 0.38),
+            (wiredTop, .wired, 0.40),
+            (appTop, .app, 0.45),
+        ]
+        for (tops, kind, top) in bands {
+            ctx.fill(area(tops), with: .linearGradient(
+                Gradient(colors: [AMSegmentStyle.legendColor(kind).opacity(top),
+                                  AMSegmentStyle.legendColor(kind).opacity(0.03)]),
+                startPoint: .zero, endPoint: CGPoint(x: 0, y: h)))
+            var line = Path(); line.addLines(tops)
+            ctx.stroke(line, with: .color(AMSegmentStyle.legendColor(kind).opacity(0.85)),
+                       style: StrokeStyle(lineWidth: 1, lineJoin: .round))
+        }
+        var totalLine = Path(); totalLine.addLines(usedTop)
+        ctx.stroke(totalLine, with: .color(MonitorDesign.inkMuted.opacity(0.9)),
+                   style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
     }
 
     private func baseline(w: CGFloat, h: CGFloat) -> some View {
@@ -961,16 +912,25 @@ private func memoryPreviewContext(
     snapshot.system = system
 
     // A mostly-normal 120-sample run with one short warn blip near the middle
-    // (mirrors the mock's `memHist`); M reads the trailing 60s of it, L the full 120s.
+    // (mirrors the mock's `memHist`); M reads the trailing 60s of it, L the full
+    // 120s. Category series roughly match the snapshot's AM split proportions.
     var used: [Double] = []
     var press: [String] = []
+    var app: [Double] = [], wired: [Double] = [], compressed: [Double] = []
     for i in 0..<120 {
-        used.append(0.40 + Double(i) / 120.0 * 0.08 + (i > 74 && i < 82 ? 0.10 : 0))
+        let u = 0.40 + Double(i) / 120.0 * 0.08 + (i > 74 && i < 82 ? 0.10 : 0)
+        used.append(u)
         press.append(i > 74 && i < 82 ? "warn" : "normal")
+        app.append(u * 0.59)
+        wired.append(u * 0.28)
+        compressed.append(u * 0.13)
     }
     var history = MonitorHistorySnapshot()
     history.memUsedFraction = used
     history.memPressure = press
+    history.memAppFraction = app
+    history.memWiredFraction = wired
+    history.memCompressedFraction = compressed
 
     return MonitorWidgetContext(
         snapshot: snapshot,
@@ -983,12 +943,14 @@ private func memoryPreviewContext(
     )
 }
 
+// Preview frames are Apple's exact widget tiles: S 170×170, M 364×170, L 364×376.
+
 #Preview("Memory · S") {
     HStack(spacing: 20) {
         MonitorMemoryWidgetView(context: memoryPreviewContext(size: .small, pressure: "normal", swapGiB: 0))
-            .frame(width: 150, height: 150)
+            .frame(width: 170, height: 170)
         MonitorMemoryWidgetView(context: memoryPreviewContext(size: .small, pressure: "warn", swapGiB: 2.4))
-            .frame(width: 150, height: 150)
+            .frame(width: 170, height: 170)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)
@@ -997,9 +959,9 @@ private func memoryPreviewContext(
 #Preview("Memory · M") {
     VStack(spacing: 20) {
         MonitorMemoryWidgetView(context: memoryPreviewContext(size: .medium, pressure: "normal"))
-            .frame(width: 320, height: 150)
+            .frame(width: 364, height: 170)
         MonitorMemoryWidgetView(context: memoryPreviewContext(size: .medium, pressure: "warn"))
-            .frame(width: 320, height: 150)
+            .frame(width: 364, height: 170)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)
@@ -1009,13 +971,13 @@ private func memoryPreviewContext(
     HStack(alignment: .top, spacing: 20) {
         // Full L: curve + breakdown + top-by-memory.
         MonitorMemoryWidgetView(context: memoryPreviewContext(size: .large, pressure: "normal"))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
         // No processes sampled + compact breakdown + showTopProcesses off —
         // exercises the `breakdown`/`showTopProcesses` option reads.
         MonitorMemoryWidgetView(context: memoryPreviewContext(
             size: .large, pressure: "warn", includeProcesses: false,
             options: ["breakdown": .string("compact"), "showTopProcesses": .bool(false)]))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)

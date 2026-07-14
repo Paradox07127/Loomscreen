@@ -56,6 +56,7 @@ struct MonitorBoardPreviewArea: View {
                 configuration: board,
                 agentFleetEnabled: agentFleetEnabled,
                 topInsetFraction: topInsetFraction,
+                referenceWidth: max(screen.frame.width, 1),
                 onConfigurationEdited: { edited in
                     // A live board edit (drag/add/remove/resize) already reflects on
                     // the preview; mirror it into our state and persist WITHOUT a
@@ -126,6 +127,9 @@ struct MonitorBoardPreview: NSViewRepresentable {
     let agentFleetEnabled: Bool
     /// Menu-bar forbidden-zone fraction, WYSIWYG with the real display.
     let topInsetFraction: CGFloat
+    /// Real display width in points — the preview board scales Apple-size
+    /// widgets down by boardWidth/referenceWidth so placement is WYSIWYG.
+    let referenceWidth: CGFloat
     let onConfigurationEdited: (MonitorBoardConfiguration) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -141,14 +145,23 @@ struct MonitorBoardPreview: NSViewRepresentable {
             configuration: gated,
             agentFleetEnabled: agentFleetEnabled,
             nameOnlyTiles: true,
-            topInsetFraction: topInsetFraction
+            topInsetFraction: topInsetFraction,
+            referenceWidth: referenceWidth
         )
         host.onConfigurationEdited = onConfigurationEdited
-        // Preview is always editable — this IS the editor (SPEC §4).
-        host.setEditing(true)
-        // Edit mode needs clicks even though the live wallpaper is click-through.
-        host.setMouseInteractionEnabled(true)
         context.coordinator.attach(host)
+        // make/updateNSView run INSIDE a SwiftUI view-update transaction, and
+        // these calls mutate the interaction model's @Published state
+        // (isEditing / placements / boardSize) — publishing there is undefined
+        // behavior ("Publishing changes from within view updates"), so hop to
+        // the next main-actor turn. FIFO ordering keeps them before any later
+        // update's deferred work.
+        Task { @MainActor in
+            // Preview is always editable — this IS the editor (SPEC §4). Edit
+            // mode needs clicks even though the live wallpaper is click-through.
+            host.setEditing(true)
+            host.setMouseInteractionEnabled(true)
+        }
         return host
     }
 
@@ -160,12 +173,21 @@ struct MonitorBoardPreview: NSViewRepresentable {
         )
         // Only re-apply when the config the preview holds actually differs, so a
         // board-originated edit we just mirrored back doesn't bounce a rebuild.
-        if context.coordinator.lastAppliedConfiguration != gated {
-            host.apply(configuration: gated, topInsetFraction: topInsetFraction)
-            context.coordinator.lastAppliedConfiguration = gated
+        // The gate is decided (and recorded) synchronously so back-to-back view
+        // updates can't double-schedule; the mutating calls themselves are
+        // deferred out of the view-update transaction (see makeNSView note).
+        let needsApply = context.coordinator.lastAppliedConfiguration != gated
+        if needsApply { context.coordinator.lastAppliedConfiguration = gated }
+        let referenceWidth = referenceWidth
+        let topInsetFraction = topInsetFraction
+        Task { @MainActor in
+            host.setReferenceWidth(referenceWidth)
+            if needsApply {
+                host.apply(configuration: gated, topInsetFraction: topInsetFraction)
+            }
+            host.setEditing(true)
+            host.setMouseInteractionEnabled(true)
         }
-        host.setEditing(true)
-        host.setMouseInteractionEnabled(true)
     }
 
     static func dismantleNSView(_ host: MonitorBoardHostView, coordinator: Coordinator) {

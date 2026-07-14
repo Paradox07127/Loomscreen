@@ -148,7 +148,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
             agents: wantsAgents,
             usage: wantsUsage,
             topProcesses: wantsProcesses,
-            activeWidgetKinds: kinds
+            activeWidgetKinds: kinds,
+            gpuSampleSeconds: MonitorWidgetDraft.gpuSampleSeconds(in: configuration.widgets)
         )
     }
 

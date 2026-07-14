@@ -133,4 +133,34 @@ struct MonitorPowerWidgetTests {
         #expect(MonitorPowerModel.accessoryTint(20).barGradient == [MonitorDesign.signalSage])
         #expect(MonitorPowerModel.accessoryTint(96).barGradient == [MonitorDesign.signalSage])
     }
+
+    // MARK: - Accessory row cap (M's fixed 125pt content box)
+
+    @Test("Over the cap, the LOWEST-percent accessories are kept, original order preserved")
+    func displayAccessoriesKeepsNeediest() {
+        let m = MonitorPowerModel(system: system {
+            $0.accessories = [
+                MonitorAccessoryBattery(name: "Magic Mouse", kind: "mouse", percent: 82),
+                MonitorAccessoryBattery(name: "Magic Keyboard", kind: "keyboard", percent: 9),
+                MonitorAccessoryBattery(name: "Magic Trackpad", kind: "trackpad", percent: 41),
+            ]
+        })
+        let shown = m.displayAccessories(limit: 2)
+        // Keyboard (9%) and trackpad (41%) survive; healthy mouse hides. Order
+        // stays as reported, not sorted-by-percent.
+        #expect(shown.map(\.name) == ["Magic Keyboard", "Magic Trackpad"])
+    }
+
+    @Test("At or under the cap, accessories pass through untouched")
+    func displayAccessoriesPassThrough() {
+        let two = MonitorPowerModel(system: system {
+            $0.accessories = [
+                MonitorAccessoryBattery(name: "A", kind: "mouse", percent: 5),
+                MonitorAccessoryBattery(name: "B", kind: "keyboard", percent: 99),
+            ]
+        })
+        #expect(two.displayAccessories(limit: 2).map(\.name) == ["A", "B"])
+        let none = MonitorPowerModel(system: system { $0.accessories = nil })
+        #expect(none.displayAccessories(limit: 2).isEmpty)
+    }
 }

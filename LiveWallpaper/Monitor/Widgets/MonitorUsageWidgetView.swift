@@ -9,7 +9,7 @@ import LiveWallpaperCore
 /// hero (the ONE shared `ArcGauge`), the week meter and today $/tokens frame it,
 /// and M densifies into a CodexBar-popover-class cockpit: dual 5h/week meters +
 /// dual reset countdowns + provider split + a client-derived burn ETA + a
-/// four-segment cache strip + a 7-day mini sparkline. L adds the two things M has
+/// one-line four-segment cache row + a 7-day mini sparkline. L adds the two things M has
 /// no room for — the client burn-rate readouts ($/h, tok/h) and a per-model
 /// breakdown (share bar + valued rows from `perModel`) — over the same quota
 /// hero, cache strip and 7-day trend.
@@ -42,7 +42,11 @@ struct MonitorUsageWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cellHeight = geo.size.height
+            // Board convention (see CPU): S/M span one board row and L two, so
+            // dividing by 2·rowSpan yields the mock's near-constant cell height
+            // (85/94) — one type scale across all sizes.
+            let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
+            let cellHeight = geo.size.height / (2 * rowSpan)
             MonitorWidgetContainer(
                 label: "Usage",
                 systemImage: "gauge.with.needle",
@@ -80,6 +84,10 @@ struct MonitorUsageWidgetView: View {
                         .font(MonitorDesign.labelFont(size: scale.label))
                         .tracking(MonitorDesign.labelTracking(size: scale.label))
                         .foregroundStyle(MonitorDesign.inkFaint)
+                        // ~16 tracked chars beside "USAGE" won't fit the fixed
+                        // 170 pt tile's header; shrink before truncating.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 } else {
                     providerStatusPill(usage, scale: scale, showLabel: false)
                 }
@@ -90,11 +98,14 @@ struct MonitorUsageWidgetView: View {
     }
 
     /// The provider status dot + optional word ("live" / "stale" / "degraded").
+    /// Labelled (M/L header) it reads as a contained status chip; dot-only (S)
+    /// stays bare — a lone dot needs no capsule.
+    @ViewBuilder
     private func providerStatusPill(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale, showLabel: Bool
     ) -> some View {
         let status = Self.providerStatus(usage)
-        return HStack(spacing: 5) {
+        let pill = HStack(spacing: 5) {
             Circle()
                 .fill(status.color)
                 .frame(width: scale.label * 0.55, height: scale.label * 0.55)
@@ -106,12 +117,20 @@ struct MonitorUsageWidgetView: View {
                     .foregroundStyle(MonitorDesign.inkMuted)
             }
         }
+        if showLabel {
+            pill.monitorChip(scale)
+        } else {
+            pill
+        }
     }
 
     private var nowEpoch: Double { context.now.timeIntervalSince1970 }
 
-    // MARK: - Small (2×2)
+    // MARK: - S (170×170 — content ≈ 138×125)
 
+    /// S content budget ≈ 138×125 pt: ring 76 + week meter (~20) + today row
+    /// (~13) + two gaps. Staleness reads via the dimmed quota + the amber status
+    /// dots (header + today row) — a dedicated marker row no longer fits.
     @ViewBuilder
     private func smallBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
@@ -126,7 +145,6 @@ struct MonitorUsageWidgetView: View {
                 Spacer(minLength: 0)
             }
             todayRowCompact(usage, scale: scale)
-            if stale { staleMarker(scale: scale) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -151,18 +169,21 @@ struct MonitorUsageWidgetView: View {
                             .font(MonitorDesign.microFont(size: scale.hero * hubHeroScale * 0.42))
                             .foregroundStyle(MonitorDesign.inkFaint)
                     }
+                    // "100%" is hub-width at the new ring sizes; shrink, not clip.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     Text(verbatim: "5H")
                         .font(MonitorDesign.labelFont(size: scale.label * 0.9))
                         .tracking(MonitorDesign.labelTracking(size: scale.label))
                         .foregroundStyle(MonitorDesign.inkFaint)
                 }
             }
-            .frame(width: min(104, cellSide * 0.52), height: min(104, cellSide * 0.52))
+            // 76 pt is the vertical budget left in the fixed 170 pt S tile once
+            // the week meter and today row take their share.
+            .frame(width: 76, height: 76)
             Spacer(minLength: 0)
         }
     }
-
-    private var cellSide: CGFloat { 150 }
 
     /// Weekly quota micro-meter — used% + tiny days-aware reset, over a thin bar.
     private func weekMicroMeter(
@@ -196,6 +217,8 @@ struct MonitorUsageWidgetView: View {
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             if let tokens {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(verbatim: MonitorFormat.tokens(tokens.input + tokens.output))
@@ -206,6 +229,8 @@ struct MonitorUsageWidgetView: View {
                         .font(MonitorDesign.microFont(size: scale.label * 0.86))
                         .foregroundStyle(MonitorDesign.inkFaint)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             }
             Spacer(minLength: 4)
             let status = Self.providerStatus(usage)
@@ -217,7 +242,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    // MARK: - Medium (4×2)
+    // MARK: - M (364×170 — content ≈ 332×125)
 
     @ViewBuilder
     private func mediumBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
@@ -234,13 +259,15 @@ struct MonitorUsageWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// LEFT COLUMN: 5h ring hero + today $/tokens, provider split, cache strip.
+    /// LEFT COLUMN: 5h ring hero + today $/tokens, provider split, cache row.
+    /// Budget ≈ 159×125 pt: ring 60 + split (~20) + one-line cache (~16) + two
+    /// hairline blocks — the L strip's separate bar/legend rows don't fit here.
     @ViewBuilder
     private func leftColumn(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
         let stale = Self.isLimitsStale(usage)
-        VStack(alignment: .leading, spacing: scale.label * 0.6) {
+        VStack(alignment: .leading, spacing: scale.label * 0.5) {
             HStack(alignment: .center, spacing: 10) {
                 if Self.hasQuota(usage) && Self.quotaVisible(provider) {
                     let pct = usage.fiveHourUsedPercent ?? 0
@@ -255,13 +282,15 @@ struct MonitorUsageWidgetView: View {
                                     .font(MonitorDesign.microFont(size: scale.hero * 0.28))
                                     .foregroundStyle(MonitorDesign.inkFaint)
                             }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             Text(verbatim: "5H")
                                 .font(MonitorDesign.labelFont(size: scale.label * 0.82))
                                 .tracking(MonitorDesign.labelTracking(size: scale.label))
                                 .foregroundStyle(MonitorDesign.inkFaint)
                         }
                     }
-                    .frame(width: 66, height: 66)
+                    .frame(width: 60, height: 60)
                     .opacity(stale ? 0.5 : 1)
                 }
                 todayStack(usage, scale: scale)
@@ -274,7 +303,33 @@ struct MonitorUsageWidgetView: View {
             }
             if let tokens = Self.filteredTokensToday(usage, provider: provider), tokens != .zero {
                 hairline
-                cacheStrip(tokens, scale: scale)
+                cacheRowCompact(tokens, scale: scale)
+            }
+        }
+    }
+
+    /// M-only merged cache read: label · four-segment bar · hit% chip on ONE
+    /// line. The segments stay legible unlabelled at this width; the labelled
+    /// three-row strip remains an L luxury (`cacheStrip`).
+    private func cacheRowCompact(
+        _ tokens: MonitorTokenTotals, scale: MonitorDesign.TypeScale
+    ) -> some View {
+        let segments = Self.cacheSegments(tokens)
+        return HStack(spacing: 8) {
+            Text("CACHE")
+                .font(MonitorDesign.labelFont(size: scale.label))
+                .tracking(MonitorDesign.labelTracking(size: scale.label))
+                .foregroundStyle(MonitorDesign.inkFaint)
+            CacheSegmentBar(segments: segments)
+                .frame(height: max(4, scale.caption * 0.42))
+                .frame(maxWidth: .infinity)
+            if let hit = Self.cacheHitRate(tokens) {
+                (Text(verbatim: "\(Self.wholePercent(hit)) ") + Text("hit"))
+                    .font(MonitorDesign.subFont(size: scale.label))
+                    .monospacedDigit()
+                    .foregroundStyle(MonitorDesign.oklch(0.72, 0.08, 158))
+                    .lineLimit(1)
+                    .monitorChip(scale)
             }
         }
     }
@@ -310,6 +365,8 @@ struct MonitorUsageWidgetView: View {
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .monospacedDigit()
                 .foregroundStyle(muted ? MonitorDesign.inkFaint : MonitorDesign.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 
@@ -361,7 +418,9 @@ struct MonitorUsageWidgetView: View {
         let critical = Self.isETACritical(seconds)
         let accent = critical ? MonitorDesign.signalCoral : MonitorDesign.signalAmber
         return HStack(spacing: 6) {
-            // The mock's teardrop `.burnicon` — a rotated rounded square.
+            // The mock's teardrop `.burnicon` — a rotated rounded square; its
+            // accent (coral when critical) now carries the near-limit escalation
+            // that the old bespoke coral capsule used to.
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(accent)
                 .frame(width: scale.label * 0.55, height: scale.label * 0.55)
@@ -375,18 +434,7 @@ struct MonitorUsageWidgetView: View {
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkPrimary)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(
-            Capsule().fill(critical
-                ? MonitorDesign.oklch(0.3, 0.05, 34, alpha: 0.28)
-                : MonitorDesign.bg2.opacity(0.5))
-        )
-        .overlay(
-            Capsule().strokeBorder(critical
-                ? MonitorDesign.oklch(0.5, 0.11, 40, alpha: 0.75)
-                : MonitorDesign.panelStroke, lineWidth: 1)
-        )
+        .monitorChip(scale)
         .fixedSize()
     }
 
@@ -397,6 +445,8 @@ struct MonitorUsageWidgetView: View {
                     .font(MonitorDesign.labelFont(size: scale.label * 0.9))
                     .tracking(MonitorDesign.labelTracking(size: scale.label))
                     .foregroundStyle(MonitorDesign.inkFaint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer(minLength: 4)
                 if let today = week7.last {
                     // Token count is data (verbatim); "today" reuses the localized
@@ -406,6 +456,8 @@ struct MonitorUsageWidgetView: View {
                         .font(MonitorDesign.captionFont(size: scale.label))
                         .monospacedDigit()
                         .foregroundStyle(MonitorDesign.inkFaint)
+                        .lineLimit(1)
+                        .monitorChip(scale)
                 }
             }
             Week7Bars(values: week7)
@@ -415,7 +467,7 @@ struct MonitorUsageWidgetView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    // MARK: - Large (4×4) — the "ledger-lite" glance panel
+    // MARK: - L (364×376 — content ≈ 332×331) — the "ledger-lite" glance panel
 
     /// L is a taller instrument stack that surfaces the two things M has no room
     /// for: the client burn-rate readouts and the per-model breakdown (both come
@@ -473,6 +525,8 @@ struct MonitorUsageWidgetView: View {
                                 .font(MonitorDesign.microFont(size: scale.hero * 0.3))
                                 .foregroundStyle(MonitorDesign.inkFaint)
                         }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         Text(verbatim: "5H")
                             .font(MonitorDesign.labelFont(size: scale.label * 0.86))
                             .tracking(MonitorDesign.labelTracking(size: scale.label))
@@ -543,6 +597,8 @@ struct MonitorUsageWidgetView: View {
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .monospacedDigit()
                 .foregroundStyle(value == nil ? MonitorDesign.inkFaint : MonitorDesign.inkMuted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 
@@ -639,6 +695,7 @@ struct MonitorUsageWidgetView: View {
                 .font(MonitorDesign.captionFont(size: scale.caption))
                 .foregroundStyle(MonitorDesign.inkMuted)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
             Spacer(minLength: 6)
             Text(verbatim: Self.wholePercent(share))
                 .font(MonitorDesign.captionFont(size: scale.label))
@@ -672,7 +729,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    // MARK: - Cache four-segment strip
+    // MARK: - Cache four-segment strip (L; M uses `cacheRowCompact`)
 
     private func cacheStrip(
         _ tokens: MonitorTokenTotals, scale: MonitorDesign.TypeScale
@@ -691,6 +748,7 @@ struct MonitorUsageWidgetView: View {
                         .font(MonitorDesign.subFont(size: scale.label))
                         .monospacedDigit()
                         .foregroundStyle(MonitorDesign.oklch(0.72, 0.08, 158))
+                        .monitorChip(scale)
                 }
             }
             CacheSegmentBar(segments: segments)
@@ -771,33 +829,31 @@ struct MonitorUsageWidgetView: View {
             .frame(height: MonitorDesign.hairlineWidth)
     }
 
-    private func staleMarker(scale: MonitorDesign.TypeScale) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(MonitorDesign.signalAmber)
-                .frame(width: scale.label * 0.55, height: scale.label * 0.55)
-                .shadow(color: MonitorDesign.signalAmber.opacity(0.6), radius: 2)
-            Text("quota stale")
-                .font(MonitorDesign.labelFont(size: scale.label * 0.94))
-                .tracking(scale.label * 0.06)
-                .foregroundStyle(MonitorDesign.oklch(0.82, 0.06, 60))
-        }
-    }
-
     /// Quiet setup-needed state when `usage == nil` (module off / no source yet).
+    /// A missing folder grant (runtime-synthesized `unauthorized` health) names
+    /// the real fix instead of implying data will arrive on its own.
     private func setupNeeded(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
+        let unauthorized = (context.snapshot.health ?? []).contains {
+            ($0.sourceID == "claude" || $0.sourceID == "codex") && $0.state == "unauthorized"
+        }
         return VStack(alignment: .leading, spacing: scale.label * 0.5) {
             Spacer(minLength: 0)
-            Image(systemName: "gauge.with.dots.needle.bottom.0percent")
+            Image(systemName: unauthorized ? "folder.badge.questionmark" : "gauge.with.dots.needle.bottom.0percent")
                 .font(.system(size: scale.hero * 0.5, weight: .regular))
-                .foregroundStyle(MonitorDesign.inkFaint)
+                .foregroundStyle(unauthorized ? MonitorDesign.signalAmber : MonitorDesign.inkFaint)
             Text("No usage yet")
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .foregroundStyle(MonitorDesign.inkMuted)
-            (context.placement.size == .small
-                 ? Text("Run an agent to track tokens.")
-                 : Text("Session token & cost tracking starts automatically once an agent runs."))
+            Group {
+                if unauthorized {
+                    Text("Authorize the agent folders in Monitor settings.")
+                } else if context.placement.size == .small {
+                    Text("Run an agent to track tokens.")
+                } else {
+                    Text("Session token & cost tracking starts automatically once an agent runs.")
+                }
+            }
                 .font(MonitorDesign.captionFont(size: scale.label))
                 .foregroundStyle(MonitorDesign.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1214,6 +1270,8 @@ private struct QuotaMeter: View {
                         .font(MonitorDesign.captionFont(size: scale.label))
                         .monospacedDigit()
                         .foregroundStyle(MonitorDesign.inkFaint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             GeometryReader { g in
@@ -1489,35 +1547,35 @@ private func noQuotaUsage() -> MonitorUsageSnapshot {
 
 #Preview("Usage S — normal") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .small, usage: normalUsage()))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage S — near-limit") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .small, usage: hotUsage()))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage S — stale") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .small, usage: normalUsage(stale: true)))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage S — no quota") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .small, usage: noQuotaUsage()))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage S — setup needed") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .small, usage: nil))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
@@ -1525,7 +1583,7 @@ private func noQuotaUsage() -> MonitorUsageSnapshot {
 #Preview("Usage M — normal + ETA") {
     MonitorUsageWidgetView(context: usagePreviewContext(
         size: .medium, usage: normalUsage(), history: risingHistory(current: 0.58)))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
@@ -1533,28 +1591,28 @@ private func noQuotaUsage() -> MonitorUsageSnapshot {
 #Preview("Usage M — near-limit") {
     MonitorUsageWidgetView(context: usagePreviewContext(
         size: .medium, usage: hotUsage(), history: risingHistory(current: 0.91)))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage M — stale") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .medium, usage: normalUsage(stale: true)))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage M — no quota") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .medium, usage: noQuotaUsage()))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage M — setup needed") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .medium, usage: nil))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
@@ -1562,7 +1620,7 @@ private func noQuotaUsage() -> MonitorUsageSnapshot {
 #Preview("Usage L — normal + ETA") {
     MonitorUsageWidgetView(context: usagePreviewContext(
         size: .large, usage: normalUsage(), history: risingHistory(current: 0.58)))
-        .frame(width: 364, height: 378)
+        .frame(width: 364, height: 376)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
@@ -1570,21 +1628,21 @@ private func noQuotaUsage() -> MonitorUsageSnapshot {
 #Preview("Usage L — near-limit") {
     MonitorUsageWidgetView(context: usagePreviewContext(
         size: .large, usage: hotUsage(), history: risingHistory(current: 0.91)))
-        .frame(width: 364, height: 378)
+        .frame(width: 364, height: 376)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage L — no quota") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .large, usage: noQuotaUsage()))
-        .frame(width: 364, height: 378)
+        .frame(width: 364, height: 376)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Usage L — stale") {
     MonitorUsageWidgetView(context: usagePreviewContext(size: .large, usage: normalUsage(stale: true)))
-        .frame(width: 364, height: 378)
+        .frame(width: 364, height: 376)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }

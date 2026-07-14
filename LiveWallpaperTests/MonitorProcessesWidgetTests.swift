@@ -43,12 +43,17 @@ struct MonitorProcessesWidgetTests {
 
     // MARK: - cpu% readout
 
-    @Test("cpuText is a whole number with no percent sign, rounded")
+    @Test("cpuText: whole number ≥10, one decimal under 10, clamped at 0.0")
     func cpuTextFormat() {
         #expect(MonitorProcessesWidgetView.cpuText(52) == "52")
         #expect(MonitorProcessesWidgetView.cpuText(23.4) == "23")
         #expect(MonitorProcessesWidgetView.cpuText(23.6) == "24")
-        #expect(MonitorProcessesWidgetView.cpuText(-3) == "0")
+        #expect(MonitorProcessesWidgetView.cpuText(0.44) == "0.4")
+        #expect(MonitorProcessesWidgetView.cpuText(3.24) == "3.2")
+        // Tenths-first rounding: 9.97 → 10.0 tenths → crosses into the
+        // integer branch, so no trailing ".0".
+        #expect(MonitorProcessesWidgetView.cpuText(9.97) == "10")
+        #expect(MonitorProcessesWidgetView.cpuText(-3) == "0.0")
     }
 
     // MARK: - bar normalization
@@ -62,32 +67,23 @@ struct MonitorProcessesWidgetTests {
         #expect(MonitorProcessesWidgetView.barFraction(0, maxCPU: 0) == 0)
     }
 
-    // MARK: - L's height-driven auto row count
+    // MARK: - Physical row capacity at the fixed Apple frames
 
-    @Test("auto row limit fits more rows at L's real (2× M) height, capped at the stepper's 8")
-    func autoLargeRowLimitAtRealHeight() {
-        // L's rendered height on the 14" 1512×982pt board (SPEC runtime contract):
-        // raw 392pt − ~14pt tileInset ≈ 379pt. Far more than 8 rows physically
-        // fit, so this lands on the settings stepper's ceiling.
-        #expect(MonitorProcessesWidgetView.autoLargeRowLimit(cellHeight: 379) == 8)
+    @Test("capacity at the exact Apple frames: M 170pt fits 7 rows, L 376pt fits 19")
+    func rowCapacityAtAppleFrames() {
+        #expect(MonitorProcessesWidgetView.rowCapacity(frameHeight: 170, scaleHeight: 85) == 7)
+        #expect(MonitorProcessesWidgetView.rowCapacity(frameHeight: 376, scaleHeight: 94) == 19)
     }
 
-    @Test("auto row limit is a genuine mid-range fit, not just the floor or the cap")
-    func autoLargeRowLimitMidRange() {
-        #expect(MonitorProcessesWidgetView.autoLargeRowLimit(cellHeight: 190) == 6)
+    @Test("degenerate height yields zero capacity (the view floors displayed rows at 1)")
+    func rowCapacityDegenerate() {
+        #expect(MonitorProcessesWidgetView.rowCapacity(frameHeight: 40, scaleHeight: 85) == 0)
     }
 
-    @Test("auto row limit never drops below M's fixed default of 5")
-    func autoLargeRowLimitFloors() {
-        // A degenerate/tiny height (available space goes negative once chrome
-        // is subtracted) still shows at least as many rows as M's fixed default.
-        #expect(MonitorProcessesWidgetView.autoLargeRowLimit(cellHeight: 40) == 5)
-    }
-
-    @Test("auto row limit grows monotonically with height")
-    func autoLargeRowLimitMonotonic() {
-        let short = MonitorProcessesWidgetView.autoLargeRowLimit(cellHeight: 190)
-        let tall = MonitorProcessesWidgetView.autoLargeRowLimit(cellHeight: 379)
+    @Test("capacity grows monotonically with frame height")
+    func rowCapacityMonotonic() {
+        let short = MonitorProcessesWidgetView.rowCapacity(frameHeight: 190, scaleHeight: 94)
+        let tall = MonitorProcessesWidgetView.rowCapacity(frameHeight: 376, scaleHeight: 94)
         #expect(short <= tall)
     }
 

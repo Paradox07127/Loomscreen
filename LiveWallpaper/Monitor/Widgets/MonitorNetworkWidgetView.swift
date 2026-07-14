@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// Network widget — a 1:1 native replica of the mock's `net_s` / `net_m`
+/// Network widget — ported from the mock's `net_s` / `net_m`
 /// (`.claude/plan/monitor-design/index.html`). A mirrored dual-area scope where
 /// ↓RX (amber) grows up from the midline and ↑TX (steel) grows down on a synced
 /// scale, framed by current rates, peak, session totals, and — on M — the folded
 /// interface / IP / connectivity / errors detail the design source folded in from
-/// the cut L. Pure function of `MonitorWidgetContext`; charts read pre-accumulated
-/// history, never sample.
+/// the cut L. S diverges from the mock's RX-only micro bars after on-device
+/// review: two equal-size rate rows over the same shared-axis mirrored scope
+/// M runs, so both directions read at S too. Pure function of
+/// `MonitorWidgetContext`; charts read pre-accumulated history, never sample.
 ///
 /// The mock marks Net-L `CUT` ("M's shrunk chart already holds the full detail;
 /// no L template needed") — but `MonitorWidgetKind.network.allowedSizes` still
@@ -16,6 +18,17 @@ import SwiftUI
 /// the pre-cut L used to show (mock's dormant `net120` — 120 samples, exactly
 /// `MonitorHistoryStore`'s default capacity), letting the chart grow to fill
 /// whatever height M's shrink step freed up.
+///
+/// Sized against Apple's fixed macOS widget frames (S 170×170, M 364×170,
+/// L 364×376 → content ≈ 125 pt tall on S/M, 331 on L): the scope is the one
+/// flexible row, absorbing whatever the fixed rows leave, and session Σ shares
+/// the bottom row with the errors/drops health line so M's five rows fit the
+/// 125 pt budget.
+///
+/// Small annotations (peak, session Σ, errors/drops, path-condition tags) use
+/// the board-wide `monitorChip` convention CPU established, diverging from the
+/// mock's plain-text originals; peak rides the chart's top-trailing corner
+/// (mirrors CPU M's `peakInlineTag`) instead of sharing a row with session Σ.
 struct MonitorNetworkWidgetView: View {
     let context: MonitorWidgetContext
 
@@ -24,9 +37,11 @@ struct MonitorNetworkWidgetView: View {
     private static let rxColor = MonitorDesign.signalAmber
     private static let txColor = MonitorDesign.signalSteel
 
-    // Mirrored-scope sample windows — M stays the "shrunk" 60s the network-verdict
-    // update chose; L un-shrinks toward the mock's dormant 120-sample `net120`
-    // window (== history capacity, so this is "show everything kept", not new data).
+    // Mirrored-scope sample windows — S narrows to ~30s for its 138 pt width;
+    // M stays the "shrunk" 60s the network-verdict update chose; L un-shrinks
+    // toward the mock's dormant 120-sample `net120` window (== history capacity,
+    // so this is "show everything kept", not new data).
+    private static let smallChartWindowSamples = 30
     private static let mediumChartWindowSamples = 60
     private static let largeChartWindowSamples = 120
 
@@ -36,7 +51,12 @@ struct MonitorNetworkWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cellHeight = geo.size.height
+            // Board convention (see CPU): the type scale derives from the mock's
+            // `cellH = cardHeight / rows`; S/M span one board row and L two, so
+            // dividing by 2·rowSpan yields one near-constant cell height (85/94)
+            // — hence one type scale — across all sizes.
+            let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
+            let cellHeight = geo.size.height / (2 * rowSpan)
             MonitorWidgetContainer(
                 label: "Network",
                 systemImage: headerSymbol,
@@ -106,64 +126,39 @@ struct MonitorNetworkWidgetView: View {
 
     // MARK: - Small (2×2)
 
+    /// S budget (content ≈ 138×125): two equal rate rows ~46 pt + gap; the
+    /// mirrored scope is the flexible row and absorbs the remaining ~70 pt.
     @ViewBuilder
     private func smallBody(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
         VStack(alignment: .leading, spacing: scale.label * 0.5) {
-            Spacer(minLength: 0)
-            dualRate(scale: scale, heroScale: 0.62)
-            microStrip
-                .frame(height: max(10, cellHeight * 0.18))
-                .padding(.top, scale.label * 0.15)
-            Spacer(minLength: 0)
+            dualRate(scale: scale)
+            mirroredScope(scale: scale, windowSamples: Self.smallChartWindowSamples)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-
-    /// The RX 20-sample micro bar strip (mock `.mcols`, amber bars). Each bar
-    /// fills to its share of the window max, anchored to the bottom.
-    @ViewBuilder
-    private var microStrip: some View {
-        let samples = tail(history.netRx, count: 20)
-        let mx = max(samples.max() ?? 0, .ulpOfOne)
-        if samples.count >= 2 {
-            GeometryReader { g in
-                HStack(alignment: .bottom, spacing: 2) {
-                    ForEach(Array(samples.enumerated()), id: \.offset) { _, v in
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(Self.rxColor.opacity(0.85))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: max(1, g.size.height * CGFloat(min(1, v / mx))))
-                    }
-                }
-                .frame(height: g.size.height, alignment: .bottom)
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: - Medium (4×2) / Large (4×4)
 
-    /// M's row order and content, chart pinned to the shrunk fixed height the
-    /// network-verdict update chose (frees vertical room for the folded-in detail).
     @ViewBuilder
     private func mediumBody(cellHeight: CGFloat) -> some View {
-        scopeBody(cellHeight: cellHeight, chartMode: .compact)
+        scopeBody(cellHeight: cellHeight, isLarge: false)
     }
 
-    /// Same rows as M (mock: "no L template needed") but the chart un-shrinks —
-    /// a wider sample window, grown to fill whatever height L's extra cell rows
-    /// free up instead of leaving it blank under a fixed-height chart.
+    /// Same rows as M (mock: "no L template needed") but the scope un-shrinks —
+    /// a wider sample window, grown into the height L's extra board row frees up.
     @ViewBuilder
     private func largeBody(cellHeight: CGFloat) -> some View {
-        scopeBody(cellHeight: cellHeight, chartMode: .expanded)
+        scopeBody(cellHeight: cellHeight, isLarge: true)
     }
 
-    private enum ChartMode: Equatable { case compact, expanded }
-
+    /// M budget (content ≈ 332×125): pair ~13 + detail ~34 + footer ~15 + gaps
+    /// ~16 leaves the scope its ~30 pt minimum plus the slack; only the scope
+    /// flexes, so font-metric drift can never push the fixed rows off the card.
     @ViewBuilder
-    private func scopeBody(cellHeight: CGFloat, chartMode: ChartMode) -> some View {
+    private func scopeBody(cellHeight: CGFloat, isLarge: Bool) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        let rowSpacing = scale.label * (chartMode == .expanded ? 0.75 : 0.55)
+        let rowSpacing = scale.label * (isLarge ? 0.8 : 0.6)
         VStack(alignment: .leading, spacing: rowSpacing) {
             // current pair row
             HStack(alignment: .firstTextBaseline) {
@@ -174,48 +169,44 @@ struct MonitorNetworkWidgetView: View {
                     .monospacedDigit()
                     .foregroundStyle(MonitorDesign.inkPrimary)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
 
-            mirroredScope(cellHeight: cellHeight, chartMode: chartMode)
-
-            // peak + session Σ
-            HStack(alignment: .firstTextBaseline) {
-                peakTag(scale: scale)
-                Spacer(minLength: 6)
-                Text(verbatim: "Σ \(MonitorFormat.bytes(sessionTotalBytes))")
-                    .font(MonitorDesign.captionFont(size: scale.label))
-                    .foregroundStyle(MonitorDesign.inkFaint)
-            }
+            mirroredScope(scale: scale, windowSamples:
+                isLarge ? Self.largeChartWindowSamples : Self.mediumChartWindowSamples)
+                .overlay(alignment: .topTrailing) { peakTag(scale: scale) }
 
             // interface / IP / connectivity detail (folded in from the cut L)
             if activeInterface != nil {
                 interfaceDetail(scale: scale)
             }
 
-            // errors/drops health line — whispered when clean, coral when non-zero
-            if let errN = errorCount {
-                healthCorner(errorCount: errN, scale: scale)
+            // footer: errors/drops health (whispered when clean, coral when
+            // non-zero) + session Σ share one row — peak already rides the
+            // chart corner, so Σ no longer warrants a row of its own.
+            HStack(alignment: .firstTextBaseline) {
+                if let errN = errorCount {
+                    healthCorner(errorCount: errN, scale: scale)
+                }
+                Spacer(minLength: 6)
+                sessionTotalTag(scale: scale)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
-    private func mirroredScope(cellHeight: CGFloat, chartMode: ChartMode) -> some View {
-        let windowSamples = chartMode == .expanded ? Self.largeChartWindowSamples : Self.mediumChartWindowSamples
-        let chart = MirroredAreaChart(
+    private func mirroredScope(scale: MonitorDesign.TypeScale, windowSamples: Int) -> some View {
+        MirroredAreaChart(
             up: tail(history.netRx, count: windowSamples),
             down: tail(history.netTx, count: windowSamples),
             upColor: Self.rxColor,
             downColor: Self.txColor
         )
-        switch chartMode {
-        case .compact:
-            chart.frame(height: max(28, cellHeight * 0.26))
-        case .expanded:
-            chart
-                .frame(minHeight: max(28, cellHeight * 0.26))
-                .frame(maxHeight: .infinity)
-        }
+        .frame(minHeight: scale.caption * 3)
+        .frame(maxHeight: .infinity)
     }
 
     private func currentPairLabel(scale: MonitorDesign.TypeScale) -> some View {
@@ -229,6 +220,7 @@ struct MonitorNetworkWidgetView: View {
         .tracking(MonitorDesign.labelTracking(size: scale.label))
     }
 
+    /// Pinned to the chart's top-trailing corner (mirrors CPU M's `peakInlineTag`).
     private func peakTag(scale: MonitorDesign.TypeScale) -> some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 1, style: .continuous)
@@ -242,6 +234,16 @@ struct MonitorNetworkWidgetView: View {
                 .foregroundStyle(MonitorDesign.inkMuted)
         }
         .font(MonitorDesign.labelFont(size: scale.label))
+        .monitorChip(scale)
+        .padding(scale.label * 0.3)
+    }
+
+    /// Session-total Σ, chip-wrapped like every other small board annotation.
+    private func sessionTotalTag(scale: MonitorDesign.TypeScale) -> some View {
+        Text(verbatim: "Σ \(MonitorFormat.bytes(sessionTotalBytes))")
+            .font(MonitorDesign.captionFont(size: scale.label))
+            .foregroundStyle(MonitorDesign.inkFaint)
+            .monitorChip(scale)
     }
 
     @ViewBuilder
@@ -278,27 +280,30 @@ struct MonitorNetworkWidgetView: View {
                     .font(MonitorDesign.subFont(size: scale.caption))
                     .monospacedDigit()
                     .foregroundStyle(MonitorDesign.inkPrimary)
-                    .lineLimit(1)
                     .truncationMode(.tail)
                 ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
                     warnChip(chip, scale: scale)
                 }
             }
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     }
 
+    /// Semantic (warn-coral) chip — keeps its own color, but the capsule shape
+    /// and padding now match the board-wide `monitorChip` proportions.
     private func warnChip(_ text: String, scale: MonitorDesign.TypeScale) -> some View {
         Text(verbatim: text.uppercased())
             .font(MonitorDesign.labelFont(size: scale.label * 0.92))
             .tracking(scale.label * 0.10)
             .foregroundStyle(MonitorDesign.oklch(0.9, 0.03, 44))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, scale.label * 0.5)
+            .padding(.vertical, scale.label * 0.24)
             .background(
-                Capsule().fill(MonitorDesign.oklch(0.3, 0.05, 44, alpha: 0.28))
+                Capsule(style: .continuous).fill(MonitorDesign.oklch(0.3, 0.05, 44, alpha: 0.28))
             )
             .overlay(
-                Capsule().strokeBorder(MonitorDesign.oklch(0.5, 0.11, 40, alpha: 0.75), lineWidth: 1)
+                Capsule(style: .continuous).strokeBorder(MonitorDesign.oklch(0.5, 0.11, 40, alpha: 0.75), lineWidth: 1)
             )
     }
 
@@ -323,20 +328,26 @@ struct MonitorNetworkWidgetView: View {
         .font(MonitorDesign.labelFont(size: scale.label * 0.98))
         .tracking(scale.label * 0.04)
         .foregroundStyle(clean ? MonitorDesign.inkFaint : MonitorDesign.oklch(0.86, 0.06, 40))
+        .monitorChip(scale)
     }
 
     // MARK: - Shared rate readout
 
-    private func dualRate(scale: MonitorDesign.TypeScale, heroScale: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: scale.label * 0.35) {
+    /// Equal-size rows — direction is carried by the ↓/↑ arrow + hue, not size
+    /// (on-device review: the old hero/sub split made ↑TX read as an afterthought).
+    private func dualRate(scale: MonitorDesign.TypeScale) -> some View {
+        // Slightly above sub so the pair stays THE S numeric read over the scope;
+        // both rows fit 138 pt at this size with the 0.7 scale-factor floor spare.
+        let size = scale.sub * 1.12
+        return VStack(alignment: .leading, spacing: scale.label * 0.35) {
             rateRow(label: "↓", labelColor: Self.rxColor,
                     text: MonitorFormat.rate(rxRate),
-                    font: MonitorDesign.heroFont(size: scale.hero * heroScale),
-                    unitSize: scale.hero * heroScale * 0.4)
+                    font: MonitorDesign.subFont(size: size),
+                    unitSize: size * 0.62)
             rateRow(label: "↑", labelColor: Self.txColor,
                     text: MonitorFormat.rate(txRate),
-                    font: MonitorDesign.subFont(size: scale.sub),
-                    unitSize: scale.sub * 0.62)
+                    font: MonitorDesign.subFont(size: size),
+                    unitSize: size * 0.62)
         }
     }
 
@@ -361,6 +372,8 @@ struct MonitorNetworkWidgetView: View {
                 }
             }
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     }
 
     // MARK: - Derived data
@@ -482,9 +495,14 @@ private func networkPreviewContext(size: MonitorWidgetSize) -> MonitorWidgetCont
 
     var history = MonitorHistorySnapshot()
     // 120 samples (history capacity) so the L preview's un-shrunk window has
-    // real variance to show, not just the 60s tail M already uses.
-    let rx: [Double] = (0..<120).map { 1_048_576 * (2 + 5 * abs(sin(Double($0) / 7))) }
-    let tx: [Double] = (0..<120).map { 1_048_576 * (0.2 + 0.7 * abs(cos(Double($0) / 9))) }
+    // real variance to show, not just the 60s tail M already uses. Explicit
+    // closure types keep this under the type-check time budget.
+    let rx: [Double] = (0..<120).map { (i: Int) -> Double in
+        1_048_576.0 * (2.0 + 5.0 * abs(sin(Double(i) / 7.0)))
+    }
+    let tx: [Double] = (0..<120).map { (i: Int) -> Double in
+        1_048_576.0 * (0.2 + 0.7 * abs(cos(Double(i) / 9.0)))
+    }
     history.netRx = rx
     history.netTx = tx
     history.netRxPeak = 88 * 1_048_576
@@ -503,25 +521,26 @@ private func networkPreviewContext(size: MonitorWidgetSize) -> MonitorWidgetCont
     )
 }
 
+// Preview frames are Apple's exact visible widget tiles (S 170×170, M 364×170,
+// L 364×376) — what `MonitorBoardGeometry.renderRect` hands this view.
+
 #Preview("Network S") {
     MonitorNetworkWidgetView(context: networkPreviewContext(size: .small))
-        .frame(width: 150, height: 150)
+        .frame(width: 170, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Network M") {
     MonitorNetworkWidgetView(context: networkPreviewContext(size: .medium))
-        .frame(width: 320, height: 150)
+        .frame(width: 364, height: 170)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }
 
 #Preview("Network L") {
-    // L's board footprint is the same width as M but ~2× the height (2×2 vs
-    // 2×1 cells) — the case that used to leave dead space under M's shrunk chart.
     MonitorNetworkWidgetView(context: networkPreviewContext(size: .large))
-        .frame(width: 320, height: 300)
+        .frame(width: 364, height: 376)
         .padding(32)
         .background(MonitorDesign.boardWash)
 }

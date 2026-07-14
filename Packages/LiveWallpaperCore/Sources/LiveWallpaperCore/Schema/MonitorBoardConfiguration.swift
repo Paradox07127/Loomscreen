@@ -12,9 +12,7 @@ public enum MonitorWidgetKind: String, Codable, Sendable, CaseIterable, Identifi
     case network
     case disk
     case power
-    case clock
     case processes
-    case health
     case usage
     case fleet
     case aiEngine
@@ -30,8 +28,9 @@ public enum MonitorWidgetKind: String, Codable, Sendable, CaseIterable, Identifi
         }
     }
 
-    /// Grid footprint in cells (10-column basis; cells are square, so S=1×1 and
-    /// L=2×2 render as exact squares, M=2×1 as an exact 2:1, at any board aspect).
+    /// Grid footprint in cells. The renderer's cell pitch reproduces Apple's
+    /// official macOS widget frames: S(1×1)=170×170, M(2×1)=364×170,
+    /// L(2×2)=364×376 pt.
     public func cellSize(for size: MonitorWidgetSize) -> (columns: Int, rows: Int) {
         switch size {
         case .small: return (1, 1)
@@ -45,7 +44,7 @@ public enum MonitorWidgetKind: String, Codable, Sendable, CaseIterable, Identifi
     public var allowedSizes: [MonitorWidgetSize] {
         switch self {
         case .processes, .fleet: return [.medium, .large]
-        case .power, .clock, .health: return [.small, .medium]
+        case .power: return [.small, .medium]
         default: return [.small, .medium, .large]
         }
     }
@@ -256,8 +255,7 @@ extension MonitorBoardConfiguration {
         return try? container.decode(MonitorBoardConfiguration.self, forKey: key)
     }
 
-    /// Three mediums (2 cols each) occupy the bottom row's left 6 of 10
-    /// columns, left-anchored.
+    /// Three mediums packed left-anchored on the bottom row.
     static let defaultSystemKinds: [(MonitorWidgetKind, MonitorWidgetSize)] = [
         (.cpu, .medium), (.memory, .medium), (.gpu, .medium),
     ]
@@ -266,21 +264,26 @@ extension MonitorBoardConfiguration {
         packedPlacements(for: defaultSystemKinds)
     }
 
-    /// Packs widgets into bottom-anchored rows (left→right, bottom→up) on a
-    /// 10-column grid, assuming a 16:10 reference board; the renderer's clamp
-    /// + magnetic snap absorb other aspect ratios. Positions are cell-exact —
-    /// visual gutters between tiles are the renderer's job (per-tile inset),
-    /// so a full 10-column row ends exactly at x=1.
+    /// Cell pitch of the renderer's Apple-frame grid (points), duplicated here
+    /// so the schema layer can pack defaults without importing the renderer:
+    /// pitch 194×206 − insets (12,18)×2 = Apple's S 170×170 / M 364×170 /
+    /// L 364×376 frames.
+    static let referenceCellPitch = (width: 194.0, height: 206.0)
+    /// Reference display for normalizing default placements (14″ MacBook Pro
+    /// looks-like resolution). Other displays reflow/clamp on first render.
+    static let referenceBoard = (width: 1512.0, height: 982.0)
+
+    /// Packs widgets into bottom-anchored rows (left→right, bottom→up) using
+    /// the fixed Apple cell pitch against the reference board; the renderer's
+    /// clamp + overlap resolution absorb other display sizes. Positions are
+    /// cell-exact — visual gutters between tiles are the renderer's job
+    /// (per-tile inset).
     public static func packedPlacements(
         for kinds: [(MonitorWidgetKind, MonitorWidgetSize)]
     ) -> [MonitorWidgetPlacement] {
-        let columns = Self.defaultGridColumns
-        let referenceAspect = 16.0 / 10.0
-        let cellW = 1.0 / Double(columns)
-        // Cells are square: the renderer sets cellHeight = cellWidth, so a cell's
-        // normalized height on the 16:10 reference board is aspect/columns
-        // (cellH_px = aspect/columns × H = 1/columns × W = cellW_px).
-        let cellH = referenceAspect / Double(columns)
+        let columns = max(Int(referenceBoard.width / referenceCellPitch.width), 1)
+        let cellW = referenceCellPitch.width / referenceBoard.width
+        let cellH = referenceCellPitch.height / referenceBoard.height
         let bottomMargin = 0.02
 
         var placements: [MonitorWidgetPlacement] = []

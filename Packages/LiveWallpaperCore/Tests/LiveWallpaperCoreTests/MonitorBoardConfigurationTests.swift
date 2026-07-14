@@ -60,7 +60,8 @@ struct MonitorBoardConfigurationTests {
 
     @Test("Bool option value survives round-trip as bool, not number")
     func boolOptionSurvivesAsBool() throws {
-        let placement = MonitorWidgetPlacement(kind: .clock, options: ["24h": .bool(true)])
+        // Any kind works — this exercises bool-option round-tripping, not the kind.
+        let placement = MonitorWidgetPlacement(kind: .cpu, options: ["showTrend": .bool(true)])
         var config = MonitorBoardConfiguration()
         config.widgets = [placement]
 
@@ -71,13 +72,13 @@ struct MonitorBoardConfigurationTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let widgets = try #require(object["widgets"] as? [[String: Any]])
         let options = try #require(widgets.first?["options"] as? [String: Any])
-        let rawValue = try #require(options["24h"])
+        let rawValue = try #require(options["showTrend"])
         #expect(rawValue as? Bool == true)
 
         let decoded = try JSONDecoder().decode(MonitorBoardConfiguration.self, from: data)
-        #expect(decoded.widgets.first?.options["24h"] == .bool(true))
-        #expect(decoded.widgets.first?.options["24h"]?.boolValue == true)
-        #expect(decoded.widgets.first?.options["24h"]?.numberValue == nil)
+        #expect(decoded.widgets.first?.options["showTrend"] == .bool(true))
+        #expect(decoded.widgets.first?.options["showTrend"]?.boolValue == true)
+        #expect(decoded.widgets.first?.options["showTrend"]?.numberValue == nil)
     }
 
     // MARK: - Lossy placement decode
@@ -145,7 +146,7 @@ struct MonitorBoardConfigurationTests {
     @Test("allowedSizes matrix matches the design mock's per-kind META, minus xl")
     func allowedSizesMatrix() {
         let mediumLarge: Set<MonitorWidgetKind> = [.processes, .fleet]
-        let smallMedium: Set<MonitorWidgetKind> = [.power, .clock, .health]
+        let smallMedium: Set<MonitorWidgetKind> = [.power]
         for kind in MonitorWidgetKind.allCases {
             if mediumLarge.contains(kind) {
                 #expect(kind.allowedSizes == [.medium, .large], "\(kind)")
@@ -363,43 +364,34 @@ struct MonitorBoardConfigurationTests {
         }
     }
 
-    @Test("A row wraps to a new row once column width would exceed 10")
+    @Test("A full row wraps: within a row y is shared and x runs left→right")
     func packedPlacementsWrapRows() {
-        // 5 mediums (2 cols each) fill exactly 10 columns; a 6th widget
-        // must overflow onto a second row rather than sharing row one.
-        let kinds: [(MonitorWidgetKind, MonitorWidgetSize)] = [
-            (.cpu, .medium), (.memory, .medium), (.gpu, .medium), (.network, .medium), (.disk, .medium),
-            (.power, .small),
-        ]
+        // 7 mediums (14 cols) exceed the reference board's column count on any
+        // plausible pitch, so at least one wrap is guaranteed without hardcoding
+        // the column count (now derived from the Apple cell pitch, not a fixed 10).
+        let kinds = Array(repeating: (MonitorWidgetKind.cpu, MonitorWidgetSize.medium), count: 7)
         let placements = MonitorBoardConfiguration.packedPlacements(for: kinds)
-        let rowOneY = placements[0].y
-        for placement in placements[1..<5] {
-            #expect(placement.y == rowOneY)
-        }
-        #expect(placements[5].y != rowOneY)
+        let distinctRows = Set(placements.map { ($0.y * 1000).rounded() })
+        #expect(distinctRows.count >= 2, "expected the row to wrap")
+        // Row one (widgets sharing the first placement's y) runs left→right from x=0.
+        let rowOne = placements.filter { $0.y == placements[0].y }
+        let xs = rowOne.map(\.x)
+        #expect(xs == xs.sorted())
+        #expect(xs.first == 0)
     }
 
     @Test("Later (wrapped) rows sit above earlier rows: smaller y")
     func packedPlacementsLaterRowsHaveSmallerY() {
-        // The 3-medium default board fits on a single row now, so this test
-        // needs an explicit list that actually wraps.
-        let kinds: [(MonitorWidgetKind, MonitorWidgetSize)] = [
-            (.cpu, .medium), (.memory, .medium), (.gpu, .medium), (.network, .medium), (.disk, .medium),
-            (.power, .small),
-        ]
+        let kinds = Array(repeating: (MonitorWidgetKind.cpu, MonitorWidgetSize.medium), count: 7)
         let placements = MonitorBoardConfiguration.packedPlacements(for: kinds)
-        let rowOneY = placements[0].y
-        let rowTwoY = placements[5].y
-        #expect(rowTwoY < rowOneY)
+        #expect(placements.last!.y < placements.first!.y)
     }
 
-    @Test("Exactly 10 columns worth of same-row widgets pack onto a single row")
+    @Test("Widgets that fit within one row all share it")
     func packedPlacementsExactFitStaysOnOneRow() {
-        let kinds: [(MonitorWidgetKind, MonitorWidgetSize)] = [
-            (.cpu, .medium), (.memory, .medium), (.gpu, .medium), (.network, .medium), (.disk, .medium),
-        ]
-        let placements = MonitorBoardConfiguration.packedPlacements(for: kinds)
-        #expect(Set(placements.map(\.y)).count == 1)
+        // The 3-medium default (6 cols) fits within the reference board's row.
+        let placements = MonitorBoardConfiguration.defaultSystemPlacements()
+        #expect(Set(placements.map { ($0.y * 1000).rounded() }).count == 1)
     }
 
     @Test("Empty kind list packs to no placements")

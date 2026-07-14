@@ -75,6 +75,24 @@
 	<array>
 		<string>AppleSMCClient</string>
 	</array>
+	<!--
+	    Read-only access to other processes' pid list + task info for the Monitor
+	    "Top by CPU" / Processes instruments (proc_listallpids / proc_pidinfo /
+	    proc_name). Under the plain App Sandbox those return nothing — the
+	    `process-info-*` sandbox operations are denied (proc_listallpids yields 0).
+	    This temporary SBPL exception whitelists just the READ operations
+	    (listpids/pidinfo, plus rusage for the Disk widget's per-app I/O rates) so
+	    the per-process CPU/memory/disk walk works in-process WITHOUT dropping the
+	    sandbox or a helper. Developer ID / direct distribution only (not accepted
+	    for the Mac App Store). No control operations (setcontrol/dirtycontrol) are
+	    granted.
+	-->
+	<key>com.apple.security.temporary-exception.sbpl</key>
+	<array>
+		<string>(allow process-info-listpids)</string>
+		<string>(allow process-info-pidinfo)</string>
+		<string>(allow process-info-rusage)</string>
+	</array>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>

@@ -1,5 +1,10 @@
 import Foundation
 import LiveWallpaperCore
+import os
+
+/// 🛰️-prefixed why-no-data diagnostics for the AI source pipeline; isolate
+/// on-device with `log stream --predicate 'eventMessage CONTAINS "🛰️"'`.
+let monitorSourcesLog = os.Logger(subsystem: "com.livewallpaper", category: "MonitorSources")
 
 struct MonitorRuntimeOptions: Sendable, Equatable {
     var system = true
@@ -14,6 +19,10 @@ struct MonitorRuntimeOptions: Sendable, Equatable {
     /// (GPU / top processes / ANE / accessories) only runs when a matching widget
     /// is actually placed. Unioned across leases like every other option.
     var activeWidgetKinds: Set<MonitorWidgetKind>?
+    /// GPU sampling period in seconds, from the GPU widget's `gpuSampleSeconds`
+    /// option. nil ⇒ the default cadence (~6s). Merged across leases by MIN so
+    /// the fastest request wins.
+    var gpuSampleSeconds: Double?
 }
 
 /// Account-level usage-ledger fragment a source can optionally expose (per-model +
@@ -120,20 +129,35 @@ actor MonitorRuntime {
             if let kinds = entry.activeWidgetKinds {
                 merged.activeWidgetKinds = (merged.activeWidgetKinds ?? []).union(kinds)
             }
+            // Fastest requested GPU sampling period wins across screens.
+            if let seconds = entry.gpuSampleSeconds {
+                merged.gpuSampleSeconds = min(merged.gpuSampleSeconds ?? seconds, seconds)
+            }
         }
         return merged
+    }
+
+    /// GPU cadence (in 2s base ticks) for a requested sampling period; nil keeps
+    /// the source's default (~6s).
+    static func gpuCadence(forSeconds seconds: Double?) -> Int? {
+        guard let seconds, seconds.isFinite, seconds > 0 else { return nil }
+        return max(1, Int((seconds / 2.0).rounded()))
     }
 
     /// Map the union of placed widget kinds to the system source's per-concern
     /// demand gates. Each expensive walk runs only when its widget is on the board.
     static func systemOptions(for kinds: Set<MonitorWidgetKind>) -> SystemMetricsSource.Options {
         SystemMetricsSource.Options(
+            // CPU (L "Top by CPU" list) and Memory (L "Top by memory" list) both
+            // show a process attribution, so either — not just the Processes
+            // widget — demands the top-process walk.
             gpu: kinds.contains(.gpu),
-            topProcesses: kinds.contains(.processes),
+            topProcesses: kinds.contains(.processes) || kinds.contains(.cpu) || kinds.contains(.memory),
             ane: kinds.contains(.aiEngine),
             accessories: kinds.contains(.power),
-            sensors: kinds.contains(.cpu) || kinds.contains(.gpu)
-                || kinds.contains(.health) || kinds.contains(.power)
+            sensors: kinds.contains(.cpu) || kinds.contains(.gpu) || kinds.contains(.power),
+            // The Disk widget's L "top by I/O" list rides the same walk.
+            processIO: kinds.contains(.disk)
         )
     }
 
@@ -163,20 +187,40 @@ actor MonitorRuntime {
         self.hub = hub
 
         var resolved = target
-        if target.agents {
+        if target.agents || target.usage {
             let roots = await MainActor.run {
                 (MonitorSourceAuthorization.shared.resolveClaudeRoot(),
                  MonitorSourceAuthorization.shared.resolveCodexRoot())
             }
             resolved.claudeRoot = resolved.claudeRoot ?? roots.0
             resolved.codexRoot = resolved.codexRoot ?? roots.1
+            // Why-no-data: when an AI module is wanted but a root can't resolve
+            // (no grant / stale bookmark), say so — both in the log and as a
+            // synthesized health record the widgets' empty states can read.
+            if resolved.claudeRoot == nil {
+                monitorSourcesLog.warning("🛰️ claude root unresolved (no grant?) — agent/usage sources disabled")
+                await hub.updateHealth(MonitorSourceHealth(
+                    sourceID: "claude", state: "unauthorized",
+                    detail: "folder not granted", lastUpdateAt: Date().timeIntervalSince1970
+                ))
+            }
+            if resolved.codexRoot == nil {
+                monitorSourcesLog.warning("🛰️ codex root unresolved (no grant?) — agent/usage sources disabled")
+                await hub.updateHealth(MonitorSourceHealth(
+                    sourceID: "codex", state: "unauthorized",
+                    detail: "folder not granted", lastUpdateAt: Date().timeIntervalSince1970
+                ))
+            }
         }
 
         var built: [any MonitorDataSource] = []
         if resolved.system {
             if let kinds = resolved.activeWidgetKinds {
                 // Demand-gated: only build the samplers the placed widgets need.
-                built.append(SystemMetricsSource(options: Self.systemOptions(for: kinds)))
+                built.append(SystemMetricsSource(
+                    options: Self.systemOptions(for: kinds),
+                    gpuSampleCadence: Self.gpuCadence(forSeconds: resolved.gpuSampleSeconds) ?? 3
+                ))
             } else {
                 // v1 path: default demand gates (GPU + accessories on, ANE off),
                 // top processes driven by the legacy module toggle.
@@ -192,6 +236,7 @@ actor MonitorRuntime {
         for source in built {
             await source.start(sink: hub)
         }
+        monitorSourcesLog.info("🛰️ pipeline: agents=\(resolved.agents) usage=\(resolved.usage) claudeRoot=\(resolved.claudeRoot != nil) codexRoot=\(resolved.codexRoot != nil) sources=\(built.map(\.sourceID).joined(separator: ","), privacy: .public)")
 
         if resolved.usage {
             let providers: [(id: String, provider: any MonitorUsageProviding)] = built.compactMap { source in
@@ -206,6 +251,9 @@ actor MonitorRuntime {
             // teed into the (read-only) claude root by the user's capture script;
             // nil when no root is granted or the user hasn't installed it.
             let limitsReader: ClaudeRateLimitReader? = resolved.claudeRoot.map { ClaudeRateLimitReader(rootURL: $0) }
+            if providers.isEmpty && limitsReader == nil {
+                monitorSourcesLog.warning("🛰️ usage task skipped: no providers, no limits reader")
+            }
             if !providers.isEmpty || limitsReader != nil {
                 usageTask = Task { [hub] in
                     while !Task.isCancelled {

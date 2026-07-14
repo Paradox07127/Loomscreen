@@ -15,22 +15,25 @@ struct MonitorRuntimeV2PlumbingTests {
 
     @Test("Each widget kind flips exactly its sampler gate")
     func kindMapsToItsGate() {
-        // cpu/gpu/health/power all light the SMC sensor read (each shows a
-        // temperature readout); .gpu/.power also flip their own gated walk.
+        // cpu/gpu/power all light the SMC sensor read (each shows a
+        // temperature readout); .gpu/.power also flip their own gated walk; .cpu
+        // additionally demands top-processes for its L "Top by CPU" list.
         #expect(MonitorRuntime.systemOptions(for: [.gpu]) == options(gpu: true, sensors: true))
-        #expect(MonitorRuntime.systemOptions(for: [.cpu]) == options(sensors: true))
-        #expect(MonitorRuntime.systemOptions(for: [.health]) == options(sensors: true))
+        #expect(MonitorRuntime.systemOptions(for: [.cpu]) == options(topProcesses: true, sensors: true))
         #expect(MonitorRuntime.systemOptions(for: [.processes]) == options(topProcesses: true))
+        // Memory's L "Top by memory" list rides the same top-process walk.
+        #expect(MonitorRuntime.systemOptions(for: [.memory]) == options(topProcesses: true))
+        #expect(MonitorRuntime.systemOptions(for: [.disk]) == options(processIO: true))
         #expect(MonitorRuntime.systemOptions(for: [.aiEngine]) == options(ane: true))
         #expect(MonitorRuntime.systemOptions(for: [.power]) == options(accessories: true, sensors: true))
     }
 
     @Test("A kind with no expensive sampler leaves every gate off")
     func inertKindKeepsAllGatesOff() {
-        // clock/memory need no gated walk → all flags stay false (cpu/gpu differ:
-        // they light the SMC sensor gate), unlike the pre-v2 default which leaves
-        // GPU + accessories on.
-        #expect(MonitorRuntime.systemOptions(for: [.clock]) == SystemMetricsSource.Options(
+        // network needs no gated walk → all flags stay false (cpu/gpu differ:
+        // they light the SMC sensor gate, and cpu/memory also top-processes),
+        // unlike the pre-v2 default which leaves GPU + accessories on.
+        #expect(MonitorRuntime.systemOptions(for: [.network]) == SystemMetricsSource.Options(
             gpu: false, topProcesses: false, ane: false, accessories: false
         ))
     }
@@ -50,7 +53,7 @@ struct MonitorRuntimeV2PlumbingTests {
         let opts = MonitorRuntime.systemOptions(for: [.gpu, .power, .cpu])
         #expect(opts.gpu == true)
         #expect(opts.accessories == true)
-        #expect(opts.topProcesses == false)   // no .processes widget
+        #expect(opts.topProcesses == true)     // .cpu wants the Top-by-CPU list
         #expect(opts.ane == false)             // no .aiEngine widget
         #expect(opts.sensors == true)          // cpu + gpu both want the SMC row
     }
@@ -59,8 +62,15 @@ struct MonitorRuntimeV2PlumbingTests {
     func allKindsAllGates() {
         let opts = MonitorRuntime.systemOptions(for: Set(MonitorWidgetKind.allCases))
         #expect(opts == SystemMetricsSource.Options(
-            gpu: true, topProcesses: true, ane: true, accessories: true, sensors: true
+            gpu: true, topProcesses: true, ane: true, accessories: true, sensors: true,
+            processIO: true
         ))
+    }
+
+    @Test("The Disk widget demands the per-app I/O walk; others leave it off")
+    func diskKindFlipsProcessIO() {
+        #expect(MonitorRuntime.systemOptions(for: [.disk]).processIO == true)
+        #expect(MonitorRuntime.systemOptions(for: [.cpu, .processes]).processIO == false)
     }
 
     // MARK: - Demand-gated sampling: multi-lease union of activeWidgetKinds
@@ -76,7 +86,7 @@ struct MonitorRuntimeV2PlumbingTests {
         #expect(merged?.activeWidgetKinds == [.gpu, .cpu, .power])
         // …and that union drives the combined gates.
         #expect(MonitorRuntime.systemOptions(for: merged?.activeWidgetKinds ?? []) == SystemMetricsSource.Options(
-            gpu: true, topProcesses: false, ane: false, accessories: true, sensors: true
+            gpu: true, topProcesses: true, ane: false, accessories: true, sensors: true
         ))
     }
 
@@ -242,10 +252,11 @@ struct MonitorRuntimeV2PlumbingTests {
 
     private func options(
         gpu: Bool = false, topProcesses: Bool = false, ane: Bool = false,
-        accessories: Bool = false, sensors: Bool = false
+        accessories: Bool = false, sensors: Bool = false, processIO: Bool = false
     ) -> SystemMetricsSource.Options {
         SystemMetricsSource.Options(
-            gpu: gpu, topProcesses: topProcesses, ane: ane, accessories: accessories, sensors: sensors
+            gpu: gpu, topProcesses: topProcesses, ane: ane, accessories: accessories,
+            sensors: sensors, processIO: processIO
         )
     }
 

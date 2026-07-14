@@ -7,14 +7,19 @@ import LiveWallpaperCore
 /// **谁等我 / 谁在空转烧钱 / 谁在产出** — who is waiting on me, who is idling and
 /// burning budget, who is producing.
 ///
-/// Two live footprints (`allowedSizes == [.medium, .large]`):
-///   • **M** (2×1, ≈378×196) — mock `fleet_m`: Action Strip + up to 3 non-idle
-///     lanes side by side (dot·name·tool·timer·track + warning/context inline).
-///   • **L** (2×2, ≈378×392) — mock `fleet_l`, densified with the `fleet_xl` rail's
-///     extra readouts: Action Strip + up to 6 sorted rows stacked vertically, each
-///     carrying tokens/$ · context-pressure bar · warning chip · recent-tool
-///     sequence (names only). needsInput widens+brightens (coral edge + ask +
-///     wait duration); idle/ended collapse to a calm subset.
+/// Two live footprints (`allowedSizes == [.medium, .large]`), sized to Apple's
+/// fixed macOS widget frames (M 364×170, L 364×376 pt; content ≈ 332×125 /
+/// 332×331 after the container's insets + header):
+///   • **M** — a roster: Action Strip + up to 3 single-line rows (dot · provider
+///     · name · ask/tool/budget · warn/ctx glyphs · timer). The mock `fleet_m`
+///     three-abreast lanes don't fit 332 pt (~100 pt per lane), so M trades the
+///     per-lane tick track for one legible line per session.
+///   • **L** — mock `fleet_l`: Action Strip + up to 6 two-tier rows (header +
+///     one utility line: ask for needsInput; tool chip · model⑂branch · budget ·
+///     warn · ctx for running). Only the lead row carries the tick track — six
+///     tracked rows would need ~360 pt where the fixed frame gives ~304.
+///     needsInput brightens (coral edge + ask + wait duration); idle collapses
+///     to header only, ended to header + final budget.
 /// S is retained as a defensive `fleet_s` port but is not in `allowedSizes`.
 ///
 /// Privacy invariant (SPEC §3.4): only names / counts / times / tool-NAMES that
@@ -47,9 +52,9 @@ struct MonitorFleetWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // The type scale is cell-derived. M is one board row tall, L is two;
-            // dividing by the mock's row span (2 / 4) keeps M and L text at the
-            // same density instead of doubling L's sizes.
+            // The type scale is cell-derived. Under the Apple frames the divisor
+            // maps M 170→85 and L 376→94, keeping M and L text at near-equal
+            // density instead of doubling L's sizes.
             let rowSpan: CGFloat = context.placement.size == .large ? 4 : 2
             let cellHeight = geo.size.height / rowSpan
             content(cellHeight: cellHeight, now: context.now.timeIntervalSince1970)
@@ -112,13 +117,15 @@ struct MonitorFleetWidgetView: View {
         }
     }
 
-    // MARK: - M (2×1) — Action Strip + up to 3 non-idle lanes
+    // MARK: - M (364×170) — Action Strip + up to 3 single-line rows
 
     @ViewBuilder
     private func mediumBody(cellHeight: CGFloat, now: Double) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        // The mock shows the top non-idle rows; a "+N more" whisper accounts for
-        // everything the strip leaves off (idle rows + any overflow).
+        // ~125 pt of content: strip ≈22 + three ≈21 pt line rows + gaps + the
+        // "+N more" whisper ≈ 112. A 4th row would clip the whisper, so 3 is the
+        // no-clip ceiling (`fleetMaxRows` clamps to it). Idle rows and any
+        // overflow fold into the whisper.
         let cap = Self.rowCap(options, fallback: 3)
         let rows = Self.mediumRows(ordered, cap: cap)
         let hiddenCount = visibleSessions.count - rows.count
@@ -131,16 +138,14 @@ struct MonitorFleetWidgetView: View {
             if !rows.isEmpty {
                 VStack(alignment: .leading, spacing: scale.label * 0.45) {
                     actionStrip(scale: scale, now: now)
-                    HStack(alignment: .top, spacing: scale.label * 0.45) {
-                        ForEach(rows) { session in
-                            FleetCompactRow(session: session, now: now,
-                                            reduceMotion: reduceMotion, scale: scale)
-                        }
+                    ForEach(rows) { session in
+                        FleetLineRow(session: session, now: now,
+                                     reduceMotion: reduceMotion, scale: scale)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if hiddenCount > 0 {
                         moreWhisper(hiddenCount, scale: scale)
                     }
+                    Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if !visibleSessions.isEmpty {
@@ -158,11 +163,14 @@ struct MonitorFleetWidgetView: View {
         }
     }
 
-    // MARK: - L (2×2) — Action Strip + up to 6 stacked rows (fleet_l + xl density)
+    // MARK: - L (364×376) — Action Strip + up to 6 two-tier rows (fleet_l)
 
     @ViewBuilder
     private func largeBody(cellHeight: CGFloat, now: Double) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
+        // ~331 pt of content, ~304 for rows after the strip: worst case (all six
+        // rows live) is lead ≈57 + 5×≈41 + gaps ≈ 282, leaving whisper room —
+        // 6 stays the no-clip ceiling because rows are capped at two tiers.
         let cap = Self.rowCap(options, fallback: 6)
         let rows = Self.largeRows(ordered, cap: cap)
         let hiddenCount = visibleSessions.count - rows.count
@@ -177,8 +185,8 @@ struct MonitorFleetWidgetView: View {
                     actionStrip(scale: scale, now: now)
                     VStack(alignment: .leading, spacing: scale.label * 0.4) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, session in
-                            // The lead row gets the full rail treatment (recent-tool
-                            // sequence); deeper rows stay lean so up to 6 rows fit 2×2.
+                            // Only the lead row carries the tick track; deeper rows
+                            // stay two-tier so 6 rows fit the fixed 376 pt frame.
                             FleetFullRow(session: session, now: now, isLead: index == 0,
                                          reduceMotion: reduceMotion, scale: scale)
                         }
@@ -285,7 +293,7 @@ struct MonitorFleetWidgetView: View {
         .opacity(alert ? 1 : 0.72)
     }
 
-    private var cellRadius: CGFloat { max(MonitorDesign.cornerRadiusMin, 10.9) }
+    private var cellRadius: CGFloat { MonitorBoardGeometry.appleCornerRadius }
 
     private func actionStripFill(alert: Bool) -> LinearGradient {
         if alert {
@@ -353,6 +361,7 @@ struct MonitorFleetWidgetView: View {
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkMuted)
         }
+        .monitorChip(scale)
     }
 
     /// The single most-urgent session — name + a 等你 pill (if blocked) + its
@@ -411,19 +420,25 @@ struct MonitorFleetWidgetView: View {
     // MARK: - Quiet state
 
     /// Module off, or on but with no active sessions — the honest quiet whisper
-    /// (mock: "no active sessions"). No fabricated rows.
+    /// (mock: "no active sessions"). No fabricated rows. When the real cause is
+    /// a missing folder grant (runtime-synthesized `unauthorized` health), say
+    /// THAT instead of implying the fleet is merely idle.
     @ViewBuilder
     private func quietState(scale: MonitorDesign.TypeScale) -> some View {
+        let unauthorized = (context.snapshot.health ?? []).contains {
+            ($0.sourceID == "claude" || $0.sourceID == "codex") && $0.state == "unauthorized"
+        }
         VStack(alignment: .leading, spacing: scale.label * 0.5) {
             Spacer(minLength: 0)
             HStack(spacing: scale.label * 0.5) {
                 Circle()
-                    .fill(MonitorDesign.signalIdle)
+                    .fill(unauthorized ? MonitorDesign.signalAmber : MonitorDesign.signalIdle)
                     .frame(width: scale.caption * 0.6, height: scale.caption * 0.6)
                     .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1))
-                Text(FleetStrings.noActiveSessions)
+                Text(unauthorized ? FleetStrings.authorizeHint : FleetStrings.noActiveSessions)
                     .font(MonitorDesign.captionFont(size: scale.caption))
                     .foregroundStyle(MonitorDesign.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -443,12 +458,14 @@ struct MonitorFleetWidgetView: View {
     }
 }
 
-// MARK: - Compact row (M column)
+// MARK: - Line row (M)
 
-/// One agent lane in the M board (mock `fleetStrip(a, "compact")`): a vertical
-/// card — header (dot · project · timer) → ask (needsInput) → tool chip → warning
-/// + context → tick track. `idle`/`ended` collapse to a calm subset.
-private struct FleetCompactRow: View {
+/// One session per line at the fixed M width (content ≈ 332×125): dot · provider
+/// · name · state detail · warn/ctx glyphs · in-status timer, ≈21 pt tall. The
+/// state detail is the middle, expendable slot — the ask for needsInput, the
+/// current tool for running, the final budget for ended; warning and context
+/// pressure iconify to a glowing dot / bare percent so the line stays glanceable.
+private struct FleetLineRow: View {
     let session: MonitorAgentSessionState
     let now: Double
     let reduceMotion: Bool
@@ -457,42 +474,12 @@ private struct FleetCompactRow: View {
     private var status: MonitorAgentStatus { session.status }
     private var accentColor: Color { MonitorFleetWidgetView.accentColor(status) }
     private var isBlocked: Bool { status == .needsInput }
+    private var isLive: Bool { status == .running || isBlocked }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: scale.label * 0.5) {
-            header
-            if isBlocked {
-                FleetAskLine(session: session, scale: scale)
-            }
-            if !isBlocked, status != .idle, let detail = session.statusDetail, !detail.isEmpty {
-                FleetToolChip(text: detail, scale: scale)
-            }
-            if status == .running || isBlocked {
-                utilityLine
-                TickTrack(events: session.recentEventTimes ?? [], now: now, span: 180,
-                          tint: isBlocked ? MonitorDesign.signalCoral : MonitorDesign.signalAmber)
-                    .frame(height: 16)
-            } else if status == .ended {
-                FleetBudgetLabel(session: session, scale: scale, sizeScale: 0.88)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, scale.label * 0.8)
-        .padding(.vertical, scale.label * 0.7)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(FleetRowStyle.fill(isBlocked: isBlocked))
-        .overlay(alignment: .leading) {
-            FleetRowStyle.accentBar(color: accentColor, isBlocked: isBlocked, scale: scale)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: FleetRowStyle.radius, style: .continuous))
-        .overlay(FleetRowStyle.border(isBlocked: isBlocked))
-        .opacity(status == .ended ? 0.55 : (status == .idle ? 0.6 : 1))
-    }
-
-    private var header: some View {
         HStack(spacing: scale.label * 0.45) {
             BreathingDot(color: accentColor, size: scale.caption * 0.62,
-                         animated: !reduceMotion && (status == .running || isBlocked))
+                         animated: !reduceMotion && isLive)
             FleetProviderBadge(provider: session.provider, isBlocked: isBlocked, scale: scale)
             Text(verbatim: session.projectName)
                 .font(MonitorDesign.subFont(size: scale.caption))
@@ -500,25 +487,59 @@ private struct FleetCompactRow: View {
                                  : (isBlocked ? MonitorDesign.oklch(0.97, 0.02, 40) : MonitorDesign.inkPrimary))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .minimumScaleFactor(0.7)
+                .layoutPriority(1)
+            stateDetail
             Spacer(minLength: scale.label * 0.3)
+            if isLive, let warn = MonitorFleetWidgetView.warningLabel(for: session) {
+                Circle()
+                    .fill(warn.isStale ? MonitorDesign.signalAmber : MonitorDesign.signalCoral)
+                    .frame(width: scale.caption * 0.5, height: scale.caption * 0.5)
+                    .shadow(color: (warn.isStale ? MonitorDesign.signalAmber
+                                                 : MonitorDesign.signalCoral).opacity(0.6),
+                            radius: 3)
+            }
+            if let ctx = MonitorFleetWidgetView.contextBand(for: session), ctx.band != .normal {
+                Text(verbatim: ctx.percentText)
+                    .font(MonitorDesign.subFont(size: scale.caption * 0.82))
+                    .monospacedDigit()
+                    .foregroundStyle(ctx.band == .crit ? MonitorDesign.oklch(0.9, 0.06, 40)
+                                                       : MonitorDesign.signalAmber)
+                    .layoutPriority(1)
+            }
             FleetRowTimer(session: session, now: now, scale: scale)
         }
+        .padding(.horizontal, scale.label * 0.7)
+        .padding(.vertical, scale.label * 0.5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FleetRowStyle.fill(isBlocked: isBlocked))
+        .overlay(alignment: .leading) {
+            FleetRowStyle.accentBar(color: accentColor, isBlocked: isBlocked, scale: scale)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: FleetRowStyle.radius, style: .continuous))
+        .overlay(FleetRowStyle.border(isBlocked: isBlocked))
+        .opacity(status == .ended ? 0.55 : 1)
     }
 
-    /// The tight utility line for M: warning chip (if any) + context-pressure bar.
     @ViewBuilder
-    private var utilityLine: some View {
-        let ctx = MonitorFleetWidgetView.contextBand(for: session)
-        let warn = MonitorFleetWidgetView.warningLabel(for: session)
-        if warn != nil || ctx != nil {
-            HStack(spacing: scale.label * 0.5) {
-                if let warn {
-                    FleetWarningChip(warn: warn, scale: scale)
-                }
-                if let ctx {
-                    FleetContextBar(ctx: ctx, scale: scale)
-                }
-                Spacer(minLength: 0)
+    private var stateDetail: some View {
+        if isBlocked {
+            FleetAskLine(session: session, scale: scale)
+        } else if status == .running, let detail = session.statusDetail, !detail.isEmpty {
+            Text(verbatim: detail)
+                .font(.system(size: scale.caption * 0.82, weight: .regular, design: .monospaced))
+                .foregroundStyle(MonitorDesign.inkMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.7)
+        } else if status == .ended {
+            let budget = MonitorFleetWidgetView.budgetText(for: session)
+            if !budget.isEmpty {
+                Text(verbatim: budget)
+                    .font(MonitorDesign.subFont(size: scale.caption * 0.86))
+                    .monospacedDigit()
+                    .foregroundStyle(MonitorDesign.inkFaint)
+                    .lineLimit(1)
             }
         }
     }
@@ -526,15 +547,16 @@ private struct FleetCompactRow: View {
 
 // MARK: - Full row (L column)
 
-/// One agent row in the L board (mock `fleetStrip(a, "full")` densified with the
-/// `fleet_xl` rail's readouts): header (dot · provider · name · timer) → ask
-/// (needsInput) → meta (tool · model · branch) → recent-tool sequence → tick track
-/// → footer (budget · context · warning). `idle` collapses to header only; `ended`
-/// collapses to header + final budget.
+/// One agent row in the L board (mock `fleetStrip(a, "full")`, two-tier under
+/// the fixed 364×376 frame): header (dot · provider · name · timer) + ONE
+/// utility line — the ask for needsInput, tool chip · model⑂branch · budget ·
+/// warn · ctx for running. Only the lead row adds the tick track (six tracked
+/// rows would overrun the frame). `idle` collapses to header only; `ended` to
+/// header + final budget.
 private struct FleetFullRow: View {
     let session: MonitorAgentSessionState
     let now: Double
-    /// The top row of the L stack — it alone carries the recent-tool sequence.
+    /// The top row of the L stack — it alone carries the tick track.
     var isLead: Bool = false
     let reduceMotion: Bool
     let scale: MonitorDesign.TypeScale
@@ -549,20 +571,15 @@ private struct FleetFullRow: View {
             header
             if isBlocked {
                 FleetAskLine(session: session, scale: scale)
+            } else if status == .running {
+                utilityLine
+            } else if status == .ended, session.costUSD != nil || session.tokens != .zero {
+                FleetBudgetLabel(session: session, scale: scale, sizeScale: 0.86)
             }
-            if status == .running {
-                metaLine
-            }
-            if isLead, isLive, let tools = session.recentTools, !tools.isEmpty {
-                FleetRecentTools(tools: tools, max: 3, scale: scale)
-            }
-            if isLive {
+            if isLead, isLive {
                 TickTrack(events: session.recentEventTimes ?? [], now: now, span: 180,
                           tint: isBlocked ? MonitorDesign.signalCoral : MonitorDesign.signalAmber)
                     .frame(height: scale.caption * 1.15)
-                footer
-            } else if status == .ended {
-                footer
             }
         }
         .padding(.horizontal, scale.label * 0.7)
@@ -588,30 +605,49 @@ private struct FleetFullRow: View {
                                  : (isBlocked ? MonitorDesign.oklch(0.97, 0.02, 40) : MonitorDesign.inkPrimary))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .minimumScaleFactor(0.7)
+                .layoutPriority(1)
             Spacer(minLength: scale.label * 0.3)
             FleetRowTimer(session: session, now: now, scale: scale)
         }
     }
 
-    /// Running rows carry the current tool (verbatim, redacted name only) plus a
-    /// dim model·branch tail. needsInput leads with the ask, so it skips this.
+    /// The running row's one utility line: tool chip + dim model·branch tail on
+    /// the left (both expendable — they truncate first), budget · warn · ctx
+    /// pinned right (mock `.fmeta` + `.ffoot` merged so rows stay two-tier).
     @ViewBuilder
-    private var metaLine: some View {
+    private var utilityLine: some View {
+        let ctx = MonitorFleetWidgetView.contextBand(for: session)
+        let warn = MonitorFleetWidgetView.warningLabel(for: session)
+        let hasBudget = session.costUSD != nil || session.tokens != .zero
         let hasTool = !(session.statusDetail ?? "").isEmpty
-        let tail = modelBranchTail
-        if hasTool || tail != nil {
+        if hasTool || modelBranchTail != nil || hasBudget || ctx != nil || warn != nil {
             HStack(spacing: scale.label * 0.4) {
+                // Chip beats tail for leftover space; the fixedSize right side
+                // never compresses, so the readouts stay legible.
                 if let detail = session.statusDetail, !detail.isEmpty {
                     FleetToolChip(text: detail, scale: scale)
+                        .layoutPriority(1)
                 }
-                if let tail {
+                if let tail = modelBranchTail {
                     Text(verbatim: tail)
                         .font(MonitorDesign.captionFont(size: scale.caption * 0.82))
                         .foregroundStyle(MonitorDesign.inkFaint)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: scale.label * 0.3)
+                if hasBudget {
+                    FleetBudgetLabel(session: session, scale: scale, sizeScale: 0.86)
+                        .fixedSize()
+                }
+                if let warn {
+                    FleetWarningChip(warn: warn, scale: scale)
+                        .fixedSize()
+                }
+                if let ctx {
+                    FleetContextBar(ctx: ctx, scale: scale)
+                }
             }
         }
     }
@@ -622,28 +658,6 @@ private struct FleetFullRow: View {
         if let model = session.model, !model.isEmpty { parts.append(model) }
         if let branch = session.gitBranch, !branch.isEmpty { parts.append("⑂" + branch) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    /// Budget on the left, context + warning on the right (mock `.ffoot`).
-    @ViewBuilder
-    private var footer: some View {
-        let ctx = isLive ? MonitorFleetWidgetView.contextBand(for: session) : nil
-        let warn = isLive ? MonitorFleetWidgetView.warningLabel(for: session) : nil
-        let hasBudget = session.costUSD != nil || session.tokens != .zero
-        if hasBudget || ctx != nil || warn != nil {
-            HStack(spacing: scale.label * 0.5) {
-                if hasBudget {
-                    FleetBudgetLabel(session: session, scale: scale, sizeScale: 0.86)
-                }
-                Spacer(minLength: scale.label * 0.3)
-                if let warn {
-                    FleetWarningChip(warn: warn, scale: scale)
-                }
-                if let ctx {
-                    FleetContextBar(ctx: ctx, scale: scale)
-                }
-            }
-        }
     }
 }
 
@@ -761,6 +775,7 @@ private struct FleetAskLine: View {
                 .foregroundStyle(MonitorDesign.oklch(0.95, 0.028, 40))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .minimumScaleFactor(0.7)
         } else {
             Text(FleetStrings.needsYou)
                 .font(MonitorDesign.subFont(size: scale.caption * 0.98))
@@ -781,52 +796,7 @@ private struct FleetToolChip: View {
             .foregroundStyle(MonitorDesign.inkMuted)
             .lineLimit(1)
             .truncationMode(.tail)
-            .padding(.horizontal, scale.caption * 0.42)
-            .padding(.vertical, scale.caption * 0.16)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(MonitorDesign.bg2.opacity(0.6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .strokeBorder(MonitorDesign.hairline.opacity(0.6), lineWidth: 1)
-                    )
-            )
-    }
-}
-
-/// Recent-tool sequence — the last few tool NAMES (no arguments), arrow-joined and
-/// status-tinted (mock `.rtools`). The `fleet_xl` density flourish carried into L.
-private struct FleetRecentTools: View {
-    let tools: [MonitorAgentToolEvent]
-    let max: Int
-    let scale: MonitorDesign.TypeScale
-
-    var body: some View {
-        let shown = Array(tools.suffix(max))
-        HStack(spacing: scale.caption * 0.28) {
-            ForEach(Array(shown.enumerated()), id: \.offset) { index, tool in
-                if index > 0 {
-                    Text(verbatim: "›")
-                        .font(MonitorDesign.captionFont(size: scale.caption * 0.72))
-                        .foregroundStyle(MonitorDesign.inkFaint.opacity(0.6))
-                }
-                Text(verbatim: tool.name)
-                    .font(.system(size: scale.caption * 0.74, weight: .regular, design: .monospaced))
-                    .foregroundStyle(MonitorFleetWidgetView.toolTint(tool.ok))
-                    .lineLimit(1)
-                    .padding(.horizontal, scale.caption * 0.3)
-                    .padding(.vertical, scale.caption * 0.06)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(MonitorDesign.oklch(0.22, 0.011, 74, alpha: 0.5))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                    .strokeBorder(MonitorDesign.hairline.opacity(0.5), lineWidth: 1)
-                            )
-                    )
-            }
-            Spacer(minLength: 0)
-        }
+            .monitorChip(scale)
     }
 }
 
@@ -903,8 +873,8 @@ private struct FleetWarningChip: View {
 private struct FleetBudgetLabel: View {
     let session: MonitorAgentSessionState
     let scale: MonitorDesign.TypeScale
-    /// Multiplier on the caption size (M ended footer uses 0.88; L footer 0.86).
-    var sizeScale: CGFloat = 0.88
+    /// Multiplier on the caption size (L rows use 0.86).
+    var sizeScale: CGFloat = 0.86
 
     var body: some View {
         let tok = session.tokens.input + session.tokens.output
@@ -936,6 +906,9 @@ private enum FleetStrings {
 
     // Computed (not stored) so the enum stays Sendable under strict concurrency.
     static var noActiveSessions: LocalizedStringKey { "No active sessions" }
+    /// Why-no-data: a wanted AI source has no folder grant (synthesized
+    /// `unauthorized` health from the runtime).
+    static var authorizeHint: LocalizedStringKey { "Authorize the agent folders in Monitor settings." }
 
     // Action-Strip + count-cluster + row keywords (English source keys).
     static var awaitingYou: LocalizedStringKey { "needs you" }
@@ -992,9 +965,10 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// Recent-tool tint (mock `.rt.ok/.err`): a completed tool reads brighter, an
-    /// errored tool coral, a still-pending one (`ok == nil`) neutral. Codex events
-    /// carry no result flag yet, so they all read neutral (a data gap, not a bug).
+    /// Recent-tool tint (mock `.rt.ok/.err`): completed reads brighter, errored
+    /// coral, still-pending (`ok == nil`) neutral. The recent-tool sequence view
+    /// was dropped when L moved to the fixed 364×376 frame; the mapping stays
+    /// (tested) for the tool-result affordance's return on a roomier surface.
     nonisolated static func toolTint(_ ok: Bool?) -> Color {
         switch ok {
         case .some(true): return MonitorDesign.inkMuted
@@ -1370,13 +1344,14 @@ private extension MonitorWidgetContext {
 
 // The board supplies `context.now` in production; in isolated previews we wrap the
 // widget in a TimelineView so timers stay live without the board.
+// Frames below are Apple's fixed macOS widget sizes (M 364×170, L 364×376).
 #Preview("Fleet · M") {
     TimelineView(.periodic(from: .now, by: 1)) { t in
         VStack(spacing: 20) {
             MonitorFleetWidgetView(context: .fleetSample(size: .medium).at(t.date))
-                .frame(width: 378, height: 196)
+                .frame(width: 364, height: 170)
             MonitorFleetWidgetView(context: .fleetQuiet(size: .medium).at(t.date))
-                .frame(width: 378, height: 196)
+                .frame(width: 364, height: 170)
         }
         .padding(32)
         .background(MonitorDesign.boardWash)
@@ -1386,7 +1361,7 @@ private extension MonitorWidgetContext {
 #Preview("Fleet · L") {
     TimelineView(.periodic(from: .now, by: 1)) { t in
         MonitorFleetWidgetView(context: .fleetSample(size: .large).at(t.date))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
             .padding(32)
             .background(MonitorDesign.boardWash)
     }

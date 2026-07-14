@@ -11,11 +11,9 @@ import SwiftUI
 /// chrome fills the tile's full bounds with zero inset, so it must share the
 /// one board-wide radius (`MonitorBoardGeometry.cornerRadius`) every tile is
 /// clipped/stroked with, or the fill reads as mis-centred inside its own tile.
-/// Callers should pass that value through once it's threaded down to widget
-/// views; until then this defaults to the design-token radius, which keeps
-/// every tile's fill at one constant value instead of scaling with cell
-/// height (the old `cellHeight * 0.10` formula ballooned past the outer
-/// radius on tall/large tiles — the "fill recedes into the corner" bug).
+/// The default matches the board's fixed Apple desktop-widget radius, which is
+/// what the live wallpaper (point-scale 1) always renders at; the scaled
+/// inspector preview draws name tiles that receive the geometry radius directly.
 /// Content is caller-provided, so any embedded text should use `Text(verbatim:)`.
 struct MonitorWidgetContainer<Content: View, Status: View>: View {
     var label: String
@@ -24,8 +22,12 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
     /// Cell height in points; drives the type scale only (see corner-radius note above).
     var cellHeight: CGFloat
     /// Panel corner radius — zero-inset, so this should equal the outer tile's
-    /// radius exactly (see type doc). Defaults to the shared design token.
-    var cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault
+    /// radius exactly (see type doc). Defaults to the board's Apple desktop-widget
+    /// radius: the live wallpaper always renders at point-scale 1, so the static
+    /// default matches `MonitorBoardGeometry.cornerRadius` wherever real
+    /// instruments draw (the scaled inspector preview renders name tiles, which
+    /// receive the geometry radius explicitly).
+    var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
     @ViewBuilder var status: () -> Status
     @ViewBuilder var content: () -> Content
 
@@ -33,7 +35,7 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
         label: String,
         systemImage: String? = nil,
         cellHeight: CGFloat = 150,
-        cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault,
+        cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius,
         @ViewBuilder status: @escaping () -> Status = { EmptyView() },
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -60,15 +62,18 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        // Title reads one size up from the whisper labels so the instrument's
+        // name anchors the card at the fixed Apple frames.
+        let titleSize = scale.label + 1
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: scale.label, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(MonitorDesign.inkFaint)
             }
             Text(verbatim: label.uppercased())
-                .font(MonitorDesign.labelFont(size: scale.label))
-                .tracking(MonitorDesign.labelTracking(size: scale.label))
+                .font(MonitorDesign.labelFont(size: titleSize))
+                .tracking(MonitorDesign.labelTracking(size: titleSize))
                 .foregroundStyle(MonitorDesign.inkFaint)
             Spacer(minLength: 4)
             status()

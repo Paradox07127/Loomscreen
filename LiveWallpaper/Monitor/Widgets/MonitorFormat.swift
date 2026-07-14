@@ -1,5 +1,27 @@
 import Foundation
 
+/// User-facing temperature unit for the monitor widgets' sensor readouts.
+/// DISPLAY-only: every internal threshold (temperature colour ramp, hot/warm
+/// bands) stays in Celsius; only the printed value + symbol convert. The
+/// inspector's unit picker writes the defaults key; widgets re-read it on
+/// every 1 Hz render, so a flip shows on the next tick.
+enum MonitorTemperature {
+    static let fahrenheitDefaultsKey = "MonitorTemperatureFahrenheit"
+
+    static var isFahrenheit: Bool {
+        UserDefaults.standard.bool(forKey: fahrenheitDefaultsKey)
+    }
+
+    static var symbol: String { isFahrenheit ? "°F" : "°C" }
+
+    /// Whole-number reading in the user's unit ("62" / "144").
+    static func valueText(_ celsius: Double) -> String {
+        let c = celsius.isFinite ? celsius : 0
+        let shown = isFahrenheit ? c * 9 / 5 + 32 : c
+        return "\(Int(shown.rounded()))"
+    }
+}
+
 /// Shared display formatters for monitor widgets — 1:1 ports of the mock's
 /// JS formatters (index.html) so native output matches the approved design
 /// pixel-for-pixel. Thresholds and precision rules are load-bearing; change

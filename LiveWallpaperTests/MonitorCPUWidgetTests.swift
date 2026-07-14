@@ -142,8 +142,13 @@ final class MonitorCPUWidgetTests: XCTestCase {
     }
 
     func testCpuTextRoundsAndClamps() {
+        // ≥10 stays whole-number; <10 gains one decimal so light load never
+        // reads as a flat "0"; negatives/non-finite clamp to 0.0.
         XCTAssertEqual(MonitorCPUWidgetView.cpuText(52.4), "52")
-        XCTAssertEqual(MonitorCPUWidgetView.cpuText(-3), "0")
+        XCTAssertEqual(MonitorCPUWidgetView.cpuText(0.44), "0.4")
+        XCTAssertEqual(MonitorCPUWidgetView.cpuText(3.24), "3.2")
+        XCTAssertEqual(MonitorCPUWidgetView.cpuText(9.96), "10.0")
+        XCTAssertEqual(MonitorCPUWidgetView.cpuText(-3), "0.0")
     }
 
     func testBarFractionRelativeToBusiest() {

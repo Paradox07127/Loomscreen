@@ -2,6 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Inspector card for the Monitor wallpaper — the side panel for the board
 /// editor (Monitor v2). The board itself is edited in the preview area to the
@@ -36,6 +37,11 @@ struct MonitorDetailView: View {
     @State private var showUsageSetup = false
     @State private var detectedStatusLineCommand: String?
 
+    /// Display-only temperature unit for every sensor readout (app-wide, not
+    /// per-board). Widgets re-read `MonitorTemperature` on each 1 Hz render, so a
+    /// flip shows on the next tick.
+    @AppStorage(MonitorTemperature.fahrenheitDefaultsKey) private var temperatureFahrenheit = false
+
     private var agentFleetEnabled: Bool {
         featureCatalog.isEnabled(.agentFleet)
     }
@@ -47,10 +53,19 @@ struct MonitorDetailView: View {
                 systemImage: "gauge.with.dots.needle.67percent",
                 isExpanded: $isExpanded
             ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    boardControlsSection
+                VStack(alignment: .leading, spacing: 8) {
+                    boardHint
+                    refreshRateRow
+                    Divider()
+                    mouseInteractionRow
+                    Divider()
+                    reduceMotionRow
+                    Divider()
+                    temperatureUnitRow
                     Divider()
                     placedWidgetsSection
+                    Divider()
+                    layoutManagementRow
 
                     if agentFleetEnabled {
                         Divider()
@@ -61,6 +76,7 @@ struct MonitorDetailView: View {
                 }
             }
         }
+        .groupBoxStyle(ContainerGroupBoxStyle())
         .onAppear(perform: reload)
         .onChange(of: screen.id) { _, _ in reload() }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
@@ -77,18 +93,11 @@ struct MonitorDetailView: View {
 
     // MARK: - Board-level controls
 
-    private var boardControlsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Arrange the board in the preview above — drag tiles, or add and remove instruments there.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            refreshRateRow
-            Divider()
-            mouseInteractionRow
-            Divider()
-            reduceMotionRow
-        }
+    private var boardHint: some View {
+        Text("Arrange the board in the preview above — drag tiles, or add and remove instruments there.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var refreshRateRow: some View {
@@ -96,9 +105,9 @@ struct MonitorDetailView: View {
             icon: "arrow.triangle.2.circlepath",
             iconColor: .blue,
             title: "Refresh Rate",
-            subtitle: "How often the instruments sample"
+            info: "How often the instruments sample"
         ) {
-            HStack(spacing: 8) {
+            HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
                 // Dragging updates only the local draft (live label); the value is
                 // committed ONCE on release. Committing on every tick would fire a
                 // config write per frame — a storm the live board must not endure.
@@ -112,11 +121,12 @@ struct MonitorDetailView: View {
                         if !editing { commit(draft) }
                     }
                 )
-                .frame(width: 120)
+                .controlSize(.small)
+                .frame(width: DesignTokens.Inspector.sliderWidth)
                 Text(verbatim: Self.refreshHzLabel(draft.refreshHz))
-                    .font(.caption.monospacedDigit())
+                    .font(DesignTokens.Typography.metric)
                     .foregroundStyle(.secondary)
-                    .frame(width: 46, alignment: .trailing)
+                    .frame(width: DesignTokens.Inspector.sliderValueWidth, alignment: .trailing)
             }
         }
     }
@@ -124,9 +134,9 @@ struct MonitorDetailView: View {
     private var mouseInteractionRow: some View {
         SettingRow(
             icon: "cursorarrow.rays",
-            iconColor: .green,
+            iconColor: draft.mouseInteractionEnabled ? .blue : .secondary,
             title: "Mouse Interaction",
-            subtitle: "Let the wallpaper receive clicks instead of passing them to the desktop"
+            info: "Let the wallpaper receive clicks instead of passing them to the desktop"
         ) {
             Toggle("", isOn: Binding(
                 get: { draft.mouseInteractionEnabled },
@@ -134,6 +144,7 @@ struct MonitorDetailView: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
+            .controlSize(.small)
             .accessibilityLabel(Text("Enable mouse interaction"))
         }
     }
@@ -143,7 +154,7 @@ struct MonitorDetailView: View {
             icon: "wind",
             iconColor: .teal,
             title: "Reduce Motion",
-            subtitle: "Still the animations on this board"
+            info: "Still the animations on this board"
         ) {
             Picker("", selection: Binding(
                 get: { ReduceMotionChoice(draft.reduceMotionOverride) },
@@ -153,11 +164,73 @@ struct MonitorDetailView: View {
                 Text("On").tag(ReduceMotionChoice.on)
                 Text("Off").tag(ReduceMotionChoice.off)
             }
+            .pickerStyle(.menu)
             .labelsHidden()
-            .pickerStyle(.segmented)
             .fixedSize()
             .accessibilityLabel(Text("Reduce motion"))
         }
+    }
+
+    private var temperatureUnitRow: some View {
+        SettingRow(
+            icon: "thermometer.variable.and.figure",
+            iconColor: .orange,
+            title: "Temperature",
+            info: "Unit for the CPU / GPU / battery sensor readouts"
+        ) {
+            Picker("", selection: Binding(
+                get: { temperatureFahrenheit },
+                set: { temperatureFahrenheit = $0 }
+            )) {
+                Text(verbatim: "°C").tag(false)
+                Text(verbatim: "°F").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel(Text("Temperature unit"))
+        }
+    }
+
+    // MARK: - Layout management (reset / import / export)
+
+    private var layoutManagementRow: some View {
+        SettingRow(
+            icon: "square.grid.2x2",
+            iconColor: .purple,
+            title: "Layout",
+            info: "Reset the board to its default instruments, or move a layout between machines"
+        ) {
+            HStack(spacing: 6) {
+                Button("Reset", action: resetLayout)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .disabled(isDefaultLayout)
+                Button("Import…", action: importLayout)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                Button("Export…", action: exportLayout)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .disabled(draft.widgets.isEmpty)
+            }
+        }
+    }
+
+    /// True when the board already matches the default preset — same instruments,
+    /// sizes, AND positions — so Reset is a genuine no-op. Position is included so
+    /// a user who only rearranged the default trio can still reset the layout.
+    private var isDefaultLayout: Bool {
+        let defaults = MonitorBoardConfiguration.defaultSystemPlacements()
+        let current = draft.widgets
+        guard current.count == defaults.count else { return false }
+        func key(_ p: MonitorWidgetPlacement) -> String {
+            "\(p.kind.rawValue)|\(p.size.rawValue)|\((p.x * 1000).rounded())|\((p.y * 1000).rounded())"
+        }
+        return Set(current.map(key)) == Set(defaults.map(key))
     }
 
     // MARK: - Placed widgets list
@@ -235,71 +308,96 @@ struct MonitorDetailView: View {
             icon: "clock.badge.exclamationmark",
             iconColor: .pink,
             title: "Account usage limits",
-            subtitle: "Show 5-hour and weekly quota from Claude Code's statusline"
+            info: "Show 5-hour and weekly quota from Claude Code's statusline"
         ) {
             Button("Set Up…") {
                 detectedStatusLineCommand = detectExistingStatuslineCommand()
                 showUsageSetup = true
             }
+            .buttonStyle(.bordered)
             .controlSize(.small)
+            .fixedSize()
         }
     }
 
     @ViewBuilder
     private var authorizationRows: some View {
-        SettingRow(
-            icon: "folder.badge.person.crop",
-            iconColor: .indigo,
+        authorizationRow(
             title: "Authorize Claude Folder",
-            subtitle: "Read-only access to ~/.claude"
-        ) {
-            authorizationControl(
-                isAuthorized: claudeAuthorized,
-                authorize: {
-                    MonitorSourceAuthorization.shared.requestClaudeAccess(from: hostWindow()) {
-                        refreshAuthorizationState()
-                        Task { await MonitorRuntime.shared.refreshSources() }
-                    }
-                },
-                revoke: { revoke(.claude) }
-            )
-        }
+            subtitle: "Read-only access to ~/.claude",
+            isAuthorized: claudeAuthorized,
+            authorize: {
+                MonitorSourceAuthorization.shared.requestClaudeAccess(from: hostWindow()) {
+                    refreshAuthorizationState()
+                    Task { await MonitorRuntime.shared.refreshSources() }
+                }
+            },
+            revoke: { revoke(.claude) }
+        )
 
-        SettingRow(
-            icon: "folder.badge.person.crop",
-            iconColor: .indigo,
+        Divider()
+
+        authorizationRow(
             title: "Authorize Codex Folder",
-            subtitle: "Read-only access to ~/.codex"
-        ) {
-            authorizationControl(
-                isAuthorized: codexAuthorized,
-                authorize: {
-                    MonitorSourceAuthorization.shared.requestCodexAccess(from: hostWindow()) {
-                        refreshAuthorizationState()
-                        Task { await MonitorRuntime.shared.refreshSources() }
-                    }
-                },
-                revoke: { revoke(.codex) }
-            )
-        }
+            subtitle: "Read-only access to ~/.codex",
+            isAuthorized: codexAuthorized,
+            authorize: {
+                MonitorSourceAuthorization.shared.requestCodexAccess(from: hostWindow()) {
+                    refreshAuthorizationState()
+                    Task { await MonitorRuntime.shared.refreshSources() }
+                }
+            },
+            revoke: { revoke(.codex) }
+        )
     }
 
+    /// Authorized state carries TWO actions (Revoke + Re-authorize…) that can
+    /// never share `SettingRow`'s trailing slot with the long title at inspector
+    /// width, so they get a full-width trailing row of their own; the ✓ becomes
+    /// a title badge. Buttons are `.fixedSize()` so labels never truncate —
+    /// title/subtitle give way instead.
     @ViewBuilder
-    private func authorizationControl(
+    private func authorizationRow(
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
         isAuthorized: Bool,
         authorize: @escaping () -> Void,
         revoke: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 6) {
-            if isAuthorized {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .accessibilityLabel(Text("Authorized"))
-                Button("Revoke", action: revoke)
-                    .controlSize(.small)
+        VStack(alignment: .leading, spacing: 6) {
+            SettingRow(
+                icon: "folder.badge.person.crop",
+                iconColor: .indigo,
+                title: title,
+                titleBadge: isAuthorized
+                    ? SettingRowTitleBadge(
+                        systemImage: "checkmark.circle.fill",
+                        tint: DesignTokens.Colors.Status.active,
+                        accessibilityLabel: Text("Authorized")
+                    )
+                    : nil,
+                subtitle: subtitle
+            ) {
+                if !isAuthorized {
+                    Button("Authorize…", action: authorize)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                }
             }
-            Button(isAuthorized ? "Re-authorize…" : "Authorize…", action: authorize)
-                .controlSize(.small)
+            if isAuthorized {
+                HStack(spacing: 6) {
+                    Button("Revoke", action: revoke)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                    Button("Re-authorize…", action: authorize)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
     }
 
@@ -336,6 +434,73 @@ struct MonitorDetailView: View {
         next.widgets.removeAll { $0.id == id }
         if settingsWidgetID == id { settingsWidgetID = nil }
         commit(next)
+    }
+
+    // MARK: - Layout reset / import / export
+
+    private func resetLayout() {
+        var next = draft
+        next.widgets = MonitorBoardConfiguration.defaultSystemPlacements()
+        settingsWidgetID = nil
+        commit(next)
+    }
+
+    /// Write the whole board config (widgets + board-level settings) as JSON to a
+    /// user-chosen file. Placement ids are regenerated on import, so a file can be
+    /// applied to several machines without collisions.
+    private func exportLayout() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "monitor-layout.json"
+        panel.canCreateDirectories = true
+        panel.title = String(localized: "Export Monitor Layout", comment: "Save-panel title for exporting a monitor board layout.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(draft).write(to: url, options: .atomic)
+        } catch {
+            presentLayoutError(error, isImport: false)
+        }
+    }
+
+    private func importLayout() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = String(localized: "Import Monitor Layout", comment: "Open-panel title for importing a monitor board layout.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let imported = try JSONDecoder().decode(MonitorBoardConfiguration.self, from: data)
+            // Fresh ids so an imported file can't collide with live placements, and
+            // keep the current schema version regardless of the file's origin.
+            var next = imported
+            next.widgets = imported.widgets.map { w in
+                MonitorWidgetPlacement(kind: w.kind, size: w.size, x: w.x, y: w.y, options: w.options)
+            }
+            next.schemaVersion = MonitorBoardConfiguration.currentSchemaVersion
+            settingsWidgetID = nil
+            commit(next)
+        } catch {
+            presentLayoutError(error, isImport: true)
+        }
+    }
+
+    private func presentLayoutError(_ error: Error, isImport: Bool) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = isImport
+            ? String(localized: "Couldn't import that layout", comment: "Alert title when a monitor layout file fails to import.")
+            : String(localized: "Couldn't export the layout", comment: "Alert title when a monitor layout file fails to export.")
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: String(localized: "OK", comment: "Dismiss button on the monitor layout error alert."))
+        if let window = hostWindow() {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
     }
 
     /// Board-level edits made in THIS inspector go through the NON-restarting board

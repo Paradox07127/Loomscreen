@@ -100,10 +100,12 @@ final class MonitorSourceAuthorization {
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
             guard Self.isExpectedRoot(url, for: provider) else {
+                monitorSourcesLog.warning("🛰️ grant(\(provider.defaultDirectoryName, privacy: .public)): rejected chosen=\(url.path, privacy: .public)")
                 self.presentWrongFolderAlert(for: provider, chosen: url, window: window)
                 return
             }
             if self.storeBookmark(for: provider, url: url) {
+                monitorSourcesLog.info("🛰️ grant(\(provider.defaultDirectoryName, privacy: .public)): accepted")
                 onGrant?()
             }
         }
@@ -197,13 +199,18 @@ final class MonitorSourceAuthorization {
             stopAccessing(provider)
             guard resolved.url.startAccessingSecurityScopedResource() else {
                 Logger.warning("Monitor: startAccessingSecurityScopedResource failed for \(provider.defaultDirectoryName)", category: .fileAccess)
+                monitorSourcesLog.warning("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): scopeStartFailed")
                 return nil
             }
             activeScopes[provider] = resolved.url
+            monitorSourcesLog.info("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): ok")
             return resolved.url
         case .failure(let failure):
             if case .resolutionFailed(let reason) = failure {
                 Logger.warning("Monitor: \(provider.defaultDirectoryName) grant unresolved: \(reason)", category: .fileAccess)
+                monitorSourcesLog.warning("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): resolveFailed(\(reason, privacy: .public))")
+            } else {
+                monitorSourcesLog.info("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): missing (no grant stored)")
             }
             return nil
         }
@@ -232,14 +239,27 @@ final class MonitorSourceAuthorization {
     /// a broader parent the user might pick by mistake — the scanners derive their
     /// fixed subpaths from this root, and a wider grant would hand the app a
     /// read-only sandbox extension over unrelated files for the whole pipeline.
-    /// Symlinks on both sides are resolved so a linked root still matches.
-    /// Both sides derive from the real (unsandboxed) home; under app-sandbox
-    /// `homeDirectoryForCurrentUser` becomes the container home and this
-    /// equality would reject every legitimate grant — revisit on sandboxing.
+    ///
+    /// The check is STRUCTURAL and runs on the UNRESOLVED selection: the chosen
+    /// folder must itself be named `.claude`/`.codex` and sit directly in the real
+    /// home. Symlinks on the chosen path are deliberately NOT resolved — resolving
+    /// would let a user whose `~/.claude` is a symlink to `~` (or `/`) satisfy the
+    /// check by selecting the broad target, storing a home-wide bookmark. The
+    /// expected root derives from the REAL home (`getpwuid`), because under
+    /// app-sandbox `homeDirectoryForCurrentUser` is the container home and a
+    /// container-derived comparison would reject every legitimate grant.
     private static func isExpectedRoot(_ url: URL, for provider: Provider) -> Bool {
-        let chosen = url.resolvingSymlinksInPath().standardizedFileURL.path
-        let expected = defaultDirectory(for: provider).resolvingSymlinksInPath().standardizedFileURL.path
-        return chosen == expected
+        let chosen = url.standardizedFileURL
+        // The selected folder's OWN name must match — this is what blocks picking
+        // `~` or `/` (whose last component is never `.claude`/`.codex`).
+        guard chosen.lastPathComponent == provider.defaultDirectoryName else { return false }
+        let parent = chosen.deletingLastPathComponent().standardizedFileURL
+        let home = realHomeDirectory().standardizedFileURL
+        if parent.path == home.path { return true }
+        // Accept a parent that only differs by symlink (a relocated/linked home),
+        // now that the folder-name gate has already excluded a broad pick.
+        return parent.resolvingSymlinksInPath().standardizedFileURL.path
+            == home.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     private func presentWrongFolderAlert(for provider: Provider, chosen: URL, window: NSWindow?) {
@@ -270,7 +290,18 @@ final class MonitorSourceAuthorization {
     // MARK: - Defaults
 
     private static func defaultDirectory(for provider: Provider) -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        realHomeDirectory()
             .appendingPathComponent(provider.defaultDirectoryName, isDirectory: true)
+    }
+
+    /// The user's REAL home directory. Under app-sandbox both
+    /// `homeDirectoryForCurrentUser` and `NSHomeDirectory()` return the
+    /// container home, which would seed the grant panel at a nonexistent
+    /// container `.claude` and make the expected-root check unsatisfiable.
+    private static func realHomeDirectory() -> URL {
+        if let dir = getpwuid(getuid())?.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 }

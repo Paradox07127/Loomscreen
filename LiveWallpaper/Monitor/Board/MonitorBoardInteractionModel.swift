@@ -51,6 +51,11 @@ final class MonitorBoardInteractionModel: ObservableObject {
     /// menu bar. 0 on hosts (e.g. no matching NSScreen) that don't set it.
     var topInsetFraction: CGFloat = 0
 
+    /// Real display width in points the board represents. 0 (wallpaper hosts)
+    /// means the board IS the screen; the inspector preview sets it so its
+    /// miniature board scales Apple-size widgets down WYSIWYG.
+    var referenceWidth: CGFloat = 0
+
     /// Whether AI-agent widget kinds are offered in the catalog (Pro gate).
     let isAgentFleetEnabled: Bool
 
@@ -75,7 +80,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
     var geometry: MonitorBoardGeometry {
         MonitorBoardGeometry(
             boardSize: boardSize,
-            columns: baseConfiguration.gridColumns,
+            referenceWidth: referenceWidth,
             topInsetFraction: topInsetFraction
         )
     }

@@ -30,6 +30,10 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
         /// default — the read is cheap but sandbox-gated, so only turn it on when a
         /// widget that shows sensors is on the board.
         var sensors: Bool = false
+        /// Per-app disk I/O attribution (rusage deltas inside the top-processes
+        /// walk; needs the `process-info-rusage` sbpl exception). Demanded by
+        /// the Disk widget's L top-list.
+        var processIO: Bool = false
 
         static let `default` = Options()
     }
@@ -195,16 +199,20 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             }
 
             var topProcesses: [MonitorProcessSample]?
-            if options.topProcesses {
+            var topIOProcesses: [MonitorProcessSample]?
+            if options.topProcesses || options.processIO {
                 let result = SystemMetricsSamplers.sampleTopProcesses(
                     previous: prevProcessCounters,
                     interval: elapsed,
                     // Matches the widgets' ceiling: the processes stepper and
-                    // the L board tile both go up to 8 rows.
-                    limit: 8
+                    // the L board tile both go up to 12 rows (Apple L frame
+                    // physically fits 19; 12 keeps the tail readable).
+                    limit: 12,
+                    includeIO: options.processIO
                 )
                 prevProcessCounters = result.counters
                 topProcesses = result.samples.isEmpty ? nil : result.samples
+                topIOProcesses = result.ioSamples.isEmpty ? nil : result.ioSamples
             }
 
             // ANE's per-PID rusage walk is the priciest probe → ≥5s cadence, gated.
@@ -259,7 +267,9 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
                 accessories: accessories,
                 aneProcesses: lastANE.flatMap { $0.processes.isEmpty ? nil : $0.processes },
                 aneActive: lastANE?.active,
-                sensors: sensors
+                sensors: sensors,
+                topIOProcesses: topIOProcesses,
+                gpuMemUsedBytes: lastGPU?.memUsedBytes
             )
 
             // Bail before publishing if stop() cancelled us mid-tick, so a late

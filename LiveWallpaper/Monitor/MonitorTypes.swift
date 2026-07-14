@@ -96,6 +96,9 @@ struct MonitorProcessSample: Codable, Sendable, Equatable {
     var pid: Int?
     var bundleID: String?
     var kind: String?                 // app | background | system
+    /// Per-app disk I/O rates (rusage_info deltas); only set on `topIOProcesses`.
+    var ioReadBytesPerSec: Double?
+    var ioWriteBytesPerSec: Double?
 }
 
 // MARK: System hardware identity + per-component detail (v2)
@@ -210,6 +213,12 @@ struct MonitorSystemSnapshot: Codable, Sendable, Equatable {
     var aneProcesses: [MonitorANEProcess]?
     var aneActive: Bool?
     var sensors: MonitorSensorReadings?
+    /// Top apps by disk I/O rate (same aggregation-by-app as `topProcesses`,
+    /// ranked by read+write instead of CPU). Demand-gated by the Disk widget.
+    var topIOProcesses: [MonitorProcessSample]?
+    /// GPU-owned system memory in use (Apple Silicon `PerformanceStatistics`
+    /// "In use system memory"); nil where the driver doesn't publish it.
+    var gpuMemUsedBytes: UInt64?
 }
 
 struct MonitorProviderUsage: Codable, Sendable, Equatable {
@@ -249,8 +258,8 @@ struct MonitorUsageDayBucket: Codable, Sendable, Equatable {
     var costUSD: Double?
 }
 
-/// Per-source pipeline health, surfaced by the Health widget and the
-/// settings pane ("未授权 / stale / ok").
+/// Per-source pipeline health, surfaced by the settings pane and the AI
+/// widgets' why-no-data empty states ("unauthorized / stale / ok").
 struct MonitorSourceHealth: Codable, Sendable, Equatable {
     var sourceID: String
     var state: String                 // ok | stale | unauthorized | error | off

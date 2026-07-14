@@ -199,17 +199,30 @@ enum MonitorDesign {
 
     static let hairlineWidth: CGFloat = 1
 
-    /// Panel corner radius floor and the cell-derived default from the mock
-    /// (`max(9, min(cw,ch)*0.10)` → 10.9 at the reference cell). `cornerRadiusDefault`
-    /// now also serves as `MonitorWidgetContainer`'s static fallback until the
-    /// board's authoritative per-render `MonitorBoardGeometry.cornerRadius` is
-    /// threaded down to widget views — see that type's doc comment.
+    /// Radius floor for the small inner elements inside a widget (Fleet's session
+    /// cards, chips). The OUTER panel radius is the board's fixed Apple
+    /// desktop-widget radius (`MonitorBoardGeometry.appleCornerRadius`), threaded
+    /// down per render.
     static let cornerRadiusMin: CGFloat = 9
-    static let cornerRadiusDefault: CGFloat = 10.9
+}
 
-    /// Concentric inner radius: an inset shape keeps constant visual gap to its
-    /// parent when its radius is `outer − inset` (Apple's concentric-corner rule).
-    static func concentricRadius(outer: CGFloat, inset: CGFloat) -> CGFloat {
-        max(0, outer - inset)
+// MARK: - Annotation chip (shared board-wide aesthetic)
+
+extension View {
+    /// A faint capsule "chip" (matte fill + hairline) that contains a small
+    /// annotation — a peak tag, status pill, legend, sensor readout, or floating
+    /// micro-label. The board-wide convention (established on CPU): little
+    /// annotations read as contained tags rather than loose text. Padding is
+    /// deliberately tiny so applying it doesn't reflow the surrounding layout.
+    func monitorChip(_ scale: MonitorDesign.TypeScale) -> some View {
+        self
+            .padding(.horizontal, scale.label * 0.5)
+            .padding(.vertical, scale.label * 0.24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(MonitorDesign.bg2.opacity(0.55))
+                    .overlay(Capsule(style: .continuous)
+                        .strokeBorder(MonitorDesign.hairlineHi.opacity(0.5), lineWidth: 1))
+            )
     }
 }

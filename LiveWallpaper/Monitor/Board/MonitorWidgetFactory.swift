@@ -21,9 +21,7 @@ enum MonitorWidgetFactory {
         case .network: return String(localized: "Network", comment: "Monitor widget name: Network instrument.")
         case .disk: return String(localized: "Disk", comment: "Monitor widget name: Disk I/O instrument.")
         case .power: return String(localized: "Power", comment: "Monitor widget name: Power/battery instrument.")
-        case .clock: return String(localized: "Clock", comment: "Monitor widget name: Clock instrument.")
         case .processes: return String(localized: "Processes", comment: "Monitor widget name: top-processes instrument.")
-        case .health: return String(localized: "Health", comment: "Monitor widget name: source-health instrument.")
         case .usage: return String(localized: "Usage", comment: "Monitor widget name: account-usage instrument.")
         case .fleet: return String(localized: "Fleet", comment: "Monitor widget name: AI agent fleet instrument.")
         case .aiEngine: return String(localized: "AI Engine", comment: "Monitor widget name: Apple Neural Engine instrument.")
@@ -40,9 +38,7 @@ enum MonitorWidgetFactory {
         case .network: return "network"
         case .disk: return "internaldrive"
         case .power: return "bolt.fill"
-        case .clock: return "clock"
         case .processes: return "list.bullet"
-        case .health: return "checklist"
         case .usage: return "gauge.with.needle"
         case .fleet: return "point.3.filled.connected.trianglepath.dotted"
         case .aiEngine: return "brain"
@@ -66,12 +62,8 @@ enum MonitorWidgetFactory {
             MonitorDiskWidgetView(context: context)
         case .power:
             MonitorPowerWidgetView(context: context)
-        case .clock:
-            MonitorClockWidgetView(context: context)
         case .processes:
             MonitorProcessesWidgetView(context: context)
-        case .health:
-            MonitorHealthWidgetView(context: context)
         case .usage:
             MonitorUsageWidgetView(context: context)
         case .fleet:
@@ -92,7 +84,7 @@ struct MonitorWidgetNameTile: View {
     let cellHeight: CGFloat
     /// Board-authoritative radius (`MonitorBoardGeometry.cornerRadius`) so the
     /// fill stays concentric with the selection border on any board size.
-    var cornerRadius: CGFloat = MonitorDesign.cornerRadiusDefault
+    var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
 
     private var scale: MonitorDesign.TypeScale { .init(cellHeight: cellHeight) }
 

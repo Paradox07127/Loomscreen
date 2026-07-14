@@ -39,8 +39,8 @@ struct WidgetDragModifier: ViewModifier {
                     // Convert the render-relative grab to a raw-relative grab so
                     // the model's free-origin math (raw rects) lines up.
                     let rawOffset = CGSize(
-                        width: offset.width + geometry.tileInset,
-                        height: offset.height + geometry.tileInset
+                        width: offset.width + geometry.tileInsetX,
+                        height: offset.height + geometry.tileInsetY
                     )
                     model.beginDrag(placement.id, grabOffset: rawOffset)
                 }
@@ -351,7 +351,7 @@ struct MonitorWidgetSettingsCard: View {
 
     /// Matches `MonitorWidgetSettingsPopover`'s fixed frame — the known width
     /// deterministic placement relies on.
-    static let cardWidth: CGFloat = 260
+    static let cardWidth: CGFloat = MonitorWidgetSettingsPopover.preferredWidth
 
     @State private var contentSize: CGSize?
 

@@ -74,14 +74,14 @@ final class MonitorSensorSampler {
         let result = IOServiceOpen(service, mach_task_self_, 0, &connection)
         if result == kIOReturnSuccess {
             available = true
-            Self.log.notice("🌡️ AppleSMC opened in-process — sensor reads available")
         } else {
             connection = 0
             // 0xe00002e2 = kIOReturnNotPermitted: the sandbox blocked the open. The
             // `iokit-user-client-class` entitlement (AppleSMCClient) is the relaxed
-            // path we try before falling back to a privileged helper.
+            // path that keeps the in-process read working without a helper. Kept as a
+            // one-shot error diagnostic for hardware/OS where the open still fails.
             let code = String(UInt32(bitPattern: result), radix: 16)
-            Self.log.notice("🌡️ AppleSMC open denied (0x\(code)) — needs the SMC entitlement or a helper")
+            Self.log.notice("🌡️ AppleSMC open denied (0x\(code)) — sensor rows will stay hidden")
         }
     }
 
@@ -115,7 +115,7 @@ final class MonitorSensorSampler {
         var input = SMCKeyData()
         input.key = Self.fourCharCode(key)
         input.data8 = 9  // kSMCGetKeyInfo
-        guard var info = call(input), info.result == 0, info.keyInfo.dataSize > 0 else { return nil }
+        guard let info = call(input), info.result == 0, info.keyInfo.dataSize > 0 else { return nil }
 
         input.keyInfo.dataSize = info.keyInfo.dataSize
         input.keyInfo.dataType = info.keyInfo.dataType

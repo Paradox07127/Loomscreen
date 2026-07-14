@@ -8,9 +8,7 @@ import SwiftUI
 /// the board's own matte instrument styling. Every kind gets a size picker (only
 /// the sizes `kind.allowedSizes` permits) and a remove button; kinds with tuning
 /// add their own controls:
-///   • Clock — a seconds toggle and a world-clock editor (up to 2 timezone
-///     identifiers), keys `showsSeconds` (.bool) and `worldClocks` (.stringList).
-///   • Processes — a row-count stepper (1…8, default 5), key `count` (.number).
+///   • Processes — a row-count stepper (1…12, default 5), key `count` (.number).
 ///   • CPU/GPU/Memory/Disk — a `historyWindow` trend picker plus each kind's
 ///     toggles (`showHeatmap`/`showComposition`/`showSensors`,
 ///     `showLoadBreakdown`, `showTopProcesses`) and the Memory/Disk `breakdown`.
@@ -18,32 +16,41 @@ import SwiftUI
 ///     Fleet's `fleetSort` / `fleetMaxRows`.
 ///
 /// Writes follow one rule: a value equal to the widget's default drops the key
-/// (matching `settingWorldClocks`' empty-list habit) so `options` stays minimal.
+/// so `options` stays minimal.
 ///
 /// Edits are applied through `onUpdate`, which the inspector persists via
 /// `ScreenManager`. `MonitorWidgetDraft` holds the pure option encode/decode so
 /// the round-trips are unit-testable without any view.
 struct MonitorWidgetSettingsPopover: View {
+    /// One fixed width for every surface that hosts this popover (inspector
+    /// popover, board settings card) — segmented pickers need the room, and the
+    /// board card's deterministic placement needs the number up front.
+    static let preferredWidth: CGFloat = 360
+
     let placement: MonitorWidgetPlacement
     let onUpdate: (MonitorWidgetPlacement) -> Void
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Flat, single-surface layout (macOS Settings detail pane): the popover's
+        // own material is the only background — no nested cards — so groups read as
+        // clean sections separated by spacing + one divider, not stacked panes.
+        VStack(alignment: .leading, spacing: 18) {
             header
 
             if placement.kind.allowedSizes.count > 1 {
-                SettingsSection { sizePicker }
+                sizePicker
             }
 
             if hasKindOptions {
-                SettingsSection { kindOptions }
+                kindOptions
             }
 
+            Divider()
             removeButton
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(20)
+        .frame(width: Self.preferredWidth)
     }
 
     /// Apple-style header: the instrument's glyph in a Liquid-Glass chip, its name,
@@ -83,7 +90,7 @@ struct MonitorWidgetSettingsPopover: View {
     /// options card is drawn at all — no empty glass card for optionless kinds).
     private var hasKindOptions: Bool {
         switch placement.kind {
-        case .clock, .processes, .cpu, .gpu, .memory, .disk, .usage, .fleet: return true
+        case .processes, .cpu, .gpu, .memory, .disk, .usage, .fleet: return true
         default: return false
         }
     }
@@ -122,8 +129,6 @@ struct MonitorWidgetSettingsPopover: View {
     @ViewBuilder
     private var kindOptions: some View {
         switch placement.kind {
-        case .clock:
-            clockOptions
         case .processes:
             processesOptions
         case .cpu:
@@ -143,76 +148,10 @@ struct MonitorWidgetSettingsPopover: View {
         }
     }
 
-    // MARK: Clock
-
-    private var clockOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { MonitorWidgetDraft.showsSeconds(placement) },
-                set: { onUpdate(MonitorWidgetDraft.settingShowsSeconds($0, on: placement)) }
-            )) {
-                Text("Show seconds")
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-
-            worldClocksEditor
-        }
-    }
-
-    @ViewBuilder
-    private var worldClocksEditor: some View {
-        let clocks = MonitorWidgetDraft.worldClocks(placement)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("World clocks")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(verbatim: "\(clocks.count)/\(MonitorWidgetDraft.maxWorldClocks)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if placement.size == .small {
-                Text("World clocks show on the medium size only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            ForEach(Array(clocks.enumerated()), id: \.offset) { index, identifier in
-                HStack(spacing: 6) {
-                    Text(verbatim: Self.cityLabel(identifier))
-                        .font(.callout)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Button {
-                        onUpdate(MonitorWidgetDraft.removingWorldClock(at: index, on: placement))
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Remove world clock"))
-                }
-            }
-
-            if clocks.count < MonitorWidgetDraft.maxWorldClocks {
-                TimeZonePicker(
-                    excluding: Set(clocks),
-                    onPick: { identifier in
-                        onUpdate(MonitorWidgetDraft.addingWorldClock(identifier, on: placement))
-                    }
-                )
-            }
-        }
-    }
-
     // MARK: Processes
 
     private var processesOptions: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 14) {
             Stepper(
                 value: Binding(
                     get: { MonitorWidgetDraft.processCount(placement) },
@@ -235,54 +174,69 @@ struct MonitorWidgetSettingsPopover: View {
     // MARK: CPU
 
     private var cpuOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             historyWindowPicker(defaultWindow: MonitorCPUDraft.defaultHistoryWindow(for: placement.size))
-            Toggle(isOn: boolBinding(key: MonitorCPUDraft.showHeatmapKey, default: true)) {
-                Text("Show heatmap")
+            VStack(spacing: 8) {
+                toggleRow("Show heatmap", isOn: boolBinding(key: MonitorCPUDraft.showHeatmapKey, default: true))
+                toggleRow("Show composition", isOn: boolBinding(key: MonitorCPUDraft.showCompositionKey, default: true))
+                toggleRow("Show sensors", isOn: boolBinding(key: MonitorCPUDraft.showSensorsKey, default: true))
+                if placement.size == .small {
+                    toggleRow("Show history curve", isOn: boolBinding(key: MonitorWidgetDraft.showTrendKey, default: true))
+                }
             }
-            .toggleStyle(.switch).controlSize(.small)
-            Toggle(isOn: boolBinding(key: MonitorCPUDraft.showCompositionKey, default: true)) {
-                Text("Show composition")
-            }
-            .toggleStyle(.switch).controlSize(.small)
-            Toggle(isOn: boolBinding(key: MonitorCPUDraft.showSensorsKey, default: true)) {
-                Text("Show sensors")
-            }
-            .toggleStyle(.switch).controlSize(.small)
         }
     }
 
     // MARK: GPU
 
     private var gpuOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             historyWindowPicker(defaultWindow: 60)
-            Toggle(isOn: boolBinding(key: MonitorWidgetDraft.showLoadBreakdownKey, default: true)) {
-                Text("Show load breakdown")
+            gpuSamplingPicker
+            VStack(spacing: 8) {
+                toggleRow("Show load breakdown", isOn: boolBinding(key: MonitorWidgetDraft.showLoadBreakdownKey, default: true))
+                toggleRow("Show sensors", isOn: boolBinding(key: MonitorWidgetDraft.showSensorsKey, default: true))
+                if placement.size == .small {
+                    toggleRow("Show history curve", isOn: boolBinding(key: MonitorWidgetDraft.showTrendKey, default: true))
+                }
             }
-            .toggleStyle(.switch).controlSize(.small)
-            Toggle(isOn: boolBinding(key: MonitorWidgetDraft.showSensorsKey, default: true)) {
-                Text("Show sensors")
+        }
+    }
+
+    /// GPU sampling period — the IOAccelerator walk's cadence. Default 6s.
+    private var gpuSamplingPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Sampling interval")
+                .font(.subheadline.weight(.medium))
+            Picker("", selection: Binding(
+                get: { MonitorWidgetDraft.gpuSampleSeconds(placement) ?? 6 },
+                set: { onUpdate(MonitorWidgetDraft.settingGPUSampleSeconds($0, on: placement)) }
+            )) {
+                ForEach(MonitorWidgetDraft.gpuSampleChoices, id: \.self) { seconds in
+                    Text(verbatim: "\(Int(seconds))s").tag(seconds)
+                }
             }
-            .toggleStyle(.switch).controlSize(.small)
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(Text("GPU sampling interval"))
         }
     }
 
     // MARK: Memory
 
     private var memoryOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             historyWindowPicker(defaultWindow: placement.size == .large ? 120 : 60)
             breakdownPicker
-            Toggle(isOn: boolBinding(key: MonitorWidgetDraft.showTopProcessesKey, default: true)) {
-                Text("Show top processes")
-            }
-            .toggleStyle(.switch).controlSize(.small)
-            if placement.size != .large {
-                Text("Top processes show on the large size only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                toggleRow("Show top processes", isOn: boolBinding(key: MonitorWidgetDraft.showTopProcessesKey, default: true))
+                if placement.size != .large {
+                    Text("Top processes show on the large size only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -290,16 +244,25 @@ struct MonitorWidgetSettingsPopover: View {
     // MARK: Disk
 
     private var diskOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             historyWindowPicker(defaultWindow: 120)
             breakdownPicker
+            VStack(alignment: .leading, spacing: 4) {
+                toggleRow("Show top processes", isOn: boolBinding(key: MonitorWidgetDraft.showTopProcessesKey, default: true))
+                if placement.size != .large {
+                    Text("Top processes show on the large size only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
     // MARK: Usage
 
     private var usageOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             providerPicker(key: MonitorWidgetDraft.usageProviderKey)
             primaryMetricPicker
         }
@@ -309,7 +272,7 @@ struct MonitorWidgetSettingsPopover: View {
 
     private var fleetOptions: some View {
         let fallback = placement.size == .large ? 6 : 3
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 14) {
             providerPicker(key: MonitorFleetWidgetView.Option.provider)
 
             Picker(selection: Binding(
@@ -439,6 +402,19 @@ struct MonitorWidgetSettingsPopover: View {
         )
     }
 
+    /// A clean full-width switch row: label pinned left, switch pinned to the
+    /// trailing edge (macOS Settings style) instead of the two clustered together.
+    private func toggleRow(_ title: LocalizedStringKey, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 8) {
+            Text(title).font(.subheadline)
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+    }
+
     // MARK: - Labels
 
     static func sizeLabel(_ size: MonitorWidgetSize) -> String {
@@ -449,86 +425,6 @@ struct MonitorWidgetSettingsPopover: View {
         }
     }
 
-    /// "America/New_York" → "New York" for display; identifiers are stored raw.
-    static func cityLabel(_ identifier: String) -> String {
-        (identifier.split(separator: "/").last.map(String.init) ?? identifier)
-            .replacingOccurrences(of: "_", with: " ")
-    }
-}
-
-// MARK: - Grouped glass section
-
-/// An Apple-style grouped card: its rows sit on a Liquid-Glass surface (macOS 26+)
-/// that degrades to a `.regularMaterial` fill on earlier systems and an opaque fill
-/// under Reduce Transparency — all handled by `adaptiveGlassSurface`.
-private struct SettingsSection<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            content()
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .adaptiveGlassSurface(.roundedRectangle(12))
-    }
-}
-
-// MARK: - Timezone picker
-
-/// A searchable menu over `TimeZone.knownTimeZoneIdentifiers`, minus already
-/// chosen zones. Kept small: a text field filters, a scrolling list picks.
-private struct TimeZonePicker: View {
-    let excluding: Set<String>
-    let onPick: (String) -> Void
-
-    @State private var query = ""
-    @State private var isPresented = false
-
-    var body: some View {
-        Button {
-            isPresented = true
-        } label: {
-            Label("Add world clock", systemImage: "plus.circle")
-        }
-        .controlSize(.small)
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Search city…", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(matches, id: \.self) { identifier in
-                            Button {
-                                onPick(identifier)
-                                isPresented = false
-                                query = ""
-                            } label: {
-                                Text(verbatim: MonitorWidgetSettingsPopover.cityLabel(identifier))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                    .padding(.vertical, 3)
-                                    .padding(.horizontal, 4)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .frame(width: 220, height: 220)
-            }
-            .padding(10)
-        }
-    }
-
-    private var matches: [String] {
-        let all = TimeZone.knownTimeZoneIdentifiers.filter { !excluding.contains($0) }
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return all }
-        let needle = trimmed.lowercased()
-        return all.filter { $0.lowercased().contains(needle) }
-    }
 }
 
 // MARK: - Pure draft mutations (unit-tested)
@@ -536,62 +432,45 @@ private struct TimeZonePicker: View {
 /// Pure encode/decode of a placement's option bag for the settings popover. Kept
 /// free of any view type so the round-trips are unit-testable. Each mutator
 /// returns a NEW placement with the option written under the key the widget
-/// reads (verified against `MonitorClockWidgetView` / `MonitorProcessesWidgetView`).
+/// reads (verified against `MonitorProcessesWidgetView`).
 enum MonitorWidgetDraft {
-    static let showsSecondsKey = "showsSeconds"
-    static let worldClocksKey = "worldClocks"
     static let countKey = "count"
 
-    static let maxWorldClocks = 2
-    static let processCountRange = 1...8
+    static let processCountRange = 1...12
     static let defaultProcessCount = 5
 
-    // MARK: Clock · seconds
+    // MARK: GPU · sampling period
 
-    static func showsSeconds(_ placement: MonitorWidgetPlacement) -> Bool {
-        placement.options[showsSecondsKey]?.boolValue ?? false
+    static let gpuSampleSecondsKey = "gpuSampleSeconds"
+    static let gpuSampleChoices: [Double] = [2, 6, 10]
+
+    static func gpuSampleSeconds(_ placement: MonitorWidgetPlacement) -> Double? {
+        guard let raw = placement.options[gpuSampleSecondsKey]?.numberValue else { return nil }
+        return gpuSampleChoices.contains(raw) ? raw : nil
     }
 
-    static func settingShowsSeconds(
-        _ value: Bool, on placement: MonitorWidgetPlacement
+    /// Default GPU sampling period (seconds) when a GPU widget doesn't override it.
+    static let gpuDefaultSeconds: Double = 6
+
+    /// Board-level read for the runtime lease: the fastest period any GPU
+    /// placement requests. A GPU widget at its default counts as `gpuDefaultSeconds`
+    /// (NOT nil), so the cross-lease MIN can't let another screen's slower explicit
+    /// choice override a default screen's faster cadence. nil only when NO GPU
+    /// widget is placed.
+    static func gpuSampleSeconds(in widgets: [MonitorWidgetPlacement]) -> Double? {
+        widgets.filter { $0.kind == .gpu }
+            .map { gpuSampleSeconds($0) ?? gpuDefaultSeconds }
+            .min()
+    }
+
+    static func settingGPUSampleSeconds(
+        _ value: Double, on placement: MonitorWidgetPlacement
     ) -> MonitorWidgetPlacement {
         var next = placement
-        next.options[showsSecondsKey] = .bool(value)
-        return next
-    }
-
-    // MARK: Clock · world clocks
-
-    static func worldClocks(_ placement: MonitorWidgetPlacement) -> [String] {
-        Array((placement.options[worldClocksKey]?.stringListValue ?? []).prefix(maxWorldClocks))
-    }
-
-    static func addingWorldClock(
-        _ identifier: String, on placement: MonitorWidgetPlacement
-    ) -> MonitorWidgetPlacement {
-        var list = worldClocks(placement)
-        guard !list.contains(identifier), list.count < maxWorldClocks else { return placement }
-        list.append(identifier)
-        return settingWorldClocks(list, on: placement)
-    }
-
-    static func removingWorldClock(
-        at index: Int, on placement: MonitorWidgetPlacement
-    ) -> MonitorWidgetPlacement {
-        var list = worldClocks(placement)
-        guard list.indices.contains(index) else { return placement }
-        list.remove(at: index)
-        return settingWorldClocks(list, on: placement)
-    }
-
-    static func settingWorldClocks(
-        _ list: [String], on placement: MonitorWidgetPlacement
-    ) -> MonitorWidgetPlacement {
-        var next = placement
-        if list.isEmpty {
-            next.options.removeValue(forKey: worldClocksKey)
+        if value == 6 || !gpuSampleChoices.contains(value) {
+            next.options.removeValue(forKey: gpuSampleSecondsKey)   // default drops the key
         } else {
-            next.options[worldClocksKey] = .stringList(Array(list.prefix(maxWorldClocks)))
+            next.options[gpuSampleSecondsKey] = .number(value)
         }
         return next
     }
@@ -623,6 +502,8 @@ enum MonitorWidgetDraft {
     static let showLoadBreakdownKey = "showLoadBreakdown"
     static let showSensorsKey = "showSensors"
     static let showTopProcessesKey = "showTopProcesses"
+    /// CPU/GPU S-size history sparkline visibility (default true).
+    static let showTrendKey = "showTrend"
     static let breakdownKey = "breakdown"
     static let usageProviderKey = "provider"
     static let primaryMetricKey = "primaryMetric"

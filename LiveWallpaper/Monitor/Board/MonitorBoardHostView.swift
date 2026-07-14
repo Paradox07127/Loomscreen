@@ -63,7 +63,8 @@ final class MonitorBoardHostView: NSView {
         configuration: MonitorBoardConfiguration,
         agentFleetEnabled: Bool,
         nameOnlyTiles: Bool = false,
-        topInsetFraction: CGFloat = 0
+        topInsetFraction: CGFloat = 0,
+        referenceWidth: CGFloat = 0
     ) {
         self.allowMouseInteraction = configuration.mouseInteractionEnabled
         self.nameOnlyTiles = nameOnlyTiles
@@ -83,6 +84,7 @@ final class MonitorBoardHostView: NSView {
         super.init(frame: frameRect)
 
         interactionModel.topInsetFraction = topInsetFraction
+        interactionModel.referenceWidth = referenceWidth
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -150,6 +152,17 @@ final class MonitorBoardHostView: NSView {
             reduceMotion: Self.effectiveReduceMotion(configuration),
             nameOnlyTiles: nameOnlyTiles
         )
+    }
+
+    /// Repoint the real-display width the board's point scale derives from
+    /// (inspector preview after a screen switch). Reflows so Apple-size
+    /// footprints re-fit at the new scale.
+    func setReferenceWidth(_ width: CGFloat) {
+        guard interactionModel.referenceWidth != width else { return }
+        interactionModel.referenceWidth = width
+        if interactionModel.boardSize != .zero {
+            interactionModel.reflow(boardSize: interactionModel.boardSize)
+        }
     }
 
     // MARK: - Editing

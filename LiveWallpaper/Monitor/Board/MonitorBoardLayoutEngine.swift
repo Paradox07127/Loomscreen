@@ -11,67 +11,65 @@ import LiveWallpaperCore
 // SwiftUI/AppKit layers call in but hold no geometry of their own.
 //
 // Coordinate model (cell-exact):
-//   • Normalized (x,y) ∈ 0…1 — the persisted top-left corner. It lands on exact
-//     cell boundaries (x = cellIndex/10); NO margin or gutter is baked in, so a
-//     full 10-column row ends exactly at x = 1.
+//   • Normalized (x,y) ∈ 0…1 — the persisted top-left corner. NO margin or
+//     gutter is baked in.
 //   • Board pixels — normalized × board size. A widget's pixel footprint is a
-//     pure multiple of the (margin-free, gutter-free) cell size.
+//     pure multiple of the (margin-free, gutter-free) cell pitch.
 //   • Visual gutters are the RENDERER's job: each tile's pixel rect is inset by
-//     `tileInset` on all sides at draw time. Snap candidates and overlap tests
+//     `tileInsetX/Y` per axis at draw time. Snap candidates and overlap tests
 //     run on the RAW (pre-inset) cell rects, so tiles pack edge-to-edge in
 //     stored coordinates while still showing a uniform gap on screen.
 //
 // A widget's normalized origin survives display changes; out-of-bounds
 // placements clamp back on rather than being dropped (mock `relayoutAll`).
 
-/// Cell geometry for one board size under the cell-exact model: a plain
-/// 10-column grid of SQUARE cells — `cellHeight == cellWidth == W / columns` —
-/// so S=1×1 and L=2×2 are exact squares and M=2×1 an exact 2:1 at any board
-/// aspect. `rows` is a reference count only (`max(floor(H / cellHeight), 1)`);
-/// placements are free-form, so the board may show leftover space below the
-/// last row.
+/// Cell geometry for one board size under the cell-exact model, sized to
+/// Apple's official macOS widget frames (HIG Widgets → Specifications):
+/// S 170×170, M 364×170, L 364×376 pt. Decomposed into a fixed-point cell
+/// PITCH + per-axis render inset so all three frames come out exact:
+/// visible = span×pitch − 2×inset ⇒ pitch 194/206 with insets 12/18 gives
+/// 170/364 wide and 170/376 tall, with 24 pt horizontal / 36 pt vertical
+/// gaps between flush neighbours — the same absolute size on every display,
+/// like real desktop widgets. `columns`/`rows` are derived reference counts;
+/// placements are free-form.
 struct MonitorBoardGeometry: Equatable {
     let boardSize: CGSize
     let columns: Int
     let rows: Int
+    /// Cell PITCH (gutter included) — a widget's RAW footprint is span × pitch.
     let cellWidth: CGFloat
     let cellHeight: CGFloat
-    /// Per-tile visual inset applied at render time to create the gutter. Also
-    /// the minimum on-screen gap between neighbours (each side insets, so the
-    /// visible gap between two touching tiles is `2 × tileInset`).
-    let tileInset: CGFloat
+    /// Per-tile render inset creating the gutter; per axis because Apple's
+    /// frame decomposition yields different h/v gaps (24 pt vs 36 pt).
+    let tileInsetX: CGFloat
+    let tileInsetY: CGFloat
     let cornerRadius: CGFloat
     /// Normalized top forbidden zone in pixels (menu-bar avoidance): the least y
     /// a widget origin may take. 0 on hosts that pass no `topInsetFraction`.
     let topInset: CGFloat
 
-    /// Visual gutter token from the mock: `clamp(12px, 0.9vw, 20px)`, `vw` = 1%
-    /// board width. In the cell-exact model this is the *visible* gap between
-    /// two edge-sharing tiles, so each tile insets by half of it.
-    static func visualGutter(forBoardWidth width: CGFloat) -> CGFloat {
-        let fluid = 0.009 * width
-        return min(max(fluid, 12), 20)
-    }
+    static let appleCellPitch = CGSize(width: 194, height: 206)
+    static let appleTileInset = CGSize(width: 12, height: 18)
+    /// macOS desktop-widget corner radius.
+    static let appleCornerRadius: CGFloat = 16
 
-    init(boardSize: CGSize, columns: Int = 10, topInsetFraction: CGFloat = 0) {
-        let cols = max(columns, 1)
-        let cw = boardSize.width / CGFloat(cols)
-        // Square cells: height tracks width, so a cell is a true square at any
-        // board aspect (S/L stay square, M stays 2:1). `rows` is a reference
-        // count only. width ≤ 0 degenerates to a single row.
-        let ch = cw
-        let rowCount = ch > 0
-            ? max(Int((boardSize.height / ch).rounded(.down)), 1)
-            : 1
+    init(boardSize: CGSize, referenceWidth: CGFloat = 0, topInsetFraction: CGFloat = 0) {
+        // Point scale: 1 on the wallpaper (the board IS the screen). The
+        // inspector preview passes the real display's width so its miniature
+        // board renders Apple-size widgets to scale (WYSIWYG placements).
+        let reference = referenceWidth > 0 ? referenceWidth : boardSize.width
+        let s = reference > 0 ? boardSize.width / reference : 1
 
+        let cw = Self.appleCellPitch.width * s
+        let ch = Self.appleCellPitch.height * s
         self.boardSize = boardSize
-        self.columns = cols
-        self.rows = rowCount
+        self.columns = cw > 0 ? max(Int((boardSize.width / cw).rounded(.down)), 1) : 1
+        self.rows = ch > 0 ? max(Int((boardSize.height / ch).rounded(.down)), 1) : 1
         self.cellWidth = max(cw, 0)
         self.cellHeight = max(ch, 0)
-        self.tileInset = MonitorBoardGeometry.visualGutter(forBoardWidth: boardSize.width) / 2
-        // Card radius = 7% of the smaller cell dimension, clamped to 6...12pt.
-        self.cornerRadius = min(max(min(self.cellWidth, self.cellHeight) * 0.07, 6), 12)
+        self.tileInsetX = Self.appleTileInset.width * s
+        self.tileInsetY = Self.appleTileInset.height * s
+        self.cornerRadius = max(Self.appleCornerRadius * s, 1)
         // Top forbidden zone (menu-bar avoidance), in board pixels.
         self.topInset = max(0, min(boardSize.height, boardSize.height * topInsetFraction))
     }
@@ -80,7 +78,7 @@ struct MonitorBoardGeometry: Equatable {
         boardSize.width <= 0 || boardSize.height <= 0 || cellWidth <= 0 || cellHeight <= 0
     }
 
-    /// RAW pixel size of a widget footprint: a pure multiple of the cell size,
+    /// RAW pixel size of a widget footprint: a pure multiple of the cell pitch,
     /// with no gutter subtracted (the inset handles the visible gap).
     func pixelSize(columns cols: Int, rows spanRows: Int) -> CGSize {
         CGSize(width: CGFloat(cols) * cellWidth, height: CGFloat(spanRows) * cellHeight)
@@ -91,11 +89,12 @@ struct MonitorBoardGeometry: Equatable {
         return pixelSize(columns: cells.columns, rows: cells.rows)
     }
 
-    /// The rendered rect for a raw cell rect: inset on all sides so neighbours
-    /// that share an edge show a uniform gutter. Never inverts a tiny rect.
+    /// The rendered rect for a raw cell rect: inset per axis so neighbours that
+    /// share an edge show the axis's gutter. Never inverts a tiny rect.
     func renderRect(forRawRect raw: CGRect) -> CGRect {
-        let inset = min(tileInset, min(raw.width, raw.height) / 2)
-        return raw.insetBy(dx: inset, dy: inset)
+        let dx = min(tileInsetX, raw.width / 2)
+        let dy = min(tileInsetY, raw.height / 2)
+        return raw.insetBy(dx: dx, dy: dy)
     }
 
     /// Legal top-left range so the full RAW footprint stays on-board (edges may

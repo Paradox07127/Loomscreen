@@ -40,6 +40,12 @@ struct MonitorHistorySnapshot: Sendable, Equatable {
     /// Pressure level aligned with `memUsedFraction` — the memory curve is
     /// colored by discrete pressure segments, not by used%.
     var memPressure: [String] = []
+    /// Per-category fractions (of total RAM) aligned with `memUsedFraction`, so
+    /// the Memory history can stack app/wired/compressed as colored bands. 0
+    /// where a tick carried no breakdown.
+    var memAppFraction: [Double] = []
+    var memWiredFraction: [Double] = []
+    var memCompressedFraction: [Double] = []
     /// GPU keeps its own timeline: it samples ~6s, so aligning it with the
     /// 1Hz series would fabricate readings between real samples.
     var gpuSampleTimes: [Double] = []
@@ -119,6 +125,11 @@ final class MonitorHistoryStore: ObservableObject {
             ? Double(sys.memUsedBytes) / Double(sys.memTotalBytes) : 0
         next.memUsedFraction.append(memFraction)
         next.memPressure.append(sys.memPressure)
+        let total = Double(sys.memTotalBytes)
+        let breakdown = sys.memBreakdown
+        next.memAppFraction.append(total > 0 ? Double(breakdown?.appBytes ?? 0) / total : 0)
+        next.memWiredFraction.append(total > 0 ? Double(breakdown?.wiredBytes ?? 0) / total : 0)
+        next.memCompressedFraction.append(total > 0 ? Double(breakdown?.compressedBytes ?? 0) / total : 0)
         next.netRx.append(sys.netRxBytesPerSec)
         next.netTx.append(sys.netTxBytesPerSec)
         next.diskRead.append(sys.diskReadBytesPerSec)
@@ -145,6 +156,9 @@ final class MonitorHistoryStore: ObservableObject {
         trim(&next.cpuSystem)
         trim(&next.memUsedFraction)
         trim(&next.memPressure)
+        trim(&next.memAppFraction)
+        trim(&next.memWiredFraction)
+        trim(&next.memCompressedFraction)
         trim(&next.netRx)
         trim(&next.netTx)
         trim(&next.diskRead)

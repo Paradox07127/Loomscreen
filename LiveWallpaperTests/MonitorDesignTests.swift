@@ -90,15 +90,6 @@ struct MonitorDesignTests {
         #expect(colorEq(MonitorDesign.loadBandColor(0.95), MonitorDesign.signalCoral))
     }
 
-    // MARK: - Concentric radius
-
-    @Test("Concentric radius = outer − inset, floored at 0")
-    func concentric() {
-        approx(MonitorDesign.concentricRadius(outer: 10.9, inset: 10), 0.9, 1e-9, "normal")
-        approx(MonitorDesign.concentricRadius(outer: 5, inset: 10), 0, 1e-9, "clamped")
-        approx(MonitorDesign.concentricRadius(outer: 20, inset: 6), 14, 1e-9, "wide")
-    }
-
     // MARK: - Type scale clamps (SPEC §3.0)
 
     @Test("Type scale honours the mock's clamps")

@@ -41,22 +41,51 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         return items
     }
 
-    // MARK: - Geometry basics
+    // MARK: - Geometry basics (fixed Apple widget metrics)
 
-    func testVisualGutterTokenClamp() {
-        XCTAssertEqual(MonitorBoardGeometry.visualGutter(forBoardWidth: 800), 12, accuracy: 0.001)
-        XCTAssertEqual(MonitorBoardGeometry.visualGutter(forBoardWidth: 1600), 14.4, accuracy: 0.001)
-        XCTAssertEqual(MonitorBoardGeometry.visualGutter(forBoardWidth: 4000), 20, accuracy: 0.001)
+    /// Cell pitch and insets are fixed points (Apple's macOS widget frames
+    /// decomposed): pitch 194×206, insets 12/18, on EVERY board width.
+    func testFixedApplePitchIndependentOfBoardWidth() {
+        let g = makeGeometry()
+        XCTAssertEqual(g.cellWidth, 194, accuracy: 0.001)
+        XCTAssertEqual(g.cellHeight, 206, accuracy: 0.001)
+        XCTAssertEqual(g.tileInsetX, 12, accuracy: 0.001)
+        XCTAssertEqual(g.tileInsetY, 18, accuracy: 0.001)
+        XCTAssertEqual(g.columns, 8) // floor(1600/194)
+
+        let huge = MonitorBoardGeometry(boardSize: CGSize(width: 3000, height: 1875))
+        XCTAssertEqual(huge.cellWidth, 194, accuracy: 0.001)
+        XCTAssertEqual(huge.cellHeight, 206, accuracy: 0.001)
+        XCTAssertEqual(huge.columns, 15)
     }
 
-    func testCellIsBoardWidthOverTen() {
+    /// The visible (rendered) frames come out at Apple's official macOS widget
+    /// sizes exactly: S 170×170, M 364×170, L 364×376 pt.
+    func testRenderedFramesMatchAppleWidgetSizes() {
         let g = makeGeometry()
-        XCTAssertEqual(g.columns, 10)
-        XCTAssertEqual(g.cellWidth, boardSize.width / 10, accuracy: 0.001)
-        // Ten cells span the full board width, edge to edge (cell-exact).
-        XCTAssertEqual(CGFloat(g.columns) * g.cellWidth, boardSize.width, accuracy: 0.001)
-        // Tile inset is half the visual gutter.
-        XCTAssertEqual(g.tileInset, MonitorBoardGeometry.visualGutter(forBoardWidth: boardSize.width) / 2, accuracy: 0.001)
+        let s = g.renderRect(forRawRect: CGRect(origin: .zero, size: g.pixelSize(for: .memory, size: .small)))
+        XCTAssertEqual(s.width, 170, accuracy: 0.001)
+        XCTAssertEqual(s.height, 170, accuracy: 0.001)
+        let m = g.renderRect(forRawRect: CGRect(origin: .zero, size: g.pixelSize(for: .cpu, size: .medium)))
+        XCTAssertEqual(m.width, 364, accuracy: 0.001)
+        XCTAssertEqual(m.height, 170, accuracy: 0.001)
+        let l = g.renderRect(forRawRect: CGRect(origin: .zero, size: g.pixelSize(for: .cpu, size: .large)))
+        XCTAssertEqual(l.width, 364, accuracy: 0.001)
+        XCTAssertEqual(l.height, 376, accuracy: 0.001)
+    }
+
+    /// The inspector preview passes the real display's width; every metric
+    /// scales by boardWidth/referenceWidth so the miniature stays WYSIWYG.
+    func testReferenceWidthScalesMetricsForPreview() {
+        let g = MonitorBoardGeometry(
+            boardSize: CGSize(width: 400, height: 250), referenceWidth: 1600
+        ) // s = 0.25
+        XCTAssertEqual(g.cellWidth, 194 * 0.25, accuracy: 0.001)
+        XCTAssertEqual(g.cellHeight, 206 * 0.25, accuracy: 0.001)
+        XCTAssertEqual(g.tileInsetX, 12 * 0.25, accuracy: 0.001)
+        XCTAssertEqual(g.tileInsetY, 18 * 0.25, accuracy: 0.001)
+        // Same column capacity as the display it represents.
+        XCTAssertEqual(g.columns, MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000)).columns)
     }
 
     func testFootprintIsPureCellMultiple() {
@@ -65,30 +94,27 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         let medium = g.pixelSize(for: .cpu, size: .medium) // 2×1
         XCTAssertEqual(medium.width, 2 * g.cellWidth, accuracy: 0.001)
         XCTAssertEqual(medium.height, 1 * g.cellHeight, accuracy: 0.001)
-        let small = g.pixelSize(for: .clock, size: .small) // 1×1
+        let small = g.pixelSize(for: .memory, size: .small) // 1×1
         XCTAssertEqual(small.width, 1 * g.cellWidth, accuracy: 0.001)
         XCTAssertEqual(small.height, 1 * g.cellHeight, accuracy: 0.001)
-    }
-
-    func testFullTenColumnRowEndsAtBoardEdge() {
-        let g = makeGeometry()
-        // Five medium (2-col) widgets packed flush fill the row to the edge.
-        let m = g.pixelSize(for: .cpu, size: .medium)
-        XCTAssertEqual(5 * m.width, boardSize.width, accuracy: 0.001)
     }
 
     func testRenderRectInsetsForGutter() {
         let g = makeGeometry()
         let raw = CGRect(x: 100, y: 100, width: 400, height: 200)
         let rendered = g.renderRect(forRawRect: raw)
-        XCTAssertEqual(rendered.minX, raw.minX + g.tileInset, accuracy: 0.001)
-        XCTAssertEqual(rendered.minY, raw.minY + g.tileInset, accuracy: 0.001)
-        XCTAssertEqual(rendered.width, raw.width - 2 * g.tileInset, accuracy: 0.001)
-        // Two edge-sharing raw tiles show a full visual gutter between renders.
+        XCTAssertEqual(rendered.minX, raw.minX + g.tileInsetX, accuracy: 0.001)
+        XCTAssertEqual(rendered.minY, raw.minY + g.tileInsetY, accuracy: 0.001)
+        XCTAssertEqual(rendered.width, raw.width - 2 * g.tileInsetX, accuracy: 0.001)
+        XCTAssertEqual(rendered.height, raw.height - 2 * g.tileInsetY, accuracy: 0.001)
+        // Two edge-sharing raw tiles show the axis's full visual gutter between
+        // renders: 24 pt horizontally, 36 pt vertically (Apple decomposition).
         let rawRight = CGRect(x: raw.maxX, y: 100, width: 400, height: 200)
         let renderedRight = g.renderRect(forRawRect: rawRight)
-        XCTAssertEqual(renderedRight.minX - rendered.maxX, 2 * g.tileInset, accuracy: 0.001)
-        XCTAssertEqual(2 * g.tileInset, MonitorBoardGeometry.visualGutter(forBoardWidth: boardSize.width), accuracy: 0.001)
+        XCTAssertEqual(renderedRight.minX - rendered.maxX, 24, accuracy: 0.001)
+        let rawBelow = CGRect(x: 100, y: raw.maxY, width: 400, height: 200)
+        let renderedBelow = g.renderRect(forRawRect: rawBelow)
+        XCTAssertEqual(renderedBelow.minY - rendered.maxY, 36, accuracy: 0.001)
     }
 
     func testDegenerateBoardFlagged() {
@@ -96,70 +122,37 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         XCTAssertFalse(makeGeometry().isDegenerate)
     }
 
-    // MARK: - Square cells + reference row count (bug fix #5: cell height tracks
-    // width so S/L are exact squares and M an exact 2:1 at ANY board aspect,
-    // replacing the old aspect-derived row height that skewed cells off 16:10)
+    // MARK: - Reference row/column counts at fixed pitch
 
-    /// `cellHeight == cellWidth == W / 10`; `rows = max(floor(H / cellHeight), 1)`
-    /// is a reference count only. Hand-derived (columns = 10):
-    ///   16:10 (1600×1000): cw = ch = 160, rows = floor(1000/160) = 6
-    ///   16:9  (1600×900):  cw = ch = 160, rows = floor(900/160)  = 5
-    ///   3:1   (1200×400):  cw = ch = 120, rows = floor(400/120)  = 3
-    ///   9:16  (900×1600):  cw = ch = 90,  rows = floor(1600/90)  = 17
-    func testSquareCellsAndReferenceRowCount() {
+    /// `rows = max(floor(H / 206), 1)`, `columns = max(floor(W / 194), 1)` —
+    /// reference counts derived from the fixed pitch, per board size.
+    func testReferenceRowAndColumnCounts() {
         let g1610 = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000))
-        XCTAssertEqual(g1610.cellWidth, 160, accuracy: 0.001)
-        XCTAssertEqual(g1610.cellHeight, 160, accuracy: 0.001) // square, == cellWidth
-        XCTAssertEqual(g1610.rows, 6)
+        XCTAssertEqual(g1610.columns, 8)  // floor(1600/194)
+        XCTAssertEqual(g1610.rows, 4)     // floor(1000/206)
 
         let g169 = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 900))
-        XCTAssertEqual(g169.cellHeight, 160, accuracy: 0.001) // square regardless of aspect
-        XCTAssertEqual(g169.rows, 5)
+        XCTAssertEqual(g169.rows, 4)      // floor(900/206)
 
         let gWide = MonitorBoardGeometry(boardSize: CGSize(width: 1200, height: 400))
-        XCTAssertEqual(gWide.cellWidth, 120, accuracy: 0.001)
-        XCTAssertEqual(gWide.cellHeight, 120, accuracy: 0.001)
-        XCTAssertEqual(gWide.rows, 3)
+        XCTAssertEqual(gWide.columns, 6)
+        XCTAssertEqual(gWide.rows, 1)
 
         let gPortrait = MonitorBoardGeometry(boardSize: CGSize(width: 900, height: 1600))
-        XCTAssertEqual(gPortrait.cellWidth, 90, accuracy: 0.001)
-        XCTAssertEqual(gPortrait.cellHeight, 90, accuracy: 0.001)
-        XCTAssertEqual(gPortrait.rows, 17)
+        XCTAssertEqual(gPortrait.columns, 4)
+        XCTAssertEqual(gPortrait.rows, 7) // floor(1600/206)
     }
 
-    /// Regression for the widget-distortion complaint: cells are now square by
-    /// construction (ratio exactly 1.0) at every board aspect, not the old
-    /// aspect-derived stretch.
-    func testCellsAreExactlySquare() {
-        let g = makeGeometry() // 16:10 reference board
-        let ratio = g.cellHeight / g.cellWidth
-        XCTAssertEqual(ratio, 1.0, accuracy: 0.001)
-        // …and off 16:10 too.
-        let g169 = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 900))
-        XCTAssertEqual(g169.cellHeight / g169.cellWidth, 1.0, accuracy: 0.001)
-    }
+    // MARK: - Corner radius (Apple desktop-widget radius, scaled for previews)
 
-    // MARK: - Corner radius (bug fix: was up to ~23pt on a full board; now 7% of
-    // the smaller cell dimension, clamped to 6...12pt)
+    func testCornerRadiusIsAppleRadiusScaled() {
+        let live = makeGeometry() // wallpaper: s = 1
+        XCTAssertEqual(live.cornerRadius, 16, accuracy: 0.001)
 
-    /// Hand-derived (`cornerRadius = clamp(min(cw, ch) * 0.07, 6...12)`; cells
-    /// square, columns = 10, so min(cw,ch) = cw = W/10):
-    ///   16:10 (1600×1000): cw = 160 → *0.07 = 11.2 (in range)
-    ///   3:1   (1200×400):  cw = 120 → *0.07 = 8.4  (in range)
-    ///   tiny 16:10 (120×75):     cw = 12  → *0.07 = 0.84 → floors to 6
-    ///   huge 16:10 (3000×1875):  cw = 300 → *0.07 = 21   → ceilings to 12
-    func testCornerRadiusIsSmallAndClamped() {
-        let g1610 = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000))
-        XCTAssertEqual(g1610.cornerRadius, 11.2, accuracy: 0.001) // in range at 10 columns
-
-        let gWide = MonitorBoardGeometry(boardSize: CGSize(width: 1200, height: 400))
-        XCTAssertEqual(gWide.cornerRadius, 8.4, accuracy: 0.001)
-
-        let gTiny = MonitorBoardGeometry(boardSize: CGSize(width: 120, height: 75))
-        XCTAssertEqual(gTiny.cornerRadius, 6, accuracy: 0.001) // floor
-
-        let gHuge = MonitorBoardGeometry(boardSize: CGSize(width: 3000, height: 1875))
-        XCTAssertEqual(gHuge.cornerRadius, 12, accuracy: 0.001) // ceiling
+        let preview = MonitorBoardGeometry(
+            boardSize: CGSize(width: 400, height: 250), referenceWidth: 1600
+        ) // s = 0.25
+        XCTAssertEqual(preview.cornerRadius, 4, accuracy: 0.001)
     }
 
     // MARK: - Normalized ↔ pixel round-trip
@@ -176,12 +169,13 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testCellExactNormalizedOriginRoundTrips() {
         let g = makeGeometry()
-        // x = 3/10 (a cell boundary) → pixel 3*cellW → back to 3/10.
-        let normalized = CGPoint(x: 3.0 / 10.0, y: 0)
+        // A cell boundary (x = 3 × pitch) normalizes and round-trips exactly.
+        let cellX = 3 * g.cellWidth
+        let normalized = MonitorBoardLayoutEngine.normalized(
+            pixelOrigin: CGPoint(x: cellX, y: 0), boardSize: boardSize
+        )
         let px = MonitorBoardLayoutEngine.pixelOrigin(normalized: normalized, boardSize: boardSize)
-        XCTAssertEqual(px.x, 3 * g.cellWidth, accuracy: 0.001)
-        let back = MonitorBoardLayoutEngine.normalized(pixelOrigin: px, boardSize: boardSize)
-        XCTAssertEqual(back.x, 3.0 / 10.0, accuracy: 1e-9)
+        XCTAssertEqual(px.x, cellX, accuracy: 0.001)
     }
 
     func testNormalizedOnZeroBoardIsOrigin() {
@@ -233,7 +227,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testTopInsetClampsOriginDownToInsetLine() {
         let g = insetGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         // An origin inside the zone is pushed down to the inset line…
         let clamped = g.clampOrigin(CGPoint(x: 200, y: 0), footprint: footprint)
         XCTAssertEqual(clamped.y, 50, accuracy: 0.001)
@@ -244,7 +238,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testTopInsetRejectsRectIntrudingIntoZone() {
         let g = insetGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         // A rect whose top crosses the inset line is illegal…
         let intruding = CGRect(origin: CGPoint(x: 200, y: 20), size: footprint)
         XCTAssertFalse(MonitorBoardLayoutEngine.isLegal(rect: intruding, geometry: g, items: [], ignoring: nil))
@@ -255,7 +249,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testTopInsetMovesTopSnapCandidateToInsetLine() {
         let g = insetGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         // Dragging just below the inset line snaps to it (not to y=0), with a guide.
         let free = CGPoint(x: 400, y: 54)
         let result = MonitorBoardLayoutEngine.snap(
@@ -292,7 +286,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testIsLegalRejectsOffBoard() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let rect = CGRect(origin: CGPoint(x: -5, y: 300), size: footprint)
         XCTAssertFalse(MonitorBoardLayoutEngine.isLegal(rect: rect, geometry: g, items: [], ignoring: nil))
     }
@@ -312,7 +306,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testSnapPicksNearestBoardEdgeWithinThreshold() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         // Origin a few px inside the left board edge → snaps to 0, emits guide.
         let free = CGPoint(x: 6, y: 400)
         let result = MonitorBoardLayoutEngine.snap(
@@ -326,7 +320,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testSnapDoesNotEngageBeyondThreshold() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let centerX = (boardSize.width - footprint.width) / 2
         let free = CGPoint(x: centerX - (MonitorBoardLayoutEngine.snapThreshold + 30), y: 400)
         let result = MonitorBoardLayoutEngine.snap(
@@ -338,11 +332,13 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testSnapEdgeAlignsToSiblingLeftEdge() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let siblingID = UUID()
         let sibling = CGRect(x: 500, y: 300, width: 200, height: 200)
         let items = [item(siblingID, sibling)]
-        let free = CGPoint(x: sibling.minX + 5, y: 520)
+        // +1 keeps L-L the nearest x candidate (R-R sits at maxX-194=506,
+        // C-C at 503 — both nearer than L-L for offsets ≥ 2).
+        let free = CGPoint(x: sibling.minX + 1, y: 520)
         let result = MonitorBoardLayoutEngine.snap(
             freeOrigin: free, footprint: footprint, geometry: g, items: items, ignoring: nil
         )
@@ -353,11 +349,11 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testSnapFlushAdjacencyHasNoGuideLine() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let siblingID = UUID()
-        // At 10 columns the small-widget footprint is 160×160. Sibling at x=300
-        // puts its flush-right edge at 500, clear of every board-edge / centre-line
-        // x candidate (0, (1600-160)/2 = 720, 1600-160 = 1440), so the flush-right
+        // The small-widget raw footprint is 194×206. Sibling at x=300 puts its
+        // flush-right edge at 500, clear of every board-edge / centre-line x
+        // candidate (0, (1600-194)/2 = 703, 1600-194 = 1406), so the flush-right
         // snap — which carries NO guide — wins the x axis with guideX still nil.
         let sibling = CGRect(x: 300, y: 300, width: 200, height: 200)
         let items = [item(siblingID, sibling)]
@@ -377,11 +373,11 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testGuideSegmentMatchesSnappedEdge() throws {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let siblingID = UUID()
         let sibling = CGRect(x: 500, y: 300, width: 200, height: 200)
         let items = [item(siblingID, sibling)]
-        let free = CGPoint(x: sibling.minX + 4, y: 520)
+        let free = CGPoint(x: sibling.minX + 1, y: 520)
         let result = MonitorBoardLayoutEngine.snap(
             freeOrigin: free, footprint: footprint, geometry: g, items: items, ignoring: nil
         )
@@ -408,7 +404,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testCommandBypassIsRawOrigin() throws {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let free = CGPoint(x: 640, y: 480)
         let landed = try XCTUnwrap(MonitorBoardLayoutEngine.land(
             freeOrigin: free, snappedOrigin: nil, footprint: footprint,
@@ -434,7 +430,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testResolveFindsAdjacentFreeSlotInCrowdedBoard() throws {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let occupantID = UUID()
         let occupant = CGRect(origin: g.clampOrigin(CGPoint(x: 400, y: 400), footprint: footprint), size: footprint)
         let items = [item(occupantID, occupant)]
@@ -448,10 +444,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         XCTAssertTrue(MonitorBoardLayoutEngine.isLegal(rect: rect, geometry: g, items: items, ignoring: nil))
         XCTAssertFalse(MonitorBoardLayoutEngine.conflicts(rect, occupant))
         // Nearest free slot is flush-adjacent (cell-exact): exactly one footprint
-        // over, on x OR y. Cells are square (160×160 on this 16:10 board), so the
-        // x-shift and y-shift candidates tie exactly; the candidate search (x
-        // outer, y inner, first-found-wins on ties) resolves the tie to a pure
-        // y-shift (x unchanged).
+        // over, on x OR y (pitch 194 wide vs 206 tall, so the x-shift is nearest).
         let dx = abs(resolvedPoint.x - occupant.origin.x)
         let dy = abs(resolvedPoint.y - occupant.origin.y)
         XCTAssertTrue(
@@ -462,7 +455,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testResolveRejectsWhenNoSlotWithinMaxDisplacement() {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let occupantID = UUID()
         let occupant = CGRect(origin: g.clampOrigin(CGPoint(x: 400, y: 400), footprint: footprint), size: footprint)
         let items = [item(occupantID, occupant)]
@@ -478,11 +471,11 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         // wall-to-wall with small widgets; sizing the board so the small grid
         // tiles it wall-to-wall leaves no free slot for one more.
         let probe = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000))
-        let sfp = probe.pixelSize(for: .clock, size: .small)
+        let sfp = probe.pixelSize(for: .memory, size: .small)
         let exactBoard = CGSize(width: sfp.width * 6, height: sfp.height * 2)
         let g = MonitorBoardGeometry(boardSize: exactBoard)
-        let items = fillBoard(g, kind: .clock, size: .small)
-        let fp = g.pixelSize(for: .clock, size: .small)
+        let items = fillBoard(g, kind: .memory, size: .small)
+        let fp = g.pixelSize(for: .memory, size: .small)
         let resolved = MonitorBoardLayoutEngine.resolve(
             origin: CGPoint(x: exactBoard.width / 2, y: exactBoard.height / 2), footprint: fp,
             geometry: g, items: items, ignoring: nil, maxDisplacement: .greatestFiniteMagnitude
@@ -494,7 +487,7 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testLandPrefersSnappedOriginThenResolves() throws {
         let g = makeGeometry()
-        let footprint = g.pixelSize(for: .clock, size: .small)
+        let footprint = g.pixelSize(for: .memory, size: .small)
         let snapped = g.clampOrigin(CGPoint(x: 300, y: 300), footprint: footprint)
         let landed = try XCTUnwrap(MonitorBoardLayoutEngine.land(
             freeOrigin: CGPoint(x: 305, y: 305), snappedOrigin: snapped,
@@ -509,11 +502,11 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
         // slot is beyond max displacement (max(dw,dh)) → land returns nil, so the
         // caller springs the widget back to its origin.
         let probe = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000))
-        let sfp = probe.pixelSize(for: .clock, size: .small)
+        let sfp = probe.pixelSize(for: .memory, size: .small)
         let exactBoard = CGSize(width: sfp.width * 6, height: sfp.height * 2)
         let g = MonitorBoardGeometry(boardSize: exactBoard)
-        let items = fillBoard(g, kind: .clock, size: .small)
-        let fp = g.pixelSize(for: .clock, size: .small)
+        let items = fillBoard(g, kind: .memory, size: .small)
+        let fp = g.pixelSize(for: .memory, size: .small)
         // Aim at an occupied cell centre.
         let target = CGPoint(x: exactBoard.width / 2 - fp.width / 2, y: exactBoard.height / 2 - fp.height / 2)
         let landed = MonitorBoardLayoutEngine.land(
@@ -606,11 +599,11 @@ final class MonitorBoardLayoutEngineTests: XCTestCase {
 
     func testFirstFitReturnsNilWhenBoardFull() {
         let probe = MonitorBoardGeometry(boardSize: CGSize(width: 1600, height: 1000))
-        let sfp = probe.pixelSize(for: .clock, size: .small)
+        let sfp = probe.pixelSize(for: .memory, size: .small)
         let exactBoard = CGSize(width: sfp.width * 6, height: sfp.height * 2)
         let g = MonitorBoardGeometry(boardSize: exactBoard)
-        let items = fillBoard(g, kind: .clock, size: .small)
-        let fp = g.pixelSize(for: .clock, size: .small)
+        let items = fillBoard(g, kind: .memory, size: .small)
+        let fp = g.pixelSize(for: .memory, size: .small)
         XCTAssertNil(MonitorBoardLayoutEngine.firstFit(footprint: fp, geometry: g, items: items))
     }
 

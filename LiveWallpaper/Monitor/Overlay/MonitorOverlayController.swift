@@ -185,16 +185,21 @@ final class MonitorOverlayController: NSObject {
     private func makeOptions() -> MonitorRuntimeOptions {
         var kinds: Set<MonitorWidgetKind> = []
         var anyAgentFleet = false
+        var gpuSeconds: Double?
         for host in hosts.values {
             kinds.formUnion(host.config.widgets.map(\.kind))
             anyAgentFleet = anyAgentFleet || host.agentFleetEnabled
+            if let s = MonitorWidgetDraft.gpuSampleSeconds(in: host.config.widgets) {
+                gpuSeconds = min(gpuSeconds ?? s, s)
+            }
         }
         return MonitorRuntimeOptions(
             system: true,
             agents: anyAgentFleet && kinds.contains(.fleet),
             usage: anyAgentFleet && kinds.contains(.usage),
             topProcesses: kinds.contains(.processes),
-            activeWidgetKinds: kinds
+            activeWidgetKinds: kinds,
+            gpuSampleSeconds: gpuSeconds
         )
     }
 

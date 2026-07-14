@@ -32,8 +32,27 @@ struct MonitorAIEngineWidgetView: View {
         self.context = context
     }
 
+    var body: some View {
+        GeometryReader { geo in
+            // The board hands us the Apple-fixed tile frame (S/M 170 tall, L 376).
+            // S/M are one board row, L two; dividing by 2·rowSpan is the mock's
+            // `cellH = cardHeight / rows` → cell 85 (S/M) / 94 (L), and the type
+            // scale shrinks verbatim in the inspector's miniature board.
+            let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
+            AIEngineContent(context: context, cellHeight: geo.size.height / (2 * rowSpan))
+        }
+    }
+}
+
+private struct AIEngineContent: View {
+    /// The tested pure logic lives on the public widget type (see the extension
+    /// at the bottom); the view body only ever calls through this alias.
+    private typealias Widget = MonitorAIEngineWidgetView
+
+    let context: MonitorWidgetContext
+    let cellHeight: CGFloat
+
     private var system: MonitorSystemSnapshot? { context.snapshot.system }
-    private var cellHeight: CGFloat { context.placement.pixelHeightHint }
     private var scale: MonitorDesign.TypeScale { .init(cellHeight: cellHeight) }
 
     /// The honest tri-state. The producer sets `aneActive == nil` only when the
@@ -42,7 +61,7 @@ struct MonitorAIEngineWidgetView: View {
     /// at least one does. `aneProcesses` is non-nil ⇔ active, so all three states
     /// key off `aneActive` — gating on `processes == nil` alone conflates idle with
     /// unsampled and mislabels an idle Mac as "no sample".
-    private var state: DisplayState { Self.displayState(aneActive: system?.aneActive) }
+    private var state: Widget.DisplayState { Widget.displayState(aneActive: system?.aneActive) }
     /// A-tier: whether the Neural Engine is in use (any non-zero footprint).
     private var aneActive: Bool { state == .active }
     /// A-tier: the top-k consumers by footprint (non-nil ⇔ active).
@@ -103,7 +122,7 @@ struct MonitorAIEngineWidgetView: View {
         }
     }
 
-    // MARK: - S (2×2)
+    // MARK: - S (170×170 — content ≈ 138×125)
 
     @ViewBuilder
     private var smallBody: some View {
@@ -126,13 +145,15 @@ struct MonitorAIEngineWidgetView: View {
             Spacer(minLength: 0)
             activityIndicator(heroFactor: 0.72)
             topApp
+            // Single line at the fixed 138-pt S width — a wrapped capsule reads
+            // broken, and 0.7 minScale keeps the full boundary caption legible.
             Text(verbatim: "ri_neural_footprint · no util%")
                 .font(MonitorDesign.captionFont(size: scale.caption * 0.92))
                 .tracking(scale.caption * 0.05)
                 .foregroundStyle(MonitorDesign.inkFaint)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .monitorChip(scale)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -145,7 +166,7 @@ struct MonitorAIEngineWidgetView: View {
     private func smallPowerBody(watts: Double) -> some View {
         VStack(spacing: 6) {
             Spacer(minLength: 0)
-            ArcGauge(value: Self.powerFraction(watts), color: MonitorDesign.loadBandColor(Self.powerFraction(watts)), lineWidth: 9) {
+            ArcGauge(value: Widget.powerFraction(watts), color: MonitorDesign.loadBandColor(Widget.powerFraction(watts)), lineWidth: 9) {
                 powerHub(watts: watts, heroFactor: 0.86)
             }
             .frame(maxWidth: 150)
@@ -179,7 +200,7 @@ struct MonitorAIEngineWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - M (4×2)
+    // MARK: - M (364×170 — content ≈ 332×125)
 
     @ViewBuilder
     private var mediumBody: some View {
@@ -187,19 +208,15 @@ struct MonitorAIEngineWidgetView: View {
         case .unsampled:
             unavailableBody
         case .idle, .active:
-            VStack(alignment: .leading, spacing: 7) {
-                if hasB, let watts = aneWatts {
-                    mediumPowerHeader(watts: watts)
-                } else {
+            if hasB, let watts = aneWatts {
+                mediumPowerBody(watts: watts)
+            } else {
+                VStack(alignment: .leading, spacing: 7) {
                     mediumActivityHeader
+                    listOrIdle
                 }
-                if let list = processes {
-                    processList(Self.rankedProcesses(list))
-                } else {
-                    idlePlaceholder
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
@@ -208,39 +225,63 @@ struct MonitorAIEngineWidgetView: View {
     private var mediumActivityHeader: some View {
         HStack(alignment: .center, spacing: 8) {
             activityIndicator(heroFactor: 0.5)
+                .monitorChip(scale)
             Spacer(minLength: 6)
             topApp
         }
     }
 
-    /// M A+B header (mock `ane_m(true)`): power arc + a DRAM bandwidth line and the
-    /// busiest process beside it, above the ranked list.
-    private func mediumPowerHeader(watts: Double) -> some View {
+    /// M A+B (mock `ane_m(true)`, refitted to the fixed 125-pt content height): the
+    /// mock stacks arc-header over list, which needs ~185 pt — instead the power arc
+    /// becomes a full-height LEFT column and DRAM + the ranked list stack on the
+    /// right. The mock header's busiest-process line is dropped here: the list's
+    /// first row IS the busiest process, so nothing is lost at this size.
+    private func mediumPowerBody(watts: Double) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            ArcGauge(value: Self.powerFraction(watts), color: MonitorDesign.loadBandColor(Self.powerFraction(watts)), lineWidth: 9) {
+            ArcGauge(value: Widget.powerFraction(watts), color: MonitorDesign.loadBandColor(Widget.powerFraction(watts)), lineWidth: 9) {
                 powerHub(watts: watts, heroFactor: 0.72)
             }
-            .frame(width: 88)
+            .frame(width: 96)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 if let dram = dramLine {
                     dram
                 }
-                topApp
+                if !aneActive {
+                    // Idle: the list is gone, so the A-tier state word ("no ANE
+                    // activity") must surface here instead of a list row.
+                    topApp
+                }
+                listOrIdle
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    /// The ranked-list slot both tiers share: the honest per-process list when
+    /// active, the quiet idle caption otherwise.
+    @ViewBuilder
+    private var listOrIdle: some View {
+        if let list = processes {
+            processList(Widget.rankedProcesses(list))
+        } else {
+            idlePlaceholder
         }
     }
 
-    // MARK: - L (4×4)
+    // MARK: - L (364×376 — content ≈ 332×331)
     //
     // The mock CUTS AI Engine-L (index.html:3831 "size cut — S/M suffice"): there is
-    // no public per-process ANE *power* or utilisation% to fill 4×4, so L is an
-    // honest EXTENSION of M, not a new data layer. It reuses M's parts (activity,
-    // power arc, DRAM, ranked list) with generous L spacing and adds two things the
-    // extra height earns without fabrication: the ACTIVE/IDLE indicator even in the
-    // B header (M drops it for space) and an explicit honest-boundary footer — the
-    // section note the mock keeps in its lede, surfaced on-card at the size that fits.
+    // no public per-process ANE *power* or utilisation% to fill the tall frame, so L
+    // is an honest EXTENSION of M, not a new data layer. It reuses M's parts
+    // (activity, power arc, DRAM, ranked list) with generous L spacing and adds two
+    // things the extra height earns without fabrication: the ACTIVE/IDLE indicator
+    // even in the B header (M drops it for space) and an explicit honest-boundary
+    // footer — the section note the mock keeps in its lede, surfaced on-card at the
+    // size that fits. ~200 of the 331-pt budget is content; the rest is deliberate
+    // air before the pinned footer (an under-filled L must read calm, never padded
+    // with fabricated readouts).
 
     @ViewBuilder
     private var largeBody: some View {
@@ -263,8 +304,8 @@ struct MonitorAIEngineWidgetView: View {
                         .frame(height: MonitorDesign.hairlineWidth)
                         .opacity(0.7)
                     processList(
-                        Self.rankedProcesses(list),
-                        rowGap: scale.caption * 1.05,
+                        Widget.rankedProcesses(list),
+                        rowGap: scale.caption * 1.3,
                         barHeight: scale.caption * 0.52
                     )
                 }
@@ -280,26 +321,29 @@ struct MonitorAIEngineWidgetView: View {
     private var largeActivityHeader: some View {
         HStack(alignment: .center, spacing: 10) {
             activityIndicator(heroFactor: 0.62)
+                .monitorChip(scale)
             Spacer(minLength: 8)
             topApp
         }
     }
 
     /// L A+B header: the shared power arc + hub beside a stacked column carrying the
-    /// activity state (which M-B omits), the DRAM bandwidth line and the busiest app.
+    /// activity state (which M-B omits) and the DRAM bandwidth line. No busiest-app
+    /// line here — the ranked list is directly below and its first row is exactly
+    /// that process.
     private func largePowerHeader(watts: Double) -> some View {
         HStack(alignment: .center, spacing: 14) {
-            ArcGauge(value: Self.powerFraction(watts), color: MonitorDesign.loadBandColor(Self.powerFraction(watts)), lineWidth: 9) {
+            ArcGauge(value: Widget.powerFraction(watts), color: MonitorDesign.loadBandColor(Widget.powerFraction(watts)), lineWidth: 9) {
                 powerHub(watts: watts, heroFactor: 0.78)
             }
             .frame(width: 104)
 
             VStack(alignment: .leading, spacing: 8) {
                 activityIndicator(heroFactor: 0.4)
+                    .monitorChip(scale)
                 if let dram = dramLine {
                     dram
                 }
-                topApp
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -315,6 +359,7 @@ struct MonitorAIEngineWidgetView: View {
                 .font(MonitorDesign.captionFont(size: scale.caption * 0.92))
                 .tracking(scale.caption * 0.05)
                 .foregroundStyle(MonitorDesign.inkFaint)
+                .monitorChip(scale)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -323,23 +368,29 @@ struct MonitorAIEngineWidgetView: View {
     /// The on-card honest boundary (L only): a neural swatch + the same technical
     /// caption S uses, with the "helper" tag when B is present. States plainly that
     /// the ranked signal is per-process ANE MEMORY, and that no utilisation% exists.
+    /// Both the caption and the "helper" tag are chipped — small annotations, board
+    /// convention (CPU's `thermalPill`/`loadStatus`).
     private var honestFooter: some View {
         HStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(MonitorDesign.neuralDim)
-                .frame(width: scale.caption * 0.5, height: scale.caption * 0.5)
-                .opacity(0.8)
-            Text(verbatim: "ri_neural_footprint · no util%")
-                .font(MonitorDesign.captionFont(size: scale.caption * 0.9))
-                .foregroundStyle(MonitorDesign.inkFaint)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            HStack(spacing: 7) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(MonitorDesign.neuralDim)
+                    .frame(width: scale.caption * 0.5, height: scale.caption * 0.5)
+                    .opacity(0.8)
+                Text(verbatim: "ri_neural_footprint · no util%")
+                    .font(MonitorDesign.captionFont(size: scale.caption * 0.9))
+                    .foregroundStyle(MonitorDesign.inkFaint)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .monitorChip(scale)
             Spacer(minLength: 0)
             if hasB {
                 Text("helper")
                     .font(MonitorDesign.labelFont(size: scale.label * 0.9))
                     .tracking(scale.label * 0.1)
                     .foregroundStyle(MonitorDesign.inkFaint.opacity(0.7))
+                    .monitorChip(scale)
             }
         }
     }
@@ -364,33 +415,37 @@ struct MonitorAIEngineWidgetView: View {
     }
 
     /// The busiest ANE consumer (mock `aneTopApp`): "Name · NNN MB" in the neural
-    /// hue, or a calm "no ANE activity" when idle.
+    /// hue, or a calm "no ANE activity" when idle. Chipped — a small annotation,
+    /// board convention (CPU's `peakTag`/`thermalPill`).
     @ViewBuilder
     private var topApp: some View {
-        if aneActive, let busiest = Self.busiestProcess(processes ?? []) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(verbatim: busiest.name)
-                    .font(MonitorDesign.subFont(size: scale.caption))
-                    .foregroundStyle(MonitorDesign.inkPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(verbatim: "·")
+        Group {
+            if aneActive, let busiest = Widget.busiestProcess(processes ?? []) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(verbatim: busiest.name)
+                        .font(MonitorDesign.subFont(size: scale.caption))
+                        .foregroundStyle(MonitorDesign.inkPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(verbatim: "·")
+                        .font(MonitorDesign.captionFont(size: scale.caption))
+                        .foregroundStyle(MonitorDesign.inkFaint)
+                    footprintValue(busiest.footprintBytes, size: scale.caption)
+                }
+            } else {
+                Text("no ANE activity")
                     .font(MonitorDesign.captionFont(size: scale.caption))
                     .foregroundStyle(MonitorDesign.inkFaint)
-                footprintValue(busiest.footprintBytes, size: scale.caption)
             }
-        } else {
-            Text("no ANE activity")
-                .font(MonitorDesign.captionFont(size: scale.caption))
-                .foregroundStyle(MonitorDesign.inkFaint)
         }
+        .monitorChip(scale)
     }
 
     /// A footprint readout: the number in the neural hue, unit dimmed (mock
     /// `.anm` / `.amv`). Uses the shared `MonitorFormat.bytes` so it matches the
     /// design's MB/GB rounding.
     private func footprintValue(_ bytes: UInt64, size: CGFloat) -> some View {
-        let parts = Self.splitBytes(bytes)
+        let parts = Widget.splitBytes(bytes)
         return (Text(verbatim: parts.value)
             + Text(verbatim: parts.unit)
                 .font(MonitorDesign.labelFont(size: size * 0.7))
@@ -398,11 +453,13 @@ struct MonitorAIEngineWidgetView: View {
             .font(MonitorDesign.subFont(size: size))
             .monospacedDigit()
             .foregroundStyle(MonitorDesign.neuralValue)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 
     /// The power arc hub reading (mock `.hero` + `.u` inside `.arcg`): "X.X W".
     private func powerHub(watts: Double, heroFactor: CGFloat) -> some View {
-        let size = heroSize * heroFactor
+        let size = scale.hero * heroFactor
         return (Text(verbatim: String(format: "%.1f", max(0, watts)))
             + Text(verbatim: "W")
                 .font(MonitorDesign.subFont(size: size * 0.5))
@@ -441,12 +498,13 @@ struct MonitorAIEngineWidgetView: View {
                     .font(MonitorDesign.labelFont(size: scale.label * 0.9))
                     .tracking(scale.label * 0.1)
                     .foregroundStyle(MonitorDesign.inkFaint.opacity(0.7))
+                    .monitorChip(scale)
             }
         )
     }
 
     private func dramReading(tag: String, rate: Double) -> some View {
-        let parts = Self.splitRate(rate)
+        let parts = Widget.splitRate(rate)
         return HStack(alignment: .firstTextBaseline, spacing: 3) {
             Text(verbatim: tag)
                 .font(.system(size: scale.caption * 0.86, weight: .bold, design: .rounded))
@@ -458,6 +516,8 @@ struct MonitorAIEngineWidgetView: View {
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 
@@ -499,7 +559,7 @@ struct MonitorAIEngineWidgetView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 6) {
-                ANEBar(fraction: Self.barFraction(proc.footprintBytes, top: topFootprint))
+                ANEBar(fraction: Widget.barFraction(proc.footprintBytes, top: topFootprint))
                     .frame(maxWidth: .infinity)
                     .frame(height: barHeight ?? scale.caption * 0.42)
                 footprintValue(proc.footprintBytes, size: scale.caption * 0.94)
@@ -510,12 +570,20 @@ struct MonitorAIEngineWidgetView: View {
     }
 
     // MARK: - Layout metrics
+    //
+    // Fixed-point columns for Apple's fixed tile frames (the old cellHeight-derived
+    // formulas were calibrated for variable cells and now always hit their floors).
+    // The list renders in two widths: the full 332-pt M/L content box (name gets
+    // ~226) and M-B's right column beside the 96-pt arc (~224 wide, name ~118). L
+    // widens the bar column — the taller frame's rows earn more instrument presence.
 
-    private var heroSize: CGFloat { min(46, max(24, cellHeight * 0.36)) }
-    private var memColumnWidth: CGFloat { max(96, cellHeight * 0.62) }
-    private var memValueWidth: CGFloat { max(46, cellHeight * 0.30) }
+    private var memColumnWidth: CGFloat { context.placement.size == .large ? 120 : 96 }
+    private var memValueWidth: CGFloat { 46 }
+}
 
-    // MARK: - Pure logic (tested)
+// MARK: - Pure logic (tested)
+
+extension MonitorAIEngineWidgetView {
 
     /// The honest render state, derived from the producer's `aneActive` tri-state:
     /// `nil` = the ANE walk hasn't run (sampling off) → the quiet unsampled state;
@@ -628,20 +696,6 @@ private extension MonitorDesign {
     static let neuralValue = oklch(0.85, 0.055, 300)
 }
 
-// MARK: - Placement sizing hint
-
-private extension MonitorWidgetPlacement {
-    /// The container derives its type scale from a cell height. The mock scales type
-    /// from the PER-ROW cell height (`d.h / d.rows`), so all sizes share one cell
-    /// reference — L is taller because it holds more rows, not bigger text. The board
-    /// owns the true pixel frame; absent that here, use the SPEC reference cell.
-    var pixelHeightHint: CGFloat {
-        switch size {
-        case .small, .medium, .large: return 150
-        }
-    }
-}
-
 // MARK: - Previews
 
 #if DEBUG
@@ -691,23 +745,23 @@ private func defaultANEProcesses() -> [MonitorANEProcess] {
 
 private let dramSample = (r: 41.3 * 1_073_741_824.0, w: 18.7 * 1_073_741_824.0)
 
-// True 14"-MBP tile sizes (task contract): S 189×196, M 378×196, L 378×392.
+// Apple's fixed macOS widget frames: S 170×170, M 364×170, L 364×376.
 #Preview("AI Engine · S") {
     HStack(spacing: 20) {
         // A-tier active
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(size: .small))
-            .frame(width: 189, height: 196)
+            .frame(width: 170, height: 170)
         // A-tier idle (sampled, no footprint → aneActive false, processes nil)
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .small, active: false, processes: nil))
-            .frame(width: 189, height: 196)
+            .frame(width: 170, height: 170)
         // Sampling off → unavailable (aneActive nil)
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .small, active: nil, processes: nil))
-            .frame(width: 189, height: 196)
+            .frame(width: 170, height: 170)
         // A+B power hero
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(size: .small, watts: 3.2))
-            .frame(width: 189, height: 196)
+            .frame(width: 170, height: 170)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)
@@ -717,19 +771,23 @@ private let dramSample = (r: 41.3 * 1_073_741_824.0, w: 18.7 * 1_073_741_824.0)
     VStack(spacing: 20) {
         // A-tier active — activity + ranked list
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(size: .medium))
-            .frame(width: 378, height: 196)
+            .frame(width: 364, height: 170)
         // A-tier idle
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .medium, active: false, processes: nil))
-            .frame(width: 378, height: 196)
-        // A+B — power arc + DRAM + list
+            .frame(width: 364, height: 170)
+        // A+B — power arc beside DRAM + list
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .medium, watts: 3.2, dram: dramSample))
-            .frame(width: 378, height: 196)
+            .frame(width: 364, height: 170)
+        // A+B idle — arc + DRAM + idle caption
+        MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
+            size: .medium, active: false, processes: nil, watts: 0.4, dram: dramSample))
+            .frame(width: 364, height: 170)
         // Sampling off → unavailable
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .medium, active: nil, processes: nil))
-            .frame(width: 378, height: 196)
+            .frame(width: 364, height: 170)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)
@@ -739,15 +797,15 @@ private let dramSample = (r: 41.3 * 1_073_741_824.0, w: 18.7 * 1_073_741_824.0)
     HStack(alignment: .top, spacing: 20) {
         // A-tier active — big activity + ranked list + honest footer
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(size: .large))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
         // A+B — power arc + activity + DRAM + list + footer
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .large, watts: 3.2, dram: dramSample))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
         // A-tier idle
         MonitorAIEngineWidgetView(context: aiEnginePreviewContext(
             size: .large, active: false, processes: nil))
-            .frame(width: 378, height: 392)
+            .frame(width: 364, height: 376)
     }
     .padding(28)
     .background(MonitorDesign.boardWash)

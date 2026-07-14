@@ -224,6 +224,9 @@ enum SystemMetricsSamplers {
         var rendererUtil: Double?         // 0…1 — graphics (fragment/vertex)
         var tilerUtil: Double?            // 0…1 — TBDR binning
         var coreCount: Int?
+        /// GPU-owned system memory in use, bytes (Apple Silicon AGX publishes
+        /// "In use system memory" in the same PerformanceStatistics dict).
+        var memUsedBytes: UInt64?
     }
 
     /// Backward-compatible thin wrapper: total device utilization only.
@@ -271,6 +274,10 @@ enum SystemMetricsSamplers {
                 }
                 if let tiler = perfPercent(perfStats["Tiler Utilization %"]) {
                     sample.tilerUtil = tiler
+                }
+                if let inUse = (perfStats["In use system memory"] as? NSNumber)?.uint64Value,
+                   inUse > 0 {
+                    sample.memUsedBytes = inUse
                 }
             }
             entry = IOIteratorNext(iterator)
@@ -569,34 +576,55 @@ enum SystemMetricsSamplers {
 
     struct ProcessCPUCounters: Sendable {
         var totalTimeNanos: UInt64
+        /// Cumulative disk I/O (rusage_info) — captured only when `includeIO`.
+        var diskReadBytes: UInt64 = 0
+        var diskWrittenBytes: UInt64 = 0
     }
 
     struct TopProcessesResult: Sendable {
         var samples: [MonitorProcessSample]
+        /// Top apps by summed disk I/O rate; empty unless `includeIO` was set.
+        var ioSamples: [MonitorProcessSample]
         var counters: [Int32: ProcessCPUCounters]
     }
 
     /// Best-effort: enumerates PIDs via `proc_listallpids`, reads task CPU time +
     /// resident size via `proc_pidinfo(PROC_PIDTASKINFO)`, diffs CPU time against the
-    /// previous counters, and returns the top `limit` by CPU-time delta. Any failure
-    /// path yields fewer/no rows rather than crashing — this is behind a flag.
+    /// previous counters, then AGGREGATES each process's usage under its top-level
+    /// app (walking the parent chain up to launchd) so a browser's dozen helpers
+    /// read as one "Chrome" row, not a dozen "…Helper" rows. Returns the top `limit`
+    /// apps by summed CPU; with `includeIO` the same walk also diffs each PID's
+    /// `proc_pid_rusage` disk counters (needs the `process-info-rusage` sbpl
+    /// exception) and returns a second list ranked by read+write rate. Any failure
+    /// path yields fewer/no rows, never a crash.
     static func sampleTopProcesses(
         previous: [Int32: ProcessCPUCounters],
         interval: TimeInterval,
-        limit: Int
+        limit: Int,
+        includeIO: Bool = false
     ) -> TopProcessesResult {
+        // NOTE: under the plain App Sandbox `proc_listallpids` returns 0 (the
+        // `process-info-*` operations are denied); the `temporary-exception.sbpl`
+        // entitlement (process-info-listpids/pidinfo) unblocks this walk.
         let capacity = proc_listallpids(nil, 0)
-        guard capacity > 0 else { return TopProcessesResult(samples: [], counters: [:]) }
+        guard capacity > 0 else { return TopProcessesResult(samples: [], ioSamples: [], counters: [:]) }
 
         var pids = [Int32](repeating: 0, count: Int(capacity))
         let byteCount = proc_listallpids(&pids, capacity * Int32(MemoryLayout<Int32>.stride))
-        guard byteCount > 0 else { return TopProcessesResult(samples: [], counters: [:]) }
+        guard byteCount > 0 else { return TopProcessesResult(samples: [], ioSamples: [], counters: [:]) }
         let pidCount = Int(byteCount) / MemoryLayout<Int32>.stride
 
         var counters: [Int32: ProcessCPUCounters] = [:]
         counters.reserveCapacity(pidCount)
-        var scored: [(pid: Int32, cpu: Double, mem: UInt64)] = []
-        let intervalNanos = max(interval, 0.001) * 1_000_000_000
+        let seconds = max(interval, 0.001)
+        let intervalNanos = seconds * 1_000_000_000
+
+        // Per-PID metrics + parent link, for every readable process.
+        var ppidOf: [Int32: Int32] = [:]
+        var cpuOf: [Int32: Double] = [:]
+        var memOf: [Int32: UInt64] = [:]
+        var ioReadOf: [Int32: Double] = [:]
+        var ioWriteOf: [Int32: Double] = [:]
 
         for index in 0..<min(pidCount, pids.count) {
             let pid = pids[index]
@@ -607,24 +635,118 @@ enum SystemMetricsSamplers {
             guard read == size else { continue }
 
             let totalTime = info.pti_total_user &+ info.pti_total_system
-            counters[pid] = ProcessCPUCounters(totalTimeNanos: totalTime)
+            var counter = ProcessCPUCounters(totalTimeNanos: totalTime)
 
-            guard let prev = previous[pid] else { continue }
-            let delta = totalTime &- prev.totalTimeNanos
-            let cpuPercent = clamp01(Double(delta) / intervalNanos) * 100.0
-            guard cpuPercent > 0 else { continue }
-            scored.append((pid, cpuPercent, info.pti_resident_size))
+            // Parent PID (for app aggregation) via the short BSD info record.
+            var bsd = proc_bsdshortinfo()
+            let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.stride)
+            if proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsd, bsdSize) == bsdSize {
+                ppidOf[pid] = Int32(bitPattern: bsd.pbsi_ppid)
+            }
+
+            memOf[pid] = info.pti_resident_size
+            // Only a monotonic increase is a real delta: a decrease means the PID
+            // was reused by a new process, so skip it and re-baseline off the value
+            // stored in `counter` this tick (a `&-` underflow would report a bogus
+            // ~100% spike).
+            if let prev = previous[pid], totalTime >= prev.totalTimeNanos {
+                let delta = totalTime - prev.totalTimeNanos
+                cpuOf[pid] = clamp01(Double(delta) / intervalNanos) * 100.0
+            }
+
+            if includeIO {
+                var usage = rusage_info_v4()
+                let ok = withUnsafeMutablePointer(to: &usage) { ptr -> Int32 in
+                    ptr.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                        proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
+                    }
+                }
+                if ok == 0 {
+                    counter.diskReadBytes = usage.ri_diskio_bytesread
+                    counter.diskWrittenBytes = usage.ri_diskio_byteswritten
+                    // A prior sample existing (includeIO is constant for a pipeline's
+                    // life) is the baseline — a 0/0 prev is valid, so don't gate on
+                    // it. Guard monotonicity to skip a reused PID's counter reset.
+                    if let prev = previous[pid],
+                       usage.ri_diskio_bytesread >= prev.diskReadBytes,
+                       usage.ri_diskio_byteswritten >= prev.diskWrittenBytes {
+                        ioReadOf[pid] = Double(usage.ri_diskio_bytesread - prev.diskReadBytes) / seconds
+                        ioWriteOf[pid] = Double(usage.ri_diskio_byteswritten - prev.diskWrittenBytes) / seconds
+                    }
+                }
+            }
+            counters[pid] = counter
         }
 
-        let top = scored.sorted { $0.cpu > $1.cpu }.prefix(limit)
-        let samples = top.map { entry in
+        // Aggregate CPU + memory under each process's top-level app, over ALL
+        // readable PIDs (not just CPU-active ones) so an idle memory hog still
+        // contributes its RSS to its app total.
+        var appCPU: [Int32: Double] = [:]
+        var appMem: [Int32: UInt64] = [:]
+        for pid in memOf.keys {
+            let root = Self.topLevelPID(pid, parents: ppidOf)
+            appCPU[root, default: 0] += cpuOf[pid] ?? 0
+            appMem[root, default: 0] += memOf[pid] ?? 0
+        }
+
+        // `topProcesses` feeds three widgets that re-rank it: CPU / Processes by
+        // CPU, Memory by RSS. Return the union of the top-by-CPU and top-by-memory
+        // apps so an idle memory hog (0% CPU) still reaches the Memory widget.
+        let topCPUKeys = appCPU.filter { $0.value > 0 }
+            .sorted { $0.value > $1.value }.prefix(limit).map(\.key)
+        let topMemKeys = appMem.sorted { $0.value > $1.value }.prefix(limit).map(\.key)
+        var orderedKeys = Array(topCPUKeys)
+        for key in topMemKeys where !orderedKeys.contains(key) { orderedKeys.append(key) }
+        let samples = orderedKeys.map { key in
             MonitorProcessSample(
-                name: processName(pid: entry.pid),
-                cpuPercent: entry.cpu,
-                memBytes: entry.mem
+                name: processName(pid: key),
+                cpuPercent: appCPU[key] ?? 0,
+                memBytes: appMem[key] ?? memOf[key] ?? 0
             )
         }
-        return TopProcessesResult(samples: samples, counters: counters)
+
+        // Disk I/O ranking: same per-app roll-up, ordered by read+write rate.
+        // `ioReadOf`/`ioWriteOf` are populated as a pair (both set inside the same
+        // guard), so iterating the read keys covers every I/O-active PID.
+        var ioSamples: [MonitorProcessSample] = []
+        if includeIO {
+            var appRead: [Int32: Double] = [:]
+            var appWrite: [Int32: Double] = [:]
+            for (pid, rate) in ioReadOf where rate > 0 || (ioWriteOf[pid] ?? 0) > 0 {
+                let root = Self.topLevelPID(pid, parents: ppidOf)
+                appRead[root, default: 0] += rate
+                appWrite[root, default: 0] += ioWriteOf[pid] ?? 0
+            }
+            let ioTop = Set(appRead.keys).union(appWrite.keys)
+                .map { (pid: $0, total: (appRead[$0] ?? 0) + (appWrite[$0] ?? 0)) }
+                .filter { $0.total > 0 }
+                .sorted { $0.total > $1.total }
+                .prefix(limit)
+            ioSamples = ioTop.map { entry in
+                MonitorProcessSample(
+                    name: processName(pid: entry.pid),
+                    cpuPercent: appCPU[entry.pid] ?? 0,
+                    memBytes: appMem[entry.pid] ?? 0,
+                    ioReadBytesPerSec: appRead[entry.pid] ?? 0,
+                    ioWriteBytesPerSec: appWrite[entry.pid] ?? 0
+                )
+            }
+        }
+        return TopProcessesResult(samples: samples, ioSamples: ioSamples, counters: counters)
+    }
+
+    /// The top-level app PID a process rolls up to: walk the parent chain until the
+    /// parent is launchd (1), unknown, or self — so an app's helpers/XPC children
+    /// aggregate under it, while a launchd-parented process stays itself. Bounded to
+    /// guard against pathological/cyclic parent links.
+    static func topLevelPID(_ pid: Int32, parents: [Int32: Int32]) -> Int32 {
+        var current = pid
+        var hops = 0
+        while hops < 64, let parent = parents[current], parent > 1, parent != current {
+            current = parent
+            hops += 1
+        }
+        return current
     }
 
     private static func processName(pid: Int32) -> String {
