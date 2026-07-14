@@ -27,8 +27,7 @@ struct WPEHistoryRow: View {
             .galleryTileChrome(
                 isHovering: isHovering,
                 isSelected: isSelected,
-                reduceMotion: reduceMotion,
-                useGlass: true
+                reduceMotion: reduceMotion
             )
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .onHover { isHovering = $0 }

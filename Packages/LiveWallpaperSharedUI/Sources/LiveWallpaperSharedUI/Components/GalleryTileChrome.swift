@@ -1,50 +1,40 @@
 import SwiftUI
 
-/// Shared gallery-card chrome. Pass `useGlass` for content cards; library tiles
-/// that supply their own backing leave it off.
+/// Shared gallery-card chrome. Content cards render FLAT per the locked
+/// 2026-06-05 visual language.
 public struct GalleryTileChrome: ViewModifier {
     public let isHovering: Bool
     public let isSelected: Bool
     public let cornerRadius: CGFloat
     public let reduceMotion: Bool
-    public let useGlass: Bool
 
     public init(
         isHovering: Bool,
         isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
-        reduceMotion: Bool = false,
-        useGlass: Bool = false
+        reduceMotion: Bool = false
     ) {
         self.isHovering = isHovering
         self.isSelected = isSelected
         self.cornerRadius = cornerRadius
         self.reduceMotion = reduceMotion
-        self.useGlass = useGlass
     }
 
     public func body(content: Content) -> some View {
         content
-            .background {
-                if useGlass {
-                    Color.clear.adaptiveGlassSurface(.roundedRectangle(cornerRadius), interactive: true)
-                }
-            }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                // When glass is on it supplies its own hairline edge, so only the
-                // accent selection ring is drawn here to avoid a double stroke.
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
                         isSelected
                             ? Color.accentColor
-                            : Color.primary.opacity(useGlass ? 0 : DesignTokens.Card.strokeOpacity),
+                            : Color.primary.opacity(DesignTokens.Card.strokeOpacity),
                         lineWidth: isSelected ? 2.5 : DesignTokens.Card.strokeWidth
                     )
             }
             .shadow(
                 color: isSelected
-                    ? Color.accentColor.opacity(0.22)
+                    ? Color.accentColor.opacity(DesignTokens.Card.selectedShadowOpacity)
                     : .black.opacity(isHovering
                                      ? DesignTokens.Card.shadowOpacity
                                      : DesignTokens.Card.restShadowOpacity),
@@ -73,15 +63,13 @@ extension View {
         isHovering: Bool,
         isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
-        reduceMotion: Bool = false,
-        useGlass: Bool = false
+        reduceMotion: Bool = false
     ) -> some View {
         modifier(GalleryTileChrome(
             isHovering: isHovering,
             isSelected: isSelected,
             cornerRadius: cornerRadius,
-            reduceMotion: reduceMotion,
-            useGlass: useGlass
+            reduceMotion: reduceMotion
         ))
     }
 }

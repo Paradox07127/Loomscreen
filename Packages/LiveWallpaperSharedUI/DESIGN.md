@@ -6,7 +6,7 @@ tokens live in `DesignTokens` (this package, re-exported app-wide). New views
 
 ## Visual language (locked 2026-06-05)
 
-- **Content cards** (wallpaper / library tiles) → glass compact 1:1 (`GalleryTileChrome(useGlass:)`).
+- **Content cards** (wallpaper / library tiles) → flat (`GalleryTileChrome`). No glass: the card is content, not chrome.
 - **Floating chrome** (toolbars, filter ribbon, inspector, sheets, toasts, menu-bar dropdown) → glass (`AdaptiveGlass`).
 - **Small accents** (type pills, badges, selection, segmented controls) → liquid-glass (`TypeBadge`, `thumbnailBadgeGlass`).
 - Apple-HIG aligned, modern, restrained. Default SF font design (no `.rounded`) to sit cleanly next to native chrome.
