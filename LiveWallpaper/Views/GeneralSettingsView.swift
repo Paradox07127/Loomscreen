@@ -342,10 +342,14 @@ struct GeneralSettingsView: View {
 
     // MARK: - Settings Persistence
 
+    /// Persists every `@State` field this view mirrors (the full list loaded
+    /// in `init`) via read-modify-write, so unrelated `GlobalSettings` fields
+    /// (schedule, shortcuts, display defaults, WPE history…) survive.
     func updateGlobalSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
         let developerModeChanged = settings.developerModeEnabled != developerModeEnabled
+        let weatherChanged = settings.weatherLocation != weatherLocation
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
@@ -358,6 +362,7 @@ struct GeneralSettingsView: View {
         settings.developerModeEnabled = developerModeEnabled
         settings.audioResponseEnabled = audioResponseEnabled
         settings.adaptiveFrameRateEnabled = adaptiveFrameRateEnabled
+        settings.weatherLocation = weatherLocation
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
@@ -365,6 +370,9 @@ struct GeneralSettingsView: View {
         }
         if developerModeChanged {
             postSettingsNotificationAsync(.developerModeDidChange)
+        }
+        if weatherChanged {
+            postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
         }
     }
 

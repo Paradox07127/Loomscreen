@@ -9,10 +9,10 @@ import AppKit
 /// toggle in Settings → Advanced.
 struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
-    @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: "WPEMetalCaptureScene") ?? []
+    @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: DeveloperToolsView.captureSceneKey) ?? []
     @State private var newCaptureID: String = ""
     @State private var freezeTimeText: String = {
-        if let value = UserDefaults.standard.object(forKey: "WPEOracleFreezeTime") as? Double {
+        if let value = UserDefaults.standard.object(forKey: DeveloperToolsView.oracleFreezeTimeKey) as? Double {
             return String(value)
         }
         return ""
@@ -69,11 +69,29 @@ struct DeveloperToolsView: View {
               help: "Override the automatic per-puppet decision (default: defer only puppets that have an effect chain, so their effect masks align). ON forces every non-clip puppet to defer; OFF forces direct warp. Clip-eye puppets ignore this. Reload the scene to apply."),
     ]
 
+    static let oracleEnabledKey = "WPEOracleEnabled"
+    static let oracleFreezeTimeKey = "WPEOracleFreezeTime"
+    static let captureSceneKey = "WPEMetalCaptureScene"
+
     private static let diagnosticStringKeys: [String] = [
         "WPEDumpScenePasses",
         "WPEDumpScenePassesAtTime",
-        "WPEMetalCaptureScene",
+        captureSceneKey,
     ]
+
+    /// Every UserDefaults key any control in this view writes. "Reset all"
+    /// clears exactly this list — a control whose key is missing here would
+    /// silently survive the reset, so new flags must be added here too.
+    static let allDiagnosticDefaultsKeys: [String] =
+        diagnosticBoolFlags.map(\.key)
+            + diagnosticStringKeys
+            + [oracleEnabledKey, oracleFreezeTimeKey]
+
+    static func clearAllDiagnosticDefaults(in defaults: UserDefaults = .standard) {
+        for key in allDiagnosticDefaultsKeys {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     private var diagnosticsFlagsSection: some View {
         GroupBox(label:
@@ -128,13 +146,9 @@ struct DeveloperToolsView: View {
     }
 
     private func resetDiagnosticFlags() {
-        for flag in Self.diagnosticBoolFlags {
-            UserDefaults.standard.removeObject(forKey: flag.key)
-        }
-        for key in Self.diagnosticStringKeys {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        Self.clearAllDiagnosticDefaults()
         captureIDs = []
+        freezeTimeText = ""
         flagRefresh += 1
     }
 
@@ -165,7 +179,7 @@ struct DeveloperToolsView: View {
             }
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle(isOn: boolBinding("WPEOracleEnabled")) {
+                Toggle(isOn: boolBinding(Self.oracleEnabledKey)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Render oracle", comment: "Developer Tools toggle title enabling the WPE render oracle (deterministic capture mode).")
                         Text("Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value.", comment: "Developer Tools helper text under the render oracle toggle.")
@@ -201,9 +215,9 @@ struct DeveloperToolsView: View {
     private func commitFreezeTime() {
         let trimmed = freezeTimeText.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: "WPEOracleFreezeTime")
+            UserDefaults.standard.removeObject(forKey: Self.oracleFreezeTimeKey)
         } else if let value = Double(trimmed), value >= 0 {
-            UserDefaults.standard.set(value, forKey: "WPEOracleFreezeTime")
+            UserDefaults.standard.set(value, forKey: Self.oracleFreezeTimeKey)
         }
         flagRefresh += 1
     }
@@ -214,16 +228,16 @@ struct DeveloperToolsView: View {
         let id = newCaptureID.trimmingCharacters(in: .whitespaces)
         guard !id.isEmpty, !captureIDs.contains(id) else { return }
         captureIDs.append(id)
-        UserDefaults.standard.set(captureIDs, forKey: "WPEMetalCaptureScene")
+        UserDefaults.standard.set(captureIDs, forKey: Self.captureSceneKey)
         newCaptureID = ""
     }
 
     private func removeCaptureID(_ id: String) {
         captureIDs.removeAll { $0 == id }
         if captureIDs.isEmpty {
-            UserDefaults.standard.removeObject(forKey: "WPEMetalCaptureScene")
+            UserDefaults.standard.removeObject(forKey: Self.captureSceneKey)
         } else {
-            UserDefaults.standard.set(captureIDs, forKey: "WPEMetalCaptureScene")
+            UserDefaults.standard.set(captureIDs, forKey: Self.captureSceneKey)
         }
     }
 

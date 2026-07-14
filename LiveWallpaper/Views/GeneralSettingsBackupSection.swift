@@ -110,6 +110,9 @@ extension GeneralSettingsView {
         developerModeEnabled = settings.developerModeEnabled
         audioResponseEnabled = settings.audioResponseEnabled
         weatherLocation = settings.weatherLocation
+        #if !LITE_BUILD
+        applyAudioResponseEnabled(settings.audioResponseEnabled)
+        #endif
         postSettingsNotificationAsync(.developerModeDidChange)
 
         let feedback = importFeedbackMessage(for: summary)

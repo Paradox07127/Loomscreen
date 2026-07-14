@@ -35,13 +35,7 @@ extension GeneralSettingsView {
                         .toggleStyle(.switch)
                         .onChange(of: audioResponseEnabled) { _, newValue in
                             updateGlobalSettings()
-                            SystemAudioCaptureManager.shared.setEnabled(newValue)
-                            audioCaptureState = SystemAudioCaptureManager.shared.state
-                            if newValue {
-                                scheduleSystemStatusRefresh(.audioCapture)
-                            } else {
-                                audioStatusRefreshPending = false
-                            }
+                            applyAudioResponseEnabled(newValue)
                         }
                         .accessibilityLabel(Text("Audio Response"))
                         .accessibilityHint(Text("Lets wallpapers react to the audio playing on your Mac. Off by default; requires audio-recording permission."))
@@ -54,6 +48,20 @@ extension GeneralSettingsView {
     }
 
     #if !LITE_BUILD
+    /// Single reconcile point for the live capture tap. The Toggle's onChange
+    /// and the config-bundle import both route through here — the import path
+    /// runs on the Backup & Restore page where the Toggle (and its onChange)
+    /// is not in the view tree, so persisting alone would leave the tap stale.
+    func applyAudioResponseEnabled(_ enabled: Bool) {
+        SystemAudioCaptureManager.shared.setEnabled(enabled)
+        audioCaptureState = SystemAudioCaptureManager.shared.state
+        if enabled {
+            scheduleSystemStatusRefresh(.audioCapture)
+        } else {
+            audioStatusRefreshPending = false
+        }
+    }
+
     private var audioStatusText: String {
         guard audioResponseEnabled else { return "Off" }
         if audioStatusRefreshPending {
