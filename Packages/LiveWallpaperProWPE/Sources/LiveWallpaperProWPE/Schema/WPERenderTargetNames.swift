@@ -49,8 +49,8 @@ public enum WPERenderTargetNames {
     /// `_rt_imageLayerComposite_<objectID>_{a,b}` — a layer's ping-pong composite
     /// pair. The bare `_rt_imageLayerComposite` (no suffix) is a SCENE ALIAS
     /// (`WPETextureReference.isSceneAliasName`), not a member of this family:
-    /// `matches`/`layerID` require the `_a`/`_b` suffix so the two vocabularies
-    /// stay disjoint by construction.
+    /// `layerID` requires the `_a`/`_b` suffix so the two vocabularies stay
+    /// disjoint by construction.
     public enum ImageLayerComposite {
         private static let prefix = "_rt_imageLayerComposite_"
 
@@ -68,8 +68,6 @@ public enum WPERenderTargetNames {
             guard start < end else { return nil }
             return String(name[start..<end])
         }
-
-        public static func matches(_ name: String) -> Bool { layerID(from: name) != nil }
     }
 
     /// `_rt_layerGroup_<objectID>` — composelayer group buffer. Prefix-matched by
@@ -89,6 +87,5 @@ public enum WPERenderTargetNames {
         public static func make(key: String) -> CompositePair {
             CompositePair(a: "\(prefix)\(key)_a", b: "\(prefix)\(key)_b")
         }
-        public static func matches(_ name: String) -> Bool { name.hasPrefix(prefix) }
     }
 }

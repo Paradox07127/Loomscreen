@@ -115,15 +115,20 @@ public enum WPESceneDocumentParser {
             canvasHeight: general.orthogonalProjection.height,
             makeResolver: makeTransformScriptResolver
         )
+        // One canonical id→object index feeds every downstream pass (transforms,
+        // visibility, hierarchy, attachments). Later duplicates win — matching the
+        // paint-order map below — so a malformed duplicate-id document resolves
+        // every field from a single source object instead of mixing first/last.
+        let objectsByID = indexObjectsByID(rawObjects)
         let objectTransforms = resolvedObjectTransforms(
-            rawObjects,
+            objectsByID,
             scriptOrigins: scriptResolvedOrigins
         )
         // Effective visibility folds each object's own `visible` with its ancestor
         // groups', so a child of a condition-hidden group is hidden too.
-        let objectVisibility = resolvedObjectVisibility(rawObjects)
-        let (objectParentByID, ownVisibilityByID) = objectHierarchy(rawObjects)
-        let inheritedAttachments = inheritedGroupAttachments(rawObjects)
+        let objectVisibility = resolvedObjectVisibility(objectsByID)
+        let (objectParentByID, ownVisibilityByID) = objectHierarchy(from: objectsByID)
+        let inheritedAttachments = inheritedGroupAttachments(from: objectsByID)
         var imageObjects: [WPESceneImageObject] = []
         var scriptHostObjects: [WPESceneScriptHostObject] = []
         var transformHostObjects: [WPESceneTransformHostObject] = []
@@ -316,17 +321,30 @@ public enum WPESceneDocumentParser {
         )
     }
 
+    /// Canonical id→object index. A later duplicate id wins so every downstream
+    /// pass resolves the same source object for a given id; well-formed WPE
+    /// exports carry unique ids, so this only matters for malformed documents.
+    private static func indexObjectsByID(
+        _ rawObjects: [[String: Any]]
+    ) -> [String: [String: Any]] {
+        var objectsByID: [String: [String: Any]] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object) else { continue }
+            objectsByID[id] = object
+        }
+        return objectsByID
+    }
+
     /// Parent id and OWN baked `visible` for every object (groups included). The
     /// renderer walks the parent chain live so a layer script can't show a layer
     /// under a currently-hidden ancestor (group toggle, condition, or live image
     /// toggle alike) — its `getParent()` is a neutral always-visible stub.
     private static func objectHierarchy(
-        _ rawObjects: [[String: Any]]
+        from objectsByID: [String: [String: Any]]
     ) -> (parents: [String: String], ownVisibility: [String: Bool]) {
         var parents: [String: String] = [:]
         var ownVisibility: [String: Bool] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object) else { continue }
+        for (id, object) in objectsByID {
             ownVisibility[id] = parseBool(object["visible"]) ?? true
             if let parent = parentID(in: object), parent != id {
                 parents[id] = parent
@@ -342,31 +360,42 @@ public enum WPESceneDocumentParser {
     /// layer), the exact shape the static anchor-offset and runtime attachment-follow
     /// paths already handle for directly-attached layers.
     private static func inheritedGroupAttachments(
-        _ rawObjects: [[String: Any]]
+        from objectsByID: [String: [String: Any]]
     ) -> [String: (name: String, parentID: String)] {
-        var byID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), byID[id] == nil else { continue }
-            byID[id] = object
+        // Each group node's nearest inherited attachment is a property of its
+        // position in the group chain, not of the image that starts the walk, so
+        // memoize it once instead of re-walking the whole chain per unattached
+        // image (previously O(objects × chain-depth) on deep group hierarchies).
+        var memo: [String: (name: String, parentID: String)?] = [:]
+
+        func inherited(groupID: String, stack: Set<String>) -> (name: String, parentID: String)? {
+            if let cached = memo[groupID] { return cached }
+            guard !stack.contains(groupID),
+                  let group = objectsByID[groupID],
+                  objectKindResolution(for: group).primary == .unknown else {
+                return nil
+            }
+            let resolved: (name: String, parentID: String)?
+            if let attachment = nonEmptyString(group["attachment"]) ?? nonEmptyString(group["anchor"]),
+               let groupParentID = parentID(in: group) {
+                resolved = (attachment, groupParentID)
+            } else if let parent = parentID(in: group) {
+                resolved = inherited(groupID: parent, stack: stack.union([groupID]))
+            } else {
+                resolved = nil
+            }
+            memo[groupID] = resolved
+            return resolved
         }
+
         var result: [String: (name: String, parentID: String)] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object),
-                  objectKindResolution(for: object).primary == .image,
+        for (id, object) in objectsByID {
+            guard objectKindResolution(for: object).primary == .image,
                   nonEmptyString(object["attachment"]) == nil,
-                  nonEmptyString(object["anchor"]) == nil else { continue }
-            var current = parentID(in: object)
-            var seen: Set<String> = []
-            while let ancestorID = current,
-                  seen.insert(ancestorID).inserted,
-                  let ancestor = byID[ancestorID] {
-                guard objectKindResolution(for: ancestor).primary == .unknown else { break }
-                if let attachment = nonEmptyString(ancestor["attachment"]) ?? nonEmptyString(ancestor["anchor"]),
-                   let groupParentID = parentID(in: ancestor) {
-                    result[id] = (attachment, groupParentID)
-                    break
-                }
-                current = parentID(in: ancestor)
+                  nonEmptyString(object["anchor"]) == nil,
+                  let parent = parentID(in: object) else { continue }
+            if let attachment = inherited(groupID: parent, stack: []) {
+                result[id] = attachment
             }
         }
         return result
@@ -524,15 +553,9 @@ public enum WPESceneDocumentParser {
     }
 
     private static func resolvedObjectTransforms(
-        _ rawObjects: [[String: Any]],
+        _ objectsByID: [String: [String: Any]],
         scriptOrigins: [String: SIMD3<Double>] = [:]
     ) -> [String: SceneObjectTransform] {
-        var objectsByID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
-            objectsByID[id] = object
-        }
-
         var memo: [String: SceneObjectTransform] = [:]
 
         func resolve(id: String, stack: Set<String>) -> SceneObjectTransform {
@@ -615,14 +638,8 @@ public enum WPESceneDocumentParser {
     /// both the horizontal and vertical variant show at once. Mirrors the image
     /// graph's `hasHiddenAncestor`, but covers group containers and text too.
     private static func resolvedObjectVisibility(
-        _ rawObjects: [[String: Any]]
+        _ objectsByID: [String: [String: Any]]
     ) -> [String: Bool] {
-        var objectsByID: [String: [String: Any]] = [:]
-        for object in rawObjects {
-            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
-            objectsByID[id] = object
-        }
-
         var memo: [String: Bool] = [:]
 
         func resolve(id: String, stack: Set<String>) -> Bool {

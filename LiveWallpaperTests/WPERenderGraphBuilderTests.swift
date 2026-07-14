@@ -2598,7 +2598,7 @@ struct WPERenderGraphBuilderTests {
     @Test("rt-name families keep the bare scene alias and ping-pong vocabularies disjoint")
     func renderTargetNameFamiliesStayDisjoint() {
         // Bare `_rt_imageLayerComposite` is a SCENE ALIAS, never a ping-pong member…
-        #expect(WPERenderTargetNames.ImageLayerComposite.matches("_rt_imageLayerComposite") == false)
+        #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: "_rt_imageLayerComposite") == nil)
         // …and a suffixed ping-pong name is never a scene alias.
         #expect(WPETextureReference.isSceneAliasName("_rt_imageLayerComposite_1_a") == false)
         // Round-trips: make → parse recovers the objectID.

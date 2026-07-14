@@ -1356,7 +1356,7 @@ public enum WPEMdlParser {
                 throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
             }
             let boneIndex = Int(try reader.readUInt16())
-            let name = try reader.readCString()
+            let name = try reader.readCString(sectionEnd: sectionEnd)
             guard reader.currentOffset + 16 * MemoryLayout<Float>.size <= sectionEnd else {
                 throw WPEMdlParserError.invalidAttachmentHeader(offset: attachmentOffset)
             }
@@ -1621,6 +1621,26 @@ private struct WPEMdlBinaryReader {
             offset += 1
         }
         guard offset < data.count else {
+            throw WPEMdlParserError.unterminatedString(offset: start)
+        }
+        let bytes = data[start..<offset]
+        offset += 1
+        guard let string = String(bytes: bytes, encoding: .utf8) else {
+            throw WPEMdlParserError.invalidString(offset: start)
+        }
+        return string
+    }
+
+    /// Section-bounded `readCString`. A malformed/truncated name whose terminator
+    /// lies past `sectionEnd` fails fast on the existing `unterminatedString`
+    /// path instead of scanning (and UTF-8 decoding) the rest of the file.
+    mutating func readCString(sectionEnd: Int) throws -> String {
+        let start = offset
+        let limit = min(sectionEnd, data.count)
+        while offset < limit, data[offset] != 0 {
+            offset += 1
+        }
+        guard offset < limit else {
             throw WPEMdlParserError.unterminatedString(offset: start)
         }
         let bytes = data[start..<offset]

@@ -55,7 +55,10 @@ struct WPEMetalTextureLoaderTests {
                 textureFormatCode: WPETexFormat.rg88.rawValue,
                 format: .rg88,
                 mipmapCount: 1,
-                flags: WPETexInfo.alphaChannelPriorityFlag
+                // TEXI flag bit 0x80000 = "alpha channel priority" (set on light/beam
+                // glows). NOT the swizzle discriminator — this fixture only asserts the
+                // flag's presence doesn't change the RG88 → (R,R,R,G) result.
+                flags: 0x0008_0000
             ),
             mipmaps: [WPETexTextureMipmap(index: 0, width: 2, height: 2, bytes: bytes)],
             hasAnimationFrames: false

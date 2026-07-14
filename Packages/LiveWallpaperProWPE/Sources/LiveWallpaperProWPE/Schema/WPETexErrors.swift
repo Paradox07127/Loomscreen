@@ -167,14 +167,6 @@ public struct WPETexInfo: Sendable, Equatable {
             && width <= 16_384 && height <= 16_384
     }
 
-    /// TEXI flag bit 0x80000 = "alpha channel priority" — set on the
-    /// light/beam glows (light_shafts, beam_1). Kept for documentation and
-    /// test fixtures, but it is NOT the discriminator: animated glow sprites
-    /// (fog, smoke, snow, explosion) are also RG88 LUMINANCE_ALPHA yet lack
-    /// the flag, so keying off it left their inter-frame R-full regions
-    /// opaque (red lines/blocks).
-    public static let alphaChannelPriorityFlag: UInt32 = 0x0008_0000
-
     /// TEXI flag bit 0x1 = NoInterpolation: sample with nearest (point) filtering
     /// instead of linear — pixel-art / palette maps (e.g. `camera.tex`).
     public static let noInterpolationFlag: UInt32 = 0x0000_0001
