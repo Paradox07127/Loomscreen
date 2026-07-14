@@ -33,6 +33,32 @@ enum RepositoryRoot {
         try Data(contentsOf: url(relativePath))
     }
 
+    /// Concatenates one type's sources across the files it was split into —
+    /// `Foo.swift` plus `Foo+Part.swift` / `FooTypes.swift` siblings.
+    ///
+    /// A `contains` assertion anchored to a single path stops enforcing the
+    /// moment the declaration it targets moves to a sibling file, and a pure
+    /// move is exactly the refactor that moves it. Addressing the component
+    /// rather than the file keeps the assertion meaningful across splits;
+    /// `noSourcesMatch` keeps a typo'd prefix loud instead of vacuously true.
+    static func componentSource(under directory: String, namePrefix: String) throws -> String {
+        let files = swiftFiles(under: directory)
+            .filter { $0.deletingPathExtension().lastPathComponent.hasPrefix(namePrefix) }
+        guard !files.isEmpty else { throw SweepError.noSourcesMatch(directory: directory, prefix: namePrefix) }
+        return try files.map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
+    }
+
+    enum SweepError: Error, CustomStringConvertible {
+        case noSourcesMatch(directory: String, prefix: String)
+
+        var description: String {
+            switch self {
+            case let .noSourcesMatch(directory, prefix):
+                return "No .swift file under \(directory) starts with \(prefix) — the scan is misconfigured, not passing."
+            }
+        }
+    }
+
     /// Recursively collects `.swift` files under a repo-relative directory.
     /// Callers must assert the result is non-empty — an empty sweep is how a
     /// scanning test silently stops enforcing anything.
@@ -89,5 +115,20 @@ struct RepositoryRootTests {
     @Test("A missing directory sweeps to empty rather than resolving somewhere else")
     func missingDirectorySweepsEmpty() {
         #expect(RepositoryRoot.swiftFiles(under: "LiveWallpaper/DirectoryThatDoesNotExist").isEmpty)
+    }
+
+    @Test("A component sweep spans the files its type was split into")
+    func componentSourceSpansSplitParts() throws {
+        let executor = try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalRenderExecutor")
+        // One declaration from the class body and one from an extension file.
+        #expect(executor.contains("final class WPEMetalRenderExecutor"))
+        #expect(executor.contains("func present("))
+    }
+
+    @Test("A component sweep matching nothing throws instead of returning empty")
+    func componentSourceRejectsEmptySweep() {
+        #expect(throws: RepositoryRoot.SweepError.self) {
+            try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "NoSuchTypeName")
+        }
     }
 }

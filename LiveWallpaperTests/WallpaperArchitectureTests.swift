@@ -704,7 +704,7 @@ struct WallpaperVideoPlayerStartupPolicyTests {
     @Test("Scene preview poster readback waits for present completion without synchronizing draw")
     func scenePreviewPosterReadbackUsesPresentCompletion() throws {
         let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalSceneRenderer.swift")
-        let executor = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalRenderExecutor.swift")
+        let executor = try Self.readExecutorSource()
 
         #expect(source.contains("capturePendingLivePostersAfterPresent"))
         #expect(source.contains("presentCompletion:"))
@@ -716,7 +716,7 @@ struct WallpaperVideoPlayerStartupPolicyTests {
 
     @Test("Puppet bound-scan cache stores successful nil checks")
     func puppetBoundScanCacheStoresSuccessfulNilChecks() throws {
-        let executor = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalRenderExecutor.swift")
+        let executor = try Self.readExecutorSource()
 
         #expect(executor.contains("struct PuppetBoundScanCacheEntry"))
         #expect(executor.contains("puppetBoundScanDetailByObjectID[objectID] = PuppetBoundScanCacheEntry"))
@@ -749,6 +749,13 @@ struct WallpaperVideoPlayerStartupPolicyTests {
 
     private static func readSourceFile(_ relativePath: String) throws -> String {
         try RepositoryRoot.source(relativePath)
+    }
+
+    /// The executor is split across `WPEMetalRenderExecutor+*.swift`, so these
+    /// assertions address the component instead of pinning to whichever part a
+    /// declaration currently lives in.
+    private static func readExecutorSource() throws -> String {
+        try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalRenderExecutor")
     }
 }
 
