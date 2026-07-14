@@ -143,20 +143,7 @@ struct SettingsWindowLayoutTests {
     }
 
     private static func readSourceFile(_ relativePath: String) throws -> String {
-        let bases = [
-            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        ]
-
-        guard let url = bases
-            .lazy
-            .map({ $0.appendingPathComponent(relativePath) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-        else {
-            Issue.record("Could not locate \(relativePath)")
-            return ""
-        }
-        return try String(contentsOf: url, encoding: .utf8)
+        try RepositoryRoot.source(relativePath)
     }
 
     private static func slice(_ source: String, from start: String, to end: String) -> String? {
@@ -183,10 +170,7 @@ struct ResourceUtilitiesTests {
 
     @Test("Sandbox entitlements allow read-write user-selected files")
     func sandboxEntitlementsAllowReadWriteUserSelectedFiles() throws {
-        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let projectRoot = testsDirectory.deletingLastPathComponent()
-        let url = projectRoot.appendingPathComponent("LiveWallpaper/LiveWallpaper.entitlements")
-        let data = try Data(contentsOf: url)
+        let data = try RepositoryRoot.data("LiveWallpaper/LiveWallpaper.entitlements")
         let plist = try #require(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         )

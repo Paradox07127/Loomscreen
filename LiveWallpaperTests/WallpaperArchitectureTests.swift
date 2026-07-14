@@ -748,20 +748,7 @@ struct WallpaperVideoPlayerStartupPolicyTests {
     }
 
     private static func readSourceFile(_ relativePath: String) throws -> String {
-        let bases = [
-            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        ]
-
-        guard let url = bases
-            .lazy
-            .map({ $0.appendingPathComponent(relativePath) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-        else {
-            Issue.record("Could not locate \(relativePath)")
-            return ""
-        }
-        return try String(contentsOf: url, encoding: .utf8)
+        try RepositoryRoot.source(relativePath)
     }
 }
 
@@ -1619,9 +1606,6 @@ struct InfrastructureRuntimeBoundaryTests {
     /// may only ever *shrink*: deleting entries as the coupling is paid down is
     /// expected; adding one means a new boundary violation slipped in.
     private static let baseline: [String: Set<String>] = [
-        "WPEDependencyMountResolver.swift": ["WPEPathSafety"],
-        "WPEDirectorySceneAssetProvider.swift": ["WPEPathSafety"],
-        "WPEDownloadArchiveReclaimer.swift": ["WPEPathSafety"],
         "WPEMetalTextureLoader.swift": [
             "WPEMetalTextureMetadataRegistry",
             "WPETexAnimatedFrame",
@@ -1639,15 +1623,7 @@ struct InfrastructureRuntimeBoundaryTests {
         "WPERenderGraphBuilder.swift": ["WPEMetalRenderExecutor", "WPEResolutionTracer"],
         "WPERenderPipelineBuilder.swift": ["WPEResolutionTracer", "WPEShaderBuiltinMacros"],
         "WPESceneDebugArtifacts.swift": ["WPEResolutionDiagnosticsSnapshot"],
-        "WPESceneProjectSchemaLoader.swift": ["WPEPathSafety"],
-        "WPEStorageInventory.swift": ["WPEPathSafety"],
-        "WPEStoragePaths.swift": ["WPEPathSafety"],
-        "WPEVideoTextureDiskCache.swift": ["WPEPathSafety"],
-        "WallpaperEngineCache.swift": ["WPEPathSafety"],
-        "WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy", "WPEPathSafety"],
-        "WallpaperEngineLibraryScanner.swift": ["WPEPathSafety"],
-        "WallpaperEngineProject.swift": ["WPEPathSafety"],
-        "Workshop/Doctor/SteamCMDDoctorService.swift": ["WPEPathSafety"],
+        "WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy"],
     ]
 
     @Test("Infrastructure/ introduces no Runtime/ references beyond the ADR-002 baseline")
@@ -1655,8 +1631,14 @@ struct InfrastructureRuntimeBoundaryTests {
         let runtimeTypes = try runtimeDeclaredTypeNames()
         #expect(!runtimeTypes.isEmpty, "Runtime type extraction found nothing — scan is misconfigured")
 
+        let infrastructureFiles = try infrastructureSwiftFiles()
+        #expect(
+            !infrastructureFiles.isEmpty,
+            Comment(rawValue: "Infrastructure scan found no files at \(infrastructureRoot.path) — the boundary is unenforced, not clean")
+        )
+
         var newCrossings: [String] = []
-        for file in try infrastructureSwiftFiles() {
+        for file in infrastructureFiles {
             let relativePath = file.path.replacingOccurrences(
                 of: infrastructureRoot.path + "/",
                 with: ""
@@ -1707,26 +1689,22 @@ struct InfrastructureRuntimeBoundaryTests {
 
     // MARK: - Repository source scanning
 
-    private var repoRoot: URL {
-        var url = URL(fileURLWithPath: #filePath)
-        while url.lastPathComponent != "LiveWallpaperTests" {
-            url.deleteLastPathComponent()
-        }
-        return url.deletingLastPathComponent()
-    }
-
     private var infrastructureRoot: URL {
-        repoRoot.appendingPathComponent("LiveWallpaper/Infrastructure")
+        RepositoryRoot.url("LiveWallpaper/Infrastructure")
     }
 
     private func infrastructureSwiftFiles() throws -> [URL] {
-        try swiftFiles(under: infrastructureRoot)
+        RepositoryRoot.swiftFiles(underURL: infrastructureRoot)
     }
 
+    /// `private`/`fileprivate` declarations are file-scoped, so no Infrastructure
+    /// file can reach them however the name matches — counting them turns a mere
+    /// name collision (e.g. the `#if LITE_BUILD` shadow of the package's public
+    /// `WPEPathSafety`) into a phantom boundary crossing.
     private func runtimeDeclaredTypeNames() throws -> Set<String> {
-        let declaration = /^(?:public |internal |private |fileprivate |open )*(?:final )?(?:class|struct|enum|protocol|actor)\s+([A-Za-z_][A-Za-z0-9_]*)/
+        let declaration = /^(?:public |internal |open )*(?:final )?(?:class|struct|enum|protocol|actor)\s+([A-Za-z_][A-Za-z0-9_]*)/
         var names: Set<String> = []
-        for file in try swiftFiles(under: repoRoot.appendingPathComponent("LiveWallpaper/Runtime")) {
+        for file in RepositoryRoot.swiftFiles(under: "LiveWallpaper/Runtime") {
             for line in try String(contentsOf: file, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false) {
                 if let match = try declaration.prefixMatch(in: line) {
                     names.insert(String(match.output.1))
@@ -1734,21 +1712,6 @@ struct InfrastructureRuntimeBoundaryTests {
             }
         }
         return names
-    }
-
-    private func swiftFiles(under root: URL) throws -> [URL] {
-        let manager = FileManager.default
-        guard let enumerator = manager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        var collected: [URL] = []
-        for case let url as URL in enumerator where url.pathExtension == "swift" {
-            let isRegular = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
-            if isRegular { collected.append(url) }
-        }
-        return collected
     }
 
     /// Whole-word (`\b…\b`) identifier search — a substring hit inside a longer

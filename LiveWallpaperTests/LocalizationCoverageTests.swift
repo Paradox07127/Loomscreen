@@ -91,21 +91,13 @@ struct LocalizationCoverageTests {
 
     @Test("Workshop import copy describes local copied projects, not online Workshop connection")
     func workshopImportCopyAvoidsOnlineConnectionLanguage() throws {
-        let relativePaths = [
-            "LiveWallpaper/L10n.swift",
-            "LiveWallpaper/Resources/Localizable.xcstrings",
-            "LiveWallpaper/Views/ContentView.swift",
-            "LiveWallpaper/Views/GeneralSettingsView.swift",
-            "LiveWallpaper/Views/WPECacheManagementView.swift",
-            "LiveWallpaper/Views/ScreenDetail/WPESceneSection.swift",
-            "LiveWallpaper/Views/ScreenDetail/EmptyStateGuideView.swift",
-            "LiveWallpaper/Views/ScreenDetail/WPEFallbackCard.swift",
-            "LiveWallpaper/Views/ScreenDetail/WPEHistoryRow.swift",
-            "LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift",
-        ]
-        let source = try relativePaths.map { relativePath in
-            try Self.projectFile(relativePath)
-        }.joined(separator: "\n")
+        // Swept, not listed: a hardcoded file list keeps passing after a monolith
+        // is split, because the banned copy simply moves to a file nobody scans.
+        var scanned = RepositoryRoot.swiftFiles(under: "LiveWallpaper")
+        scanned.append(RepositoryRoot.url("LiveWallpaper/Resources/Localizable.xcstrings"))
+        #expect(scanned.count > 100, "App source sweep collapsed to \(scanned.count) files — the copy scan is unenforced")
+
+        let source = try scanned.map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
 
         let disallowedPhrases = [
             "Connect Steam Workshop",
@@ -138,11 +130,8 @@ struct LocalizationCoverageTests {
         #expect(source.contains("Workshop Library"), "The product decision keeps the Workshop Library page label.")
     }
 
-    private static func projectFile(_ relativePath: String, filePath: String = #filePath) throws -> String {
-        let testsDirectory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
-        let projectRoot = testsDirectory.deletingLastPathComponent()
-        let url = projectRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: url, encoding: .utf8)
+    private static func projectFile(_ relativePath: String) throws -> String {
+        try RepositoryRoot.source(relativePath)
     }
 }
 
@@ -150,11 +139,8 @@ private struct StringCatalog: Decodable {
     let sourceLanguage: String
     let strings: [String: Entry]
 
-    static func load(named name: String, filePath: String = #filePath) throws -> StringCatalog {
-        let testsDirectory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
-        let projectRoot = testsDirectory.deletingLastPathComponent()
-        let url = projectRoot.appendingPathComponent("LiveWallpaper/Resources/\(name)")
-        let data = try Data(contentsOf: url)
+    static func load(named name: String) throws -> StringCatalog {
+        let data = try RepositoryRoot.data("LiveWallpaper/Resources/\(name)")
         return try JSONDecoder().decode(StringCatalog.self, from: data)
     }
 

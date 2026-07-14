@@ -3,13 +3,7 @@ import Testing
 
 @Suite("macOS compatibility policy")
 struct MacOSCompatibilityPolicyTests {
-    private var repoRoot: URL {
-        var url = URL(fileURLWithPath: #filePath)
-        while url.lastPathComponent != "LiveWallpaperTests" {
-            url.deleteLastPathComponent()
-        }
-        return url.deletingLastPathComponent()
-    }
+    private var repoRoot: URL { RepositoryRoot.url }
 
     @Test("project and package manifests target macOS 14")
     func deploymentTargetsAreMacOS14() throws {

@@ -73,24 +73,15 @@ struct MenuBarBehaviorTests {
 
     @Test("MenuBarContent does not invoke NSOpenPanel directly")
     func menuBarContentHasNoOpenPanelCoupling() throws {
-        let candidates = ["LiveWallpaper/Views/MenuBarContent.swift"]
-        let bases = [
-            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        ]
+        // Every MenuBar* file, not just MenuBarContent.swift: splitting the view
+        // out into siblings must not let NSOpenPanel back in unscanned.
+        let sources = Self.menuBarSourceFiles()
+        #expect(!sources.isEmpty, "No MenuBar sources found under LiveWallpaper/Views — the scan is misconfigured")
 
-        for relative in candidates {
-            guard let source = bases
-                .lazy
-                .map({ $0.appendingPathComponent(relative) })
-                .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-            else {
-                Issue.record("Could not locate \(relative); fix the test path resolver")
-                return
-            }
-            let contents = try String(contentsOf: source, encoding: .utf8)
+        for url in sources {
+            let contents = try String(contentsOf: url, encoding: .utf8)
             #expect(!contents.contains("NSOpenPanel"),
-                    "MenuBarContent must stay free of NSOpenPanel — keep it a shortcut surface only")
+                    "\(url.lastPathComponent) must stay free of NSOpenPanel — keep the menu bar a shortcut surface only")
         }
     }
 
@@ -150,22 +141,18 @@ struct MenuBarBehaviorTests {
         )
     }
 
-    private func readMenuBarSource() throws -> String {
-        let relative = "LiveWallpaper/Views/MenuBarContent.swift"
-        let bases = [
-            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        ]
+    static func menuBarSourceFiles() -> [URL] {
+        RepositoryRoot.swiftFiles(under: "LiveWallpaper/Views")
+            .filter { $0.lastPathComponent.hasPrefix("MenuBar") }
+    }
 
-        guard let source = bases
-            .lazy
-            .map({ $0.appendingPathComponent(relative) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-        else {
-            Issue.record("Could not locate \(relative); fix the test path resolver")
+    private func readMenuBarSource() throws -> String {
+        let sources = Self.menuBarSourceFiles()
+        guard !sources.isEmpty else {
+            Issue.record("No MenuBar sources found under LiveWallpaper/Views; fix the test path resolver")
             return ""
         }
-        return try String(contentsOf: source, encoding: .utf8)
+        return try sources.map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
     }
 }
 

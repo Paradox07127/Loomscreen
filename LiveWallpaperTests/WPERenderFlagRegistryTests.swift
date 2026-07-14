@@ -131,22 +131,10 @@ struct WPERenderFlagRegistryTests {
     }
 
     private static func swiftFiles(under root: URL) throws -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        var collected: [URL] = []
-        for case let url as URL in enumerator where url.pathExtension == "swift" {
-            let isRegular = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
-            if isRegular { collected.append(url) }
-        }
-        return collected
+        RepositoryRoot.swiftFiles(underURL: root)
     }
 
-    private static func projectURL(_ relativePath: String, filePath: String = #filePath) -> URL {
-        let testsDirectory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
-        let projectRoot = testsDirectory.deletingLastPathComponent()
-        return projectRoot.appendingPathComponent(relativePath)
+    private static func projectURL(_ relativePath: String) -> URL {
+        RepositoryRoot.url(relativePath)
     }
 }

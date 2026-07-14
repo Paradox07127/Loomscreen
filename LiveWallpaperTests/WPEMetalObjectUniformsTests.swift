@@ -81,19 +81,6 @@ struct WPEMetalObjectUniformsTests {
     }
 
     private static func readSourceFile(_ relativePath: String) throws -> String {
-        let bases = [
-            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        ]
-
-        guard let url = bases
-            .lazy
-            .map({ $0.appendingPathComponent(relativePath) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-        else {
-            Issue.record("Could not locate \(relativePath)")
-            return ""
-        }
-        return try String(contentsOf: url, encoding: .utf8)
+        try RepositoryRoot.source(relativePath)
     }
 }

@@ -57,21 +57,13 @@ struct SparkleIntegrationTests {
         #expect(aboutTab.contains("if SparkleUpdateConfiguration.manualChecksEnabled"))
     }
 
-    private static func plistDictionary(_ relativePath: String, filePath: String = #filePath) throws -> [String: Any] {
-        let url = projectURL(relativePath, filePath: filePath)
-        let data = try Data(contentsOf: url)
+    private static func plistDictionary(_ relativePath: String) throws -> [String: Any] {
+        let data = try RepositoryRoot.data(relativePath)
         let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         return try #require(plist as? [String: Any])
     }
 
-    private static func projectFile(_ relativePath: String, filePath: String = #filePath) throws -> String {
-        let url = projectURL(relativePath, filePath: filePath)
-        return try String(contentsOf: url, encoding: .utf8)
-    }
-
-    private static func projectURL(_ relativePath: String, filePath: String) -> URL {
-        let testsDirectory = URL(fileURLWithPath: filePath).deletingLastPathComponent()
-        let projectRoot = testsDirectory.deletingLastPathComponent()
-        return projectRoot.appendingPathComponent(relativePath)
+    private static func projectFile(_ relativePath: String) throws -> String {
+        try RepositoryRoot.source(relativePath)
     }
 }
