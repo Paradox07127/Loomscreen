@@ -60,4 +60,28 @@ struct GameModeDetectorTests {
         #expect(GameModeDetector.evaluate(lowPowerMode: true, classification: .unknown))
         #expect(GameModeDetector.evaluate(lowPowerMode: true, classification: .nonGame))
     }
+
+    // First sight of a bundle must not read disk on the MainActor: the answer
+    // is fail-open `.unknown`, and the off-main plist read fills the cache for
+    // the next policy refresh.
+    @Test("First sight fails open, then the background read fills the cache")
+    @MainActor
+    func firstSightFailsOpenThenCacheFills() async throws {
+        let bundle = FileManager.default.temporaryDirectory
+            .appendingPathComponent("W3GameModeDetector-\(UUID().uuidString).app")
+        let contents = bundle.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bundle) }
+        let plist = try PropertyListSerialization.data(
+            fromPropertyList: ["LSApplicationCategoryType": "public.app-category.games"],
+            format: .xml,
+            options: 0
+        )
+        try plist.write(to: contents.appendingPathComponent("Info.plist"))
+
+        let detector = GameModeDetector()
+        #expect(detector.classification(forBundleAt: bundle) == .unknown)
+        await detector.awaitPendingClassifications()
+        #expect(detector.classification(forBundleAt: bundle) == .game)
+    }
 }

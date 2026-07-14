@@ -1,246 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Freeze time" : {
-      "comment" : "Developer Tools section label above the WPE render oracle's frozen scene-time field.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Freeze time"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "固定時間"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "冻结时间"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "凍結時間"
-          }
-        }
-      }
-    },
-    "Oracle" : {
-      "comment" : "Developer Tools section header for the WPE render oracle controls.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Oracle"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Oracle"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Oracle"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Oracle"
-          }
-        }
-      }
-    },
-    "Render oracle" : {
-      "comment" : "Developer Tools toggle title enabling the WPE render oracle (deterministic capture mode).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Render oracle"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "レンダーオラクル"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "渲染 Oracle"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "渲染 Oracle"
-          }
-        }
-      }
-    },
-    "Reveal trace" : {
-      "comment" : "Developer Tools button revealing the WPE render oracle trace output folder in Finder.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reveal trace"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トレースを表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示追踪文件"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "顯示追蹤檔案"
-          }
-        }
-      }
-    },
-    "Seconds" : {
-      "comment" : "Developer Tools accessibility title for the WPE render oracle's freeze-time number field (visible placeholder is the literal default value).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Seconds"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "秒"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "秒"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "秒"
-          }
-        }
-      }
-    },
-    "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value." : {
-      "comment" : "Developer Tools helper text under the render oracle toggle.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "パーティクルRNGにシードを与え、フレームクロックを固定し、同一マシンでのリファクタリング安全性比較やWindows忠実度リプレイのために、パスごとと最終フレームのトレースハッシュを記録します。切り替え後はアプリを再起動してください — 実行中のインスタンスは古い値をキャッシュします。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "为粒子 RNG 播种、冻结帧时钟，并记录逐 pass 与最终帧的追踪哈希，用于同机重构安全性比对或 Windows 保真回放。切换后需重启应用——运行中的实例会缓存旧值。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "為粒子 RNG 播種、凍結畫格時鐘，並記錄逐 pass 與最終畫面的追蹤雜湊，用於同機重構安全性比對或 Windows 保真回放。切換後需重新啟動應用程式——執行中的執行個體會快取舊值。"
-          }
-        }
-      }
-    },
-    "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank." : {
-      "comment" : "Developer Tools helper text explaining the WPE render oracle freeze-time field.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "オラクルが毎フレームを固定する、シーン内の合成時間です。空欄の場合はデフォルトで6秒になります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "场景内合成时间，Oracle 会将每一帧冻结在此时刻。留空时默认 6 秒。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "場景內合成時間，Oracle 會將每一畫格凍結在此時刻。留空時預設 6 秒。"
-          }
-        }
-      }
-    },
-    "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on." : {
-      "comment" : "Developer Tools helper text pointing to where WPE render oracle traces are written.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "オラクルを有効にした状態でシーンを再読み込みすると、トレースは「トレースを表示」で開く scene-debug フォルダに書き込まれます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开启 Oracle 后重新加载场景，追踪文件会写入“显示追踪文件”打开的 scene-debug 目录。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟 Oracle 後重新載入場景，追蹤檔案會寫入「顯示追蹤檔案」開啟的 scene-debug 目錄。"
-          }
-        }
-      }
-    },
     "" : {
       "localizations" : {
         "en" : {
@@ -2911,7 +2671,7 @@
       }
     },
     "All" : {
-      "comment" : "Workshop content-type filter: no type restriction.\nWorkshop resolution filter: no restriction.",
+      "comment" : "Workshop resolution filter: no restriction.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3617,35 +3377,6 @@
         }
       }
     },
-    "Apply to All" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply to All"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてに適用"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用到全部"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "套用到全部"
-          }
-        }
-      }
-    },
     "Apply to All — copy this display's wallpaper and settings to every other display" : {
       "comment" : "Tooltip for apply-to-all display settings action.",
       "localizations" : {
@@ -3727,35 +3458,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "套用到所有顯示器"
-          }
-        }
-      }
-    },
-    "Apply to all displays?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply to all displays?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのディスプレイに適用しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用到所有显示器吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要套用到所有顯示器嗎？"
           }
         }
       }
@@ -6976,35 +6678,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除搜尋"
-          }
-        }
-      }
-    },
-    "Clear the Scene wallpaper?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear the Scene wallpaper?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シーン壁紙をクリアしますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "清除场景壁纸吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要清除場景桌布嗎？"
           }
         }
       }
@@ -11876,126 +11549,6 @@
         }
       }
     },
-    "error.app.configuration_save_failed" : {
-      "comment" : "Error shown when app settings cannot be saved.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to save configuration"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "構成の保存に失敗しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存配置失败"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "儲存設定失敗"
-          }
-        }
-      }
-    },
-    "error.app.configuration_save_failed.recovery" : {
-      "comment" : "Recovery suggestion for configuration save failures.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try restarting the app"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリを再起動してみてください"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尝试重新启动应用"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請嘗試重新啟動 App"
-          }
-        }
-      }
-    },
-    "error.app.effects_pipeline_failed" : {
-      "comment" : "Error shown when the video effects pipeline fails.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Effects error: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "エフェクトエラー：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "效果错误：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "效果錯誤：%@"
-          }
-        }
-      }
-    },
-    "error.app.effects_pipeline_failed.recovery" : {
-      "comment" : "Recovery suggestion for video effects failures.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try disabling effects"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "エフェクトを無効にしてみてください"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尝试禁用效果"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請嘗試停用效果"
-          }
-        }
-      }
-    },
     "error.app.file_access_denied" : {
       "comment" : "Error shown when the app cannot access a selected wallpaper file.",
       "extractionState" : "manual",
@@ -12052,186 +11605,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請嘗試重新選擇檔案"
-          }
-        }
-      }
-    },
-    "error.app.html_load_failed" : {
-      "comment" : "Error shown when a web wallpaper cannot be loaded.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to load web content: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web コンテンツの読み込みに失敗しました：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "加载网页内容失败：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "載入網頁內容失敗：%@"
-          }
-        }
-      }
-    },
-    "error.app.html_load_failed.recovery" : {
-      "comment" : "Recovery suggestion for web wallpaper load failures.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Check the URL and try again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "URL を確認して、もう一度試してください"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "检查 URL 并重试"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請檢查 URL 後再試一次"
-          }
-        }
-      }
-    },
-    "error.app.shader_load_failed" : {
-      "comment" : "Error shown when a shader wallpaper cannot be loaded.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to load shader wallpaper"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダー壁紙の読み込みに失敗しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "加载着色器壁纸失败"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法載入著色器桌布"
-          }
-        }
-      }
-    },
-    "error.app.shader_load_failed.recovery" : {
-      "comment" : "Recovery suggestion for shader wallpaper load failures.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your GPU may not support this shader"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この GPU はこのシェーダーに対応していない可能性があります"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "您的 GPU 可能不支持此着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的 GPU 可能不支援此著色器"
-          }
-        }
-      }
-    },
-    "error.app.video_not_playable" : {
-      "comment" : "Error shown when a selected video cannot be played.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "\"%@\" is not playable"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「%@」は再生できません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%@”无法播放。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「%@」無法播放"
-          }
-        }
-      }
-    },
-    "error.app.video_not_playable.recovery" : {
-      "comment" : "Recovery suggestion for unsupported video files.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The file format may not be supported"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ファイル形式がサポートされていない可能性があります"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "文件格式可能不受支持"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "檔案格式可能不受支援"
           }
         }
       }
@@ -12352,66 +11725,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請嘗試從 Steam 創意工坊重新下載"
-          }
-        }
-      }
-    },
-    "error.app.wpe_unsupported_type" : {
-      "comment" : "Error shown when a Wallpaper Engine package type is unsupported.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wallpaper Engine \"%@\" type is not supported"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wallpaper Engine の「%@」タイプはサポートされていません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不支持 Wallpaper Engine 的“%@”类型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不支援 Wallpaper Engine「%@」類型"
-          }
-        }
-      }
-    },
-    "error.app.wpe_unsupported_type.recovery" : {
-      "comment" : "Recovery suggestion for unsupported Wallpaper Engine package types.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Look for a video version of this wallpaper"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この壁紙の動画版を探してください"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "查找此壁纸的视频版本"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尋找此桌布的影片版本"
           }
         }
       }
@@ -15223,35 +14536,6 @@
         }
       }
     },
-    "Forget Library" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Forget Library"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ライブラリを解除"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "断开资源库连接"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "忘記資料庫"
-          }
-        }
-      }
-    },
     "Forget Wallpaper Engine install folder?" : {
       "comment" : "A confirmation prompt for forgetting the Wallpaper Engine install folder.",
       "extractionState" : "manual",
@@ -15446,6 +14730,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已釋放 %@。"
+          }
+        }
+      }
+    },
+    "Freeze time" : {
+      "comment" : "Developer Tools section label above the WPE render oracle's frozen scene-time field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freeze time"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定時間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "冻结时间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "凍結時間"
           }
         }
       }
@@ -17256,6 +16570,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在頁面執行自身腳本前注入嚴格的 CSP meta 標籤。允許 HTTPS 和內建的 livewallpaper:// scheme；阻止透過 FTP 或任意 scheme 外洩資料。某些桌布可能會失效 — 切換後需要重新載入。"
+          }
+        }
+      }
+    },
+    "Inline HTML content" : {
+      "comment" : "Read-only label shown when a web wallpaper's source is legacy inline HTML.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inline HTML content"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インライン HTML コンテンツ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内联 HTML 内容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "內嵌 HTML 內容"
           }
         }
       }
@@ -20081,36 +19425,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "需要執行階段系統"
-          }
-        }
-      }
-    },
-    "Needs shader translation" : {
-      "comment" : "Scene preflight tier label.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Needs shader translation"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダー変換が必要"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要着色器转译"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要著色器轉譯"
           }
         }
       }
@@ -23234,6 +22548,36 @@
         }
       }
     },
+    "Oracle" : {
+      "comment" : "Developer Tools section header for the WPE render oracle controls.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oracle"
+          }
+        }
+      }
+    },
     "Origin Access" : {
       "comment" : "Row title in Content Security inspector for per-origin script execution permission.",
       "extractionState" : "manual",
@@ -23434,35 +22778,6 @@
         }
       }
     },
-    "panel.message.workshop_projects_folder" : {
-      "comment" : "Message shown in the folder picker for choosing a copied local project folder.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select the project folder copied from Windows"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Windows からコピーしたプロジェクトフォルダを選択"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择从 Windows 拷贝的项目文件夹"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇從 Windows 拷貝的專案資料夾"
-          }
-        }
-      }
-    },
     "panel.prompt.add_videos" : {
       "comment" : "Confirmation button for adding selected videos to a playlist.",
       "localizations" : {
@@ -23488,35 +22803,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入影片"
-          }
-        }
-      }
-    },
-    "panel.prompt.change_folder" : {
-      "comment" : "Confirmation button for changing the selected library folder.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change Folder"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フォルダを変更"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更改文件夹"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更改資料夾"
           }
         }
       }
@@ -23550,35 +22836,6 @@
         }
       }
     },
-    "panel.prompt.grant_library_access" : {
-      "comment" : "Confirmation button for granting access to the local project library folder.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Grant Library Access"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ライブラリアクセスを許可"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "授予库访问权限"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "授予資料庫存取權"
-          }
-        }
-      }
-    },
     "panel.prompt.import_project" : {
       "comment" : "Confirmation button for choosing and applying a copied local project folder.",
       "localizations" : {
@@ -23604,35 +22861,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "套用專案"
-          }
-        }
-      }
-    },
-    "panel.prompt.preview" : {
-      "comment" : "Confirmation button for previewing a selected wallpaper video.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preview"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "プレビュー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "预览"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "預覽"
           }
         }
       }
@@ -23691,35 +22919,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "作為桌布使用"
-          }
-        }
-      }
-    },
-    "panel.prompt.use_wallpaper" : {
-      "comment" : "Confirmation button in onboarding file and folder pickers.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use Wallpaper"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "壁紙を使用"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用壁纸"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用桌布"
           }
         }
       }
@@ -24784,6 +23983,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "選擇 SteamCMD 執行檔或其 steamcmd.sh 包裝指令碼。"
+          }
+        }
+      }
+    },
+    "Pick URL or Local to replace" : {
+      "comment" : "Hint shown next to a legacy inline-HTML web source, explaining how to replace it.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick URL or Local to replace"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置き換えるには URL またはローカルを選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 URL 或本地以替换"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇 URL 或本機以取代"
           }
         }
       }
@@ -27244,35 +26473,6 @@
         }
       }
     },
-    "Remove from history?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove from history?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "履歴から削除しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从历史记录中移除吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要從記錄中移除嗎？"
-          }
-        }
-      }
-    },
     "Remove from Library" : {
       "localizations" : {
         "ja" : {
@@ -27698,6 +26898,36 @@
         }
       }
     },
+    "Render oracle" : {
+      "comment" : "Developer Tools toggle title enabling the WPE render oracle (deterministic capture mode).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Render oracle"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "レンダーオラクル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "渲染 Oracle"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "渲染 Oracle"
+          }
+        }
+      }
+    },
     "Renderer Diagnostics" : {
       "localizations" : {
         "en" : {
@@ -27919,35 +27149,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部重置"
-          }
-        }
-      }
-    },
-    "Reset all keyboard shortcuts?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset all keyboard shortcuts?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのキーボードショートカットをリセットしますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置所有键盘快捷键吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要重置所有鍵盤快捷鍵嗎？"
           }
         }
       }
@@ -28215,35 +27416,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重置設定"
-          }
-        }
-      }
-    },
-    "Reset this shortcut?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset this shortcut?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このショートカットをリセットしますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置此快捷键吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要重置此快捷鍵嗎？"
           }
         }
       }
@@ -28858,6 +28030,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Finder 中顯示產物"
+          }
+        }
+      }
+    },
+    "Reveal trace" : {
+      "comment" : "Developer Tools button revealing the WPE render oracle trace output folder in Finder.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reveal trace"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "トレースを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示追踪文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示追蹤檔案"
           }
         }
       }
@@ -30317,6 +29519,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜尋 Workshop"
+          }
+        }
+      }
+    },
+    "Seconds" : {
+      "comment" : "Developer Tools accessibility title for the WPE render oracle's freeze-time number field (visible placeholder is the literal default value).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seconds"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秒"
+          }
+        }
+      }
+    },
+    "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value." : {
+      "comment" : "Developer Tools helper text under the render oracle toggle.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seeds particle RNG, freezes the frame clock, and records per-pass and final trace hashes for same-machine refactor-safety diffing or Windows fidelity replay. Restart the app after toggling — a running instance caches the old value."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パーティクルRNGにシードを与え、フレームクロックを固定し、同一マシンでのリファクタリング安全性比較やWindows忠実度リプレイのために、パスごとと最終フレームのトレースハッシュを記録します。切り替え後はアプリを再起動してください — 実行中のインスタンスは古い値をキャッシュします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为粒子 RNG 播种、冻结帧时钟，并记录逐 pass 与最终帧的追踪哈希，用于同机重构安全性比对或 Windows 保真回放。切换后需重启应用——运行中的实例会缓存旧值。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為粒子 RNG 播種、凍結畫格時鐘，並記錄逐 pass 與最終畫面的追蹤雜湊，用於同機重構安全性比對或 Windows 保真回放。切換後需重新啟動應用程式——執行中的執行個體會快取舊值。"
           }
         }
       }
@@ -34120,6 +33382,36 @@
         }
       }
     },
+    "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank." : {
+      "comment" : "Developer Tools helper text explaining the WPE render oracle freeze-time field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synthetic scene time the oracle freezes every frame to. Defaults to 6 seconds when left blank."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オラクルが毎フレームを固定する、シーン内の合成時間です。空欄の場合はデフォルトで6秒になります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "场景内合成时间，Oracle 会将每一帧冻结在此时刻。留空时默认 6 秒。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "場景內合成時間，Oracle 會將每一畫格凍結在此時刻。留空時預設 6 秒。"
+          }
+        }
+      }
+    },
     "System" : {
       "comment" : "Segmented option (Weather → Location) — short label for the CoreLocation source.",
       "extractionState" : "manual",
@@ -36475,6 +35767,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不重複訂閱者總數"
+          }
+        }
+      }
+    },
+    "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on." : {
+      "comment" : "Developer Tools helper text pointing to where WPE render oracle traces are written.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Traces land in the scene-debug folder shown by “Reveal trace” once a scene is reloaded with the oracle on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オラクルを有効にした状態でシーンを再読み込みすると、トレースは「トレースを表示」で開く scene-debug フォルダに書き込まれます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启 Oracle 后重新加载场景，追踪文件会写入“显示追踪文件”打开的 scene-debug 目录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 Oracle 後重新載入場景，追蹤檔案會寫入「顯示追蹤檔案」開啟的 scene-debug 目錄。"
           }
         }
       }

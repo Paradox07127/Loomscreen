@@ -13,18 +13,6 @@ enum L10n {
             comment: "Confirmation button in file pickers for applying a selected file as wallpaper."
         )
 
-        static let useWallpaper = String(
-            localized: "panel.prompt.use_wallpaper",
-            defaultValue: "Use Wallpaper",
-            comment: "Confirmation button in onboarding file and folder pickers."
-        )
-
-        static let preview = String(
-            localized: "panel.prompt.preview",
-            defaultValue: "Preview",
-            comment: "Confirmation button for previewing a selected wallpaper video."
-        )
-
         static let importProject = String(
             localized: "panel.prompt.import_project",
             defaultValue: "Apply Project",
@@ -35,18 +23,6 @@ enum L10n {
             localized: "panel.prompt.grant_access",
             defaultValue: "Grant Access",
             comment: "Confirmation button for granting one-time folder access."
-        )
-
-        static let grantLibraryAccess = String(
-            localized: "panel.prompt.grant_library_access",
-            defaultValue: "Grant Library Access",
-            comment: "Confirmation button for granting access to the local project library folder."
-        )
-
-        static let changeFolder = String(
-            localized: "panel.prompt.change_folder",
-            defaultValue: "Change Folder",
-            comment: "Confirmation button for changing the selected library folder."
         )
 
         static let addVideos = String(
@@ -61,22 +37,11 @@ enum L10n {
             comment: "Confirmation button for assigning a selected video to a schedule slot."
         )
 
-        static let workshopProjectsFolderMessage = String(
-            localized: "panel.message.workshop_projects_folder",
-            defaultValue: "Select the project folder copied from Windows",
-            comment: "Message shown in the folder picker for choosing a copied local project folder."
-        )
-
         static let appleAerialsAccessMessage = String(
             localized: "panel.message.apple_aerials_access",
             defaultValue: "macOS requires one-time approval to read Apple's wallpaper folder. Just click \"Grant Access\" — you do not need to pick any specific file.",
             comment: "Message shown in the folder picker for granting access to Apple's wallpaper folder."
         )
-
-        /// Returns the appropriate prompt for the Workshop library folder picker.
-        static func workshopLibraryPrompt(hasLibraryRoot: Bool) -> String {
-            hasLibraryRoot ? changeFolder : grantLibraryAccess
-        }
     }
 
     enum Window {

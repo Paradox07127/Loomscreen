@@ -3,8 +3,7 @@ import Foundation
 
 @MainActor
 final class WallpaperAutomationCoordinator {
-    private var scheduleMonitorTask: Task<Void, Never>?
-    private var playlistRotationTask: Task<Void, Never>?
+    private var automationTask: Task<Void, Never>?
 
     func start(
         screenProvider: @escaping @MainActor () -> [Screen],
@@ -14,10 +13,14 @@ final class WallpaperAutomationCoordinator {
     ) {
         stop()
 
-        scheduleMonitorTask = Task { @MainActor in
+        // Single 60s tick for both duties (schedule check + playlist rotation)
+        // instead of two identical sleep/wake loops — halves periodic wakeups.
+        automationTask = Task { @MainActor in
             for screen in screenProvider() {
                 scheduleHandler(screen)
             }
+
+            var lastRotation: [CGDirectDisplayID: Date] = [:]
 
             while !Task.isCancelled {
                 do {
@@ -28,18 +31,6 @@ final class WallpaperAutomationCoordinator {
 
                 for screen in screenProvider() {
                     scheduleHandler(screen)
-                }
-            }
-        }
-
-        playlistRotationTask = Task { @MainActor in
-            var lastRotation: [CGDirectDisplayID: Date] = [:]
-
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(60))
-                } catch {
-                    return
                 }
 
                 let now = Date()
@@ -72,14 +63,11 @@ final class WallpaperAutomationCoordinator {
     }
 
     func stop() {
-        scheduleMonitorTask?.cancel()
-        scheduleMonitorTask = nil
-        playlistRotationTask?.cancel()
-        playlistRotationTask = nil
+        automationTask?.cancel()
+        automationTask = nil
     }
 
     deinit {
-        scheduleMonitorTask?.cancel()
-        playlistRotationTask?.cancel()
+        automationTask?.cancel()
     }
 }

@@ -37,14 +37,45 @@ final class GameModeDetector {
     /// `didActivateApplication` (never polled), and the map stays small — one
     /// entry per app the user actually switches to.
     private var cache: [String: Classification] = [:]
+    private var pendingLookups: [String: Task<Void, Never>] = [:]
 
     func currentClassification() -> Classification {
         guard let bundleURL = NSWorkspace.shared.frontmostApplication?.bundleURL else { return .unknown }
+        return classification(forBundleAt: bundleURL)
+    }
+
+    /// First sight of a bundle answers fail-open `.unknown` immediately and
+    /// resolves the plist off the main thread — the read is normally
+    /// sub-millisecond but can stall on slow/network volumes, and this path
+    /// runs on the MainActor that also drives UI and render policy. The cached
+    /// value takes effect on the next policy refresh (app switch, thermal,
+    /// power, or full-screen change — all frequent while a game spins up).
+    func classification(forBundleAt bundleURL: URL) -> Classification {
         let key = bundleURL.path
         if let hit = cache[key] { return hit }
-        let value = Self.readClassification(infoPlistAt: bundleURL.appendingPathComponent("Contents/Info.plist"))
+        scheduleClassification(for: bundleURL, key: key)
+        return .unknown
+    }
+
+    private func scheduleClassification(for bundleURL: URL, key: String) {
+        guard pendingLookups[key] == nil else { return }
+        let infoPlist = bundleURL.appendingPathComponent("Contents/Info.plist")
+        pendingLookups[key] = Task.detached(priority: .utility) { [weak self] in
+            let value = Self.readClassification(infoPlistAt: infoPlist)
+            await self?.finishClassification(key: key, value: value)
+        }
+    }
+
+    private func finishClassification(key: String, value: Classification) {
+        pendingLookups[key] = nil
         cache[key] = value
-        return value
+    }
+
+    /// Test hook: waits until every in-flight plist read has landed in `cache`.
+    func awaitPendingClassifications() async {
+        while let task = pendingLookups.values.first {
+            await task.value
+        }
     }
 
     /// Reads the bundle's declared category straight from its `Info.plist`.
