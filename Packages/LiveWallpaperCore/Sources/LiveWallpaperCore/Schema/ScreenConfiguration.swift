@@ -135,7 +135,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         self.activeWallpaper = wallpaper
         self.savedVideoBookmarkData = savedVideoBookmarkData ?? wallpaper.activeVideoBookmarkData
         self.savedVideoPackageEntryName = savedVideoPackageEntryName ?? wallpaper.packageVideoEntryName
-        if case .html(let source, let config) = wallpaper, source.isRestorableHTMLSource {
+        if case .html(let source, let config) = wallpaper {
             self.savedHTMLSource = source
             self.savedHTMLConfig = config
         }
@@ -300,10 +300,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         return false
     }
 
-    public var preferredVideoBookmarkData: Data? {
-        videoBookmarkData
-    }
-
     public var htmlSource: HTMLSource? {
         activeWallpaper.htmlSource
     }
@@ -375,8 +371,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 savedVideoPackageEntryName = decodedWallpaper.packageVideoEntryName
             }
             if savedHTMLSource == nil,
-               case .html(let source, let config) = decodedWallpaper,
-               source.isRestorableHTMLSource {
+               case .html(let source, let config) = decodedWallpaper {
                 savedHTMLSource = source
                 savedHTMLConfig = config
             }
@@ -506,10 +501,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     public mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
         preserveCurrentVideoBookmarkIfNeeded()
-        if source.isRestorableHTMLSource {
-            savedHTMLSource = source
-            savedHTMLConfig = config
-        }
+        savedHTMLSource = source
+        savedHTMLConfig = config
         activeWallpaper = .html(source: source, config: config)
     }
 

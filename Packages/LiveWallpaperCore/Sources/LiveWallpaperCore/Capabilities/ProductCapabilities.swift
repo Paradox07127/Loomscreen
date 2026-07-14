@@ -50,8 +50,9 @@ public enum ProductFeature: String, Sendable, Hashable, Codable {
     /// until the user opens the Aerials surface).
     case appleAerials
 
-    /// Inline preview window inside the inspector. Pro-only — Lite drops the
-    /// `InspectorPreviewController` initialization entirely.
+    /// Inline preview window inside the inspector. Enabled in BOTH SKUs —
+    /// gates only the UI surfacing; `InspectorPreviewController` itself is
+    /// constructed unconditionally for Lite and Pro alike.
     case inspectorPreview
 }
 

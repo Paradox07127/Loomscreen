@@ -15,7 +15,7 @@ public struct WPEOriginReconciler: OriginReconciler {
         guard let origin = configuration.wpeOrigin else { return }
 
         switch event {
-        case .loaded, .refreshedBookmark:
+        case .loaded:
             return
         case .userReplacedActiveWallpaper:
             break
