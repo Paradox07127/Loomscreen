@@ -1141,6 +1141,67 @@ struct WPESceneScriptRuntimeTests {
         #expect(reader.initialOutput.own.visible == true)
     }
 
+    /// 三体 3509243656's 日志 (object 1227) keeps its whole civilisation state in
+    /// `shared` CONTAINERS and mutates them in place: `logEntries.unshift(...)`,
+    /// `civilizationRecords.push(...)`, `lastStates.<field> = ...`. Values cross the
+    /// host bridge by copy, so without a write-back proxy every mutation hit a
+    /// detached temporary — the log and the survival leaderboard stayed empty
+    /// forever while the primitive counters ticked on.
+    @Test("shared container mutations round-trip across scripts")
+    func sharedContainerMutationsPersist() throws {
+        let store = WPESharedScriptState()
+        _ = try WPELayerScriptInstance(script: """
+        export function init() {
+            shared.logEntries = [];
+            shared.records = [];
+            shared.lastStates = { rocheLimit: '' };
+        }
+        export function update() {
+            shared.logEntries.unshift('entry');
+            shared.records.push({ number: 1, lifespan: 8 });
+            shared.lastStates.rocheLimit = '大撕裂';
+        }
+        """, shared: store)
+        .tick()
+        // Read into locals and guard every deref: a regression leaves these
+        // undefined, and an uncaught TypeError would abort init() BEFORE the
+        // assignment — leaving `visible` at its default and passing spuriously.
+        let reader = try WPELayerScriptInstance(script: """
+        export function init() {
+            const le = shared.logEntries, rc = shared.records, ls = shared.lastStates;
+            thisLayer.visible = !!le && le.length === 1
+                && !!rc && rc.length === 1 && rc[0].lifespan === 8
+                && !!ls && ls.rocheLimit === '大撕裂';
+        }
+        export function update() {}
+        """, shared: store)
+        #expect(reader.initialOutput.own.visible == true)
+    }
+
+    /// `civilizationRecords.find(r => ...).lifespan = n` — 1227 live-updates the
+    /// running civilisation's lifespan through an element handed out by `find()`,
+    /// so the write-back must reach the ROOT container from any depth.
+    @Test("shared element mutation via find() writes back to the store")
+    func sharedNestedElementMutationPersists() throws {
+        let store = WPESharedScriptState()
+        _ = try WPELayerScriptInstance(script: """
+        export function init() { shared.records = [{ number: 2, lifespan: 0 }]; }
+        export function update() {
+            const r = shared.records.find(x => x.number === 2);
+            if (r) { r.lifespan = 99; }
+        }
+        """, shared: store)
+        .tick()
+        let reader = try WPELayerScriptInstance(script: """
+        export function init() {
+            const rc = shared.records;
+            thisLayer.visible = !!rc && rc.length === 1 && rc[0].lifespan === 99;
+        }
+        export function update() {}
+        """, shared: store)
+        #expect(reader.initialOutput.own.visible == true)
+    }
+
     @Test("applyUserProperties can seed shared state from scriptProperties")
     func applyUserPropertiesSeedsSharedState() throws {
         let store = WPESharedScriptState()
@@ -1512,5 +1573,74 @@ struct WPESceneScriptRuntimeTests {
         #expect(merged.own.visible == true)
         // Not poisoned: a follow-up push on the now-idle queue still runs.
         #expect(instance.applyUserPropertiesSuperseding(["k": .bool(false)]) != nil)
+    }
+
+    // MARK: - Consumer-before-producer recovery (3509243656 三体)
+
+    @Test("Text script that throws on unset shared state recovers on a later tick")
+    func textScriptRecoversOnceSharedStateArrives() throws {
+        // 3509243656's tooltip scripts read `shared.xx1.toFixed(2)` — before the
+        // MAIN sim's first update() they throw (undefined.toFixed). The engine
+        // must keep the last value AND retry: once the producer writes the key,
+        // the very next tick recovers. A permanently-frozen instance here is the
+        // regression this test locks out.
+        let shared = WPESharedScriptState()
+        let script = """
+        export function update(value) {
+            return '[' + shared.xx1.toFixed(2) + ']';
+        }
+        """
+        let instance = try WPESceneScriptInstance(
+            script: script,
+            initialValue: "placeholder",
+            shared: shared
+        )
+        // Producer hasn't run: the tick throws inside JS, value stays put.
+        #expect(instance.tickString() == "placeholder")
+        // Producer (script-host layer script) writes the shared key cross-context…
+        let producer = try WPELayerScriptInstance(
+            script: "export function update() { shared.xx1 = 1.5; }",
+            shared: shared
+        )
+        _ = producer.tick(runtimeSeconds: 0, pointerFrame: .neutral)
+        // …and the consumer's next retry succeeds.
+        #expect(instance.tickString() == "[1.50]")
+    }
+
+    @Test("Parser keeps a script-driven text object whose authored value is empty")
+    func parserKeepsScriptedTextWithEmptyAuthoredValue() throws {
+        // 3509243656's `time` object authors "" and computes the string in
+        // update() — it is the scene's ONLY shared.xntime producer. Dropping it
+        // for the empty placeholder froze every consumer text in the scene.
+        let json = #"""
+        {
+            "camera": {"center":"0 0 0"},
+            "general": {"orthogonalprojection":{"width":100,"height":100,"auto":true}},
+            "objects": [
+                {
+                    "id": 345,
+                    "name": "time",
+                    "text": {
+                        "script": "export function update(value) { return '1 Years'; }",
+                        "value": ""
+                    },
+                    "origin": "0 0 0"
+                },
+                {
+                    "id": 346,
+                    "name": "empty-static",
+                    "text": {"value": ""},
+                    "origin": "0 0 0"
+                }
+            ]
+        }
+        """#
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        // Scripted empty text survives with an empty initial value…
+        let scripted = try #require(document.textObjects.first(where: { $0.id == "345" }))
+        #expect(scripted.text.isEmpty)
+        #expect(scripted.textScript?.isEmpty == false)
+        // …while a scriptless empty text is still dropped.
+        #expect(!document.textObjects.contains(where: { $0.id == "346" }))
     }
 }

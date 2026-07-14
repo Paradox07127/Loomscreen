@@ -308,7 +308,7 @@ final class WPESceneScriptInstance {
                 guard let self, !self.didLogException else { return }
                 self.didLogException = true
                 Logger.warning(
-                    "Text SceneScript raised an uncaught JS exception — text frozen at its last value: \(ex?.toString() ?? "unknown")",
+                    "Text SceneScript raised an uncaught JS exception — keeping last value; update() retries each tick (logged once): \(ex?.toString() ?? "unknown")",
                     category: .wpeRender
                 )
             }
@@ -1475,7 +1475,9 @@ extension WPESceneScriptPropertyValue {
 /// scene, used for cross-script coordination (e.g. a media-player widget's
 /// settings/visibility state). Each script's `JSContext` is isolated, so `shared`
 /// can't be one JSValue; it's a host-owned, lock-guarded store that per-context
-/// `shared` Proxies read/write. Values cross contexts as primitives.
+/// `shared` Proxies read/write. Values cross contexts as detached COPIES, so
+/// container mutation is re-published to the store by `wpeInstallSharedState`'s
+/// write-back proxy rather than relying on reference identity.
 final class WPESharedScriptState: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String: Any] = [:]
@@ -1500,7 +1502,21 @@ private func wpeBridgeJSValueToHost(_ value: JSValue) -> Any? {
 }
 
 /// Install `shared` as a Proxy whose traps route to `store`, so every script in
-/// the scene reads/writes the same primitives across isolated contexts.
+/// the scene reads/writes the same state across isolated contexts.
+///
+/// A raw `__sharedGet` hands back a DETACHED copy (values cross the host bridge
+/// by value — `JSValue.toObject()`), so WPE's reference semantics on containers
+/// were silently dropped: `shared.log.push(x)` mutated a temporary and the store
+/// never saw it. 三体 3509243656's 日志 (object 1227) keeps its whole civilisation
+/// state in `shared.logEntries` / `shared.civilizationRecords` / `shared.lastStates`
+/// — every `push`/`unshift` and field write vanished, so the log and the survival
+/// leaderboard stayed permanently empty while the primitive counters ticked on.
+///
+/// Fix: object/array reads return a write-back Proxy bound to the ROOT key. Any
+/// mutating method, property set, or delete — at any depth, including on an
+/// element handed out by `find()` — re-publishes the whole root container to the
+/// store. Primitives keep the direct fast path (no proxy allocation); they are
+/// the hot reads (`shared.xx1`…) and already round-tripped correctly.
 private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JSContext) {
     let get: @convention(block) (String) -> Any? = { store.get($0) }
     let set: @convention(block) (String, JSValue) -> Void = { key, value in
@@ -1509,8 +1525,39 @@ private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JS
     context.setObject(get, forKeyedSubscript: "__sharedGet" as NSString)
     context.setObject(set, forKeyedSubscript: "__sharedSet" as NSString)
     _ = context.evaluateScript("""
+    var __sharedMutators = {
+        push: 1, pop: 1, shift: 1, unshift: 1, splice: 1, sort: 1, reverse: 1,
+        fill: 1, copyWithin: 1, add: 1, clear: 1, delete: 1, set: 1
+    };
+    function __sharedWrap(rootKey, root, node) {
+        if (node === null || typeof node !== 'object') { return node; }
+        return new Proxy(node, {
+            get: function(t, p) {
+                var v = t[p];
+                // Symbol-keyed access (Symbol.iterator → spread/for-of) must stay
+                // raw: wrapping the iterator protocol breaks it for no benefit,
+                // since iteration itself never mutates.
+                if (typeof p === 'symbol') {
+                    return (typeof v === 'function') ? v.bind(t) : v;
+                }
+                if (typeof v === 'function') {
+                    return function() {
+                        var res = v.apply(t, arguments);
+                        if (__sharedMutators[p] === 1) { __sharedSet(rootKey, root); }
+                        return __sharedWrap(rootKey, root, res);
+                    };
+                }
+                return __sharedWrap(rootKey, root, v);
+            },
+            set: function(t, p, v) { t[p] = v; __sharedSet(rootKey, root); return true; },
+            deleteProperty: function(t, p) { delete t[p]; __sharedSet(rootKey, root); return true; }
+        });
+    }
     var shared = new Proxy({}, {
-        get: function(_t, k) { return __sharedGet(k); },
+        get: function(_t, k) {
+            var v = __sharedGet(k);
+            return (v !== null && typeof v === 'object') ? __sharedWrap(k, v, v) : v;
+        },
         set: function(_t, k, v) { __sharedSet(k, v); return true; },
         has: function(_t, k) { return __sharedGet(k) !== undefined; }
     });

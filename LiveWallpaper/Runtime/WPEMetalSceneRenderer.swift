@@ -942,6 +942,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         // sources exist; runs each script's init() to seed visibility/alpha and
         // suppress auto-play on script-owned video sources.
         loadLayerScripts(from: document)
+        // First-evaluation seeding, in WPE order: script hosts (pure compute
+        // producers, e.g. 3509243656's MAIN n-body sim writing shared.xx*/ktime)
+        // update once FIRST, then transform + text consumers seed. Seeding texts
+        // inside loadTextOverlays ran consumers before the producer existed —
+        // tooltip scripts threw and the `time` script NaN-poisoned itself.
+        seedSceneScriptsAfterLoad(from: document)
         try Task.checkCancellation()
 
         // Audio startup is deferred to after the first frame (see below): the
@@ -2228,9 +2234,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     scriptProperties: object.scriptProperties,
                     shared: sharedState
                 )
-                // Off-frame seed: the first frame renders the scripted value
-                // instead of popping the authored placeholder for one frame.
-                if Self.scriptAsyncTickEnabled { instance.seedAsyncTick() }
+                // Seeding happens in seedSceneScriptsAfterLoad() — AFTER the
+                // layer/script-host instances exist and have produced their
+                // first `shared` state, never here (WPE evaluation order).
                 textScriptInstances[object.id] = instance
             } catch {
                 Logger.warning("Scene \(descriptor.workshopID) [TextScript] init failed for \(object.name): \(error)", category: .wpeRender)
@@ -2583,6 +2589,50 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         }
     }
 
+    /// One deterministic "frame 0" evaluation pass over the scene's scripts, run
+    /// once at the end of load — PRODUCERS FIRST. WPE ticks every script serially
+    /// in scene-object order each frame, so a `shared`-consuming script never
+    /// evaluates before the producers that precede it. Our per-load seeding used
+    /// to run inside each loader (texts before the layer scripts even existed);
+    /// a consumer's first evaluation then read an empty `shared` — worst case
+    /// permanently corrupting its own module state (3509243656's `time` script
+    /// accumulates `undefined` arithmetic into NaN, and its self-reset keys off
+    /// `shared.xntime === undefined`, which that same broken tick already set to
+    /// NaN — "frozen at NaN Years" forever). Order here: script hosts (pure
+    /// compute producers, e.g. MAIN's n-body sim writing shared.xx*/ktime) run
+    /// one update() each, then transform + text-content consumers seed.
+    /// Async mode only: legacy sync ticks already run layer scripts before text
+    /// scripts inside every frame, so their first frame is producer-first.
+    private func seedSceneScriptsAfterLoad(from document: WPESceneDocument) {
+        guard Self.scriptAsyncTickEnabled else { return }
+        // 1. Script hosts: one bounded synchronous update() each, in scene
+        //    order, applied exactly like a frame tick.
+        for host in document.scriptHostObjects {
+            guard let instance = layerScriptInstances[host.id] else { continue }
+            if let output = instance.tick(runtimeSeconds: 0, pointerFrame: .neutral) {
+                applyLayerScriptOutput(output, ownObjectID: host.id)
+            }
+        }
+        // 2. Transform scripts, neutral pointer (the frame path's
+        //    follow-cursor-off default) — first frame shows the scripted
+        //    transform instead of popping from the baked value.
+        let neutralPointer = SIMD2<Double>(0.5, 0.5)
+        for instances in [
+            dynamicOriginScriptInstances,
+            dynamicScaleScriptInstances,
+            dynamicAnglesScriptInstances
+        ] {
+            for (_, instance) in instances.sorted(by: { $0.key < $1.key }) {
+                instance.seedAsyncTick(pointerPosition: neutralPointer)
+            }
+        }
+        // 3. Text-content scripts, in scene-object order (hidden compute texts
+        //    write shared.txtN that later data texts read — 三体's 日志).
+        for object in textObjects {
+            textScriptInstances[object.id]?.seedAsyncTick()
+        }
+    }
+
     /// Builds dynamic origin script instances for image layers whose `origin`
     /// SceneScript depends on live input. Static origin scripts were resolved by
     /// `WPESceneDocumentParser`, so they do not reach this path.
@@ -2656,12 +2706,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                         canvasSize: canvasSize,
                         shared: sharedState
                     )
-                    // Off-frame seed with the neutral pointer (the frame path's
-                    // follow-cursor-off default), so the first frame uses the
-                    // scripted transform instead of popping from the baked value.
-                    if Self.scriptAsyncTickEnabled {
-                        instance.seedAsyncTick(pointerPosition: SIMD2<Double>(0.5, 0.5))
-                    }
+                    // Seeded in seedSceneScriptsAfterLoad() — after the script
+                    // hosts have produced their first `shared` state (a tooltip
+                    // origin script reading `shared.xxN` must not run first).
                     instances[objectID] = instance
                 } catch {
                     Logger.warning("Scene \(descriptor.workshopID) [\(label)] init failed for \(objectID): \(error)", category: .wpeRender)

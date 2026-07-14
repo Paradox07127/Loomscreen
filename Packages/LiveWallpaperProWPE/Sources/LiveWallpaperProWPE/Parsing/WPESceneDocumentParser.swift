@@ -789,14 +789,14 @@ public enum WPESceneDocumentParser {
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
-        let text: String?
+        let authoredText: String?
         var textScript: String?
         var textScriptProperties: [String: WPESceneScriptPropertyValue] = [:]
         switch raw {
         case let value as String:
-            text = value
+            authoredText = value
         case let nested as [String: Any]:
-            text = (nested["value"] as? String) ?? (nested["text"] as? String)
+            authoredText = (nested["value"] as? String) ?? (nested["text"] as? String)
             if let script = nested["script"] as? String, !script.isEmpty {
                 textScript = script
                 // The scene's per-object scriptProperty overrides (already
@@ -805,9 +805,14 @@ public enum WPESceneDocumentParser {
                 textScriptProperties = scriptPropertyValues(nested["scriptproperties"])
             }
         default:
-            text = nil
+            authoredText = nil
         }
-        guard let text, !text.isEmpty else {
+        // A script-driven text object may author an EMPTY placeholder — its
+        // update() computes the real string (3509243656's `time` display authors
+        // "" and is the scene's only `shared.xntime` producer; dropping it froze
+        // every consumer text). WPE runs the script regardless of the authored
+        // value, so only SCRIPTLESS objects with no resolvable text are dropped.
+        guard authoredText?.isEmpty == false || textScript != nil else {
             let objectName = dict["name"] as? String ?? "?"
             diagnostics.append(.init(
                 severity: .warning,
@@ -818,6 +823,7 @@ public enum WPESceneDocumentParser {
             ))
             return nil
         }
+        let text = authoredText ?? ""
         let id = (dict["id"] as? String)
             ?? (dict["id"] as? Int).map(String.init)
             ?? (dict["name"] as? String)
