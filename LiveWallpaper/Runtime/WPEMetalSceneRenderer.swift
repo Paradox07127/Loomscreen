@@ -162,6 +162,10 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// GPU MSDF text renderer (Milestone D). Built only when the engine's
     /// `font.frag` resolves; nil → text falls back to the CoreText overlay.
     private var msdfTextRenderer: WPEMSDFTextRenderer?
+    /// Suppresses repeat `drawMSDFText` failure logs within a failure streak
+    /// (mirrors `didLogFrameFailure`) — a persistently-failing MSDF combo
+    /// falls back to CoreText every frame and must not flood the log.
+    private var didLogMSDFTextDrawFailure = false
     private var textObjects: [WPESceneTextObject] = []
     /// Phase 2D-O: audio runtime publishing live FFT bins into the
     /// runtime uniform that audio-reactive shaders sample. Optional —
@@ -1962,8 +1966,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
                     output: frame
                 )
                 msdfSucceeded = true
+                didLogMSDFTextDrawFailure = false
             } catch {
                 msdfSucceeded = false
+                // This used to fail silently — every affected frame fell back to
+                // CoreText with zero signal that MSDF was even attempted. Log the
+                // first failure of a streak (mirrors didLogFrameFailure) so a
+                // persistently-broken combo/pipeline is diagnosable instead of
+                // looking like MSDF was simply never enabled.
+                if !didLogMSDFTextDrawFailure {
+                    Logger.warning(
+                        "Scene \(descriptor.workshopID) MSDF text draw failed (\(msdfPayloads.count) payload(s)), falling back to CoreText: \(error)",
+                        category: .wpeRender
+                    )
+                    didLogMSDFTextDrawFailure = true
+                }
+                debugStage("text.msdf.drawFailed", "count=\(msdfPayloads.count) error=\(error)")
             }
         }
         // If the MSDF pass threw, rasterize CoreText for the MSDF objects NOW
