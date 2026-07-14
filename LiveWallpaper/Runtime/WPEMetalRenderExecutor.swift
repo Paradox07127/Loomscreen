@@ -1681,21 +1681,6 @@ final class WPEMetalRenderExecutor {
         return state
     }
 
-    // MARK: - HDR tonemap (present)
-
-    /// Pure fragment selection for `present()` (and its debug replica), so tests can
-    /// lock the invariant "flag OFF, or any SDR source ⇒ the legacy fragment name":
-    /// same name ⇒ same pipeline-cache key ⇒ the new shader is never even compiled.
-    /// Only rgba16Float sources (HDR scenes) ever see the tonemap fragment.
-    static func presentFragmentName(
-        hdrTonemapEnabled: Bool,
-        sourcePixelFormat: MTLPixelFormat
-    ) -> String {
-        (hdrTonemapEnabled && sourcePixelFormat == .rgba16Float)
-            ? "wpe_present_tonemap_fragment"
-            : "wpe_present_fragment"
-    }
-
     @MainActor
     func present(
         texture source: MTLTexture,
@@ -1724,10 +1709,7 @@ final class WPEMetalRenderExecutor {
 
         let copyState = try renderPipeline(
             vertexName: "wpe_present_vertex",
-            fragmentName: Self.presentFragmentName(
-                hdrTonemapEnabled: WPEHDRTonemapCurve.isEnabled,
-                sourcePixelFormat: source.pixelFormat
-            ),
+            fragmentName: "wpe_present_fragment",
             blendMode: "disabled",
             colorPixelFormat: drawable.texture.pixelFormat
         )
@@ -1775,65 +1757,6 @@ final class WPEMetalRenderExecutor {
         commandBuffer.commit()
         return true
     }
-
-    #if DEBUG
-    /// Offscreen replica of the on-screen present pass for the `WPEDumpScenePasses`
-    /// evidence path: MTKView drawables are framebufferOnly (not blit/readback-able),
-    /// so "what did present put on screen" is answered by re-encoding the SAME
-    /// pipeline (same fragment selection, same fit uniforms) into a readable texture
-    /// of the drawable's format. Debug/dump only — never on the per-frame path.
-    func makePresentReplicaTexture(
-        source: MTLTexture,
-        fitMode: WPEPresentFitMode = .stretch,
-        hdrTonemapEnabled: Bool = WPEHDRTonemapCurve.isEnabled
-    ) throws -> MTLTexture {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: Self.outputPixelFormat,
-            width: max(source.width, 1),
-            height: max(source.height, 1),
-            mipmapped: false
-        )
-        descriptor.usage = [.renderTarget, .shaderRead]
-        descriptor.storageMode = .shared
-        guard let target = device.makeTexture(descriptor: descriptor),
-              let commandBuffer = commandQueue.makeCommandBuffer() else {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
-        }
-        target.label = "wpe.present.replica"
-        let passDescriptor = MTLRenderPassDescriptor()
-        passDescriptor.colorAttachments[0].texture = target
-        passDescriptor.colorAttachments[0].loadAction = .clear
-        passDescriptor.colorAttachments[0].storeAction = .store
-        passDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        let state = try renderPipeline(
-            vertexName: "wpe_present_vertex",
-            fragmentName: Self.presentFragmentName(
-                hdrTonemapEnabled: hdrTonemapEnabled,
-                sourcePixelFormat: source.pixelFormat
-            ),
-            blendMode: "disabled",
-            colorPixelFormat: target.pixelFormat
-        )
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: passDescriptor) else {
-            throw WPEMetalRenderExecutorError.commandBufferFailed
-        }
-        encoder.setRenderPipelineState(state)
-        encoder.setFragmentTexture(source, index: 0)
-        var uniforms = WPEPresentUniforms.make(
-            fitMode: fitMode,
-            sourceWidth: source.width,
-            sourceHeight: source.height,
-            targetWidth: target.width,
-            targetHeight: target.height
-        )
-        encoder.setVertexBytes(&uniforms, length: MemoryLayout<WPEPresentUniforms>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-        encoder.endEncoding()
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        return target
-    }
-    #endif
 
     private func clearColor(for targetID: WPEMetalTargetID) -> MTLClearColor {
         switch targetID {

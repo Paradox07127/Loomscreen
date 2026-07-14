@@ -977,7 +977,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             // trace is already written and the per-pass output hashes are dropped.
             #if DEBUG
             dumpScenePassesIfRequested()
-            dumpPresentReplicaIfRequested(composite: outputTexture)
             #endif
             // The snapshot + visual-stats read-backs here exist only to feed the
             // scene-debug artifacts (first-frame PNG + stats). The inspector
@@ -1153,36 +1152,6 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         let tag = "t\(Int(time.rounded()))s"
         dumpScenePassesIfRequested(suffix: "-\(tag)")
         dumpTextureToPNG(composite, basename: "composite-\(tag)")
-        dumpPresentReplicaIfRequested(composite: composite, suffix: "-\(tag)")
-    }
-
-    /// Extends the `WPEDumpScenePasses` net past the render into the PRESENT
-    /// stage: dumps the frame as present reads it (`present-before`, the float
-    /// composite) and what present puts on the drawable (`present-after-…`, an
-    /// offscreen replica — drawables are framebufferOnly and unreadable), with
-    /// the HDR-tonemap state in the filename so a flag A/B is two comparable
-    /// PNGs. For rgba16Float frames the overbright stats (>1 pixel count / peak
-    /// channel) are logged too — the 8-bit PNG cannot carry them.
-    private func dumpPresentReplicaIfRequested(composite: MTLTexture, suffix: String = "") {
-        let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
-        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else { return }
-        if let stats = WPEMetalTextureFloatStats.analyze(texture: composite) {
-            Logger.notice(
-                "[WPEDumpScenePasses] present\(suffix)-before \(stats.oneLineDescription)",
-                category: .wpeRender
-            )
-        }
-        dumpTextureToPNG(composite, basename: "present\(suffix)-before")
-        let tonemapTag = WPEHDRTonemapCurve.isEnabled ? "on" : "off"
-        do {
-            let replica = try executor.makePresentReplicaTexture(source: composite, fitMode: presentFitMode)
-            dumpTextureToPNG(replica, basename: "present\(suffix)-after-tonemap-\(tonemapTag)")
-        } catch {
-            Logger.info(
-                "[WPEDumpScenePasses] present replica failed: \(error.localizedDescription)",
-                category: .wpeRender
-            )
-        }
     }
 
     private func dumpTextureToPNG(_ rawTexture: MTLTexture, basename: String) {
@@ -1192,11 +1161,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             texture = rawTexture
         } else if rawTexture.pixelFormat == .rgba16Float {
             // The sampling fallback below renders HDR float targets black; the
-            // snapshotter's CPU clamp+sRGB conversion is the correct viewer
-            // (tonemap deliberately OFF so the dump shows the raw clamped frame
-            // regardless of the flag — the present-after replica carries the
-            // tonemapped view).
-            overrideBytes = WPEMetalTextureSnapshotter.convertRGBA16FloatToSRGB8(rawTexture, tonemapEnabled: false)
+            // snapshotter's CPU clamp+sRGB conversion is the correct viewer.
+            overrideBytes = WPEMetalTextureSnapshotter.convertRGBA16FloatToSRGB8(rawTexture)
             texture = rawTexture
         } else if let decoded = executor.debugDecodeToRGBA(rawTexture) {
             // BC/DXT/RG88/R8 etc. — decode by sampling into rgba8 so we can view it.

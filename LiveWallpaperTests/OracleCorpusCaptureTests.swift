@@ -35,12 +35,9 @@ struct OracleCorpusCaptureTests {
         /// INSIDE the test host — an outside `defaults write` to the container plist
         /// is a different cfprefsd domain and the sandboxed host never sees it).
         var dumpPNGs: Bool = false
-        /// Opt-in `WPEMetalHDRTonemapEnabled` for headless tonemap A/B evidence runs
-        /// (same sandbox reason as `dumpPNGs`: the flag must be set in-process).
-        var hdrTonemap: Bool = false
 
         private enum CodingKeys: String, CodingKey {
-            case corpusRoot, label, scenes, perPass, dumpPNGs, hdrTonemap
+            case corpusRoot, label, scenes, perPass, dumpPNGs
         }
 
         /// Swift's compiler-synthesized `Decodable.init(from:)` does NOT fall back to a
@@ -57,7 +54,6 @@ struct OracleCorpusCaptureTests {
             scenes = try container.decodeIfPresent([String].self, forKey: .scenes)
             perPass = try container.decodeIfPresent(Bool.self, forKey: .perPass) ?? false
             dumpPNGs = try container.decodeIfPresent(Bool.self, forKey: .dumpPNGs) ?? false
-            hdrTonemap = try container.decodeIfPresent(Bool.self, forKey: .hdrTonemap) ?? false
         }
     }
 
@@ -95,11 +91,6 @@ struct OracleCorpusCaptureTests {
         if config.perPass {
             UserDefaults.standard.set(true, forKey: "WPEOraclePerPassHashes")
         }
-        if config.hdrTonemap {
-            // Must land before anything touches the frozen
-            // `WPEHDRTonemapCurve.isEnabled` static.
-            UserDefaults.standard.set(true, forKey: "WPEMetalHDRTonemapEnabled")
-        }
         defer {
             WPEOracleMode.testingOverride = nil
             WPESceneDebugArtifacts.shared.setEnabledForTesting(nil)
@@ -108,9 +99,6 @@ struct OracleCorpusCaptureTests {
             }
             if config.dumpPNGs {
                 UserDefaults.standard.removeObject(forKey: "WPEDumpScenePasses")
-            }
-            if config.hdrTonemap {
-                UserDefaults.standard.removeObject(forKey: "WPEMetalHDRTonemapEnabled")
             }
         }
 
@@ -203,7 +191,6 @@ struct OracleCorpusCaptureTests {
         #expect(config.scenes == nil)
         #expect(config.perPass == false)
         #expect(config.dumpPNGs == false)
-        #expect(config.hdrTonemap == false)
     }
 
     @Test("Config decode throws on a malformed config instead of silently defaulting")

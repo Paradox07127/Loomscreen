@@ -420,33 +420,6 @@ fragment half4 wpe_present_fragment(
     return texture0.sample(linearSampler, in.uv);
 }
 
-// Flag-gated HDR present (`WPEMetalHDRTonemapEnabled`, default OFF; selected by
-// `presentFragmentName` only for rgba16Float sources): hue-preserving soft-knee
-// compression of overbright pixels. The peak channel m = max(r,g,b) maps to
-// 2 - 1/m (slope 1 at m = 1 ⇒ C1-continuous knee, asymptote 2) and ALL channels
-// scale by the same factor, so an overbright colored highlight keeps its hue on
-// the 8-bit drawable instead of per-channel clipping toward white. m <= 1 (and
-// NaN) is a bit-exact passthrough of wpe_present_fragment's sample. This is a
-// Mac-only enhancement, NOT a WPE-fidelity fix: on SDR displays Windows WPE
-// hard-clamps (combine_hdr.frag DISPLAYHDR==0 is `saturate(...)`) — it has no
-// tonemap operator. CPU twin: `WPEHDRTonemapCurve` (WPEMetalTextureSnapshotter);
-// keep the two in sync (WPEPresentTonemapTests locks them to shared samples).
-fragment half4 wpe_present_tonemap_fragment(
-    WPEVertexOut in [[stage_in]],
-    texture2d<float, access::sample> texture0 [[texture(0)]]
-) {
-    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 color = texture0.sample(linearSampler, in.uv);
-    float peak = max(color.r, max(color.g, color.b));
-    if (peak > 1.0f) {
-        // half-max guard: an inf peak would zero the scale and turn the whole
-        // pixel into NaN; clamping keeps inf channels clipping to 1 like today.
-        peak = min(peak, 65504.0f);
-        color.rgb *= (2.0f - 1.0f / peak) / peak;
-    }
-    return half4(color);
-}
-
 // Full-frame 1:1 copy. Camera parallax is a geometry translation applied in
 // the vertex stage (objectQuadUniforms / pixelOffset), so this fragment never
 // offsets its sample UV — it samples the source texture straight through and
