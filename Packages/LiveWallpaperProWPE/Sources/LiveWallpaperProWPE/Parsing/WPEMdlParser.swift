@@ -654,7 +654,18 @@ public enum WPEPuppetAnimationEvaluator {
         guard frameValue.isFinite, frameValue < Double(Int.max) else { return 0 }
         let rawFrame = max(Int(frameValue), 0)
         let mode = animation.mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return mode == "loop" ? rawFrame % playableFrameCount : min(rawFrame, playableFrameCount - 1)
+        if mode == "loop" {
+            return rawFrame % playableFrameCount
+        }
+        if mode == "mirror" {
+            // Ping-pong: 0,1,...,N-1,N-2,...,1,0,1,... — a full period revisits both end frames
+            // once each rather than holding on them, so the period is 2*(N-1), not 2*N.
+            guard playableFrameCount > 1 else { return 0 }
+            let period = 2 * (playableFrameCount - 1)
+            let phase = rawFrame % period
+            return phase < playableFrameCount ? phase : period - phase
+        }
+        return min(rawFrame, playableFrameCount - 1)
     }
 
     private static func matrix(

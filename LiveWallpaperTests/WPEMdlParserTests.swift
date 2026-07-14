@@ -158,6 +158,55 @@ struct WPEPuppetAnimationEvaluatorTests {
         #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 2.0 / 30.0) == 0)
     }
 
+    @Test("Clamp (any non-loop, non-mirror mode) holds the last frame instead of wrapping or bouncing")
+    func clampModeHoldsLastFrame() {
+        let anim = animation(frameCount: 4, mode: "clamp", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        let fps = 30.0
+        let expected = [0, 1, 2, 3, 3, 3, 3]
+        for (rawFrame, want) in expected.enumerated() {
+            let time = Double(rawFrame) / fps
+            #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: time) == want)
+        }
+    }
+
+    @Test("Mirror mode ping-pongs the sampled frame index instead of freezing on the last frame")
+    func mirrorModeBounces() {
+        // N=4 → period 2*(4-1)=6: 0,1,2,3,2,1,0,1,2,3,2,1,0,...
+        let anim = animation(frameCount: 4, mode: "mirror", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        let fps = 30.0
+        let expected = [0, 1, 2, 3, 2, 1, 0, 1, 2, 3, 2, 1, 0]
+        for (rawFrame, want) in expected.enumerated() {
+            let time = Double(rawFrame) / fps
+            #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: time) == want)
+        }
+    }
+
+    @Test("Mirror mode is case-insensitive and tolerates surrounding whitespace")
+    func mirrorModeNormalizesCasingAndWhitespace() {
+        let anim = animation(frameCount: 3, mode: " Mirror ", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        // N=3 → period 2*(3-1)=4: 0,1,2,1,0,1,2,1,0,...
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 0) == 0)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 1.0 / 30.0) == 1)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 2.0 / 30.0) == 2)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 3.0 / 30.0) == 1)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 4.0 / 30.0) == 0)
+    }
+
+    @Test("Mirror mode with a single frame never divides by a zero period")
+    func mirrorModeSingleFrame() {
+        let anim = animation(frameCount: 1, mode: "mirror", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 0) == 0)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 5.0 / 30.0) == 0)
+    }
+
     @Test("Pure-translation channel skins by the per-frame delta from the bind pose")
     func translationDeltaMatrix() {
         let anim = animation(frameCount: 2, mode: "loop", channels: [
