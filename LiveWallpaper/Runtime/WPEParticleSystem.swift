@@ -275,11 +275,15 @@ final class WPEParticleSystem {
     private var lastTickTime: Double?
     private var firstTickTime: Double?
     private var rng: WPEParticleRNG
+    /// `turbulentvelocityrandom` noise sample point — ONE per system, not one per
+    /// particle: WPE captures it in the initializer closure and lets each spawn
+    /// nudge it along its own curl streamline, so successive particles ride the
+    /// same slowly-turning gust. Seeded once (below); the walk consumes no RNG.
+    private var turbulentSamplePoint = SIMD3<Double>.zero
     /// Cached gravity in render space (Y-up). Mirrors the velocity rule:
     /// flip emitter-local Y once, then apply the scene object's scale
     /// and rotation without translating.
     private let gravity: SIMD3<Float>
-    private let turbulenceMask: SIMD3<Float>
     /// `oscillateposition` sway mask transformed into render space (so the
     /// displacement rotates/scales with the scene object, like velocity).
     /// `applyModelDirection` is linear, so the per-particle amplitude can be
@@ -301,16 +305,6 @@ final class WPEParticleSystem {
     /// This makes +Z gravity starfields expand radially toward the viewer instead
     /// of collapsing back to the vanishing point.
     static let perspectiveNearBoost: Float = 1.5
-
-    /// `turbulentvelocityrandom` seed speed. WPE's initializer gives each particle
-    /// a one-time full-3D curl-noise velocity so it TRAVELS out of the spawn box —
-    /// distinct from the `turbulence` OPERATOR, which is a continuous, often
-    /// axis-masked sway. For 大型/ember the operator mask is "1 0 0" (X-only) and
-    /// there is no gravity, so WITHOUT this seed the sparks have zero Y velocity and
-    /// stay stuck below-screen forever (invisible). The magnitude follows the parsed
-    /// turbulence speed when present; this constant is the fallback. Tunable, pending
-    /// on-device comparison against Windows.
-    static let turbulentVelocityInitSpeed: Float = 150
 
     /// Stable per-system oracle seed: reproducible across reloads, unique per
     /// (scene, object, paint order). Uses FNV-1a for the scene id — NOT Swift's
@@ -426,11 +420,6 @@ final class WPEParticleSystem {
             Float(definition.gravity.z)
         )
         self.gravity = sceneTransform.applyModelDirection(localGravity)
-        self.turbulenceMask = SIMD3<Float>(
-            Float(definition.turbulenceMask.x),
-            Float(definition.turbulenceMask.y),
-            Float(definition.turbulenceMask.z)
-        )
         if let osc = definition.oscillatePosition {
             self.oscillatePositionMask = sceneTransform.applyModelDirection(SIMD3<Float>(
                 Float(osc.mask.x), Float(osc.mask.y), Float(osc.mask.z)
@@ -459,6 +448,15 @@ final class WPEParticleSystem {
         }
         self.controlPointRawOffsets = offsets
         self.pointerLockedControlPointIDs = pointerIDs
+        // Drawn only for systems that actually have the initializer, so every
+        // other system's spawn draw sequence stays byte-identical for the oracle.
+        if definition.turbulentVelocityInit != nil {
+            turbulentSamplePoint = SIMD3<Double>(
+                Double.random(in: 0..<10, using: &rng),
+                Double.random(in: 0..<10, using: &rng),
+                Double.random(in: 0..<10, using: &rng)
+            )
+        }
     }
 
     /// Resolves a control point's position in the centered render frame.
@@ -860,11 +858,17 @@ final class WPEParticleSystem {
         let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
         let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
         let angularForce = sceneTransform.visualAngularZ(localAngularZ: Float(definition.angularForceZ))
-        let turbulenceScale = Float(definition.turbulenceScale)
-        let turbulenceTimescale = Float(definition.turbulenceTimescale)
-        let turbulenceOffset = Float(definition.turbulenceOffset)
-        let turbulenceEnabled = definition.turbulenceSpeedMax > 0
-        let elapsedFloat = Float(elapsed)
+        // `turbulence` OPERATOR: a per-frame curl-noise wind, applied in render
+        // space as an ACCELERATION (velocity += force·dt), matching the reference
+        // renderer — not a transient position nudge. Absent ⇒ no per-frame wind
+        // (leaves, whose only turbulence is the spawn-time initializer, must NOT
+        // get this continuous sway).
+        let turbulenceOp = definition.turbulence
+        let turbulenceScale = turbulenceOp.map { $0.scale * 2 } ?? 0
+        let turbulenceTimescale = turbulenceOp.map(\.timescale) ?? 0
+        let turbulenceMask = turbulenceOp.map {
+            SIMD3<Double>($0.mask.x, $0.mask.y, $0.mask.z)
+        } ?? .zero
 
         var attractorAffectedThisTick = 0
         for index in 0..<capacity {
@@ -898,21 +902,22 @@ final class WPEParticleSystem {
                 }
                 if affectedThisParticle { attractorAffectedThisTick += 1 }
             }
-            var step = particles[index].velocity
-            if turbulenceEnabled && particles[index].turbulenceSpeed > 0 {
+            if turbulenceOp != nil, particles[index].turbulenceSpeed > 0 {
                 let pos = particles[index].position
-                let t = elapsedFloat * turbulenceTimescale
-                    + turbulenceOffset
-                    + particles[index].turbulencePhase
-                let noise = turbulenceNoise(
-                    x: pos.x * turbulenceScale,
-                    y: pos.y * turbulenceScale,
-                    t: t
-                )
-                step.x += noise.x * particles[index].turbulenceSpeed * turbulenceMask.x
-                step.y += noise.y * particles[index].turbulenceSpeed * turbulenceMask.y
+                // Scroll the field along X by phase + timescale·t, then sample the
+                // curl direction and accelerate along it (masked per axis).
+                let sample = SIMD3<Double>(
+                    Double(pos.x) + Double(particles[index].turbulencePhase) + turbulenceTimescale * elapsed,
+                    Double(pos.y),
+                    Double(pos.z)
+                ) * turbulenceScale
+                let dir = WPEParticleCurlNoise.direction(at: sample)
+                let speed = Double(particles[index].turbulenceSpeed)
+                particles[index].velocity.x += Float(dir.x * speed * turbulenceMask.x) * dt
+                particles[index].velocity.y += Float(dir.y * speed * turbulenceMask.y) * dt
+                particles[index].velocity.z += Float(dir.z * speed * turbulenceMask.z) * dt
             }
-            particles[index].position += step * dt
+            particles[index].position += particles[index].velocity * dt
             // Angular motion with force + drag.
             particles[index].angularVelocityZ += angularForce * dt
             if angularDragScalar < 1 { particles[index].angularVelocityZ *= angularDragScalar }
@@ -1051,20 +1056,8 @@ final class WPEParticleSystem {
         )
         let localPoint = emitterOriginLocal + dispersal
         var localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        if definition.hasTurbulentVelocityInit {
-            // WPE `turbulentvelocityrandom`: seed a persistent curl-noise velocity so
-            // the particle drifts out of its spawn box (rising embers, drifting motes).
-            // Sample the same noise field the operator uses, but UNMASKED — the
-            // initializer produces a full velocity, not the operator's axis-limited
-            // sway — with a per-particle random phase for spread. Magnitude follows the
-            // parsed turbulence speed when present, else the tunable fallback.
-            let noiseScale = definition.turbulenceScale > 0 ? Float(definition.turbulenceScale) : 0.1
-            let phase = Float(Double.random(in: 0..<(2 * .pi), using: &rng))
-            let n = turbulenceNoise(x: localPoint.x * noiseScale, y: localPoint.y * noiseScale, t: phase)
-            let seedSpeed = definition.turbulenceSpeedMax > 0
-                ? Float(definition.turbulenceSpeedMax)
-                : Self.turbulentVelocityInitSpeed
-            localVelocity += SIMD3<Float>(n.x, n.y, 0) * seedSpeed
+        if let tvi = definition.turbulentVelocityInit {
+            localVelocity += seedTurbulentVelocity(tvi)
         }
         let position: SIMD3<Float>
         if requiresFollowParent {
@@ -1109,9 +1102,10 @@ final class WPEParticleSystem {
         }
         var size = Float(sizeSample) * sizeScale
         // Blend-aware cap: a hugely-scaled ADDITIVE emitter (e.g. 3426865175's
-        // 7.8× light-shaft) would otherwise fill the frame with additive glow
-        // and saturate to white (until HDR tonemap lands). Cap additive sprites
-        // near scene height; translucent sprites (atmospheric fog) stay uncapped.
+        // 7.8× light-shaft) would otherwise fill the frame with additive glow that
+        // hard-clamps to white — the SDR pipeline has no headroom to recover it, so
+        // bounding the sprite is the only lever. Cap additive sprites near scene
+        // height; translucent sprites (atmospheric fog) stay uncapped.
         if blendMode == .additive {
             size = min(size, sceneTransform.sceneHeight)
         }
@@ -1120,8 +1114,18 @@ final class WPEParticleSystem {
         let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))
         let rotationVec = uniformVector(definition.rotationMin, definition.rotationMax)
         let angularVec = uniformVector(definition.angularVelocityMin, definition.angularVelocityMax)
-        let turbulenceSpeed = Float(uniform(definition.turbulenceSpeedMin, definition.turbulenceSpeedMax))
-        let turbulencePhase = Float(uniform(definition.turbulencePhaseMin, definition.turbulencePhaseMax))
+        // Per-particle wind speed/phase for the `turbulence` OPERATOR only. Drawn
+        // solely when the operator is present so a system without it consumes NO
+        // extra RNG (keeps the spawn draw sequence byte-identical for the oracle).
+        let turbulenceSpeed: Float
+        let turbulencePhase: Float
+        if let turb = definition.turbulence {
+            turbulenceSpeed = Float(uniform(turb.speedMin, turb.speedMax))
+            turbulencePhase = Float(uniform(turb.phaseMin, turb.phaseMax))
+        } else {
+            turbulenceSpeed = 0
+            turbulencePhase = 0
+        }
         let oscPosFrequency: Float
         let oscPosScale: Float
         let oscPosPhase: Float
@@ -1168,30 +1172,64 @@ final class WPEParticleSystem {
         return true
     }
 
-    /// Cheap deterministic 2D noise field built from sine products —
-    /// sufficient for "leaves drift on the breeze" feel without pulling
-    /// in a full Perlin/simplex implementation. Each output component
-    /// is bounded to roughly [-0.5, 0.5] so multiplying by `speed`
-    /// caps the per-frame velocity contribution cleanly.
+    /// `turbulentvelocityrandom` spawn velocity in emitter-local space. A curl-noise
+    /// direction is cone-limited toward `forward` (default +Y), then tilted `offset`
+    /// radians about `right` (default +Z) and scaled by `uniform(speedMin, speedMax)`.
+    /// The `offset` tilt is what makes the leaves preset (`offset ≈ 3`) fall instead
+    /// of rise — WPE's downward drift is authored here, not gravity (which is 0).
+    /// The emitter's own rotation is applied later by `applyModelDirection`, so the
+    /// same preset falls under one emitter and rises under a rotated one.
     ///
-    /// KNOWN LIMITATION (oracle-measured, saber 3526278753 leaves):
-    /// this field is ISOTROPIC and zero-mean, so it cannot reproduce
-    /// WPE's `turbulentvelocityrandom` initializer, which empirically
-    /// drifts particles DOWNWARD. Decoding WPE's particle vertex buffer
-    /// (TEXCOORD1 = velocity) vs an offline replay of this sim: the X
-    /// velocity matches (~-130), but WPE's vy is ~1.85× ours — |vy/vx|
-    /// 1.83 (WPE) vs 0.84 (ours), equivalent to a steady ~30 px/s² down
-    /// acceleration. This is NOT gravity (the preset's `movement` operator
-    /// sets gravity="0 0 0", confirmed in scene.pkg) and NOT a Y-axis flip
-    /// (flipping makes leaves rise — see `applyModelDirection`); it is this
-    /// turbulence model being too simple. Closing it needs a downward-
-    /// biased / anisotropic noise (or an empirical settle force) tuned to
-    /// |vy/vx| → 1.83, then cross-scene validation before enabling globally
-    /// so it can't over-accelerate other particle presets.
-    private func turbulenceNoise(x: Float, y: Float, t: Float) -> SIMD2<Float> {
-        let nx = sin(x * 0.10 + t * 0.5) + cos(y * 0.13 + t * 0.7)
-        let ny = sin(x * 0.17 + t * 0.3) + cos(y * 0.09 + t * 0.4)
-        return SIMD2<Float>(nx * 0.25, ny * 0.25)
+    /// The field is sampled at the system's single `turbulentSamplePoint`, which
+    /// each spawn advects a little further along its own curl streamline — so
+    /// consecutive leaves share one gust that only swings as the point drifts.
+    /// Sampling a fresh random point per particle instead (what we did before)
+    /// preserves the ensemble average but scatters every leaf independently.
+    private func seedTurbulentVelocity(_ tvi: WPEParticleTurbulentVelocityInit) -> SIMD3<Float> {
+        let speed = uniform(tvi.speedMin, tvi.speedMax)
+        // The emit interval is how much field time this particle owns (WPE hands
+        // the initializer `1/rate`), so the gust turns at a wall-clock rate rather
+        // than a per-particle one. A near-stalled emitter (>10s/particle) instead
+        // teleports the point, so its rare particles don't all share one gust.
+        var duration = definition.rate > 0 ? 1 / definition.rate : .infinity
+        if duration > 10 {
+            turbulentSamplePoint.x += speed
+            duration = 0
+        }
+        let forward = simd_normalize(tvi.forward)
+        // `timescale` = how fast the field evolves, so it divides the step. Guard
+        // the division: an authored 0 would send the sample point to infinity.
+        let timescale = tvi.timescale.isFinite && tvi.timescale > 0 ? tvi.timescale : 1
+        let step = 0.005 / timescale
+        var dir: SIMD3<Double>
+        repeat {
+            dir = WPEParticleCurlNoise.direction(at: turbulentSamplePoint, fallback: forward)
+            turbulentSamplePoint += dir * step
+            duration -= 0.01
+        } while duration > 0.01
+        // Cone limit: `scale` is the cone width as a hemisphere fraction (2 =
+        // unrestricted). Rotate `dir` toward `forward` by `a·(1 - scale/2)·π`
+        // about (dir × forward), where `a` is their angle over π.
+        let coneFrac = tvi.scale / 2
+        let c = min(max(simd_dot(dir, forward), -1), 1)
+        let a = acos(c) / .pi
+        if a > coneFrac {
+            let axis = simd_cross(dir, forward)
+            if simd_length(axis) > 1e-6 {
+                dir = Self.rotate(dir, around: simd_normalize(axis), by: a * (1 - coneFrac) * .pi)
+            }
+        }
+        if tvi.offset != 0, simd_length(tvi.right) > 1e-6 {
+            dir = Self.rotate(dir, around: simd_normalize(tvi.right), by: tvi.offset)
+        }
+        let v = dir * speed
+        return SIMD3<Float>(Float(v.x), Float(v.y), Float(v.z))
+    }
+
+    private static func rotate(_ v: SIMD3<Double>, around k: SIMD3<Double>, by angle: Double) -> SIMD3<Double> {
+        let cosA = cos(angle)
+        let sinA = sin(angle)
+        return v * cosA + simd_cross(k, v) * sinA + k * simd_dot(k, v) * (1 - cosA)
     }
 }
 #endif

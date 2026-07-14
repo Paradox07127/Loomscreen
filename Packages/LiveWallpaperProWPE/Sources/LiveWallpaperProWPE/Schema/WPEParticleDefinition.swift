@@ -250,6 +250,87 @@ public struct WPEParticleOscillatePosition: Equatable, Sendable {
     }
 }
 
+/// `turbulentvelocityrandom` INITIALIZER: seeds each particle, once at spawn,
+/// with a velocity aimed along a curl-noise stream. This is what gives WPE's
+/// leaves/petals/embers their initial drift — NOT the per-frame operator below.
+///
+/// The stream direction is a curl-noise sample, cone-limited around `forward`
+/// (default +Y) and then rotated `offset` radians about `right` (default +Z).
+/// `scale` is the cone WIDTH as a fraction of a hemisphere: `2` = every
+/// direction, smaller = a tighter cone about `forward`. `offset` is what turns
+/// an upward stream downward — the leaves preset authors `offset: 3` (≈172°),
+/// rotating the +Y stream to nearly -Y so leaves fall. Speed is a per-particle
+/// `uniform(speedMin, speedMax)`. Engine defaults mirror the reference renderer.
+public struct WPEParticleTurbulentVelocityInit: Equatable, Sendable {
+    public let speedMin: Double
+    public let speedMax: Double
+    public let scale: Double
+    public let timescale: Double
+    public let offset: Double
+    public let phaseMin: Double
+    public let phaseMax: Double
+    public let forward: SIMD3<Double>
+    public let right: SIMD3<Double>
+
+    public init(
+        speedMin: Double = 100,
+        speedMax: Double = 250,
+        scale: Double = 1,
+        timescale: Double = 1,
+        offset: Double = 0,
+        phaseMin: Double = 0,
+        phaseMax: Double = 0.1,
+        forward: SIMD3<Double> = SIMD3<Double>(0, 1, 0),
+        right: SIMD3<Double> = SIMD3<Double>(0, 0, 1)
+    ) {
+        self.speedMin = min(speedMin, speedMax)
+        self.speedMax = max(speedMin, speedMax)
+        self.scale = max(0, scale)
+        self.timescale = timescale
+        self.offset = offset
+        self.phaseMin = min(phaseMin, phaseMax)
+        self.phaseMax = max(phaseMin, phaseMax)
+        self.forward = forward
+        self.right = right
+    }
+}
+
+/// `turbulence` OPERATOR: a per-frame acceleration sampled from a curl-noise
+/// field that scrolls over time (`timescale`) — a continuous, axis-masked wind.
+/// Distinct from the initializer above (which fires once at spawn): the operator
+/// keeps pushing every particle each frame, so presets that use it usually pair
+/// it with `drag` to bound the resulting velocity (fireflies drag 2.5). Applied
+/// as `velocity += speed · normalize(curl((pos + X·(phase + timescale·t))·2·scale)) · mask · dt`.
+/// Engine defaults mirror the reference renderer (500…1000, scale 0.01,
+/// timescale 20, mask 1 1 0).
+public struct WPEParticleTurbulenceOperator: Equatable, Sendable {
+    public let speedMin: Double
+    public let speedMax: Double
+    public let scale: Double
+    public let timescale: Double
+    public let phaseMin: Double
+    public let phaseMax: Double
+    public let mask: SIMD3<Double>
+
+    public init(
+        speedMin: Double = 500,
+        speedMax: Double = 1000,
+        scale: Double = 0.01,
+        timescale: Double = 20,
+        phaseMin: Double = 0,
+        phaseMax: Double = 0,
+        mask: SIMD3<Double> = SIMD3<Double>(1, 1, 0)
+    ) {
+        self.speedMin = min(speedMin, speedMax)
+        self.speedMax = max(speedMin, speedMax)
+        self.scale = max(0, scale)
+        self.timescale = timescale
+        self.phaseMin = min(phaseMin, phaseMax)
+        self.phaseMax = max(phaseMin, phaseMax)
+        self.mask = SIMD3<Double>(max(0, mask.x), max(0, mask.y), max(0, mask.z))
+    }
+}
+
 /// WPE emitter geometry. `sphererandom` scatters within a radius; `boxrandom`
 /// scatters within an axis-aligned box (per-axis `distancemax` half-extents) —
 /// how full-screen effects like rain spread across the frame.
@@ -330,10 +411,14 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// (Z) and are drawn with a perspective divide — near ones larger + faster,
     /// far ones smaller + slower (3462491575's 雪景远景 snow).
     public let isPerspective: Bool
-    /// True when a `turbulentvelocityrandom` initializer is present — the
-    /// particle is seeded with a curl-noise INITIAL velocity (WPE's rising
-    /// embers/sparks: 大型 3115). Without it such emitters spawn motionless.
-    public let hasTurbulentVelocityInit: Bool
+    /// `turbulentvelocityrandom` initializer, or nil when absent. Seeds each
+    /// particle's spawn velocity along a curl-noise stream (rising embers, falling
+    /// leaves). Without it such emitters would spawn motionless.
+    public let turbulentVelocityInit: WPEParticleTurbulentVelocityInit?
+    /// `turbulence` operator, or nil when absent. A per-frame curl-noise wind
+    /// applied to every live particle. Independent from the initializer above —
+    /// a preset may declare either, both, or neither.
+    public let turbulence: WPEParticleTurbulenceOperator?
     /// Per-particle base alpha sampled on spawn (alpharandom). The
     /// fade-in/out envelope multiplies this value at draw time.
     public let alphaMin: Double
@@ -359,17 +444,6 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// `operator: angularmovement` — applied on rotationZ.
     public let angularForceZ: Double
     public let angularDrag: Double
-    /// `turbulentvelocityrandom` initializer parameters (per-particle
-    /// random sample baked at spawn time, then the operator applies a
-    /// noise field every frame).
-    public let turbulenceSpeedMin: Double
-    public let turbulenceSpeedMax: Double
-    public let turbulenceScale: Double
-    public let turbulenceTimescale: Double
-    public let turbulenceOffset: Double
-    public let turbulenceMask: SIMD3<Double>
-    public let turbulencePhaseMin: Double
-    public let turbulencePhaseMax: Double
     /// `sequencemultiplier` from the particle JSON. Multiplies the
     /// texture's `.tex-json` baseline `frames/duration` rate so the
     /// runtime can pick a sub-frame index every tick. `1` is the
@@ -380,145 +454,10 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let controlPoints: [WPEParticleControlPoint]
     public let attractors: [WPEParticleControlPointAttractor]
 
-    /// Ordered child particle file paths. Back-compat accessor over
-    /// `childReferences`; preserves duplicates (same path, different origin).
-    public var childRelativePaths: [String] {
-        childReferences.map(\.relativePath)
-    }
-
     /// True when the emitter's origin (control point `id 0`) tracks the cursor —
     /// the canonical "particles spawn at the pointer" / follow behavior.
     public var emitterTracksPointer: Bool {
         controlPoints.first(where: { $0.id == 0 })?.pointerLocked ?? false
-    }
-
-    /// Whether the system consumes the pointer at all (follow OR any attractor
-    /// referencing a pointer-locked control point) — lets the runtime skip the
-    /// pointer plumbing for non-interactive emitters.
-    public var usesPointer: Bool {
-        if emitterTracksPointer { return true }
-        let pointerIDs = Set(controlPoints.filter(\.pointerLocked).map(\.id))
-        return attractors.contains { pointerIDs.contains($0.controlPointID) }
-    }
-
-    /// Back-compat sphere initializer: scalar `dispersalMin/Max` broadcast to a
-    /// vector radius. Keeps the many existing call sites (tests, `.empty`) intact;
-    /// box emitters use the vector designated init below.
-    public init(
-        materialRelativePath: String?,
-        childRelativePaths: [String] = [],
-        childReferences: [WPEParticleChildReference]? = nil,
-        rendersSprite: Bool = true,
-        isRope: Bool = false,
-        maxCount: Int,
-        rate: Double,
-        instantaneousCount: Int = 0,
-        startDelay: Double,
-        lifetimeMin: Double,
-        lifetimeMax: Double,
-        sizeMin: Double,
-        sizeMax: Double,
-        sizeExponent: Double = 1,
-        originOffset: SIMD3<Double>,
-        dispersalMin: Double,
-        dispersalMax: Double,
-        velocityMin: SIMD3<Double>,
-        velocityMax: SIMD3<Double>,
-        colorMin: SIMD3<Double>,
-        colorMax: SIMD3<Double>,
-        fadeInSeconds: Double,
-        directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
-        alphaMin: Double = 1,
-        alphaMax: Double = 1,
-        rotationMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
-        rotationMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
-        angularVelocityMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
-        angularVelocityMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
-        fadeOutSeconds: Double = 0,
-        alphaChange: WPEParticleAlphaChange? = nil,
-        oscillateAlpha: WPEParticleOscillateAlpha? = nil,
-        sizeChange: WPEParticleSizeChange? = nil,
-        colorChange: WPEParticleColorChange? = nil,
-        oscillatePosition: WPEParticleOscillatePosition? = nil,
-        gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
-        drag: Double = 0,
-        angularForceZ: Double = 0,
-        angularDrag: Double = 0,
-        turbulenceSpeedMin: Double = 0,
-        turbulenceSpeedMax: Double = 0,
-        turbulenceScale: Double = 0.005,
-        turbulenceTimescale: Double = 0.01,
-        turbulenceOffset: Double = 0,
-        turbulenceMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
-        turbulencePhaseMin: Double = 0,
-        turbulencePhaseMax: Double = 0,
-        sequenceMultiplier: Double = 1,
-        animationMode: WPEParticleAnimationMode = .sequence,
-        controlPoints: [WPEParticleControlPoint] = [],
-        attractors: [WPEParticleControlPointAttractor] = [],
-        hasColorInitializer: Bool = false,
-        declaresSequenceAnimation: Bool = false,
-        isPerspective: Bool = false,
-        hasTurbulentVelocityInit: Bool = false
-    ) {
-        self.init(
-            materialRelativePath: materialRelativePath,
-            childRelativePaths: childRelativePaths,
-            childReferences: childReferences,
-            rendersSprite: rendersSprite,
-            isRope: isRope,
-            maxCount: maxCount,
-            rate: rate,
-            instantaneousCount: instantaneousCount,
-            startDelay: startDelay,
-            lifetimeMin: lifetimeMin,
-            lifetimeMax: lifetimeMax,
-            sizeMin: sizeMin,
-            sizeMax: sizeMax,
-            sizeExponent: sizeExponent,
-            originOffset: originOffset,
-            emitterShape: .sphere,
-            dispersalMin: SIMD3<Double>(dispersalMin, dispersalMin, dispersalMin),
-            dispersalMax: SIMD3<Double>(dispersalMax, dispersalMax, dispersalMax),
-            velocityMin: velocityMin,
-            velocityMax: velocityMax,
-            colorMin: colorMin,
-            colorMax: colorMax,
-            fadeInSeconds: fadeInSeconds,
-            directionMask: directionMask,
-            alphaMin: alphaMin,
-            alphaMax: alphaMax,
-            rotationMin: rotationMin,
-            rotationMax: rotationMax,
-            angularVelocityMin: angularVelocityMin,
-            angularVelocityMax: angularVelocityMax,
-            fadeOutSeconds: fadeOutSeconds,
-            alphaChange: alphaChange,
-            oscillateAlpha: oscillateAlpha,
-            sizeChange: sizeChange,
-            colorChange: colorChange,
-            oscillatePosition: oscillatePosition,
-            gravity: gravity,
-            drag: drag,
-            angularForceZ: angularForceZ,
-            angularDrag: angularDrag,
-            turbulenceSpeedMin: turbulenceSpeedMin,
-            turbulenceSpeedMax: turbulenceSpeedMax,
-            turbulenceScale: turbulenceScale,
-            turbulenceTimescale: turbulenceTimescale,
-            turbulenceOffset: turbulenceOffset,
-            turbulenceMask: turbulenceMask,
-            turbulencePhaseMin: turbulencePhaseMin,
-            turbulencePhaseMax: turbulencePhaseMax,
-            sequenceMultiplier: sequenceMultiplier,
-            animationMode: animationMode,
-            controlPoints: controlPoints,
-            attractors: attractors,
-            hasColorInitializer: hasColorInitializer,
-            declaresSequenceAnimation: declaresSequenceAnimation,
-            isPerspective: isPerspective,
-            hasTurbulentVelocityInit: hasTurbulentVelocityInit
-        )
     }
 
     public init(
@@ -562,22 +501,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         drag: Double = 0,
         angularForceZ: Double = 0,
         angularDrag: Double = 0,
-        turbulenceSpeedMin: Double = 0,
-        turbulenceSpeedMax: Double = 0,
-        turbulenceScale: Double = 0.005,
-        turbulenceTimescale: Double = 0.01,
-        turbulenceOffset: Double = 0,
-        turbulenceMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
-        turbulencePhaseMin: Double = 0,
-        turbulencePhaseMax: Double = 0,
+        turbulentVelocityInit: WPEParticleTurbulentVelocityInit? = nil,
+        turbulence: WPEParticleTurbulenceOperator? = nil,
         sequenceMultiplier: Double = 1,
         animationMode: WPEParticleAnimationMode = .sequence,
         controlPoints: [WPEParticleControlPoint] = [],
         attractors: [WPEParticleControlPointAttractor] = [],
         hasColorInitializer: Bool = false,
         declaresSequenceAnimation: Bool = false,
-        isPerspective: Bool = false,
-        hasTurbulentVelocityInit: Bool = false
+        isPerspective: Bool = false
     ) {
         self.materialRelativePath = materialRelativePath
         // Prefer explicit child references; fall back to bare paths (origin 0)
@@ -608,7 +540,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.hasColorInitializer = hasColorInitializer
         self.declaresSequenceAnimation = declaresSequenceAnimation
         self.isPerspective = isPerspective
-        self.hasTurbulentVelocityInit = hasTurbulentVelocityInit
+        self.turbulentVelocityInit = turbulentVelocityInit
+        self.turbulence = turbulence
         self.alphaMin = alphaMin
         self.alphaMax = alphaMax
         self.rotationMin = rotationMin
@@ -626,18 +559,6 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.drag = drag
         self.angularForceZ = angularForceZ
         self.angularDrag = angularDrag
-        self.turbulenceSpeedMin = max(0, min(turbulenceSpeedMin, turbulenceSpeedMax))
-        self.turbulenceSpeedMax = max(turbulenceSpeedMin, turbulenceSpeedMax)
-        self.turbulenceScale = max(0, turbulenceScale)
-        self.turbulenceTimescale = turbulenceTimescale
-        self.turbulenceOffset = turbulenceOffset
-        self.turbulenceMask = SIMD3<Double>(
-            max(0, turbulenceMask.x),
-            max(0, turbulenceMask.y),
-            max(0, turbulenceMask.z)
-        )
-        self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
-        self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
         self.sequenceMultiplier = max(0, sequenceMultiplier)
         self.animationMode = animationMode
         self.controlPoints = controlPoints
@@ -678,6 +599,23 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             scaledInstantaneous = 0
         } else {
             scaledInstantaneous = max(1, Int((Double(instantaneousCount) * countScale).rounded()))
+        }
+        // `speed` override scales emission velocity — including the turbulence
+        // seed/wind speeds (the reference renderer multiplies every velocity op).
+        let scaledTurbulentVelocityInit = turbulentVelocityInit.map {
+            WPEParticleTurbulentVelocityInit(
+                speedMin: $0.speedMin * speedScale, speedMax: $0.speedMax * speedScale,
+                scale: $0.scale, timescale: $0.timescale, offset: $0.offset,
+                phaseMin: $0.phaseMin, phaseMax: $0.phaseMax,
+                forward: $0.forward, right: $0.right
+            )
+        }
+        let scaledTurbulence = turbulence.map {
+            WPEParticleTurbulenceOperator(
+                speedMin: $0.speedMin * speedScale, speedMax: $0.speedMax * speedScale,
+                scale: $0.scale, timescale: $0.timescale,
+                phaseMin: $0.phaseMin, phaseMax: $0.phaseMax, mask: $0.mask
+            )
         }
 
         return WPEParticleDefinition(
@@ -726,22 +664,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             drag: drag,
             angularForceZ: angularForceZ * speedScale,
             angularDrag: angularDrag,
-            turbulenceSpeedMin: turbulenceSpeedMin * speedScale,
-            turbulenceSpeedMax: turbulenceSpeedMax * speedScale,
-            turbulenceScale: turbulenceScale,
-            turbulenceTimescale: turbulenceTimescale,
-            turbulenceOffset: turbulenceOffset,
-            turbulenceMask: turbulenceMask,
-            turbulencePhaseMin: turbulencePhaseMin,
-            turbulencePhaseMax: turbulencePhaseMax,
+            turbulentVelocityInit: scaledTurbulentVelocityInit,
+            turbulence: scaledTurbulence,
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
             declaresSequenceAnimation: declaresSequenceAnimation,
-            isPerspective: isPerspective,
-            hasTurbulentVelocityInit: hasTurbulentVelocityInit
+            isPerspective: isPerspective
         )
     }
 
@@ -790,22 +721,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             drag: drag,
             angularForceZ: angularForceZ,
             angularDrag: angularDrag,
-            turbulenceSpeedMin: turbulenceSpeedMin,
-            turbulenceSpeedMax: turbulenceSpeedMax,
-            turbulenceScale: turbulenceScale,
-            turbulenceTimescale: turbulenceTimescale,
-            turbulenceOffset: turbulenceOffset,
-            turbulenceMask: turbulenceMask,
-            turbulencePhaseMin: turbulencePhaseMin,
-            turbulencePhaseMax: turbulencePhaseMax,
+            turbulentVelocityInit: turbulentVelocityInit,
+            turbulence: turbulence,
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
             declaresSequenceAnimation: declaresSequenceAnimation,
-            isPerspective: isPerspective,
-            hasTurbulentVelocityInit: hasTurbulentVelocityInit
+            isPerspective: isPerspective
         )
     }
 
@@ -819,8 +743,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         sizeMin: 4,
         sizeMax: 4,
         originOffset: SIMD3<Double>(0, 0, 0),
-        dispersalMin: 0,
-        dispersalMax: 0,
+        dispersalMin: SIMD3<Double>(0, 0, 0),
+        dispersalMax: SIMD3<Double>(0, 0, 0),
         velocityMin: SIMD3<Double>(0, 0, 0),
         velocityMax: SIMD3<Double>(0, 0, 0),
         colorMin: SIMD3<Double>(255, 255, 255),
@@ -933,21 +857,14 @@ public enum WPEParticleDefinitionParser {
         var colorMin = def.colorMin
         var colorMax = def.colorMax
         var hasColorInitializer = false
-        var hasTurbulentVelocityInit = false
+        var turbulentVelocityInit: WPEParticleTurbulentVelocityInit?
+        var turbulence: WPEParticleTurbulenceOperator?
         var alphaMin: Double = def.alphaMin
         var alphaMax: Double = def.alphaMax
         var rotationMin: SIMD3<Double> = def.rotationMin
         var rotationMax: SIMD3<Double> = def.rotationMax
         var angularVelocityMin: SIMD3<Double> = def.angularVelocityMin
         var angularVelocityMax: SIMD3<Double> = def.angularVelocityMax
-        var turbulenceSpeedMin: Double = def.turbulenceSpeedMin
-        var turbulenceSpeedMax: Double = def.turbulenceSpeedMax
-        var turbulenceScale: Double = def.turbulenceScale
-        var turbulenceTimescale: Double = def.turbulenceTimescale
-        var turbulenceOffset: Double = def.turbulenceOffset
-        var turbulenceMask: SIMD3<Double> = def.turbulenceMask
-        var turbulencePhaseMin: Double = def.turbulencePhaseMin
-        var turbulencePhaseMax: Double = def.turbulencePhaseMax
 
         if let initializers = json["initializer"] as? [[String: Any]] {
             for entry in initializers {
@@ -1002,14 +919,22 @@ public enum WPEParticleDefinitionParser {
                     angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? angularVelocityMin
                     angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? angularVelocityMax
                 case "turbulentvelocityrandom":
-                    hasTurbulentVelocityInit = true
-                    turbulenceSpeedMin = WPEValueParser.double(entry["speedmin"]) ?? turbulenceSpeedMin
-                    turbulenceSpeedMax = WPEValueParser.double(entry["speedmax"]) ?? turbulenceSpeedMax
-                    turbulenceScale = WPEValueParser.double(entry["scale"]) ?? turbulenceScale
-                    turbulenceTimescale = WPEValueParser.double(entry["timescale"]) ?? turbulenceTimescale
-                    turbulenceOffset = WPEValueParser.double(entry["offset"]) ?? turbulenceOffset
-                    turbulencePhaseMin = WPEValueParser.double(entry["phasemin"]) ?? turbulencePhaseMin
-                    turbulencePhaseMax = WPEValueParser.double(entry["phasemax"]) ?? turbulencePhaseMax
+                    // Absent fields take the reference-renderer engine defaults
+                    // (speed 100…250, scale 1, timescale 1, phase 0…0.1, forward +Y,
+                    // right +Z), NOT zero — presets like wildfireembers author only
+                    // `scale` and rely on the rest defaulting.
+                    let d = WPEParticleTurbulentVelocityInit()
+                    turbulentVelocityInit = WPEParticleTurbulentVelocityInit(
+                        speedMin: WPEValueParser.double(entry["speedmin"]) ?? d.speedMin,
+                        speedMax: WPEValueParser.double(entry["speedmax"]) ?? d.speedMax,
+                        scale: WPEValueParser.double(entry["scale"]) ?? d.scale,
+                        timescale: WPEValueParser.double(entry["timescale"]) ?? d.timescale,
+                        offset: WPEValueParser.double(entry["offset"]) ?? d.offset,
+                        phaseMin: WPEValueParser.double(entry["phasemin"]) ?? d.phaseMin,
+                        phaseMax: WPEValueParser.double(entry["phasemax"]) ?? d.phaseMax,
+                        forward: WPEValueParser.vector3(entry["forward"]) ?? d.forward,
+                        right: WPEValueParser.vector3(entry["right"]) ?? d.right
+                    )
                 default:
                     break
                 }
@@ -1124,18 +1049,19 @@ public enum WPEParticleDefinitionParser {
                     }
                     angularDrag = WPEValueParser.double(entry["drag"]) ?? angularDrag
                 case "turbulence":
-                    if let speedMin = WPEValueParser.double(entry["speedmin"]) {
-                        turbulenceSpeedMin = speedMin
-                        turbulenceSpeedMax = WPEValueParser.double(entry["speedmax"]) ?? speedMin
-                    } else if let speedMax = WPEValueParser.double(entry["speedmax"]) {
-                        turbulenceSpeedMax = speedMax
-                    }
-                    turbulenceScale = WPEValueParser.double(entry["scale"]) ?? turbulenceScale
-                    turbulenceTimescale = WPEValueParser.double(entry["timescale"]) ?? turbulenceTimescale
-                    turbulenceOffset = WPEValueParser.double(entry["offset"]) ?? turbulenceOffset
-                    if let mask = WPEValueParser.vector3(entry["mask"]) {
-                        turbulenceMask = mask
-                    }
+                    // Engine defaults are 500…1000 / scale 0.01 / timescale 20 /
+                    // mask "1 1 0" — much stronger than the initializer, and paired
+                    // with drag in most presets. `phasemin/max` were dropped before.
+                    let d = WPEParticleTurbulenceOperator()
+                    turbulence = WPEParticleTurbulenceOperator(
+                        speedMin: WPEValueParser.double(entry["speedmin"]) ?? d.speedMin,
+                        speedMax: WPEValueParser.double(entry["speedmax"]) ?? d.speedMax,
+                        scale: WPEValueParser.double(entry["scale"]) ?? d.scale,
+                        timescale: WPEValueParser.double(entry["timescale"]) ?? d.timescale,
+                        phaseMin: WPEValueParser.double(entry["phasemin"]) ?? d.phaseMin,
+                        phaseMax: WPEValueParser.double(entry["phasemax"]) ?? d.phaseMax,
+                        mask: WPEValueParser.vector3(entry["mask"]) ?? d.mask
+                    )
                 default:
                     break
                 }
@@ -1182,22 +1108,15 @@ public enum WPEParticleDefinitionParser {
             drag: max(0, drag),
             angularForceZ: angularForceZ,
             angularDrag: max(0, angularDrag),
-            turbulenceSpeedMin: turbulenceSpeedMin,
-            turbulenceSpeedMax: turbulenceSpeedMax,
-            turbulenceScale: turbulenceScale,
-            turbulenceTimescale: turbulenceTimescale,
-            turbulenceOffset: turbulenceOffset,
-            turbulenceMask: turbulenceMask,
-            turbulencePhaseMin: turbulencePhaseMin,
-            turbulencePhaseMax: turbulencePhaseMax,
+            turbulentVelocityInit: turbulentVelocityInit,
+            turbulence: turbulence,
             sequenceMultiplier: sequenceMultiplier,
             animationMode: animationMode,
             controlPoints: controlPoints,
             attractors: attractors,
             hasColorInitializer: hasColorInitializer,
             declaresSequenceAnimation: declaresSequenceAnimation,
-            isPerspective: isPerspective,
-            hasTurbulentVelocityInit: hasTurbulentVelocityInit
+            isPerspective: isPerspective
         )
     }
 

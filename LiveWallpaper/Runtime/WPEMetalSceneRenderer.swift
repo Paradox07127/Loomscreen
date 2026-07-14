@@ -3473,7 +3473,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             s += "velocityMin=\(d.velocityMin) velocityMax=\(d.velocityMax)\n"
             s += "gravity=\(d.gravity) drag=\(d.drag)\n"
             s += "rotation=[\(d.rotationMin),\(d.rotationMax)] angularVel=[\(d.angularVelocityMin),\(d.angularVelocityMax)] angularForceZ=\(d.angularForceZ)\n"
-            s += "turbulence: speed=[\(d.turbulenceSpeedMin),\(d.turbulenceSpeedMax)] scale=\(d.turbulenceScale) mask=\(d.turbulenceMask)\n"
+            if let tvi = d.turbulentVelocityInit {
+                s += "turbVelInit: speed=[\(tvi.speedMin),\(tvi.speedMax)] scale=\(tvi.scale) offset=\(tvi.offset)\n"
+            }
+            if let turb = d.turbulence {
+                s += "turbulenceOp: speed=[\(turb.speedMin),\(turb.speedMax)] scale=\(turb.scale) timescale=\(turb.timescale) mask=\(turb.mask)\n"
+            }
             s += "sceneTransform: renderOrigin=\(sceneTransform.renderOrigin) objectScale=\(sceneTransform.objectScale) objectAngleZ=\(sceneTransform.objectAngleZ)\n"
             WPESceneDebugArtifacts.shared.recordNote(name: "particle-def-\(idx).txt", contents: s)
         }
