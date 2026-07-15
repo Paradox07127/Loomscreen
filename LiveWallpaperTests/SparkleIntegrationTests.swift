@@ -46,7 +46,7 @@ struct SparkleIntegrationTests {
 
     @Test("App source keeps Sparkle marked as testing-only")
     func appSourceKeepsSparkleMarkedAsTestingOnly() throws {
-        let configuration = try Self.projectFile("LiveWallpaper/Infrastructure/SparkleUpdateConfiguration.swift")
+        let configuration = try Self.projectFile("LiveWallpaper/Infrastructure/Services/SparkleUpdateConfiguration.swift")
         let panel = try Self.projectFile("LiveWallpaper/Views/Settings/SparkleUpdateTestPanel.swift")
         let aboutTab = try Self.projectFile("LiveWallpaper/Views/GeneralSettingsAboutTab.swift")
 

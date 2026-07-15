@@ -72,7 +72,7 @@ struct WPEMetalObjectUniformsTests {
 
     @Test("Dispatcher object quads carry frame camera uniforms")
     func dispatcherObjectQuadsCarryFrameCameraUniforms() throws {
-        let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalShaderDispatcher.swift")
+        let source = try Self.readSourceFile("LiveWallpaper/Runtime/Metal/WPEMetalShaderDispatcher.swift")
         let quadCallCount = source.components(separatedBy: "executor.objectQuadUniforms(").count - 1
         let cameraArgumentCount = source.components(separatedBy: "cameraUniforms: executor.objectQuadCameraUniforms(").count - 1
 

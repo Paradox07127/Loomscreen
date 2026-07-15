@@ -703,7 +703,7 @@ struct WallpaperVideoPlayerStartupPolicyTests {
 
     @Test("Scene preview poster readback waits for present completion without synchronizing draw")
     func scenePreviewPosterReadbackUsesPresentCompletion() throws {
-        let source = try Self.readSourceFile("LiveWallpaper/Runtime/WPEMetalSceneRenderer.swift")
+        let source = try Self.readSourceFile("LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer.swift")
         let executor = try Self.readExecutorSource()
 
         #expect(source.contains("capturePendingLivePostersAfterPresent"))
@@ -1612,25 +1612,15 @@ struct InfrastructureRuntimeBoundaryTests {
     /// Known Infra→Runtime references, frozen at the ADR-002 baseline. This map
     /// may only ever *shrink*: deleting entries as the coupling is paid down is
     /// expected; adding one means a new boundary violation slipped in.
+    /// Five of the six original entries were paid down by putting the files on
+    /// the layer their dependencies already implied, rather than by relaxing the
+    /// rule: the render-graph/pipeline builders and the texture loader do GPU
+    /// work and moved to `Runtime/Metal/`, while `WPEResolutionDiagnostics`
+    /// (asset-resolution tracing, with no runtime behaviour) moved the other way
+    /// into `Infrastructure/Diagnostics/`, which dissolved every remaining
+    /// `WPEResolution*` crossing at once.
     private static let baseline: [String: Set<String>] = [
-        "WPEMetalTextureLoader.swift": [
-            "WPEMetalTextureMetadataRegistry",
-            "WPETexAnimatedFrame",
-            "WPETexAnimatedTextureSource",
-            "WPETexLazyAnimatedTextureSource",
-            "WPEVideoTextureSource",
-        ],
-        "WPEMultiRootResourceResolver.swift": [
-            "WPEResolutionAttempt",
-            "WPEResolutionEvent",
-            "WPEResolutionOrigin",
-            "WPEResolutionOutcome",
-            "WPEResolutionTracer",
-        ],
-        "WPERenderGraphBuilder.swift": ["WPEMetalRenderExecutor", "WPEResolutionTracer"],
-        "WPERenderPipelineBuilder.swift": ["WPEResolutionTracer", "WPEShaderBuiltinMacros"],
-        "WPESceneDebugArtifacts.swift": ["WPEResolutionDiagnosticsSnapshot"],
-        "WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy"],
+        "Workshop/WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy"],
     ]
 
     @Test("Infrastructure/ introduces no Runtime/ references beyond the ADR-002 baseline")

@@ -96,7 +96,7 @@ struct SettingsWindowLayoutTests {
     @Test("HTML preview prefers live web snapshots before static fallbacks")
     func htmlPreviewPrefersLiveWebSnapshots() throws {
         let previewSection = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/HTMLPreviewSection.swift")
-        let runtimeSession = try Self.readSourceFile("LiveWallpaper/Runtime/WallpaperRuntimeSession.swift")
+        let runtimeSession = try Self.readSourceFile("LiveWallpaper/Runtime/Session/WallpaperRuntimeSession.swift")
         let htmlView = try Self.readSourceFile("LiveWallpaper/VideoPlayback/HTMLWallpaperView.swift")
 
         #expect(previewSection.contains("captureLiveHTMLSnapshot"))
