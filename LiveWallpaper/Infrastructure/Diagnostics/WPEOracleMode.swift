@@ -17,6 +17,14 @@ enum WPEOracleMode {
     /// mercy of a developer's persisted `WPEOracleEnabled` (which would otherwise freeze
     /// the clock / seed particles inside renderer tests). Pass nil to clear.
     nonisolated(unsafe) static var testingOverride: Bool?
+
+    /// Seconds added to the frozen scene clock, so a multi-frame capture can step
+    /// time without the renderer re-reading its `oracleFrameOverride` (a stored
+    /// `let`, fixed at init). `WPEOracleFrameOverride.time` folds this in on every
+    /// read; a capture bumps it between `renderCurrentFrame()` calls.
+    /// 0 ⇒ the clock is frozen exactly as before, so single-frame captures are
+    /// bit-identical to the pre-multi-frame recorder.
+    nonisolated(unsafe) static var frameAdvanceSeconds: Double = 0
     #endif
 
     /// Master toggle, read from the `WPEOracleEnabled` user default.
@@ -101,7 +109,7 @@ enum WPEOracleMode {
         let pointerX = (defaults.object(forKey: "WPEOracleReplayPointerX") as? Double) ?? 0.5
         let pointerY = (defaults.object(forKey: "WPEOracleReplayPointerY") as? Double) ?? 0.5
         return WPEOracleFrameOverride(
-            time: time,
+            baseTime: time,
             daytime: min(max(daytime, 0), 1),
             pointer: SIMD2<Double>(pointerX, pointerY)
         )
@@ -111,8 +119,20 @@ enum WPEOracleMode {
 /// Frozen frame globals for a render-oracle capture. Substituted into
 /// `WPEMetalRuntimeUniforms` at the top of each frame; see `WPEOracleMode`.
 struct WPEOracleFrameOverride: Equatable {
-    var time: Double
+    /// The capture's frozen scene time, before any multi-frame advance.
+    var baseTime: Double
     var daytime: Double
     var pointer: SIMD2<Double>
+
+    /// Scene time for the frame being rendered right now. Computed (not stored)
+    /// because the renderer holds this override in a stored `let` sampled once at
+    /// init — folding the advance in here is what lets a capture step the clock.
+    var time: Double {
+        #if DEBUG
+        baseTime + WPEOracleMode.frameAdvanceSeconds
+        #else
+        baseTime
+        #endif
+    }
 }
 #endif

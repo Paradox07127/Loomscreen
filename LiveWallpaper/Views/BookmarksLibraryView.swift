@@ -263,7 +263,6 @@ private struct BookmarkTile: View {
 
     /// Only shown when a real thumbnail is loaded — the SF Symbol fallback
     /// already conveys the type, so the badge would be redundant there.
-    /// Forced-dark `ultraThinMaterial` keeps it readable on the artwork.
     private var typeBadge: some View {
         VStack {
             HStack {

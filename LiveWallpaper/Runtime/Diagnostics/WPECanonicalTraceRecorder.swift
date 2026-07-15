@@ -12,9 +12,10 @@ import simd
 /// fallbacks, and render targets — what the divergence engine needs to align
 /// against the Windows ground truth.
 ///
-/// One `mac/trace.json` is written per scene load: passes accumulate during the
-/// first rendered frame, then `finishFrame` serialises once and latches so the
-/// live render loop never re-accumulates.
+/// One `mac/trace.json` is written per `beginScene`: passes accumulate during the
+/// next rendered frame, then `finishFrame` serialises once and latches so the live
+/// render loop never re-accumulates. A multi-frame capture re-opens the window with
+/// a second `beginScene` right before the frame it wants to describe.
 ///
 /// `@unchecked Sendable`: all mutable state is guarded by `lock`, so the shared
 /// singleton is safe to touch from the render thread and the end-of-frame flush.
@@ -35,6 +36,33 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         let value: SIMD4<Float>
     }
 
+    /// One text object as `drawLiveTextOverlays` resolved it for this frame.
+    struct TextObjectInput {
+        let objectID: String
+        let name: String
+        let text: String
+        /// Which text path drew it: `msdf`, `coretext`, or `coretext-msdf-fallback`.
+        let path: String
+        let center: SIMD2<Float>
+        let scale: SIMD2<Float>
+        let perspectiveSizeScale: Float
+        let rotation: Float
+        let alpha: Float
+        let tint: SIMD3<Float>
+
+        func withPath(_ newPath: String) -> TextObjectInput {
+            TextObjectInput(
+                objectID: objectID, name: name, text: text, path: newPath,
+                center: center, scale: scale, perspectiveSizeScale: perspectiveSizeScale,
+                rotation: rotation, alpha: alpha, tint: tint
+            )
+        }
+    }
+
+    /// Stable passId for the text overlay pass, so `finishFrame` can find it and
+    /// the diff engine can name it.
+    static let textPassID = "text.overlay"
+
     private let lock = NSLock()
     private var scene: SceneContext?
     private var frameComplete = false
@@ -42,6 +70,24 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
     private var resources: ResourceTables = ResourceTables()
 
     private init() {}
+
+    /// True only while a scene is mid-capture and the frame has not latched — the
+    /// render path checks this before building any trace payload, so a production
+    /// (non-oracle, non-scene-debug) frame pays one `isEnabled` read and nothing else.
+    var isAccumulating: Bool {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        return scene != nil && !frameComplete
+    }
+
+    /// sha256 of a texture's canonical bytes. Exposed for the text pass's
+    /// pre-composite probe, which must hash the frame BEFORE the text draws
+    /// (nothing else in the render path can). nil when the texture isn't readable.
+    func textureSha256(_ texture: MTLTexture) -> String? {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return nil }
+        return textureMetrics(texture)?.sha256
+    }
 
     func beginScene(workshopID: String, projectJsonPath: String?, descriptor: String) {
         guard WPESceneDebugArtifacts.shared.isEnabled else { return }
@@ -413,10 +459,18 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
 
         let ordinal = passes.count
         let targetResource = "rt-scene"
-        resources.renderTargets[targetResource] = [
-            "label": "scene", "width": target.width, "height": target.height,
-            "format": pixelFormatName(target.pixelFormat), "lineage": [String]()
-        ]
+        // Create rt-scene only if no pass registered it yet — same reason as the text
+        // pass. Particles are interleaved by paint index, so in a scene whose last
+        // .scene-targeting pass precedes them (3460973721 pass-0001, 3462491575
+        // pass-0031) a blind assign wiped the `lineage` the structural golden reads
+        // as the FBO graph; 3554161528 only kept its lineage because a custom pass
+        // happened to draw after its particles.
+        if resources.renderTargets[targetResource] == nil {
+            resources.renderTargets[targetResource] = [
+                "label": "scene", "width": target.width, "height": target.height,
+                "format": pixelFormatName(target.pixelFormat), "lineage": [String]()
+            ]
+        }
         let spriteID = textureResourceID(texture: sprite, fallbackKey: "particle-\(index)")
         resources.textures[spriteID] = textureResource(id: spriteID, name: "g_Texture0", reference: nil, texture: sprite)
 
@@ -476,17 +530,160 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         passes.append(passRecord)
     }
 
+    /// Record the frame's text overlays as one pass. `drawLiveTextOverlays` runs
+    /// AFTER `executor.render()` and composites straight into the final frame, so
+    /// before this hook every text pixel landed in `final.sha256` and in no pass at
+    /// all: a self-oracle run could show every recorded pass hash identical while
+    /// `final` moved, with nothing to name text as the cause.
+    ///
+    /// The three content hashes split the divergence by axis, which is the whole
+    /// point of the pass:
+    ///   - `g_TextStringsSha256` moves ⇒ the resolved STRINGS differ (script/content).
+    ///   - `g_TextPlacementSha256` moves ⇒ position/scale/rotation/tint differ.
+    ///   - both hold but `output.sha256` moves ⇒ glyph rasterization itself differs.
+    ///   - `g_TextPreCompositeSha256` moves ⇒ text is innocent; the scene arrived
+    ///     different and the divergence is upstream.
+    func recordTextPass(
+        objects: [TextObjectInput],
+        preCompositeSha256: String?,
+        target: MTLTexture
+    ) {
+        guard WPESceneDebugArtifacts.shared.isEnabled else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard scene != nil, !frameComplete else { return }
+
+        let ordinal = passes.count
+        let targetResource = "rt-scene"
+        // Create rt-scene only if no pass registered it yet. Overwriting would wipe
+        // its `lineage`, which the structural golden fingerprint reads as the scene's
+        // FBO graph — the text pass draws last, so a blind assignment silently
+        // erased every scene's lineage.
+        if resources.renderTargets[targetResource] == nil {
+            resources.renderTargets[targetResource] = [
+                "label": "scene", "width": target.width, "height": target.height,
+                "format": pixelFormatName(target.pixelFormat), "lineage": [String]()
+            ]
+        }
+
+        let stringsHash = sha256Hex(Data(objects.map { "\($0.objectID)\u{1}\($0.text)" }.joined(separator: "\u{2}").utf8))
+        let placementHash = sha256Hex(Data(objects.map(Self.canonicalPlacement).joined(separator: "\u{2}").utf8))
+        let contentHash = sha256Hex(Data(objects.map(Self.canonicalDescription).joined(separator: "\u{2}").utf8))
+        let msdfCount = objects.filter { $0.path == "msdf" }.count
+
+        let draw: [String: Any] = [
+            "topology": "text-quads",
+            "vertexCount": objects.count * 4,
+            "indexCount": NSNull(),
+            "instanceCount": objects.count,
+            "viewport": [0, 0, Double(target.width), Double(target.height), 0, 1] as [Double],
+            "scissor": [Double]()
+        ]
+        let colorTargets: [[String: Any]] = [[
+            "slot": 0, "resource": targetResource, "load": "load", "store": "store"
+        ]]
+        // Fixed NAME set (values carry the variance) so the fingerprint's
+        // `uniformNames` stays stable while `diff_traces.py` still compares each
+        // hash by name and reports which one moved.
+        let variables: [[String: Any]] = [
+            ["name": "g_TextObjectCount", "type": "float", "value": Double(objects.count)],
+            ["name": "g_TextMSDFCount", "type": "float", "value": Double(msdfCount)],
+            ["name": "g_TextCoreTextCount", "type": "float", "value": Double(objects.count - msdfCount)],
+            ["name": "g_TextStringsSha256", "type": "string", "value": stringsHash],
+            ["name": "g_TextPlacementSha256", "type": "string", "value": placementHash],
+            ["name": "g_TextPreCompositeSha256", "type": "string", "value": jsonOrNull(preCompositeSha256)]
+        ]
+        let constantBuffer: [String: Any] = [
+            "name": "text_overlay",
+            "stage": "fragment",
+            "slot": 0,
+            "rawBytesSha256": contentHash,
+            "variables": variables
+        ]
+        let state: [String: Any] = [
+            "blend": ["mode": "alpha"] as [String: Any],
+            "depth": NSNull(),
+            "raster": NSNull(),
+            "samplers": [["stage": "fragment", "slot": 0, "name": "g_Texture0"]] as [[String: Any]]
+        ]
+        // sha256 is back-filled by finishFrame with the final composite hash —
+        // nothing draws after the text overlays, so they are the same pixels.
+        let output: [String: Any] = [
+            "resource": targetResource,
+            "png": NSNull(),
+            "sha256": NSNull(),
+            "visualStats": ["note": "text overlay pass (\(objects.count) object(s), \(msdfCount) via MSDF)"]
+        ]
+        let text: [String: Any] = [
+            "objectCount": objects.count,
+            "msdfCount": msdfCount,
+            "coreTextCount": objects.count - msdfCount,
+            "contentSha256": contentHash,
+            "stringsSha256": stringsHash,
+            "placementSha256": placementHash,
+            "preCompositeSha256": jsonOrNull(preCompositeSha256),
+            "objects": objects.map { object in
+                [
+                    "objectId": object.objectID,
+                    "name": object.name,
+                    "text": object.text,
+                    "path": object.path,
+                    "center": [Double(object.center.x), Double(object.center.y)],
+                    "scale": [Double(object.scale.x), Double(object.scale.y)],
+                    "perspectiveSizeScale": Double(object.perspectiveSizeScale),
+                    "rotation": Double(object.rotation),
+                    "alpha": Double(object.alpha),
+                    "tint": [Double(object.tint.x), Double(object.tint.y), Double(object.tint.z)]
+                ] as [String: Any]
+            }
+        ]
+        let passRecord: [String: Any] = [
+            "ordinal": ordinal,
+            "eventId": NSNull(),
+            "layerId": NSNull(),
+            "passId": Self.textPassID,
+            "shaderName": "text/overlay",
+            "draw": draw,
+            "targets": ["color": colorTargets, "depth": NSNull()] as [String: Any],
+            "textures": [[String: Any]](),
+            "shaders": ["vs": "shader-vs-text", "fs": "shader-fs-text"],
+            "constantBuffers": [constantBuffer],
+            "state": state,
+            "output": output,
+            "text": text
+        ]
+        passes.append(passRecord)
+    }
+
+    /// Canonical, hashable rendering of a text object's placement. Formatted
+    /// decimals rather than raw float bits: NaN payloads and ±0 are not stable
+    /// across runs and would hash as spurious divergence (the same trap the
+    /// Float16 read-back path already documents).
+    private static func canonicalPlacement(_ object: TextObjectInput) -> String {
+        let values: [Float] = [
+            object.center.x, object.center.y, object.scale.x, object.scale.y,
+            object.perspectiveSizeScale, object.rotation, object.alpha,
+            object.tint.x, object.tint.y, object.tint.z
+        ]
+        return "\(object.objectID)|\(object.path)|" + values.map { String(format: "%.6f", $0) }.joined(separator: ",")
+    }
+
+    private static func canonicalDescription(_ object: TextObjectInput) -> String {
+        "\(canonicalPlacement(object))|\(object.text)"
+    }
+
     func finishFrame(
         outputTexture: MTLTexture,
         runtimeUniforms: WPEMetalRuntimeUniforms?,
         firstFrameStats: WPEMetalTextureVisualStats?,
-        resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot
+        resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot,
+        frameOrdinal: Int = 0
     ) {
         guard WPESceneDebugArtifacts.shared.isEnabled else { return }
         lock.lock()
         guard let scene, !frameComplete else { lock.unlock(); return }
         frameComplete = true
-        let passSnapshot = passes
+        var passSnapshot = passes
         let resourceSnapshot = resources
         lock.unlock()
 
@@ -496,6 +693,21 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         let height = outputTexture.height
         let finalHash = textureMetrics(outputTexture)?.sha256
         let missedRefs = resolutionDiagnostics.missedRefs
+
+        // The text overlays composite into the final frame and nothing draws after
+        // them, so the text pass's output IS `final`. Back-filling from the hash we
+        // just computed gives the pass an output hash even when per-pass hashing is
+        // off, at the cost of zero extra read-backs.
+        if let finalHash,
+           let index = passSnapshot.firstIndex(where: { ($0["passId"] as? String) == Self.textPassID }) {
+            var record = passSnapshot[index]
+            var output = record["output"] as? [String: Any] ?? [:]
+            if output["sha256"] is NSNull {
+                output["sha256"] = finalHash
+                record["output"] = output
+                passSnapshot[index] = record
+            }
+        }
 
         let producer: [String: Any] = [
             "side": "mac-metal",
@@ -531,7 +743,7 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
         let capture: [String: Any] = [
             "jobId": scene.workshopID,
             "mode": "shader-first",
-            "frameOrdinal": 0,
+            "frameOrdinal": frameOrdinal,
             "resolution": ["width": width, "height": height],
             "wallpaperWindow": ["class": "MTKView", "hwnd": NSNull(), "pid": NSNull()] as [String: Any],
             "determinism": determinism,
@@ -574,7 +786,9 @@ final class WPECanonicalTraceRecorder: @unchecked Sendable {
             return
         }
         WPESceneDebugArtifacts.shared.recordNote(name: "trace.json", contents: text)
-        WPESceneDebugArtifacts.shared.appendLog("[canonical-trace] wrote trace.json passes=\(passCount)", level: .info)
+        WPESceneDebugArtifacts.shared.appendLog(
+            "[canonical-trace] wrote trace.json passes=\(passCount) frame=\(frameOrdinal)", level: .info
+        )
     }
 
     // MARK: - Description helpers (mirror WPESceneDebugArtifacts)

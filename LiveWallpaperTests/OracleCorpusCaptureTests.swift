@@ -35,9 +35,19 @@ struct OracleCorpusCaptureTests {
         /// INSIDE the test host — an outside `defaults write` to the container plist
         /// is a different cfprefsd domain and the sandboxed host never sees it).
         var dumpPNGs: Bool = false
+        /// How many frames to render before taking the trace. 1 (the default) traces
+        /// `load()`'s first frame and is byte-identical to the pre-multi-frame
+        /// capture. >1 makes the oracle able to see cross-frame behaviour at all:
+        /// frame 1 is the one script seeding is *constructed* to make match, so a
+        /// capture that only ever looks at it has zero detection power over anything
+        /// that happens per-frame.
+        var frames: Int = 1
+        /// Scene seconds each extra frame advances the frozen clock. 1/60 = one
+        /// nominal frame of scene time.
+        var frameStepSeconds: Double = 1.0 / 60.0
 
         private enum CodingKeys: String, CodingKey {
-            case corpusRoot, label, scenes, perPass, dumpPNGs
+            case corpusRoot, label, scenes, perPass, dumpPNGs, frames, frameStepSeconds
         }
 
         /// Swift's compiler-synthesized `Decodable.init(from:)` does NOT fall back to a
@@ -54,6 +64,8 @@ struct OracleCorpusCaptureTests {
             scenes = try container.decodeIfPresent([String].self, forKey: .scenes)
             perPass = try container.decodeIfPresent(Bool.self, forKey: .perPass) ?? false
             dumpPNGs = try container.decodeIfPresent(Bool.self, forKey: .dumpPNGs) ?? false
+            frames = try container.decodeIfPresent(Int.self, forKey: .frames) ?? 1
+            frameStepSeconds = try container.decodeIfPresent(Double.self, forKey: .frameStepSeconds) ?? (1.0 / 60.0)
         }
     }
 
@@ -82,7 +94,8 @@ struct OracleCorpusCaptureTests {
         let outDir = base.appendingPathComponent("oracle-out").appendingPathComponent(config.label)
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let filter = config.scenes.map(Set.init)
-        print("[oracle-capture] config: corpusRoot=\(config.corpusRoot) label=\(config.label) scenes=\(config.scenes ?? ["<all>"])")
+        print("[oracle-capture] config: corpusRoot=\(config.corpusRoot) label=\(config.label) "
+              + "scenes=\(config.scenes ?? ["<all>"]) frames=\(config.frames) step=\(config.frameStepSeconds)")
 
         // Force the oracle on for this run regardless of the machine default (seeds
         // particles, freezes the clock, writes the canonical trace).
@@ -93,6 +106,9 @@ struct OracleCorpusCaptureTests {
         }
         defer {
             WPEOracleMode.testingOverride = nil
+            // Global, so it MUST be reset — a leaked advance would silently shift
+            // the frozen clock for every later oracle run in this process.
+            WPEOracleMode.frameAdvanceSeconds = 0
             WPESceneDebugArtifacts.shared.setEnabledForTesting(nil)
             if config.perPass {
                 UserDefaults.standard.removeObject(forKey: "WPEOraclePerPassHashes")
@@ -144,6 +160,9 @@ struct OracleCorpusCaptureTests {
             if config.dumpPNGs {
                 UserDefaults.standard.set(id, forKey: "WPEDumpScenePasses")
             }
+            // Per-scene reset: the previous scene left the advance at its last
+            // frame, which would otherwise offset this scene's load-path frame.
+            WPEOracleMode.frameAdvanceSeconds = 0
             let descriptor = SceneDescriptor(
                 workshopID: id,
                 cacheRelativePath: "wpe-oracle-cache/\(id)",
@@ -161,6 +180,15 @@ struct OracleCorpusCaptureTests {
                     pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
                 )
                 try await renderer.load()
+                try Self.advanceToTracedFrame(
+                    renderer: renderer,
+                    id: id,
+                    entryFile: descriptor.entryFile,
+                    stage: stage,
+                    frames: config.frames,
+                    stepSeconds: config.frameStepSeconds,
+                    perPass: config.perPass || config.dumpPNGs
+                )
                 if let trace = Self.latestTrace(forID: id) {
                     let dest = outDir.appendingPathComponent("\(id).json")
                     try? FileManager.default.removeItem(at: dest)
@@ -191,6 +219,44 @@ struct OracleCorpusCaptureTests {
         #expect(config.scenes == nil)
         #expect(config.perPass == false)
         #expect(config.dumpPNGs == false)
+        // frames defaults to 1 = the single-frame behaviour every existing config
+        // and golden was captured under.
+        #expect(config.frames == 1)
+        #expect(config.frameStepSeconds == 1.0 / 60.0)
+    }
+
+    @Test("Config decode accepts an explicit multi-frame capture")
+    func configDecodeAcceptsFrames() throws {
+        let json = Data(#"{"corpusRoot": "/tmp/corpus", "frames": 4, "frameStepSeconds": 0.5}"#.utf8)
+        let config = try JSONDecoder().decode(Config.self, from: json)
+        #expect(config.frames == 4)
+        #expect(config.frameStepSeconds == 0.5)
+    }
+
+    /// The frozen clock must actually MOVE when a multi-frame capture steps it —
+    /// `WPEOracleFrameOverride.time` is computed for exactly this reason, and a
+    /// regression back to a stored property would silently make every extra frame
+    /// render at the same instant (the failure mode `frames` exists to fix).
+    @Test("Frozen clock advances with frameAdvanceSeconds, and is inert at 0")
+    func frozenClockAdvancesWithFrameAdvance() throws {
+        WPEOracleMode.testingOverride = true
+        defer {
+            WPEOracleMode.testingOverride = nil
+            WPEOracleMode.frameAdvanceSeconds = 0
+        }
+        // Deltas, not absolutes: `loadFrameOverride` prefers a persisted
+        // WPEOracleReplayTime over freezeTime, and the test host shares the app's
+        // defaults domain — asserting the absolute value would fail on any machine
+        // that has run a fidelity capture.
+        WPEOracleMode.frameAdvanceSeconds = 0
+        let override = try #require(WPEOracleMode.loadFrameOverride())
+        let frozen = override.time
+        #expect(override.time == override.baseTime, "advance 0 must leave the clock exactly frozen")
+
+        WPEOracleMode.frameAdvanceSeconds = 0.25
+        // Same stored override the renderer sampled at init; only `time` moves.
+        #expect(override.time == frozen + 0.25)
+        #expect(override.baseTime == frozen)
     }
 
     @Test("Config decode throws on a malformed config instead of silently defaulting")
@@ -207,6 +273,59 @@ struct OracleCorpusCaptureTests {
         let wrongShape = Data(#"{"corpusRoot": 12345}"#.utf8)
         #expect(throws: (any Error).self) {
             _ = try JSONDecoder().decode(Config.self, from: wrongShape)
+        }
+    }
+
+    /// Renders frames 2…N and re-traces the LAST one, so the capture describes a
+    /// frame the renderer had to *evolve* into rather than the one it loaded.
+    ///
+    /// `frames <= 1` returns immediately — the load-path trace stands untouched.
+    ///
+    /// Why the trace has to be re-taken rather than accumulated: `load()` already
+    /// called `finishFrame`, which latches the recorder, so these re-renders record
+    /// nothing. Re-opening with `beginScene` immediately before the final frame is
+    /// what makes the trace describe that frame ALONE — opening earlier would stack
+    /// every intervening frame's passes into one trace.
+    @MainActor
+    private static func advanceToTracedFrame(
+        renderer: WPEMetalSceneRenderer,
+        id: String,
+        entryFile: String,
+        stage: URL,
+        frames: Int,
+        stepSeconds: Double,
+        perPass: Bool
+    ) throws {
+        guard frames > 1 else { return }
+        let summary = "\(id) oracle-capture frames=\(frames) step=\(stepSeconds)"
+        for index in 1..<frames {
+            // The renderer samples `oracleFrameOverride` once at init, so the clock
+            // is stepped through the override's computed `time` instead.
+            WPEOracleMode.frameAdvanceSeconds = Double(index) * stepSeconds
+            let isLast = index == frames - 1
+            if isLast {
+                _ = WPESceneDebugArtifacts.shared.beginSession(workshopID: id, descriptor: summary)
+                WPECanonicalTraceRecorder.shared.beginScene(
+                    workshopID: id,
+                    projectJsonPath: stage.appendingPathComponent(entryFile).path,
+                    descriptor: summary
+                )
+            }
+            let texture = try renderer.renderCurrentFrame()
+            guard isLast else { continue }
+            if perPass {
+                renderer.dumpScenePassesIfRequested(suffix: "-f\(index)")
+            }
+            WPECanonicalTraceRecorder.shared.finishFrame(
+                outputTexture: texture,
+                runtimeUniforms: renderer.lastRuntimeUniforms,
+                firstFrameStats: WPEMetalTextureVisualStats.analyze(texture: texture),
+                resolutionDiagnostics: renderer.resolutionTracer.snapshot(),
+                frameOrdinal: index
+            )
+            WPESceneDebugArtifacts.shared.endSession()
+            print("[oracle-capture] [\(id)] advanced to frame \(index) "
+                  + "(t=\(renderer.lastRuntimeUniforms.map { String(format: "%.4f", $0.time) } ?? "?"))")
         }
     }
 

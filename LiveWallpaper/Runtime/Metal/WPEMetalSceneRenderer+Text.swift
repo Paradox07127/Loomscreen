@@ -15,6 +15,17 @@ extension WPEMetalSceneRenderer {
         parallaxFrame: WPECameraParallaxFrame
     ) throws {
         guard let textRenderer, !textObjects.isEmpty else { return }
+        #if DEBUG
+        // Oracle/scene-debug only. `isAccumulating` is false in production after one
+        // `isEnabled` read, so a normal frame builds no payload and hashes nothing.
+        let tracingText = WPECanonicalTraceRecorder.shared.isAccumulating
+        // Hash the frame BEFORE any text draws: this is the discriminator that tells
+        // a moving `final` caused by text apart from one that arrived from upstream.
+        let preCompositeSha256 = tracingText
+            ? WPECanonicalTraceRecorder.shared.textureSha256(frame)
+            : nil
+        var textTrace: [WPECanonicalTraceRecorder.TextObjectInput] = []
+        #endif
         // CoreText draws for objects that don't take the MSDF path this frame.
         var draws: [WPETextOverlayDraw] = []
         var msdfPayloads: [WPEMSDFTextDrawPayload] = []
@@ -54,10 +65,20 @@ extension WPEMetalSceneRenderer {
             ) {
                 msdfPayloads.append(payload)
                 deferredMSDFObjects.append((liveObject, placement.geometry))
+                #if DEBUG
+                if tracingText {
+                    textTrace.append(Self.textTraceInput(liveObject, placement.geometry, path: "msdf"))
+                }
+                #endif
             } else if let draw = coreTextOverlayDraw(
                 for: liveObject, geometry: placement.geometry, textRenderer: textRenderer
             ) {
                 draws.append(draw)
+                #if DEBUG
+                if tracingText {
+                    textTrace.append(Self.textTraceInput(liveObject, placement.geometry, path: "coretext"))
+                }
+                #endif
             }
         }
         var msdfSucceeded = false
@@ -98,6 +119,14 @@ extension WPEMetalSceneRenderer {
                     draws.append(draw)
                 }
             }
+            #if DEBUG
+            if tracingText {
+                // The trace must name the path that actually drew, not the one we tried.
+                textTrace = textTrace.map {
+                    $0.path == "msdf" ? $0.withPath("coretext-msdf-fallback") : $0
+                }
+            }
+            #endif
         }
         if !draws.isEmpty {
             try executor.drawTextOverlays(
@@ -106,7 +135,45 @@ extension WPEMetalSceneRenderer {
                 output: frame
             )
         }
+        #if DEBUG
+        if tracingText {
+            WPECanonicalTraceRecorder.shared.recordTextPass(
+                objects: textTrace,
+                preCompositeSha256: preCompositeSha256,
+                target: frame
+            )
+        }
+        #endif
     }
+
+    #if DEBUG
+    /// Snapshot one resolved text object for the canonical trace. Mirrors
+    /// `coreTextOverlayDraw`'s tint fold (`rgb × brightness`) so the traced tint is
+    /// the one the fragment shader actually receives.
+    private static func textTraceInput(
+        _ liveObject: WPESceneTextObject,
+        _ geometry: WPETextOverlayGeometry,
+        path: String
+    ) -> WPECanonicalTraceRecorder.TextObjectInput {
+        let brightness = Float(max(liveObject.brightness, 0))
+        return WPECanonicalTraceRecorder.TextObjectInput(
+            objectID: liveObject.id,
+            name: liveObject.name,
+            text: liveObject.text,
+            path: path,
+            center: geometry.center,
+            scale: geometry.scale,
+            perspectiveSizeScale: geometry.perspectiveSizeScale,
+            rotation: geometry.rotation,
+            alpha: Float(liveObject.alpha),
+            tint: SIMD3<Float>(
+                Float(liveObject.color.x) * brightness,
+                Float(liveObject.color.y) * brightness,
+                Float(liveObject.color.z) * brightness
+            )
+        )
+    }
+    #endif
 
     // MARK: - Placement
 

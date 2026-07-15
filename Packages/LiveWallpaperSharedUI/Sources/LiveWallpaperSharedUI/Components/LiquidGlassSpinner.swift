@@ -57,7 +57,7 @@ public struct LiquidGlassSpinner: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .thumbnailBadgeGlass()
                     .accessibilityLabel(Text(verbatim: progressText))
             }
         }
