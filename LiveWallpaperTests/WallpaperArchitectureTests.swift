@@ -429,6 +429,7 @@ struct HTMLFolderURLSchemeTests {
     @Test("Folder scheme rejects traversal outside the granted folder")
     func rejectsTraversalOutsideGrantedFolder() throws {
         let fixture = try makeFolderFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
@@ -446,6 +447,7 @@ struct HTMLFolderURLSchemeTests {
     @Test("Folder scheme rejects symlinks that resolve outside the granted folder")
     func rejectsSymlinkEscapes() throws {
         let fixture = try makeFolderFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
         let symlink = fixture.folder.appendingPathComponent("linked-secret.txt")
         try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: fixture.secret)
         let handler = FolderURLSchemeHandler()
@@ -465,6 +467,7 @@ struct HTMLFolderURLSchemeTests {
     @Test("Folder scheme sends large assets in bounded chunks")
     func sendsLargeAssetsInBoundedChunks() async throws {
         let fixture = try makeFolderFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
         let largeFile = fixture.folder.appendingPathComponent("large.bin")
         let payload = Data(repeating: 0xA5, count: 200 * 1024)
         try payload.write(to: largeFile)
@@ -703,7 +706,7 @@ struct WallpaperVideoPlayerStartupPolicyTests {
 
     @Test("Scene preview poster readback waits for present completion without synchronizing draw")
     func scenePreviewPosterReadbackUsesPresentCompletion() throws {
-        let source = try Self.readSourceFile("LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer.swift")
+        let source = try Self.readSceneRendererSource()
         let executor = try Self.readExecutorSource()
 
         #expect(source.contains("capturePendingLivePostersAfterPresent"))
@@ -756,6 +759,12 @@ struct WallpaperVideoPlayerStartupPolicyTests {
     /// declaration currently lives in.
     private static func readExecutorSource() throws -> String {
         try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalRenderExecutor")
+    }
+
+    /// Same reasoning as `readExecutorSource`: the scene renderer is split
+    /// across `WPEMetalSceneRenderer+*.swift`.
+    private static func readSceneRendererSource() throws -> String {
+        try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalSceneRenderer")
     }
 }
 
@@ -1730,12 +1739,22 @@ struct InfrastructureRuntimeBoundaryTests {
         return false
     }
 
-    // MARK: - Comment stripping (so a type named only in prose never trips the scan)
+    // MARK: - Non-code text stripping (so a type named only in prose never trips the scan)
 
+    /// Strips comments *and* string-literal contents. Both are prose: a type
+    /// name inside `"WPEMetalSceneRenderer-"` (a temp-directory prefix) is text,
+    /// not a reference, and the `\b`-boundary scan cannot tell them apart.
+    ///
+    /// Cost: a genuinely *dynamic* crossing (`NSClassFromString("WPEMetal…")`)
+    /// is hidden too. No such call exists in this codebase, and the one baseline
+    /// entry is a real type reference, so the trade buys away a whole class of
+    /// false positives for a risk that is currently zero.
     private func stripComments(_ source: String) -> String {
         stripLineComments(stripBlockComments(source))
     }
 
+    /// Newlines inside a literal survive so line structure — which
+    /// `stripLineComments` splits on — is preserved.
     private func stripBlockComments(_ source: String) -> String {
         var result = ""
         result.reserveCapacity(source.count)
@@ -1746,10 +1765,10 @@ struct InfrastructureRuntimeBoundaryTests {
             let character = source[index]
             let next = source.index(after: index)
             if inString {
-                result.append(character)
                 if escaped { escaped = false }
                 else if character == "\\" { escaped = true }
-                else if character == "\"" { inString = false }
+                else if character == "\"" { inString = false; result.append(character) }
+                else if character == "\n" { result.append(character) }
                 index = next
             } else if character == "\"" {
                 inString = true
