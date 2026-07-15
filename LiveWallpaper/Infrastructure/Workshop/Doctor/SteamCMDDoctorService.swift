@@ -141,6 +141,22 @@ final class SteamCMDDoctorService {
     }
 
     private static let valveTeamIdentifier = "MXGJJ98X76"
+    private static let identityBannerPattern = #"Steam Console Client \(c\) Valve Corporation - version \d+"#
+    /// SteamCMD prints these while bootstrapping or replacing itself, and that run
+    /// never reaches the identity banner. Seeing them instead of the banner means
+    /// "come back in a moment", not "this binary is not SteamCMD".
+    private static let selfUpdatePattern =
+        #"(Checking for available updates|Downloading update|Verifying installation)"#
+
+    private static func matches(_ pattern: String, in text: String) -> Bool {
+        text.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    /// Probes worth running when `binaryIdentity` fails, because each one can
+    /// explain that failure. `cachedLogin` / `wallpaperEngineOwnership` are
+    /// excluded: they need a binary that already identifies itself.
+    private static let identityFailureExplainers: [DoctorProbeKind] =
+        [.rosetta, .codeSignature, .gatekeeperQuarantine]
     nonisolated private static let wallpaperEngineAppID: UInt32 = 431960
     /// Empirically validated public free WE community item used as the primary
     /// ownership probe (Phase 0 empirical pass, 2026-05-28).
@@ -232,6 +248,15 @@ final class SteamCMDDoctorService {
         }
         Logger.info("Bound SteamCMD binary", category: .workshop)
         await runProbe(.binaryIdentity)
+        // Binding otherwise stops here, so a SteamCMD that won't identify itself
+        // leaves one red row above six blanks — and the probes that say *why*
+        // are among the blanks. Run those, and only those: the rest need a
+        // working binary to mean anything.
+        if !isGreen(.binaryIdentity) {
+            for kind in Self.identityFailureExplainers {
+                await runProbe(kind)
+            }
+        }
     }
 
     /// Scans the conventional, non-TCC-protected SteamCMD install locations
@@ -384,7 +409,7 @@ final class SteamCMDDoctorService {
         switch kind {
         case .binaryIdentity: await runBinaryIdentityProbe()
         case .codeSignature: await runCodeSignatureProbe()
-        case .rosetta: runRosettaProbe()
+        case .rosetta: await runRosettaProbe()
         case .gatekeeperQuarantine: await runGatekeeperProbe()
         case .workingDirectory: runWorkingDirectoryProbe()
         case .cachedLogin: await runCachedLoginProbe()
@@ -405,10 +430,29 @@ final class SteamCMDDoctorService {
             let didStart = binary.startAccessingSecurityScopedResource()
             defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
 
-            let result = await runner.run(
+            var result = await runner.run(
                 binary: binary, args: ["+quit"], stdin: nil,
                 timeout: 30, workingDirectory: nil
             )
+            var retriedAfterSelfUpdate = false
+            if !result.timedOut,
+               !Self.matches(Self.identityBannerPattern, in: result.stdout),
+               Self.matches(Self.selfUpdatePattern, in: result.stdout) {
+                // That run may have replaced the binary on disk, so re-establish
+                // trust before launching whatever is there now.
+                guard await ensureTrustedBinary(binary) else {
+                    setProbe(.binaryIdentity, status: .red(
+                        message: "SteamCMD isn't a verified Valve build, so it wasn't run. Re-select the official SteamCMD.",
+                        command: nil
+                    ))
+                    return
+                }
+                retriedAfterSelfUpdate = true
+                result = await runner.run(
+                    binary: binary, args: ["+quit"], stdin: nil,
+                    timeout: 30, workingDirectory: nil
+                )
+            }
             if result.timedOut {
                 setProbe(.binaryIdentity, status: .red(
                     message: redacted("SteamCMD identity probe timed out after 30 seconds."),
@@ -416,12 +460,11 @@ final class SteamCMDDoctorService {
                 ))
                 return
             }
-            guard result.stdout.range(
-                of: #"Steam Console Client \(c\) Valve Corporation - version \d+"#,
-                options: .regularExpression
-            ) != nil else {
+            guard Self.matches(Self.identityBannerPattern, in: result.stdout) else {
                 setProbe(.binaryIdentity, status: .red(
-                    message: "SteamCMD did not print the expected Valve identity banner. Use Export diagnostics for the raw output.",
+                    message: retriedAfterSelfUpdate
+                        ? "SteamCMD is still updating itself and hasn't printed the Valve identity banner yet. Wait for the update to finish, then run this probe again."
+                        : "SteamCMD did not print the expected Valve identity banner. Use Export diagnostics for the raw output.",
                     command: redacted(command(binary: binary, args: ["+quit"]))
                 ))
                 return
@@ -467,16 +510,35 @@ final class SteamCMDDoctorService {
         }
     }
 
-    private func runRosettaProbe() {
-        let marker = URL(fileURLWithPath: "/Library/Apple/usr/share/rosetta/rosetta")
-        if fileManager.fileExists(atPath: marker.path(percentEncoded: false)) {
+    private func runRosettaProbe() async {
+        // The `/Library/Apple/usr/share/rosetta/rosetta` marker this used to stat
+        // outlives the runtime itself on macOS 27 — it is still there on machines
+        // where `/Library/Apple/usr/libexec/oah/libRosettaRuntime` is gone and no
+        // x86_64 binary can launch, so existence green-lit a dead Rosetta. Ask the
+        // kernel to actually translate instead: `/usr/bin/true` is universal, so a
+        // zero exit is proof rather than a proxy.
+        let result = await runner.run(
+            binary: URL(fileURLWithPath: "/usr/bin/arch"),
+            args: ["-x86_64", "/usr/bin/true"],
+            stdin: nil, timeout: 15, workingDirectory: nil
+        )
+        if result.exitCode == 0, !result.timedOut, !result.killed {
             setProbe(.rosetta, status: .green(detail: "Rosetta is installed."))
-        } else {
-            setProbe(.rosetta, status: .yellow(
-                message: "Rosetta is required for the SteamCMD bootstrap on Apple Silicon. Homebrew's cask ships a universal binary; the Valve tarball bootstrap is x86_64-only.",
-                command: "/usr/sbin/softwareupdate --install-rosetta --agree-to-license"
-            ))
+            return
         }
+        // Missing Rosetta only matters if this SteamCMD actually needs it, and
+        // current builds don't — Valve's steamcmd_osx.tar.gz is universal, and
+        // Homebrew's cask repackages that same tarball. `binaryIdentity` already
+        // settled the question by launching it, so defer to that rather than
+        // telling someone to install a translator they'll never use.
+        if isGreen(.binaryIdentity) {
+            setProbe(.rosetta, status: .green(detail: "Not needed — SteamCMD runs natively on Apple Silicon."))
+            return
+        }
+        setProbe(.rosetta, status: .yellow(
+            message: "Rosetta isn't available and SteamCMD didn't launch. Current SteamCMD builds are universal, so this only matters if you're running an older x86_64-only copy.",
+            command: "/usr/sbin/softwareupdate --install-rosetta --agree-to-license"
+        ))
     }
 
     private func runGatekeeperProbe() async {

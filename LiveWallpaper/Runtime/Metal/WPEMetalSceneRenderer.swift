@@ -311,8 +311,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     private let snapshotter: WPEMetalTextureSnapshotter
     private var cachedSnapshot: NSImage?
     private var pendingLivePosterCaptures: [UUID: CheckedContinuation<NSImage?, Never>] = [:]
-    private final class LivePosterCaptureBatch: @unchecked Sendable {
-        weak var renderer: WPEMetalSceneRenderer?
+    private final class LivePosterCaptureBatch: Sendable {
+        weak let renderer: WPEMetalSceneRenderer?
         let captures: [UUID: CheckedContinuation<NSImage?, Never>]
         let generation: Int
         let snapshotter: WPEMetalTextureSnapshotter

@@ -83,7 +83,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "MTL_HUD_ENABLED"
-            value = "0"
+            value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

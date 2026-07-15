@@ -379,6 +379,7 @@ struct Sidebar: View {
     let developerModeEnabled: Bool
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
+    @AppStorage(SidebarDisplayOrder.preferencesKey) private var displayOrderData = Data()
 
     var body: some View {
         List(selection: $selection) {
@@ -393,7 +394,7 @@ struct Sidebar: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 8)
                 } else {
-                    ForEach(screenManager.screens, id: \.id) { screen in
+                    ForEach(orderedScreens, id: \.id) { screen in
                         NavigationLink(value: Navigation.screen(screen.id)) {
                             ScreenRow(screen: screen)
                         }
@@ -401,6 +402,7 @@ struct Sidebar: View {
                             return handleVideoDrop(urls: urls, for: screen)
                         }
                     }
+                    .onMove(perform: moveDisplays)
                 }
             } header: {
                 SidebarSectionHeader(title: "Displays")
@@ -465,6 +467,25 @@ struct Sidebar: View {
         screenManager.screens.reduce(0) { acc, screen in
             acc + (screenManager.wallpaperSummary(for: screen).activity == .active ? 1 : 0)
         }
+    }
+
+    private var orderedScreens: [Screen] {
+        let screens = screenManager.screens
+        let order = SidebarDisplayOrder.decode(displayOrderData)
+        let orderedIDs = SidebarDisplayOrder.orderedDisplayIDs(
+            from: screens.map(SidebarDisplayOrder.Entry.init(screen:)),
+            storedOrder: order
+        )
+        let screensByID = Dictionary(uniqueKeysWithValues: screens.map { ($0.id, $0) })
+        return orderedIDs.compactMap { screensByID[$0] }
+    }
+
+    private func moveDisplays(from source: IndexSet, to destination: Int) {
+        var reorderedScreens = orderedScreens
+        reorderedScreens.move(fromOffsets: source, toOffset: destination)
+        displayOrderData = SidebarDisplayOrder.encode(
+            reorderedScreens.map(SidebarDisplayOrder.Entry.init(screen:))
+        )
     }
 
     /// Accepts the first supported video URL in the drop payload — Finder
