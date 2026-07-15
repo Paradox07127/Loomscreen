@@ -31,6 +31,16 @@ final class MonitorBoardHostView: NSView {
     /// intercepts events (same semantics as v1's `allowMouseInteraction`).
     private var allowMouseInteraction: Bool
 
+    /// Board-scoped reduce-motion (system setting + config override), re-derived
+    /// on `apply` and re-published whenever the root view is rebuilt.
+    private var reduceMotion: Bool
+
+    /// True while the performance policy has the wallpaper suspended. Published
+    /// into the board's environment so the widgets' self-driven animation loops
+    /// and the board clock stop — nothing else does that for them: they run off
+    /// CoreAnimation/TimelineView, not off the data pump.
+    private(set) var isSuspended = false
+
     /// When true the board renders name-only placeholder tiles (icon + widget
     /// name) instead of the live instruments — the inspector preview sets this so
     /// arranging the board never pumps live data. The wallpaper host leaves it false.
@@ -66,8 +76,10 @@ final class MonitorBoardHostView: NSView {
         topInsetFraction: CGFloat = 0,
         referenceWidth: CGFloat = 0
     ) {
+        let reduceMotion = Self.effectiveReduceMotion(configuration)
         self.allowMouseInteraction = configuration.mouseInteractionEnabled
         self.nameOnlyTiles = nameOnlyTiles
+        self.reduceMotion = reduceMotion
         self.dataModel = MonitorBoardDataModel()
         self.interactionModel = MonitorBoardInteractionModel(
             configuration: configuration,
@@ -76,7 +88,8 @@ final class MonitorBoardHostView: NSView {
         let container = MonitorBoardRootContainer(
             model: interactionModel,
             data: dataModel,
-            reduceMotion: Self.effectiveReduceMotion(configuration),
+            reduceMotion: reduceMotion,
+            suspended: false,
             nameOnlyTiles: nameOnlyTiles
         )
         self.hostingView = NSHostingView(rootView: container)
@@ -146,10 +159,28 @@ final class MonitorBoardHostView: NSView {
         if let topInsetFraction { interactionModel.topInsetFraction = topInsetFraction }
         interactionModel.apply(configuration: configuration)
         allowMouseInteraction = configuration.mouseInteractionEnabled
+        reduceMotion = Self.effectiveReduceMotion(configuration)
+        rebuildRootView()
+    }
+
+    // MARK: - Suspend
+
+    /// Stop/restart the board's self-driven work (the 1 Hz clock, the widgets'
+    /// repeating dot animations) when the performance policy suspends the
+    /// wallpaper. Independent of reduce-motion: that is the user's accessibility
+    /// preference, this is "nobody can see this — stop spending".
+    func setSuspended(_ suspended: Bool) {
+        guard isSuspended != suspended else { return }
+        isSuspended = suspended
+        rebuildRootView()
+    }
+
+    private func rebuildRootView() {
         hostingView.rootView = MonitorBoardRootContainer(
             model: interactionModel,
             data: dataModel,
-            reduceMotion: Self.effectiveReduceMotion(configuration),
+            reduceMotion: reduceMotion,
+            suspended: isSuspended,
             nameOnlyTiles: nameOnlyTiles
         )
     }
@@ -233,17 +264,20 @@ final class MonitorBoardHostView: NSView {
     }
 }
 
-/// Wraps the board with the reduce-motion environment. A tiny container so the
-/// host can swap the whole root view (config change) while keeping the models.
+/// Wraps the board with the reduce-motion + suspend environment. A tiny container
+/// so the host can swap the whole root view (config change, suspend) while
+/// keeping the models — and with them the widgets' `@State`.
 struct MonitorBoardRootContainer: View {
     @ObservedObject var model: MonitorBoardInteractionModel
     @ObservedObject var data: MonitorBoardDataModel
     let reduceMotion: Bool
+    var suspended: Bool = false
     var nameOnlyTiles: Bool = false
 
     var body: some View {
         MonitorBoardRootView(model: model, data: data, nameOnlyTiles: nameOnlyTiles)
             .environment(\.monitorReduceMotion, reduceMotion)
+            .environment(\.monitorSuspended, suspended)
     }
 }
 
@@ -261,5 +295,24 @@ extension EnvironmentValues {
     var monitorReduceMotion: Bool {
         get { self[MonitorReduceMotionKey.self] }
         set { self[MonitorReduceMotionKey.self] = newValue }
+    }
+}
+
+// MARK: - Suspend environment
+
+/// True while the performance policy has the wallpaper suspended (occluded,
+/// full-screen game, battery saver). Deliberately NOT folded into
+/// `monitorReduceMotion`: that one is the user's accessibility preference and is
+/// the wrong lever for an energy decision — conflating them is what made v2's
+/// `suspend()` a no-op. Read by anything that drives itself (the board clock, the
+/// breathing dot) rather than by the data pump.
+private struct MonitorSuspendedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var monitorSuspended: Bool {
+        get { self[MonitorSuspendedKey.self] }
+        set { self[MonitorSuspendedKey.self] = newValue }
     }
 }

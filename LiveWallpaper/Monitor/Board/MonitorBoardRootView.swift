@@ -10,6 +10,28 @@ import LiveWallpaperCore
 // add-widget catalog. Visuals are restrained plain SwiftUI shapes; a later wave
 // restyles with the shared component library.
 
+// MARK: - Board clock
+
+/// The board's single clock: 1 Hz normally, STOPPED while the wallpaper is
+/// suspended. `.periodic` has no off switch — it keeps scheduling vsync work for
+/// a board nobody is looking at — so suspending ends the schedule after one
+/// entry instead. That one entry still fires, giving the final frame an accurate
+/// `now` rather than a frozen-at-suspend clock; TimelineView then requests
+/// nothing further until `suspended` flips back and a fresh schedule is built.
+struct MonitorBoardClock: TimelineSchedule {
+    let suspended: Bool
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        let suspended = self.suspended
+        var next: Date? = startDate
+        return AnyIterator {
+            guard let current = next else { return nil }
+            next = suspended ? nil : current.addingTimeInterval(1)
+            return current
+        }
+    }
+}
+
 struct MonitorBoardRootView: View {
     @ObservedObject var model: MonitorBoardInteractionModel
     @ObservedObject var data: MonitorBoardDataModel
@@ -17,6 +39,7 @@ struct MonitorBoardRootView: View {
     /// land (the store is @Published inside the data model).
     @ObservedObject private var history: MonitorHistoryStore
     @Environment(\.monitorReduceMotion) private var reduceMotion
+    @Environment(\.monitorSuspended) private var suspended
 
     /// The Add Widget button's board-space frame, reported by the toolbar so the
     /// catalog anchors beneath it. `.zero` until the toolbar first lays out.
@@ -39,8 +62,8 @@ struct MonitorBoardRootView: View {
         // widgets read it via `context.now`); there is no per-tile or per-widget
         // Timer, so a full board refreshes on a single tick instead of a dozen
         // independent ones. The tick only changes `now` — view identity is stable,
-        // so charts don't re-animate.
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+        // so charts don't re-animate. While suspended the clock stops entirely.
+        TimelineView(MonitorBoardClock(suspended: suspended)) { timeline in
             boardContent(now: timeline.date)
         }
         .background(Color.clear)

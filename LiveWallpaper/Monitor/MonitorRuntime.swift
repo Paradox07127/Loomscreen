@@ -37,6 +37,26 @@ protocol MonitorUsageLedgerProviding: Sendable {
 extension ClaudeAgentSource: MonitorUsageLedgerProviding {}
 extension CodexAgentSource: MonitorUsageLedgerProviding {}
 
+/// The security-scoped grant plumbing the runtime drives, behind a seam so the
+/// suspend tests can prove a resume re-opens nothing — the property this type
+/// exists to provide is invisible from the outside otherwise.
+struct MonitorGrantAccess: Sendable {
+    var resolveRoots: @Sendable () async -> (claude: URL?, codex: URL?)
+    var release: @Sendable () async -> Void
+
+    static let live = MonitorGrantAccess(
+        resolveRoots: {
+            await MainActor.run {
+                (MonitorSourceAuthorization.shared.resolveClaudeRoot(),
+                 MonitorSourceAuthorization.shared.resolveCodexRoot())
+            }
+        },
+        release: {
+            await MainActor.run { MonitorSourceAuthorization.shared.release() }
+        }
+    )
+}
+
 /// App-wide owner of the monitor data pipeline so N displays showing the Monitor
 /// wallpaper share one hub + one set of sources.
 ///
@@ -47,17 +67,30 @@ extension CodexAgentSource: MonitorUsageLedgerProviding {}
 /// orphaned pipeline. Same-ID option changes go through `updateOptions` (never
 /// `acquire`) so a refresh that races the lease's own teardown can't resurrect a
 /// released lease. The pipeline always runs with the UNION of every live lease's
-/// options (so one system-only display can't strip agent modules from another),
-/// and rebuilds are chained through a single task so overlapping
+/// UNPAUSED options (so one system-only display can't strip agent modules from
+/// another), and rebuilds are chained through a single task so overlapping
 /// acquire/release/refresh calls never interleave mid-start.
+///
+/// `setPaused` is the energy seam: a wallpaper the performance policy suspended
+/// pauses its lease rather than releasing it, so the samplers it alone demanded
+/// are torn down while the lease slot survives for a cheap resume.
 ///
 /// Agent/usage sources live in separate adapter files wired through
 /// `extraSourceFactories` — registered once at startup — letting this coordinator
 /// compile and run system-only without them. Security-scoped agent roots are
-/// resolved HERE (never by views) so sandbox-scope lifetime exactly matches
-/// pipeline lifetime.
+/// resolved HERE (never by views) so sandbox-scope lifetime is owned by the
+/// pipeline's owner rather than by any one display. Scope lifetime tracks LIVE
+/// LEASES, not the pipeline: every lease pausing tears the samplers down but
+/// keeps the resolved roots open, which is what makes the resume cheap. The
+/// scopes close when no live lease wants AI data any more.
 actor MonitorRuntime {
     static let shared = MonitorRuntime()
+
+    private let grants: MonitorGrantAccess
+
+    init(grants: MonitorGrantAccess = .live) {
+        self.grants = grants
+    }
 
     typealias SourceFactory = @Sendable (MonitorRuntimeOptions) -> [any MonitorDataSource]
 
@@ -69,21 +102,88 @@ actor MonitorRuntime {
 
     nonisolated let broker = MonitorSnapshotBroker()
 
+    /// One view's claim on the pipeline. A paused lease keeps its slot but
+    /// contributes nothing to the merged options, so whatever it alone demanded is
+    /// torn down; every lease paused ⇒ no pipeline at all.
+    private struct Lease {
+        var options: MonitorRuntimeOptions
+        var isPaused = false
+    }
+
+    /// What is known about a lease ID with no live lease. Views issue acquire,
+    /// setPaused and release as separate fire-and-forget tasks, so calls for one
+    /// ID land in any order and this is the only state that bridges them.
+    ///
+    /// `pausedBeforeAcquire` and `retired` both describe "a pause arrived with no
+    /// lease to apply it to" and MUST stay distinguishable: the first belongs to
+    /// an acquire still in flight, the second to a lease that is already gone. A
+    /// `retired` ID recorded as `pausedBeforeAcquire` would hand the stale pause
+    /// to whatever acquires that ID next — and the HUD/overlay controllers reuse
+    /// one process-constant ID across every show/hide.
+    private enum DetachedLease {
+        /// A release overtook its own acquire: cancel that acquire when it lands.
+        case releasedBeforeAcquire
+        /// A pause overtook its own acquire: apply it to that acquire.
+        case pausedBeforeAcquire(Bool)
+        /// The lease lived and was released. Terminal until the ID is acquired
+        /// again, which starts a fresh lease that inherits nothing.
+        case retired
+    }
+
     private var hub: MonitorDataHub?
     private var sources: [any MonitorDataSource] = []
     private var usageTask: Task<Void, Never>?
-    private var leases: [UUID: MonitorRuntimeOptions] = [:]
-    /// Releases that arrived before their matching acquire.
-    private var orphanedReleases: Set<UUID> = []
+    private var leases: [UUID: Lease] = [:]
+    /// Out-of-order call state for IDs with no live lease. One small entry per
+    /// lease ID that has been released and not re-acquired.
+    private var detached: [UUID: DetachedLease] = [:]
     /// Union options the current pipeline was requested with (pre-resolution).
     private var activeOptions: MonitorRuntimeOptions?
+    /// Roots resolved under the current grants, held open by live leases. Cached
+    /// so a resume (or any rebuild that still wants AI data) reuses the open
+    /// security scopes instead of re-resolving the bookmarks. Cleared exactly
+    /// when the grants are released.
+    private var resolvedRoots: (claude: URL?, codex: URL?)?
     private var rebuildTask: Task<Void, Never>?
 
     var debugActiveLeaseCount: Int { leases.count }
+    var debugPausedLeaseCount: Int { leases.values.filter(\.isPaused).count }
+    /// Options the live pipeline is actually running with. `nil` ⇒ no pipeline
+    /// exists (no lease, or every lease paused) ⇒ nothing is being sampled.
+    var debugActiveOptions: MonitorRuntimeOptions? { activeOptions }
+    var debugActiveSourceCount: Int { sources.count }
 
     func acquire(leaseID: UUID, options: MonitorRuntimeOptions) async {
-        if orphanedReleases.remove(leaseID) != nil { return }
-        leases[leaseID] = options
+        switch detached.removeValue(forKey: leaseID) {
+        case .releasedBeforeAcquire:
+            return
+        case .pausedBeforeAcquire(let paused):
+            leases[leaseID] = Lease(options: options, isPaused: paused)
+        case .retired, nil:
+            leases[leaseID] = Lease(options: options, isPaused: leases[leaseID]?.isPaused ?? false)
+        }
+        await rebuild()
+    }
+
+    /// Pause/resume one lease's contribution without releasing it. A paused lease
+    /// drops out of the merged options, so the sources only it demanded are
+    /// stopped — this is what makes a suspended wallpaper actually stop sampling
+    /// rather than just stop drawing.
+    func setPaused(leaseID: UUID, paused: Bool) async {
+        guard let lease = leases[leaseID] else {
+            switch detached[leaseID] {
+            case nil, .pausedBeforeAcquire:
+                // Racing its own acquire: remember it so the late acquire applies it.
+                detached[leaseID] = .pausedBeforeAcquire(paused)
+            case .releasedBeforeAcquire, .retired:
+                // The lease this addressed is gone; it dies with that lease
+                // rather than waiting for the ID's next one.
+                break
+            }
+            return
+        }
+        guard lease.isPaused != paused else { return }
+        leases[leaseID]?.isPaused = paused
         await rebuild()
     }
 
@@ -95,15 +195,25 @@ actor MonitorRuntime {
     /// refresh (the common case) mutates in place and rebuilds as before.
     func updateOptions(leaseID: UUID, options: MonitorRuntimeOptions) async {
         guard leases[leaseID] != nil else { return }
-        leases[leaseID] = options
+        // Mutates only the options: a live-config refresh must not silently
+        // un-pause a suspended wallpaper's lease.
+        leases[leaseID]?.options = options
         await rebuild()
     }
 
     func release(leaseID: UUID) async {
         guard leases.removeValue(forKey: leaseID) != nil else {
-            orphanedReleases.insert(leaseID)
+            switch detached[leaseID] {
+            case nil, .pausedBeforeAcquire:
+                detached[leaseID] = .releasedBeforeAcquire
+            case .releasedBeforeAcquire, .retired:
+                // Already dead — a second release must not re-arm the cancel and
+                // shoot down a legitimate future acquire on a reused ID.
+                break
+            }
             return
         }
+        detached[leaseID] = .retired
         await rebuild()
     }
 
@@ -174,10 +284,18 @@ actor MonitorRuntime {
     private func performRebuild(force: Bool) async {
         // Recomputed at execution time so the last rebuild in a chained burst
         // settles on the final lease state and earlier ones collapse to no-ops.
-        let target = Self.merged(Array(leases.values))
-        guard force || target != activeOptions else { return }
-
-        await stopPipeline()
+        // Paused leases are excluded: with every lease paused this yields nil and
+        // the pipeline stops outright.
+        let target = Self.merged(leases.values.filter { !$0.isPaused }.map(\.options))
+        let rebuilding = force || target != activeOptions
+        if rebuilding { await stopPipeline() }
+        // Grants answer to live leases (paused ones included), not to the
+        // pipeline. Reconciled even when the pipeline itself is unchanged: the
+        // last lease can go away while every lease was already paused, and
+        // `target` stays nil across that, so the no-op guard would skip it.
+        let stillWanted = leases.values.contains { $0.options.agents || $0.options.usage }
+        if force || !stillWanted { await releaseGrants() }
+        guard rebuilding else { return }
         broker.clear()
         activeOptions = target
         guard let target else { return }
@@ -188,12 +306,18 @@ actor MonitorRuntime {
 
         var resolved = target
         if target.agents || target.usage {
-            let roots = await MainActor.run {
-                (MonitorSourceAuthorization.shared.resolveClaudeRoot(),
-                 MonitorSourceAuthorization.shared.resolveCodexRoot())
+            let roots: (claude: URL?, codex: URL?)
+            if let cached = resolvedRoots {
+                roots = cached
+            } else {
+                roots = await grants.resolveRoots()
+                // Only a resolution that opened a scope is worth holding: an
+                // unresolved grant keeps being retried, so a grant the user makes
+                // later is picked up without waiting for `refreshSources`.
+                if roots.claude != nil || roots.codex != nil { resolvedRoots = roots }
             }
-            resolved.claudeRoot = resolved.claudeRoot ?? roots.0
-            resolved.codexRoot = resolved.codexRoot ?? roots.1
+            resolved.claudeRoot = resolved.claudeRoot ?? roots.claude
+            resolved.codexRoot = resolved.codexRoot ?? roots.codex
             // Why-no-data: when an AI module is wanted but a root can't resolve
             // (no grant / stale bookmark), say so — both in the log and as a
             // synthesized health record the widgets' empty states can read.
@@ -346,8 +470,12 @@ actor MonitorRuntime {
         }
         sources.removeAll()
         hub = nil
-        // Scope lifetime matches pipeline lifetime; a rebuild that still wants
-        // agents re-resolves (and re-opens) the grants right after this.
-        await MainActor.run { MonitorSourceAuthorization.shared.release() }
+    }
+
+    /// Closes the security scopes and drops the cached roots together — the cache
+    /// is only valid while the scopes it was resolved under are still open.
+    private func releaseGrants() async {
+        resolvedRoots = nil
+        await grants.release()
     }
 }

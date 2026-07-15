@@ -13,8 +13,9 @@ import os
 ///   • Lease the shared data pipeline (unique UUID acquire → single release),
 ///     now advertising the board's active widget kinds so the runtime only
 ///     samples what is on screen.
-///   • Pump the newest snapshot at the configured cadence, pausing while the
-///     performance policy suspends the wallpaper (occlusion / battery / etc.).
+///   • Pump the newest snapshot at the configured cadence. While the performance
+///     policy suspends the wallpaper (occlusion / battery / etc.) the pump, the
+///     runtime lease, and the board's own clocks all stop — see `suspend()`.
 ///   • Click-through unless `mouseInteractionEnabled` (mirrored by the window's
 ///     `ignoresMouseEvents`, set alongside in `makeMonitorSession`).
 ///   • Hard-gate the AI-agent modules: when the injected feature catalog does
@@ -58,13 +59,18 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     /// Identifies this view's runtime lease; the runtime tolerates the release
     /// task overtaking the acquire task as long as both carry this ID.
     private let runtimeLeaseID = UUID()
+    /// The shared pipeline in production; injectable so the suspend/energy tests
+    /// can watch a lease without racing the app-wide singleton.
+    private let runtime: MonitorRuntime
 
     init(
         frame frameRect: NSRect,
         configuration: MonitorBoardConfiguration,
-        agentFleetEnabled: Bool
+        agentFleetEnabled: Bool,
+        runtime: MonitorRuntime = .shared
     ) {
         self.agentFleetEnabled = agentFleetEnabled
+        self.runtime = runtime
         let gated = Self.gatedConfiguration(configuration, agentFleetEnabled: agentFleetEnabled)
         self.configuration = gated
         self.allowMouseInteraction = gated.mouseInteractionEnabled
@@ -108,7 +114,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         owesRuntimeRelease = true
         let leaseID = runtimeLeaseID
         let options = makeRuntimeOptions()
-        Task { await MonitorRuntime.shared.acquire(leaseID: leaseID, options: options) }
+        let runtime = self.runtime
+        Task { await runtime.acquire(leaseID: leaseID, options: options) }
 
         startPump()
         // Paint the current snapshot (if any) immediately.
@@ -125,7 +132,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         pumpTask?.cancel()
         if owesRuntimeRelease {
             let leaseID = runtimeLeaseID
-            Task { await MonitorRuntime.shared.release(leaseID: leaseID) }
+            let runtime = self.runtime
+            Task { await runtime.release(leaseID: leaseID) }
         }
     }
 
@@ -161,7 +169,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         guard owesRuntimeRelease, !isCleaningUp else { return }
         let leaseID = runtimeLeaseID
         let options = makeRuntimeOptions()
-        Task { await MonitorRuntime.shared.updateOptions(leaseID: leaseID, options: options) }
+        let runtime = self.runtime
+        Task { await runtime.updateOptions(leaseID: leaseID, options: options) }
     }
 
     // MARK: - Live configuration
@@ -197,6 +206,10 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     var isEditing: Bool { boardHost.isEditing }
+
+    /// Whether the suspend signal reached the board (its clock + dot animations).
+    /// Mirrors `isEditing`'s pass-through; the energy regression test asserts on it.
+    var isBoardSuspended: Bool { boardHost.isSuspended }
 
     /// Force mouse interaction on while editing (the persisted wallpaper is
     /// usually click-through, which would leave the edit chrome unclickable), and
@@ -243,7 +256,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     /// (used right after init / resume so the board paints immediately).
     private func pushLatestSnapshot(force: Bool) {
         guard !isCleaningUp else { return }
-        let broker = MonitorRuntime.shared.broker
+        let broker = runtime.broker
         let after = force ? 0 : lastGeneration
         guard let update = broker.latest(after: after) else { return }
         lastGeneration = update.generation
@@ -267,22 +280,43 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         }
     }
 
+    /// Stop paying for a wallpaper nobody can see. Stopping the pump only stops
+    /// the CONSUMER — both producers keep running unless told otherwise, so all
+    /// three have to be cut:
+    ///   • the pump (no snapshot delivery),
+    ///   • the runtime lease (paused, not released: the per-PID walk and the SMC
+    ///     reads stop, but the lease's resolved grants survive for a cheap resume),
+    ///   • the board (its 1 Hz clock and the widgets' repeating dot animations run
+    ///     off their own CoreAnimation/TimelineView loops, which no absence of data
+    ///     stops — only `monitorSuspended` does).
     private func suspend() {
         guard !isSuspended else { return }
         isSuspended = true
-        // Stopping the pump halts native snapshot delivery; the board's own
-        // CoreAnimation loops are stilled via reduce-motion inside the widgets,
-        // and no vsync work is scheduled while no new snapshot arrives.
         stopPump()
+        setRuntimePaused(true)
+        boardHost.setSuspended(true)
     }
 
     private func resume() {
         guard isSuspended else { return }
         isSuspended = false
+        setRuntimePaused(false)
+        boardHost.setSuspended(false)
         // Reflect the current state the instant playback resumes, then restart
-        // the cadence.
+        // the cadence. The broker was cleared while paused, so this repaints only
+        // once a fresh sample lands; the board keeps its last values until then.
         pushLatestSnapshot(force: true)
         startPump()
+    }
+
+    /// Pause (never release) the lease on suspend. Release would drop the
+    /// security-scoped grants the runtime resolved, making every resume pay to
+    /// re-open them.
+    private func setRuntimePaused(_ paused: Bool) {
+        guard owesRuntimeRelease, !isCleaningUp else { return }
+        let leaseID = runtimeLeaseID
+        let runtime = self.runtime
+        Task { await runtime.setPaused(leaseID: leaseID, paused: paused) }
     }
 
     // MARK: - Hit testing
@@ -318,7 +352,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         if owesRuntimeRelease {
             owesRuntimeRelease = false
             let leaseID = runtimeLeaseID
-            Task { await MonitorRuntime.shared.release(leaseID: leaseID) }
+            let runtime = self.runtime
+            Task { await runtime.release(leaseID: leaseID) }
         }
     }
 

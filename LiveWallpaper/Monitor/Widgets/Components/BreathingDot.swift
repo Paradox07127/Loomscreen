@@ -2,10 +2,14 @@ import SwiftUI
 
 /// A small status dot with a gentle opacity/scale "breathe" for running states.
 /// Ported from the mock's one animation: `breathe 3s ease-in-out infinite`
-/// (opacity .5→1, scale .86→1). Fully respects Reduce Motion — static (at rest
-/// opacity/scale) when reduced, exactly like `MonitorHUDView`'s dot. This is the
-/// board's only animated primitive; it uses a self-contained repeating animation,
-/// not a timer or data source.
+/// (opacity .5→1, scale .86→1). Respects Reduce Motion — static (at rest
+/// opacity/scale) when reduced, exactly like `MonitorHUDView`'s dot.
+///
+/// This is the board's only `repeatForever` primitive, and because it drives
+/// itself rather than following the data, stopping the data pump does NOT stop it
+/// — it is the board's one animation that keeps a display awake on its own. So it
+/// also honours `monitorSuspended`: while the wallpaper is suspended the dot
+/// freezes into the same still state Reduce Motion gives it.
 struct BreathingDot: View {
     var color: Color = MonitorDesign.signalSage
     var size: CGFloat = 7
@@ -15,6 +19,7 @@ struct BreathingDot: View {
 
     @State private var phase = false
     @Environment(\.monitorReduceMotion) private var reduceMotion
+    @Environment(\.monitorSuspended) private var suspended
 
     init(color: Color = MonitorDesign.signalSage, size: CGFloat = 7, animated: Bool = true) {
         self.color = color
@@ -22,7 +27,17 @@ struct BreathingDot: View {
         self.animated = animated
     }
 
-    private var breathing: Bool { animated && !reduceMotion }
+    /// Every condition that must hold for the dot to run its repeating animation.
+    /// Any one of them is enough to still it — in particular `suspended`, which no
+    /// caller passes: the busiest call site is `animated: pct > 60`, i.e. the dot
+    /// breathes precisely when the machine is already hot.
+    static func shouldBreathe(animated: Bool, reduceMotion: Bool, suspended: Bool) -> Bool {
+        animated && !reduceMotion && !suspended
+    }
+
+    private var breathing: Bool {
+        Self.shouldBreathe(animated: animated, reduceMotion: reduceMotion, suspended: suspended)
+    }
 
     var body: some View {
         Circle()
@@ -37,6 +52,9 @@ struct BreathingDot: View {
             .animation(breathing ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true) : nil,
                        value: phase)
             .onAppear { if breathing { phase = true } }
+            // Suspend/resume flips `breathing` on a live dot, and `onAppear` won't
+            // fire again to restart the repeat — so drive the phase from it.
+            .onChange(of: breathing) { _, isBreathing in phase = isBreathing }
     }
 }
 
