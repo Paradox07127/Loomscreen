@@ -72,6 +72,35 @@ public enum WallpaperContent: Equatable, Sendable {
         guard case .monitor(let config) = self else { return nil }
         return config
     }
+
+    /// Whether this content may read its assets in place from a source
+    /// `scene.pkg`, making that archive a live runtime dependency rather than a
+    /// redundant copy of an extracted cache. Answer `true` and a stale archive
+    /// survives; answer `false` wrongly and reclaiming it breaks the wallpaper.
+    ///
+    /// `.html(.folder)` is `true` for every folder source: a packaged web import
+    /// bookmarks the *download folder* and the scheme handler serves entries out
+    /// of its `scene.pkg`, and nothing in the persisted content records whether
+    /// the index resolves loose, from the package, or from a legacy cache
+    /// mirror. The over-report costs one unreclaimed archive; the under-report
+    /// costs the user their wallpaper.
+    ///
+    /// Note this says nothing about *which* workshop item the package belongs
+    /// to — only `.scene` carries its own id. Callers pair it with the origin.
+    public var mayReadFromSourcePackage: Bool {
+        switch self {
+        case .video(_, let packageEntryName):
+            return packageEntryName != nil
+        case .html(let source, _):
+            if case .folder = source { return true }
+            return false
+        case .scene(let descriptor):
+            if case .packageSource = descriptor.assetStorage { return true }
+            return false
+        case .metalShader, .monitor:
+            return false
+        }
+    }
 }
 
 // MARK: - Codable

@@ -37,24 +37,42 @@ enum WPESceneReachability {
         return ids.filter { !$0.isEmpty }
     }
 
-    /// Ids whose live **descriptor** reads in place from a packed `scene.pkg` —
-    /// their source archive is a runtime dependency and must never be reclaimed.
-    /// Recent-history-only items aren't covered (history stores `WPEOrigin`, not
-    /// the descriptor's storage); those rely on import-time `purgeStaleCache`
-    /// removing the legacy cache so the id never reaches the reclaimer's
-    /// completed-cache set. A residual failed-purge edge is a tracked follow-up
-    /// (persist storage in history).
+    /// Ids whose live **content** reads in place from a source `scene.pkg` —
+    /// that archive is a runtime dependency and must never be reclaimed. Covers
+    /// every packaged type (scene, video, web), not just `.scene`: a packaged
+    /// video's content *is* a bookmark to the `.pkg`.
+    ///
+    /// Recent-history-only ids are deliberately absent. The reclaimer only ever
+    /// considers ids that still have a completed extraction cache, and a history
+    /// entry is re-resolved through `WPECachedContentResolver` on apply — which
+    /// falls back to that cache when the source `.pkg` is gone. An applied or
+    /// bookmarked item cannot: its stored content already points at the `.pkg`,
+    /// and nothing re-derives it.
     static func packageBackedWorkshopIDs() -> Set<String> {
+        packageBackedWorkshopIDs(
+            configurations: SettingsManager.shared.loadConfigurations(),
+            bookmarks: BookmarkStore.shared.bookmarks
+        )
+    }
+
+    static func packageBackedWorkshopIDs(
+        configurations: [ScreenConfiguration],
+        bookmarks: [WallpaperBookmark]
+    ) -> Set<String> {
         var ids: Set<String> = []
-        func add(_ descriptor: SceneDescriptor?) {
-            guard let descriptor, case .packageSource = descriptor.assetStorage else { return }
-            ids.insert(descriptor.workshopID)
+        func add(_ content: WallpaperContent, _ origin: WPEOrigin?) {
+            guard content.mayReadFromSourcePackage else { return }
+            // Only a scene descriptor carries its own id; a packaged video/web
+            // knows it solely through the paired origin.
+            guard let id = content.sceneDescriptor?.workshopID ?? origin?.workshopID,
+                  !id.isEmpty else { return }
+            ids.insert(id)
         }
-        for config in SettingsManager.shared.loadConfigurations() {
-            add(config.activeWallpaper.sceneDescriptor)
+        for config in configurations {
+            add(config.activeWallpaper, config.wpeOrigin)
         }
-        for bookmark in BookmarkStore.shared.bookmarks {
-            add(bookmark.content.sceneDescriptor)
+        for bookmark in bookmarks {
+            add(bookmark.content, bookmark.wpeOrigin)
         }
         return ids
     }
