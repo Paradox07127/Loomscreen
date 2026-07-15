@@ -210,8 +210,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.entryFile == "video.mp4")
         let extractedDir = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: extractedDir.path))
-        // Cache idempotency / fingerprint-invalidation stay covered directly by
-        // WallpaperEngineCacheTests (the extraction fallback still relies on them).
     }
 
     @Test("Scene import sets origin without cache path")

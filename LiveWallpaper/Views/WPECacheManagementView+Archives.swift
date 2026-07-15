@@ -2,8 +2,10 @@
 import SwiftUI
 
 extension WPECacheManagementView {
-    /// Reclaiming the redundant `.pkg` moves it to the Trash (recoverable) without
-    /// touching any wallpaper — the runtime renders from the unpacked cache copy.
+    /// Only legacy imports reach this section — ones an older build unpacked into
+    /// `wpe-cache` and whose runtime renders from that copy, leaving the source
+    /// `.pkg` redundant. Reclaiming moves it to the Trash (recoverable); an
+    /// import that reads its archive in place is filtered out upstream.
     /// Pro/direct-distribution only (Lite has no SteamCMD).
     @ViewBuilder
     var reclaimArchivesSection: some View {
@@ -14,7 +16,7 @@ extension WPECacheManagementView {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(byteFormatter.string(fromByteCount: reclaimableArchiveBytes))
                             .font(DesignTokens.Typography.pageTitle)
-                        Text("Source download archives already unpacked into your cache.")
+                        Text("Source archives from older imports that were unpacked into your cache.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

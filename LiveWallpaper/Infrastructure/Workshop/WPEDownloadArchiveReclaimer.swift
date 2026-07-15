@@ -1,10 +1,13 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import Foundation
 
-/// Reclaims disk by trashing the redundant source `scene.pkg` archives SteamCMD
-/// left in the container Steam download tree once their payload was unpacked
-/// into `wpe-cache`. The runtime reads the cache copy, so the source archive is
-/// dead weight after import.
+/// Reclaims disk by trashing source `scene.pkg` archives SteamCMD left in the
+/// container Steam download tree. Only *legacy* items qualify: ones an older
+/// build unpacked into `wpe-cache`, whose runtime reads that extracted copy, so
+/// the archive is dead weight. Since extraction was retired an import reads its
+/// `.pkg` in place and purges any cache, so it never enters `cachedIDs` — and
+/// `WPESceneReachability.packageBackedWorkshopIDs` subtracts anything whose live
+/// content still reads from its archive.
 ///
 /// Safe because SteamCMD tracks completion via its `appworkshop_431960.acf`
 /// manifest, not a content scan: removing the `.pkg` while leaving the item

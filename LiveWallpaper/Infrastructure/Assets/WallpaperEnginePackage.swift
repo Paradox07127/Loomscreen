@@ -234,6 +234,11 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return Self(magic: magic, entries: entries, dataStart: dataStart, nameIndex: nameIndex)
     }
 
+    /// Atomic extraction: writes into `<root>.inflight`, then swaps via
+    /// `<root>.replaced`, so a partially extracted directory is never observed
+    /// at `rootURL`. No production path extracts any more (imports read in
+    /// place); the only caller is `OracleCorpusCaptureTests`, which stages a
+    /// package to a scratch dir.
     func extractAll(streamingFrom handle: FileHandle, to rootURL: URL) throws {
         let fileManager = FileManager.default
         let parentURL = rootURL.deletingLastPathComponent()
@@ -384,63 +389,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
         headerBytes = nextHeaderBytes
         return chunk
-    }
-
-    /// Atomic extraction: writes into `<root>.inflight` first, then swaps via `<root>.replaced` so a partially extracted directory is never observed at `rootURL`.
-    func extractAll(from data: Data, to rootURL: URL) throws {
-        let fileManager = FileManager.default
-        let parentURL = rootURL.deletingLastPathComponent()
-        let rootName = rootURL.lastPathComponent
-        let inflightURL = parentURL.appendingPathComponent("\(rootName).inflight", isDirectory: true)
-        let backupURL = parentURL.appendingPathComponent("\(rootName).replaced", isDirectory: true)
-
-        try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
-
-        if !fileManager.fileExists(atPath: rootURL.path),
-           fileManager.fileExists(atPath: backupURL.path) {
-            try fileManager.moveItem(at: backupURL, to: rootURL)
-        }
-
-        try? fileManager.removeItem(at: inflightURL)
-        try? fileManager.removeItem(at: backupURL)
-        try fileManager.createDirectory(at: inflightURL, withIntermediateDirectories: true)
-
-        let inflightPath = inflightURL.standardizedFileURL.path
-        var movedExistingRoot = false
-
-        do {
-            for entry in entries {
-                let range = try dataRange(for: entry, in: data)
-                let targetURL = inflightURL.appendingPathComponent(Self.filesystemSafeEntryName(entry.name))
-                let standardizedTarget = targetURL.standardizedFileURL
-                guard standardizedTarget.path.hasPrefix(inflightPath + "/") else {
-                    throw WPEPackageError.pathTraversal(name: entry.name)
-                }
-
-                try fileManager.createDirectory(
-                    at: standardizedTarget.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try Data(data[range]).write(to: standardizedTarget, options: .atomic)
-            }
-
-            if fileManager.fileExists(atPath: rootURL.path) {
-                try fileManager.moveItem(at: rootURL, to: backupURL)
-                movedExistingRoot = true
-            }
-            try fileManager.moveItem(at: inflightURL, to: rootURL)
-            if movedExistingRoot {
-                try? fileManager.removeItem(at: backupURL)
-            }
-        } catch {
-            try? fileManager.removeItem(at: inflightURL)
-            if movedExistingRoot,
-               !fileManager.fileExists(atPath: rootURL.path),
-               fileManager.fileExists(atPath: backupURL.path) {
-                try? fileManager.moveItem(at: backupURL, to: rootURL)
-            }
-            throw error
-        }
     }
 
     func readEntry(_ entry: Entry, from handle: FileHandle) throws -> Data {

@@ -2,125 +2,56 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-@Suite("WallpaperEngineCache idempotency")
+/// Covers the cache's surviving read/enumerate/reclaim duties. Extraction is
+/// retired, so every fixture writes a legacy cache directory the way an old
+/// install left it on disk — payload plus the `manifest.json` no code writes
+/// any more but `readManifest` must still parse.
+@Suite("WallpaperEngineCache enumeration and reclaim")
 struct WallpaperEngineCacheTests {
-    @Test("Cache hit when manifest fingerprint matches and payload present")
-    func cacheHitWithMatchingManifest() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "111")
+    @Test("A legacy manifest still marks a cache complete")
+    func legacyManifestMarksCacheCompleted() async throws {
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
+        try env.seed(workshopID: "with-manifest")
+        try env.seed(workshopID: "no-manifest", manifest: false)
 
-        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        let sentinel = firstURL.appendingPathComponent("hit-marker.txt")
-        try Data("hit".utf8).write(to: sentinel)
-
-        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-
-        #expect(secondURL == firstURL)
-        #expect(FileManager.default.fileExists(atPath: sentinel.path))
-    }
-
-    @Test("Cache miss when source pkg fingerprint changes")
-    func cacheMissOnFingerprintChange() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "222")
-        defer { env.cleanup() }
-
-        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        let originalEntry = firstURL.appendingPathComponent("payload.bin")
-        #expect(try Data(contentsOf: originalEntry) == Data([0x01, 0x02]))
-
-        let secondPkgURL = env.pkgURL.deletingLastPathComponent().appendingPathComponent("scene-v2.pkg")
-        let secondPkg = SyntheticPackage.makeData(entries: [
-            .init(name: "fresh-payload.bin", bytes: Array(repeating: 0xAA, count: 64))
-        ])
-        try secondPkg.write(to: secondPkgURL)
-
-        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: secondPkgURL)
-        #expect(secondURL == firstURL, "cache directory key is workshopID, not pkg path")
-
-        let freshEntry = secondURL.appendingPathComponent("fresh-payload.bin")
-        #expect(try Data(contentsOf: freshEntry).count == 64)
-        #expect(!FileManager.default.fileExists(atPath: originalEntry.path),
-                "atomic re-extract must wipe stale payloads")
-    }
-
-    @Test("Cache miss when source pkg bytes change but size and mtime stay the same")
-    func cacheMissOnSameSizeSameMTimeContentChange() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "same-fingerprint", payload: [0x01, 0x02])
-        defer { env.cleanup() }
-
-        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        let payloadURL = firstURL.appendingPathComponent("payload.bin")
-        #expect(try Data(contentsOf: payloadURL) == Data([0x01, 0x02]))
-
-        let originalMTime = try #require(
-            env.pkgURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        )
-        let changed = SyntheticPackage.makeData(entries: [
-            .init(name: "payload.bin", bytes: [0xAA, 0xBB])
-        ])
-        try changed.write(to: env.pkgURL, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.modificationDate: originalMTime],
-            ofItemAtPath: env.pkgURL.path
-        )
-
-        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-
-        #expect(secondURL == firstURL)
-        #expect(try Data(contentsOf: payloadURL) == Data([0xAA, 0xBB]))
-    }
-
-    @Test("Cache miss when manifest exists but payload was deleted")
-    func cacheMissWhenPayloadDeleted() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "333")
-        defer { env.cleanup() }
-
-        let cacheURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        let entries = try FileManager.default.contentsOfDirectory(atPath: cacheURL.path)
-        for entry in entries where entry != "manifest.json" {
-            try FileManager.default.removeItem(at: cacheURL.appendingPathComponent(entry))
-        }
-
-        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-
-        #expect(secondURL == cacheURL)
-        let restored = cacheURL.appendingPathComponent("payload.bin")
-        #expect(FileManager.default.fileExists(atPath: restored.path))
+        // Destructive source-archive cleanup keys off the completed set, so a
+        // half-extracted (manifest-less) cache must never qualify.
+        #expect(await env.cache.listCompletedWorkshopIDs() == ["with-manifest"])
+        #expect(await env.cache.listAvailableWorkshopIDs() == ["with-manifest", "no-manifest"])
     }
 
     @Test("Invalid workshop IDs are rejected before touching disk")
     func invalidWorkshopIDRejection() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "444")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
 
         for badID in ["", ".", "..", "/etc/passwd", "..\\foo", "foo/bar"] {
             await #expect(throws: WPECacheError.self) {
-                _ = try await env.cache.ensureExtracted(workshopID: badID, sourcePkgURL: env.pkgURL)
+                try await env.cache.purge(workshopID: badID)
             }
         }
     }
 
     @Test("Purge removes the cache directory and is safe when missing")
     func purgeRemovesCacheDirectory() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "555")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
-
-        let cacheURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        let cacheURL = try env.seed(workshopID: "555")
         #expect(FileManager.default.fileExists(atPath: cacheURL.path))
 
-        try await env.cache.purge(workshopID: env.workshopID)
+        try await env.cache.purge(workshopID: "555")
         #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
 
-        try await env.cache.purge(workshopID: env.workshopID)
+        try await env.cache.purge(workshopID: "555")
     }
 
     @Test("stats() returns aggregated bytes and entries sorted by last-used")
     func statsAggregatesAcrossWorkshopDirectories() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "stats-a")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
-
-        _ = try await env.cache.ensureExtracted(workshopID: "alpha", sourcePkgURL: env.pkgURL)
-        _ = try await env.cache.ensureExtracted(workshopID: "beta", sourcePkgURL: env.pkgURL)
+        try env.seed(workshopID: "alpha")
+        try env.seed(workshopID: "beta")
 
         let snapshot = await env.cache.stats()
 
@@ -133,13 +64,23 @@ struct WallpaperEngineCacheTests {
         }
     }
 
+    @Test("stats() reads lastUsed from the manifest's extractedAt")
+    func statsReadsLastUsedFromManifest() async throws {
+        let env = try TempCacheEnvironment.make()
+        defer { env.cleanup() }
+        let extractedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try env.seed(workshopID: "dated", extractedAt: extractedAt)
+
+        let entry = try #require(await env.cache.stats().entries.first)
+        #expect(entry.lastUsed == extractedAt)
+    }
+
     @Test("purgeAll() removes every workshop subdirectory and reports freed bytes")
     func purgeAllRemovesAllWorkshops() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "purgeall")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
-
-        _ = try await env.cache.ensureExtracted(workshopID: "one", sourcePkgURL: env.pkgURL)
-        _ = try await env.cache.ensureExtracted(workshopID: "two", sourcePkgURL: env.pkgURL)
+        try env.seed(workshopID: "one")
+        try env.seed(workshopID: "two")
         let beforeStats = await env.cache.stats()
         #expect(beforeStats.entries.count == 2)
         #expect(beforeStats.totalBytes > 0)
@@ -154,13 +95,11 @@ struct WallpaperEngineCacheTests {
 
     @Test("collectOrphans() drops unreferenced workshops and keeps referenced ones")
     func collectOrphansDropsUnreferenced() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "orphans")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
 
-        let keepURL = try await env.cache.ensureExtracted(workshopID: "keep", sourcePkgURL: env.pkgURL)
-        let dropURL = try await env.cache.ensureExtracted(workshopID: "drop", sourcePkgURL: env.pkgURL)
-        #expect(FileManager.default.fileExists(atPath: keepURL.path))
-        #expect(FileManager.default.fileExists(atPath: dropURL.path))
+        let keepURL = try env.seed(workshopID: "keep")
+        let dropURL = try env.seed(workshopID: "drop")
 
         let freed = await env.cache.collectOrphans(keepIDs: ["keep"])
 
@@ -173,9 +112,9 @@ struct WallpaperEngineCacheTests {
 
     @Test("collectOrphans() reclaims stale extraction sidecars but spares young ones")
     func collectOrphansSidecarAgeGate() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "sidecars")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
-        let live = try await env.cache.ensureExtracted(workshopID: "live", sourcePkgURL: env.pkgURL)
+        let live = try env.seed(workshopID: "live")
 
         let fm = FileManager.default
         let staleSidecar = env.cacheRoot.appendingPathComponent("999.inflight", isDirectory: true)
@@ -196,10 +135,10 @@ struct WallpaperEngineCacheTests {
 
     @Test("purgeOlderThan() never removes ids in the keep-set")
     func purgeOlderThanRespectsKeepSet() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "keepset")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
-        _ = try await env.cache.ensureExtracted(workshopID: "keep", sourcePkgURL: env.pkgURL)
-        _ = try await env.cache.ensureExtracted(workshopID: "drop", sourcePkgURL: env.pkgURL)
+        try env.seed(workshopID: "keep")
+        try env.seed(workshopID: "drop")
 
         // Future cutoff → both are "older than cutoff"; only the non-kept id goes.
         let freed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60), keepingIDs: ["keep"])
@@ -210,11 +149,11 @@ struct WallpaperEngineCacheTests {
 
     @Test("collectOrphans() keeps everything when all ids are referenced and frees nothing")
     func collectOrphansNoOpWhenAllReferenced() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "all-kept")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
 
-        _ = try await env.cache.ensureExtracted(workshopID: "one", sourcePkgURL: env.pkgURL)
-        _ = try await env.cache.ensureExtracted(workshopID: "two", sourcePkgURL: env.pkgURL)
+        try env.seed(workshopID: "one")
+        try env.seed(workshopID: "two")
 
         let freed = await env.cache.collectOrphans(keepIDs: ["one", "two"])
 
@@ -224,89 +163,53 @@ struct WallpaperEngineCacheTests {
 
     @Test("purgeOlderThan() only drops entries whose lastUsed predates the cutoff")
     func purgeOlderThanScopesByLastUsed() async throws {
-        let env = try TempCacheEnvironment.make(workshopID: "older")
+        let env = try TempCacheEnvironment.make()
         defer { env.cleanup() }
 
-        _ = try await env.cache.ensureExtracted(workshopID: "fresh", sourcePkgURL: env.pkgURL)
-        _ = try await env.cache.ensureExtracted(workshopID: "stale", sourcePkgURL: env.pkgURL)
+        try env.seed(workshopID: "fresh")
+        try env.seed(workshopID: "stale", extractedAt: Date(timeIntervalSince1970: 0))
 
-        let allFreed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60))
-        #expect(allFreed > 0)
-        #expect(await env.cache.stats().entries.isEmpty)
+        let freed = await env.cache.purgeOlderThan(Date().addingTimeInterval(-3600))
 
-        _ = try await env.cache.ensureExtracted(workshopID: "fresh-again", sourcePkgURL: env.pkgURL)
-        let nothingFreed = await env.cache.purgeOlderThan(Date(timeIntervalSince1970: 0))
-        #expect(nothingFreed == 0)
-        #expect(await env.cache.stats().entries.count == 1)
+        #expect(freed > 0)
+        #expect(await env.cache.stats().entries.map(\.workshopID) == ["fresh"])
     }
 }
 
 private struct TempCacheEnvironment {
     let cache: WallpaperEngineCache
-    let pkgURL: URL
     let cacheRoot: URL
-    let workshopID: String
 
-    static func make(workshopID: String, payload: [UInt8] = [0x01, 0x02]) throws -> TempCacheEnvironment {
+    static func make() throws -> TempCacheEnvironment {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let cacheRoot = scratch.appendingPathComponent("cache", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+        return TempCacheEnvironment(cache: WallpaperEngineCache(rootURL: cacheRoot), cacheRoot: cacheRoot)
+    }
 
-        let pkgURL = scratch.appendingPathComponent("scene.pkg")
-        let pkgData = SyntheticPackage.makeData(entries: [.init(name: "payload.bin", bytes: payload)])
-        try pkgData.write(to: pkgURL)
-
-        return TempCacheEnvironment(
-            cache: WallpaperEngineCache(rootURL: cacheRoot),
-            pkgURL: pkgURL,
-            cacheRoot: cacheRoot,
-            workshopID: workshopID
-        )
+    /// Writes a per-workshop cache directory byte-for-byte the way the retired
+    /// extractor left one. The manifest JSON is spelled out rather than encoded
+    /// through the app's type: it is an on-disk format the reader must keep
+    /// accepting, so the test must fail if that shape ever drifts.
+    @discardableResult
+    func seed(
+        workshopID: String,
+        manifest: Bool = true,
+        extractedAt: Date = Date()
+    ) throws -> URL {
+        let dir = cacheRoot.appendingPathComponent(workshopID, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data([0x01, 0x02]).write(to: dir.appendingPathComponent("payload.bin"))
+        guard manifest else { return dir }
+        let json = """
+        {"extractedAt":\(extractedAt.timeIntervalSince1970),\
+        "fingerprint":{"mtime":1600000000.0,"sha256":"deadbeef","size":2}}
+        """
+        try Data(json.utf8).write(to: dir.appendingPathComponent("manifest.json"))
+        return dir
     }
 
     func cleanup() {
         try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent())
-    }
-}
-
-private enum SyntheticPackage {
-    struct Entry {
-        let name: String
-        let bytes: [UInt8]
-    }
-
-    static func makeData(entries: [Entry]) -> Data {
-        var payload = Data()
-        var offsets: [(name: String, offset: UInt32, size: UInt32)] = []
-
-        for entry in entries {
-            let offset = UInt32(payload.count)
-            payload.append(contentsOf: entry.bytes)
-            offsets.append((entry.name, offset, UInt32(entry.bytes.count)))
-        }
-
-        var data = Data()
-        let magicBytes = Array("PKGV0022".utf8)
-        appendU32(UInt32(magicBytes.count), to: &data)
-        data.append(contentsOf: magicBytes)
-        appendU32(UInt32(offsets.count), to: &data)
-
-        for entry in offsets {
-            let nameBytes = Array(entry.name.utf8)
-            appendU32(UInt32(nameBytes.count), to: &data)
-            data.append(contentsOf: nameBytes)
-            appendU32(entry.offset, to: &data)
-            appendU32(entry.size, to: &data)
-        }
-
-        data.append(payload)
-        return data
-    }
-
-    private static func appendU32(_ value: UInt32, to data: inout Data) {
-        data.append(UInt8(value & 0xff))
-        data.append(UInt8((value >> 8) & 0xff))
-        data.append(UInt8((value >> 16) & 0xff))
-        data.append(UInt8((value >> 24) & 0xff))
     }
 }

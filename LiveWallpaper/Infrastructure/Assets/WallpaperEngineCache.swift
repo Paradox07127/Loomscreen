@@ -1,11 +1,11 @@
 #if !LITE_BUILD
 import Foundation
-import CryptoKit
 
-/// Caches extracted `scene.pkg` archives under
+/// Read-only custodian of the retired extraction cache under
 /// `~/Library/Application Support/LiveWallpaper/wpe-cache/<workshopID>/`.
-/// Idempotent: a sibling `manifest.json` records the source pkg's
-/// `(size, mtime)` fingerprint and lets repeated imports skip re-extraction.
+/// Nothing writes it any more — imports read `scene.pkg` in place — but old
+/// installs still have directories (and their `manifest.json` sidecars) on
+/// disk, so this enumerates, measures, and reclaims them.
 actor WallpaperEngineCache {
     /// Shared instance over the default cache root. Tests that need a custom root
     /// still construct directly via `init(rootURL:)`.
@@ -34,66 +34,6 @@ actor WallpaperEngineCache {
     init(rootURL: URL? = nil) {
         self.fileManager = .default
         self.rootURL = rootURL ?? Self.defaultRootURL
-    }
-
-    func ensureExtracted(workshopID: String, sourcePkgURL: URL) async throws -> URL {
-        let cacheURL = try cacheDirectory(for: workshopID)
-        let fingerprint = try fingerprint(for: sourcePkgURL)
-
-        if let manifest = readManifest(in: cacheURL),
-           manifest.fingerprint == fingerprint,
-           cacheHasPayload(cacheURL) {
-            Logger.info("WPE cache hit for workshop \(workshopID)", category: .screenManager)
-            return cacheURL
-        }
-
-        Logger.info("WPE cache extracting workshop \(workshopID)", category: .screenManager)
-        do {
-            let handle = try FileHandle(forReadingFrom: sourcePkgURL)
-            defer { try? handle.close() }
-
-            let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
-            try package.extractAll(streamingFrom: handle, to: cacheURL)
-            try writeManifest(
-                Manifest(fingerprint: fingerprint, extractedAt: Date().timeIntervalSince1970),
-                in: cacheURL
-            )
-            Logger.info("WPE cache extracted workshop \(workshopID)", category: .screenManager)
-            return cacheURL
-        } catch let error as WPECacheError {
-            Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
-            throw error
-        } catch let error as WPEPackageError {
-            // A bad/absent PKGV header almost always means SteamCMD landed a
-            // truncated/placeholder `scene.pkg` (partial download, entitlement/
-            // region issue) rather than a real package. Dump head bytes + size so
-            // a recurrence is unambiguous (truncated PKGV vs HTML error page vs a
-            // new magic) — a valid scene.pkg begins with U32 length 8 + "PKGV00NN".
-            Logger.error("WPE extraction failed: \(error) — \(Self.headDescription(of: sourcePkgURL))", category: .screenManager)
-            switch error {
-            case .invalidMagic, .truncatedHeader:
-                throw WPECacheError.extractionFailed(String(localized: "The downloaded file isn't a valid Wallpaper Engine package — the SteamCMD download was likely incomplete. Try downloading it again.", comment: "WPE extraction failed: scene.pkg has no valid PKGV header, usually a partial download."))
-            default:
-                throw WPECacheError.extractionFailed(String(describing: error))
-            }
-        } catch {
-            Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
-            throw WPECacheError.extractionFailed(String(describing: error))
-        }
-    }
-
-    /// Diagnostic for a parse failure: a real `scene.pkg` starts `08 00 00 00
-    /// "PKGV00NN"`; a partial download is short, an HTML error page starts `3c`
-    /// (`<`). Best-effort; never throws.
-    private static func headDescription(of url: URL) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "head: <unreadable>" }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        try? handle.seek(toOffset: 0)
-        let head = (try? handle.read(upToCount: 16)) ?? Data()
-        let hex = head.map { String(format: "%02x", $0) }.joined(separator: " ")
-        let ascii = String(head.map { (32...126).contains($0) ? Character(UnicodeScalar($0)) : "." })
-        return "size: \(size)B, head: [\(hex)] \"\(ascii)\""
     }
 
     /// Workshop IDs whose extracted payload currently lives under the cache root.
@@ -349,37 +289,6 @@ actor WallpaperEngineCache {
         cacheURL.appendingPathComponent("manifest.json")
     }
 
-    /// Streaming fingerprint: hashes the source pkg in 64 KiB chunks instead of mapping the entire file.
-    private func fingerprint(for sourcePkgURL: URL) throws -> Fingerprint {
-        do {
-            let values = try sourcePkgURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            guard let size = values.fileSize,
-                  size >= 0,
-                  let mtime = values.contentModificationDate?.timeIntervalSince1970 else {
-                throw WPECacheError.pkgUnreadable("Missing file metadata")
-            }
-            let sha = try Self.streamingSHA256Hex(of: sourcePkgURL)
-            return Fingerprint(size: UInt64(size), mtime: mtime, sha256: sha)
-        } catch let error as WPECacheError {
-            throw error
-        } catch {
-            throw WPECacheError.pkgUnreadable(error.localizedDescription)
-        }
-    }
-
-    private static func streamingSHA256Hex(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        let chunkSize = 64 * 1024
-        while let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty {
-            hasher.update(data: chunk)
-        }
-        return hasher.finalize()
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
     private func readManifest(in cacheURL: URL) -> Manifest? {
         let url = manifestURL(in: cacheURL)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
@@ -391,16 +300,12 @@ actor WallpaperEngineCache {
             return nil
         }
     }
-
-    private func writeManifest(_ manifest: Manifest, in cacheURL: URL) throws {
-        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(manifest)
-        try data.write(to: manifestURL(in: cacheURL), options: .atomic)
-    }
 }
 
+/// Decode-only: nothing writes a manifest since extraction was retired, but old
+/// installs still have them on disk and `readManifest` gates completion + the
+/// `lastUsed` sort on parsing them. Both fields must keep matching the historical
+/// JSON or every legacy cache silently reads back as incomplete.
 private struct Manifest: Codable, Equatable, Sendable {
     let fingerprint: Fingerprint
     let extractedAt: Double
@@ -414,8 +319,6 @@ private struct Fingerprint: Codable, Equatable, Sendable {
 
 enum WPECacheError: Error, Equatable, Sendable {
     case invalidWorkshopID(String)
-    case pkgUnreadable(String)
-    case extractionFailed(String)
 }
 
 /// Disk-usage snapshot of the WPE cache, sorted most-recently-used first.

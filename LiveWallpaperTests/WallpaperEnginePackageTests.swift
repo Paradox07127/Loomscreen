@@ -213,39 +213,6 @@ struct WallpaperEnginePackageTests {
         #expect(try provider.data(atRelativePath: "assets/value.bin") == Data([0xde, 0xad]))
     }
 
-    @Test("Extract creates nested dirs")
-    func extractCreatesNestedDirs() throws {
-        let fileManager = FileManager.default
-        let root = temporaryRoot()
-        defer { try? fileManager.removeItem(at: root) }
-        let data = makePackage(entries: [EntrySpec("models/sub/file.bin", [0xde, 0xad])])
-        let package = try WallpaperEnginePackage.parseIndex(of: data)
-
-        try package.extractAll(from: data, to: root)
-
-        let extractedURL = root.appendingPathComponent("models/sub/file.bin")
-        let extracted = try Data(contentsOf: extractedURL)
-        #expect(extracted == Data([0xde, 0xad]))
-    }
-
-    @Test("Extract is atomic")
-    func extractIsAtomic() throws {
-        let fileManager = FileManager.default
-        let root = temporaryRoot()
-        defer { try? fileManager.removeItem(at: root) }
-        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        let staleURL = root.appendingPathComponent("stale.bin")
-        try Data([0x00]).write(to: staleURL)
-
-        let data = makePackage(entries: [EntrySpec("fresh.bin", [0x99])])
-        let package = try WallpaperEnginePackage.parseIndex(of: data)
-        try package.extractAll(from: data, to: root)
-
-        #expect(!fileManager.fileExists(atPath: staleURL.path))
-        let fresh = try Data(contentsOf: root.appendingPathComponent("fresh.bin"))
-        #expect(fresh == Data([0x99]))
-    }
-
     private func temporaryRoot() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
