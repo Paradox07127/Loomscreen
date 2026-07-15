@@ -44,12 +44,10 @@ struct WPECacheManagementView: View {
     @State var lastTestArtifactFreedBytes: UInt64?
     #endif
 
-    #if DIRECT_DISTRIBUTION
     /// The Workshop online-browse JSON cache (self-capped at 5-min TTL + 100 MB),
     /// folded into the Storage total + Clear All so it lives in one place.
     @Environment(WorkshopServices.self) var workshopServices
     @State var workshopCacheBytes: Int64 = 0
-    #endif
 
     let cache: WallpaperEngineCache
     let dashboardColumns = [

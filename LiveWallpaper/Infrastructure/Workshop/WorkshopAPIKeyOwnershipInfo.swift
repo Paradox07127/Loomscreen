@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import Foundation
 
 /// Single source of truth for the official Valve links + the user-facing copy

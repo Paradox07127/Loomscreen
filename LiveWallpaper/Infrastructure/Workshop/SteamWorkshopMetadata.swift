@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import Foundation
 
 /// Metadata for a Workshop item, derived from

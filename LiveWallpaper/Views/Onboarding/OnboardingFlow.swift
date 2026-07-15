@@ -77,7 +77,7 @@ struct OnboardingFlow: View {
                     openAppleAerials: showAppleAerials
                 )
             case .workshop:
-                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                #if !LITE_BUILD
                 OnboardingStepWorkshop(continueStep: nextStep, skip: nextStep)
                 #else
                 EmptyView()

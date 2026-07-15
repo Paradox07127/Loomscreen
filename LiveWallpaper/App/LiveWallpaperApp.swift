@@ -47,17 +47,11 @@ struct AppStartupPlan: Equatable {
             originReconciler: PreservingOriginReconciler()
         )
         #else
-        // Direct-distribution Pro: layer `.workshopOnline` onto the Pro catalog.
-        // The conditional lives here (not in `ProductCapabilities.pro` where it
-        // logically belongs) because Xcode does not propagate
+        // `.workshopOnline` is layered on here rather than baked into
+        // `ProductCapabilities.pro` because Xcode does not propagate
         // `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target into local
-        // SwiftPM packages. MAS / non-direct-distribution Pro builds omit the
-        // `DIRECT_DISTRIBUTION` flag and the capability stays out.
-        #if DIRECT_DISTRIBUTION
+        // SwiftPM packages, so the package cannot tell which SKU it is in.
         let proCapabilities = ProductCapabilities.pro.withWorkshopOnline()
-        #else
-        let proCapabilities = ProductCapabilities.pro
-        #endif
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
             startAutomation: runtimeOptions.shouldStartAutomation,
@@ -93,8 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var showOnboardingObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
-    #if !LITE_BUILD && DIRECT_DISTRIBUTION
-    /// Direct-distribution Pro only: lives for the lifetime of the app so the
+    #if !LITE_BUILD
+    /// Pro only: lives for the lifetime of the app so the
     /// Doctor's probe state survives Settings-window close / re-open and the
     /// Workshop tab can read it without re-running probes.
     @ObservationIgnored private let workshopDoctorService = SteamCMDDoctorService()
@@ -216,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         #endif
 
-        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        #if !LITE_BUILD
         // Auto-run the Workshop Doctor once at launch when it's already
         // configured, so the in-app "Download from Steam" path is ready without
         // a manual probe run. Deferred + background; skipped when unconfigured
@@ -396,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(manager)
             .environment(\.featureCatalog, manager.featureCatalog)
 
-        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        #if !LITE_BUILD
         let contentView = baseContentView
             .environment(workshopDoctorService)
             .environment(workshopServices)
@@ -515,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let base = flow
                 .environment(manager)
                 .environment(\.featureCatalog, manager.featureCatalog)
-            #if !LITE_BUILD && DIRECT_DISTRIBUTION
+            #if !LITE_BUILD
             window.contentView = NSHostingView(
                 rootView: base
                     .environment(workshopDoctorService)

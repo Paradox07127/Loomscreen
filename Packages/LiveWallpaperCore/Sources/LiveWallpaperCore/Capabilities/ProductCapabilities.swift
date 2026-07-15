@@ -30,10 +30,8 @@ public enum ProductFeature: String, Sendable, Hashable, Codable {
     case weatherReactive
 
     /// Steam Workshop online surfaces (paste URL → fetch metadata → optional
-    /// download via SteamCMD). Registered at module init **only** when the
-    /// build is direct-distribution AND not Lite — MAS / Lite binaries omit
-    /// the case entirely via [`ProductCapabilities.workshopOnlineSupported`]
-    /// so no runtime check can accidentally surface the UI.
+    /// download via SteamCMD). Added to the Pro catalog by the app target via
+    /// `withWorkshopOnline()`; Lite never gets it, so its UI stays unreachable.
     case workshopOnline
 
     case scheduleAutomation
@@ -96,13 +94,12 @@ public struct ProductCapabilities: Sendable, Equatable {
     )
 
     /// Returns a copy of this catalog with `.workshopOnline` inserted into
-    /// the feature set. The consumer-side gate lives in the **main app
-    /// target**, not in this SwiftPM package, because Xcode does not
-    /// propagate `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target
-    /// down into local packages — a `#if DIRECT_DISTRIBUTION` here would
-    /// always be `false`. The app target is the authority on which
-    /// distribution channel it is, and adds the capability at injection
-    /// time.
+    /// the feature set. The SKU gate lives in the **main app target**, not in
+    /// this SwiftPM package, because Xcode does not propagate
+    /// `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target down into
+    /// local packages — a `#if LITE_BUILD` here would always be `false`. The
+    /// app target is the authority on which SKU it is, and adds the
+    /// capability at injection time.
     public func withWorkshopOnline() -> ProductCapabilities {
         ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
     }

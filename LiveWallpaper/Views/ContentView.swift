@@ -415,7 +415,7 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                #if !LITE_BUILD
                 if featureCatalog.isEnabled(.wpeImport) {
                     NavigationLink(value: Navigation.workshop) {
                         Label("Steam Workshop", systemImage: "cube.transparent.fill")
@@ -626,7 +626,7 @@ struct DetailContent: View {
                 BookmarksLibraryView()
 
             case .workshop:
-                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                #if !LITE_BUILD
                 WorkshopPaneView()
                 #else
                 EmptyView()

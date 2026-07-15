@@ -16,7 +16,7 @@ public struct OnboardingPathPolicy: Sendable, Equatable {
     public let sku: ProductSKU
     public let galleryActions: [OnboardingSourceAction]
     /// Whether the flow includes the optional Steam Workshop setup step.
-    /// True only when `.workshopOnline` is present (direct-distribution Pro).
+    /// True only when `.workshopOnline` is present (Pro).
     public let showsWorkshopSetup: Bool
 
     public init(capabilities: ProductCapabilities) {

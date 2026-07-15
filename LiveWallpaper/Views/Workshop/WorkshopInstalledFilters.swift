@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import Foundation
 
 /// Library type kinds for the chip row. No `.all` case — all-or-none selected

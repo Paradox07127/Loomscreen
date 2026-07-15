@@ -16,14 +16,12 @@ extension WPECacheManagementView {
         inventory = await Task.detached { WPEStorageInventory.compute() }.value
         projectItems = projectRowItems(inventory?.projects ?? [])
         isLoadingInventory = false
-        #if DIRECT_DISTRIBUTION
         let cachedIDs = await cache.listCompletedWorkshopIDs()
             .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
         reclaimableArchiveBytes = await Task.detached {
             WPEDownloadArchiveReclaimer().reclaimableBytes(cachedIDs: cachedIDs)
         }.value
         workshopCacheBytes = await workshopServices.queryCache.sizeBytes()
-        #endif
         #if DEBUG
         await refreshTestArtifacts()
         #endif
@@ -45,9 +43,7 @@ extension WPECacheManagementView {
     private func clearAllCaches() async {
         lastFreedBytes = await cache.purgeAll()
         lastVideoFreedBytes = await WPEVideoTextureDiskCache.shared.purgeAll()
-        #if DIRECT_DISTRIBUTION
         await workshopServices.queryCache.clear()
-        #endif
         await refreshStats()
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }

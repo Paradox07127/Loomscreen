@@ -461,7 +461,6 @@ struct WPESceneDetailView: View {
     @ViewBuilder
     private var workshopLinkButton: some View {
         if isSteamWorkshopID, let url = steamWorkshopURL {
-            #if DIRECT_DISTRIBUTION
             if featureCatalog.isEnabled(.wpeImport) {
                 Menu {
                     Button {
@@ -488,9 +487,6 @@ struct WPESceneDetailView: View {
             } else {
                 workshopWebLinkButton(url)
             }
-            #else
-            workshopWebLinkButton(url)
-            #endif
         }
     }
 

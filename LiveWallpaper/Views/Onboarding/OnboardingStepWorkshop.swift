@@ -1,9 +1,9 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// Optional onboarding step (direct-distribution Pro only). Surfaces live
+/// Optional onboarding step (Pro only). Surfaces live
 /// SteamCMD / Web API key status and opens the existing Doctor / key-entry
 /// sheets in-window. Both the "Import a file" and "Steam Workshop" picker
 /// cards lead here, so it is always skippable.

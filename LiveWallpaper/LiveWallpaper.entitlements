@@ -48,9 +48,9 @@
 	    SteamCMD install and its sibling dylibs, which live outside the sandbox
 	    container. Read-only and scoped to tooling directories; downloads/cache
 	    still go to user-granted or container-local locations. The consuming
-	    code (SteamCMDDoctorService/SteamCMDScriptWriter) is `#if !LITE_BUILD
-	    && DIRECT_DISTRIBUTION`-gated, but this file is shared across every
-	    build config (no MAS target exists in this project) — temporary
+	    code (SteamCMDDoctorService/SteamCMDScriptWriter) is `#if !LITE_BUILD`-
+	    gated, but this file is shared across every build config (no MAS
+	    target exists in this project) — temporary
 	    exceptions like this one are not accepted for a Mac App Store
 	    submission, which would require its own conditionally-stripped
 	    entitlements file, not just excluded Swift code.

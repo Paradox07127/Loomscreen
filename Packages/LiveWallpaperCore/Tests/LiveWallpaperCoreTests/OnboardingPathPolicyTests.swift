@@ -4,7 +4,7 @@ import Testing
 @Suite("OnboardingPathPolicy")
 struct OnboardingPathPolicyTests {
 
-    @Test("Pro (MAS / no Workshop): Import file + Apple Aerials, no setup step")
+    @Test("Pro without the Workshop capability: Import file + Apple Aerials, no setup step")
     func proPolicy() {
         let policy = OnboardingPathPolicy(capabilities: .pro)
 
@@ -13,7 +13,7 @@ struct OnboardingPathPolicyTests {
         #expect(policy.showsWorkshopSetup == false)
     }
 
-    @Test("Direct-distribution Pro: Import file + Steam Workshop, with setup step")
+    @Test("Pro with the Workshop capability: Import file + Steam Workshop, with setup step")
     func directProPolicy() {
         let policy = OnboardingPathPolicy(capabilities: .pro.withWorkshopOnline())
 

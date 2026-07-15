@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import Foundation
 
 /// Reclaims disk by trashing source `scene.pkg` archives SteamCMD left in the

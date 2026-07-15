@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import Foundation
 
 /// Parses the URL/ID forms accepted by the Workshop paste sheet. Accepted

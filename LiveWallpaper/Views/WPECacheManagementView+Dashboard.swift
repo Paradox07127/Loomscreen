@@ -11,9 +11,7 @@ extension WPECacheManagementView {
     var totalBytes: UInt64 {
         var total = UInt64(stats?.totalBytes ?? 0)
         total += videoStats?.totalBytes ?? 0
-        #if DIRECT_DISTRIBUTION
         total += UInt64(max(0, workshopCacheBytes))
-        #endif
         return total
     }
 

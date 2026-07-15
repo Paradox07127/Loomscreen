@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import SwiftUI
 
 /// Confirmation toast after "Copy diagnostic" on a Workshop error state.

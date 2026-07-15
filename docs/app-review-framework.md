@@ -18,7 +18,7 @@
 
 **体量与形态**
 - **534 个 Swift 文件 / ~166.7k LoC**;主 app target ~272 文件;**5 个 SPM 包**(`Core` / `SharedUI` / `ProWPE` / `ProFeatures` / `VideoWeb`,共 111 文件);测试 122 文件(~41.6k LoC,重资产)。
-- **3 个构建变体**:`Lite`(`LITE_BUILD`,无 Metal/WPE,video-only)、`Pro`(默认,全 Metal renderer)、`Direct-Distribution Pro`(`DIRECT_DISTRIBUTION`,Steam Workshop 在线)。236 处条件编译块。
+- **2 个构建变体**:`Lite`(`LITE_BUILD`,无 Metal/WPE,video-only)、`Pro`(默认,全 Metal renderer + Steam Workshop 在线)。
 - 仅 2 个 `.metal` 文件 —— **shader 绝大多数是运行时 GLSL→MSL transpile**,这是本 app 独有的结构性风险点(见下)。
 - **无 CI 入库**(归档在 `build/DerivedData/…`);发版靠 `scripts/release-app.sh`。
 

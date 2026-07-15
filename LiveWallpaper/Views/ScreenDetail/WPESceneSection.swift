@@ -79,15 +79,11 @@ struct WPESceneSection: View {
                 .controlSize(.large)
                 .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
 
-                #if DIRECT_DISTRIBUTION
                 if featureCatalog.isEnabled(.wpeImport) {
                     browseWorkshopButton("Browse all in Workshop")
                 } else {
                     workshopHintText
                 }
-                #else
-                workshopHintText
-                #endif
             }
             .padding(.top, 4)
 
@@ -106,11 +102,9 @@ struct WPESceneSection: View {
                     Text("Recent Imported Projects")
                         .font(DesignTokens.Typography.sectionTitle)
                     Spacer()
-                    #if DIRECT_DISTRIBUTION
                     if featureCatalog.isEnabled(.wpeImport) {
                         browseWorkshopButton("Browse all in Workshop")
                     }
-                    #endif
                     Button {
                         presentFolderPicker()
                     } label: {
@@ -194,8 +188,8 @@ struct WPESceneSection: View {
         }
     }
 
-    /// Informational fallback for builds without the in-app Workshop tab
-    /// (non-direct-distribution), where there is nothing to jump to.
+    /// Informational fallback for when `.wpeImport` is off and there is no
+    /// in-app Workshop tab to jump to.
     private var workshopHintText: some View {
         Text("Browse and manage your whole library in the Steam Workshop tab.")
             .font(.caption)
@@ -203,7 +197,6 @@ struct WPESceneSection: View {
             .multilineTextAlignment(.center)
     }
 
-    #if DIRECT_DISTRIBUTION
     @ViewBuilder
     private func browseWorkshopButton(_ title: LocalizedStringKey) -> some View {
         Button {
@@ -220,7 +213,6 @@ struct WPESceneSection: View {
         .buttonStyle(.plain)
         .accessibilityHint(Text("Opens the Steam Workshop tab to browse and manage your full library"))
     }
-    #endif
 
     // MARK: - Actions
 

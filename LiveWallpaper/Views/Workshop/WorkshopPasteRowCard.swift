@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI

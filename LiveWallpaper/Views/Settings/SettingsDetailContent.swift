@@ -33,7 +33,7 @@ struct SettingsDetailContent: View {
             case .backupRestore:
                 GeneralSettingsView(page: .backupRestore)
             case .workshopSetup:
-                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                #if !LITE_BUILD
                 if featureCatalog.isEnabled(.workshopOnline) {
                     WorkshopSettingsView(pendingSearchAnchor: $pendingSearchAnchor)
                 } else {

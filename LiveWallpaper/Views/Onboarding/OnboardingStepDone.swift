@@ -82,10 +82,10 @@ struct OnboardingStepDone: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Direct-distribution Pro leads with Steam Workshop (its signature
-    /// surface); Lite / MAS Pro lead with the everyday playlist/effects tips.
-    /// Gated on `.workshopOnline`, not `.scene`, so MAS Pro (scenes via import,
-    /// no Workshop) doesn't advertise a surface it can't reach.
+    /// Pro leads with Steam Workshop (its signature surface); Lite leads with
+    /// the everyday playlist/effects tips. Gated on `.workshopOnline` rather
+    /// than `.scene` so a catalog with scenes but no Workshop would not
+    /// advertise a surface it can't reach.
     private var tips: [DoneStepTip] {
         if featureCatalog.isEnabled(.workshopOnline) {
             return [

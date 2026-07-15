@@ -1,4 +1,4 @@
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
+#if !LITE_BUILD
 import SwiftUI
 
 /// Observes the shared `WorkshopToastCenter` so it fires even after the detail

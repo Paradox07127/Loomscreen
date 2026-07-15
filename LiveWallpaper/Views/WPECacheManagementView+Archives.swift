@@ -6,10 +6,9 @@ extension WPECacheManagementView {
     /// `wpe-cache` and whose runtime renders from that copy, leaving the source
     /// `.pkg` redundant. Reclaiming moves it to the Trash (recoverable); an
     /// import that reads its archive in place is filtered out upstream.
-    /// Pro/direct-distribution only (Lite has no SteamCMD).
+    /// Pro only (Lite has no SteamCMD).
     @ViewBuilder
     var reclaimArchivesSection: some View {
-        #if DIRECT_DISTRIBUTION
         if reclaimableArchiveBytes > 0 {
             Section {
                 HStack(alignment: .center, spacing: 12) {
@@ -42,10 +41,8 @@ extension WPECacheManagementView {
                 }
             }
         }
-        #endif
     }
 
-    #if DIRECT_DISTRIBUTION
     private func reclaimArchives() async {
         let cachedIDs = await cache.listCompletedWorkshopIDs()
             .subtracting(WPESceneReachability.packageBackedWorkshopIDs())
@@ -57,6 +54,5 @@ extension WPECacheManagementView {
         await refreshStats()
     }
 
-    #endif
 }
 #endif
