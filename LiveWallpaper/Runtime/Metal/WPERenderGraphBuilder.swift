@@ -377,6 +377,7 @@ struct WPERenderGraphBuilder: Sendable {
             alpha: child.alpha,
             alphaAnimation: child.alphaAnimation,
             color: child.color,
+            colorAnimation: child.colorAnimation,
             brightness: child.brightness
         )
     }
@@ -1048,6 +1049,7 @@ struct WPERenderGraphBuilder: Sendable {
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
+                colorAnimation: object.colorAnimation,
                 brightness: object.brightness,
                 shapePoints: object.shapePoints
             ),
@@ -1061,6 +1063,7 @@ struct WPERenderGraphBuilder: Sendable {
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
+                colorAnimation: object.colorAnimation,
                 brightness: object.brightness,
                 shapePoints: object.shapePoints
             ),
@@ -1069,7 +1072,11 @@ struct WPERenderGraphBuilder: Sendable {
             localFBOs: context.localFBOs,
             passes: context.finalizedPasses(
                 finalUntargetedPassToScene: finalUntargetedPassToScene,
-                preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.requiresFinalSceneComposite
+                // A destination-reading blend needs the layer isolated in its own
+                // composite before it can be blended against the scene snapshot.
+                preserveFinalCompositeForScene: preserveFinalCompositeForScene
+                    || model.requiresFinalSceneComposite
+                    || object.usesProgrammableBlend
             ),
             parallaxDepth: object.parallaxDepth,
             sortIndex: sortIndex
@@ -1597,11 +1604,54 @@ private struct LayerBuildContext {
     var passes: [WPERenderPass] = []
     var passTargetsWereExplicit: [Bool] = []
 
+    /// The layer's final draw onto the scene. Normally a plain copy under the
+    /// object's fixed-function blend; for a destination-reading mode it becomes
+    /// WPE's own construction — sample the layer composite plus the scene
+    /// snapshot (`_rt_FullFrameBuffer` at slot 4, matching `g_Texture4`) and run
+    /// ApplyBlending. RenderDoc-confirmed against 3448877775 pass 41.
+    func sceneCompositePass(
+        index: Int,
+        source: WPETextureReference,
+        fallbackBlending: String
+    ) -> WPERenderPass {
+        let programmable = object.usesProgrammableBlend
+        let shader = programmable
+            ? WPEBuiltinShaderKind.blendComposite.rawValue
+            : WPERenderPassPhase.sceneCopyCommandFile
+        var textures: [Int: WPETextureReference] = [0: source]
+        if programmable {
+            // Slot 4 mirrors WPE's `g_Texture4`. The executor's
+            // `snapshotFullFrameBufferIfAliasingScene` sees this alias in the
+            // pass's texture set and hands the fragment a COPY, so sampling the
+            // scene while drawing into it is not a feedback loop.
+            textures[4] = .fbo(WPESceneAliasName.fullFrameBuffer)
+        }
+        return WPERenderPass(
+            id: "\(object.id).\(index)",
+            phase: .command(file: WPERenderPassPhase.sceneCopyCommandFile),
+            shader: shader,
+            source: source,
+            target: .scene,
+            textures: textures,
+            binds: [:],
+            constants: programmable ? ["g_BlendMode": .number(Double(object.colorBlendMode))] : [:],
+            combos: [:],
+            // ApplyBlending has already folded the destination in, so the state
+            // is a plain premultiplied over — never the authored mode.
+            blending: programmable ? "premultiplied" : fallbackBlending,
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+    }
+
     func finalizedPasses(
         finalUntargetedPassToScene: Bool,
         preserveFinalCompositeForScene: Bool
     ) -> [WPERenderPass] {
-        let finalSceneBlendMode = object.blendMode == .normal
+        // A programmable blend is applied inside the composite fragment; leaving
+        // the authored mode on the pass would double-apply it.
+        let finalSceneBlendMode = (object.blendMode == .normal || object.usesProgrammableBlend)
             ? nil
             : object.blendMode.rawValue.premultipliedRenderTargetBlendMode
 
@@ -1657,21 +1707,7 @@ private struct LayerBuildContext {
             let sceneSource = preserveFinalCompositeForScene && finalSource != .fbo(compositeA)
                 ? WPETextureReference.fbo(compositeA)
                 : finalSource
-            finalized.append(WPERenderPass(
-                id: "\(object.id).\(finalized.count)",
-                phase: .command(file: WPERenderPassPhase.sceneCopyCommandFile),
-                shader: WPERenderPassPhase.sceneCopyCommandFile,
-                source: sceneSource,
-                target: .scene,
-                textures: [0: sceneSource],
-                binds: [:],
-                constants: [:],
-                combos: [:],
-                blending: lastPass.blending,
-                cullMode: "nocull",
-                depthTest: "disabled",
-                depthWrite: "disabled"
-            ))
+            finalized.append(sceneCompositePass(index: finalized.count, source: sceneSource, fallbackBlending: lastPass.blending))
             return finalized.movingFirstBlendModeToFinalPass(finalBlendMode: finalSceneBlendMode)
         }
 

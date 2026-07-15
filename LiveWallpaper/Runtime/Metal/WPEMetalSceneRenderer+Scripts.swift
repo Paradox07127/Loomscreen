@@ -264,9 +264,17 @@ extension WPEMetalSceneRenderer {
                 seed: script.seed * (180 / .pi)
             ))
         }
+        // Keyframed origins ride the same live-transform map as the scripts, so a
+        // moving transform host composes onto its children exactly the same way.
+        dynamicOriginAnimations = Dictionary(
+            document.transformHostObjects.compactMap { object -> (String, WPESceneAnimatedValue)? in
+                object.originAnimation.map { (object.id, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         debugStage(
             "transformScripts.load",
-            "origin=\(originScripts.count) scale=\(scaleScripts.count) angles=\(anglesScripts.count) hosts=\(document.transformHostObjects.count)"
+            "origin=\(originScripts.count) scale=\(scaleScripts.count) angles=\(anglesScripts.count) originAnim=\(dynamicOriginAnimations.count) hosts=\(document.transformHostObjects.count)"
         )
         guard !originScripts.isEmpty || !scaleScripts.isEmpty || !anglesScripts.isEmpty else { return }
         let canvasSize = SIMD2<Double>(

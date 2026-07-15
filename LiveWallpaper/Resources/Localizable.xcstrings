@@ -1054,35 +1054,6 @@
         }
       }
     },
-    "%lld waiting" : {
-      "comment" : "Fleet HUD collapsed pill: %lld agent sessions need the user.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld waiting"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 件待機中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 个待处理"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 個待處理"
-          }
-        }
-      }
-    },
     "%lld temporary items left in the container by test runs." : {
       "comment" : "Storage tab, debug-only Test Artifacts section subtitle. Placeholder is the number of leftover test temp items.",
       "extractionState" : "manual",
@@ -1109,6 +1080,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "測試執行在容器中殘留了 %lld 個暫存項目。"
+          }
+        }
+      }
+    },
+    "%lld waiting" : {
+      "comment" : "Fleet HUD collapsed pill: %lld agent sessions need the user.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld waiting"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件待機中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个待处理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個待處理"
           }
         }
       }
@@ -10275,6 +10275,28 @@
         }
       }
     },
+    "Delete & Free Up Space" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除して空き容量を増やす"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除并释放空间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除並釋放空間"
+          }
+        }
+      }
+    },
     "Delete %lld Items" : {
       "comment" : "Destructive confirmation button for deleting leftover test temp items. Placeholder is the item count.",
       "extractionState" : "manual",
@@ -10305,28 +10327,6 @@
         }
       }
     },
-    "Delete & Free Up Space" : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "削除して空き容量を増やす"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除并释放空间"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除並釋放空間"
-          }
-        }
-      }
-    },
     "Delete bookmark" : {
       "localizations" : {
         "en" : {
@@ -10351,6 +10351,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除書籤"
+          }
+        }
+      }
+    },
+    "Delete leftover test artifacts?" : {
+      "comment" : "Confirmation dialog title for deleting leftover test temp directories (debug builds only).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete leftover test artifacts?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "残っているテスト成果物を削除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除残留的测试文件？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除殘留的測試檔案？"
           }
         }
       }
@@ -10411,36 +10441,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除測試殘留檔案"
-          }
-        }
-      }
-    },
-    "Delete leftover test artifacts?" : {
-      "comment" : "Confirmation dialog title for deleting leftover test temp directories (debug builds only).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete leftover test artifacts?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "残っているテスト成果物を削除しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除残留的测试文件？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除殘留的測試檔案？"
           }
         }
       }
@@ -42446,6 +42446,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "桌布屬性"
+          }
+        }
+      }
+    },
+    "Wallpaper rendering is off" : {
+      "comment" : "Scene renderer accessibility state shown when the menu-bar master switch is off.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wallpaper rendering is off"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壁紙の描画がオフです"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壁纸渲染已关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "桌布算繪已關閉"
           }
         }
       }

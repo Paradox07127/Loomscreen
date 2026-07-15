@@ -206,6 +206,11 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     var dynamicOriginScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:] {
         didSet { cachedInstalledScriptLayerIDs = nil }
     }
+    /// Keyframed object `origin` tracks, keyed by objectID. Same live-transform
+    /// map as the origin SCRIPTS above, so the existing parent→child composition
+    /// carries a moving group onto its children (3448877775's meteor emitter is a
+    /// bare transform host whose sweep is what gates its shooting stars).
+    var dynamicOriginAnimations: [String: WPESceneAnimatedValue] = [:]
     /// Image-object scale SceneScripts keyed by objectID. Used by scenes that
     /// drive body sizes or link lengths from shared simulation state.
     var dynamicScaleScriptInstances: [String: WPEDynamicTransformScriptInstance] = [:] {

@@ -77,9 +77,16 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
         time: Double,
         gain: Double = WPECameraParallaxFrame.defaultGain
     ) -> WPECameraParallaxFrame {
-        let amount = max(settings.amount, 0)
-        let influence = max(settings.mouseInfluence, 0)
-        guard settings.enabled, amount > 0, influence > 0 else {
+        // Sign is authored, not a mistake to clamp away: WPE multiplies
+        // `mouseinfluence` straight into the parallax vector
+        // (WPShaderValueUpdater.cpp `mouseVec * m_parallax.mouseinfluence`),
+        // and its only gate is `enable`. A negative value INVERTS the parallax —
+        // clamping it to 0 read "inverted" as "off", which is why 3448877775
+        // (mouseinfluence −0.3) sat perfectly still while every positive-influence
+        // scene parallaxed fine.
+        let amount = settings.amount
+        let influence = settings.mouseInfluence
+        guard settings.enabled, amount != 0, influence != 0 else {
             smoothed = SIMD2<Float>(0, 0)
             lastTime = time
             return WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0), gain: gain)

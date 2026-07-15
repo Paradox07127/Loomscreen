@@ -232,6 +232,8 @@ private struct WPEShaderSourceLoader: Sendable {
             return solidLayerProgram(shaderName: shaderName, combos: combos)
         case .copy?:
             return copyProgram(shaderName: shaderName, combos: combos)
+        case .blendComposite?:
+            return blendCompositeProgram(shaderName: shaderName, combos: combos)
         case .compose?:
             return composeProgram(shaderName: shaderName, combos: combos)
         case .genericImage2?, .genericImage4?:
@@ -388,6 +390,42 @@ private struct WPEShaderSourceLoader: Sendable {
         """
         let fragment = """
         uniform sampler2D g_Texture0;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            gl_FragColor = texSample2D(g_Texture0, v_TexCoord);
+        }
+        """
+        return WPEShaderProgram(
+            name: shaderName,
+            vertexSource: shaderPrelude(comboValues: combos, stage: .vertex) + vertex,
+            fragmentSource: shaderPrelude(comboValues: combos, stage: .fragment) + fragment.replacingOccurrences(
+                of: "gl_FragColor",
+                with: "out_FragColor"
+            ),
+            isBuiltin: true
+        )
+    }
+
+    /// Interface declaration for the `wpe_blend_composite_fragment` builtin: the
+    /// real blend math is hand-written MSL, this only pins the binding set
+    /// (`g_Texture0` = layer composite, `g_Texture4` = scene snapshot — the same
+    /// slot WPE's `genericimage4.frag` uses under `#if BLENDMODE`).
+    private func blendCompositeProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
+        let vertex = """
+        attribute vec3 a_Position;
+        attribute vec2 a_TexCoord;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            gl_Position = vec4(a_Position, 1.0);
+            v_TexCoord = a_TexCoord;
+        }
+        """
+        let fragment = """
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture4;
+        uniform float g_BlendMode;
         varying vec2 v_TexCoord;
 
         void main() {

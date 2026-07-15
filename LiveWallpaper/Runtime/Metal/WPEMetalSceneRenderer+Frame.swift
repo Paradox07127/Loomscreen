@@ -325,9 +325,18 @@ extension WPEMetalSceneRenderer {
     ) -> LiveScriptTransforms? {
         guard !dynamicOriginScriptInstances.isEmpty
             || !dynamicScaleScriptInstances.isEmpty
-            || !dynamicAnglesScriptInstances.isEmpty else { return nil }
+            || !dynamicAnglesScriptInstances.isEmpty
+            || !dynamicOriginAnimations.isEmpty else { return nil }
         var transforms = LiveScriptTransforms()
-        transforms.origins.reserveCapacity(dynamicOriginScriptInstances.count)
+        transforms.origins.reserveCapacity(
+            dynamicOriginScriptInstances.count + dynamicOriginAnimations.count
+        )
+        // Keyframed origins first so an origin SCRIPT on the same object still
+        // wins (scripts are the live authority; the track is the authored path).
+        for (objectID, animation) in dynamicOriginAnimations.sorted(by: { $0.key < $1.key }) {
+            guard let v = animation.vector(at: time), v.count >= 3 else { continue }
+            transforms.origins[objectID] = SIMD3<Double>(v[0], v[1], v[2])
+        }
         // Sorted by objectID for the same shared-state-determinism reason as the
         // layer/text script loops above.
         for (objectID, instance) in dynamicOriginScriptInstances.sorted(by: { $0.key < $1.key }) {

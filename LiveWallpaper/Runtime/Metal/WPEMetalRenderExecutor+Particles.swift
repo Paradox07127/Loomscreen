@@ -82,6 +82,37 @@ extension WPEMetalRenderExecutor {
         // carried in `padding.xy` and added to each particle's screen position.
         let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
         projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
+        // WPE `g_RenderVar0` for TRAILRENDERER: the shader stretches the quad by
+        // `clamp(speed * .x, .z, .y)` ON TOP of the sprite size.
+        //
+        // `.x` is NOT the JSON's `length`. deku_twinkle_shootingstar authors
+        // `length: 3`, but its live pass carries `.x = 0.005` (RenderDoc,
+        // 3448877775_1 ord 4) — WPE derives it at runtime by some scale we have
+        // not pinned down. Feeding `length` in directly made stretch ≈ speed*3
+        // ≈ 600, i.e. a 9000px screen-crossing "laser". Until the mapping is
+        // grounded, stay neutral (stretch 1): the streak still gets its real
+        // shape from `textureRatio` (the shooting star's sprite is 256×832), it
+        // just isn't speed-elongated on top.
+        if system.definition.trailRenderer != nil {
+            projection.trail = SIMD4<Float>(0, 1, 1, 1)
+        }
+
+        // WPE's particle quad is NOT square: `ComputeParticlePosition` scales the
+        // `up` axis by `textureRatio` so the quad carries the sprite's aspect
+        // (common_particles.h). Non-spritesheet reads it off the texture
+        // (`g_Texture0Resolution.y / .x`); a sprite sheet uses the FRAME aspect
+        // (`g_RenderVar1.w`). Forcing every particle square squashed the
+        // shooting star's 256×832 streak into a blob and flattened the size
+        // differences between layers.
+        let texW = Float(max(texture.width, 1))
+        let texH = Float(max(texture.height, 1))
+        var textureRatio = texH / texW
+        if let sheet = system.spriteSheet, sheet.frameCount > 1 {
+            let cols = Float(max(sheet.cols, 1))
+            let rows = Float(max(sheet.rows, 1))
+            textureRatio = (texH / rows) / (texW / cols)
+        }
+        projection.padding.z = textureRatio
 
         let useFrameRects = system.frameRectsBuffer != nil
         var sprite = WPEParticleSpriteParams(

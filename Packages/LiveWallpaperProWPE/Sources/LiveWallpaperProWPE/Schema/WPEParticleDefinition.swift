@@ -126,22 +126,65 @@ public struct WPEParticleAlphaChange: Equatable, Sendable {
     }
 }
 
-/// `oscillatealpha` operator: a sine-wave alpha multiplier clamped to [0, 1].
+/// `oscillatealpha` operator: WPE's `FrequencyValue::GetScale` — a cosine that
+/// lerps the alpha multiplier across `[scaleMin, scaleMax]`. Frequency and phase
+/// are randomized PER PARTICLE at spawn, so stars twinkle out of step.
+///
+/// The reference computes `f = frequency/2π` then `w = 2π·f`, i.e. **w is the
+/// authored frequency** — folding in another 2π ran it 6.28× too fast. Reading
+/// only `frequency`/`frequencymin` was worse: presets that author bare
+/// `frequencymax` (Stars.json: `{frequencymax:3, scalemin:0.2}`) collapsed to
+/// frequency 0 and stopped twinkling altogether.
 public struct WPEParticleOscillateAlpha: Equatable, Sendable {
-    public let frequency: Double
-    public let scale: Double
-    public let phase: Double
+    public let frequencyMin: Double
+    public let frequencyMax: Double
+    public let scaleMin: Double
+    public let scaleMax: Double
+    public let phaseMin: Double
+    public let phaseMax: Double
 
-    public init(frequency: Double, scale: Double, phase: Double) {
-        self.frequency = frequency
-        self.scale = scale
-        self.phase = phase
+    public init(
+        frequencyMin: Double,
+        frequencyMax: Double,
+        scaleMin: Double,
+        scaleMax: Double,
+        phaseMin: Double,
+        phaseMax: Double
+    ) {
+        self.frequencyMin = frequencyMin
+        self.frequencyMax = frequencyMax
+        self.scaleMin = scaleMin
+        self.scaleMax = scaleMax
+        self.phaseMin = phaseMin
+        self.phaseMax = phaseMax
     }
 
-    public func factor(age: Double) -> Double {
-        guard frequency != 0, scale != 0 else { return 1 }
-        let value = 1 + sin((age + phase) * frequency * 2 * Double.pi) * scale
-        return min(max(value, 0), 1)
+    /// `frequency`/`phase` come from the particle's spawn-time draw.
+    public func factor(age: Double, frequency: Double, phase: Double) -> Double {
+        guard frequency != 0 else { return 1 }
+        let wave = (cos(frequency * age + phase) + 1) * 0.5
+        return min(max(scaleMin + (scaleMax - scaleMin) * wave, 0), 1)
+    }
+}
+
+/// `spritetrail` / `ropetrail` renderer params — parsed, NOT yet reproduced.
+///
+/// `length` is the trail's SEGMENT COUNT, not a stretch factor. RenderDoc on
+/// 3448877775 pins the model: each meteor owns `length + 1` positions sampled
+/// every `lifetime / length` seconds (its 80 vertices are 20 meteors × 4 points,
+/// `trailPosition` running 0,1,2,3,0,1,2,3…), and `maxcount` budgets POINTS — so
+/// the real particle count is `maxcount / (length + 1)`. Reproducing that needs a
+/// per-particle position history this renderer does not have yet.
+///
+/// Kept because it is the authored input that work needs; today the executor only
+/// checks for non-nil, to orient the sprite along its velocity.
+public struct WPEParticleTrailRenderer: Equatable, Sendable {
+    public let length: Double
+    public let maxLength: Double
+
+    public init(length: Double, maxLength: Double) {
+        self.length = length
+        self.maxLength = maxLength
     }
 }
 
@@ -358,7 +401,15 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// NOT instanced quads: stacking the quads (all knots spawn at one point with
     /// no spread, relying on the rope to spread them along the control-point path)
     /// piled into an additive white blob (scene 3351072238).
+    /// Keyframed `instanceoverride.alpha`, applied per frame by the system
+    /// (NOT baked into `alphaMin/alphaMax` — see `applyingInstanceOverride`).
+    public let overrideAlphaAnimation: WPESceneAnimatedValue?
     public let isRope: Bool
+    /// `spritetrail` / `ropetrail`: today this only orients the quad along the
+    /// particle's velocity instead of its rotation — the authored trail itself is
+    /// not reproduced (see `WPEParticleTrailRenderer`). Distinct from `isRope`,
+    /// which threads ONE ribbon through the whole particle chain.
+    public let trailRenderer: WPEParticleTrailRenderer?
     public let maxCount: Int
     public let rate: Double
     /// Emitter `instantaneous` count: particles spawned in a one-time burst
@@ -465,7 +516,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         childRelativePaths: [String] = [],
         childReferences: [WPEParticleChildReference]? = nil,
         rendersSprite: Bool = true,
+        overrideAlphaAnimation: WPESceneAnimatedValue? = nil,
         isRope: Bool = false,
+        trailRenderer: WPEParticleTrailRenderer? = nil,
         maxCount: Int,
         rate: Double,
         instantaneousCount: Int = 0,
@@ -518,7 +571,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             WPEParticleChildReference(relativePath: $0)
         }
         self.rendersSprite = rendersSprite
+        self.overrideAlphaAnimation = overrideAlphaAnimation
         self.isRope = isRope
+        self.trailRenderer = trailRenderer
         self.maxCount = maxCount
         self.rate = rate
         self.instantaneousCount = max(0, instantaneousCount)
@@ -587,7 +642,13 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         let lifetimeScale = max(0.0001, instanceOverride.lifetime ?? 1)
         let sizeScale = max(0, instanceOverride.size ?? 1)
         let speedScale = instanceOverride.speed ?? 1
-        let alphaScale = max(0, instanceOverride.alpha ?? 1)
+        // A KEYFRAMED override alpha must not be baked: `alpha` is only its static
+        // seed. Leave the spawn alpha untouched and let the system apply the track
+        // per frame (3448877775's star field ramps 0.01 → 1.0 across a 90s loop;
+        // baking the seed pinned it at full brightness).
+        let alphaScale = instanceOverride.alphaAnimation != nil
+            ? 1
+            : max(0, instanceOverride.alpha ?? 1)
         let scaledMaxCount: Int
         if countScale == 0 || maxCount == 0 {
             scaledMaxCount = 0
@@ -622,7 +683,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             materialRelativePath: materialRelativePath,
             childReferences: childReferences,
             rendersSprite: rendersSprite,
+            overrideAlphaAnimation: instanceOverride.alphaAnimation,
             isRope: isRope,
+            trailRenderer: trailRenderer,
             maxCount: scaledMaxCount,
             rate: rate * rateScale,
             instantaneousCount: scaledInstantaneous,
@@ -686,6 +749,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             childReferences: childReferences,
             rendersSprite: rendersSprite,
             isRope: isRope,
+            trailRenderer: trailRenderer,
             maxCount: maxCount,
             rate: rate,
             instantaneousCount: instantaneousCount,
@@ -790,9 +854,32 @@ public enum WPEParticleDefinitionParser {
         // array marks a simulation-only spawner (renders nothing itself).
         let rendererEntries = json["renderer"] as? [[String: Any]]
         let rendersSprite = rendererEntries.map { !$0.isEmpty } ?? true
-        let isRope = rendererEntries?.contains {
-            ($0["name"] as? String)?.lowercased() == "rope"
-        } ?? false
+        // `rope` = ONE ribbon threaded through the whole particle chain (our
+        // `buildRopeGeometry`). `ropetrail`/`spritetrail` are NOT that: RenderDoc
+        // on 3448877775 shows each particle carrying its OWN position history —
+        // `TEXCOORD1.w` (trailPosition) runs 0,1,2,3,0,1,2,3… i.e. 80 vertices =
+        // 20 meteors × 4 points, and each group's positions form one moving
+        // particle's path (386→420→646→886→1141). `length: 3` is the SEGMENT
+        // COUNT (3 segments = 4 points).
+        //
+        // So `ropetrail` must NOT take the rope path: threading one ribbon through
+        // unrelated particles — the emitter is `boxrandom` over a 360×360 box —
+        // draws a random zigzag across the sky. Until per-particle trail history
+        // exists, it stays a sprite (see `trailRenderer`).
+        let rendererNames = (rendererEntries ?? []).compactMap {
+            ($0["name"] as? String)?.lowercased()
+        }
+        let isRope = rendererNames.contains("rope")
+        let trailEntry = rendererEntries?.first {
+            guard let n = ($0["name"] as? String)?.lowercased() else { return false }
+            return n.hasSuffix("trail") && !isRope
+        }
+        let parsedTrail: WPEParticleTrailRenderer? = trailEntry.map {
+            WPEParticleTrailRenderer(
+                length: WPEValueParser.double($0["length"]) ?? 0,
+                maxLength: WPEValueParser.double($0["maxlength"]) ?? 0
+            )
+        }
         let maxCount = (json["maxcount"] as? Int)
             ?? (json["maxcount"] as? Double).map { Int($0) }
             ?? 0
@@ -993,13 +1080,30 @@ public enum WPEParticleDefinitionParser {
                         endValue: WPEValueParser.double(entry["endvalue"]) ?? 1
                     )
                 case "oscillatealpha":
-                    let frequency = WPEValueParser.double(entry["frequency"])
-                        ?? WPEValueParser.double(entry["frequencymin"]) ?? 0
-                    let scale = WPEValueParser.double(entry["scale"])
-                        ?? WPEValueParser.double(entry["scalemin"]) ?? 0
-                    let phase = WPEValueParser.double(entry["phase"])
-                        ?? WPEValueParser.double(entry["phasemin"]) ?? 0
-                    oscillateAlpha = WPEParticleOscillateAlpha(frequency: frequency, scale: scale, phase: phase)
+                    // WPE `FrequencyValue` engine defaults: frequency 0…10,
+                    // scale 0…1, phase 0…2π. An absent bound takes the default,
+                    // NOT the other bound — Stars.json authors only
+                    // `frequencymax`/`scalemin` and relies on 0 and 1.
+                    let freqMin = WPEValueParser.double(entry["frequencymin"])
+                        ?? WPEValueParser.double(entry["frequency"]) ?? 0
+                    var freqMax = WPEValueParser.double(entry["frequencymax"])
+                        ?? WPEValueParser.double(entry["frequency"]) ?? 10
+                    // Reference: `if (frequencymax == 0) frequencymax = frequencymin`.
+                    if freqMax == 0 { freqMax = freqMin }
+                    let scaleMin = WPEValueParser.double(entry["scalemin"])
+                        ?? WPEValueParser.double(entry["scale"]) ?? 0
+                    let scaleMax = WPEValueParser.double(entry["scalemax"]) ?? 1
+                    let phaseMin = WPEValueParser.double(entry["phasemin"])
+                        ?? WPEValueParser.double(entry["phase"]) ?? 0
+                    let phaseMax = WPEValueParser.double(entry["phasemax"]) ?? 2 * .pi
+                    oscillateAlpha = WPEParticleOscillateAlpha(
+                        frequencyMin: freqMin,
+                        frequencyMax: freqMax,
+                        scaleMin: scaleMin,
+                        scaleMax: scaleMax,
+                        phaseMin: phaseMin,
+                        phaseMax: phaseMax
+                    )
                 case "sizechange":
                     sizeChange = WPEParticleSizeChange(
                         startTime: WPEValueParser.double(entry["starttime"]) ?? 0,
@@ -1073,6 +1177,7 @@ public enum WPEParticleDefinitionParser {
             childReferences: childReferences,
             rendersSprite: rendersSprite,
             isRope: isRope,
+            trailRenderer: parsedTrail,
             maxCount: max(0, maxCount),
             rate: max(0, rate),
             instantaneousCount: instantaneousCount,

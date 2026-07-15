@@ -105,6 +105,9 @@ struct WPESceneDetailView: View {
         case .idle:
             fallbackBackground
             LiquidGlassSpinner()
+        case .notRendering:
+            // Poster only: nothing is loading, so a spinner would spin forever.
+            fallbackBackground
         case .loading(let progress):
             fallbackBackground
             LiquidGlassSpinner(progressText: progress)
@@ -627,7 +630,7 @@ struct WPESceneDetailView: View {
     }
 
     private func derivedState() -> SceneRenderState {
-        guard let session else { return .error(.unsupportedType) }
+        guard let session else { return .notRendering }
         if let error = session.loadError {
             return .error(mapToFallbackReason(error))
         }
@@ -685,10 +688,11 @@ struct WPESceneDetailView: View {
 
     private var stateKey: Int {
         switch state {
-        case .idle:    return 0
-        case .loading: return 1
-        case .ready:   return 2
-        case .error:   return 3
+        case .idle:         return 0
+        case .loading:      return 1
+        case .ready:        return 2
+        case .error:        return 3
+        case .notRendering: return 4
         }
     }
 
@@ -696,6 +700,8 @@ struct WPESceneDetailView: View {
         switch state {
         case .idle:
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer accessibility state.")
+        case .notRendering:
+            return String(localized: "Wallpaper rendering is off", defaultValue: "Wallpaper rendering is off", comment: "Scene renderer accessibility state shown when the menu-bar master switch is off.")
         case .loading:
             return String(localized: "Loading scene assets", defaultValue: "Loading scene assets", comment: "Scene renderer accessibility state.")
         case .ready:
@@ -827,6 +833,12 @@ private struct DiagnosticLogSheet: View {
 
 enum SceneRenderState: Equatable {
     case idle
+    /// No live session: the menu-bar master switch tears sessions down rather
+    /// than suspending them. Says nothing about the scene itself — which is why
+    /// this is NOT an error state (a missing session used to report
+    /// `.unsupportedType`, i.e. "Scene format not supported", for a scene the
+    /// renderer supports perfectly well).
+    case notRendering
     case loading(progress: String?)
     /// Scene loaded and presenting. The live `MTKView` drives the desktop
     /// wallpaper; the detail card reuses the renderer's current frame as the

@@ -115,6 +115,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
+    public let colorAnimation: WPESceneAnimatedValue?
     public let brightness: Double
     /// Normalized perspective-quad corners (`point0..3`) for a `shape: "quad"`
     /// DIRECTDRAW effect layer. Non-nil routes the pass through the 4-corner
@@ -131,6 +132,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
+        colorAnimation: WPESceneAnimatedValue? = nil,
         brightness: Double,
         shapePoints: [SIMD2<Double>]? = nil
     ) {
@@ -143,6 +145,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation
         self.color = color
+        self.colorAnimation = colorAnimation
         self.brightness = brightness
         self.shapePoints = shapePoints
     }
@@ -157,10 +160,19 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
             puppetMeshCenter: puppetMeshCenter,
             alpha: alphaAnimation?.scalar(at: time) ?? alpha,
             alphaAnimation: alphaAnimation,
-            color: color,
+            color: Self.resolvedColor(colorAnimation, at: time) ?? color,
+            colorAnimation: colorAnimation,
             brightness: brightness,
             shapePoints: shapePoints
         )
+    }
+
+    private static func resolvedColor(
+        _ animation: WPESceneAnimatedValue?,
+        at time: Double
+    ) -> SIMD3<Double>? {
+        guard let values = animation?.vector(at: time), values.count >= 3 else { return nil }
+        return SIMD3<Double>(values[0], values[1], values[2])
     }
 
     public static let identity = WPERenderLayerGeometry(
@@ -291,6 +303,13 @@ public enum WPERenderPassPhase: Equatable, Sendable {
     public static let sceneCopyCommandFile = "materials/util/copy.json"
 }
 
+/// WPE's reserved render-target aliases. `_rt_FullFrameBuffer` is "the scene as
+/// rendered so far" — what `genericimage4.frag` binds to `g_Texture4` under
+/// `#if BLENDMODE` to blend a layer against its destination.
+public enum WPESceneAliasName {
+    public static let fullFrameBuffer = "_rt_FullFrameBuffer"
+}
+
 public enum WPETextureReference: Equatable, Sendable {
     case image(String)
     case asset(String)
@@ -305,7 +324,7 @@ public enum WPETextureReference: Equatable, Sendable {
     /// between the two copies causes PiP / shine-white-out regressions).
     public static func isSceneAliasName(_ name: String) -> Bool {
         switch name {
-        case "_rt_FullFrameBuffer",
+        case WPESceneAliasName.fullFrameBuffer,
              "_rt_HalfFrameBuffer",
              "_rt_QuarterFrameBuffer",
              "_rt_imageLayerComposite":

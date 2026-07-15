@@ -35,6 +35,111 @@ struct WPEComposeLayerUniforms {
     float4 flags; // x = CLEARALPHA
 };
 
+// ---------------------------------------------------------------------------
+// WPE `common_blending.h` ApplyBlending — MSL port.
+//
+// Integers match Wallpaper Engine's authoritative `#if BLENDMODE == N` chain
+// (NOT Photoshop ordering); this mirrors the GLSL port the transpiler injects
+// for workshop shaders (WPERenderPipelineBuilder "common_blending.h"), kept in
+// lockstep with it. Only reachable for modes a fixed-function Metal blend
+// descriptor cannot express — those still take the cheap blend-state path.
+// ---------------------------------------------------------------------------
+
+static inline float wpe_s_colorBurn(float b, float s)   { return (s == 0.0) ? 0.0 : max(1.0 - (1.0 - b) / s, 0.0); }
+static inline float wpe_s_colorDodge(float b, float s)  { return (s == 1.0) ? 1.0 : min(b / (1.0 - s), 1.0); }
+static inline float wpe_s_overlay(float b, float s)     { return b < 0.5 ? (2.0 * b * s) : (1.0 - 2.0 * (1.0 - b) * (1.0 - s)); }
+static inline float wpe_s_softLight(float b, float s)   { return s < 0.5 ? (2.0 * b * s + b * b * (1.0 - 2.0 * s)) : (sqrt(b) * (2.0 * s - 1.0) + 2.0 * b * (1.0 - s)); }
+static inline float wpe_s_linearLight(float b, float s) { return s < 0.5 ? max(b + 2.0 * s - 1.0, 0.0) : (b + 2.0 * (s - 0.5)); }
+static inline float wpe_s_vividLight(float b, float s)  { return s < 0.5 ? wpe_s_colorBurn(b, 2.0 * s) : wpe_s_colorDodge(b, 2.0 * (s - 0.5)); }
+static inline float wpe_s_pinLight(float b, float s)    { return s < 0.5 ? min(b, 2.0 * s) : max(b, 2.0 * (s - 0.5)); }
+static inline float wpe_s_hardMix(float b, float s)     { return wpe_s_vividLight(b, s) < 0.5 ? 0.0 : 1.0; }
+static inline float wpe_s_reflect(float b, float s)     { return (s == 1.0) ? 1.0 : min(b * b / (1.0 - s), 1.0); }
+
+static inline float3 wpe_map3(float (*fn)(float, float), float3 b, float3 s) {
+    return float3(fn(b.r, s.r), fn(b.g, s.g), fn(b.b, s.b));
+}
+
+static inline float3 wpe_RGBToHSL(float3 color) {
+    float fmin = min(min(color.r, color.g), color.b);
+    float fmax = max(max(color.r, color.g), color.b);
+    float delta = fmax - fmin;
+    float3 hsl = float3(0.0, 0.0, (fmax + fmin) * 0.5);
+    if (delta != 0.0) {
+        hsl.y = (hsl.z < 0.5) ? (delta / (fmax + fmin)) : (delta / (2.0 - fmax - fmin));
+        float dR = (((fmax - color.r) / 6.0) + (delta * 0.5)) / delta;
+        float dG = (((fmax - color.g) / 6.0) + (delta * 0.5)) / delta;
+        float dB = (((fmax - color.b) / 6.0) + (delta * 0.5)) / delta;
+        if (color.r == fmax)      { hsl.x = dB - dG; }
+        else if (color.g == fmax) { hsl.x = (1.0 / 3.0) + dR - dB; }
+        else                      { hsl.x = (2.0 / 3.0) + dG - dR; }
+        if (hsl.x < 0.0)      { hsl.x += 1.0; }
+        else if (hsl.x > 1.0) { hsl.x -= 1.0; }
+    }
+    return hsl;
+}
+
+static inline float wpe_hueToRGB(float f1, float f2, float hue) {
+    if (hue < 0.0)      { hue += 1.0; }
+    else if (hue > 1.0) { hue -= 1.0; }
+    if ((6.0 * hue) < 1.0) { return f1 + (f2 - f1) * 6.0 * hue; }
+    if ((2.0 * hue) < 1.0) { return f2; }
+    if ((3.0 * hue) < 2.0) { return f1 + (f2 - f1) * ((2.0 / 3.0) - hue) * 6.0; }
+    return f1;
+}
+
+static inline float3 wpe_HSLToRGB(float3 hsl) {
+    if (hsl.y == 0.0) { return float3(hsl.z); }
+    float f2 = (hsl.z < 0.5) ? (hsl.z * (1.0 + hsl.y)) : ((hsl.z + hsl.y) - (hsl.y * hsl.z));
+    float f1 = 2.0 * hsl.z - f2;
+    return float3(
+        wpe_hueToRGB(f1, f2, hsl.x + (1.0 / 3.0)),
+        wpe_hueToRGB(f1, f2, hsl.x),
+        wpe_hueToRGB(f1, f2, hsl.x - (1.0 / 3.0))
+    );
+}
+
+static inline float3 wpe_ApplyBlending(int blendMode, float3 A, float3 B, float opacity) {
+    // Modes WPE applies without the opacity mix.
+    if (blendMode == 5)  { return min(A, B); }        // Darker Color
+    if (blendMode == 10) { return max(A, B); }        // Lighter Color
+    if (blendMode == 31) { return A + B * opacity; }  // imageblending additive
+
+    float3 r;
+    switch (blendMode) {
+    case 1:  r = min(A, B); break;                                          // Darken
+    case 2:  r = A * B; break;                                              // Multiply
+    case 3:  r = wpe_map3(wpe_s_colorBurn, A, B); break;                    // Color Burn
+    case 4:
+    case 20: r = max(A + B - float3(1.0), float3(0.0)); break;              // Subtract
+    case 6:  r = max(A, B); break;                                          // Lighten
+    case 7:  r = float3(1.0) - (float3(1.0) - A) * (float3(1.0) - B); break; // Screen
+    case 8:  r = wpe_map3(wpe_s_colorDodge, A, B); break;                   // Color Dodge
+    case 9:  r = min(A + B, float3(1.0)); break;                            // Add
+    case 11: r = wpe_map3(wpe_s_overlay, A, B); break;                      // Overlay
+    case 12: r = wpe_map3(wpe_s_softLight, A, B); break;                    // Soft Light
+    case 13: r = wpe_map3(wpe_s_overlay, B, A); break;                      // Hard Light
+    case 14: r = wpe_map3(wpe_s_vividLight, A, B); break;                   // Vivid Light
+    case 15: r = wpe_map3(wpe_s_linearLight, A, B); break;                  // Linear Light
+    case 16: r = wpe_map3(wpe_s_pinLight, A, B); break;                     // Pin Light
+    case 17: r = wpe_map3(wpe_s_hardMix, A, B); break;                      // Hard Mix
+    case 18: r = abs(A - B); break;                                         // Difference
+    case 19: r = A + B - 2.0 * A * B; break;                                // Exclusion
+    case 21: r = wpe_map3(wpe_s_reflect, A, B); break;                      // Reflect
+    case 22: r = wpe_map3(wpe_s_reflect, B, A); break;                      // Glow
+    case 23: r = min(A, B) - max(A, B) + float3(1.0); break;                // Phoenix
+    case 24: r = (A + B) * 0.5; break;                                      // Average
+    case 25: r = float3(1.0) - abs(float3(1.0) - A - B); break;             // Negation
+    case 26: r = wpe_HSLToRGB(float3(wpe_RGBToHSL(B).r, wpe_RGBToHSL(A).g, wpe_RGBToHSL(A).b)); break; // Hue
+    case 27: r = wpe_HSLToRGB(float3(wpe_RGBToHSL(A).r, wpe_RGBToHSL(B).g, wpe_RGBToHSL(A).b)); break; // Saturation
+    case 28: { float3 bh = wpe_RGBToHSL(B); r = wpe_HSLToRGB(float3(bh.r, bh.g, wpe_RGBToHSL(A).b)); } break; // Color
+    case 29: { float3 ah = wpe_RGBToHSL(A); r = wpe_HSLToRGB(float3(ah.r, ah.g, wpe_RGBToHSL(B).b)); } break; // Luminosity
+    case 30: r = float3(max(A.x, max(A.y, A.z))) * B; break;                // Tint
+    case 32: r = A + A * B; break;
+    default: r = B; break;                                                  // Normal
+    }
+    return mix(A, r, opacity);
+}
+
 vertex WPEVertexOut wpe_fullscreen_vertex(uint vertexID [[vertex_id]]) {
     float2 positions[4] = {
         float2(-1.0, -1.0),
@@ -451,6 +556,42 @@ fragment half4 wpe_util_copy_fragment(
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     return texture0.sample(linearSampler, in.uv);
+}
+
+struct WPEBlendCompositeUniforms {
+    int blendMode;
+};
+
+// Composites a layer whose WPE blend mode is a FUNCTION OF THE DESTINATION
+// (Overlay, Soft Light, Color Burn, …) and therefore cannot be expressed as a
+// Metal blend descriptor. Mirrors WPE's own structure, RenderDoc-confirmed on
+// 3448877775 pass 41: the layer is drawn into its own composite, then a quad
+// samples that plus `_rt_FullFrameBuffer` (bound at slot 4 = `g_Texture4`,
+// which `genericimage4.frag` only declares under `#if BLENDMODE`) and runs
+// ApplyBlending against the scene-so-far.
+//
+// Screen UV comes from the snapshot's own dimensions rather than a uniform:
+// it is always allocated at scene size, which is the space `[[position]]` is in.
+fragment half4 wpe_blend_composite_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture4 [[texture(4)]],
+    constant WPEBlendCompositeUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 layer = float4(texture0.sample(linearSampler, in.uv));
+    // Layer composites are premultiplied; ApplyBlending's B is straight colour.
+    float3 straight = layer.a > 0.001 ? saturate(layer.rgb / layer.a) : layer.rgb;
+
+    float2 sceneSize = float2(texture4.get_width(), texture4.get_height());
+    float2 screenUV = in.position.xy / max(sceneSize, float2(1.0));
+    float3 scene = float3(texture4.sample(linearSampler, screenUV).rgb);
+
+    float3 blended = wpe_ApplyBlending(uniforms.blendMode, scene, straight, layer.a);
+    // Premultiplied out + the graph's `premultiplied` state (src + dst*(1-src.a))
+    // reproduces WPE's ApplyBlending→SRC_ALPHA/INV_SRC_ALPHA exactly, including
+    // its alpha-squared weighting at layer alpha < 1.
+    return half4(float4(blended * layer.a, layer.a));
 }
 
 // WPE `composelayer.frag` parity: `passthrough:true` compose/project/fullscreen
@@ -883,6 +1024,7 @@ struct WPEParticleInstance {
     float4 positionAndSize;   // x, y, signed sprite X scale, size in pixels
     float4 color;             // rgb 0..1, a = current alpha
     float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z = spriteFrameIndex, w = signed sprite Y scale
+    float4 velocity;          // xy = scene px/s (TRAILRENDERER only), zw unused
 };
 
 struct WPEParticleVertexOut {
@@ -903,7 +1045,15 @@ struct WPEParticleVertexOut {
 
 struct WPEParticleProjection {
     float4 sceneSize;         // x = width, y = height (pixels)
-    float4 padding;           // reserved for future world transform
+    // xy = camera-parallax pixel offset for this system's depth.
+    // z  = WPE `textureRatio` (sprite aspect h/w; frame aspect for a sheet).
+    // w  unused.
+    float4 padding;
+    // WPE `g_RenderVar0` for TRAILRENDERER (common_particles.h
+    // ComputeParticleTrailTangents): x = length multiplier on the particle's
+    // speed, y = max trail length, z = min trail length. w > 0.5 enables the
+    // trail path at all.
+    float4 trail;
 };
 
 // Sprite-sheet slice + format hint. `grid.w == 1` means the atlas is an
@@ -940,6 +1090,10 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
         instance.rotationAndLife.w < 0.0 ? -1.0 : 1.0
     );
     corner *= spriteSign;
+    // WPE `ComputeParticlePosition`: the `up` axis carries the sprite aspect, so
+    // the quad matches the texture instead of always being square.
+    float textureRatio = projection.padding.z > 0.0 ? projection.padding.z : 1.0;
+    corner.y *= textureRatio;
     // Spin the quad in screen space around its center. Z is the only
     // rotation axis we honour for 2D sprite particles; X/Y would need
     // a perspective particle pipeline (flags & 4 in the WPE JSON) that
@@ -959,6 +1113,31 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     );
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
+
+    // `spritetrail` / `ropetrail`: orient the quad along the particle's VELOCITY
+    // rather than its rotation — the tangent half of common_particles.h's
+    // ComputeParticleTrailTangents. The eye sits at -Z for our 2D ortho scenes,
+    // so `cross(eyeDir, v)` reduces to the in-plane perpendicular (v.y, -v.x).
+    //
+    // The `stretch` term is deliberately fed 1 (see the executor): WPE's real
+    // trail is a per-particle POSITION HISTORY, not a speed-stretched quad, and
+    // guessing a stretch here drew a screen-crossing "laser". Orientation is the
+    // part that is grounded, so that is all this does.
+    if (projection.trail.w > 0.5) {
+        float2 v = instance.velocity.xy;
+        float speed = length(v);
+        if (speed > 1e-4) {
+            float2 dir = v / speed;
+            float2 right = float2(dir.y, -dir.x);
+            float stretch = max(projection.trail.z, min(speed * projection.trail.x, projection.trail.y));
+            float size = instance.positionAndSize.w;
+            // WPE: `size*right*(u-.5) - size*up*(v-.5)*ratio`, where `up` already
+            // carries the stretch — so `stretch` MULTIPLIES the sprite size, it is
+            // not an absolute length. corner.y already carries textureRatio.
+            float2 offsetPixels = right * (corner.x * size) + dir * (corner.y * size * stretch);
+            cornerNDC = offsetPixels * 2.0 / float2(halfWidth * 2.0, halfHeight * 2.0);
+        }
+    }
 
     // Sprite-sheet: walk two adjacent cells and let the fragment shader
     // cross-fade between them by `frameBlend`. The WPE shader contract

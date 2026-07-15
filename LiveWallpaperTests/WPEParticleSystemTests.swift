@@ -306,7 +306,7 @@ struct WPEParticleSystemTests {
             "operator": [
                 {"name": "alphafade", "fadeintime": 0.1, "fadeouttime": 0.9},
                 {"name": "alphachange", "starttime": 0, "endtime": 0.8, "startvalue": 1, "endvalue": 0},
-                {"name": "oscillatealpha", "frequency": 0.5, "scale": 0.6, "phasemin": 0.25},
+                {"name": "oscillatealpha", "frequencymin": 0.5, "frequencymax": 0.5, "scalemin": 0.6, "phasemin": 0.25},
                 {"name": "movement", "gravity": "0 -50 0", "drag": 0.5},
                 {"name": "angularmovement", "force": "0 0 3", "drag": 0.2}
             ]
@@ -327,13 +327,56 @@ struct WPEParticleSystemTests {
         #expect(alphaChange.startValue == 1)
         #expect(alphaChange.endValue == 0)
         let oscillateAlpha = try #require(def.oscillateAlpha)
-        #expect(oscillateAlpha.frequency == 0.5)
-        #expect(oscillateAlpha.scale == 0.6)
-        #expect(oscillateAlpha.phase == 0.25)
+        #expect(oscillateAlpha.frequencyMin == 0.5)
+        #expect(oscillateAlpha.frequencyMax == 0.5)
+        #expect(oscillateAlpha.scaleMin == 0.6)
+        #expect(oscillateAlpha.scaleMax == 1)
+        #expect(oscillateAlpha.phaseMin == 0.25)
         #expect(def.gravity.y == -50)
         #expect(def.drag == 0.5)
         #expect(def.angularForceZ == 3)
         #expect(def.angularDrag == 0.2)
+    }
+
+    /// `ropetrail` must NOT join the whole particle chain into one ribbon: its
+    /// particles spawn at random points (`boxrandom` over 360×360), so threading
+    /// them draws a random zigzag. RenderDoc on 3448877775 shows each meteor owns
+    /// a 4-point history (`TEXCOORD1.w` = 0,1,2,3,0,1,2,3…), which is a separate
+    /// feature — until it exists, only a literal `rope` takes the ribbon path.
+    @Test("Only a literal rope takes the ribbon path; ropetrail/spritetrail do not")
+    func trailRendererTaxonomy() throws {
+        func def(_ renderer: String, extra: String = "") throws -> WPEParticleDefinition {
+            let json = #"""
+            {
+                "maxcount": 100,
+                "material": "materials/m.json",
+                "initializer": [{"name": "lifetimerandom", "min": 4, "max": 4}],
+                "renderer": [{"name": "\#(renderer)"\#(extra)}]
+            }
+            """#
+            return try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        }
+
+        // Threading `ropetrail`'s independently-spawned particles into one ribbon
+        // drew a random zigzag across the sky — worse than the sprite fallback.
+        let ropetrail = try def("ropetrail", extra: #", "length": 3"#)
+        #expect(!ropetrail.isRope, "ropetrail must not join the whole chain")
+        #expect(ropetrail.trailRenderer?.length == 3)
+
+        let spritetrail = try def("spritetrail", extra: #", "length": 5, "maxlength": 40"#)
+        #expect(!spritetrail.isRope)
+        #expect(spritetrail.trailRenderer?.length == 5)
+        #expect(spritetrail.trailRenderer?.maxLength == 40)
+
+        // A literal `rope` IS the whole-chain ribbon (Trails 2 / trail_1.json).
+        let rope = try def("rope")
+        #expect(rope.isRope)
+        #expect(rope.trailRenderer == nil)
+
+        // A plain sprite gets neither.
+        let sprite = try def("sprite")
+        #expect(!sprite.isRope)
+        #expect(sprite.trailRenderer == nil)
     }
 
     @Test("alphachange interpolates over lifetime fractions")
@@ -347,12 +390,42 @@ struct WPEParticleSystemTests {
 
     @Test("oscillatealpha clamps factor to [0,1]")
     func oscillateAlphaClampsFactor() {
-        let oscillate = WPEParticleOscillateAlpha(frequency: 1, scale: 2, phase: 0)
+        let oscillate = WPEParticleOscillateAlpha(
+            frequencyMin: 1, frequencyMax: 1, scaleMin: 0, scaleMax: 2, phaseMin: 0, phaseMax: 0
+        )
         for age in stride(from: 0.0, through: 1.0, by: 0.05) {
-            let factor = oscillate.factor(age: age)
+            let factor = oscillate.factor(age: age, frequency: 1, phase: 0)
             #expect(factor >= 0)
             #expect(factor <= 1)
         }
+    }
+
+    /// Stars.json authors ONLY `frequencymax`/`scalemin`. Reading `frequency`
+    /// (a key WPE never emits — the corpus has 0 occurrences) and falling back to
+    /// `frequencymin` yielded frequency 0, whose guard returned a constant 1: the
+    /// star field stopped twinkling and read as dead static dots.
+    @Test("oscillatealpha honours a bare frequencymax and sweeps scalemin…scalemax")
+    func oscillateAlphaBareFrequencyMaxTwinkles() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "material": "materials/m.json",
+            "initializer": [{"name": "lifetimerandom", "min": 4, "max": 8}],
+            "operator": [{"name": "oscillatealpha", "frequencymax": 3, "scalemin": 0.2}]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        let osc = try #require(def.oscillateAlpha)
+        #expect(osc.frequencyMin == 0)
+        #expect(osc.frequencyMax == 3)
+        #expect(osc.scaleMin == 0.2)
+        #expect(osc.scaleMax == 1)
+
+        // WPE's GetScale: lerp((cos(w·t + phase)+1)/2, scaleMin, scaleMax), w = frequency.
+        // phase 0, t 0 -> cos 0 = 1 -> wave 1 -> scaleMax.
+        #expect(abs(osc.factor(age: 0, frequency: 3, phase: 0) - 1.0) < 0.0001)
+        // Half a period (w·t = π) -> wave 0 -> scaleMin, i.e. a real twinkle.
+        #expect(abs(osc.factor(age: .pi / 3, frequency: 3, phase: 0) - 0.2) < 0.0001)
     }
 
     @Test("Angular velocity advances rotationZ over time")
@@ -1556,10 +1629,12 @@ struct WPEParticleSystemTests {
             .bindMemory(to: WPEParticleInstance.self, capacity: 1)
         var minX = Float.greatestFiniteMagnitude
         var maxX = -Float.greatestFiniteMagnitude
-        // Sample over >1 full period (freq 1 → 1s). A transient sine sway stays
-        // bounded by ±scale forever; an integrated offset would widen each cycle.
+        // `frequency` IS the angular rate (WPE's GetMove cancels its 2π), so
+        // freq 1 → period 2π ≈ 6.28s, not 1s. Sample past one full period. A
+        // transient sine sway stays bounded by ±scale forever; an integrated
+        // offset would widen each cycle.
         system.tick(now: 0)
-        for step in 1...30 {
+        for step in 1...160 {
             system.tick(now: Double(step) * 0.05)
             let x = pointer[0].positionAndSize.x
             minX = min(minX, x)
@@ -1689,7 +1764,8 @@ struct WPEParticleSystemTests {
         var minX = Float.greatestFiniteMagnitude, maxX = -Float.greatestFiniteMagnitude
         var minY = Float.greatestFiniteMagnitude, maxY = -Float.greatestFiniteMagnitude
         system.tick(now: 0)
-        for step in 1...30 {
+        // freq 1 → period 2π ≈ 6.28s (the authored frequency IS the angular rate).
+        for step in 1...160 {
             system.tick(now: Double(step) * 0.05)
             let p = pointer[0].positionAndSize
             minX = min(minX, p.x); maxX = max(maxX, p.x)

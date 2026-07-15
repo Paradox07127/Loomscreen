@@ -287,6 +287,18 @@ extension WPEPreparedRenderPipeline {
         return WPEPreparedRenderPipeline(layers: result)
     }
 
+    /// The builtins whose `g_Color` IS the layer's object tint (the graph bakes it
+    /// from `object.color * object.brightness`). A workshop material may declare an
+    /// unrelated `g_Color` of its own — never overwrite those.
+    private static func consumesLayerColor(_ shader: String) -> Bool {
+        switch WPEBuiltinShaderName.normalized(shader) {
+        case WPEBuiltinShaderKind.solidLayer.rawValue, WPEBuiltinShaderKind.solidColor.rawValue:
+            return true
+        default:
+            return false
+        }
+    }
+
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms
@@ -321,6 +333,18 @@ extension WPEPreparedRenderPipeline {
                             $0.resolved(at: runtimeUniforms.time)
                         }
                         values.reserveCapacity(values.count + mergedExtraCount)
+                        // Solid-layer tints bake `g_Color` from the authored static
+                        // color at graph-build time, so a keyframed tint would freeze
+                        // on that seed (3448877775's 昼夜变化 stuck at its night-blue
+                        // `value` while WPE cycled the whole day/night gradient).
+                        // `colorVector(for:)` prefers uniformValues over the baked
+                        // constant — re-resolve into it.
+                        if geometry.colorAnimation != nil,
+                           pass.pass.constants["g_Color"] != nil,
+                           Self.consumesLayerColor(pass.pass.shader) {
+                            let tint = geometry.color * geometry.brightness
+                            values["g_Color"] = .vector([tint.x, tint.y, tint.z, geometry.alpha])
+                        }
                         for (key, value) in runtimeUniformValues {
                             values[key] = value
                         }
@@ -493,6 +517,7 @@ private extension WPERenderLayer {
             alpha: alpha,
             alphaAnimation: nil,
             color: g.color,
+            colorAnimation: g.colorAnimation,
             brightness: g.brightness,
             shapePoints: g.shapePoints
         )
@@ -511,6 +536,7 @@ private extension WPERenderLayer {
                 alpha: alpha,
                 alphaAnimation: nil,
                 color: gl.color,
+                colorAnimation: gl.colorAnimation,
                 brightness: gl.brightness,
                 shapePoints: gl.shapePoints
             )

@@ -36,6 +36,8 @@ enum WPEBuiltinShaderName {
             return "solidlayer"
         case "copy", "commands/copy", "util/copy":
             return "copy"
+        case "wpe_blend_composite":
+            return "wpe_blend_composite"
         case "compose", "util/compose", "composelayer", "util/composelayer":
             return "compose"
         case "genericparticle", "particle/genericparticle":
@@ -185,6 +187,9 @@ enum WPEBuiltinShaderKind: String, CaseIterable {
     case effectShimmer = "effect_shimmer"
     case genericParticle = "genericparticle"
     case effectShake = "effect_shake"
+    /// Synthesized by the render-graph builder (never authored in a scene) for
+    /// layers whose WPE blend mode reads the destination.
+    case blendComposite = "wpe_blend_composite"
 }
 
 extension WPEBuiltinShaderKind {

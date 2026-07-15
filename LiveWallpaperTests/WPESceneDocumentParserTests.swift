@@ -518,6 +518,163 @@ struct WPESceneDocumentParserTests {
         #expect(layer.blendMode == .additive)
     }
 
+    /// 3448877775's 昼夜变化: a full-screen `solidlayer` tint with WPE BLENDMODE 11
+    /// (Overlay). Overlay reads the destination, so it has no fixed-function
+    /// equivalent — resolving it to `.normal` painted an opaque rectangle over the
+    /// whole wallpaper (frame went from 204,974 colours to exactly 1).
+    @Test("Destination-reading colorBlendMode routes to the programmable path, not opaque normal")
+    func imageOverlayBlendModeUsesProgrammablePath() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "1478",
+                "name": "昼夜变化",
+                "type": "image",
+                "image": "models/util/solidlayer.json",
+                "color": "0.28627 0.32157 0.51765",
+                "colorBlendMode": 11
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.colorBlendMode == 11)
+        #expect(layer.usesProgrammableBlend)
+    }
+
+    @Test("Fixed-function colorBlendModes stay on the cheap blend-state path")
+    func imageFixedFunctionBlendModesStayFixedFunction() throws {
+        for (raw, expected) in [(0, WPESceneBlendMode.normal), (2, .multiply), (7, .screen), (9, .additive), (31, .additive)] {
+            let payload: [String: Any] = [
+                "camera": ["center": "0 0 0"],
+                "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+                "objects": [[
+                    "id": "x", "name": "x", "type": "image",
+                    "image": "models/x.json", "colorBlendMode": raw
+                ]]
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let layer = try #require(try WPESceneDocumentParser.parse(data: data).imageObjects.first)
+            #expect(layer.blendMode == expected, "colorBlendMode \(raw)")
+            #expect(!layer.usesProgrammableBlend, "colorBlendMode \(raw) must not pay for a scene snapshot")
+        }
+    }
+
+    /// The same layer authors `color` as `{animation, script, scriptproperties,
+    /// value}`. `value` is only the seed — reading it and dropping `animation`
+    /// froze the day/night gradient on its night-blue endpoint while WPE cycled.
+    /// 3448877775's star field ramps in via a KEYFRAMED `instanceoverride.alpha`
+    /// (0.01 → 1.0 across a 90s loop). Reading the static `value: 1.0` and baking
+    /// it into the spawn alpha pinned the stars at full brightness.
+    @Test("instanceoverride alpha keyframes survive parsing and are not baked")
+    func instanceOverrideAnimatedAlphaIsParsed() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "4424",
+                "name": "stars",
+                "particle": "particles/stars.json",
+                "instanceoverride": [
+                    "id": 4426,
+                    "count": 3.0,
+                    "alpha": [
+                        "value": 1.0,
+                        "animation": [
+                            "c0": [["frame": 0, "value": 0.01], ["frame": 1794, "value": 1.018]],
+                            "options": ["fps": 30, "length": 2700, "mode": "loop", "wraploop": true]
+                        ]
+                    ]
+                ]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let object = try #require(document.particleObjects.first { $0.id == "4424" })
+        let override = try #require(object.instanceOverride)
+        let animation = try #require(override.alphaAnimation, "override alpha keyframes must survive")
+        // t=0 → nearly invisible; 1794/30 = 59.8s → fully in.
+        #expect(abs((animation.scalar(at: 0) ?? -1) - 0.01) < 0.001)
+        #expect((animation.scalar(at: 1794.0 / 30.0) ?? 0) > 1.0)
+    }
+
+    /// 3448877775's meteor emitter is a bare transform host whose `origin` is a
+    /// keyframed sweep: parked off-screen for most of a 90s loop and back at
+    /// (0,0) for ~18s. Reading only the static `value` ("0 0 0") pinned it
+    /// on-screen forever, so the shooting stars fell permanently instead of in
+    /// periodic showers.
+    @Test("Transform-host origin keyframes are parsed, not collapsed to the static value seed")
+    func transformHostAnimatedOriginIsParsed() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "15705",
+                "name": "meteor emitter host",
+                "origin": [
+                    "value": "0 0 0",
+                    "animation": [
+                        "c0": [["frame": 0, "value": 2869.73], ["frame": 1503, "value": 0]],
+                        "c1": [["frame": 0, "value": 1791.55], ["frame": 1503, "value": 0]],
+                        "c2": [["frame": 0, "value": 0], ["frame": 1503, "value": 0]],
+                        "options": ["fps": 30, "length": 2700, "mode": "loop", "wraploop": true]
+                    ]
+                ]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let host = try #require(document.transformHostObjects.first { $0.id == "15705" })
+        let animation = try #require(host.originAnimation, "origin keyframes must survive parsing")
+        // Seeded from the authored static `value`.
+        #expect(host.origin == SIMD3<Double>(0, 0, 0))
+        // t=0 → parked off-screen; halfway (frame 1503 = 50.1s) → back at centre.
+        let start = try #require(animation.vector(at: 0))
+        #expect(abs(start[0] - 2869.73) < 0.01, "got \(start[0])")
+        let arrived = try #require(animation.vector(at: 1503.0 / 30.0))
+        #expect(abs(arrived[0]) < 1, "emitter must reach the origin, got \(arrived[0])")
+    }
+
+    @Test("Image color keyframes are parsed, not collapsed to the static value seed")
+    func imageAnimatedColorIsParsed() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "1478",
+                "name": "昼夜变化",
+                "type": "image",
+                "image": "models/util/solidlayer.json",
+                "color": [
+                    "value": "0.28627 0.32157 0.51765",
+                    "animation": [
+                        "c0": [["frame": 0, "value": 0.5], ["frame": 600, "value": 1.0]],
+                        "c1": [["frame": 0, "value": 0.5], ["frame": 600, "value": 1.0]],
+                        "c2": [["frame": 0, "value": 0.5], ["frame": 600, "value": 1.0]],
+                        "options": ["fps": 30, "length": 2700, "mode": "loop", "wraploop": true]
+                    ]
+                ]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let layer = try #require(try WPESceneDocumentParser.parse(data: data).imageObjects.first)
+
+        let animation = try #require(layer.colorAnimation, "color animation must survive parsing")
+        // Seeded from the authored `value` so an untick'd first frame matches WPE.
+        #expect(abs(layer.color.x - 0.28627) < 0.0001)
+        // 6s * 30fps = frame 180 of a 0->600 ramp: 0.5 + 0.3*(1.0-0.5).
+        let at6s = try #require(animation.vector(at: 6))
+        #expect(abs(at6s[0] - 0.65) < 0.01, "got \(at6s[0])")
+    }
+
     @Test("Image numeric colorBlendMode 7 maps to layer screen blend")
     func imageNumericColorBlendModeSevenMapsToScreenBlend() throws {
         let payload: [String: Any] = [

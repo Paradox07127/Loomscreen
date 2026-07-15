@@ -121,6 +121,12 @@ struct WPESolidUniforms {
     var color: SIMD4<Float>
 }
 
+/// Layout MUST match `WPEBlendCompositeUniforms` in `WPEMetalBuiltins.metal`.
+/// The raw WPE `common_blending.h` BLENDMODE index the composite runs.
+struct WPEBlendCompositeUniforms {
+    var blendMode: Int32
+}
+
 /// Layout MUST match `WPEComposeLayerUniforms` in `WPEMetalBuiltins.metal`.
 /// `flags.x` carries the WPE `CLEARALPHA` combo (1 = clear sampled alpha).
 struct WPEComposeLayerUniforms {
@@ -453,6 +459,9 @@ struct WPEShimmerUniforms {
 struct WPEParticleProjection {
     var sceneSize: SIMD4<Float>   // x = width, y = height (pixels)
     var padding: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
+    /// WPE `g_RenderVar0` for TRAILRENDERER: x = speed→length multiplier,
+    /// y = max length, z = min length, w > 0.5 = trail enabled.
+    var trail: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
 }
 
 /// Layout MUST match `WPESkewParams` in WPEMetalBuiltins.metal. Normalized

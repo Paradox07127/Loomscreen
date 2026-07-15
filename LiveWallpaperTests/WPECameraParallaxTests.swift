@@ -64,6 +64,31 @@ struct WPECameraParallaxTests {
         #expect(abs(doc.general.cameraParallax.amount - 0.5) < 1e-9)
     }
 
+    /// 3448877775 authors `cameraparallaxmouseinfluence: -0.3`. WPE multiplies the
+    /// sign straight into the parallax vector (WPShaderValueUpdater.cpp) and gates
+    /// only on `enable`, so a negative influence INVERTS the shift. Clamping it to
+    /// 0 froze the whole scene while positive-influence scenes worked.
+    @Test("Negative mouseinfluence inverts parallax instead of disabling it")
+    func negativeMouseInfluenceInvertsParallax() {
+        func smoothedTarget(influence: Double) -> SIMD2<Float> {
+            var smoother = WPECameraParallaxSmoother()
+            let settings = WPESceneCameraParallaxSettings(
+                enabled: true, amount: 0.5, delay: 0, mouseInfluence: influence
+            )
+            // First frame snaps to target (no previous timestamp), no smoothing.
+            return smoother.frame(
+                settings: settings,
+                pointerPosition: SIMD2<Double>(1, 1),
+                time: 0
+            ).smoothed
+        }
+        let positive = smoothedTarget(influence: 0.5)
+        let negative = smoothedTarget(influence: -0.5)
+        #expect(positive != SIMD2<Float>(0, 0), "sanity: positive influence parallaxes")
+        #expect(negative != SIMD2<Float>(0, 0), "negative influence must NOT be treated as off")
+        #expect(negative == -positive, "negative influence mirrors the shift")
+    }
+
     // MARK: - pixelOffset
 
     @Test("pixelOffset is zero for depth 0")

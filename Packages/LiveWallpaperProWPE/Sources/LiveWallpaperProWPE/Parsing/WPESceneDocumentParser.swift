@@ -291,6 +291,7 @@ public enum WPESceneDocumentParser {
             localOrigin: local.origin,
             localScale: local.scale,
             localAngles: local.angles,
+            originAnimation: WPEValueParser.animatedValue(dict["origin"]),
             originScript: dynamicTransformScript(in: dict["origin"], preserveStaticallyResolvable: false),
             scaleScript: dynamicTransformScript(in: dict["scale"], preserveStaticallyResolvable: true),
             anglesScript: dynamicTransformScript(in: dict["angles"], preserveStaticallyResolvable: true)
@@ -1162,7 +1163,8 @@ public enum WPESceneDocumentParser {
             size: parseDouble(unwrap("size")),
             speed: parseDouble(unwrap("speed")),
             alpha: parseDouble(unwrap("alpha")),
-            color: parseNormalizedParticleColor(unwrap("colorn")) ?? parseVector3(unwrap("color"))
+            color: parseNormalizedParticleColor(unwrap("colorn")) ?? parseVector3(unwrap("color")),
+            alphaAnimation: WPEValueParser.animatedValue(dict["alpha"])
         )
         return value.count == nil
             && value.rate == nil
@@ -1171,6 +1173,7 @@ public enum WPESceneDocumentParser {
             && value.speed == nil
             && value.alpha == nil
             && value.color == nil
+            && value.alphaAnimation == nil
             ? nil
             : value
     }
@@ -1407,15 +1410,17 @@ public enum WPESceneDocumentParser {
             syntheticShapeBase: isShapeQuad
         )
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: alphaFallback)
-        let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        let colorValue = parseAnimatedVector3(dict["color"], fallback: SIMD3<Double>(1, 1, 1))
         let brightness = parseDouble(dict["brightness"]) ?? 1.0
         // The perspective-quad corners a DIRECTDRAW effect draws through (lightshafts
         // `point0..3`). Also picks the additive scene composite WPE uses for these
         // beams (RenderDoc pass 65/66: SRC_ALPHA/ONE).
         let shapePoints = isShapeQuad ? shapeQuadPoints(in: effects) : nil
-        let blend = (isShapeQuad && shapePoints != nil)
+        let isShapeQuadBeam = isShapeQuad && shapePoints != nil
+        let blend = isShapeQuadBeam
             ? WPESceneBlendMode.additive
             : parseImageBlendMode(dict)
+        let colorBlendMode = isShapeQuadBeam ? 9 : parseColorBlendMode(dict)
         let alignment = WPESceneAlignment(rawWPEValue: dict["alignment"] as? String)
         let size: CGSize?
         if let vec = parseVector3(dict["size"]) {
@@ -1486,9 +1491,11 @@ public enum WPESceneDocumentParser {
             visible: visible,
             alpha: alphaValue.value,
             alphaAnimation: alphaValue.animation,
-            color: color,
+            color: colorValue.value,
+            colorAnimation: colorValue.animation,
             brightness: brightness,
             blendMode: blend,
+            colorBlendMode: colorBlendMode,
             alignment: alignment,
             size: size,
             dependencies: dependencies,
@@ -1556,21 +1563,48 @@ public enum WPESceneDocumentParser {
         }
     }
 
+    /// Raw `common_blending.h` BLENDMODE index (0 = normal). A `blendmode`
+    /// string, when present, wins and is re-expressed as its numeric equivalent
+    /// so the render graph only ever reasons about one representation.
+    static func parseColorBlendMode(_ dict: [String: Any]) -> Int {
+        if let rawBlend = dict["blendmode"] as? String {
+            switch WPESceneBlendMode(rawWPEValue: rawBlend) {
+            case .multiply: return 2
+            case .screen:   return 7
+            case .additive: return 9
+            // `translucent` has no BLENDMODE peer — it is a plain alpha-over
+            // that the fixed-function path already covers.
+            case .normal, .translucent: return 0
+            }
+        }
+        return parseInt(dict["colorBlendMode"] ?? dict["colorblendmode"]) ?? 0
+    }
+
+    /// The fixed-function approximation used for the layer's own draw. Modes
+    /// that need the destination resolve to `.normal` here and are routed
+    /// through the programmable composite by the render-graph builder, which
+    /// reads `colorBlendMode` — never assume this alone reproduces the blend.
     private static func parseImageBlendMode(_ dict: [String: Any]) -> WPESceneBlendMode {
         if let rawBlend = dict["blendmode"] as? String {
             return WPESceneBlendMode(rawWPEValue: rawBlend)
         }
+        return WPESceneBlendMode.fixedFunction(forWPEBlendMode: parseColorBlendMode(dict)) ?? .normal
+    }
 
-        switch parseInt(dict["colorBlendMode"] ?? dict["colorblendmode"]) {
-        case 2:
-            return .multiply
-        case 7:
-            return .screen
-        case 9, 31:
-            return .additive
-        default:
-            return .normal
+    private static func parseAnimatedVector3(
+        _ raw: Any?,
+        fallback: SIMD3<Double>
+    ) -> (value: SIMD3<Double>, animation: WPESceneAnimatedValue?) {
+        guard case .animated(let animated)? = WPEValueParser.shaderConstant(raw) else {
+            return (parseVector3(raw) ?? fallback, nil)
         }
+        // Seed from the authored static `value` (WPE's own preview value) so a
+        // frame rendered before the timeline ticks matches the editor.
+        let seed = animated.vectorFallback ?? animated.vector(at: 0)
+        guard let seed, seed.count >= 3 else {
+            return (fallback, animated)
+        }
+        return (SIMD3<Double>(seed[0], seed[1], seed[2]), animated)
     }
 
     private static func dynamicTransformScript(

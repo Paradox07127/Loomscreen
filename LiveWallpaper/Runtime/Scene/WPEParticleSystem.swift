@@ -9,6 +9,9 @@ struct WPEParticleInstance {
     var positionAndSize: SIMD4<Float>   // x, y in centered scene pixels ; z = signed sprite X scale; w = size
     var color: SIMD4<Float>             // rgb 0…1, a = current alpha (base × fade envelope)
     var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z = spriteFrameIndex; w = signed sprite Y scale
+    /// xy = render-space velocity (scene px/s). Only the TRAILRENDERER path
+    /// reads it — WPE gates the matching `a_TexCoordVec4C1` on THICKFORMAT.
+    var velocity: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
 }
 
 /// One ribbon-strip vertex for the rope renderer. Layout MUST match
@@ -350,6 +353,10 @@ final class WPEParticleSystem {
         var oscPosFrequency: Float
         var oscPosScale: Float
         var oscPosPhase: Float
+        /// Per-particle `oscillatealpha` draw (WPE randomizes both per particle,
+        /// which is what keeps a star field twinkling out of phase).
+        var oscAlphaFrequency: Float
+        var oscAlphaPhase: Float
     }
 
     init?(
@@ -381,7 +388,9 @@ final class WPEParticleSystem {
             staticFrame: 0,
             oscPosFrequency: 0,
             oscPosScale: 0,
-            oscPosPhase: 0
+            oscPosPhase: 0,
+            oscAlphaFrequency: 0,
+            oscAlphaPhase: 0
         ), count: cap)
         guard let buffer = device.makeBuffer(
             length: cap * MemoryLayout<WPEParticleInstance>.stride,
@@ -421,9 +430,16 @@ final class WPEParticleSystem {
         )
         self.gravity = sceneTransform.applyModelDirection(localGravity)
         if let osc = definition.oscillatePosition {
-            self.oscillatePositionMask = sceneTransform.applyModelDirection(SIMD3<Float>(
-                Float(osc.mask.x), Float(osc.mask.y), Float(osc.mask.z)
-            ))
+            // WPE's mask GATES an axis, it does not scale it
+            // (WPParticleParser.cpp: `if (mask[d] < 0.01) continue;` then the
+            // full-amplitude move). snowperspective authors "1 0.5 0" — scaling
+            // by 0.5 halved the vertical sway instead of simply enabling it.
+            let gate = SIMD3<Float>(
+                osc.mask.x < 0.01 ? 0 : 1,
+                osc.mask.y < 0.01 ? 0 : 1,
+                osc.mask.z < 0.01 ? 0 : 1
+            )
+            self.oscillatePositionMask = sceneTransform.applyModelDirection(gate)
         } else {
             self.oscillatePositionMask = .zero
         }
@@ -508,6 +524,21 @@ final class WPEParticleSystem {
             Float(uniform(low.x, high.x)),
             Float(uniform(low.y, high.y)),
             Float(uniform(low.z, high.z))
+        )
+    }
+
+    /// `colorrandom` is the ONE VecRandom that does NOT draw per channel: WPE
+    /// pulls a single `t` and lerps all three with it (WPParticleParser.cpp's
+    /// `Color()`), so the result always lands on the min→max LINE. Drawing per
+    /// channel lets each pick its own end — snowperspective
+    /// (min 255,255,255 → max 95,98,100) then produced red/green flecks instead
+    /// of WPE's single white→grey ramp.
+    private func lerpVector(_ low: SIMD3<Double>, _ high: SIMD3<Double>) -> SIMD3<Float> {
+        let t = uniform(0, 1)
+        return SIMD3<Float>(
+            Float(low.x + (high.x - low.x) * t),
+            Float(low.y + (high.y - low.y) * t),
+            Float(low.z + (high.z - low.z) * t)
         )
     }
 
@@ -598,8 +629,16 @@ final class WPEParticleSystem {
         if let alphaChange = definition.alphaChange {
             alpha *= Float(alphaChange.factor(lifetimeFraction: Double(lifetimeFraction)))
         }
+        if let overrideAlpha = definition.overrideAlphaAnimation,
+           let scale = overrideAlpha.scalar(at: systemElapsed) {
+            alpha *= Float(max(0, scale))
+        }
         if let oscillateAlpha = definition.oscillateAlpha {
-            alpha *= Float(oscillateAlpha.factor(age: Double(particle.age)))
+            alpha *= Float(oscillateAlpha.factor(
+                age: Double(particle.age),
+                frequency: Double(particle.oscAlphaFrequency),
+                phase: Double(particle.oscAlphaPhase)
+            ))
         }
         alpha = min(max(alpha, 0), 1)
         // `sizechange`: lifetime-fraction multiplier on the sprite quad.
@@ -625,7 +664,14 @@ final class WPEParticleSystem {
         // the stored position, so the particle sways without drifting).
         var drawPosition = particle.position
         if particle.oscPosScale != 0, particle.oscPosFrequency != 0 {
-            let sway = sin((particle.age + particle.oscPosPhase) * particle.oscPosFrequency * 2 * Float.pi)
+            // `frequency` IS the angular rate, and `phase` is in radians. WPE's
+            // GetMove computes `f = frequency/2π` then `w = 2π·f` — the two
+            // cancel, so w == frequency. Folding an extra 2π in ran the sway
+            // 6.28× too fast: its peak speed (A·w = 35·2π ≈ 220 px/s) overtook
+            // snowperspective's 50–90 px/s fall, so snow visibly flew back
+            // upward. At w = frequency the peak is ~35 px/s and the drift never
+            // reverses, matching Windows.
+            let sway = sin(particle.age * particle.oscPosFrequency + particle.oscPosPhase)
             drawPosition += oscillatePositionMask * (sway * particle.oscPosScale)
         }
         // Perspective (`flags & 4`): project draw position + size through a depth
@@ -738,7 +784,8 @@ final class WPEParticleSystem {
                     drawPosition.x, drawPosition.y, visualScaleSigns.x, spriteSize
                 ),
                 color: SIMD4<Float>(rgb.x, rgb.y, rgb.z, alpha),
-                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, visualScaleSigns.y)
+                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, visualScaleSigns.y),
+                velocity: SIMD4<Float>(particle.velocity.x, particle.velocity.y, 0, 0)
             )
             written += 1
         }
@@ -845,6 +892,10 @@ final class WPEParticleSystem {
     /// Integrate every alive particle and spawn new ones. Split from
     /// `tick(now:)` so `prewarm` can advance the simulator without
     /// touching the GPU buffer.
+    /// Seconds since this system's first tick. `instanceoverride.alpha` tracks run
+    /// on this system timeline (not per-particle age).
+    private var systemElapsed: Double = 0
+
     private func advance(now: Double) {
         defer { lastTickTime = now }
         if firstTickTime == nil { firstTickTime = now }
@@ -855,6 +906,7 @@ final class WPEParticleSystem {
             dt = 0
         }
         let elapsed = now - (firstTickTime ?? now)
+        systemElapsed = elapsed
         let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
         let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
         let angularForce = sceneTransform.visualAngularZ(localAngularZ: Float(definition.angularForceZ))
@@ -1109,7 +1161,7 @@ final class WPEParticleSystem {
         if blendMode == .additive {
             size = min(size, sceneTransform.sceneHeight)
         }
-        let rawColor = uniformVector(definition.colorMin, definition.colorMax)
+        let rawColor = lerpVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
         let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))
         let rotationVec = uniformVector(definition.rotationMin, definition.rotationMax)
@@ -1132,11 +1184,23 @@ final class WPEParticleSystem {
         if let osc = definition.oscillatePosition {
             oscPosFrequency = Float(uniform(osc.frequencyMin, osc.frequencyMax))
             oscPosScale = Float(uniform(osc.scaleMin, osc.scaleMax))
-            oscPosPhase = Float(uniform(osc.phaseMin, osc.phaseMax))
+            // WPE samples the phase over [phasemin, phasemax + 2π] so a preset
+            // authoring a narrow band (snowperspective: 0…1) still spreads its
+            // flakes around the full sine instead of starting them in lockstep.
+            oscPosPhase = Float(uniform(osc.phaseMin, osc.phaseMax + 2 * .pi))
         } else {
             oscPosFrequency = 0
             oscPosScale = 0
             oscPosPhase = 0
+        }
+        let oscAlphaFrequency: Float
+        let oscAlphaPhase: Float
+        if let osc = definition.oscillateAlpha {
+            oscAlphaFrequency = Float(uniform(osc.frequencyMin, osc.frequencyMax))
+            oscAlphaPhase = Float(uniform(osc.phaseMin, osc.phaseMax + 2 * .pi))
+        } else {
+            oscAlphaFrequency = 0
+            oscAlphaPhase = 0
         }
         // `.randomFrame`: lock onto one atlas cell for life so each shard
         // is a different *static* piece of the sheet (WPE shatter look).
@@ -1167,7 +1231,9 @@ final class WPEParticleSystem {
             staticFrame: staticFrame,
             oscPosFrequency: oscPosFrequency,
             oscPosScale: oscPosScale,
-            oscPosPhase: oscPosPhase
+            oscPosPhase: oscPosPhase,
+            oscAlphaFrequency: oscAlphaFrequency,
+            oscAlphaPhase: oscAlphaPhase
         )
         return true
     }

@@ -106,6 +106,11 @@ struct WPEMetalShaderDispatcher {
                 pass: pass, layer: layer, destination: destination, textures: textures,
                 frameState: frameState, encoder: encoder, depthPixelFormat: depthPixelFormat
             )
+        case .blendComposite:
+            try dispatchBlendComposite(
+                pass: pass, layer: layer, destination: destination, textures: textures,
+                frameState: frameState, encoder: encoder, depthPixelFormat: depthPixelFormat
+            )
         case .compose:
             try dispatchCompose(
                 pass: pass, layer: layer, destination: destination, textures: textures,
@@ -201,6 +206,77 @@ struct WPEMetalShaderDispatcher {
                 ),
                 cameraParallax: frameState.cameraParallax,
                 sourceTexture: destination.texture,
+                cameraUniforms: executor.objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
+            )
+            encoder.setVertexBytes(
+                &quadUniforms,
+                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                index: 1
+            )
+        }
+    }
+
+    /// Composites a destination-reading blend (Overlay et al) — see
+    /// `wpe_blend_composite_fragment`. Slot 4 carries the scene snapshot to
+    /// mirror WPE's `g_Texture4` binding.
+    private func dispatchBlendComposite(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat
+    ) throws {
+        let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
+        encoder.setRenderPipelineState(try executor.renderPipeline(
+            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
+            fragmentName: "wpe_blend_composite_fragment",
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+
+        let layerReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let layerTexture = try WPEMetalShaderInputs.resolve(
+            reference: layerReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        encoder.setFragmentTexture(layerTexture, index: 0)
+
+        guard let sceneReference = pass.textureBindings[4] ?? pass.pass.textures[4] else {
+            throw WPEMetalRenderExecutorError.missingTexture(layerReference)
+        }
+        let sceneTexture = try WPEMetalShaderInputs.resolve(
+            reference: sceneReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        encoder.setFragmentTexture(sceneTexture, index: 4)
+
+        var uniforms = WPEBlendCompositeUniforms(
+            blendMode: Int32(WPEMetalShaderInputs.floatScalar(
+                named: "g_BlendMode",
+                in: pass,
+                default: 0
+            ))
+        )
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEBlendCompositeUniforms>.stride, index: 0)
+
+        if usesObjectQuad {
+            var quadUniforms = executor.objectQuadUniforms(
+                for: layer,
+                sceneSize: executor.objectQuadSceneSize(
+                    for: pass,
+                    layer: layer,
+                    destination: destination,
+                    frameState: frameState
+                ),
+                cameraParallax: frameState.cameraParallax,
+                sourceTexture: layerTexture,
                 cameraUniforms: executor.objectQuadCameraUniforms(for: pass, layer: layer, frameState: frameState)
             )
             encoder.setVertexBytes(

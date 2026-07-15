@@ -36,6 +36,7 @@ struct WPEMetalShaderDispatcherTests {
             "effect_shimmer",
             "genericparticle",
             "effect_shake",
+            "wpe_blend_composite",
         ]
         #expect(Set(WPEBuiltinShaderKind.allCases.map(\.rawValue)) == expected)
         #expect(WPEBuiltinShaderKind.allCases.count == expected.count)

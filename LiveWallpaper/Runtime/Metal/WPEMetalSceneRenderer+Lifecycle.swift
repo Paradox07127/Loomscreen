@@ -314,10 +314,12 @@ extension WPEMetalSceneRenderer {
     /// qualify; pointer-only shaders are already "animated" (effects/workshop)
     /// and covered by `hasAnimatedShaderPasses`.
     private var pointerDrivenContent: Bool {
+        // `!= 0`, not `> 0`: a negative amount/influence is an INVERTED parallax
+        // (WPE multiplies the sign straight in), so it still needs the pointer.
         (mouseInteractionEnabled
             && cameraParallaxSettings.enabled
-            && cameraParallaxSettings.amount > 0
-            && cameraParallaxSettings.mouseInfluence > 0)
+            && cameraParallaxSettings.amount != 0
+            && cameraParallaxSettings.mouseInfluence != 0)
             || mtkView.clickCaptureEnabled
     }
 

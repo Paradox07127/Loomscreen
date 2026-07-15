@@ -76,6 +76,11 @@ public struct WPESceneTransformHostObject: Equatable, Sendable, Identifiable {
     public let localOrigin: SIMD3<Double>
     public let localScale: SIMD3<Double>
     public let localAngles: SIMD3<Double>
+    /// Keyframed `origin` (WPE authors emitter sweeps this way). `origin` above
+    /// holds only the authored static `value` seed — 3448877775's meteor emitter
+    /// parks off-screen and returns to (0,0) for ~18s of a 90s loop, which is
+    /// what makes its shooting stars periodic rather than permanent.
+    public let originAnimation: WPESceneAnimatedValue?
     public let originScript: WPESceneTransformScript?
     public let scaleScript: WPESceneTransformScript?
     public let anglesScript: WPESceneTransformScript?
@@ -90,6 +95,7 @@ public struct WPESceneTransformHostObject: Equatable, Sendable, Identifiable {
         localOrigin: SIMD3<Double>? = nil,
         localScale: SIMD3<Double>? = nil,
         localAngles: SIMD3<Double>? = nil,
+        originAnimation: WPESceneAnimatedValue? = nil,
         originScript: WPESceneTransformScript? = nil,
         scaleScript: WPESceneTransformScript? = nil,
         anglesScript: WPESceneTransformScript? = nil
@@ -103,6 +109,7 @@ public struct WPESceneTransformHostObject: Equatable, Sendable, Identifiable {
         self.localOrigin = localOrigin ?? origin
         self.localScale = localScale ?? scale
         self.localAngles = localAngles ?? angles
+        self.originAnimation = originAnimation
         self.originScript = originScript
         self.scaleScript = scaleScript
         self.anglesScript = anglesScript
@@ -522,6 +529,11 @@ public struct WPESceneParticleInstanceOverride: Equatable, Sendable {
     public let alpha: Double?
     /// Override color in the same 0...255 space as particle definitions.
     public let color: SIMD3<Double>?
+    /// Keyframed `alpha` override. WPE authors these as the usual four-key
+    /// `{animation, script, scriptproperties, value}` dict; `alpha` above is only
+    /// the static seed, so a scene that ramps its particles in over a loop
+    /// (3448877775's star field: 0.01 → 1.0) sat at full brightness without this.
+    public let alphaAnimation: WPESceneAnimatedValue?
 
     public init(
         count: Double? = nil,
@@ -530,7 +542,8 @@ public struct WPESceneParticleInstanceOverride: Equatable, Sendable {
         size: Double? = nil,
         speed: Double? = nil,
         alpha: Double? = nil,
-        color: SIMD3<Double>? = nil
+        color: SIMD3<Double>? = nil,
+        alphaAnimation: WPESceneAnimatedValue? = nil
     ) {
         self.count = count
         self.rate = rate
@@ -539,6 +552,7 @@ public struct WPESceneParticleInstanceOverride: Equatable, Sendable {
         self.speed = speed
         self.alpha = alpha
         self.color = color
+        self.alphaAnimation = alphaAnimation
     }
 }
 
@@ -710,8 +724,26 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
+    /// Keyframed `color` (WPE authors day/night tints as a c0/c1/c2 track set).
+    /// `color` holds the authored static `value`, which is only the seed — a
+    /// scene that animates the tint (3448877775's 昼夜变化) freezes on that seed
+    /// unless this drives it per frame.
+    public let colorAnimation: WPESceneAnimatedValue?
     public let brightness: Double
+    /// A blend that reads the destination, so it cannot ride a Metal blend
+    /// descriptor and must go through the programmable composite. `blendMode`
+    /// is `.normal` for these — drawing them with it paints an opaque rectangle
+    /// over the scene (3448877775's full-screen Overlay tint erased the whole
+    /// wallpaper this way).
+    public var usesProgrammableBlend: Bool {
+        WPESceneBlendMode.fixedFunction(forWPEBlendMode: colorBlendMode) == nil
+    }
     public let blendMode: WPESceneBlendMode
+    /// Raw WPE `common_blending.h` BLENDMODE index. `blendMode` above is only the
+    /// fixed-function-expressible approximation; modes outside that subset (11
+    /// Overlay, 12 Soft Light, …) read the destination and must run the
+    /// programmable `ApplyBlending` path keyed on this number.
+    public let colorBlendMode: Int
     public let alignment: WPESceneAlignment
     public let size: CGSize?
     public let dependencies: [String]
@@ -768,8 +800,10 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
+        colorAnimation: WPESceneAnimatedValue? = nil,
         brightness: Double,
         blendMode: WPESceneBlendMode,
+        colorBlendMode: Int = 0,
         alignment: WPESceneAlignment,
         size: CGSize?,
         dependencies: [String] = [],
@@ -802,8 +836,10 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation
         self.color = color
+        self.colorAnimation = colorAnimation
         self.brightness = brightness
         self.blendMode = blendMode
+        self.colorBlendMode = colorBlendMode
         self.alignment = alignment
         self.size = size
         self.dependencies = dependencies
@@ -1079,6 +1115,28 @@ public enum WPESceneBlendMode: String, Equatable, Sendable {
         case "multiply":    self = .multiply
         case "screen":      self = .screen
         default:            self = .normal
+        }
+    }
+
+    /// The subset of WPE's `common_blending.h` BLENDMODE enum that a Metal
+    /// fixed-function blend descriptor can express exactly. `nil` means the mode
+    /// is a *function of the destination* (Overlay, Soft Light, Color Burn, …)
+    /// and can only be reproduced by sampling the scene and running
+    /// `ApplyBlending` in the fragment shader, exactly as WPE itself does
+    /// (`genericimage4.frag` binds `_rt_FullFrameBuffer` to `g_Texture4` under
+    /// `#if BLENDMODE` — RenderDoc-confirmed on 3448877775 pass 41).
+    ///
+    /// Returning `.normal` for an unmapped mode is NOT a safe default: a
+    /// full-screen tint layer then paints opaque over the whole wallpaper.
+    public static func fixedFunction(forWPEBlendMode raw: Int) -> WPESceneBlendMode? {
+        switch raw {
+        case 0:     return .normal
+        case 2:     return .multiply
+        case 7:     return .screen
+        // 9 = Add `min(A+B,1)`; 31 = `A + B*opacity` — both are the premultiplied
+        // one/one add once the source carries its own alpha.
+        case 9, 31: return .additive
+        default:    return nil
         }
     }
 }
