@@ -23,11 +23,13 @@ struct WPEMSDFTextRenderE2ETests {
 
     /// Empty primary root so `shaders/font.frag` can only resolve through the
     /// app-bundled built-ins — exactly the zero-config user situation.
-    private func makeEmptyPrimaryResolver() throws -> WPEMultiRootResourceResolver {
+    /// The resolver keeps its primary root private, so the root comes back
+    /// alongside it for callers to `defer`-remove.
+    private func makeEmptyPrimaryResolver() throws -> (resolver: WPEMultiRootResourceResolver, root: URL) {
         let primaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("msdf-e2e-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: primaryRoot, withIntermediateDirectories: true)
-        return WPEMultiRootResourceResolver(primaryRootURL: primaryRoot, dependencyMounts: [])
+        return (WPEMultiRootResourceResolver(primaryRootURL: primaryRoot, dependencyMounts: []), primaryRoot)
     }
 
     private func makeTextObject(text: String = "Hi", origin: SIMD3<Double>) -> WPESceneTextObject {
@@ -101,7 +103,8 @@ struct WPEMSDFTextRenderE2ETests {
         .enabled(if: WPEBuiltinFrameworkAssets.rootURL != nil)
     )
     func fontFragResolvesThroughBuiltinFallback() throws {
-        let resolver = try makeEmptyPrimaryResolver()
+        let (resolver, primaryRoot) = try makeEmptyPrimaryResolver()
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         // Same call shape as resolveMSDFFontFragmentSource() in the renderer.
         let data = try resolver.data(relativePath: "shaders/font.frag", optional: true)
         let source = try #require(String(data: data, encoding: .utf8))
@@ -115,6 +118,7 @@ struct WPEMSDFTextRenderE2ETests {
     func missingBuiltinRootLeavesCoreTextOnly() throws {
         let primaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("msdf-e2e-neg-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         try FileManager.default.createDirectory(at: primaryRoot, withIntermediateDirectories: true)
         let resolver = WPEMultiRootResourceResolver(
             primaryRootURL: primaryRoot,
@@ -142,7 +146,8 @@ struct WPEMSDFTextRenderE2ETests {
         let executor = try WPEMetalRenderExecutor(device: device)
         executor.synchronizeFrameCompletion = true
 
-        let resolver = try makeEmptyPrimaryResolver()
+        let (resolver, primaryRoot) = try makeEmptyPrimaryResolver()
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let fragData = try resolver.data(relativePath: "shaders/font.frag", optional: true)
         let fontFragmentSource = try #require(String(data: fragData, encoding: .utf8))
 
@@ -203,7 +208,8 @@ struct WPEMSDFTextRenderE2ETests {
         let executor = try WPEMetalRenderExecutor(device: device)
         executor.synchronizeFrameCompletion = true
 
-        let resolver = try makeEmptyPrimaryResolver()
+        let (resolver, primaryRoot) = try makeEmptyPrimaryResolver()
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let fragData = try resolver.data(relativePath: "shaders/font.frag", optional: true)
         let fontFragmentSource = try #require(String(data: fragData, encoding: .utf8))
 

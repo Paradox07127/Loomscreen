@@ -208,6 +208,7 @@ struct WallpaperEngineProjectPropertiesTests {
     @Test("Web property bridge uses user overrides over project defaults")
     func bridgeUsesOverridesOverDefaults() throws {
         let folder = try makeProjectFolder(manifest: sampleManifest)
+        defer { try? FileManager.default.removeItem(at: folder) }
 
         let script = try #require(WallpaperEngineWebPropertyBridge.bootstrapScript(
             forFolder: folder,
@@ -227,6 +228,7 @@ struct WallpaperEngineProjectPropertiesTests {
     @Test("Inspector schema loader accepts WPE web folders even when origin metadata is absent")
     func inspectorSchemaLoaderAcceptsFolderWithoutOrigin() async throws {
         let folder = try makeProjectFolder(manifest: sampleManifest)
+        defer { try? FileManager.default.removeItem(at: folder) }
         let bookmark = try folder.bookmarkData(
             options: [.withSecurityScope],
             includingResourceValuesForKeys: nil,
@@ -246,6 +248,7 @@ struct WallpaperEngineProjectPropertiesTests {
     @Test("Project property schema cache invalidates when project.json changes")
     func schemaCacheInvalidatesWhenManifestChanges() throws {
         let folder = try makeProjectFolder(manifest: manifestWithProperty(key: "speed", text: "Speed"))
+        defer { try? FileManager.default.removeItem(at: folder) }
         let cache = WallpaperEngineProjectPropertySchemaCache(limit: 8)
 
         let first = try cache.schema(from: folder, preferredLanguages: ["en-US"])
@@ -265,6 +268,7 @@ struct WallpaperEngineProjectPropertiesTests {
     @Test("Project property schema cache separates schemecolor inclusion")
     func schemaCacheSeparatesSchemeColorInclusion() throws {
         let folder = try makeProjectFolder(manifest: sampleManifest)
+        defer { try? FileManager.default.removeItem(at: folder) }
         let cache = WallpaperEngineProjectPropertySchemaCache(limit: 8)
 
         let hidden = try cache.schema(from: folder, preferredLanguages: ["en-US"], includeSchemeColor: false)

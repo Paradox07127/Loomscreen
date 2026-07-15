@@ -24,6 +24,7 @@ struct ClaudeRateLimitReaderTests {
             "seven_day": { "used_percentage": 71, "resets_at": 1751500000 } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
 
         #expect(limits.fiveHourUsedPercent == 42.5)
@@ -41,6 +42,7 @@ struct ClaudeRateLimitReaderTests {
             "seven_day": { "used_percentage": 20, "resets_at": "2026-01-01T00:00:00.500Z" } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
 
         #expect(limits.fiveHourResetsAt == 1767225600)
@@ -56,6 +58,7 @@ struct ClaudeRateLimitReaderTests {
             "five_hour": { "used_percentage": "55.5", "resets_at": "1751000000" } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
 
         #expect(limits.fiveHourUsedPercent == 55.5)
@@ -68,6 +71,7 @@ struct ClaudeRateLimitReaderTests {
         { "rate_limits": { "five_hour": { "used_percentage": 33 } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
 
         #expect(limits.fiveHourUsedPercent == 33)
@@ -79,12 +83,14 @@ struct ClaudeRateLimitReaderTests {
     @Test("Payload with no rate_limits section returns nil")
     func noRateLimitsSection() throws {
         let (root, _) = try makeRoot(json: #"{ "model": { "display_name": "Opus" } }"#)
+        defer { try? FileManager.default.removeItem(at: root) }
         #expect(ClaudeRateLimitReader(rootURL: root).currentLimits() == nil)
     }
 
     @Test("Malformed JSON returns nil, never throws")
     func malformedJSON() throws {
         let (root, _) = try makeRoot(json: "{ this is not json ")
+        defer { try? FileManager.default.removeItem(at: root) }
         #expect(ClaudeRateLimitReader(rootURL: root).currentLimits() == nil)
     }
 
@@ -103,6 +109,7 @@ struct ClaudeRateLimitReaderTests {
           "rate_limits": { "five_hour": { "used_percentage": 5 } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
         #expect(limits.isStale == false)
     }
@@ -115,6 +122,7 @@ struct ClaudeRateLimitReaderTests {
           "rate_limits": { "five_hour": { "used_percentage": 5 } } }
         """
         let (root, _) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
         #expect(limits.isStale == true)
         #expect(limits.fiveHourUsedPercent == 5)
@@ -125,6 +133,7 @@ struct ClaudeRateLimitReaderTests {
         // No timestamp field ⇒ falls back to mtime, which we backdate.
         let json = #"{ "rate_limits": { "five_hour": { "used_percentage": 5 } } }"#
         let (root, payload) = try makeRoot(json: json)
+        defer { try? FileManager.default.removeItem(at: root) }
         let old = Date().addingTimeInterval(-40 * 60)
         try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: payload.path)
 

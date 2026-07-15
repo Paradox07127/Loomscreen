@@ -129,6 +129,9 @@ struct WPEVideoTextureSourcePacingTests {
             durationSeconds: 1.0,
             frameRate: 24
         )
+        // Net below the assertion, not a replacement for it: invalidate() is
+        // what must delete the file, but a failure here shouldn't strand it.
+        defer { try? FileManager.default.removeItem(at: videoURL) }
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         source.applyPerformanceProfile(.quality)

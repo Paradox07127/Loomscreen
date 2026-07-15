@@ -37,6 +37,13 @@ struct WPECacheManagementView: View {
     @State var showingProjectsSheet = false
     @Binding private var pendingSearchAnchor: SettingsSearchAnchor?
 
+    #if DEBUG
+    /// Temp dirs left in the container by test runs. DEBUG-only: no shipping
+    /// code path creates them, so Release has nothing to report.
+    @State var testArtifacts: TestTempArtifacts.Summary = .empty
+    @State var lastTestArtifactFreedBytes: UInt64?
+    #endif
+
     #if DIRECT_DISTRIBUTION
     /// The Workshop online-browse JSON cache (self-capped at 5-min TTL + 100 MB),
     /// folded into the Storage total + Clear All so it lives in one place.
@@ -65,6 +72,8 @@ struct WPECacheManagementView: View {
             legacyCacheSection
 
             reclaimArchivesSection
+
+            testArtifactsSection
         }
         .settingsFormChrome()
         .settingsSearchAnchorScroller(

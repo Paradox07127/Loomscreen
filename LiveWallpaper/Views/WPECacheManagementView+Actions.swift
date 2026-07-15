@@ -24,6 +24,9 @@ extension WPECacheManagementView {
         }.value
         workshopCacheBytes = await workshopServices.queryCache.sizeBytes()
         #endif
+        #if DEBUG
+        await refreshTestArtifacts()
+        #endif
         await refreshVideoStats()
     }
 

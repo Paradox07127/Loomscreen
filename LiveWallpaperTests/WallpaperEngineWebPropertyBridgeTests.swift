@@ -19,6 +19,7 @@ struct WallpaperEngineWebPropertyBridgeTests {
           }
         }
         """)
+        defer { try? FileManager.default.removeItem(at: folder) }
 
         let script = try #require(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder))
 
@@ -38,6 +39,7 @@ struct WallpaperEngineWebPropertyBridgeTests {
           "type": "Web"
         }
         """)
+        defer { try? FileManager.default.removeItem(at: folder) }
 
         #expect(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder) == nil)
     }
@@ -61,6 +63,7 @@ struct WallpaperEngineWebPropertyBridgeTests {
           }
         }
         """)
+        defer { try? FileManager.default.removeItem(at: folder) }
 
         let script = try #require(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder))
 

@@ -63,6 +63,7 @@ struct WPEInPlaceAssetReadingTests {
     @Test("Directory provider reads, reports existence, rejects escapes")
     func directoryProviderReadsAndContains() throws {
         let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
         try "hello".data(using: .utf8)!.write(to: root.appendingPathComponent("scene.json"))
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("materials"), withIntermediateDirectories: true)
@@ -89,6 +90,7 @@ struct WPEInPlaceAssetReadingTests {
     @Test("Package provider reads entries in place and matches canonical lookups")
     func packageProviderReadsInPlace() throws {
         let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
         let sceneJSON = #"{"k":"v"}"#.data(using: .utf8)!
         let texBytes = Data([0xAA, 0xBB, 0xCC, 0xDD])
         let pkg = makePackageData([
@@ -115,6 +117,7 @@ struct WPEInPlaceAssetReadingTests {
     @Test("Package provider stages an entry to a readable file URL")
     func packageProviderStagesURL() throws {
         let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data((0..<2048).map { UInt8($0 & 0xFF) })
         let pkg = makePackageData([(name: "audio/clip.mp3", data: payload)])
         let pkgURL = root.appendingPathComponent("scene.pkg")
@@ -130,6 +133,7 @@ struct WPEInPlaceAssetReadingTests {
     @Test("Package entry lookup is case-insensitive and first-match-wins on collision")
     func packageEntryFirstMatchWins() throws {
         let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
         let pkg = makePackageData([
             (name: "Material.json", data: Data("first".utf8)),
             (name: "material.json", data: Data("second".utf8)),
@@ -162,6 +166,7 @@ struct WPEInPlaceAssetReadingTests {
     @Test("sweepStaleStagingDirectories reclaims matching entries and spares others")
     func sweepReclaimsOnlyStagingEntries() throws {
         let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
         let fm = FileManager.default
         let prefix = WPEPackageSceneAssetProvider.stagingDirectoryNamePrefix
 

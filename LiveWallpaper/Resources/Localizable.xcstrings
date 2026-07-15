@@ -1083,6 +1083,36 @@
         }
       }
     },
+    "%lld temporary items left in the container by test runs." : {
+      "comment" : "Storage tab, debug-only Test Artifacts section subtitle. Placeholder is the number of leftover test temp items.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld temporary items left in the container by test runs."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テスト実行がコンテナに残した一時項目が %lld 件あります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试运行在容器中残留了 %lld 个临时项目。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試執行在容器中殘留了 %lld 個暫存項目。"
+          }
+        }
+      }
+    },
     "%lld× Active" : {
       "comment" : "URL chip showing the number of screens running the same web wallpaper. %lld is the total screen count including the current one.",
       "extractionState" : "manual",
@@ -10245,6 +10275,36 @@
         }
       }
     },
+    "Delete %lld Items" : {
+      "comment" : "Destructive confirmation button for deleting leftover test temp items. Placeholder is the item count.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete %lld Items"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 項目を削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 %lld 项"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除 %lld 個項目"
+          }
+        }
+      }
+    },
     "Delete & Free Up Space" : {
       "localizations" : {
         "ja" : {
@@ -10321,6 +10381,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除著色器？"
+          }
+        }
+      }
+    },
+    "Delete test artifacts" : {
+      "comment" : "Storage tab, debug-only button that deletes leftover test temp directories.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete test artifacts"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テスト成果物を削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除测试残留文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除測試殘留檔案"
+          }
+        }
+      }
+    },
+    "Delete leftover test artifacts?" : {
+      "comment" : "Confirmation dialog title for deleting leftover test temp directories (debug builds only).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete leftover test artifacts?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "残っているテスト成果物を削除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除残留的测试文件？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除殘留的測試檔案？"
           }
         }
       }
@@ -32947,6 +33067,36 @@
         }
       }
     },
+    "Scratch directories created by the test suites under the container's tmp folder. Debug builds only — no shipping code path writes them. Deleting them affects nothing but disk usage." : {
+      "comment" : "Storage tab, debug-only Test Artifacts info popover explaining what the leftover files are.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scratch directories created by the test suites under the container's tmp folder. Debug builds only — no shipping code path writes them. Deleting them affects nothing but disk usage."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テストスイートがコンテナの tmp フォルダ内に作成した一時ディレクトリです。デバッグビルド専用で、製品版のコードが書き出すことはありません。削除してもディスク使用量以外に影響はありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试套件在容器 tmp 文件夹下创建的临时目录。仅存在于调试构建，正式版代码不会写入。删除它们除了释放磁盘空间外没有任何影响。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試套件在容器 tmp 資料夾下建立的暫存目錄。僅存在於除錯建置，正式版程式碼不會寫入。刪除它們除了釋放磁碟空間外沒有任何影響。"
+          }
+        }
+      }
+    },
     "Scripts disabled. Manage in Content Security panel." : {
       "comment" : "Tooltip on the untrusted URL chip — directs the user to manage trust in the inspector.",
       "extractionState" : "manual",
@@ -35937,26 +36087,25 @@
         }
       }
     },
-    "Source download archives already unpacked into your cache." : {
+    "Source archives from older imports that were unpacked into your cache." : {
       "comment" : "A description of the reclaimable download archives.",
-      "isCommentAutoGenerated" : true,
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ソースダウンロードアーカイブはすでにキャッシュへ展開されています。"
+            "value" : "以前の読み込みでキャッシュへ展開された、元のアーカイブです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "源下载归档已解包到你的缓存中。"
+            "value" : "早期导入时已解包到缓存中的源归档。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "來源下載封存檔已解包到你的快取中。"
+            "value" : "早期匯入時已解包到快取中的來源封存檔。"
           }
         }
       }
@@ -37845,6 +37994,36 @@
         }
       }
     },
+    "Test Artifacts (Debug)" : {
+      "comment" : "Storage tab, debug-only section header for leftover test temp files.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test Artifacts (Debug)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "テスト成果物（デバッグ）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试残留文件（调试）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試殘留檔案（除錯）"
+          }
+        }
+      }
+    },
     "Testing only" : {
       "comment" : "A label that indicates that the update is being tested locally.",
       "isCommentAutoGenerated" : true,
@@ -38235,29 +38414,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載逾時。請重試。"
-          }
-        }
-      }
-    },
-    "The downloaded file isn't a valid Wallpaper Engine package — the SteamCMD download was likely incomplete. Try downloading it again." : {
-      "comment" : "WPE extraction failed: scene.pkg has no valid PKGV header, usually a partial download.",
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ダウンロードしたファイルは有効な Wallpaper Engine パッケージではありません — SteamCMD のダウンロードが不完全だった可能性があります。もう一度ダウンロードしてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载的文件不是有效的 Wallpaper Engine 包 — SteamCMD 下载可能不完整。请重新下载。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載的檔案不是有效的 Wallpaper Engine 套件 — SteamCMD 下載可能不完整。請重新下載。"
           }
         }
       }

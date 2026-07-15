@@ -11,11 +11,13 @@ import Testing
 @MainActor
 struct WPEMSDFPayloadCacheTests {
 
-    private func makeEmptyPrimaryResolver() throws -> WPEMultiRootResourceResolver {
+    /// The resolver keeps its primary root private, so the root comes back
+    /// alongside it for callers to `defer`-remove.
+    private func makeEmptyPrimaryResolver() throws -> (resolver: WPEMultiRootResourceResolver, root: URL) {
         let primaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("msdf-payload-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: primaryRoot, withIntermediateDirectories: true)
-        return WPEMultiRootResourceResolver(primaryRootURL: primaryRoot, dependencyMounts: [])
+        return (WPEMultiRootResourceResolver(primaryRootURL: primaryRoot, dependencyMounts: []), primaryRoot)
     }
 
     private func makeTextObject(id: String = "cache", text: String) -> WPESceneTextObject {
@@ -29,15 +31,16 @@ struct WPEMSDFPayloadCacheTests {
         )
     }
 
-    private func makeRenderer(device: MTLDevice) throws -> WPEMSDFTextRenderer {
-        let resolver = try makeEmptyPrimaryResolver()
+    private func makeRenderer(device: MTLDevice) throws -> (renderer: WPEMSDFTextRenderer, root: URL) {
+        let (resolver, root) = try makeEmptyPrimaryResolver()
         let fragData = try resolver.data(relativePath: "shaders/font.frag", optional: true)
         let fontFragmentSource = try #require(String(data: fragData, encoding: .utf8))
-        return WPEMSDFTextRenderer(
+        let renderer = WPEMSDFTextRenderer(
             device: device,
             resolver: resolver,
             fontFragmentSource: fontFragmentSource
         )
+        return (renderer, root)
     }
 
     private func awaitPayload(
@@ -65,7 +68,8 @@ struct WPEMSDFPayloadCacheTests {
     )
     func unchangedObjectReusesBuffers() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let renderer = try makeRenderer(device: device)
+        let (renderer, primaryRoot) = try makeRenderer(device: device)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let sceneSize = CGSize(width: 256, height: 128)
         let object = makeTextObject(text: "Hi")
 
@@ -82,7 +86,8 @@ struct WPEMSDFPayloadCacheTests {
     )
     func textChangeRebuildsBuffers() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let renderer = try makeRenderer(device: device)
+        let (renderer, primaryRoot) = try makeRenderer(device: device)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let sceneSize = CGSize(width: 256, height: 128)
 
         let first = try #require(await awaitPayload(renderer: renderer, object: makeTextObject(text: "Hi"), sceneSize: sceneSize))
@@ -98,7 +103,8 @@ struct WPEMSDFPayloadCacheTests {
     )
     func colorChangeKeepsCachedMesh() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let renderer = try makeRenderer(device: device)
+        let (renderer, primaryRoot) = try makeRenderer(device: device)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let sceneSize = CGSize(width: 256, height: 128)
 
         let base = makeTextObject(text: "Hi")
@@ -127,7 +133,8 @@ struct WPEMSDFPayloadCacheTests {
     )
     func numericObjectRendersAndPrewarmsDigits() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let renderer = try makeRenderer(device: device)
+        let (renderer, primaryRoot) = try makeRenderer(device: device)
+        defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let sceneSize = CGSize(width: 256, height: 128)
         // Generation is always async (never blocks the main thread) — poll until
         // the glyphs land, exactly like the production per-frame loop.
