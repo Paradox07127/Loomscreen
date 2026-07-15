@@ -119,7 +119,8 @@ extension WPEMetalSceneRenderer {
         tickParticleSystems(
             time: uniforms.time,
             followPointerIsLive: frameContext.followPointerIsLive,
-            pointer: frameContext.pointer
+            pointer: frameContext.pointer,
+            liveTransforms: liveTransforms
         )
         let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: framePipeline)
         let frame = try executor.render(
@@ -369,7 +370,8 @@ extension WPEMetalSceneRenderer {
     private func tickParticleSystems(
         time: Double,
         followPointerIsLive: Bool,
-        pointer: SIMD2<Double>
+        pointer: SIMD2<Double>,
+        liveTransforms: LiveScriptTransforms
     ) {
         guard !particleSystems.isEmpty else { return }
         // Cursor in the centered render frame (Y-up), or nil when Follow
@@ -388,6 +390,20 @@ extension WPEMetalSceneRenderer {
         // is already this-frame-fresh when its event-follow child ticks.
         for system in particleSystems {
             system.pointerCentered = particlePointer
+            // A keyframed ancestor `origin` moves this emitter. The authored seed
+            // is already baked into the system's transform, so only the live
+            // DELTA is applied; Y flips into the render frame's Y-up space.
+            system.hostOriginOffset = .zero
+            if !system.hostAncestorIDs.isEmpty, !liveTransforms.origins.isEmpty {
+                for id in system.hostAncestorIDs {
+                    guard let now = liveTransforms.origins[id],
+                          let seed = transformHostLocalTransformsByID[id]?.origin else { continue }
+                    system.hostOriginOffset += SIMD2<Float>(
+                        Float(now.x - seed.x),
+                        Float(seed.y - now.y)
+                    )
+                }
+            }
             if let parent = system.followParent {
                 if let followPosition = parent.primaryLiveParticlePosition {
                     system.injectedControlPoints[system.followControlPointID] = followPosition

@@ -1129,6 +1129,7 @@ public enum WPESceneDocumentParser {
         return WPESceneParticleObject(
             id: id,
             name: name,
+            parentObjectID: parentID(in: dict),
             particleRelativePath: path,
             origin: origin,
             scale: scale,

@@ -214,6 +214,14 @@ final class WPEParticleSystem {
     /// drives the per-frame parallax translation applied to the whole system at
     /// draw time.
     var parallaxDepth: SIMD2<Double> = SIMD2<Double>(0, 0)
+    /// Screen-space shift from an ancestor transform host whose `origin` is
+    /// keyframed. Particles are not render layers, so they miss the graph's
+    /// parent→child composition; the executor folds this into the same
+    /// `projection.padding.xy` the camera parallax rides.
+    var hostOriginOffset: SIMD2<Float> = SIMD2<Float>(0, 0)
+    /// This emitter's ancestor object ids (nearest first), used to look up their
+    /// live origins each frame.
+    var hostAncestorIDs: [String] = []
     /// Owning particle object's WPE scene paint index — where this system
     /// composites relative to image layers (background behind, character front).
     var sortIndex: Int = 0
@@ -907,8 +915,13 @@ final class WPEParticleSystem {
         }
         let elapsed = now - (firstTickTime ?? now)
         systemElapsed = elapsed
-        let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
-        let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
+        // WPE's drag is `-2·strength·v` (algorism.h `DragForce`: `-2.0 * speed *
+        // strength * density`), not `-strength·v`. The factor matters most where
+        // drag balances gravity: terminal fall speed is `gravity/(2·drag)`, so
+        // halving the coefficient DOUBLED it — 3448877775's meteor arced into a
+        // slow parabola where Windows shoots it across in a near-straight line.
+        let dragScalar: Float = max(0, 1 - 2 * Float(definition.drag) * dt)
+        let angularDragScalar: Float = max(0, 1 - 2 * Float(definition.angularDrag) * dt)
         let angularForce = sceneTransform.visualAngularZ(localAngularZ: Float(definition.angularForceZ))
         // `turbulence` OPERATOR: a per-frame curl-noise wind, applied in render
         // space as an ACCELERATION (velocity += force·dt), matching the reference

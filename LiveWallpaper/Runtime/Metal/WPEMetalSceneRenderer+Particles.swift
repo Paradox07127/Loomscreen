@@ -446,6 +446,20 @@ extension WPEMetalSceneRenderer {
             seed: oracleSeed
         ) else { return nil }
         system.parallaxDepth = object.parallaxDepth
+        // Ancestor chain, so a keyframed transform-host `origin` can move this
+        // emitter (particles are not render layers and miss the graph's own
+        // parent→child composition).
+        system.hostAncestorIDs = {
+            var chain: [String] = []
+            var next = object.parentObjectID
+            var guardCount = 0
+            while let id = next, guardCount < 32 {
+                chain.append(id)
+                next = objectParentByID[id]
+                guardCount += 1
+            }
+            return chain
+        }()
         system.sortIndex = sortIndex
         system.overbright = Self.particleOverbright(
             material: material?.overbright,

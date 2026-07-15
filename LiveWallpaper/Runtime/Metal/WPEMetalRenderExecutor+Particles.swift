@@ -81,7 +81,14 @@ extension WPEMetalRenderExecutor {
         // Translate the whole system by its camera-parallax depth (pixels),
         // carried in `padding.xy` and added to each particle's screen position.
         let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
-        projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
+        // A keyframed ancestor `origin` shifts the whole system, exactly like the
+        // parallax offset does — ride the same channel rather than rebuilding the
+        // system's baked transform every frame.
+        projection.padding = SIMD4<Float>(
+            parallax.x + system.hostOriginOffset.x,
+            parallax.y + system.hostOriginOffset.y,
+            0, 0
+        )
         // WPE `g_RenderVar0` = (length, maxlength, …); the shader stretches the
         // quad along the velocity by `clamp(speed * length, min, maxlength)`.
         // RenderDoc on 3448877775 confirms the pair verbatim on that scene's rain

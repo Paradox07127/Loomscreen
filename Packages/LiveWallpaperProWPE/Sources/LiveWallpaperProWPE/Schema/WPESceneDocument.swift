@@ -481,6 +481,12 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
 public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
+    /// Parent object, so a transform host with a keyframed `origin` can move this
+    /// emitter. Image layers get that through the render graph's parent→child
+    /// composition; particles are not render layers, so without this the meteor's
+    /// emitter stayed frozen at its parse-time origin and rained shooting stars
+    /// non-stop instead of only while its host sweeps on-screen.
+    public let parentObjectID: String?
     public let particleRelativePath: String
     public let origin: SIMD3<Double>
     public let scale: SIMD3<Double>
@@ -499,9 +505,10 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
     public let parallaxDepth: SIMD2<Double>
     public let instanceOverride: WPESceneParticleInstanceOverride?
 
-    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, brightness: Double = 1, parallaxDepth: SIMD2<Double>, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
+    public init(id: String, name: String, parentObjectID: String? = nil, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, brightness: Double = 1, parallaxDepth: SIMD2<Double>, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
         self.id = id
         self.name = name
+        self.parentObjectID = parentObjectID
         self.particleRelativePath = particleRelativePath
         self.origin = origin
         self.scale = scale
