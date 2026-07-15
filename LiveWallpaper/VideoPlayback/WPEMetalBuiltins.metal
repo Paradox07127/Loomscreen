@@ -1115,14 +1115,10 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
         / float2(halfWidth * 2.0, halfHeight * 2.0);
 
     // `spritetrail` / `ropetrail`: orient the quad along the particle's VELOCITY
-    // rather than its rotation — the tangent half of common_particles.h's
-    // ComputeParticleTrailTangents. The eye sits at -Z for our 2D ortho scenes,
-    // so `cross(eyeDir, v)` reduces to the in-plane perpendicular (v.y, -v.x).
-    //
-    // The `stretch` term is deliberately fed 1 (see the executor): WPE's real
-    // trail is a per-particle POSITION HISTORY, not a speed-stretched quad, and
-    // guessing a stretch here drew a screen-crossing "laser". Orientation is the
-    // part that is grounded, so that is all this does.
+    // rather than its rotation and stretch it by the speed — verbatim from
+    // common_particles.h's ComputeParticleTrailTangents. The eye sits at -Z for
+    // our 2D ortho scenes, so `cross(eyeDir, v)` reduces to the in-plane
+    // perpendicular (v.y, -v.x).
     if (projection.trail.w > 0.5) {
         float2 v = instance.velocity.xy;
         float speed = length(v);

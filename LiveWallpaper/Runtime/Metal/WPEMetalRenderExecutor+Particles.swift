@@ -82,19 +82,18 @@ extension WPEMetalRenderExecutor {
         // carried in `padding.xy` and added to each particle's screen position.
         let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
         projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
-        // WPE `g_RenderVar0` for TRAILRENDERER: the shader stretches the quad by
-        // `clamp(speed * .x, .z, .y)` ON TOP of the sprite size.
+        // WPE `g_RenderVar0` = (length, maxlength, …); the shader stretches the
+        // quad along the velocity by `clamp(speed * length, min, maxlength)`.
+        // RenderDoc on 3448877775 confirms the pair verbatim on that scene's rain
+        // (`length 0.005 / maxlength 100` → `g_RenderVar0 = (0.005, 100.0, …)`;
+        // speed 3000 ⇒ stretch 15 ⇒ a rain streak).
         //
-        // `.x` is NOT the JSON's `length`. deku_twinkle_shootingstar authors
-        // `length: 3`, but its live pass carries `.x = 0.005` (RenderDoc,
-        // 3448877775_1 ord 4) — WPE derives it at runtime by some scale we have
-        // not pinned down. Feeding `length` in directly made stretch ≈ speed*3
-        // ≈ 600, i.e. a 9000px screen-crossing "laser". Until the mapping is
-        // grounded, stay neutral (stretch 1): the streak still gets its real
-        // shape from `textureRatio` (the shooting star's sprite is 256×832), it
-        // just isn't speed-elongated on top.
-        if system.definition.trailRenderer != nil {
-            projection.trail = SIMD4<Float>(0, 1, 1, 1)
+        // The clamp is the whole effect: the meteor authors `length: 3` and omits
+        // `maxlength`, so speed 100–250 × 3 = 300–750 only becomes a streak once
+        // the engine default 10 reins it in. Reading the absent bound as
+        // "unbounded" drew a screen-crossing laser instead.
+        if let trail = system.definition.trailRenderer {
+            projection.trail = SIMD4<Float>(Float(trail.length), Float(trail.maxLength), 0, 1)
         }
 
         // WPE's particle quad is NOT square: `ComputeParticlePosition` scales the

@@ -167,24 +167,30 @@ public struct WPEParticleOscillateAlpha: Equatable, Sendable {
     }
 }
 
-/// `spritetrail` / `ropetrail` renderer params — parsed, NOT yet reproduced.
+/// `spritetrail` / `ropetrail` renderer params. These ARE `g_RenderVar0.xy`
+/// verbatim: the shader stretches the quad along the velocity by
+/// `clamp(speed * length, min, maxLength)`
+/// (`common_particles.h` ComputeParticleTrailTangents).
 ///
-/// `length` is the trail's SEGMENT COUNT, not a stretch factor. RenderDoc on
-/// 3448877775 pins the model: each meteor owns `length + 1` positions sampled
-/// every `lifetime / length` seconds (its 80 vertices are 20 meteors × 4 points,
-/// `trailPosition` running 0,1,2,3,0,1,2,3…), and `maxcount` budgets POINTS — so
-/// the real particle count is `maxcount / (length + 1)`. Reproducing that needs a
-/// per-particle position history this renderer does not have yet.
-///
-/// Kept because it is the authored input that work needs; today the executor only
-/// checks for non-nil, to orient the sprite along its velocity.
+/// The DEFAULTS carry the whole effect and must not be invented
+/// (`wpscene/WPParticleObject.h`: `length {0.05}`, `maxlength {10.0}`,
+/// `subdivision {3.0}`). 3448877775's meteor authors `length: 3` and omits
+/// `maxlength`: speed 100–250 × 3 = 300–750 is clamped by the default 10 to a
+/// ~10× streak. Treating the absent `maxlength` as unbounded instead drew a
+/// screen-crossing "laser". RenderDoc cross-checks the pair on the same scene's
+/// rain (`length 0.005, maxlength 100` → `g_RenderVar0 = (0.005, 100.0, …)`,
+/// speed 3000 → stretch 15).
 public struct WPEParticleTrailRenderer: Equatable, Sendable {
     public let length: Double
     public let maxLength: Double
+    /// Trail segment count — `subdivision`, NOT `length`. The default 3 is why
+    /// RenderDoc shows `trailPosition` cycling 0,1,2,3 (4 points per particle).
+    public let subdivision: Double
 
-    public init(length: Double, maxLength: Double) {
+    public init(length: Double, maxLength: Double, subdivision: Double) {
         self.length = length
         self.maxLength = maxLength
+        self.subdivision = subdivision
     }
 }
 
@@ -874,10 +880,14 @@ public enum WPEParticleDefinitionParser {
             guard let n = ($0["name"] as? String)?.lowercased() else { return false }
             return n.hasSuffix("trail") && !isRope
         }
+        // Engine defaults, NOT zero (wpscene/WPParticleObject.h ParticleRender).
+        // An absent `maxlength` means 10, not "unbounded" — the meteor relies on
+        // exactly that to clamp its 750× stretch down to a ~10× streak.
         let parsedTrail: WPEParticleTrailRenderer? = trailEntry.map {
             WPEParticleTrailRenderer(
-                length: WPEValueParser.double($0["length"]) ?? 0,
-                maxLength: WPEValueParser.double($0["maxlength"]) ?? 0
+                length: WPEValueParser.double($0["length"]) ?? 0.05,
+                maxLength: WPEValueParser.double($0["maxlength"]) ?? 10.0,
+                subdivision: WPEValueParser.double($0["subdivision"]) ?? 3.0
             )
         }
         let maxCount = (json["maxcount"] as? Int)

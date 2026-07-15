@@ -368,6 +368,18 @@ struct WPEParticleSystemTests {
         #expect(spritetrail.trailRenderer?.length == 5)
         #expect(spritetrail.trailRenderer?.maxLength == 40)
 
+        // The ENGINE defaults carry the effect (WPParticleObject.h ParticleRender:
+        // length 0.05, maxlength 10, subdivision 3). 3448877775's meteor authors
+        // only `length: 3`; reading the absent `maxlength` as 0/unbounded let its
+        // speed×3 = 300–750 stretch through as a screen-crossing laser, where the
+        // default 10 clamps it to a streak.
+        let defaulted = try #require(ropetrail.trailRenderer)
+        #expect(defaulted.maxLength == 10, "absent maxlength is 10, never unbounded")
+        #expect(defaulted.subdivision == 3)
+        let bare = try #require(try def("spritetrail").trailRenderer)
+        #expect(bare.length == 0.05)
+        #expect(bare.maxLength == 10)
+
         // A literal `rope` IS the whole-chain ribbon (Trails 2 / trail_1.json).
         let rope = try def("rope")
         #expect(rope.isRope)
