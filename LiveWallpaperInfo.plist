@@ -30,14 +30,6 @@
 	<true/>
 	<key>MetalCaptureEnabled</key>
 	<true/>
-	<key>SUEnableAutomaticChecks</key>
-	<false/>
-	<key>SUEnableInstallerLauncherService</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>http://127.0.0.1:8123/livewallpaper-appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>pfIShU4dEXqPd5ObYNfDBiQWcXozk7estwzTnF9BamQ=</string>
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>
 	<key>NSAudioCaptureUsageDescription</key>

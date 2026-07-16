@@ -134,9 +134,10 @@ final class CodexAgentSource: MonitorDataSource {
                         models[file.url] = model
                     }
                     if let cursorState = reader.cursorState {
-                        cursorStore?.set(cursorState, for: file.url)
                         if let model = models[file.url] {
-                            cursorStore?.setAggregate(model.snapshotState(), for: file.url)
+                            cursorStore?.set(cursorState, aggregate: model.snapshotState(), for: file.url)
+                        } else {
+                            cursorStore?.set(cursorState, for: file.url)
                         }
                     }
                 } catch {

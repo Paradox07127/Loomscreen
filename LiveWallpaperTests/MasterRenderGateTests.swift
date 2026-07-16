@@ -39,7 +39,8 @@ struct MasterRenderGateTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
     }
 

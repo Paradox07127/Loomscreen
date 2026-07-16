@@ -1,0 +1,13 @@
+# SwiftFormat — starter config (P0). Conservative first adoption.
+# The 6 god-files slated for structural refactor (review doc §6.1, P-B) are EXCLUDED
+# so cosmetic reformatting does not collide with the upcoming splits.
+# AF-10: every Swift path in --exclude is owned and time-bounded by
+# scripts/quality-baselines/exclusions.json. scripts/check_quality_exclusions.py
+# enforces exact SwiftLint/SwiftFormat/manifest parity and component LoC caps.
+
+--swiftversion 6.0
+
+--exclude build,archived,cache,trace,tools,**/DerivedSources,**/DerivedData,Packages/**/.build,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutorTypes.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Text.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Particles.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Present.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Targets.swift,LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Puppet.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+LivePoster.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Load.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Debug.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Text.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Particles.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Scripts.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Lifecycle.swift,LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Textures.swift,LiveWallpaper/Runtime/Metal/WPEMetalShaderDispatcher.swift,LiveWallpaper/App/ScreenManager.swift,LiveWallpaper/App/ScreenManagerTypes.swift,LiveWallpaper/App/ScreenManager+Observers.swift,LiveWallpaper/App/ScreenManager+Screens.swift,LiveWallpaper/App/ScreenManager+Wallpaper.swift,LiveWallpaper/App/ScreenManager+Monitor.swift,LiveWallpaper/App/ScreenManager+Automation.swift,LiveWallpaper/VideoPlayback/HTMLWallpaperView.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Preprocessor.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Main.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Substitutions.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Helpers.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Render.swift,LiveWallpaper/Runtime/Metal/WPEShaderTranspilerTypes.swift
+
+# Reduce line-reflow churn on first pass; keep safe redundancy/whitespace rules.
+--disable wrapMultilineStatementBraces

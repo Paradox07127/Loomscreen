@@ -89,18 +89,17 @@ extension WPEMetalRenderExecutor {
             parallax.y + system.hostOriginOffset.y,
             0, 0
         )
-        // WPE `g_RenderVar0` = (length, maxlength, …); the shader stretches the
-        // quad along the velocity by `clamp(speed * length, min, maxlength)`.
-        // RenderDoc on 3448877775 confirms the pair verbatim on that scene's rain
-        // (`length 0.005 / maxlength 100` → `g_RenderVar0 = (0.005, 100.0, …)`;
-        // speed 3000 ⇒ stretch 15 ⇒ a rain streak).
+        // Orientation only (stretch 1); authored length/maxlength do not derive WPE's trail.
         //
-        // The clamp is the whole effect: the meteor authors `length: 3` and omits
-        // `maxlength`, so speed 100–250 × 3 = 300–750 only becomes a streak once
-        // the engine default 10 reins it in. Reading the absent bound as
-        // "unbounded" drew a screen-crossing laser instead.
-        if let trail = system.definition.trailRenderer {
-            projection.trail = SIMD4<Float>(Float(trail.length), Float(trail.maxLength), 0, 1)
+        // `g_RenderVar0` is recomputed in `g_bufDynamic`, not baked from JSON. RenderDoc on
+        // 3448877775 shows the meteor draw (ord 4, `流星.tex`) authors length 3 with no
+        // maxlength but carries `(0.005, 100.0, 0.1585, 3.5)`; none of catsout's static
+        // `{length, maxlength, 0, maxcount-1}` components match either.
+        //
+        // Until the runtime mapping is understood, only grounded textureRatio plus velocity
+        // orientation shapes the streak; guessing caused screen-crossing lasers/over-long rain.
+        if system.definition.trailRenderer != nil {
+            projection.trail = SIMD4<Float>(0, 1, 1, 1)
         }
 
         // WPE's particle quad is NOT square: `ComputeParticlePosition` scales the

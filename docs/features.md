@@ -15,7 +15,7 @@ Authoritative feature gate: [ProductCapabilities.swift](../Packages/LiveWallpape
 - **Settings window** (`LiveWallpaper/Views/ContentView.swift`)
   - Sidebar entries by feature surface and hardware/runtime capability.
   - `Displays` + per-display config pages.
-  - `Bookmarks`, `Apple Aerials`, optional `Steam Workshop`, optional `Developer Tools`.
+  - `Bookmarks`, `Apple Aerials`, and optional `Steam Workshop`.
   - `System Monitor` panel in sidebar footer (runtime status).
 
 ## 1) Per-display workflow
@@ -179,9 +179,10 @@ Entry path: Settings `General / Shortcuts` tabs.
 - Global on/off in menu bar keeps app resident.
 - Wallpaper automation runs schedule/playlist rotation in minute cadence.
 - Full-screen/game-window/battery behavior controls are centralized in manager/policy layers.
-- Update check:
+- Lite update check:
   - launch-time GitHub Releases check + manual check in About tab.
   - no background polling service and no public auto-install updater yet.
+- Pro currently has no in-app updater.
 
 ## 9) Security and privacy
 

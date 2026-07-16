@@ -149,28 +149,12 @@ extension ScreenManager {
             ? userAbsenceReasons.insert(reason).inserted
             : (userAbsenceReasons.remove(reason) != nil)
         guard changed else { return }
-        reconcileSystemMonitor()
+        refreshMonitorOverlayVisibility()
         refreshPerformancePolicyForAllScreens()
     }
 
-    /// Park / resume SystemMonitor's poll alongside display availability.
-    /// Conservative gate (all displays asleep) rather than per-session, because
-    /// the system-memory-pressure warning that drives `setMemoryPressure` is
-    /// derived inside SystemMonitor's own sampling loop — stopping the poll
-    /// stops that warning, so we only park it when no display can render at all.
-    private func reconcileSystemMonitor() {
-        guard featureCatalog.isEnabled(.systemMonitor) else { return }
-        let shouldRun = !allDisplaysAsleep
-        guard shouldRun != systemMonitorActive else { return }
-        systemMonitorActive = shouldRun
-        if shouldRun {
-            SystemMonitor.shared.startMonitoring()
-        } else {
-            SystemMonitor.shared.stopMonitoring()
-        }
-    }
-
     private func handleScreenParameterChange() {
+        guard !isTerminating else { return }
         let current = ScreenConfigurationSignature.currentLayout()
         if current == lastScreenSignatures && !screens.isEmpty {
             Logger.debug("Screen parameters unchanged — skipping refresh", category: .screenManager)
@@ -183,14 +167,17 @@ extension ScreenManager {
 
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(100))
-            self?.updateAllWindowFrames()
+            guard let self, !self.isTerminating else { return }
+            self.updateAllWindowFrames()
             try? await Task.sleep(for: .milliseconds(500))
-            self?.updateAllWindowFrames()
+            guard !self.isTerminating else { return }
+            self.updateAllWindowFrames()
         }
 
     }
 
     func updateAllWindowFrames() {
+        guard !isTerminating else { return }
         for screen in screens {
             if let nsScreen = displayRegistry.findNSScreen(for: screen.id) {
                 screen.updateRuntimeFrame(to: nsScreen.frame)
@@ -203,25 +190,6 @@ extension ScreenManager {
         reconcileMonitorOverlays()
     }
     
-    func setupMemoryMonitoring() {
-        SystemMonitor.shared.startMonitoring()
-        systemMonitorActive = true
-
-        NotificationCenter.default.publisher(for: .systemMemoryWarning)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.setMemoryPressure(true)
-            }
-            .store(in: &cleanupTasks)
-
-        NotificationCenter.default.publisher(for: .systemMemoryNormal)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.setMemoryPressure(false)
-            }
-            .store(in: &cleanupTasks)
-    }
-
     func setupFullScreenDetection() {
         observeFullScreenChanges()
         fullScreenDetector.checkNow()
@@ -240,6 +208,7 @@ extension ScreenManager {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self,
+                      !self.isTerminating,
                       self.fullScreenTrackingGeneration == generation else { return }
                 self.handleFullScreenChange(self.fullScreenDetector.hiddenScreens)
                 self.observeFullScreenChanges()
@@ -252,6 +221,7 @@ extension ScreenManager {
     /// play/pause decision. The `hiddenScreens` snapshot is now informational —
     /// the policy reads the detector live.
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
+        refreshMonitorOverlayVisibility()
         refreshPerformancePolicyForAllScreens()
     }
 
@@ -419,36 +389,30 @@ extension ScreenManager {
     }
 
     func updateFullScreenFallbackPolling() {
+        guard !isTerminating else {
+            // Bottom-level fail-closed gate: settings/backup callbacks are not
+            // owned by `cleanupTasks` and may arrive after termination teardown.
+            fullScreenDetector.setFallbackPollingEnabled(false)
+            return
+        }
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let hasConfiguredSessions = wallpaperSessionSummaries.contains { $0.isConfigured }
         let hasConfiguredSceneSessions = wallpaperSessionSummaries.contains {
             $0.isConfigured && $0.wallpaperType == .scene
         }
-        let shouldEnablePolling = WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+        let wallpaperPolicyNeedsPolling = WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: globalSettings,
             hasConfiguredWallpaperSessions: hasConfiguredSessions,
             hasConfiguredSceneSessions: hasConfiguredSceneSessions
         )
+        let shouldEnablePolling = wallpaperPolicyNeedsPolling || hasEnabledDesktopMonitorOverlay
 
         fullScreenDetector.setFallbackPollingEnabled(shouldEnablePolling)
     }
 
     func handleGlobalSettingsChanged() {
+        guard !isTerminating else { return }
         updateFullScreenFallbackPolling()
-        refreshPerformancePolicyForAllScreens()
-    }
-    
-    // MARK: - Memory Management
-    /// Folds memory pressure into the unified performance policy. Suspends every
-    /// wallpaper type while pressure holds and auto-resumes when it clears,
-    /// without ever touching the user's play/pause intent.
-    private func setMemoryPressure(_ active: Bool) {
-        guard isUnderMemoryPressure != active else { return }
-        isUnderMemoryPressure = active
-        Logger.notice(
-            active ? "Memory pressure: suspending wallpapers" : "Memory pressure cleared: restoring wallpapers",
-            category: .memory
-        )
         refreshPerformancePolicyForAllScreens()
     }
     
@@ -466,6 +430,7 @@ extension ScreenManager {
     }
 
     func captureDesktopSnapshotsForLockIfNeeded() {
+        guard !isTerminating else { return }
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         guard globalSettings.preservePlaybackOnLock else { return }
 

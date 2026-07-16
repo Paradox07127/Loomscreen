@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import LiveWallpaperCore
 
@@ -8,6 +9,31 @@ import Testing
 /// switches over; both must agree on the SKU surface area.
 @Suite("ProductCapabilities (Core SPM)")
 struct ProductCapabilitiesTests {
+
+    @Test("Unconfigured capabilities and environment defaults fail closed")
+    func unconfiguredCatalogFailsClosed() {
+        let capabilities = ProductCapabilities.unconfigured
+        let forged = ProductCapabilities(
+            sku: .unconfigured,
+            enabledFeatures: Set(ProductFeature.allCases)
+        )
+        let workshopAttempt = capabilities.withWorkshopOnline()
+        let developerToolsAttempt = capabilities.withLocalDeveloperTools()
+        let catalog = FeatureCatalog.unconfigured
+        let environmentCatalog = EnvironmentValues().featureCatalog
+
+        #expect(capabilities.sku == .unconfigured)
+        #expect(capabilities.enabledFeatures.isEmpty)
+        #expect(capabilities.selectableWallpaperTypes.isEmpty)
+        #expect(capabilities.selectableWallpaperModes.isEmpty)
+        #expect(forged.enabledFeatures.isEmpty)
+        #expect(workshopAttempt.enabledFeatures.isEmpty)
+        #expect(developerToolsAttempt.enabledFeatures.isEmpty)
+        #expect(ProductCapabilities.lite.withWorkshopOnline() == .lite)
+        #expect(ProductCapabilities.lite.withLocalDeveloperTools() == .lite)
+        #expect(ProductFeature.allCases.allSatisfy { !catalog.isEnabled($0) })
+        #expect(environmentCatalog == .unconfigured)
+    }
 
     @Test("Lite catalog renders video + html + monitor")
     func liteCatalogWallpaperTypes() {
@@ -34,6 +60,23 @@ struct ProductCapabilitiesTests {
         let catalog = ProductCapabilities.pro
         #expect(catalog.sku == .pro)
         #expect(Set(catalog.selectableWallpaperTypes) == Set(WallpaperType.allCases))
+    }
+
+    @Test("Shipping catalogs exclude local Developer Tools")
+    func shippingCatalogsExcludeDeveloperTools() {
+        #expect(!ProductCapabilities.lite.enabledFeatures.contains(.developerTools))
+        #expect(!ProductCapabilities.pro.enabledFeatures.contains(.developerTools))
+        #expect(!ProductCapabilities.pro.withWorkshopOnline().enabledFeatures.contains(.developerTools))
+    }
+
+    @Test("Local Developer Tools can only be layered onto Pro")
+    func localDeveloperToolsAreProOnly() {
+        let localPro = ProductCapabilities.pro.withLocalDeveloperTools()
+
+        #expect(localPro.sku == .pro)
+        #expect(localPro.enabledFeatures.contains(.developerTools))
+        #expect(!ProductCapabilities.lite.withLocalDeveloperTools().enabledFeatures.contains(.developerTools))
+        #expect(!ProductCapabilities.unconfigured.withLocalDeveloperTools().enabledFeatures.contains(.developerTools))
     }
 
     @Test("Lite catalog exposes playlist and schedule automation modes")
@@ -82,5 +125,9 @@ struct ProductCapabilitiesTests {
         #expect(pro.isEnabled(.systemMonitor))
         #expect(pro.isEnabled(.monitorWallpaper))
         #expect(pro.isEnabled(.agentFleet))
+        #expect(!pro.isEnabled(.developerTools))
+
+        let localPro = FeatureCatalog(capabilities: .pro.withLocalDeveloperTools())
+        #expect(localPro.isEnabled(.developerTools))
     }
 }

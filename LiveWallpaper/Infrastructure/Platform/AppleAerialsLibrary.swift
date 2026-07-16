@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// One Apple Aerial wallpaper asset discovered under idleassetsd.

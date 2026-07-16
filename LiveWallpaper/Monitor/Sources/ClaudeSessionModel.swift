@@ -417,11 +417,11 @@ struct ClaudeSessionModel {
         )
     }
 
-    static func restore(from state: SessionAggregateState) -> ClaudeSessionModel? {
-        guard state.provider == .claude,
-              let sessionId = state.sessionId else {
-            return nil
-        }
+    /// Session identity is intentionally absent from the durable aggregate.
+    /// The scanner is the authority for the current file-to-session mapping and
+    /// injects that identity when it reconnects a cursor to this model.
+    static func restore(from state: SessionAggregateState, sessionId: String) -> ClaudeSessionModel? {
+        guard state.provider == .claude else { return nil }
         var model = ClaudeSessionModel(sessionId: sessionId)
         model.projectName = state.projectName
         model.gitBranch = state.gitBranch

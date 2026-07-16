@@ -5,15 +5,9 @@ ad-hoc signed and distributed from GitHub Releases as DMGs.
 
 ## Current updater boundary
 
-For `0.2.3`, Sparkle is only a local testing integration. Do not describe it as
-a public update feature and do not rely on it for release delivery.
-
-- `SparkleUpdateConfiguration.isPublicDistributionEnabled` is `false`.
-- Sparkle feed URLs in the app plists point to `127.0.0.1` test appcasts.
-- The test panel is hidden unless a maintainer opts in with
-  `LOOMSCREEN_SPARKLE_TESTING=1` or `SparkleTestManualChecksEnabled`.
-- Public users still get the GitHub Releases check and manually download/replace
-  the DMG.
+Release delivery uses GitHub Releases and remains manual: users download the
+new DMG and replace the installed app. The Lite app keeps its launch-time and
+About-panel GitHub update checks; neither SKU auto-installs updates.
 
 ## Version checklist
 
@@ -44,7 +38,7 @@ be run in addition, but are not required by this portable gate.
 
 ## Manual packaging
 
-The maintainer-local packaging helpers, when present, produce:
+The tracked, secret-free packaging helper produces:
 
 - `build/release/Loomscreen-X.Y.Z.dmg`
 - `build/release/Loomscreen-X.Y.Z.dmg.sha256`
@@ -57,6 +51,18 @@ Expected commands:
 scripts/release-app.sh --sku lite --version X.Y.Z
 scripts/release-app.sh --sku pro  --version X.Y.Z
 ```
+
+Validate the clean-clone tooling contract without building or signing:
+
+```sh
+scripts/release_contract_check.sh
+scripts/release-app.sh --sku lite --version X.Y.Z --plan
+scripts/release-app.sh --sku pro  --version X.Y.Z --plan
+```
+
+`--plan` performs no build and writes no artifact. Signing identities and any
+future notarization credentials remain environment/machine inputs; they are not
+stored in this repository.
 
 The public Lite asset must be named `Loomscreen-X.Y.Z.dmg`. The Pro asset must
 be named `Loomscreen-Pro-X.Y.Z.dmg`. Upload the Lite DMG first so older update
@@ -89,4 +95,4 @@ the quarantine-clear command once.
    ```
 3. Launch Loomscreen and confirm the menu bar app opens.
 4. In **Settings -> About**, confirm the version is `X.Y.Z`.
-5. Confirm **Check Now** opens/sees the GitHub Releases path, not Sparkle.
+5. Confirm **Check Now** resolves the current version through GitHub Releases.

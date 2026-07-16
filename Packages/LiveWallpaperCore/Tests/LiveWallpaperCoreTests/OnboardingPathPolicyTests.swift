@@ -4,6 +4,15 @@ import Testing
 @Suite("OnboardingPathPolicy")
 struct OnboardingPathPolicyTests {
 
+    @Test("Unconfigured: no import or gallery action is exposed")
+    func unconfiguredPolicy() {
+        let policy = OnboardingPathPolicy(capabilities: .unconfigured)
+
+        #expect(policy.sku == .unconfigured)
+        #expect(policy.galleryActions.isEmpty)
+        #expect(policy.showsWorkshopSetup == false)
+    }
+
     @Test("Pro without the Workshop capability: Import file + Apple Aerials, no setup step")
     func proPolicy() {
         let policy = OnboardingPathPolicy(capabilities: .pro)

@@ -55,18 +55,26 @@ final class WPEEngineAssetsInstaller {
     /// Per-run token. Guards a cancel-then-retry race where a superseded run's
     /// late return or progress callback would otherwise mutate the newer run.
     @ObservationIgnored private var currentAttempt: UUID?
+    @ObservationIgnored private let operationCoordinator: SteamCMDDoctorOperationCoordinator
+    @ObservationIgnored private let filesystemOwner: WPEEngineAssetsFilesystemOwner
 
     /// Marker stored when an install exists but its buildid couldn't be parsed —
     /// keeps `hasManagedInstall` true while signalling "version unknown".
-    private static let unknownBuildMarker = "0"
-
     /// Stored (not computed-from-`SettingsManager`) so SwiftUI re-renders the
     /// engine-assets row the instant a download finishes — a computed read of
     /// UserDefaults isn't observation-tracked, which left the row stuck on the
     /// pre-download state until some other change nudged it.
     private(set) var hasManagedInstall: Bool
 
-    init() {
+    init(
+        operationCoordinator: SteamCMDDoctorOperationCoordinator = .shared,
+        assetsTransaction: WPEEngineAssetsTransaction = WPEEngineAssetsTransaction(),
+        filesystemOwner: WPEEngineAssetsFilesystemOwner? = nil
+    ) {
+        self.operationCoordinator = operationCoordinator
+        self.filesystemOwner = filesystemOwner ?? WPEEngineAssetsFilesystemOwner(
+            transaction: assetsTransaction
+        )
         let state = Self.managedStateFromDefaults()
         hasManagedInstall = state.hasManagedInstall
         installedBuildID = state.installedBuildID
@@ -74,8 +82,8 @@ final class WPEEngineAssetsInstaller {
 
     var isBusy: Bool {
         switch phase {
-        case .downloading, .pruning, .checking: return true
-        default: return false
+        case .downloading, .pruning, .checking: true
+        default: false
         }
     }
 
@@ -113,7 +121,9 @@ final class WPEEngineAssetsInstaller {
         currentAttempt = nil
         progress = nil
         progressBytes = nil
-        if isBusy { phase = .idle }
+        if isBusy {
+            phase = .idle
+        }
     }
 
     func clearTransientStatus() {
@@ -128,14 +138,36 @@ final class WPEEngineAssetsInstaller {
     }
 
     private func run(using doctor: SteamCMDDoctorService, attempt: UUID) async {
+        do {
+            try await operationCoordinator.withOperation(.appUpdate) { [weak self] lease in
+                guard let self else { return }
+                await performRun(using: doctor, attempt: attempt, operationLease: lease)
+            }
+        } catch {
+            guard currentAttempt == attempt else { return }
+            task = nil
+            if error is CancellationError {
+                currentAttempt = nil
+                phase = .idle
+            } else {
+                fail(error.localizedDescription)
+            }
+        }
+    }
+
+    private func performRun(
+        using doctor: SteamCMDDoctorService,
+        attempt: UUID,
+        operationLease: SteamCMDDoctorOperationLease
+    ) async {
         let result = await doctor.updateWallpaperEngineApp(onProgress: { [weak self] percent, downloaded, total in
             Task { @MainActor [weak self] in
-                guard let self, self.currentAttempt == attempt,
+                guard let self, currentAttempt == attempt,
                       case .downloading = self.phase, percent.isFinite else { return }
-                self.progress = min(max(percent / 100, 0), 1)
-                self.progressBytes = ProgressBytes(downloaded: downloaded, total: (total ?? 0) > 0 ? total : nil)
+                progress = min(max(percent / 100, 0), 1)
+                progressBytes = ProgressBytes(downloaded: downloaded, total: (total ?? 0) > 0 ? total : nil)
             }
-        })
+        }, inheriting: operationLease)
         // A newer attempt (cancel-then-retry) may have superseded this one while it
         // awaited; only the current attempt may mutate shared state.
         guard currentAttempt == attempt else { return }
@@ -143,9 +175,14 @@ final class WPEEngineAssetsInstaller {
         guard !Task.isCancelled else { phase = .idle; progress = nil; currentAttempt = nil; return }
 
         switch result {
-        case .updated(let installRoot, let buildID):
-            await finishUpdate(installRoot: installRoot, buildID: buildID)
-        case .notConfigured(let reason):
+        case let .updated(installRoot, buildID):
+            await finishUpdate(
+                installRoot: installRoot,
+                buildID: buildID,
+                attempt: attempt,
+                operationLease: operationLease
+            )
+        case let .notConfigured(reason):
             fail(reason)
         case .loginRequired:
             fail(String(localized: "Sign in to SteamCMD in the Doctor (Settings → Workshop) first.", comment: "Engine-assets download blocked: no cached SteamCMD login."))
@@ -155,32 +192,72 @@ final class WPEEngineAssetsInstaller {
             fail(String(localized: "This Steam account doesn't own Wallpaper Engine, so its assets can't be downloaded.", comment: "Engine-assets download blocked: account doesn't own Wallpaper Engine."))
         case .timedOut:
             fail(String(localized: "The download timed out. Try again.", comment: "Engine-assets download timed out."))
-        case .failed(let reason):
+        case let .failed(reason):
             fail(reason)
         }
     }
 
-    private func finishUpdate(installRoot: URL, buildID: String?) async {
+    private func finishUpdate(
+        installRoot: URL,
+        buildID: String?,
+        attempt: UUID,
+        operationLease: SteamCMDDoctorOperationLease
+    ) async {
         phase = .pruning
         progress = nil
         progressBytes = nil
+        // Cancellation is honored until the commit starts. Once the utility task
+        // enters publication, disk + marker completion is mandatory; a queued
+        // successor remains serialized by the still-held operation lease.
+        guard currentAttempt == attempt, !Task.isCancelled else { return }
+        let owner = filesystemOwner
+        let authorization = operationLease.filesystemMutation(
+            approvingSourceRoot: installRoot
+        )
+        let commit: WPEEngineAssetsFilesystemOwner.CommitResult
         do {
-            try await Task.detached(priority: .utility) {
-                try WPEEngineAssetsInstaller.commitAndPrune(installRoot: installRoot)
+            commit = try await Task.detached(priority: .utility) {
+                try owner.commitAndPrune(
+                    installRoot: installRoot,
+                    buildID: buildID,
+                    authorization: authorization
+                )
             }.value
         } catch {
+            guard currentAttempt == attempt else { return }
             fail(String(localized: "Downloaded Wallpaper Engine, but trimming it to the assets folder failed.", comment: "Engine-assets download succeeded but pruning failed."))
             return
         }
-
-        SettingsManager.shared.wpeEngineAssetsManagedBuildID = buildID ?? Self.unknownBuildMarker
+        // Publication is already durable. Always publish its durable marker and
+        // library truth even when Cancel created a newer attempt while pruning.
+        SettingsManager.shared.wpeEngineAssetsManagedBuildID = commit.buildID
         hasManagedInstall = true
-        installedBuildID = buildID
-        latestBuildID = buildID
+        let exactBuildID = commit.buildID == WPEEngineAssetsLibrary.unknownManagedBuildMarker
+            ? nil
+            : commit.buildID
+        installedBuildID = exactBuildID
+        latestBuildID = exactBuildID
         updateAvailable = false
-        updateCheckOutcome = .upToDate(buildID: buildID)
-        currentAttempt = nil
+        updateCheckOutcome = .upToDate(buildID: exactBuildID)
         WPEEngineAssetsLibrary.shared.refresh()
+        // Large previous slots and SteamCMD staging are cleanup, not commit.
+        // Keep them on the same live lease/utility lane, but only after the
+        // authority sidecar and UserDefaults marker agree.
+        do {
+            try await Task.detached(priority: .utility) {
+                try owner.cleanupAfterCommit(
+                    commit,
+                    authorization: authorization
+                )
+            }.value
+        } catch {
+            Logger.warning(
+                "Wallpaper Engine assets published; deferred cleanup will retry later: \(error.localizedDescription)",
+                category: .workshop
+            )
+        }
+        guard currentAttempt == attempt, !Task.isCancelled else { return }
+        currentAttempt = nil
         phase = .idle
         WorkshopToastCenter.shared.post(
             headline: String(localized: "Wallpaper Engine assets ready", comment: "Engine-assets download success toast headline."),
@@ -200,21 +277,23 @@ final class WPEEngineAssetsInstaller {
         updateCheckOutcome = .checking
         task = Task { [weak self] in
             let latest = await doctor.latestWallpaperEngineBuildID()
-            guard let self, self.currentAttempt == attempt else { return }
-            self.task = nil
-            self.currentAttempt = nil
-            self.phase = .idle
-            self.latestBuildID = latest
+            guard let self, currentAttempt == attempt else { return }
+            task = nil
+            currentAttempt = nil
+            phase = .idle
+            latestBuildID = latest
             let outcome = UpdateCheckOutcome.resolve(
-                installedBuildID: self.installedBuildID,
+                installedBuildID: installedBuildID,
                 latestBuildID: latest
             )
-            self.updateCheckOutcome = outcome
-            self.updateAvailable = {
-                if case .available = outcome { return true }
+            updateCheckOutcome = outcome
+            updateAvailable = {
+                if case .available = outcome {
+                    return true
+                }
                 return false
             }()
-            self.postUpdateCheckToast(outcome)
+            postUpdateCheckToast(outcome)
         }
     }
 
@@ -222,14 +301,51 @@ final class WPEEngineAssetsInstaller {
 
     func remove() {
         guard !isBusy else { return }
+        let attempt = UUID()
+        currentAttempt = attempt
+        phase = .pruning
+        task = Task { [weak self] in await self?.performRemove(attempt: attempt) }
+    }
+
+    private func performRemove(attempt: UUID) async {
+        do {
+            try await operationCoordinator.withOperation(.assetsMutation) { [weak self] lease in
+                guard let self else { return }
+                try await commitRemove(attempt: attempt, operationLease: lease)
+            }
+        } catch {
+            guard currentAttempt == attempt else { return }
+            task = nil
+            currentAttempt = nil
+            phase = .idle
+        }
+    }
+
+    // The coordinator's closure is @Sendable and runs off the main actor; hop back in one
+    // call instead of touching main-actor state piecemeal, same as performRun.
+    private func commitRemove(
+        attempt: UUID,
+        operationLease lease: SteamCMDDoctorOperationLease
+    ) async throws {
+        guard currentAttempt == attempt else { return }
+        let owner = filesystemOwner
+        _ = try await Task.detached(priority: .utility) {
+            try owner.removeManagedInstall(
+                authorization: lease.filesystemMutation
+            )
+        }.value
+        // Once deletion commits, its durable marker must match disk even
+        // if the initiating UI attempt was cancelled meanwhile.
         SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
-        Self.deleteManagedInstall()
         hasManagedInstall = false
         installedBuildID = nil
         latestBuildID = nil
         updateAvailable = false
         updateCheckOutcome = .notChecked
         WPEEngineAssetsLibrary.shared.refresh()
+        guard currentAttempt == attempt else { return }
+        task = nil
+        currentAttempt = nil
         phase = .idle
     }
 
@@ -250,7 +366,10 @@ final class WPEEngineAssetsInstaller {
         let hasManagedInstall = WPEEngineAssetsLibrary.hasManagedInstall
         guard hasManagedInstall else { return (false, nil) }
         let stored = SettingsManager.shared.wpeEngineAssetsManagedBuildID
-        return (true, stored == Self.unknownBuildMarker ? nil : stored)
+        return (
+            true,
+            stored == WPEEngineAssetsLibrary.unknownManagedBuildMarker ? nil : stored
+        )
     }
 
     private func postUpdateCheckToast(_ outcome: UpdateCheckOutcome) {
@@ -289,156 +408,4 @@ final class WPEEngineAssetsInstaller {
     }
 }
 
-// MARK: - Safe filesystem operations
-
-extension WPEEngineAssetsInstaller {
-    enum PruneError: Error, Equatable, Sendable {
-        case notContainerInternal
-        case unexpectedLayout
-        case missingAssets
-    }
-
-    nonisolated static let wpeAppID = 431960
-
-    /// Cross-platform `app_update` leaves the engine content in steamcmd's staging
-    /// dir (`downloading/431960/`) and never commits it to `common/`. So we do the
-    /// "commit" ourselves: move `assets/` into the managed location, prune, then
-    /// clear steamcmd's 431960 bookkeeping so its lingering pending-update state
-    /// stops derailing the Doctor's ownership probe (which shares app id 431960).
-    nonisolated static func commitAndPrune(installRoot: URL, fileManager: FileManager = .default) throws {
-        let managed = WPEEngineAssetsLibrary.managedContainerRoot()
-        if WPEEngineAssetsLibrary.canonicalPath(installRoot) != WPEEngineAssetsLibrary.canonicalPath(managed) {
-            try relocateAssets(from: installRoot, to: managed, fileManager: fileManager)
-        }
-        try pruneToAssets(installRoot: managed, fileManager: fileManager)
-        cleanupSteamcmdAppState(fileManager: fileManager)
-    }
-
-    /// Moves `sourceRoot/assets` into the managed `common/wallpaper_engine/assets`
-    /// (a same-volume rename). Guards that the destination is the expected
-    /// container path and the source assets exist.
-    private nonisolated static func relocateAssets(from sourceRoot: URL, to managedRoot: URL, fileManager: FileManager) throws {
-        let managed = managedRoot.standardizedFileURL.resolvingSymlinksInPath()
-        guard WPEEngineAssetsLibrary.isContainerInternal(managed),
-              managed.lastPathComponent == "wallpaper_engine",
-              managed.deletingLastPathComponent().lastPathComponent == "common" else {
-            throw PruneError.unexpectedLayout
-        }
-        let srcAssets = sourceRoot.appendingPathComponent("assets", isDirectory: true)
-        guard isNonEmptyDirectory(srcAssets, fileManager: fileManager) else { throw PruneError.missingAssets }
-        try fileManager.createDirectory(at: managed, withIntermediateDirectories: true)
-
-        // Stage-then-swap so a failed move (e.g. cross-volume copy) can't leave us
-        // with the old assets deleted and the new ones not in place. The first move
-        // (possibly cross-volume) happens BEFORE the old assets are touched; the
-        // two swap moves are same-directory renames.
-        let dest = managed.appendingPathComponent("assets", isDirectory: true)
-        let incoming = managed.appendingPathComponent("assets.incoming", isDirectory: true)
-        let previous = managed.appendingPathComponent("assets.previous", isDirectory: true)
-        try? fileManager.removeItem(at: incoming)
-        try? fileManager.removeItem(at: previous)
-        try fileManager.moveItem(at: srcAssets, to: incoming)
-        if fileManager.fileExists(atPath: dest.path(percentEncoded: false)) {
-            try fileManager.moveItem(at: dest, to: previous)
-        }
-        do {
-            try fileManager.moveItem(at: incoming, to: dest)
-        } catch {
-            if fileManager.fileExists(atPath: previous.path(percentEncoded: false)),
-               !fileManager.fileExists(atPath: dest.path(percentEncoded: false)) {
-                try? fileManager.moveItem(at: previous, to: dest)
-            }
-            throw error
-        }
-        try? fileManager.removeItem(at: previous)
-    }
-
-    /// Deletes ONLY steamcmd's 431960 app-install bookkeeping — the `appmanifest`,
-    /// the `downloading/431960` staging tree, and its `state_*` patch files. Never
-    /// touches `common/`, workshop content, or the login session. This is what
-    /// stops a half-finished cross-platform update from poisoning the ownership
-    /// probe (which runs `workshop_download_item 431960` and otherwise gets pulled
-    /// into resuming the pending update).
-    nonisolated static func cleanupSteamcmdAppState(fileManager: FileManager = .default) {
-        guard let steamApps = containerSteamApps(fileManager: fileManager) else { return }
-        cleanupSteamcmdAppState(steamApps: steamApps, fileManager: fileManager)
-    }
-
-    nonisolated static func cleanupSteamcmdAppState(steamApps: URL, fileManager: FileManager = .default) {
-        var targets = [
-            steamApps.appendingPathComponent("appmanifest_\(wpeAppID).acf", isDirectory: false),
-            steamApps.appendingPathComponent("downloading/\(wpeAppID)", isDirectory: true),
-        ]
-        let downloadingRoot = steamApps.appendingPathComponent("downloading", isDirectory: true)
-        if let children = try? fileManager.contentsOfDirectory(at: downloadingRoot, includingPropertiesForKeys: nil) {
-            targets += children.filter { $0.lastPathComponent.hasPrefix("state_\(wpeAppID)_") }
-        }
-        for target in targets {
-            // Containment check uses the fully-resolved path (catches a symlinked
-            // intermediate that escapes the container); the delete operates on the
-            // LITERAL path so a final-component symlink is unlinked, not followed to
-            // its target (which could be `common/`, the login session, etc.).
-            let resolved = target.standardizedFileURL.resolvingSymlinksInPath()
-            guard WPEEngineAssetsLibrary.isContainerInternal(resolved) else { continue }
-            try? fileManager.removeItem(at: target)
-        }
-    }
-
-    private nonisolated static func containerSteamApps(fileManager: FileManager) -> URL? {
-        guard let appSupport = try? fileManager.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
-        ) else { return nil }
-        return appSupport.appendingPathComponent("Steam/steamapps", isDirectory: true)
-    }
-
-    /// Deletes everything under the WPE install dir EXCEPT `assets/`. Hard guards
-    /// against ever touching files elsewhere:
-    ///  1. the target must be inside our own sandbox container,
-    ///  2. it must be the expected `…/common/wallpaper_engine` path,
-    ///  3. `assets/` must be a non-empty directory (never prune a partial download),
-    ///  4. only immediate children that resolve back inside the dir are removed —
-    ///     a symlink escaping the install dir is skipped, not followed.
-    nonisolated static func pruneToAssets(installRoot: URL, fileManager: FileManager = .default) throws {
-        let root = installRoot.standardizedFileURL.resolvingSymlinksInPath()
-        guard WPEEngineAssetsLibrary.isContainerInternal(root) else { throw PruneError.notContainerInternal }
-        guard root.lastPathComponent == "wallpaper_engine",
-              root.deletingLastPathComponent().lastPathComponent == "common" else {
-            throw PruneError.unexpectedLayout
-        }
-        let assets = root.appendingPathComponent("assets", isDirectory: true)
-        guard isNonEmptyDirectory(assets, fileManager: fileManager) else { throw PruneError.missingAssets }
-
-        let children = try fileManager.contentsOfDirectory(
-            at: root, includingPropertiesForKeys: nil, options: [])
-        for child in children where child.lastPathComponent != "assets" {
-            guard isContained(child, in: root) else { continue }
-            try? fileManager.removeItem(at: child)
-        }
-    }
-
-    /// Removes the whole managed `wallpaper_engine` directory, guarded the same
-    /// way as the prune so a corrupt path can never escape the container.
-    nonisolated static func deleteManagedInstall(fileManager: FileManager = .default) {
-        let root = WPEEngineAssetsLibrary.managedContainerRoot().standardizedFileURL.resolvingSymlinksInPath()
-        guard WPEEngineAssetsLibrary.isContainerInternal(root),
-              root.lastPathComponent == "wallpaper_engine",
-              root.deletingLastPathComponent().lastPathComponent == "common" else { return }
-        try? fileManager.removeItem(at: root)
-    }
-
-    private nonisolated static func isContained(_ child: URL, in parent: URL) -> Bool {
-        let c = WPEEngineAssetsLibrary.canonicalPath(child)
-        let p = WPEEngineAssetsLibrary.canonicalPath(parent)
-        return c == p || c.hasPrefix(p + "/")
-    }
-
-    private nonisolated static func isNonEmptyDirectory(_ url: URL, fileManager: FileManager) -> Bool {
-        var isDir = ObjCBool(false)
-        guard fileManager.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDir), isDir.boolValue else {
-            return false
-        }
-        let contents = (try? fileManager.contentsOfDirectory(atPath: url.path(percentEncoded: false))) ?? []
-        return !contents.isEmpty
-    }
-}
 #endif

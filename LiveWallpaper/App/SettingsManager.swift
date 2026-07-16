@@ -20,6 +20,8 @@ final class SettingsManager {
     private let screenConfigStore: AtomicFileStore<[ScreenConfiguration]>
     private let globalSettingsStore: AtomicFileStore<GlobalSettings>
     private let wallpaperBookmarksStore: AtomicFileStore<[WallpaperBookmark]>
+    private let bookmarkResolver: SecurityScopedBookmarkResolver
+    private let persistWPEBookmarkOwnerRefresh: @MainActor (WPEOrigin, Data) -> Void
 
     /// Serial off-MainActor writer for all three file stores (configs, global
     /// settings, bookmarks). Cache mutations remain synchronous on MainActor;
@@ -73,7 +75,18 @@ final class SettingsManager {
     /// dispatch in `stampBlobSchemaVersionIfNeeded` keyed off `storedVersion`.
     private static let currentBlobSchemaVersion = 1
 
-    init(directory: ConfigurationDirectory = ConfigurationDirectory()) {
+    init(
+        directory: ConfigurationDirectory = ConfigurationDirectory(),
+        bookmarkResolver: SecurityScopedBookmarkResolver = .shared,
+        persistWPEBookmarkOwnerRefresh: @MainActor @escaping (WPEOrigin, Data) -> Void = {
+            origin, refreshed in
+            _ = BookmarkStore.shared.replaceWPEOriginBookmark(
+                workshopID: origin.workshopID,
+                matching: origin.sourceFolderBookmark,
+                with: refreshed
+            )
+        }
+    ) {
         let screenConfigStore = AtomicFileStore<[ScreenConfiguration]>(
             fileURL: directory.url(for: .screenConfigurations)
         )
@@ -86,6 +99,8 @@ final class SettingsManager {
         )
         self.globalSettingsStore = globalSettingsStore
         self.wallpaperBookmarksStore = wallpaperBookmarksStore
+        self.bookmarkResolver = bookmarkResolver
+        self.persistWPEBookmarkOwnerRefresh = persistWPEBookmarkOwnerRefresh
         self.configurationPersistenceActor = WallpaperPersistenceActor(
             store: screenConfigStore,
             globalSettingsStore: globalSettingsStore,
@@ -282,6 +297,33 @@ final class SettingsManager {
         saveGlobalSettings(settings)
     }
 
+    /// Persists a refreshed source-folder bookmark into every matching WPE
+    /// history row. The original Data is part of the predicate so a delayed
+    /// refresh can never overwrite a newer explicit re-grant.
+    @discardableResult
+    func replaceWPEHistorySourceBookmark(
+        workshopID: String,
+        matching original: Data,
+        with refreshed: Data
+    ) -> Bool {
+        var settings = loadGlobalSettings()
+        var didReplace = false
+        for index in settings.recentWPEImports.indices {
+            guard let updated = settings.recentWPEImports[index]
+                .replacingSourceFolderBookmark(
+                    workshopID: workshopID,
+                    matching: original,
+                    with: refreshed
+                ) else { continue }
+            settings.recentWPEImports[index] = updated
+            didReplace = true
+        }
+        guard didReplace else { return false }
+        saveGlobalSettings(settings)
+        NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+        return true
+    }
+
     /// Upper bound on the delete-tombstone list. Each tombstone is just a
     /// workshop-ID string, but it lives in the single `global-settings.json`
     /// blob, so cap its growth; the oldest fall off first.
@@ -307,14 +349,31 @@ final class SettingsManager {
         // any id that isn't a safe path component (mirrors ProWPE's
         // `WPEPathSafety.isSafeWorkshopID`, inlined here because that type is
         // Pro-only while this method is compiled into both SKUs).
-        guard Self.isSafeWorkshopIDComponent(workshopID) else { return }
         var settings = loadGlobalSettings()
-        guard !settings.deletedWorkshopIDs.contains(workshopID) else { return }
-        settings.deletedWorkshopIDs.insert(workshopID, at: 0)
-        if settings.deletedWorkshopIDs.count > Self.maxDeletedWorkshopTombstones {
-            settings.deletedWorkshopIDs = Array(settings.deletedWorkshopIDs.prefix(Self.maxDeletedWorkshopTombstones))
+        guard Self.insertDeleteTombstone(workshopID: workshopID, into: &settings) else { return }
+        saveGlobalSettings(settings)
+    }
+
+    /// Atomic compare-and-remove for confirmation UIs that captured a concrete
+    /// library entry. A same-ID re-import has a different `importedAt`, so a
+    /// stale confirmation cannot remove it or write a tombstone for it.
+    @discardableResult
+    func removeWPEImport(
+        workshopID: String,
+        matchingImportedAt importedAt: Date,
+        recordingDeleteTombstone: Bool = true
+    ) -> Bool {
+        var settings = loadGlobalSettings()
+        guard let index = settings.recentWPEImports.firstIndex(where: {
+            $0.origin.workshopID == workshopID && $0.importedAt == importedAt
+        }) else { return false }
+        settings.recentWPEImports.remove(at: index)
+        if recordingDeleteTombstone {
+            _ = Self.insertDeleteTombstone(workshopID: workshopID, into: &settings)
         }
         saveGlobalSettings(settings)
+        NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+        return true
     }
 
     func removeWPEImport(workshopID: String) {
@@ -324,6 +383,22 @@ final class SettingsManager {
         guard settings.recentWPEImports != previous else { return }
         saveGlobalSettings(settings)
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
+    @discardableResult
+    private static func insertDeleteTombstone(
+        workshopID: String,
+        into settings: inout GlobalSettings
+    ) -> Bool {
+        guard isSafeWorkshopIDComponent(workshopID),
+              !settings.deletedWorkshopIDs.contains(workshopID) else { return false }
+        settings.deletedWorkshopIDs.insert(workshopID, at: 0)
+        if settings.deletedWorkshopIDs.count > maxDeletedWorkshopTombstones {
+            settings.deletedWorkshopIDs = Array(
+                settings.deletedWorkshopIDs.prefix(maxDeletedWorkshopTombstones)
+            )
+        }
+        return true
     }
 
     // MARK: - Workshop Library Root Bookmark
@@ -612,7 +687,7 @@ final class SettingsManager {
         for screenID: CGDirectDisplayID,
         configuration: ScreenConfiguration
     ) -> Bool {
-        switch SecurityScopedBookmarkResolver.shared.resolve(bookmarkData, target: .transient) {
+        switch bookmarkResolver.resolve(bookmarkData, target: .transient) {
         case .success(let resolved):
             let url = resolved.url
             if resolved.didRefresh {
@@ -665,9 +740,16 @@ final class SettingsManager {
         indexFileName: String?,
         for screenID: CGDirectDisplayID
     ) -> Bool {
-        switch SecurityScopedBookmarkResolver.shared.resolve(bookmarkData, target: .transient) {
+        switch bookmarkResolver.resolve(bookmarkData, target: .transient) {
         case .success(let resolved):
             let url = resolved.url
+            if resolved.didRefresh {
+                persistRefreshedHTMLBookmark(
+                    matching: bookmarkData,
+                    with: resolved.bookmarkData,
+                    for: screenID
+                )
+            }
 
             let canAccess = url.startAccessingSecurityScopedResource()
             defer {
@@ -704,6 +786,49 @@ final class SettingsManager {
             Logger.error("Failed to resolve local HTML bookmark for screen \(screenID): \(failure.localizedDescription)", category: .fileAccess)
             return false
         }
+    }
+
+    /// Actor-safe persistent owner used by validation. This is a normal
+    /// MainActor method rather than an escaping `Target.save` closure, so it
+    /// cannot later be invoked from an arbitrary executor.
+    @discardableResult
+    func persistRefreshedHTMLBookmark(
+        matching original: Data,
+        with refreshed: Data,
+        for screenID: CGDirectDisplayID
+    ) -> Bool {
+        guard let current = getConfiguration(for: screenID) else { return false }
+
+        let updated: ScreenConfiguration?
+        if let origin = current.wpeOrigin,
+           origin.sourceFolderBookmark == original {
+            updated = current.replacingWPEOriginBookmark(
+                workshopID: origin.workshopID,
+                matching: original,
+                with: refreshed
+            )
+            _ = replaceWPEHistorySourceBookmark(
+                workshopID: origin.workshopID,
+                matching: original,
+                with: refreshed
+            )
+            persistWPEBookmarkOwnerRefresh(origin, refreshed)
+        } else {
+            updated = current.replacingHTMLBookmark(
+                matching: original,
+                with: refreshed
+            )
+        }
+
+        guard let updated else {
+            Logger.info(
+                "[bookmark/screenHTML] skipped stale refresh save — stored bookmark changed between resolve and save",
+                category: .fileAccess
+            )
+            return false
+        }
+        saveConfiguration(updated)
+        return true
     }
 
     // MARK: - User Preferences

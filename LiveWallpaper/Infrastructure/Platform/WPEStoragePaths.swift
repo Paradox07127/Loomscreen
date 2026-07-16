@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Single source of truth for the app's on-disk WPE storage locations and
 /// `du`-style allocated-size accounting. Consolidates container Steam path

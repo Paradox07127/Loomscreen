@@ -1,0 +1,17 @@
+array-string	com.apple.security.exception.mach-lookup.global-name	com.apple.audioanalyticsd
+array-string	com.apple.security.temporary-exception.files.absolute-path.read-only	/opt/homebrew/
+array-string	com.apple.security.temporary-exception.files.absolute-path.read-only	/opt/local/
+array-string	com.apple.security.temporary-exception.files.absolute-path.read-only	/usr/local/
+array-string	com.apple.security.temporary-exception.iokit-user-client-class	AppleSMCClient
+array-string	com.apple.security.temporary-exception.sbpl	(allow process-info-listpids)
+array-string	com.apple.security.temporary-exception.sbpl	(allow process-info-pidinfo)
+array-string	com.apple.security.temporary-exception.sbpl	(allow process-info-rusage)
+bool	com.apple.security.app-sandbox	true
+bool	com.apple.security.automation.startup-items	true
+bool	com.apple.security.device.audio-input	true
+bool	com.apple.security.device.power	true
+bool	com.apple.security.files.bookmarks.app-scope	true
+bool	com.apple.security.files.user-selected.read-write	true
+bool	com.apple.security.network.client	true
+bool	com.apple.security.network.server	true
+bool	com.apple.security.personal-information.location	true

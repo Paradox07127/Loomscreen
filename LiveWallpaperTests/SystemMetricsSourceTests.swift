@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import os
 @testable import LiveWallpaper
 
 @Suite("System metrics source")
@@ -48,10 +49,41 @@ struct SystemMetricsSourceTests {
         #expect(snapshot.cpuTotal >= 0)
         #expect(snapshot.cpuTotal <= 1)
         #expect(snapshot.uptimeSeconds > 0)
+        #expect(snapshot.loadAverage1 == snapshot.cpuLoadAvg?.first)
 
         let health = await sink.health()
         #expect(health?.sourceID == "system")
         #expect(health?.state == "ok")
+    }
+
+    @Test("Each published poll samples load averages exactly once", .timeLimit(.minutes(1)))
+    func pollSamplesLoadAverageOnce() async {
+        let sink = MockSink()
+        let samplerCalls = OSAllocatedUnfairLock(initialState: 0)
+        let source = SystemMetricsSource(
+            includeTopProcesses: false,
+            interval: 60,
+            loadAverageSampler: {
+                samplerCalls.withLock { $0 += 1 }
+                return [1.25, 0.75, 0.5]
+            }
+        )
+
+        await source.start(sink: sink)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if await sink.count() >= 1 { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        await source.stop()
+
+        let updateCount = await sink.count()
+        let callCount = samplerCalls.withLock { $0 }
+        #expect(updateCount == 1)
+        #expect(callCount == updateCount)
+        let snapshot = await sink.system()
+        #expect(snapshot?.loadAverage1 == 1.25)
+        #expect(snapshot?.cpuLoadAvg == [1.25, 0.75, 0.5])
     }
 
     @Test("Stopping halts further updates")

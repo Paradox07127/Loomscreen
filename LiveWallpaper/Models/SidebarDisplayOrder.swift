@@ -37,13 +37,22 @@ enum SidebarDisplayOrder {
     static func orderedDisplayIDs(from available: [Entry], storedOrder: [Entry]) -> [CGDirectDisplayID] {
         var remaining = available
         var ordered = [Entry]()
+        let availableFingerprintCounts = Dictionary(grouping: available, by: \.fingerprint).mapValues(\.count)
+        let storedFingerprintCounts = Dictionary(grouping: storedOrder, by: \.fingerprint).mapValues(\.count)
 
         for storedEntry in storedOrder {
             let exactMatch = remaining.firstIndex { candidate in
                 candidate.displayID == storedEntry.displayID
                     && candidate.fingerprint == storedEntry.fingerprint
             }
-            let fingerprintMatch = !isUnknownFingerprint(storedEntry.fingerprint)
+            // A fingerprint fallback is truthful only when it identifies one
+            // row on both sides. Counts come from the original collections so
+            // removing an exact match cannot make an ambiguous group appear
+            // unique later in the loop.
+            let canUseFingerprintFallback = !isUnknownFingerprint(storedEntry.fingerprint)
+                && availableFingerprintCounts[storedEntry.fingerprint] == 1
+                && storedFingerprintCounts[storedEntry.fingerprint] == 1
+            let fingerprintMatch = canUseFingerprintFallback
                 ? remaining.firstIndex { candidate in
                     candidate.fingerprint == storedEntry.fingerprint
                         && !isUnknownFingerprint(candidate.fingerprint)

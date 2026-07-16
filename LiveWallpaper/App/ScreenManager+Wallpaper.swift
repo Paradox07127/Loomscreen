@@ -7,6 +7,7 @@ extension ScreenManager {
 
     /// Replaces the primary video while preserving per-screen settings.
     func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
+        guard !isTerminating else { return }
         recordBookmarkDisplayName(bookmarkData, name: url.lastPathComponent)
         playbackCoordinator.setVideo(
             url: url,
@@ -26,10 +27,12 @@ extension ScreenManager {
     }
 
     func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
+        guard !isTerminating else { return }
         playbackCoordinator.applyConfiguration(configuration, to: screen, preservingState: preservingState)
     }
 
     func setupVideoPlayback(url: URL, screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.setupVideoPlayback(url: url, screen: screen)
     }
 
@@ -103,8 +106,9 @@ extension ScreenManager {
 
     func retryRuntimeSession(for screen: Screen) {
         Task { @MainActor [weak self, weak screen] in
-            guard let self, let screen else { return }
+            guard let self, let screen, !self.isTerminating else { return }
             await screen.runtimeSession?.retry()
+            guard !self.isTerminating else { return }
             self.markWallpaperSessionStateChanged()
         }
     }
@@ -240,6 +244,7 @@ extension ScreenManager {
     /// anywhere) is not carried across an off→on cycle — rebuilt screens follow
     /// the normal startup playback policy, exactly as on app relaunch.
     func setWallpapersEnabled(_ enabled: Bool) {
+        guard !isTerminating else { return }
         wallpapersGloballyEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.globallyEnabledDefaultsKey)
         Logger.info("\(enabled ? "Enabling" : "Disabling") all wallpaper rendering (master gate)", category: .screenManager)
@@ -257,6 +262,7 @@ extension ScreenManager {
     /// holding memory. Idempotent and safe to call across launches and after
     /// new wallpapers are assigned.
     func applyGlobalRenderGate() {
+        guard !isTerminating else { return }
         for screen in screens {
             if wallpapersGloballyEnabled {
                 if screen.runtimeSession == nil {
@@ -289,6 +295,7 @@ extension ScreenManager {
     // MARK: - Desktop Picture from Frame
 
     func updateSetAsDesktopPicture(_ enabled: Bool, for screen: Screen) {
+        guard !isTerminating else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.setAsLockScreen != enabled else { return }
         config.setAsLockScreen = enabled
@@ -300,6 +307,7 @@ extension ScreenManager {
     /// UI feedback so a silent no-op can't show a false success indicator.
     @discardableResult
     func extractLockScreenFrame(for screen: Screen) -> Bool {
+        guard !isTerminating else { return false }
         guard let player = screen.videoPlayer?.player else { return false }
 
         return DesktopPictureFrameExtractor.applyCurrentFrame(
@@ -312,6 +320,7 @@ extension ScreenManager {
     // MARK: - Wallpaper Type Switching
 
     func switchToVideoWallpaper(for screen: Screen) {
+        guard !isTerminating else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedVideoWallpaper() else { return }
@@ -329,6 +338,7 @@ extension ScreenManager {
 
     /// Restore previously-applied HTML source after the user toggles the type picker back to HTML.
     func switchToHTMLWallpaper(for screen: Screen) {
+        guard !isTerminating else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedHTMLWallpaper() else { return }
@@ -347,6 +357,7 @@ extension ScreenManager {
     /// toggles the type picker to Monitor. Seeds a default configuration on a
     /// screen that has never had one, mirroring `switchToHTMLWallpaper`.
     func switchToMonitorWallpaper(for screen: Screen) {
+        guard !isTerminating else { return }
         var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .monitor(.default)
@@ -375,6 +386,7 @@ extension ScreenManager {
     /// `apply(configuration:)` (which no-ops when nothing changed, so a
     /// live-board-originated edit round-tripping back here doesn't rebuild).
     func persistMonitorConfigurationFromBoard(_ config: MonitorBoardConfiguration, for screen: Screen) {
+        guard !isTerminating else { return }
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         guard case .monitor(let current) = configuration.activeWallpaper else { return }
         guard current != config else { return }
@@ -394,19 +406,37 @@ extension ScreenManager {
         htmlCoordinator.screensRunningSameSource(as: source, excluding: excluding)
     }
 
-    func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, forceReload: Bool = false, for screen: Screen) {
-        htmlCoordinator.setWallpaper(source: source, config: config, forceReload: forceReload, for: screen)
+    func setHTMLWallpaper(
+        source: HTMLSource,
+        config: HTMLConfig = .default,
+        forceReload: Bool = false,
+        bookmarkID: UUID? = nil,
+        wpeOrigin: WPEOrigin? = nil,
+        for screen: Screen
+    ) {
+        guard !isTerminating else { return }
+        htmlCoordinator.setWallpaper(
+            source: source,
+            config: config,
+            forceReload: forceReload,
+            bookmarkID: bookmarkID,
+            wpeOrigin: wpeOrigin,
+            for: screen
+        )
     }
 
     func setHTMLWallpaperPreservingConfig(source: HTMLSource, for screen: Screen) {
+        guard !isTerminating else { return }
         htmlCoordinator.setWallpaperPreservingConfig(source: source, for: screen)
     }
 
     func setHTMLWallpaper(url: String, for screen: Screen) {
+        guard !isTerminating else { return }
         htmlCoordinator.setWallpaper(url: url, for: screen)
     }
 
     func updateHTMLConfig(_ config: HTMLConfig, for screen: Screen) {
+        guard !isTerminating else { return }
         htmlCoordinator.updateConfig(config, for: screen)
     }
 
@@ -416,6 +446,7 @@ extension ScreenManager {
     /// overrides — there's no in-place apply seam on the WPE runtimes yet,
     /// the way HTML has `applyHTMLConfig`.
     func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) {
+        guard !isTerminating else { return }
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         guard case .scene(let current) = configuration.activeWallpaper,
               current.workshopID == descriptor.workshopID else {
@@ -519,6 +550,7 @@ extension ScreenManager {
     /// where the `.metalShader` case is gated with `#if !LITE_BUILD`, so this
     /// stays ungated for Lite-side bookmark restore / decode compatibility.
     func setShaderWallpaper(source: ShaderSource, for screen: Screen) {
+        guard !isTerminating else { return }
         let previousContent = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.activeWallpaper
         var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id, wallpaper: .metalShader(source)

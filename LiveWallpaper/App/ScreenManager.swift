@@ -40,6 +40,10 @@ final class ScreenManager {
     let bookmarkDisplayNameCache = BookmarkDisplayNameCache()
 
     @ObservationIgnored var cleanupTasks: Set<AnyCancellable> = []
+    /// One-way application-termination latch. Async observer/automation work
+    /// may already be queued when AppKit asks to quit; every route that can
+    /// rebuild a session or overlay checks this before doing more work.
+    @ObservationIgnored var isTerminating = false
     @ObservationIgnored let displayRegistry: any DisplayRegistering
     @ObservationIgnored let featureCatalog: FeatureCatalog
     @ObservationIgnored let originReconciler: any OriginReconciler
@@ -50,6 +54,7 @@ final class ScreenManager {
     @ObservationIgnored let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored let fullScreenDetector: any FullScreenDetecting
     @ObservationIgnored private let playableVideoLoader: any PlayableVideoLoading
+    @ObservationIgnored let memoryPressureWatcher: any MemoryPressureWatching
     @ObservationIgnored let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored var lastScreenSignatures: [CGDirectDisplayID: ScreenConfigurationSignature] = [:]
     @ObservationIgnored var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
@@ -70,15 +75,6 @@ final class ScreenManager {
     /// pause/resume overlay.
     @ObservationIgnored var userAbsenceReasons: Set<UserAbsenceReason> = []
     var isUserAbsent: Bool { !userAbsenceReasons.isEmpty }
-    /// No display is lit when the panels or the whole machine are asleep — no
-    /// render or memory-pressure response is possible, so SystemMonitor's 2s
-    /// poll is parked here (Pro-only; gated on `.systemMonitor`).
-    var allDisplaysAsleep: Bool {
-        userAbsenceReasons.contains(.displaySleep) || userAbsenceReasons.contains(.systemSleep)
-    }
-    /// Tracks whether we currently hold a SystemMonitor reference, so the
-    /// reference-counted start/stop stays balanced across sleep/wake churn.
-    @ObservationIgnored var systemMonitorActive = false
     /// System memory pressure, folded into the performance policy so a
     /// low-memory condition suspends every wallpaper type and **auto-resumes**
     /// once memory recovers — unlike the old `handleLowMemory` path, which
@@ -119,6 +115,10 @@ final class ScreenManager {
         originReconciler: originReconciler,
         isGloballyEnabled: { [weak self] in
             self?.wallpapersGloballyEnabled ?? true
+        },
+        isRuntimeInstallationAllowed: { [weak self] in
+            guard let self else { return false }
+            return !self.isTerminating
         }
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
@@ -134,6 +134,13 @@ final class ScreenManager {
         },
         restoreWallpaperSession: { [weak self] screen, config, preservingState in
             self?.restoreWallpaperSession(for: screen, configuration: config, preservingState: preservingState)
+        },
+        persistOriginBookmarkRefresh: { [weak self] origin, refreshed in
+            self?.persistRuntimeWPEBookmarkRefresh(origin: origin, with: refreshed)
+        },
+        isLifecycleActive: { [weak self] in
+            guard let self else { return false }
+            return !self.isTerminating
         }
     )
     #endif
@@ -207,32 +214,64 @@ final class ScreenManager {
         notifyWallpaperSessionChanged: { [weak self] in
             self?.notifyWallpaperSessionChanged()
         },
-        originReconciler: originReconciler
+        originReconciler: originReconciler,
+        prepareSource: { [weak self] source, bookmarkID, wpeOrigin in
+            guard let self else { return source }
+            return self.ambientSessionBuilder.refreshingHTMLSource(
+                source,
+                onBookmarkRefresh: { [weak self] original, refreshed in
+                    self?.persistRuntimeHTMLBookmarkRefresh(
+                        matching: original,
+                        with: refreshed,
+                        bookmarkID: bookmarkID,
+                        ownerOrigin: wpeOrigin
+                    )
+                }
+            )
+        }
     )
     /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
     /// Lazy because the saveConfiguration / applyFrameRateLimit /
     /// screenRefreshRate / screensProvider callbacks capture self.
-    @ObservationIgnored lazy var effectsCoordinator = WallpaperEffectsCoordinator(
-        configurationStore: configurationStore,
-        screensProvider: { [weak self] in
-            self?.screens ?? []
-        },
-        saveConfiguration: { [weak self] config in
-            self?.saveConfiguration(config)
-        },
-        applyFrameRateLimit: { [weak self] limit, screen in
-            self?.applyFrameRateLimit(limit, to: screen)
-        },
-        screenRefreshRate: { [weak self] screenID in
-            self?.getScreenRefreshRate(for: screenID) ?? 60
-        }
-    )
+    /// `tearDownForTermination()` must not instantiate WeatherReactiveService
+    /// just to stop an effects coordinator that was never used. The flag is set
+    /// inside the lazy initializer and lets teardown/cancellation remain a no-op
+    /// for the cold path.
+    @ObservationIgnored var effectsCoordinatorWasInitialized = false
+    @ObservationIgnored lazy var effectsCoordinator: WallpaperEffectsCoordinator = {
+        self.effectsCoordinatorWasInitialized = true
+        return WallpaperEffectsCoordinator(
+            configurationStore: self.configurationStore,
+            screensProvider: { [weak self] in
+                self?.screens ?? []
+            },
+            saveConfiguration: { [weak self] config in
+                self?.saveConfiguration(config)
+            },
+            applyFrameRateLimit: { [weak self] limit, screen in
+                self?.applyFrameRateLimit(limit, to: screen)
+            },
+            screenRefreshRate: { [weak self] screenID in
+                self?.getScreenRefreshRate(for: screenID) ?? 60
+            }
+        )
+    }()
     /// Exposed for the WeatherLocation settings view, which reads
     /// `currentParticleEffect` / `currentEffectAdjustments` directly and
     /// triggers `refresh()` on user gestures. The actual instance is owned
     /// by the effects coordinator.
-    var weatherService: WeatherReactiveService { effectsCoordinator.weatherService }
-    @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
+    var weatherService: WeatherReactiveService {
+        let coordinator = effectsCoordinator
+        // SwiftUI may reevaluate a settings/inspector body while AppKit is
+        // waiting for termination. If that is the first weather access, return
+        // a permanently inert service rather than letting the lazy creation
+        // register a fresh preference/network producer after teardown.
+        if isTerminating {
+            coordinator.shutdown()
+        }
+        return coordinator.weatherService
+    }
+    @ObservationIgnored lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
     /// Bumped each time `observeFullScreenChanges()` registers a new observer.
@@ -254,21 +293,20 @@ final class ScreenManager {
     @ObservationIgnored var suspendedScreenIDs: Set<CGDirectDisplayID> = []
 
     // MARK: - Initialization
-    init(startupOptions: ScreenManagerStartupOptions = ScreenManagerStartupOptions()) {
+    init(startupOptions: ScreenManagerStartupOptions) {
         displayRegistry = startupOptions.displayRegistry ?? DisplayRegistry()
         featureCatalog = startupOptions.featureCatalog
         originReconciler = startupOptions.originReconciler
         powerMonitor = startupOptions.powerMonitor ?? PowerMonitor.shared
         fullScreenDetector = startupOptions.fullScreenDetector ?? FullScreenDetector()
         playableVideoLoader = startupOptions.playableVideoLoader ?? PlayableVideoLoader()
+        memoryPressureWatcher = startupOptions.memoryPressureWatcher
         restoresSavedWallpapersOnScreenRefresh = startupOptions.restoreSavedWallpapers
 
         Logger.notice("ScreenManager initializing", category: .screenManager)
         setupPowerMonitoring()
         setupScreenObservers()
-        if featureCatalog.isEnabled(.systemMonitor) {
-            setupMemoryMonitoring()
-        }
+        setupMemoryPressureMonitoring()
         setupFullScreenDetection()
         if featureCatalog.isEnabled(.lockScreenSnapshots) {
             _ = lockScreenSnapshotCoordinator
@@ -294,6 +332,7 @@ final class ScreenManager {
 
     // MARK: - Public Interface
     func reloadWallpaperForScreen(_ screen: Screen) {
+        guard !isTerminating else { return }
         Logger.info("Manually reloading wallpaper for screen \(screen.id)", category: .screenManager)
 
         guard let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else {

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loomscreen.local/schemas/wpe-corpus-manifest.v1.json",
+  "title": "Loomscreen WPE corpus manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "rootLabel", "summary", "entries"],
+  "properties": {
+    "schema": {
+      "const": "wpe.corpus-manifest.v1"
+    },
+    "rootLabel": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directories", "captureCandidates", "projectTypes", "projectJSONStates"],
+      "properties": {
+        "directories": { "type": "integer", "minimum": 0 },
+        "captureCandidates": { "type": "integer", "minimum": 0 },
+        "projectTypes": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "projectJSONStates": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "folderID",
+          "workshopID",
+          "projectType",
+          "entryFile",
+          "accessibility",
+          "captureCandidate",
+          "issues"
+        ],
+        "properties": {
+          "folderID": { "type": "string", "minLength": 1 },
+          "workshopID": { "type": ["string", "null"] },
+          "projectType": {
+            "enum": ["scene", "web", "video", "application", "unknown"]
+          },
+          "entryFile": { "type": ["string", "null"] },
+          "accessibility": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["projectJSON", "entryFileReadable", "sceneJSONReadable", "scenePackageReadable"],
+            "properties": {
+              "projectJSON": {
+                "enum": ["missing", "unreadable", "malformed", "tooLarge", "readable"]
+              },
+              "entryFileReadable": { "type": "boolean" },
+              "sceneJSONReadable": { "type": "boolean" },
+              "scenePackageReadable": { "type": "boolean" }
+            }
+          },
+          "captureCandidate": { "type": "boolean" },
+          "issues": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

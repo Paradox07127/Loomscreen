@@ -113,6 +113,84 @@ public final class BookmarkStore {
         Logger.info("WPE bookmarks removed: workshop \(workshopID), count \(removedCount), total \(bookmarks.count)", category: .ui)
     }
 
+    /// Unique write API for a refreshed local-HTML grant owned by one saved
+    /// shortcut. Both identity and old Data participate in the CAS, so a late
+    /// refresh cannot mutate another shortcut or overwrite a newer re-grant.
+    @discardableResult
+    public func replaceHTMLBookmark(
+        id bookmarkID: UUID,
+        matching original: Data,
+        with refreshed: Data
+    ) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }),
+              let updated = bookmarks[index].replacingHTMLBookmark(
+                id: bookmarkID,
+                matching: original,
+                with: refreshed
+              ) else { return false }
+        bookmarks[index] = updated
+        persist()
+        return true
+    }
+
+    /// Backstop for runtime refreshes restored directly from a screen config,
+    /// where no originating shortcut id is available. Exact old-Data matching
+    /// still protects every independently re-granted shortcut.
+    @discardableResult
+    public func replaceMatchingHTMLBookmarks(
+        matching original: Data,
+        with refreshed: Data
+    ) -> Bool {
+        var next = bookmarks
+        var didReplace = false
+        for index in next.indices {
+            guard case .html(let source, let config) = next[index].content,
+                  let updatedSource = source.replacingLocalBookmark(
+                    matching: original,
+                    with: refreshed
+                  ) else { continue }
+            next[index].content = .html(source: updatedSource, config: config)
+            if let origin = next[index].wpeOrigin,
+               let updatedOrigin = origin.replacingSourceFolderBookmark(
+                matching: original,
+                with: refreshed
+               ) {
+                next[index].wpeOrigin = updatedOrigin
+            }
+            didReplace = true
+        }
+        guard didReplace else { return false }
+        bookmarks = next
+        persist()
+        return true
+    }
+
+    /// Unique write API for refreshed WPE grants held by saved shortcuts. It
+    /// mutates the observable in-memory owner and its persistence together, so
+    /// a later rename/save cannot write an obsolete cached origin back to disk.
+    @discardableResult
+    public func replaceWPEOriginBookmark(
+        workshopID: String,
+        matching original: Data,
+        with refreshed: Data
+    ) -> Bool {
+        var next = bookmarks
+        var didReplace = false
+        for index in next.indices {
+            guard let updated = next[index].replacingWPEOriginBookmark(
+                workshopID: workshopID,
+                matching: original,
+                with: refreshed
+            ) else { continue }
+            next[index] = updated
+            didReplace = true
+        }
+        guard didReplace else { return false }
+        bookmarks = next
+        persist()
+        return true
+    }
+
     private func persist() {
         persistence.save(bookmarks)
     }

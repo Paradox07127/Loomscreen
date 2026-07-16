@@ -120,17 +120,33 @@ LiveWallpaperTests/Fixtures
 !LiveWallpaperTests/Fixtures/
 LiveWallpaperTests/Fixtures/*
 !LiveWallpaperTests/Fixtures/oracle-golden/
+!LiveWallpaperTests/Fixtures/GeneralSettingsOwnershipFixture.swift
 
-# Keep the portable release gate; all other maintainer-local scripts remain ignored.
+# Keep portable CI/release contracts; all other maintainer-local scripts remain ignored.
 !scripts/
 scripts/*
 !scripts/release_candidate_check.sh
+!scripts/fast_app_contract_tests.sh
+!scripts/release_contract_check.sh
+!scripts/release-app.sh
+!scripts/check_entitlements.sh
+!scripts/check_entitlements_self_test.sh
+!scripts/entitlement_fingerprint.py
+!scripts/check_quality_exclusions.py
+!scripts/check_module_import_boundaries.py
+!scripts/wpe-corpus-manifest.py
+!scripts/wpe-corpus-manifest.schema.json
+!scripts/release-baselines/
+!scripts/release-baselines/entitlements.fingerprint
+!scripts/quality-baselines/
+!scripts/quality-baselines/exclusions.json
+!scripts/quality-baselines/component-loc.json
 
 # Python bytecode
 __pycache__/
 *.pyc
 
-#baseline
+# Local-only baseline; AF-10 lint/format contracts are tracked below.
 .periphery.yml
-.swiftformat
-.swiftlint.yml
+!.swiftformat
+!.swiftlint.yml

@@ -100,7 +100,7 @@ final class MonitorSourceAuthorization {
         let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
             guard Self.isExpectedRoot(url, for: provider) else {
-                monitorSourcesLog.warning("🛰️ grant(\(provider.defaultDirectoryName, privacy: .public)): rejected chosen=\(url.path, privacy: .public)")
+                monitorSourcesLog.warning("🛰️ grant(\(provider.defaultDirectoryName, privacy: .public)): rejected unexpected folder")
                 self.presentWrongFolderAlert(for: provider, chosen: url, window: window)
                 return
             }
@@ -208,7 +208,7 @@ final class MonitorSourceAuthorization {
         case .failure(let failure):
             if case .resolutionFailed(let reason) = failure {
                 Logger.warning("Monitor: \(provider.defaultDirectoryName) grant unresolved: \(reason)", category: .fileAccess)
-                monitorSourcesLog.warning("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): resolveFailed(\(reason, privacy: .public))")
+                monitorSourcesLog.warning("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): resolveFailed")
             } else {
                 monitorSourcesLog.info("🛰️ resolve(\(provider.defaultDirectoryName, privacy: .public)): missing (no grant stored)")
             }

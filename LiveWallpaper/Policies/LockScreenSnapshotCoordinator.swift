@@ -19,4 +19,8 @@ final class LockScreenSnapshotCoordinator {
             }
             .store(in: &cleanupTasks)
     }
+
+    func stop() {
+        cleanupTasks.removeAll()
+    }
 }

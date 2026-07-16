@@ -105,6 +105,10 @@ final class WPEEngineAssetsLibrary {
 // MARK: - Managed (downloaded) install
 
 extension WPEEngineAssetsLibrary {
+    /// Durable marker used when disk publication completed but Steam's build ID
+    /// was unavailable (or a launch recovered the post-rename/pre-marker cut).
+    nonisolated static let unknownManagedBuildMarker = "0"
+
     static let managedDisplayName = String(
         localized: "Wallpaper Engine (downloaded)",
         defaultValue: "Wallpaper Engine (downloaded)",

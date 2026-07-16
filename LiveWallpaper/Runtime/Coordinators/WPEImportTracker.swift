@@ -20,16 +20,22 @@ final class WPEImportTracker {
     private var lastErrors: [CGDirectDisplayID: AppError] = [:]
 
     @ObservationIgnored private var generations: [CGDirectDisplayID: Int] = [:]
+    /// One-way process-lifetime latch. It makes every generation stale at once,
+    /// including imports for screen IDs that were not present in the manager's
+    /// final screen snapshot.
+    @ObservationIgnored private(set) var isTerminated = false
 
     func error(for screenID: CGDirectDisplayID) -> AppError? {
         lastErrors[screenID]
     }
 
     func recordError(_ error: AppError, for screenID: CGDirectDisplayID) {
+        guard !isTerminated else { return }
         lastErrors[screenID] = error
     }
 
     func clearError(for screenID: CGDirectDisplayID) {
+        guard !isTerminated else { return }
         lastErrors.removeValue(forKey: screenID)
     }
 
@@ -40,7 +46,16 @@ final class WPEImportTracker {
     }
 
     func isCurrentGeneration(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
-        generations[screenID] == generation
+        !isTerminated && generations[screenID] == generation
+    }
+
+    /// Invalidates every admitted import and permanently rejects later applies.
+    /// The lifecycle bit (rather than iterating only known display IDs) is the
+    /// authority, so an import finishing for a just-unplugged screen is stale too.
+    func invalidateForTermination() {
+        guard !isTerminated else { return }
+        isTerminated = true
+        generations.removeAll()
     }
 }
 #endif

@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Darwin
+import CryptoKit
 import Foundation
 
 struct SteamCMDRunResult: Sendable {
@@ -31,7 +32,7 @@ actor SteamCMDProcessRunner {
     /// single-instance lock and fail spuriously (or interleave staging writes).
     private static let steamcmdGate = AsyncSemaphore(value: 1)
 
-    func run(
+    nonisolated func run(
         binary: URL,
         args: [String],
         stdin: String?,
@@ -39,10 +40,63 @@ actor SteamCMDProcessRunner {
         workingDirectory: URL?,
         onProgress: SteamCMDProgressHandler? = nil
     ) async -> SteamCMDRunResult {
+        await execute(
+            binary: binary,
+            authorization: nil,
+            args: args,
+            stdin: stdin,
+            timeout: timeout,
+            workingDirectory: workingDirectory,
+            onProgress: onProgress
+        )
+    }
+
+    nonisolated func runVerified(
+        binary: URL,
+        authorization: SteamCMDBinaryExecutionAuthorization,
+        args: [String],
+        stdin: String?,
+        timeout: TimeInterval,
+        workingDirectory: URL?,
+        onProgress: SteamCMDProgressHandler? = nil
+    ) async -> SteamCMDRunResult {
+        await execute(
+            binary: binary,
+            authorization: authorization,
+            args: args,
+            stdin: stdin,
+            timeout: timeout,
+            workingDirectory: workingDirectory,
+            onProgress: onProgress
+        )
+    }
+
+    private nonisolated func execute(
+        binary: URL,
+        authorization: SteamCMDBinaryExecutionAuthorization?,
+        args: [String],
+        stdin: String?,
+        timeout: TimeInterval,
+        workingDirectory: URL?,
+        onProgress: SteamCMDProgressHandler?
+    ) async -> SteamCMDRunResult {
         do { try await Self.steamcmdGate.acquire() } catch { return SteamCMDRunResult(exitCode: nil, stdout: "", stderr: "", timedOut: false, killed: true) }
         defer { Self.steamcmdGate.release() }
         do {
             try Task.checkCancellation()
+            if let authorization,
+               !Self.revalidateExecutionAuthorization(
+                   authorization,
+                   for: binary
+               ) {
+                return SteamCMDRunResult(
+                    exitCode: nil,
+                    stdout: "",
+                    stderr: "Binary identity changed before launch.",
+                    timedOut: false,
+                    killed: false
+                )
+            }
             let spawned = try Self.spawn(
                 binary: binary,
                 args: args,
@@ -71,6 +125,30 @@ actor SteamCMDProcessRunner {
                 killed: false
             )
         }
+    }
+
+    /// Re-hashes after the process gate is acquired and immediately before
+    /// `posix_spawn`, closing the replace-while-queued gap left by Doctor trust.
+    nonisolated static func revalidateExecutionAuthorization(
+        _ authorization: SteamCMDBinaryExecutionAuthorization,
+        for binary: URL
+    ) -> Bool {
+        let canonical = binary.standardizedFileURL.resolvingSymlinksInPath()
+            .path(percentEncoded: false)
+        guard canonical == authorization.canonicalPath,
+              let identity = try? sha256(of: binary) else { return false }
+        return identity == authorization.sha256
+    }
+
+    private nonisolated static func sha256(of binary: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: binary)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            try Task.checkCancellation()
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Parses a SteamCMD download status line such as
@@ -139,7 +217,7 @@ actor SteamCMDProcessRunner {
 
         if let workingDirectory {
             let chdirResult = workingDirectory.path(percentEncoded: false).withCString { path in
-                posix_spawn_file_actions_addchdir_np(&fileActions, path)
+                addChdir(&fileActions, path)
             }
             try check(chdirResult, context: "chdir")
         }
@@ -195,6 +273,21 @@ actor SteamCMDProcessRunner {
         guard result == 0 else {
             throw SteamCMDProcessRunnerError.spawnFailed("\(context): \(String(cString: strerror(result)))")
         }
+    }
+
+    private static func addChdir(
+        _ actions: UnsafeMutablePointer<posix_spawn_file_actions_t?>,
+        _ path: UnsafePointer<CChar>
+    ) -> Int32 {
+        typealias AddChdir = @convention(c) (
+            UnsafeMutablePointer<posix_spawn_file_actions_t?>,
+            UnsafePointer<CChar>
+        ) -> Int32
+        guard let handle = dlopen(nil, RTLD_LAZY) else { return ENOSYS }
+        defer { dlclose(handle) }
+        guard let symbol = dlsym(handle, "posix_spawn_file_actions_addchdir")
+            ?? dlsym(handle, "posix_spawn_file_actions_addchdir_np") else { return ENOSYS }
+        return unsafeBitCast(symbol, to: AddChdir.self)(actions, path)
     }
 
     /// Minimal, scrubbed environment for spawned tools (SteamCMD, codesign).

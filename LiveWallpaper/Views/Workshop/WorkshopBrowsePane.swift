@@ -1,4 +1,5 @@
 #if !LITE_BUILD
+import Combine
 import LiveWallpaperSharedUI
 import SwiftUI
 

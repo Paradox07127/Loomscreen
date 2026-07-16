@@ -101,11 +101,7 @@ public struct SystemMonitorView: View {
         .frame(maxWidth: 220, alignment: .leading)
         .clipped()
         .onAppear {
-            monitor.startMonitoring()
             powerSource = PowerMonitor.shared.currentPowerSource
-        }
-        .onDisappear {
-            monitor.stopMonitoring()
         }
         .onReceive(NotificationCenter.default.publisher(for: PowerMonitor.powerSourceDidChangeNotification)) { notification in
             if let newSource = notification.userInfo?["newSource"] as? PowerMonitor.PowerSource {

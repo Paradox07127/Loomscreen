@@ -36,6 +36,30 @@ struct SidebarDisplayOrderTests {
         #expect(SidebarDisplayOrder.orderedDisplayIDs(from: available, storedOrder: saved) == [8, 7])
     }
 
+    @Test("Ambiguous duplicate fingerprints keep their relative system order")
+    func ambiguousDuplicateFingerprintsKeepRelativeSystemOrder() {
+        let available = [display(42, "same:panel"), display(43, "same:panel"), display(9, "unique:panel")]
+        let saved = [display(7, "same:panel"), display(9, "unique:panel"), display(8, "same:panel")]
+
+        #expect(SidebarDisplayOrder.orderedDisplayIDs(from: available, storedOrder: saved) == [9, 42, 43])
+    }
+
+    @Test("Exact IDs can still reorder panels that share a fingerprint")
+    func exactIDsDisambiguateDuplicateFingerprints() {
+        let available = [display(42, "same:panel"), display(43, "same:panel"), display(9, "unique:panel")]
+        let saved = [display(43, "same:panel"), display(9, "unique:panel"), display(42, "same:panel")]
+
+        #expect(SidebarDisplayOrder.orderedDisplayIDs(from: available, storedOrder: saved) == [43, 9, 42])
+    }
+
+    @Test("One remaining panel cannot be assigned to either of two stored identical panels")
+    func oneRemainingDuplicateFingerprintIsStillAmbiguous() {
+        let available = [display(42, "same:panel"), display(30, "unique:panel")]
+        let saved = [display(7, "same:panel"), display(30, "unique:panel"), display(8, "same:panel")]
+
+        #expect(SidebarDisplayOrder.orderedDisplayIDs(from: available, storedOrder: saved) == [30, 42])
+    }
+
     private func display(_ id: CGDirectDisplayID, _ fingerprint: String) -> SidebarDisplayOrder.Entry {
         SidebarDisplayOrder.Entry(displayID: id, fingerprint: fingerprint)
     }

@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import Observation
+import SwiftUI
 
 /// App-wide owner of the floating fleet HUD capsule. Independent of whether the
 /// Monitor *wallpaper* is active: it acquires its OWN `MonitorRuntime` lease
@@ -28,10 +28,12 @@ final class MonitorHUDController: NSObject {
     var isEnabled: Bool {
         didSet {
             guard oldValue != isEnabled else { return }
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
+            persistEnabled(isEnabled)
             if isEnabled { show() } else { hide() }
         }
     }
+
+    @ObservationIgnored private let persistEnabled: @MainActor (Bool) -> Void
 
     /// Current derived HUD state; the hosted SwiftUI view reads this.
     @ObservationIgnored private var model: MonitorHUDModel = .empty
@@ -40,13 +42,32 @@ final class MonitorHUDController: NSObject {
     @ObservationIgnored private var pumpTask: Task<Void, Never>?
     @ObservationIgnored private var lastGeneration: UInt64 = 0
     @ObservationIgnored private var lastPublishAt: Double?
-    @ObservationIgnored private var owesRuntimeRelease = false
-    @ObservationIgnored private let runtimeLeaseID = UUID()
+    @ObservationIgnored private let runtime: MonitorRuntime
+    @ObservationIgnored private let runtimeLeaseSlot: MonitorRuntimeLeaseSlot
+    @ObservationIgnored private var runtimeLease: MonitorRuntimeLeaseHandle?
+    @ObservationIgnored private var lastRuntimeTask: Task<Void, Never>?
+    /// Unlike `hide()` (a normal, restartable user action), application
+    /// termination is one-way and must reject stale menu/observer callbacks.
+    @ObservationIgnored private(set) var isShutdown = false
     /// Backing store the hosted view observes for model changes.
     @ObservationIgnored private let store = HUDModelStore()
 
-    private override init() {
-        self.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+    private override convenience init() {
+        self.init(initiallyEnabled: UserDefaults.standard.bool(forKey: Self.enabledKey))
+    }
+
+    /// Internal initializer keeps lifecycle tests isolated from the shared HUD.
+    init(
+        initiallyEnabled: Bool,
+        runtime: MonitorRuntime = .shared,
+        persistEnabled: @MainActor @escaping (Bool) -> Void = {
+            UserDefaults.standard.set($0, forKey: MonitorHUDController.enabledKey)
+        }
+    ) {
+        self.runtime = runtime
+        self.runtimeLeaseSlot = runtime.makeLeaseSlot()
+        self.persistEnabled = persistEnabled
+        self.isEnabled = initiallyEnabled
         super.init()
     }
 
@@ -55,11 +76,13 @@ final class MonitorHUDController: NSObject {
     /// Shows the HUD if the persisted switch is on. Safe to call repeatedly
     /// (idempotent) — used by the app-startup hook.
     func applyPersistedStateAtStartup() {
+        guard !isShutdown else { return }
         guard isEnabled else { return }
         show()
     }
 
     func show() {
+        guard !isShutdown else { return }
         guard panel == nil else {
             forceRefresh()
             return
@@ -91,23 +114,40 @@ final class MonitorHUDController: NSObject {
         panel = nil
     }
 
+    /// Permanently closes the HUD for this process while preserving the user's
+    /// persisted `isEnabled` preference for the next launch.
+    func shutdown() {
+        guard !isShutdown else { return }
+        isShutdown = true
+        hide()
+    }
+
+    var isPresented: Bool { panel != nil }
+    var hasActivePump: Bool { pumpTask != nil }
+    var hasRuntimeLease: Bool { runtimeLease != nil }
+
+    func waitUntilRuntimeSettled() async {
+        if let runtimeLease {
+            await runtimeLease.waitUntilSettled()
+        } else {
+            await lastRuntimeTask?.value
+        }
+    }
+
     // MARK: - Runtime lease
 
     private func acquireRuntime() {
-        guard !owesRuntimeRelease else { return }
-        owesRuntimeRelease = true
-        let leaseID = runtimeLeaseID
+        guard !isShutdown, runtimeLease == nil else { return }
         // Roots stay nil: the runtime resolves security-scoped grants itself so
         // scope lifetime tracks the pipeline, not this controller.
         let options = MonitorRuntimeOptions(system: false, agents: true, usage: false)
-        Task { await MonitorRuntime.shared.acquire(leaseID: leaseID, options: options) }
+        runtimeLease = runtimeLeaseSlot.acquire(options: options)
     }
 
     private func releaseRuntime() {
-        guard owesRuntimeRelease else { return }
-        owesRuntimeRelease = false
-        let leaseID = runtimeLeaseID
-        Task { await MonitorRuntime.shared.release(leaseID: leaseID) }
+        guard let lease = runtimeLease else { return }
+        runtimeLease = nil
+        lastRuntimeTask = lease.release()
     }
 
     // MARK: - Data pump (1 Hz, mirrors MonitorWallpaperView)
@@ -140,7 +180,7 @@ final class MonitorHUDController: NSObject {
     /// Recomputes on every tick even without a new generation so staleness
     /// crosses its threshold on wall-clock time, not on publish cadence.
     private func pullLatest(force: Bool) {
-        let broker = MonitorRuntime.shared.broker
+        let broker = runtime.broker
         let now = Date().timeIntervalSince1970
 
         if let update = broker.latest(after: force ? 0 : lastGeneration) {

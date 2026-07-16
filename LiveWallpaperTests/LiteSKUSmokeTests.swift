@@ -38,12 +38,13 @@ struct LiteSKUSmokeTests {
         #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }
 
-    @Test("ProductCapabilities.pro keeps every feature on")
+    @Test("ProductCapabilities.pro keeps every shipping renderer feature on")
     func proCatalogSurfaceArea() {
         let capabilities = ProductCapabilities.pro
         #expect(capabilities.sku == .pro)
         #expect(Set(capabilities.selectableWallpaperTypes) == Set(WallpaperType.allCases))
         #expect(Set(capabilities.selectableWallpaperModes) == Set(WallpaperMode.allCases))
+        #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }
 
     @Test("ScreenManager constructs cleanly under the Lite catalogue")

@@ -5,7 +5,7 @@ import Darwin
 import IOKit
 
 public struct MonitoringReferenceCounter {
-    private var count = 0
+    public private(set) var count = 0
 
     public init() {}
 
@@ -18,6 +18,15 @@ public struct MonitoringReferenceCounter {
         guard count > 0 else { return false }
         count -= 1
         return count == 0
+    }
+
+    /// Final-owner teardown: discard every outstanding UI reference at once.
+    /// Returns whether monitoring had been retained by at least one consumer.
+    @discardableResult
+    public mutating func reset() -> Bool {
+        guard count > 0 else { return false }
+        count = 0
+        return true
     }
 }
 
@@ -53,7 +62,6 @@ public final class SystemMonitor {
     public private(set) var systemCpuUsage: Double = 0
     public private(set) var memoryUsage: UInt64 = 0
     public private(set) var totalMemory: UInt64 = 0
-    public private(set) var isMemoryLow: Bool = false
     public private(set) var systemMemoryUsage: Double = 0
     public private(set) var gpuUsage: Double = 0
     // OS thermal-*pressure* level, not a temperature: ProcessInfo.thermalState
@@ -65,13 +73,13 @@ public final class SystemMonitor {
 
     // MARK: - Configuration
 
-    @ObservationIgnored private let memoryWarningThreshold: Double = 0.85
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
     @ObservationIgnored private let gpuSampleCadence = 3
     @ObservationIgnored private var resourceUpdateCount = 0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var references = MonitoringReferenceCounter()
     @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
+    @ObservationIgnored private var isShutdown = false
 
     private init() {
         totalMemory = ProcessInfo.processInfo.physicalMemory
@@ -80,6 +88,7 @@ public final class SystemMonitor {
     // MARK: - Public Methods
 
     public func startMonitoring() {
+        guard !isShutdown else { return }
         guard references.start() else { return }
         let interval = updateInterval
         let initialSampleDelay = MonitoringStartPolicy.initialSampleDelay
@@ -104,9 +113,23 @@ public final class SystemMonitor {
     }
 
     public func stopMonitoring() {
+        guard !isShutdown else { return }
         guard references.stop() else { return }
         updateTask?.cancel()
         updateTask = nil
+    }
+
+    /// One-way application-termination seam. Outstanding SwiftUI references are
+    /// reset together and their later `onDisappear` releases become harmless
+    /// no-ops, so no sampler can be recreated behind the termination barrier.
+    public func shutdown() {
+        guard !isShutdown else { return }
+        isShutdown = true
+        references.reset()
+        updateTask?.cancel()
+        updateTask = nil
+        resourceUpdateCount = 0
+        prevHostCpuLoad = nil
     }
 
     public func formattedMemoryUsage() -> String { FormatUtils.formatBytes(memoryUsage) }
@@ -198,7 +221,6 @@ public final class SystemMonitor {
         if thermalState != sample.thermalState {
             thermalState = sample.thermalState
         }
-        checkMemoryWarning()
     }
 
     // Material-change thresholds tuned for human perception, not raw
@@ -220,28 +242,6 @@ public final class SystemMonitor {
         let systemMemoryUsage: Double
         let gpuUsage: Double?
         let thermalState: ProcessInfo.ThermalState
-    }
-
-    private func checkMemoryWarning() {
-        let isLow = systemMemoryUsage > memoryWarningThreshold
-        if isLow != isMemoryLow {
-            isMemoryLow = isLow
-            if isLow {
-                Logger.notice("System memory usage is high: \(Int(systemMemoryUsage * 100))%", category: .memory)
-                NotificationCenter.default.post(
-                    name: .systemMemoryWarning,
-                    object: nil,
-                    userInfo: ["memoryUsage": systemMemoryUsage]
-                )
-            } else {
-                Logger.notice("System memory usage recovered: \(Int(systemMemoryUsage * 100))%", category: .memory)
-                NotificationCenter.default.post(
-                    name: .systemMemoryNormal,
-                    object: nil,
-                    userInfo: ["memoryUsage": systemMemoryUsage]
-                )
-            }
-        }
     }
 
     // MARK: - CPU Usage

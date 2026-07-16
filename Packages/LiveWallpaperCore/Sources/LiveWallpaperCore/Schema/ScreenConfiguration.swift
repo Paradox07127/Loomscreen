@@ -660,4 +660,62 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
         return copy
     }
+
+    /// Compare-and-swap replacement for a stale local-HTML bookmark. Both the
+    /// active source and the saved HTML fallback can own the same grant, so a
+    /// successful refresh updates every matching copy as one configuration
+    /// mutation. Returning `nil` means the user cleared/re-granted the source
+    /// after resolution began; callers must not overwrite that newer choice.
+    public func replacingHTMLBookmark(
+        matching original: Data,
+        with refreshed: Data
+    ) -> ScreenConfiguration? {
+        var copy = self
+        var didReplace = false
+
+        if let savedHTMLSource = copy.savedHTMLSource,
+           let updated = savedHTMLSource.replacingLocalBookmark(
+            matching: original,
+            with: refreshed
+           ) {
+            copy.savedHTMLSource = updated
+            didReplace = true
+        }
+        if case .html(let source, let config) = copy.activeWallpaper,
+           let updated = source.replacingLocalBookmark(
+            matching: original,
+            with: refreshed
+           ) {
+            copy.activeWallpaper = .html(source: updated, config: config)
+            didReplace = true
+        }
+
+        return didReplace ? copy : nil
+    }
+
+    /// CAS replacement for a WPE source-folder grant owned by this screen.
+    /// WPE web imports duplicate that same grant in their active/saved HTML
+    /// sources, so all matching copies are advanced atomically.
+    public func replacingWPEOriginBookmark(
+        workshopID: String,
+        matching original: Data,
+        with refreshed: Data
+    ) -> ScreenConfiguration? {
+        guard let origin = wpeOrigin,
+              origin.workshopID == workshopID,
+              let updatedOrigin = origin.replacingSourceFolderBookmark(
+                matching: original,
+                with: refreshed
+              ) else { return nil }
+
+        var copy = self
+        copy.wpeOrigin = updatedOrigin
+        if let updatedHTML = copy.replacingHTMLBookmark(
+            matching: original,
+            with: refreshed
+        ) {
+            copy = updatedHTML
+        }
+        return copy
+    }
 }

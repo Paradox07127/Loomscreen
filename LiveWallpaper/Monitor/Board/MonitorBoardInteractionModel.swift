@@ -26,6 +26,22 @@ struct MonitorBoardDragState: Equatable {
     var ghostOrigin: CGPoint? { snappedOrigin }
 }
 
+/// Every user-facing move or delete resolves to one of these commands before
+/// mutating the persisted widget array. Pointer, keyboard, and accessibility
+/// entry points therefore share identity, clamping, normalization, and delete
+/// semantics instead of maintaining parallel write paths.
+enum MonitorBoardPlacementCommand: Equatable {
+    case move(id: UUID, pixelOrigin: CGPoint)
+    case delete(id: UUID)
+}
+
+enum MonitorBoardPlacementDirection {
+    case left
+    case right
+    case up
+    case down
+}
+
 /// Observable board state driving `MonitorBoardRootView`: the placements, edit
 /// mode, selection, and the in-flight drag. This is the single writer of the
 /// board configuration; every committing mutation funnels through
@@ -217,25 +233,96 @@ final class MonitorBoardInteractionModel: ObservableObject {
         drag = nil
         guard current.didMove else { return }
 
-        let snapped = bypassSnap ? nil : current.snappedOrigin
-        let landed = MonitorBoardLayoutEngine.land(
-            freeOrigin: current.freeOrigin,
-            snappedOrigin: snapped,
-            footprint: current.footprint,
-            geometry: geometry,
-            items: items(excluding: current.widgetID),
-            ignoring: current.widgetID
-        ) ?? current.originAtGrab
-
-        guard let index = placements.firstIndex(where: { $0.id == current.widgetID }) else { return }
-        let normalized = MonitorBoardLayoutEngine.normalized(pixelOrigin: landed, boardSize: boardSize)
-        let changed = placements[index].x != normalized.x || placements[index].y != normalized.y
-        placements[index].x = normalized.x
-        placements[index].y = normalized.y
-        if changed { emitConfiguration() }
+        let target = bypassSnap ? current.freeOrigin : current.snappedOrigin ?? current.freeOrigin
+        perform(.move(id: current.widgetID, pixelOrigin: target))
     }
 
     // MARK: - Add / remove / resize
+
+    /// Shared placement mutation boundary. A move is expressed in board pixels
+    /// so every move caller goes through the same footprint-aware landing and
+    /// normalized-coordinate writeback.
+    @discardableResult
+    func perform(_ command: MonitorBoardPlacementCommand) -> Bool {
+        switch command {
+        case let .move(id, proposedOrigin):
+            guard !geometry.isDegenerate,
+                  let index = placements.firstIndex(where: { $0.id == id }) else {
+                return false
+            }
+            let placement = placements[index]
+            let footprintSize = footprint(for: placement)
+            guard let landed = MonitorBoardLayoutEngine.land(
+                freeOrigin: proposedOrigin,
+                snappedOrigin: nil,
+                footprint: footprintSize,
+                geometry: geometry,
+                items: items(excluding: id),
+                ignoring: id
+            ) else {
+                return false
+            }
+            let normalized = MonitorBoardLayoutEngine.normalized(
+                pixelOrigin: landed,
+                boardSize: boardSize
+            )
+            guard placement.x != normalized.x || placement.y != normalized.y else {
+                return false
+            }
+            placements[index].x = normalized.x
+            placements[index].y = normalized.y
+            emitConfiguration()
+            return true
+
+        case let .delete(id):
+            guard let index = placements.firstIndex(where: { $0.id == id }) else {
+                return false
+            }
+            placements.remove(at: index)
+            if selectedID == id { selectedID = nil }
+            if settingsOpenID == id { settingsOpenID = nil }
+            emitConfiguration()
+            return true
+        }
+    }
+
+    /// Keyboard movement is a small relative nudge, but the resulting absolute
+    /// origin is still committed by `perform(_:)`, just like a pointer drop.
+    @discardableResult
+    func moveSelectedWidget(
+        _ direction: MonitorBoardPlacementDirection,
+        distance: CGFloat = 10
+    ) -> Bool {
+        guard isEditing,
+              distance.isFinite,
+              distance > 0,
+              let selectedID,
+              let placement = placements.first(where: { $0.id == selectedID }) else {
+            return false
+        }
+        let origin = pixelOrigin(for: placement)
+        let delta: CGSize
+        switch direction {
+        case .left:
+            delta = CGSize(width: -distance, height: 0)
+        case .right:
+            delta = CGSize(width: distance, height: 0)
+        case .up:
+            delta = CGSize(width: 0, height: -distance)
+        case .down:
+            delta = CGSize(width: 0, height: distance)
+        }
+        return perform(.move(
+            id: selectedID,
+            pixelOrigin: CGPoint(x: origin.x + delta.width, y: origin.y + delta.height)
+        ))
+    }
+
+    @discardableResult
+    func deleteSelectedWidget() -> Bool {
+        guard isEditing, let selectedID else { return false }
+        return perform(.delete(id: selectedID))
+    }
 
     /// Add a widget of `kind` at its first-fit free position. No-op (returns
     /// false) if the board is full or the kind is gated off.
@@ -257,14 +344,6 @@ final class MonitorBoardInteractionModel: ObservableObject {
         isCatalogOpen = false
         emitConfiguration()
         return true
-    }
-
-    func removeWidget(_ id: UUID) {
-        guard let index = placements.firstIndex(where: { $0.id == id }) else { return }
-        placements.remove(at: index)
-        if selectedID == id { selectedID = nil }
-        if settingsOpenID == id { settingsOpenID = nil }
-        emitConfiguration()
     }
 
     /// Whole-placement writeback from the settings card (`onUpdate`). A size

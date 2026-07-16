@@ -10,6 +10,20 @@ extension ScreenManager {
     /// after an overlay setting is toggled: tears down overlays for gone or disabled
     /// displays and creates/updates the rest. Idempotent.
     func reconcileMonitorOverlays() {
+        guard !isTerminating else {
+            MonitorOverlayController.shared.teardownAll()
+            updateFullScreenFallbackPolling()
+            return
+        }
+        // Desktop overlays consume the detector independently of wallpaper
+        // pause settings. Refresh synchronously so startup, wake, and display
+        // hot-plug reconciliation never seed visibility from a stale cache.
+        if hasEnabledDesktopMonitorOverlay {
+            fullScreenDetector.checkNow()
+        }
+        // Seed the controller before creating hosts so an initially occluded or
+        // absent overlay starts suspended and never receives a prime snapshot.
+        refreshMonitorOverlayVisibility()
         MonitorOverlayController.shared.onOverlayEdited = { [weak self] screenID, board in
             self?.persistMonitorOverlayBoard(board, screenID: screenID)
         }
@@ -25,6 +39,23 @@ extension ScreenManager {
                 agentFleetEnabled: agentFleetEnabled
             )
         }
+        // Re-apply after retain/apply so the decision covers the final host set.
+        refreshMonitorOverlayVisibility()
+        updateFullScreenFallbackPolling()
+    }
+
+    /// Bridge ScreenManager's lifecycle state and FullScreenDetector's 85%
+    /// union-window occlusion result into the overlay-specific visibility policy.
+    /// Front overlays remain visible while the user is present; desktop overlays
+    /// suspend when their display is detector-occluded.
+    func refreshMonitorOverlayVisibility() {
+        let occludedScreenIDs = Set(screens.compactMap { screen in
+            fullScreenDetector.isDesktopOccluded(for: screen.id) ? screen.id : nil
+        })
+        MonitorOverlayController.shared.updateVisibility(
+            isUserAbsent: isUserAbsent,
+            occludedScreenIDs: occludedScreenIDs
+        )
     }
 
     /// Reconcile on the NEXT runloop tick. Menu controls (the overlay toggle /
@@ -34,7 +65,10 @@ extension ScreenManager {
     /// create/apply/push chain out of that cycle. Idempotent, so coalescing rapid
     /// toggles is harmless.
     private func scheduleMonitorOverlayReconcile() {
-        Task { @MainActor [weak self] in self?.reconcileMonitorOverlays() }
+        Task { @MainActor [weak self] in
+            guard let self, !self.isTerminating else { return }
+            self.reconcileMonitorOverlays()
+        }
     }
 
     /// Persist an overlay board edit made ON the floating overlay back into the
@@ -54,6 +88,18 @@ extension ScreenManager {
     var isMonitorOverlayEnabled: Bool {
         screens.contains { screen in
             configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.monitorOverlay?.enabled == true
+        }
+    }
+
+    /// Pure configuration query used to keep FullScreenDetector's fallback poll
+    /// alive whenever a desktop-level overlay depends on its occlusion cache.
+    var hasEnabledDesktopMonitorOverlay: Bool {
+        screens.contains { screen in
+            guard let overlay = configurationStore.get(
+                for: screen.id,
+                fingerprint: screen.displayFingerprint
+            )?.monitorOverlay else { return false }
+            return overlay.enabled && overlay.level == .desktop
         }
     }
 
@@ -133,6 +179,7 @@ extension ScreenManager {
     }
 
     func setSceneWallpaper(descriptor: SceneDescriptor, origin: WPEOrigin?, for screen: Screen) {
+        guard !isTerminating else { return }
         var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .scene(descriptor)
@@ -154,16 +201,44 @@ extension ScreenManager {
         for screen: Screen,
         configuration: ScreenConfiguration
     ) {
+        guard !isTerminating else { return }
         releaseRuntimeSession(screen)
 
         let session: AmbientWallpaperSession
 
         switch definition {
         case .html(let source, let htmlConfig):
-            let isLeader = htmlCoordinator.isAudioLeader(source: source, excluding: screen.id)
-            let effectiveConfig = htmlCoordinator.runtimeConfig(source: source, config: htmlConfig, for: screen)
-            session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
-            Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
+            // Refresh before identity/trust/audio-leader policy reads the
+            // source. Those policies key by source identity, so letting the
+            // builder refresh later would briefly classify this screen using
+            // obsolete bookmark Data.
+            let effectiveSource = ambientSessionBuilder.refreshingHTMLSource(
+                source,
+                onBookmarkRefresh: { [weak self] original, refreshed in
+                    self?.persistRuntimeHTMLBookmarkRefresh(
+                        matching: original,
+                        with: refreshed
+                    )
+                }
+            )
+            let isLeader = htmlCoordinator.isAudioLeader(source: effectiveSource, excluding: screen.id)
+            let effectiveConfig = htmlCoordinator.runtimeConfig(
+                source: effectiveSource,
+                config: htmlConfig,
+                for: screen
+            )
+            session = ambientSessionBuilder.makeHTMLSession(
+                source: effectiveSource,
+                config: effectiveConfig,
+                frame: screen.frame,
+                onBookmarkRefresh: { [weak self] original, refreshed in
+                    self?.persistRuntimeHTMLBookmarkRefresh(
+                        matching: original,
+                        with: refreshed
+                    )
+                }
+            )
+            Logger.info("Set HTML wallpaper for screen \(screen.id) — \(effectiveSource.displayName) [leader=\(isLeader)]", category: .screenManager)
         case .metalShader(let shaderSource):
             #if !LITE_BUILD
             session = ambientSessionBuilder.makeShaderSession(source: shaderSource, frame: screen.frame)
@@ -174,17 +249,40 @@ extension ScreenManager {
             #endif
         case .scene(let descriptor):
             #if !LITE_BUILD
+            // Dependency discovery resolves the source before the session
+            // builder does. Pre-refresh only when that discovery is needed so
+            // it cannot consume stale grace and hand the builder obsolete Data.
+            let runtimeOrigin: WPEOrigin? = if !descriptor.dependencyWorkshopIDs.isEmpty,
+                                               let origin = configuration.wpeOrigin {
+                ambientSessionBuilder.refreshingWPEOrigin(
+                    origin,
+                    onOriginBookmarkRefresh: { [weak self] origin, refreshed in
+                        self?.persistRuntimeWPEBookmarkRefresh(
+                            origin: origin,
+                            with: refreshed
+                        )
+                    }
+                )?.origin ?? origin
+            } else {
+                configuration.wpeOrigin
+            }
             let dependencyMounts = WPEDependencyMountResolver().mounts(
                 dependencyWorkshopIDs: descriptor.dependencyWorkshopIDs,
-                origin: configuration.wpeOrigin
+                origin: runtimeOrigin
             )
             let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
-                origin: configuration.wpeOrigin,
+                origin: runtimeOrigin,
                 frame: screen.frame,
                 dependencyMounts: dependencyMounts,
-                engineAssetsRootURL: engineRoot
+                engineAssetsRootURL: engineRoot,
+                onOriginBookmarkRefresh: { [weak self] origin, refreshed in
+                    self?.persistRuntimeWPEBookmarkRefresh(
+                        origin: origin,
+                        with: refreshed
+                    )
+                }
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
                 // The old session was already torn down at the top of this
@@ -236,6 +334,92 @@ extension ScreenManager {
         screen.installRuntimeSession(session)
         applyPerformancePolicy(to: screen)
         notifyWallpaperSessionChanged()
+    }
+
+    /// Persists a local HTML refresh into every screen that still owns the
+    /// original grant. WPE web imports additionally own the same Data through
+    /// `wpeOrigin` and history, so route those through the WPE CAS as well.
+    func persistRuntimeHTMLBookmarkRefresh(
+        matching original: Data,
+        with refreshed: Data,
+        bookmarkID: UUID? = nil,
+        ownerOrigin: WPEOrigin? = nil
+    ) {
+        guard !isTerminating else { return }
+        var wpeWorkshopIDs: Set<String> = []
+        if let ownerOrigin,
+           ownerOrigin.sourceFolderBookmark == original {
+            wpeWorkshopIDs.insert(ownerOrigin.workshopID)
+        }
+        for configuration in configurationStore.loadAll() {
+            if let origin = configuration.wpeOrigin,
+               origin.sourceFolderBookmark == original,
+               let updated = configuration.replacingWPEOriginBookmark(
+                workshopID: origin.workshopID,
+                matching: original,
+                with: refreshed
+               ) {
+                saveConfiguration(updated)
+                wpeWorkshopIDs.insert(origin.workshopID)
+            } else if let updated = configuration.replacingHTMLBookmark(
+                matching: original,
+                with: refreshed
+            ) {
+                saveConfiguration(updated)
+            }
+        }
+        if let bookmarkID {
+            _ = BookmarkStore.shared.replaceHTMLBookmark(
+                id: bookmarkID,
+                matching: original,
+                with: refreshed
+            )
+        }
+        _ = BookmarkStore.shared.replaceMatchingHTMLBookmarks(
+            matching: original,
+            with: refreshed
+        )
+        for workshopID in wpeWorkshopIDs {
+            _ = SettingsManager.shared.replaceWPEHistorySourceBookmark(
+                workshopID: workshopID,
+                matching: original,
+                with: refreshed
+            )
+            _ = BookmarkStore.shared.replaceWPEOriginBookmark(
+                workshopID: workshopID,
+                matching: original,
+                with: refreshed
+            )
+        }
+    }
+
+    /// MainActor owner for scene/history stale refreshes. Every matching screen
+    /// configuration and the global history row advance together; exact Data
+    /// matching prevents a late refresh from clobbering a newer re-grant.
+    func persistRuntimeWPEBookmarkRefresh(
+        origin: WPEOrigin,
+        with refreshed: Data
+    ) {
+        guard !isTerminating else { return }
+        let original = origin.sourceFolderBookmark
+        for configuration in configurationStore.loadAll() {
+            guard let updated = configuration.replacingWPEOriginBookmark(
+                workshopID: origin.workshopID,
+                matching: original,
+                with: refreshed
+            ) else { continue }
+            saveConfiguration(updated)
+        }
+        _ = SettingsManager.shared.replaceWPEHistorySourceBookmark(
+            workshopID: origin.workshopID,
+            matching: original,
+            with: refreshed
+        )
+        _ = BookmarkStore.shared.replaceWPEOriginBookmark(
+            workshopID: origin.workshopID,
+            matching: original,
+            with: refreshed
+        )
     }
 
 }

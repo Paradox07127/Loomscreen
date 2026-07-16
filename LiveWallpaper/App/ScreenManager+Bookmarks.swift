@@ -2,6 +2,7 @@ import Foundation
 
 extension ScreenManager {
     func applyBookmark(_ bookmark: WallpaperBookmark, to screen: Screen) {
+        guard !isTerminating else { return }
         Logger.info("Applying bookmark to screen \(screen.id): \(bookmark.wallpaperType.rawValue)", category: .ui)
 
         if let settings = bookmark.playbackSettings {
@@ -24,7 +25,13 @@ extension ScreenManager {
                 for: screen
             )
         case .html(let source, let config):
-            setHTMLWallpaper(source: source, config: config, for: screen)
+            setHTMLWallpaper(
+                source: source,
+                config: config,
+                bookmarkID: bookmark.id,
+                wpeOrigin: bookmark.wpeOrigin,
+                for: screen
+            )
         case .metalShader(let source):
             setShaderWallpaper(source: source, for: screen)
         case .scene(let descriptor):

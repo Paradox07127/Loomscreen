@@ -20,23 +20,26 @@ interface. Video / HTML / Apple Aerials fidelity is identical.
 | System monitor panel | ✅ | ✅ |
 | Lock-screen snapshot sync | ✅ | ✅ |
 | Game / full-screen auto-pause | ✅ | ✅ |
-| GitHub Releases update check | ✅ | ✅ |
+| GitHub Releases update check | ✅ | — |
 | **Metal shader procedural wallpapers** | — | ✅ |
 | **Wallpaper-Engine scene rendering** | — | ✅ |
 | **Local copied project-folder import** | — | ✅ |
 | **Steam Workshop URL preview** | — | ✅ |
-| **Developer-tools harness** | — | ✅ |
 | **Workshop online browse/download** | — | ✅ (direct distribution only) |
 
 ## How the split is implemented
 
 Pro-only sources are gated with `#if !LITE_BUILD`. The Lite scheme
 (`LiveWallpaperLite`) sets the `LITE_BUILD` compilation condition, so the Metal scene
-renderer, shader pipeline, local-import, Workshop, and dev-tools code are compiled
+renderer, shader pipeline, local-import, and Workshop code are compiled
 out of the Lite binary entirely — they aren't merely hidden.
 
 The runtime source of truth for what an edition exposes is
 [`ProductCapabilities.swift`](../Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
+
+The GitHub Releases launch/manual update check belongs to the public Lite build.
+Pro currently has no in-app updater; removing the unused Sparkle integration did
+not silently replace it with Lite's release channel.
 
 ## Licensing
 

@@ -3,6 +3,32 @@ import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
+enum OnboardingImportCopy {
+    enum UnsupportedFileTypeVariant: Equatable {
+        case videoAndWeb
+        case videoWebAndScene
+    }
+
+    static func unsupportedFileTypeVariant(sceneCapable: Bool) -> UnsupportedFileTypeVariant {
+        sceneCapable ? .videoWebAndScene : .videoAndWeb
+    }
+
+    /// Keep recovery copy and import routing on the same product capability.
+    /// This small policy is intentionally testable without rendering the view.
+    static func sceneCapable(in catalog: FeatureCatalog) -> Bool {
+        catalog.isEnabled(.scene)
+    }
+
+    static func unsupportedFileTypeMessage(sceneCapable: Bool) -> LocalizedStringResource {
+        switch unsupportedFileTypeVariant(sceneCapable: sceneCapable) {
+        case .videoAndWeb:
+            return "That file type isn't supported. Pick a video or web page."
+        case .videoWebAndScene:
+            return "That file type isn't supported. Pick a video, web page, or scene."
+        }
+    }
+}
+
 /// Onboarding source step. Two SKU-derived cards: a single "Import a file"
 /// action that opens one picker and routes by type (video / web / — on Pro —
 /// Wallpaper Engine scene), plus a second card that is either Steam Workshop
@@ -17,10 +43,12 @@ struct OnboardingPickerView: View {
     let skip: () -> Void
     let openAppleAerials: () -> Void
 
-    @State private var inlineError: LocalizedStringKey?
+    @State private var inlineError: LocalizedStringResource?
     @State private var isDropTargeted = false
 
-    private var sceneCapable: Bool { featureCatalog.isEnabled(.scene) }
+    private var sceneCapable: Bool {
+        OnboardingImportCopy.sceneCapable(in: featureCatalog)
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -113,7 +141,7 @@ struct OnboardingPickerView: View {
             .allowsHitTesting(false)
     }
 
-    private func inlineErrorBanner(_ message: LocalizedStringKey) -> some View {
+    private func inlineErrorBanner(_ message: LocalizedStringResource) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.caption)
@@ -190,7 +218,7 @@ struct OnboardingPickerView: View {
             return true
         }
 
-        return fail("That file type isn't supported. Pick a video, web page, or scene.")
+        return fail(OnboardingImportCopy.unsupportedFileTypeMessage(sceneCapable: sceneCapable))
     }
 
     private func applyHTML(_ source: HTMLSource) {
@@ -230,7 +258,7 @@ struct OnboardingPickerView: View {
     }
 
     @discardableResult
-    private func fail(_ message: LocalizedStringKey) -> Bool {
+    private func fail(_ message: LocalizedStringResource) -> Bool {
         withAnimation(.easeOut(duration: 0.18)) { inlineError = message }
         return false
     }

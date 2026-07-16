@@ -32,6 +32,10 @@ final class PlaybackCoordinator {
     /// Owned by ScreenManager so the session lifecycle stays single-source-of-truth.
     private let releaseRuntimeSession: @MainActor (Screen) -> Void
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
+    /// Deferred configuration-change notification seam. Production posts on
+    /// the next MainActor tick; tests inject a counter so lifecycle assertions
+    /// do not observe unrelated process-wide notifications.
+    private let notifyConfigurationChanged: @MainActor (CGDirectDisplayID) -> Void
     /// For async validation / setup failures that happen before a
     /// `VideoWallpaperSession` exists to publish its own runtime error.
     private let reportRuntimeError: @MainActor (CGDirectDisplayID, WallpaperRuntimeError?) -> Void
@@ -42,6 +46,11 @@ final class PlaybackCoordinator {
     /// never allocated while wallpapers are globally disabled — mirrors the gate
     /// `ScreenManager.restoreWallpaperSession` applies to scene/HTML sessions.
     private let isGloballyEnabled: @MainActor () -> Bool
+    /// Process-lifecycle gate owned by `ScreenManager`. This is deliberately
+    /// checked inside the coordinator as well as at the facade: a validation
+    /// Task may have been admitted before termination and resume after the
+    /// manager has torn every session down.
+    private let isRuntimeInstallationAllowed: @MainActor () -> Bool
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -55,7 +64,17 @@ final class PlaybackCoordinator {
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
         reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in },
         originReconciler: any OriginReconciler,
-        isGloballyEnabled: @MainActor @escaping () -> Bool = { true }
+        isGloballyEnabled: @MainActor @escaping () -> Bool = { true },
+        isRuntimeInstallationAllowed: @MainActor @escaping () -> Bool = { true },
+        notifyConfigurationChanged: @MainActor @escaping (CGDirectDisplayID) -> Void = { screenID in
+            Task { @MainActor in
+                NotificationCenter.default.post(
+                    name: .wallpaperConfigurationDidChange,
+                    object: nil,
+                    userInfo: ["screenID": screenID]
+                )
+            }
+        }
     ) {
         self.configurationStore = configurationStore
         self.playableVideoLoader = playableVideoLoader
@@ -66,9 +85,11 @@ final class PlaybackCoordinator {
         self.markSessionStateChanged = markSessionStateChanged
         self.releaseRuntimeSession = releaseRuntimeSession
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
+        self.notifyConfigurationChanged = notifyConfigurationChanged
         self.reportRuntimeError = reportRuntimeError
         self.originReconciler = originReconciler
         self.isGloballyEnabled = isGloballyEnabled
+        self.isRuntimeInstallationAllowed = isRuntimeInstallationAllowed
     }
 
     // MARK: - Configuration setters
@@ -311,6 +332,7 @@ final class PlaybackCoordinator {
     // MARK: - Video session lifecycle
 
     func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
+        guard isRuntimeInstallationAllowed() else { return }
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
         let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
@@ -360,6 +382,7 @@ final class PlaybackCoordinator {
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
                     guard let self,
+                          self.isRuntimeInstallationAllowed(),
                           self.transition.isCurrentTransition(generation, for: screenID),
                           let liveScreen = self.screensProvider().first(where: { $0.id == screenID }) else { return }
                     self.save(configuration)
@@ -384,6 +407,7 @@ final class PlaybackCoordinator {
                 let message = error.localizedDescription
                 await MainActor.run { [weak self] in
                     guard let self,
+                          self.isRuntimeInstallationAllowed(),
                           self.transition.isCurrentTransition(generation, for: screenID) else { return }
                     self.reportRuntimeError(screenID, runtimeError)
                     Logger.error("Failed to setup video: \(message)", category: .screenManager)
@@ -394,6 +418,7 @@ final class PlaybackCoordinator {
     }
 
     func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
+        guard isRuntimeInstallationAllowed() else { return }
         do {
             guard let bookmarkData = configuration.videoBookmarkData else {
                 throw NSError(domain: "ScreenManager", code: 400, userInfo: [
@@ -521,6 +546,7 @@ final class PlaybackCoordinator {
     }
 
     func setupVideoPlayback(url: URL, screen: Screen) {
+        guard isRuntimeInstallationAllowed() else { return }
         releaseRuntimeSession(screen)
 
         // Master gate: callers (setVideo / playlist / schedule) persist the
@@ -571,14 +597,7 @@ final class PlaybackCoordinator {
 
     private func save(_ configuration: ScreenConfiguration) {
         configurationStore.save(configuration)
-        let screenID = configuration.screenID
-        Task { @MainActor in
-            NotificationCenter.default.post(
-                name: .wallpaperConfigurationDidChange,
-                object: nil,
-                userInfo: ["screenID": screenID]
-            )
-        }
+        notifyConfigurationChanged(configuration.screenID)
     }
 
     private func applyPerformancePolicy(to screen: Screen) {

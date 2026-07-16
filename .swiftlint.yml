@@ -1,0 +1,109 @@
+# SwiftLint — starter config (P0). Conservative + low-noise on first adoption.
+# Length/complexity/naming rules are intentionally disabled here because those
+# concerns are handled by the whole-app review (docs/app-review-framework.md, D2/D5),
+# and enabling them now would drown the signal in known god-file violations.
+# Whitespace rules are left to SwiftFormat to avoid double-reporting.
+
+included:
+  - LiveWallpaper
+  - LiveWallpaperTests
+  - Packages
+
+excluded:
+  - build
+  - archived
+  - cache
+  - trace
+  - tools
+  - "**/.build"
+  - "**/DerivedSources"
+  - "**/DerivedData"
+  - Packages/**/.build
+  # AF-10 hotspot contract: every excluded Swift source below must appear in
+  # scripts/quality-baselines/exclusions.json with a component owner, reason,
+  # and expiry. scripts/check_quality_exclusions.py keeps this list exactly in
+  # sync with SwiftFormat and applies component-level LoC/changed-line gates.
+  # Build/cache exclusions above are generated artifacts, not source hotspots.
+  # God-files slated for structural refactor (review doc §6.1, P-B): keep them
+  # churn-free until they are split, so autofixes don't collide with the splits.
+  # Expiry review (G4/breadth#7): re-check this list each fix cycle — an entry
+  # leaves when its split lands. Status 2026-07-14: Dispatcher got the ADR-001
+  # step-0 decomposition but remains oversized pending ADR-001 data migration →
+  # keep excluded. SceneRenderer's split landed (B4), so it moved to the parts
+  # list below. GeneralSettingsView was split (G8) and was never on this list.
+  - LiveWallpaper/Runtime/Metal/WPEMetalShaderDispatcher.swift
+  - LiveWallpaper/VideoPlayback/HTMLWallpaperView.swift
+  # WPEShaderTranspiler, ScreenManager, WPEMetalRenderExecutor (B3a/B3b/B3c) and
+  # WPEMetalSceneRenderer (B4) were split. Every split was a pure move, so the
+  # parts inherit the violations the monoliths were never held to — splitting a
+  # file does not make it conform. The exclusions therefore follow the parts, but
+  # their reason has changed: they now wait on a dedicated lint-cleanup pass, which
+  # the splits unblocked and which must stay a separate commit so the autofixes are
+  # reviewable apart from the code motion.
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+LivePoster.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Load.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Debug.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Text.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Particles.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Scripts.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Lifecycle.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Textures.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutorTypes.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Text.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Particles.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Present.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Targets.swift
+  - LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Puppet.swift
+  - LiveWallpaper/App/ScreenManager.swift
+  - LiveWallpaper/App/ScreenManagerTypes.swift
+  - LiveWallpaper/App/ScreenManager+Observers.swift
+  - LiveWallpaper/App/ScreenManager+Screens.swift
+  - LiveWallpaper/App/ScreenManager+Wallpaper.swift
+  - LiveWallpaper/App/ScreenManager+Monitor.swift
+  - LiveWallpaper/App/ScreenManager+Automation.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Preprocessor.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Main.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Substitutions.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Helpers.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Render.swift
+  - LiveWallpaper/Runtime/Metal/WPEShaderTranspilerTypes.swift
+
+disabled_rules:
+  - line_length
+  - todo
+  - identifier_name
+  - type_name
+  - file_length
+  - type_body_length
+  - function_body_length
+  - cyclomatic_complexity
+  - nesting
+  - large_tuple
+  - function_parameter_count
+  - trailing_whitespace
+  - vertical_whitespace
+  - opening_brace
+  - trailing_comma
+
+reporter: "xcode"
+
+# G4 (review 2026-07-06 cycle-3): font-token bypass guards. High-precision forms
+# only — the `.font(.system(size:))` form is deliberately NOT enforced because
+# DESIGN.md rule 1 exempts standalone SF Symbol sizing (99 of 113 remaining
+# inline sites, taxonomy in .claude/review/2026-07-06/progress.md). Revisit if
+# an AST-based checker becomes available. Measured pt table: DESIGN.md Typography.
+custom_rules:
+  token_bypass_textstyle_font:
+    name: "Inline text-style font"
+    regex: '\.font\(\.system\(\.'
+    message: "Use DesignTokens.Typography instead of .font(.system(.textStyle…)) — SharedUI DESIGN.md rule 1"
+    severity: warning
+  token_bypass_custom_font:
+    name: "Inline custom font"
+    regex: '\.font\(\.custom\('
+    message: "Custom fonts are banned on Text/Label — use DesignTokens.Typography (DESIGN.md rule 1)"
+    severity: warning

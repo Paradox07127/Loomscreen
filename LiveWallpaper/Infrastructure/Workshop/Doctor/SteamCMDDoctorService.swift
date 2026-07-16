@@ -1,6 +1,5 @@
 #if !LITE_BUILD
 import AppKit
-import CryptoKit
 import Foundation
 import LiveWallpaperCore
 import Observation
@@ -157,7 +156,7 @@ final class SteamCMDDoctorService {
     /// excluded: they need a binary that already identifies itself.
     private static let identityFailureExplainers: [DoctorProbeKind] =
         [.rosetta, .codeSignature, .gatekeeperQuarantine]
-    nonisolated private static let wallpaperEngineAppID: UInt32 = 431960
+    nonisolated static let wallpaperEngineAppID: UInt32 = 431960
     /// Empirically validated public free WE community item used as the primary
     /// ownership probe (Phase 0 empirical pass, 2026-05-28).
     private static let primaryOwnershipProbeID: UInt64 = 3725117707
@@ -167,13 +166,16 @@ final class SteamCMDDoctorService {
         2932849316, // TODO(post-v2): replace with empirically verified free WE community items
         2906898907
     ]
-    private static var ownershipProbeCandidateIDs: [UInt64] {
+    static var ownershipProbeCandidateIDs: [UInt64] {
         [primaryOwnershipProbeID] + fallbackOwnershipProbeIDs
     }
 
-    @ObservationIgnored private let runner: SteamCMDProcessRunner
+    @ObservationIgnored private let runner: any SteamCMDProcessRunning
+    @ObservationIgnored private let binaryTrustChecker: any SteamCMDBinaryTrustChecking
+    @ObservationIgnored let operationCoordinator: SteamCMDDoctorOperationCoordinator
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let fileManager: FileManager
+    @ObservationIgnored let fileManager: FileManager
+    @ObservationIgnored private let workshopFileInventory: any SteamCMDWorkshopFileInventoryServing
 
     var probes: [DoctorProbeKind: DoctorProbeReport]
     var state: DoctorState = .idle
@@ -210,13 +212,21 @@ final class SteamCMDDoctorService {
     }
 
     init(
-        runner: SteamCMDProcessRunner = SteamCMDProcessRunner(),
+        runner: any SteamCMDProcessRunning = SteamCMDProcessRunner(),
         defaults: UserDefaults = .standard,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        workshopFileInventory: (any SteamCMDWorkshopFileInventoryServing)? = nil,
+        binaryTrustChecker: (any SteamCMDBinaryTrustChecking)? = nil,
+        operationCoordinator: SteamCMDDoctorOperationCoordinator = .shared
     ) {
         self.runner = runner
+        self.binaryTrustChecker = binaryTrustChecker
+            ?? SteamCMDProductionBinaryTrustChecker(runner: runner)
+        self.operationCoordinator = operationCoordinator
         self.defaults = defaults
         self.fileManager = fileManager
+        self.workshopFileInventory = workshopFileInventory
+            ?? SteamCMDWorkshopFileInventory(fileManager: fileManager)
         self.probes = Dictionary(uniqueKeysWithValues: DoctorProbeKind.allCases.map { kind in
             (kind, DoctorProbeReport(id: kind, status: .notRun, lastRun: .distantPast))
         })
@@ -226,16 +236,19 @@ final class SteamCMDDoctorService {
     // MARK: - Binding
 
     func bindBinary(_ userPickedURL: URL) async throws {
-        let canonicalURL: URL = try SecurityScopedBookmarkResolver.withScopedAccess(userPickedURL) { _ in
-            switch SteamCMDBinaryResolver.resolveCanonicalBinary(at: userPickedURL) {
-            case .success(let url):
-                return url.resolvingSymlinksInPath().standardizedFileURL
-            case .failure(let error):
-                throw SteamCMDDoctorError.binaryResolution(error)
-            }
+        let pickedAccess = userPickedURL.startAccessingSecurityScopedResource()
+        defer { if pickedAccess { userPickedURL.stopAccessingSecurityScopedResource() } }
+        let canonicalURL: URL
+        switch SteamCMDBinaryResolver.resolveCanonicalBinary(at: userPickedURL) {
+        case .success(let url):
+            canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
+        case .failure(let error):
+            throw SteamCMDDoctorError.binaryResolution(error)
         }
+        let canonicalAccess = canonicalURL.startAccessingSecurityScopedResource()
+        defer { if canonicalAccess { canonicalURL.stopAccessingSecurityScopedResource() } }
 
-        let sha256 = try Self.streamingSHA256Hex(of: canonicalURL)
+        let sha256 = try await binaryTrustChecker.identity(of: canonicalURL)
         let bookmark = try Self.makeBookmark(for: canonicalURL, readOnly: true)
         binaryBookmarkData = bookmark
         lastBinarySHA256 = sha256
@@ -420,19 +433,22 @@ final class SteamCMDDoctorService {
     private func runBinaryIdentityProbe() async {
         do {
             let binary = try resolveBinaryURL()
-            guard await ensureTrustedBinary(binary) else {
+            let didStart = binary.startAccessingSecurityScopedResource()
+            defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
+            guard var executionAuthorization = await trustedExecutionAuthorization(for: binary) else {
                 setProbe(.binaryIdentity, status: .red(
                     message: "SteamCMD isn't a verified Valve build, so it wasn't run. Re-select the official SteamCMD.",
                     command: nil
                 ))
                 return
             }
-            let didStart = binary.startAccessingSecurityScopedResource()
-            defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
 
-            var result = await runner.run(
-                binary: binary, args: ["+quit"], stdin: nil,
-                timeout: 30, workingDirectory: nil
+            var result = await runner.runVerified(
+                binary: binary,
+                authorization: executionAuthorization,
+                args: ["+quit"], stdin: nil,
+                timeout: 30, workingDirectory: nil,
+                onProgress: nil
             )
             var retriedAfterSelfUpdate = false
             if !result.timedOut,
@@ -440,17 +456,21 @@ final class SteamCMDDoctorService {
                Self.matches(Self.selfUpdatePattern, in: result.stdout) {
                 // That run may have replaced the binary on disk, so re-establish
                 // trust before launching whatever is there now.
-                guard await ensureTrustedBinary(binary) else {
+                guard let refreshedAuthorization = await trustedExecutionAuthorization(for: binary) else {
                     setProbe(.binaryIdentity, status: .red(
                         message: "SteamCMD isn't a verified Valve build, so it wasn't run. Re-select the official SteamCMD.",
                         command: nil
                     ))
                     return
                 }
+                executionAuthorization = refreshedAuthorization
                 retriedAfterSelfUpdate = true
-                result = await runner.run(
-                    binary: binary, args: ["+quit"], stdin: nil,
-                    timeout: 30, workingDirectory: nil
+                result = await runner.runVerified(
+                    binary: binary,
+                    authorization: executionAuthorization,
+                    args: ["+quit"], stdin: nil,
+                    timeout: 30, workingDirectory: nil,
+                    onProgress: nil
                 )
             }
             if result.timedOut {
@@ -471,7 +491,7 @@ final class SteamCMDDoctorService {
             }
 
             var detail = "SteamCMD identity verified."
-            if let currentSHA = try? Self.streamingSHA256Hex(of: binary) {
+            if let currentSHA = try? await binaryTrustChecker.identity(of: binary) {
                 if let previous = lastBinarySHA256, previous != currentSHA {
                     detail = "SteamCMD updated itself (SHA-256 changed) — that's normal."
                 }
@@ -486,7 +506,9 @@ final class SteamCMDDoctorService {
     private func runCodeSignatureProbe() async {
         do {
             let binary = try resolveBinaryURL()
-            let result = await Self.runCodesignCheck(binary: binary)
+            let didStart = binary.startAccessingSecurityScopedResource()
+            defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
+            let result = await binaryTrustChecker.codesignResult(for: binary)
             if result.signatureValid, result.teamIdentifier == Self.valveTeamIdentifier {
                 let detail = result.isHardenedRuntime
                     ? "Verified Valve build (TeamIdentifier=MXGJJ98X76, Hardened Runtime)."
@@ -544,6 +566,8 @@ final class SteamCMDDoctorService {
     private func runGatekeeperProbe() async {
         do {
             let binary = try resolveBinaryURL()
+            let didStart = binary.startAccessingSecurityScopedResource()
+            defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
             if isQuarantined(binary) {
                 setProbe(.gatekeeperQuarantine, status: .red(
                     message: redacted("SteamCMD has the Gatekeeper quarantine attribute. macOS may block it on launch."),
@@ -561,19 +585,19 @@ final class SteamCMDDoctorService {
                 return
             }
 
-            guard await ensureTrustedBinary(binary) else {
+            guard let executionAuthorization = await trustedExecutionAuthorization(for: binary) else {
                 setProbe(.gatekeeperQuarantine, status: .red(
                     message: "SteamCMD isn't a verified Valve build, so it wasn't run.",
                     command: nil
                 ))
                 return
             }
-            let didStart = binary.startAccessingSecurityScopedResource()
-            defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
-            let result = await runner.run(
+            let result = await runner.runVerified(
                 binary: binary,
+                authorization: executionAuthorization,
                 args: ["+login", "anonymous", "+quit"],
-                stdin: nil, timeout: 30, workingDirectory: nil
+                stdin: nil, timeout: 30, workingDirectory: nil,
+                onProgress: nil
             )
             let combined = "\(result.stdout)\n\(result.stderr)"
             if !result.timedOut,
@@ -684,16 +708,52 @@ final class SteamCMDDoctorService {
             message: "Cached Steam login must pass before ownership can be checked.",
             command: nil
         ))
+        do {
+            try await operationCoordinator.withOperation(.sessionMutation) { [weak self] lease in
+                guard let self else { return }
+                await performSignOutSession(lease: lease)
+            }
+        } catch {
+            setProbe(.cachedLogin, status: .yellow(
+                message: "Sign out was cancelled before local session revocation completed.",
+                command: nil
+            ))
+        }
+    }
+
+    // The coordinator's closure is @Sendable and runs off the main actor; hop back in one
+    // call instead of reading main-actor state piecemeal, same as the workshopDownload path.
+    private func performSignOutSession(lease: SteamCMDDoctorOperationLease) async {
         if let username, SteamCMDScriptWriter.validateUsername(username),
            binaryBookmarkData != nil, workdirBookmarkData != nil,
            let binary = try? resolveBinaryURL(), let workdir = try? resolveWorkdirURL() {
             let scope = workdir.startAccessingSecurityScopedResource()
             defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
             if let script = try? SteamCMDScriptWriter.logoutScript(username: username) {
-                _ = try? await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: 30)
+                _ = try? await runSteamCMDScript(
+                    script,
+                    binary: binary,
+                    workdir: workdir,
+                    timeout: 30
+                )
             }
         }
-        clearCachedSessionFiles()
+        let owner = WPEEngineAssetsFilesystemOwner(fileManager: fileManager)
+        let cleanup = await Task.detached(priority: .utility) {
+            owner.clearCachedSessionFiles(
+                authorization: lease.filesystemMutation
+            )
+        }.value
+        guard cleanup.succeeded else {
+            setProbe(.cachedLogin, status: .yellow(
+                message: String(
+                    localized: "SteamCMD signed out, but one or more local session files could not be safely removed.",
+                    comment: "SteamCMD sign-out warning when local credential cleanup was refused or failed."
+                ),
+                command: nil
+            ))
+            return
+        }
         await runProbe(.cachedLogin)
     }
 
@@ -703,115 +763,6 @@ final class SteamCMDDoctorService {
         username = nil
         setProbe(.cachedLogin, status: .notRun)
         setProbe(.wallpaperEngineOwnership, status: .notRun)
-    }
-
-    /// Deletes ONLY SteamCMD's cached-credential artifacts in the app's own
-    /// container Steam root: `config/config.vdf`, `config/loginusers.vdf`, and any
-    /// `ssfn*` (Steam Guard machine tokens). Never touches `steamapps/`,
-    /// `depotcache/`, `userdata/`, library folders, the API-key Keychain, or the
-    /// SteamCMD binary/workdir bookmarks. Containment is checked on the resolved
-    /// path; the delete operates on the literal path so a final-component symlink
-    /// is unlinked, not followed to its target.
-    private func clearCachedSessionFiles() {
-        let steamRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent("Library/Application Support/Steam", isDirectory: true)
-        let configDir = steamRoot.appendingPathComponent("config", isDirectory: true)
-        var targets = [
-            configDir.appendingPathComponent("config.vdf", isDirectory: false),
-            configDir.appendingPathComponent("loginusers.vdf", isDirectory: false),
-        ]
-        for dir in [steamRoot, configDir] {
-            if let children = try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-                targets += children.filter { $0.lastPathComponent.hasPrefix("ssfn") }
-            }
-        }
-        for target in targets {
-            let resolved = target.standardizedFileURL.resolvingSymlinksInPath()
-            guard WPEEngineAssetsLibrary.isContainerInternal(resolved) else { continue }
-            try? fileManager.removeItem(at: target)
-        }
-    }
-
-    private func runWallpaperEngineOwnershipProbe() async {
-        guard isGreen(.cachedLogin) else {
-            setProbe(.wallpaperEngineOwnership, status: .yellow(
-                message: "Cached Steam login must pass before ownership can be checked.",
-                command: nil
-            ))
-            return
-        }
-
-        do {
-            let binary = try resolveBinaryURL()
-            let workdir = try resolveWorkdirURL()
-            guard let username else {
-                setProbe(.wallpaperEngineOwnership, status: .yellow(
-                    message: "Enter your Steam username before checking ownership.",
-                    command: nil
-                ))
-                return
-            }
-
-            Self.prepareWallpaperEngineOwnershipProbe(fileManager: fileManager)
-
-            var removedIDs: [UInt64] = []
-            for itemID in Self.ownershipProbeCandidateIDs {
-                let script = try SteamCMDScriptWriter.ownershipProbeScript(username: username, itemID: itemID)
-                let result = try await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: 90)
-                if result.stdout.range(of: #"Success\. Downloaded item \#(itemID) to "#, options: .regularExpression) != nil {
-                    setProbe(.wallpaperEngineOwnership, status: .green(
-                        detail: "Your Steam account has access to Wallpaper Engine downloads."
-                    ))
-                    return
-                }
-                if result.stdout.contains("ERROR! Download item \(itemID) failed (No Connection).") {
-                    setProbe(.wallpaperEngineOwnership, status: .red(
-                        message: "This Steam account doesn't own Wallpaper Engine, or downloads are restricted in your region.",
-                        command: "steam://store/\(Self.wallpaperEngineAppID)"
-                    ))
-                    return
-                }
-                if result.stdout.contains("ERROR! Download item \(itemID) failed (No match).") {
-                    removedIDs.append(itemID)
-                    continue
-                }
-                if result.stdout.contains("ERROR! Download item \(itemID) failed (Failure).") || result.timedOut {
-                    setProbe(.wallpaperEngineOwnership, status: .yellow(
-                        message: "Steam is temporarily unreachable. Workshop downloads may be unavailable right now.",
-                        command: nil
-                    ))
-                    return
-                }
-                setProbe(.wallpaperEngineOwnership, status: .yellow(
-                    message: "Ownership probe returned an unrecognized response. Use Export diagnostics for the raw output.",
-                    command: nil
-                ))
-                return
-            }
-
-            setProbe(.wallpaperEngineOwnership, status: .yellow(
-                message: "All built-in ownership probe items appear to have been removed from Steam: \(removedIDs.map(String.init).joined(separator: ", ")).",
-                command: nil
-            ))
-        } catch SteamCMDScriptError.invalidUsername {
-            setProbe(.wallpaperEngineOwnership, status: .red(
-                message: "Steam username must match ^[A-Za-z0-9_]{1,32}$.",
-                command: nil
-            ))
-        } catch {
-            setProbe(.wallpaperEngineOwnership, status: .red(message: redacted(error.localizedDescription), command: nil))
-        }
-    }
-
-    nonisolated static func prepareWallpaperEngineOwnershipProbe(
-        steamApps: URL? = nil,
-        fileManager: FileManager = .default
-    ) {
-        if let steamApps {
-            WPEEngineAssetsInstaller.cleanupSteamcmdAppState(steamApps: steamApps, fileManager: fileManager)
-        } else {
-            WPEEngineAssetsInstaller.cleanupSteamcmdAppState(fileManager: fileManager)
-        }
     }
 
     // MARK: - Workshop download
@@ -841,7 +792,30 @@ final class SteamCMDDoctorService {
     func downloadWorkshopItem<Imported: Sendable>(
         _ itemID: UInt64,
         onProgress: SteamCMDProgressHandler? = nil,
-        onContentReady: @MainActor (URL) async -> Imported
+        onContentReady: @MainActor @Sendable (URL) async -> Imported
+    ) async -> WorkshopItemDownloadResult<Imported> {
+        do {
+            return try await operationCoordinator.withOperation(.workshopDownload) { [weak self] _ in
+                guard let self else {
+                    return .failed(reason: "Workshop download owner was released.")
+                }
+                return await performDownloadWorkshopItem(
+                    itemID,
+                    onProgress: onProgress,
+                    onContentReady: onContentReady
+                )
+            }
+        } catch is CancellationError {
+            return .failed(reason: "Download cancelled.")
+        } catch {
+            return .failed(reason: redacted(error.localizedDescription))
+        }
+    }
+
+    private func performDownloadWorkshopItem<Imported: Sendable>(
+        _ itemID: UInt64,
+        onProgress: SteamCMDProgressHandler?,
+        onContentReady: @MainActor @Sendable (URL) async -> Imported
     ) async -> WorkshopItemDownloadResult<Imported> {
         guard binaryBookmarkData != nil else {
             return .notConfigured(reason: SteamCMDDoctorError.missingBinaryBinding.errorDescription ?? "No SteamCMD binary is selected.")
@@ -881,7 +855,20 @@ final class SteamCMDDoctorService {
             if result.timedOut { return .timedOut }
             if Task.isCancelled || result.killed { return .failed(reason: "Download cancelled.") }
 
-            if let folder = Self.resolveDownloadedItemFolder(stdout: result.stdout, itemID: itemID, workdir: workdir, fileManager: fileManager) {
+            let inventory = workshopFileInventory
+            let stdout = result.stdout
+            let folder = await Task.detached(priority: .utility) { () -> URL? in
+                guard let candidate = inventory.resolveDownloadedItemFolder(
+                    stdout: stdout,
+                    itemID: itemID,
+                    workdir: workdir
+                ) else { return nil }
+                return inventory.revalidatedURL(
+                    for: candidate,
+                    requiringProjectJSON: false
+                )
+            }.value
+            if let folder {
                 return .imported(await onContentReady(folder))
             }
             // Mirror the ownership probe's stdout → meaning mapping. Steam's
@@ -891,64 +878,6 @@ final class SteamCMDDoctorService {
             if out.contains("ERROR! Download item \(itemID) failed (No match).") { return .removedFromSteam }
             if out.contains("ERROR! Download item \(itemID) failed (Failure).") { return .temporarilyUnavailable }
             return .failed(reason: "SteamCMD didn't report a successful download. Open the Doctor and use Export diagnostics for the raw output.")
-        } catch SteamCMDScriptError.invalidUsername {
-            return .notConfigured(reason: "Steam username must match ^[A-Za-z0-9_]{1,32}$.")
-        } catch {
-            return .failed(reason: redacted(error.localizedDescription))
-        }
-    }
-
-    /// Downloads / updates the full Wallpaper Engine app (431960) via SteamCMD.
-    /// Under the sandbox-redirected STEAMROOT this lands in the container at
-    /// `…/Steam/steamapps/common/wallpaper_engine`; the caller prunes it to the
-    /// `assets/` subtree. Mirrors `downloadWorkshopItem`'s gating/scope handling.
-    func updateWallpaperEngineApp(onProgress: SteamCMDProgressHandler? = nil) async -> WPEAppUpdateResult {
-        guard binaryBookmarkData != nil else {
-            return .notConfigured(reason: SteamCMDDoctorError.missingBinaryBinding.errorDescription ?? "No SteamCMD binary is selected.")
-        }
-        guard workdirBookmarkData != nil else {
-            return .notConfigured(reason: SteamCMDDoctorError.missingWorkdirBinding.errorDescription ?? "No SteamCMD working directory is selected.")
-        }
-        guard let username, SteamCMDScriptWriter.validateUsername(username) else {
-            return .notConfigured(reason: "Enter your Steam username in the SteamCMD Doctor first.")
-        }
-        guard isGreen(.cachedLogin) else { return .loginRequired }
-
-        do {
-            let binary = try resolveBinaryURL()
-            guard await ensureTrustedBinary(binary) else { return .untrustedBinary }
-            let workdir = try resolveWorkdirURL()
-            let workdirScope = workdir.startAccessingSecurityScopedResource()
-            defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
-
-            let script = try SteamCMDScriptWriter.appUpdateScript(username: username)
-            let result = try await runSteamCMDScript(
-                script,
-                binary: binary,
-                workdir: workdir,
-                timeout: Self.appUpdateTimeout,
-                onProgress: onProgress
-            )
-
-            if result.timedOut { return .timedOut }
-            if Task.isCancelled || result.killed { return .failed(reason: "Download cancelled.") }
-
-            let out = result.stdout
-            // Cross-platform reality: forcing the Windows depot on macOS stages the
-            // files to `steamapps/downloading/431960/` but NEVER performs the final
-            // install/commit into `common/wallpaper_engine/` (steamcmd leaves the
-            // app "uninstalled" with no error), so "Success! App … fully installed"
-            // never prints. Treat the content as ready when a candidate dir holds a
-            // complete asset subtree; the caller relocates it out of staging.
-            if let installRoot = Self.resolveWPEInstallRoot(workdir: workdir, fileManager: fileManager),
-               Self.isWPEContentComplete(installRoot: installRoot, fileManager: fileManager),
-               Self.isWPEStagingComplete(installRoot: installRoot, fileManager: fileManager) {
-                let buildID = Self.readInstalledBuildID(installRoot: installRoot, fileManager: fileManager)
-                return .updated(installRoot: installRoot, buildID: buildID)
-            }
-            // "No subscription" = this account doesn't own Wallpaper Engine.
-            if out.contains("No subscription") { return .notEntitled }
-            return .failed(reason: "SteamCMD didn't produce a complete Wallpaper Engine asset tree. Open the Doctor and use Export diagnostics for the raw output.")
         } catch SteamCMDScriptError.invalidUsername {
             return .notConfigured(reason: "Steam username must match ^[A-Za-z0-9_]{1,32}$.")
         } catch {
@@ -1103,6 +1032,7 @@ final class SteamCMDDoctorService {
     /// run, a prior launch, a download whose import didn't record).
     func enumerateDownloadedItemFolders(_ body: @MainActor (URL) async -> Void) async {
         var seen = Set<String>()
+        let inventory = workshopFileInventory
 
         // 1. The sandbox-redirected Steam data dir. A steamcmd spawned by this
         //    sandboxed app writes workshop content to its own STEAMROOT
@@ -1116,8 +1046,28 @@ final class SteamCMDDoctorService {
             appropriateFor: nil,
             create: false
         ) {
-            let steamContent = workshopContentRoot(under: appSupport.appendingPathComponent("Steam", isDirectory: true))
-            seen.formUnion(await enumerateProjectFolders(in: steamContent, skipping: seen, body))
+            let steamRoot = appSupport.appendingPathComponent("Steam", isDirectory: true)
+            let snapshotSeen = seen
+            let projects = await Task.detached(priority: .utility) {
+                inventory.projectFolders(
+                    under: steamRoot,
+                    anchoredTo: appSupport,
+                    skipping: snapshotSeen
+                )
+            }.value
+            var consumedIDs: [String] = []
+            for candidate in projects {
+                let project = await Task.detached(priority: .utility) {
+                    inventory.revalidatedURL(
+                        for: candidate,
+                        requiringProjectJSON: true
+                    )
+                }.value
+                guard let project else { continue }
+                consumedIDs.append(project.lastPathComponent)
+                await body(project)
+            }
+            seen.formUnion(consumedIDs)
         }
 
         // 2. The bound workdir's content tree — covers users who pointed the
@@ -1126,185 +1076,40 @@ final class SteamCMDDoctorService {
         if let workdir = try? resolveWorkdirURL() {
             let scope = workdir.startAccessingSecurityScopedResource()
             defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
-            seen.formUnion(await enumerateProjectFolders(in: workshopContentRoot(under: workdir), skipping: seen, body))
-        }
-    }
-
-    private func workshopContentRoot(under base: URL) -> URL {
-        base.appendingPathComponent("steamapps", isDirectory: true)
-            .appendingPathComponent("workshop", isDirectory: true)
-            .appendingPathComponent("content", isDirectory: true)
-            .appendingPathComponent(String(Self.wallpaperEngineAppID), isDirectory: true)
-    }
-
-    /// Calls `body` for each immediate `project.json`-bearing subfolder of
-    /// `contentRoot` whose id isn't in `seen`. Returns the visited ids for the
-    /// caller's dedup set.
-    private func enumerateProjectFolders(
-        in contentRoot: URL,
-        skipping seen: Set<String>,
-        _ body: @MainActor (URL) async -> Void
-    ) async -> [String] {
-        guard let children = try? fileManager.contentsOfDirectory(
-            at: contentRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
-
-        var visited: [String] = []
-        for child in children {
-            let id = child.lastPathComponent
-            guard !seen.contains(id), !visited.contains(id) else { continue }
-            let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            guard isDir,
-                  fileManager.fileExists(atPath: child.appendingPathComponent("project.json").path(percentEncoded: false))
-            else { continue }
-            visited.append(id)
-            await body(child)
-        }
-        return visited
-    }
-
-    /// Permanently deletes (not Trash) the app-managed SteamCMD download
-    /// folder(s) for `workshopID`. Under App Sandbox `trashItem` on the
-    /// container-internal Steam dir lands in the container's hidden `.Trash` —
-    /// invisible in Finder and not space-freeing. Scans the same two roots as
-    /// `enumerateDownloadedItemFolders` so deleting an item also frees the
-    /// download that seeded its cache copy (otherwise the bytes linger and,
-    /// absent a delete tombstone, the auto-scan re-imports it). Returns the count
-    /// deleted.
-    @discardableResult
-    func deleteDownloadedItemFolders(workshopID: String) async -> Int {
-        guard WPEPathSafety.isSafeWorkshopID(workshopID) else { return 0 }
-        var deleted = 0
-
-        if let appSupport = try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        ) {
-            // Anchor the resolved Steam root back under resolved Application
-            // Support so a symlinked `Steam` can't re-base the delete target.
-            let safeAppSupport = appSupport.standardizedFileURL.resolvingSymlinksInPath()
-            let steam = safeAppSupport
-                .appendingPathComponent("Steam", isDirectory: true)
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-            if WPEPathSafety.contains(steam, in: safeAppSupport),
-               deleteItemFolder(workshopID: workshopID, under: steam) {
-                deleted += 1
+            let snapshotSeen = seen
+            let projects = await Task.detached(priority: .utility) {
+                inventory.projectFolders(
+                    under: workdir,
+                    anchoredTo: workdir,
+                    skipping: snapshotSeen
+                )
+            }.value
+            var consumedIDs: [String] = []
+            for candidate in projects {
+                let project = await Task.detached(priority: .utility) {
+                    inventory.revalidatedURL(
+                        for: candidate,
+                        requiringProjectJSON: true
+                    )
+                }.value
+                guard let project else { continue }
+                consumedIDs.append(project.lastPathComponent)
+                await body(project)
             }
-        }
-
-        // Only reclaim a workdir-resident copy when the workdir is INSIDE our
-        // sandbox container. `autoConfigureWorkdirIfNeeded` can bind the workdir
-        // to the user's real Steam library (`~/Library/Application Support/Steam`,
-        // outside the container), which holds their own Wallpaper Engine
-        // subscriptions — deleting from there would destroy the user's files.
-        if let workdir = try? resolveWorkdirURL(),
-           WPEEngineAssetsLibrary.isContainerInternal(workdir) {
-            let scope = workdir.startAccessingSecurityScopedResource()
-            defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
-            if deleteItemFolder(workshopID: workshopID, under: workdir) { deleted += 1 }
-        }
-        return deleted
-    }
-
-    /// Removes `<base>/steamapps/workshop/content/431960/<workshopID>` only when it
-    /// resolves (symlinks included) to a directory still inside the content root —
-    /// never a sibling, parent, or symlink-escaped target.
-    private func deleteItemFolder(workshopID: String, under base: URL) -> Bool {
-        // Anchor the whole chain: the resolved content root must stay inside the
-        // resolved trusted base, so a symlinked `steamapps`/`workshop`/`content`/
-        // `431960` can't re-base the delete target outside it. The final
-        // item-in-contentRoot check below is necessary but not sufficient alone.
-        let safeBase = base.standardizedFileURL.resolvingSymlinksInPath()
-        let contentRoot = workshopContentRoot(under: safeBase).standardizedFileURL.resolvingSymlinksInPath()
-        guard WPEPathSafety.contains(contentRoot, in: safeBase) else { return false }
-        let item = contentRoot
-            .appendingPathComponent(workshopID, isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard WPEPathSafety.contains(item, in: contentRoot) else { return false }
-        var isDirectory = ObjCBool(false)
-        guard fileManager.fileExists(atPath: item.path(percentEncoded: false), isDirectory: &isDirectory),
-              isDirectory.boolValue else { return false }
-        do {
-            try fileManager.removeItem(at: item)
-            return true
-        } catch {
-            return false
+            seen.formUnion(consumedIDs)
         }
     }
 
     /// Extracts the quoted destination from SteamCMD's
     /// `Success. Downloaded item <id> to "<path>"` line.
     nonisolated static func capturedDownloadPath(stdout: String, itemID: UInt64) -> String? {
-        firstCapture(in: stdout, pattern: #"Success\. Downloaded item \#(itemID) to "([^"]+)""#)
-    }
-
-    /// Resolves the downloaded item folder, preferring the in-scope workdir
-    /// location (where SteamCMD writes when run with the workdir as its CWD)
-    /// and falling back to the path SteamCMD printed.
-    private static func resolveDownloadedItemFolder(
-        stdout: String,
-        itemID: UInt64,
-        workdir: URL,
-        fileManager: FileManager
-    ) -> URL? {
-        let workdirItem = workdir
-            .appendingPathComponent("steamapps", isDirectory: true)
-            .appendingPathComponent("workshop", isDirectory: true)
-            .appendingPathComponent("content", isDirectory: true)
-            .appendingPathComponent(String(wallpaperEngineAppID), isDirectory: true)
-            .appendingPathComponent(String(itemID), isDirectory: true)
-        if isExistingDirectory(workdirItem, fileManager: fileManager) { return workdirItem }
-        if let path = capturedDownloadPath(stdout: stdout, itemID: itemID) {
-            let url = URL(fileURLWithPath: path)
-            if isExistingDirectory(url, fileManager: fileManager) { return url }
-        }
-        return nil
-    }
-
-    private static func isExistingDirectory(_ url: URL, fileManager: FileManager) -> Bool {
-        var isDirectory = ObjCBool(false)
-        return fileManager.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDirectory)
-            && isDirectory.boolValue
+        SteamCMDWorkshopFileInventory.capturedDownloadPath(stdout: stdout, itemID: itemID)
     }
 
     // MARK: - Helpers
 
     nonisolated static func runCodesignCheck(binary: URL) async -> CodesignResult {
-        let runner = SteamCMDProcessRunner()
-        // Two passes: `--verify --strict` validates signature *integrity* (a
-        // tampered binary fails even if its metadata still displays) and drives
-        // `signatureValid`; `-dv --verbose=4` only displays TeamIdentifier +
-        // Hardened Runtime, read from the display pass.
-        let verify = await runner.run(
-            binary: URL(fileURLWithPath: "/usr/bin/codesign"),
-            args: ["--verify", "--strict", binary.path(percentEncoded: false)],
-            stdin: nil, timeout: 30, workingDirectory: nil
-        )
-        let display = await runner.run(
-            binary: URL(fileURLWithPath: "/usr/bin/codesign"),
-            args: ["-dv", "--verbose=4", binary.path(percentEncoded: false)],
-            stdin: nil, timeout: 30, workingDirectory: nil
-        )
-        let combined = "\(display.stdout)\n\(display.stderr)"
-        let teamIdentifier = firstCapture(in: combined, pattern: #"TeamIdentifier=([A-Z0-9]+)"#)
-        // CodeDirectory line carries `flags=0xN(runtime,...)` when Hardened
-        // Runtime is on. Plain `runtime` substring match also covers macOS
-        // output where the flag name is interleaved with other tokens.
-        let hardenedRuntime = combined.range(
-            of: #"flags=0x[0-9a-fA-F]+\([^)]*runtime"#,
-            options: .regularExpression
-        ) != nil || combined.contains("runtime")
-        return CodesignResult(
-            teamIdentifier: teamIdentifier,
-            isHardenedRuntime: hardenedRuntime,
-            signatureValid: verify.exitCode == 0 && !verify.timedOut && !verify.killed
-        )
+        await SteamCMDProductionBinaryTrustChecker().codesignResult(for: binary)
     }
 
     /// Last SHA-256 verified as an intact Valve build. Transient — re-verified
@@ -1315,25 +1120,42 @@ final class SteamCMDDoctorService {
     /// for an intact, Valve-signed build. Caches the verified SHA-256 so one
     /// "Run all" doesn't re-spawn codesign per executing probe; a self-updated
     /// binary (changed SHA) is re-verified.
-    private func ensureTrustedBinary(_ binary: URL) async -> Bool {
-        let currentSHA = try? Self.streamingSHA256Hex(of: binary)
-        if let currentSHA, currentSHA == verifiedBinarySHA256 { return true }
-        let signature = await Self.runCodesignCheck(binary: binary)
-        let trusted = signature.signatureValid && signature.teamIdentifier == Self.valveTeamIdentifier
-        verifiedBinarySHA256 = trusted ? currentSHA : nil
-        return trusted
+    func ensureTrustedBinary(_ binary: URL) async -> Bool {
+        await trustedExecutionAuthorization(for: binary) != nil
     }
 
-    private func runSteamCMDScript(
+    private func trustedExecutionAuthorization(
+        for binary: URL
+    ) async -> SteamCMDBinaryExecutionAuthorization? {
+        let didStart = binary.startAccessingSecurityScopedResource()
+        defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
+        guard let currentSHA = try? await binaryTrustChecker.identity(of: binary) else {
+            verifiedBinarySHA256 = nil
+            return nil
+        }
+        if currentSHA != verifiedBinarySHA256 {
+            let signature = await binaryTrustChecker.codesignResult(for: binary)
+            guard signature.signatureValid,
+                  signature.teamIdentifier == Self.valveTeamIdentifier else {
+                verifiedBinarySHA256 = nil
+                return nil
+            }
+            verifiedBinarySHA256 = currentSHA
+        }
+        return SteamCMDBinaryExecutionAuthorization(
+            canonicalPath: binary.standardizedFileURL.resolvingSymlinksInPath()
+                .path(percentEncoded: false),
+            sha256: currentSHA
+        )
+    }
+
+    func runSteamCMDScript(
         _ script: String,
         binary: URL,
         workdir: URL,
         timeout: TimeInterval,
         onProgress: SteamCMDProgressHandler? = nil
     ) async throws -> SteamCMDRunResult {
-        guard await ensureTrustedBinary(binary) else {
-            throw SteamCMDDoctorError.untrustedBinary
-        }
         let binaryAccess = binary.startAccessingSecurityScopedResource()
         let workdirAccess = workdir.startAccessingSecurityScopedResource()
         defer {
@@ -1343,15 +1165,21 @@ final class SteamCMDDoctorService {
 
         let scriptURL = try SteamCMDScriptWriter.writeScript(script, in: workdir)
         defer { SteamCMDScriptWriter.deleteScript(scriptURL) }
-        return await runner.run(
+        // Re-hash and, when changed, re-check codesign directly before spawn.
+        // The binary security scope stays alive for the complete trust/run window.
+        guard let executionAuthorization = await trustedExecutionAuthorization(for: binary) else {
+            throw SteamCMDDoctorError.untrustedBinary
+        }
+        return await runner.runVerified(
             binary: binary,
+            authorization: executionAuthorization,
             args: ["+runscript", scriptURL.path(percentEncoded: false)],
             stdin: nil, timeout: timeout, workingDirectory: workdir,
             onProgress: onProgress
         )
     }
 
-    private func resolveBinaryURL() throws -> URL {
+    func resolveBinaryURL() throws -> URL {
         guard let data = binaryBookmarkData else { throw SteamCMDDoctorError.missingBinaryBinding }
         switch SecurityScopedBookmarkResolver.shared.resolve(data, target: .transient) {
         case .success(let resolved):
@@ -1366,7 +1194,7 @@ final class SteamCMDDoctorService {
         }
     }
 
-    private func resolveWorkdirURL() throws -> URL {
+    func resolveWorkdirURL() throws -> URL {
         guard let data = workdirBookmarkData else { throw SteamCMDDoctorError.missingWorkdirBinding }
         switch SecurityScopedBookmarkResolver.shared.resolve(data, target: .transient) {
         case .success(let resolved):
@@ -1419,7 +1247,7 @@ final class SteamCMDDoctorService {
         if let value, !value.isEmpty { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
-    private func setProbe(_ kind: DoctorProbeKind, status: DoctorProbeStatus) {
+    func setProbe(_ kind: DoctorProbeKind, status: DoctorProbeStatus) {
         probes[kind] = DoctorProbeReport(id: kind, status: status, lastRun: Date())
     }
 
@@ -1435,7 +1263,7 @@ final class SteamCMDDoctorService {
         state = .done(allGreen: allGreen, blockingFailures: blockingFailures)
     }
 
-    private func isGreen(_ kind: DoctorProbeKind) -> Bool {
+    func isGreen(_ kind: DoctorProbeKind) -> Bool {
         guard let report = probes[kind], case .green = report.status else { return false }
         return true
     }
@@ -1445,7 +1273,7 @@ final class SteamCMDDoctorService {
         return values.quarantineProperties != nil
     }
 
-    private func redacted(_ raw: String) -> String {
+    func redacted(_ raw: String) -> String {
         var prepared = raw
         if let workdirDisplayPath, !workdirDisplayPath.isEmpty {
             prepared = prepared.replacingOccurrences(of: workdirDisplayPath, with: "<workdir>")
@@ -1480,16 +1308,6 @@ final class SteamCMDDoctorService {
             return value
         }
         return "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
-
-    private static func streamingSHA256Hex(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
-            hasher.update(data: chunk)
-        }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     nonisolated private static func firstCapture(in text: String, pattern: String) -> String? {

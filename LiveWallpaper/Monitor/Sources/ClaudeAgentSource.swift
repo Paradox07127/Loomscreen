@@ -13,10 +13,38 @@ import Foundation
 final class ClaudeAgentSource: MonitorDataSource {
     let sourceID = "claude"
 
+    struct TailBootstrap {
+        let reader: JSONLTailReader
+        let restoredModel: ClaudeSessionModel?
+    }
+
     private let engine: Engine
 
     init(rootURL: URL, cursorStore: MonitorTailCursorStore? = nil) {
         self.engine = Engine(rootURL: rootURL, cursorStore: cursorStore)
+    }
+
+    /// Reconnects the scanner-owned session identity to a privacy-minimized
+    /// durable aggregate. Cursor resume is enabled only when both halves of the
+    /// same persisted generation can restore a model.
+    static func makeTailBootstrap(
+        url: URL,
+        candidateSessionID: String,
+        storedCursor: TailCursorState?,
+        storedAggregate: SessionAggregateState?
+    ) -> TailBootstrap {
+        guard let storedCursor,
+              let storedAggregate,
+              let restoredModel = ClaudeSessionModel.restore(
+                  from: storedAggregate,
+                  sessionId: candidateSessionID
+              ) else {
+            return TailBootstrap(reader: JSONLTailReader(url: url, resumeFrom: nil), restoredModel: nil)
+        }
+        return TailBootstrap(
+            reader: JSONLTailReader(url: url, resumeFrom: storedCursor),
+            restoredModel: restoredModel
+        )
     }
 
     func start(sink: any MonitorSnapshotSink) async {
@@ -98,9 +126,14 @@ private actor Engine {
         }
     }
 
-    func stop() {
-        pollTask?.cancel()
+    func stop() async {
+        let task = pollTask
         pollTask = nil
+        task?.cancel()
+        // No producer may mutate the cursor generation after the termination
+        // flush snapshots it. Actor reentrancy lets the cancelled loop finish
+        // its in-flight tick before we clear state and persist the final pair.
+        if let task { await task.value }
         sink = nil
         readers.removeAll()
         models.removeAll()
@@ -165,9 +198,10 @@ private actor Engine {
                 }
                 if let url = sourceURLs[sessionId],
                    let cursorState = reader.cursorState {
-                    cursorStore?.set(cursorState, for: url)
                     if let model = models[sessionId] {
-                        cursorStore?.setAggregate(model.snapshotState(), for: url)
+                        cursorStore?.set(cursorState, aggregate: model.snapshotState(), for: url)
+                    } else {
+                        cursorStore?.set(cursorState, for: url)
                     }
                 }
             } catch {
@@ -200,14 +234,14 @@ private actor Engine {
         for candidate in candidates where readers[candidate.sessionId] == nil {
             let storedCursor = cursorStore?.state(for: candidate.url)
             let storedAggregate = cursorStore?.aggregate(for: candidate.url, provider: .claude)
-            let restoredModel = storedCursor.flatMap { _ in
-                storedAggregate.flatMap(ClaudeSessionModel.restore)
-            }
-            readers[candidate.sessionId] = JSONLTailReader(
+            let bootstrap = ClaudeAgentSource.makeTailBootstrap(
                 url: candidate.url,
-                resumeFrom: restoredModel == nil ? nil : storedCursor
+                candidateSessionID: candidate.sessionId,
+                storedCursor: storedCursor,
+                storedAggregate: storedAggregate
             )
-            if let restoredModel {
+            readers[candidate.sessionId] = bootstrap.reader
+            if let restoredModel = bootstrap.restoredModel {
                 models[candidate.sessionId] = restoredModel
             } else if models[candidate.sessionId] == nil {
                 models[candidate.sessionId] = ClaudeSessionModel(sessionId: candidate.sessionId)

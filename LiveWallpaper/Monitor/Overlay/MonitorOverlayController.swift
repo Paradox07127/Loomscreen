@@ -2,14 +2,81 @@ import AppKit
 import LiveWallpaperCore
 import os
 
+struct MonitorOverlayVisibilityInput: Equatable, Sendable {
+    var screenID: CGDirectDisplayID
+    var level: MonitorOverlayLevel
+    var isDesktopOccluded: Bool
+}
+
+struct MonitorOverlayVisibilityDecision: Equatable, Sendable {
+    enum RuntimeDisposition: Equatable, Sendable {
+        case released
+        case paused
+        case active
+    }
+
+    var runtimeDisposition: RuntimeDisposition
+    var visibleHostIDs: Set<CGDirectDisplayID>
+    var suspendedHostIDs: Set<CGDirectDisplayID>
+
+    var pumpShouldRun: Bool {
+        !visibleHostIDs.isEmpty
+    }
+
+    var snapshotRecipientIDs: Set<CGDirectDisplayID> {
+        visibleHostIDs
+    }
+}
+
+/// Pure visibility policy shared by the live controller and characterization
+/// tests. `isDesktopOccluded` is FullScreenDetector's union-window boolean (the
+/// existing 85% pause-on-occlusion signal), not its 95% single-window flag.
+enum MonitorOverlayVisibilityPolicy {
+    static func resolve(
+        hosts: [MonitorOverlayVisibilityInput],
+        isUserAbsent: Bool
+    ) -> MonitorOverlayVisibilityDecision {
+        guard !hosts.isEmpty else {
+            return MonitorOverlayVisibilityDecision(
+                runtimeDisposition: .released,
+                visibleHostIDs: [],
+                suspendedHostIDs: []
+            )
+        }
+
+        let allHostIDs = Set(hosts.map(\.screenID))
+        guard !isUserAbsent else {
+            return MonitorOverlayVisibilityDecision(
+                runtimeDisposition: .paused,
+                visibleHostIDs: [],
+                suspendedHostIDs: allHostIDs
+            )
+        }
+
+        let visibleHostIDs = Set(hosts.compactMap { host -> CGDirectDisplayID? in
+            switch host.level {
+            case .desktop:
+                return host.isDesktopOccluded ? nil : host.screenID
+            case .front:
+                return host.screenID
+            }
+        })
+        return MonitorOverlayVisibilityDecision(
+            runtimeDisposition: visibleHostIDs.isEmpty ? .paused : .active,
+            visibleHostIDs: visibleHostIDs,
+            suspendedHostIDs: allHostIDs.subtracting(visibleHostIDs)
+        )
+    }
+}
+
 /// App-wide owner of the Monitor widget board as an OVERLAY layer — one floating
 /// panel per display, hosting the same native `MonitorBoardHostView` the wallpaper
 /// uses, but layered over whatever wallpaper the display shows. Independent of the
 /// wallpaper type entirely.
 ///
 /// Modeled on `MonitorHUDController`: it holds ONE shared `MonitorRuntime` lease
-/// while any overlay is active (options = union of every overlay's placed widget
-/// kinds) and pumps the newest snapshot to every board host at 1 Hz. `ScreenManager`
+/// while any overlay is visible (options = union of visible overlays' placed widget
+/// kinds) and pumps the newest snapshot to every visible board host at 1 Hz. `ScreenManager`
 /// drives it — calling `apply(...)` per screen when a config lands or displays
 /// change, and wiring `onOverlayEdited` to persist board edits back into
 /// `ScreenConfiguration.monitorOverlay`.
@@ -30,23 +97,63 @@ final class MonitorOverlayController: NSObject {
         /// catalog is locked) — drives the union sampling options.
         var config: MonitorBoardConfiguration
         var agentFleetEnabled: Bool
+        var level: MonitorOverlayLevel
+        var isVisible = false
+        var isDeliveringSnapshots = false
 
-        init(window: MonitorOverlayWindow, board: MonitorBoardHostView, config: MonitorBoardConfiguration, agentFleetEnabled: Bool) {
+        init(
+            window: MonitorOverlayWindow,
+            board: MonitorBoardHostView,
+            config: MonitorBoardConfiguration,
+            agentFleetEnabled: Bool,
+            level: MonitorOverlayLevel
+        ) {
             self.window = window
             self.board = board
             self.config = config
             self.agentFleetEnabled = agentFleetEnabled
+            self.level = level
         }
     }
 
     private var hosts: [CGDirectDisplayID: Host] = [:]
+    private var isUserAbsent = false
+    private var occludedScreenIDs: Set<CGDirectDisplayID> = []
+    private var visibilityDecision = MonitorOverlayVisibilityPolicy.resolve(
+        hosts: [],
+        isUserAbsent: false
+    )
 
     private var pumpTask: Task<Void, Never>?
     private var lastGeneration: UInt64 = 0
-    private var owesRuntimeRelease = false
-    private let runtimeLeaseID = UUID()
+    private let runtime: MonitorRuntime
+    private let runtimeLeaseSlot: MonitorRuntimeLeaseSlot
 
-    private override init() { super.init() }
+    private struct AppliedRuntimeState {
+        var lease: MonitorRuntimeLeaseHandle?
+        var isPaused = false
+        var options: MonitorRuntimeOptions?
+    }
+
+    private enum DesiredRuntimeState {
+        case released
+        case paused
+        case active(MonitorRuntimeOptions)
+    }
+
+    private var appliedRuntimeState = AppliedRuntimeState()
+    private var runtimeReconciliationRevision: UInt64 = 0
+    private var runtimeReconciliationTask: Task<Void, Never>?
+
+    override private convenience init() {
+        self.init(runtime: .shared)
+    }
+
+    init(runtime: MonitorRuntime) {
+        self.runtime = runtime
+        self.runtimeLeaseSlot = runtime.makeLeaseSlot()
+        super.init()
+    }
 
     // MARK: - Per-screen reconcile
 
@@ -73,11 +180,12 @@ final class MonitorOverlayController: NSObject {
         if let host = hosts[screenID] {
             host.agentFleetEnabled = agentFleetEnabled
             host.config = gated
+            host.level = overlay.level
             host.window.applyFrame(screenFrame)
             host.window.apply(level: overlay.level)
             host.board.apply(configuration: gated, topInsetFraction: topInsetFraction)
             updateInteractive(host)
-            refreshLease()
+            reconcileVisibilityAndRuntime()
             return
         }
 
@@ -92,29 +200,37 @@ final class MonitorOverlayController: NSObject {
         )
         board.autoresizingMask = [.width, .height]
         board.resetHistory()
+        // Every new host starts parked. The serialized runtime reconciliation
+        // unsuspends and primes it only after a current visible decision has an
+        // active lease, so an initially occluded host never receives one frame.
+        board.setSuspended(true)
         window.contentView = board
 
-        let host = Host(window: window, board: board, config: gated, agentFleetEnabled: agentFleetEnabled)
+        let host = Host(
+            window: window,
+            board: board,
+            config: gated,
+            agentFleetEnabled: agentFleetEnabled,
+            level: overlay.level
+        )
         hosts[screenID] = host
 
         board.onConfigurationEdited = { [weak self, weak host] edited in
             guard let self, let host else { return }
             let regated = MonitorWallpaperView.gatedConfiguration(edited, agentFleetEnabled: host.agentFleetEnabled)
             host.config = regated
-            self.onOverlayEdited?(screenID, edited)
+            onOverlayEdited?(screenID, edited)
             // A widget add/remove changes the placed-kind set → repoint sampling.
-            self.refreshLease()
+            reconcileVisibilityAndRuntime()
         }
         board.onEditingChanged = { [weak self, weak host] _ in
             guard let self, let host else { return }
-            self.updateInteractive(host)
+            updateInteractive(host)
         }
 
         updateInteractive(host)
+        reconcileVisibilityAndRuntime()
         window.orderFrontRegardless()
-
-        refreshLease()
-        primeHost(host)
     }
 
     /// Tear down the overlay for one display (display unplugged / overlay disabled).
@@ -124,7 +240,7 @@ final class MonitorOverlayController: NSObject {
         host.board.onConfigurationEdited = nil
         host.board.onEditingChanged = nil
         host.window.orderOut(nil)
-        refreshLease()
+        reconcileVisibilityAndRuntime()
     }
 
     /// Tear down overlays for any display not in `liveScreenIDs` (display set
@@ -138,7 +254,23 @@ final class MonitorOverlayController: NSObject {
     }
 
     func teardownAll() {
-        for id in Array(hosts.keys) { teardown(screenID: id) }
+        for id in Array(hosts.keys) {
+            teardown(screenID: id)
+        }
+    }
+
+    /// Re-evaluate retained hosts from ScreenManager's current lifecycle and
+    /// detector snapshot. The detector has already applied its 85% union-area
+    /// threshold; this layer only maps that binary result through z-plane policy.
+    func updateVisibility(
+        isUserAbsent: Bool,
+        occludedScreenIDs: Set<CGDirectDisplayID>
+    ) {
+        guard self.isUserAbsent != isUserAbsent
+            || self.occludedScreenIDs != occludedScreenIDs else { return }
+        self.isUserAbsent = isUserAbsent
+        self.occludedScreenIDs = occludedScreenIDs
+        reconcileVisibilityAndRuntime()
     }
 
     // MARK: - Editing
@@ -147,12 +279,23 @@ final class MonitorOverlayController: NSObject {
     /// board's own Done control exits too; both funnel through `onEditingChanged`,
     /// which restores click-through.
     func setEditing(_ editing: Bool) {
-        for host in hosts.values { host.board.setEditing(editing) }
+        for host in hosts.values {
+            host.board.setEditing(editing)
+        }
     }
 
-    var isEditing: Bool { hosts.values.contains { $0.board.isEditing } }
+    var isEditing: Bool {
+        hosts.values.contains { $0.board.isEditing }
+    }
 
-    var hasActiveOverlay: Bool { !hosts.isEmpty }
+    var hasActiveOverlay: Bool {
+        !hosts.isEmpty
+    }
+
+    func waitUntilRuntimeSettled() async {
+        let task = runtimeReconciliationTask
+        await task?.value
+    }
 
     private func updateInteractive(_ host: Host) {
         // Click-through unless the board is being edited or the user opted the
@@ -164,29 +307,42 @@ final class MonitorOverlayController: NSObject {
 
     // MARK: - Runtime lease + pump
 
-    private func refreshLease() {
-        if hosts.isEmpty {
+    private func reconcileVisibilityAndRuntime() {
+        let inputs = hosts.map { screenID, host in
+            MonitorOverlayVisibilityInput(
+                screenID: screenID,
+                level: host.level,
+                isDesktopOccluded: occludedScreenIDs.contains(screenID)
+            )
+        }
+        let decision = MonitorOverlayVisibilityPolicy.resolve(
+            hosts: inputs,
+            isUserAbsent: isUserAbsent
+        )
+        visibilityDecision = decision
+
+        // Suspension is applied immediately on the MainActor so an occluded or
+        // absent board cannot animate or receive another pump tick while the
+        // actor-side lease transition is awaiting its turn.
+        for (screenID, host) in hosts {
+            host.isVisible = decision.visibleHostIDs.contains(screenID)
+            if !host.isVisible {
+                host.isDeliveringSnapshots = false
+                host.board.setSuspended(true)
+            }
+        }
+        if !decision.pumpShouldRun {
             stopPump()
-            releaseRuntime()
-            return
         }
-        let options = makeOptions()
-        if owesRuntimeRelease {
-            let leaseID = runtimeLeaseID
-            Task { await MonitorRuntime.shared.updateOptions(leaseID: leaseID, options: options) }
-        } else {
-            owesRuntimeRelease = true
-            let leaseID = runtimeLeaseID
-            Task { await MonitorRuntime.shared.acquire(leaseID: leaseID, options: options) }
-            startPump()
-        }
+
+        scheduleRuntimeReconciliation()
     }
 
-    private func makeOptions() -> MonitorRuntimeOptions {
+    private func makeOptions(visibleHostIDs: Set<CGDirectDisplayID>) -> MonitorRuntimeOptions {
         var kinds: Set<MonitorWidgetKind> = []
         var anyAgentFleet = false
         var gpuSeconds: Double?
-        for host in hosts.values {
+        for (screenID, host) in hosts where visibleHostIDs.contains(screenID) {
             kinds.formUnion(host.config.widgets.map(\.kind))
             anyAgentFleet = anyAgentFleet || host.agentFleetEnabled
             if let s = MonitorWidgetDraft.gpuSampleSeconds(in: host.config.widgets) {
@@ -194,7 +350,7 @@ final class MonitorOverlayController: NSObject {
             }
         }
         return MonitorRuntimeOptions(
-            system: true,
+            system: MonitorWallpaperView.requiresSystemMetrics(for: kinds),
             agents: anyAgentFleet && kinds.contains(.fleet),
             usage: anyAgentFleet && kinds.contains(.usage),
             topProcesses: kinds.contains(.processes),
@@ -203,15 +359,111 @@ final class MonitorOverlayController: NSObject {
         )
     }
 
-    private func releaseRuntime() {
-        guard owesRuntimeRelease else { return }
-        owesRuntimeRelease = false
-        let leaseID = runtimeLeaseID
-        Task { await MonitorRuntime.shared.release(leaseID: leaseID) }
+    private func scheduleRuntimeReconciliation() {
+        runtimeReconciliationRevision &+= 1
+        guard runtimeReconciliationTask == nil else { return }
+        runtimeReconciliationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await runRuntimeReconciliationLoop()
+        }
+    }
+
+    /// The only path that mutates this controller's MonitorRuntime lease. Every
+    /// desired-state change bumps a revision; changes that arrive during an await
+    /// are folded into the next loop iteration rather than launched as competing
+    /// acquire/update/pause/release tasks.
+    private func runRuntimeReconciliationLoop() async {
+        while true {
+            let revision = runtimeReconciliationRevision
+            let desiredState = desiredRuntimeState()
+            await applyRuntimeState(desiredState)
+
+            guard revision == runtimeReconciliationRevision else { continue }
+            applyDeliveryState()
+            runtimeReconciliationTask = nil
+            return
+        }
+    }
+
+    private func desiredRuntimeState() -> DesiredRuntimeState {
+        switch visibilityDecision.runtimeDisposition {
+        case .released:
+            .released
+        case .paused:
+            .paused
+        case .active:
+            .active(makeOptions(visibleHostIDs: visibilityDecision.visibleHostIDs))
+        }
+    }
+
+    private func applyRuntimeState(_ desiredState: DesiredRuntimeState) async {
+        switch desiredState {
+        case .released:
+            guard let lease = appliedRuntimeState.lease else { return }
+            await lease.release().value
+            appliedRuntimeState = AppliedRuntimeState()
+
+        case .paused:
+            // Initial hidden-only overlays stay parked without starting sources.
+            // The lease slot remains available for a later visible generation.
+            guard let lease = appliedRuntimeState.lease,
+                  !appliedRuntimeState.isPaused else { return }
+            await lease.setPaused(true).value
+            appliedRuntimeState.isPaused = true
+
+        case let .active(options):
+            if appliedRuntimeState.lease == nil {
+                let lease = runtimeLeaseSlot.acquire(options: options)
+                await lease.waitUntilSettled()
+                appliedRuntimeState.lease = lease
+                appliedRuntimeState.isPaused = false
+                appliedRuntimeState.options = options
+                return
+            }
+
+            guard let lease = appliedRuntimeState.lease else { return }
+
+            // A paused lease keeps its old options. Refresh the visible-host
+            // union first so resuming cannot briefly restart hidden-only sources.
+            if appliedRuntimeState.options != options {
+                await lease.updateOptions(options).value
+                appliedRuntimeState.options = options
+            }
+            if appliedRuntimeState.isPaused {
+                await lease.setPaused(false).value
+                appliedRuntimeState.isPaused = false
+            }
+        }
+    }
+
+    /// Delivery is enabled only after the matching runtime state has applied.
+    /// Hidden boards were already suspended synchronously before any actor await.
+    private func applyDeliveryState() {
+        var newlyVisibleHosts: [Host] = []
+        for host in hosts.values {
+            let shouldDeliver = host.isVisible
+            if shouldDeliver, !host.isDeliveringSnapshots {
+                host.isDeliveringSnapshots = true
+                host.board.setSuspended(false)
+                newlyVisibleHosts.append(host)
+            } else if !shouldDeliver {
+                host.isDeliveringSnapshots = false
+                host.board.setSuspended(true)
+            }
+        }
+
+        if hosts.values.contains(where: \.isDeliveringSnapshots) {
+            startPump()
+        } else {
+            stopPump()
+        }
+        for host in newlyVisibleHosts {
+            primeHost(host)
+        }
     }
 
     private func startPump() {
-        pumpTask?.cancel()
+        guard pumpTask == nil else { return }
         pumpTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 do {
@@ -219,8 +471,10 @@ final class MonitorOverlayController: NSObject {
                 } catch {
                     return
                 }
-                guard let self, !Task.isCancelled, !self.hosts.isEmpty else { return }
-                self.pushLatest(force: false)
+                guard let self,
+                      !Task.isCancelled,
+                      hosts.values.contains(where: \.isDeliveringSnapshots) else { return }
+                pushLatest(force: false)
             }
         }
     }
@@ -233,15 +487,18 @@ final class MonitorOverlayController: NSObject {
     /// Push the current newest snapshot into a freshly-added host so it paints
     /// immediately instead of waiting for the next generation bump.
     private func primeHost(_ host: Host) {
-        guard let update = MonitorRuntime.shared.broker.latest(after: 0) else { return }
+        guard host.isVisible, host.isDeliveringSnapshots else { return }
+        guard let update = runtime.broker.latest(after: 0) else { return }
         host.board.push(update.snapshot)
     }
 
     private func pushLatest(force: Bool) {
-        let broker = MonitorRuntime.shared.broker
+        let broker = runtime.broker
         let after = force ? 0 : lastGeneration
         guard let update = broker.latest(after: after) else { return }
         lastGeneration = update.generation
-        for host in hosts.values { host.board.push(update.snapshot) }
+        for host in hosts.values where host.isVisible && host.isDeliveringSnapshots {
+            host.board.push(update.snapshot)
+        }
     }
 }

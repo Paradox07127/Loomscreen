@@ -2,8 +2,8 @@
 import SwiftUI
 import AppKit
 
-/// Renders ONLY in the Loomscreen Lite build — Pro hides this section entirely
-/// because its update path will be Sparkle, not GitHub Releases.
+/// Renders only in the Loomscreen Lite build. Update delivery remains a manual
+/// download from GitHub Releases; this view does not install updates.
 struct UpdateBannerView: View {
     @State private var checker = UpdateChecker.shared
     @State private var showingAvailableAlert = false

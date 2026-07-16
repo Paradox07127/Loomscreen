@@ -13,7 +13,7 @@ tokens live in `DesignTokens` (this package, re-exported app-wide). New views
 
 ## Typography — `DesignTokens.Typography`
 
-24 ad-hoc sizes collapse into 7 roles (+2 emphasized variants). Dynamic-Type
+24 ad-hoc sizes collapse into 7 roles (+3 emphasized variants). Dynamic-Type
 styles auto-scale with accessibility; `badge` is the only fixed size.
 
 | Token | Font | ≈pt | Use | Absorbs |
@@ -27,6 +27,7 @@ styles auto-scale with accessibility; `badge` is the only fixed size.
 | `pageTitle` | `.title2` | 17 | page / nav / sheet titles | 17, 18, 20, 22 |
 | `hero` | `.largeTitle` | 26 | empty-state / onboarding | 24–56 |
 | `metric` | `.caption.monospacedDigit()` | 10 | inline numeric readouts: slider %, fps, gauges | numeric readouts |
+| `metricEmphasized` | `.callout.monospaced.semibold.monospacedDigit()` | 12 | compact headline metrics in menu/status chrome | 12 (semibold monospaced) |
 | `code` | `.body.monospaced` | 13 | paths, commands, IDs, technical text | monospaced text |
 | `codeCaption` | `.caption.monospaced` | 10 | dense technical text: log lines, paths, IDs | caption-sized monospaced |
 

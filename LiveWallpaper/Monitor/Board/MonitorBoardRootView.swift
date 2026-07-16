@@ -40,6 +40,7 @@ struct MonitorBoardRootView: View {
     @ObservedObject private var history: MonitorHistoryStore
     @Environment(\.monitorReduceMotion) private var reduceMotion
     @Environment(\.monitorSuspended) private var suspended
+    @FocusState private var boardFocused: Bool
 
     /// The Add Widget button's board-space frame, reported by the toolbar so the
     /// catalog anchors beneath it. `.zero` until the toolbar first lays out.
@@ -67,6 +68,16 @@ struct MonitorBoardRootView: View {
             boardContent(now: timeline.date)
         }
         .background(Color.clear)
+        .focusable(model.isEditing)
+        .focused($boardFocused)
+        .onMoveCommand(perform: handleMoveCommand)
+        .onDeleteCommand {
+            model.deleteSelectedWidget()
+        }
+        .onAppear { boardFocused = model.isEditing }
+        .onChange(of: model.isEditing) { _, editing in
+            boardFocused = editing
+        }
     }
 
     @ViewBuilder
@@ -173,6 +184,25 @@ struct MonitorBoardRootView: View {
                 geometry: geometry,
                 restRawRect: restRawRect
             ))
+            .modifier(MonitorPlacementAccessibilityActions(
+                model: model,
+                placementID: placement.id
+            ))
+    }
+
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .left:
+            model.moveSelectedWidget(.left)
+        case .right:
+            model.moveSelectedWidget(.right)
+        case .up:
+            model.moveSelectedWidget(.up)
+        case .down:
+            model.moveSelectedWidget(.down)
+        @unknown default:
+            break
+        }
     }
 
     /// The tile's inner content: the live instrument, or — in name-only preview

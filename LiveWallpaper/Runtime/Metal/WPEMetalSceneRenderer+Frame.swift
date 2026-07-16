@@ -3,68 +3,6 @@ import AppKit
 import MetalKit
 
 extension WPEMetalSceneRenderer {
-    // MARK: - Script tick dispatch (ADR-003 step 1)
-
-    private func tickLayerScript(
-        _ instance: WPELayerScriptInstance,
-        runtimeSeconds: Double,
-        pointerFrame: WPEPointerFrame
-    ) -> WPELayerScriptOutput? {
-        Self.scriptAsyncTickEnabled
-            ? instance.liveTick(runtimeSeconds: runtimeSeconds, pointerFrame: pointerFrame)
-            : instance.tick(runtimeSeconds: runtimeSeconds, pointerFrame: pointerFrame)
-    }
-
-    private func tickTransformScript(
-        _ instance: WPEDynamicTransformScriptInstance,
-        pointer: SIMD2<Double>,
-        runtimeSeconds: Double
-    ) -> SIMD3<Double>? {
-        Self.scriptAsyncTickEnabled
-            ? instance.liveTick(pointerPosition: pointer, runtimeSeconds: runtimeSeconds)
-            : instance.tick(pointerPosition: pointer, runtimeSeconds: runtimeSeconds)
-    }
-
-    private func tickTextScript(_ instance: WPESceneScriptInstance) -> String {
-        Self.scriptAsyncTickEnabled ? instance.liveTickString() : instance.tickString()
-    }
-
-    /// Cursor events fire inside the frame path, so async mode enqueues them
-    /// fire-and-forget (the output drains through the next frame's tick) and
-    /// returns nil; legacy mode returns the output for immediate application.
-    func dispatchScriptCursorEvent(
-        _ instance: WPELayerScriptInstance,
-        event: WPELayerScriptCursorEvent,
-        pointerFrame: WPEPointerFrame,
-        runtimeSeconds: Double
-    ) -> WPELayerScriptOutput? {
-        guard Self.scriptAsyncTickEnabled else {
-            return instance.dispatchCursorEvent(
-                event,
-                pointerFrame: pointerFrame,
-                runtimeSeconds: runtimeSeconds
-            )
-        }
-        instance.liveDispatchCursorEvent(
-            event,
-            pointerFrame: pointerFrame,
-            runtimeSeconds: runtimeSeconds
-        )
-        return nil
-    }
-
-    /// Load/settings property pushes stay bounded-synchronous in both modes; the
-    /// superseding variant additionally folds the result through the async slot.
-    func applyScriptUserProperties(
-        _ instance: WPELayerScriptInstance,
-        _ properties: [String: WPESceneScriptPropertyValue],
-        runtimeSeconds: Double? = nil
-    ) -> WPELayerScriptOutput? {
-        Self.scriptAsyncTickEnabled
-            ? instance.applyUserPropertiesSuperseding(properties, runtimeSeconds: runtimeSeconds)
-            : instance.applyUserProperties(properties, runtimeSeconds: runtimeSeconds)
-    }
-
     // MARK: - Frame rendering
 
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
@@ -74,23 +12,57 @@ extension WPEMetalSceneRenderer {
         }
         let frameContext = sampleFrameContext()
         let uniforms = frameContext.uniforms
+        let scriptTraversalEpoch = WPESceneScriptTraversalEpoch.next(
+            domainID: sceneScriptTraversalDomainID
+        )
+        let scriptFailureBeforeFrame = sceneScriptLoadState.currentFailureReason
+        let publicationBeforeFrame = captureSceneScriptFramePublication()
+        beginSceneScriptVideoCommands()
+        var didFinishSceneScriptVideoCommands = false
+        defer {
+            if !didFinishSceneScriptVideoCommands {
+                discardSceneScriptVideoCommands()
+            }
+            WPESceneScriptExecutionGovernor.processShared.completeTraversal(
+                scriptTraversalEpoch
+            )
+            // Static/on-demand renderers may have no next traversal in which to
+            // renew or retire a reservation. Do not leave their domain queued.
+            if !needsContinuousFrames || currentProfile != .quality {
+                WPESceneScriptExecutionGovernor.processShared.cancelReservations(
+                    domainID: sceneScriptTraversalDomainID
+                )
+            }
+        }
         var framePipeline = applyingLayerScriptTicks(
             to: pipeline,
             uniforms: uniforms,
-            layerScriptPointerFrame: frameContext.layerScriptPointerFrame
+            layerScriptPointerFrame: frameContext.layerScriptPointerFrame,
+            traversalEpoch: scriptTraversalEpoch
         )
         // Kept around past the pipeline application so the text-overlay pass can
         // re-compose text anchors through the SAME live parent transforms.
-        var liveTransforms = LiveScriptTransforms()
+        let authoredTransforms = authoredTransformAnimations(at: uniforms.time)
+        var liveScriptTransforms = lastStableScriptTransforms
         if let ticked = tickDynamicTransformScripts(
             pointer: frameContext.pointer,
-            time: uniforms.time
+            time: uniforms.time,
+            traversalEpoch: scriptTraversalEpoch
         ) {
-            liveTransforms = ticked
+            if scriptFailureBeforeFrame == nil,
+               sceneScriptLoadState.currentFailureReason == nil {
+                liveScriptTransforms = ticked
+            }
+        }
+        var liveTransforms = LiveScriptTransforms.resolving(
+            authored: authoredTransforms,
+            script: liveScriptTransforms
+        )
+        if !liveTransforms.isEmpty {
             framePipeline = framePipeline.applyingLayerTransforms(
-                origins: ticked.origins,
-                scales: ticked.scales,
-                angles: ticked.angles,
+                origins: liveTransforms.origins,
+                scales: liveTransforms.scales,
+                angles: liveTransforms.angles,
                 parentByID: objectParentByID,
                 hostTransforms: transformHostLocalTransformsByID
             )
@@ -104,10 +76,48 @@ extension WPEMetalSceneRenderer {
             pointerFrame: frameContext.layerScriptPointerFrame,
             runtimeSeconds: uniforms.time
         )
-        if !liveCreatedLayers.isEmpty {
-            framePipeline = framePipeline.addingCreatedLayers(
-                liveCreatedLayers,
-                templatesByImagePath: createdLayerTemplatesByImagePath
+        let tickedTextByID = tickTextContentScripts(
+            traversalEpoch: scriptTraversalEpoch
+        )
+        let liveTextByID: [String: String]
+        if scriptFailureBeforeFrame == nil,
+           let failure = sceneScriptLoadState.currentFailureReason {
+            invalidateIntroPhaseAlign()
+            restoreSceneScriptPresentation(publicationBeforeFrame.presentation)
+            liveScriptTransforms = lastStableScriptTransforms
+            liveTransforms = .resolving(
+                authored: authoredTransforms,
+                script: liveScriptTransforms
+            )
+            liveTextByID = lastStableScriptTextByID
+            framePipeline = applyingSceneScriptPresentation(
+                to: pipeline,
+                transforms: liveTransforms
+            )
+            Logger.warning(
+                "Scene \(descriptor.workshopID) froze its last stable SceneScript presentation: \(failure)",
+                category: .wpeRender
+            )
+        } else if sceneScriptLoadState.currentFailureReason == nil {
+            lastStableScriptTransforms = liveScriptTransforms
+            lastStableScriptTextByID = tickedTextByID
+            liveTextByID = tickedTextByID
+            if !liveCreatedLayers.isEmpty {
+                framePipeline = framePipeline.addingCreatedLayers(
+                    liveCreatedLayers,
+                    templatesByImagePath: createdLayerTemplatesByImagePath
+                )
+            }
+        } else {
+            liveScriptTransforms = lastStableScriptTransforms
+            liveTransforms = .resolving(
+                authored: authoredTransforms,
+                script: liveScriptTransforms
+            )
+            liveTextByID = lastStableScriptTextByID
+            framePipeline = applyingSceneScriptPresentation(
+                to: pipeline,
+                transforms: liveTransforms
             )
         }
         lastFramePipeline = framePipeline
@@ -122,9 +132,35 @@ extension WPEMetalSceneRenderer {
             pointer: frameContext.pointer,
             liveTransforms: liveTransforms
         )
-        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: framePipeline)
-        let frame = try executor.render(
+        let frame = try encodeSceneFrame(
             pipeline: framePipeline,
+            uniforms: uniforms,
+            liveTextByID: liveTextByID,
+            transforms: liveTransforms,
+            parallaxFrame: frameContext.parallaxFrame
+        )
+        didFinishSceneScriptVideoCommands = true
+        return try finishSceneScriptFrame(
+            speculativeFrame: frame,
+            failureBeforeFrame: scriptFailureBeforeFrame,
+            publicationBeforeFrame: publicationBeforeFrame,
+            basePipeline: pipeline,
+            uniforms: uniforms,
+            authoredTransforms: authoredTransforms,
+            parallaxFrame: frameContext.parallaxFrame
+        )
+    }
+
+    func encodeSceneFrame(
+        pipeline: WPEPreparedRenderPipeline,
+        uniforms: WPEMetalRuntimeUniforms,
+        liveTextByID: [String: String],
+        transforms: LiveScriptTransforms,
+        parallaxFrame: WPECameraParallaxFrame
+    ) throws -> MTLTexture {
+        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: pipeline)
+        let frame = try executor.render(
+            pipeline: pipeline,
             size: sceneRenderSize,
             textures: currentTextures,
             dynamicTextureNames: dynamicTextureNames,
@@ -135,20 +171,22 @@ extension WPEMetalSceneRenderer {
             particleSystems: particleSystems,
             particleTextures: particleTextures,
             particleNormalTextures: particleNormalTextures,
-            particleParallax: frameContext.parallaxFrame
+            particleParallax: parallaxFrame
         )
-        let liveTextByID = tickTextContentScripts()
         try drawLiveTextOverlays(
             onto: frame,
             uniforms: uniforms,
             liveTextByID: liveTextByID,
-            transforms: liveTransforms,
-            parallaxFrame: frameContext.parallaxFrame
+            transforms: transforms,
+            parallaxFrame: parallaxFrame
         )
-        #if DEBUG
-        maybeDumpScenePassesOverTime(time: uniforms.time, composite: frame)
-        #endif
         return frame
+    }
+
+    func recordSceneFrameForDebug(time: Double, composite: MTLTexture) {
+        #if DEBUG
+        maybeDumpScenePassesOverTime(time: time, composite: composite)
+        #endif
     }
 
     /// Per-frame inputs shared by the script/particle/encode stages, computed
@@ -271,7 +309,8 @@ extension WPEMetalSceneRenderer {
     private func applyingLayerScriptTicks(
         to pipeline: WPEPreparedRenderPipeline,
         uniforms: WPEMetalRuntimeUniforms,
-        layerScriptPointerFrame: WPEPointerFrame
+        layerScriptPointerFrame: WPEPointerFrame,
+        traversalEpoch: WPESceneScriptTraversalEpoch
     ) -> WPEPreparedRenderPipeline {
         guard !layerScriptInstances.isEmpty || !layerAlphaScriptInstances.isEmpty
             || !textVisibleScriptInstances.isEmpty || !textAlphaScriptInstances.isEmpty else {
@@ -287,26 +326,46 @@ extension WPEMetalSceneRenderer {
         // stable tick order keeps the frame deterministic (oracle) and behaviour
         // reproducible (dictionary order was arbitrary).
         for (objectID, instance) in layerScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+            if let output = tickLayerScript(
+                instance,
+                runtimeSeconds: uniforms.time,
+                pointerFrame: layerScriptPointerFrame,
+                traversalEpoch: traversalEpoch
+            ) {
                 applyLayerScriptOutput(output, ownObjectID: objectID)
             }
         }
         for (objectID, instance) in layerAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+            if let output = tickLayerScript(
+                instance,
+                runtimeSeconds: uniforms.time,
+                pointerFrame: layerScriptPointerFrame,
+                traversalEpoch: traversalEpoch
+            ) {
                 applyLayerAlphaScriptOutput(output, ownObjectID: objectID)
             }
         }
         for (objectID, instance) in textVisibleScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+            if let output = tickLayerScript(
+                instance,
+                runtimeSeconds: uniforms.time,
+                pointerFrame: layerScriptPointerFrame,
+                traversalEpoch: traversalEpoch
+            ) {
                 applyTextScriptOutput(output, ownObjectID: objectID)
             }
         }
         for (objectID, instance) in textAlphaScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let output = tickLayerScript(instance, runtimeSeconds: uniforms.time, pointerFrame: layerScriptPointerFrame) {
+            if let output = tickLayerScript(
+                instance,
+                runtimeSeconds: uniforms.time,
+                pointerFrame: layerScriptPointerFrame,
+                traversalEpoch: traversalEpoch
+            ) {
                 liveTextAlpha[objectID] = output.own.alpha
             }
         }
-        updateIntroPhaseAlign()
+        stageIntroPhaseAlign()
         return pipeline
             .applyingLayerVisibility(liveLayerVisibility)
             .applyingLayerAlpha(liveLayerAlpha)
@@ -322,38 +381,45 @@ extension WPEMetalSceneRenderer {
     /// (the pipeline keeps its parse-time transforms).
     private func tickDynamicTransformScripts(
         pointer: SIMD2<Double>,
-        time: Double
+        time: Double,
+        traversalEpoch: WPESceneScriptTraversalEpoch
     ) -> LiveScriptTransforms? {
         guard !dynamicOriginScriptInstances.isEmpty
             || !dynamicScaleScriptInstances.isEmpty
-            || !dynamicAnglesScriptInstances.isEmpty
-            || !dynamicOriginAnimations.isEmpty else { return nil }
+            || !dynamicAnglesScriptInstances.isEmpty else { return nil }
         var transforms = LiveScriptTransforms()
-        transforms.origins.reserveCapacity(
-            dynamicOriginScriptInstances.count + dynamicOriginAnimations.count
-        )
-        // Keyframed origins first so an origin SCRIPT on the same object still
-        // wins (scripts are the live authority; the track is the authored path).
-        for (objectID, animation) in dynamicOriginAnimations.sorted(by: { $0.key < $1.key }) {
-            guard let v = animation.vector(at: time), v.count >= 3 else { continue }
-            transforms.origins[objectID] = SIMD3<Double>(v[0], v[1], v[2])
-        }
+        transforms.origins.reserveCapacity(dynamicOriginScriptInstances.count)
         // Sorted by objectID for the same shared-state-determinism reason as the
         // layer/text script loops above.
         for (objectID, instance) in dynamicOriginScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let origin = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+            if let origin = tickTransformScript(
+                instance,
+                pointer: pointer,
+                runtimeSeconds: time,
+                traversalEpoch: traversalEpoch
+            ) {
                 transforms.origins[objectID] = origin
             }
         }
         transforms.scales.reserveCapacity(dynamicScaleScriptInstances.count)
         for (objectID, instance) in dynamicScaleScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let scale = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+            if let scale = tickTransformScript(
+                instance,
+                pointer: pointer,
+                runtimeSeconds: time,
+                traversalEpoch: traversalEpoch
+            ) {
                 transforms.scales[objectID] = scale
             }
         }
         transforms.angles.reserveCapacity(dynamicAnglesScriptInstances.count)
         for (objectID, instance) in dynamicAnglesScriptInstances.sorted(by: { $0.key < $1.key }) {
-            if let angle = tickTransformScript(instance, pointer: pointer, runtimeSeconds: time) {
+            if let angle = tickTransformScript(
+                instance,
+                pointer: pointer,
+                runtimeSeconds: time,
+                traversalEpoch: traversalEpoch
+            ) {
                 // WPE's script API exposes `angles` in degrees; scene.json and the
                 // rotation math are radians (corpus-verified: all 353 nonzero static
                 // angles ≤ 2π). Convert only at this boundary — the instance's
@@ -385,25 +451,12 @@ extension WPEMetalSceneRenderer {
                 Float((0.5 - pointer.y) * sceneRenderSize.height)
             )
             : nil
+        updateParticleHostOriginOffsets(using: liveTransforms)
         // Parents precede their children in `particleSystems` (DFS
         // registration order), so a parent's `primaryLiveParticlePosition`
         // is already this-frame-fresh when its event-follow child ticks.
         for system in particleSystems {
             system.pointerCentered = particlePointer
-            // A keyframed ancestor `origin` moves this emitter. The authored seed
-            // is already baked into the system's transform, so only the live
-            // DELTA is applied; Y flips into the render frame's Y-up space.
-            system.hostOriginOffset = .zero
-            if !system.hostAncestorIDs.isEmpty, !liveTransforms.origins.isEmpty {
-                for id in system.hostAncestorIDs {
-                    guard let now = liveTransforms.origins[id],
-                          let seed = transformHostLocalTransformsByID[id]?.origin else { continue }
-                    system.hostOriginOffset += SIMD2<Float>(
-                        Float(now.x - seed.x),
-                        Float(seed.y - now.y)
-                    )
-                }
-            }
             if let parent = system.followParent {
                 if let followPosition = parent.primaryLiveParticlePosition {
                     system.injectedControlPoints[system.followControlPointID] = followPosition
@@ -427,7 +480,9 @@ extension WPEMetalSceneRenderer {
     /// shared.txtN`. Ticking only visible objects left that shared state unset,
     /// so every derived readout rendered blank. Tick every script here (for its
     /// side effects on `shared`), independent of whether it will be drawn.
-    private func tickTextContentScripts() -> [String: String] {
+    private func tickTextContentScripts(
+        traversalEpoch: WPESceneScriptTraversalEpoch
+    ) -> [String: String] {
         var liveTextByID: [String: String] = [:]
         liveTextByID.reserveCapacity(textScriptInstances.count)
         // Sorted by objectID: hidden compute-scripts write `shared` state that the
@@ -435,7 +490,10 @@ extension WPEMetalSceneRenderer {
         // rendered text. Dictionary order was arbitrary — a fixed order makes the
         // oracle trace deterministic and the render reproducible.
         for (id, instance) in textScriptInstances.sorted(by: { $0.key < $1.key }) {
-            liveTextByID[id] = tickTextScript(instance)
+            liveTextByID[id] = tickTextScript(
+                instance,
+                traversalEpoch: traversalEpoch
+            )
         }
         return liveTextByID
     }

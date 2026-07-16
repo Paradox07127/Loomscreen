@@ -43,18 +43,24 @@ struct AppStartupPlan: Equatable {
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
             startAutomation: runtimeOptions.shouldStartAutomation,
+            memoryPressureWatcher: SystemMemoryPressureWatcher.shared,
             featureCatalog: FeatureCatalog(capabilities: .lite),
             originReconciler: PreservingOriginReconciler()
         )
         #else
-        // `.workshopOnline` is layered on here rather than baked into
-        // `ProductCapabilities.pro` because Xcode does not propagate
-        // `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target into local
-        // SwiftPM packages, so the package cannot tell which SKU it is in.
-        let proCapabilities = ProductCapabilities.pro.withWorkshopOnline()
+        // Build-target-only capabilities are layered on here rather than baked
+        // into the shipping Pro catalog because Xcode does not propagate app
+        // compilation conditions into local SwiftPM packages.
+        let shippingProCapabilities = ProductCapabilities.pro.withWorkshopOnline()
+        #if DEBUG
+        let proCapabilities = shippingProCapabilities.withLocalDeveloperTools()
+        #else
+        let proCapabilities = shippingProCapabilities
+        #endif
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
             startAutomation: runtimeOptions.shouldStartAutomation,
+            memoryPressureWatcher: SystemMemoryPressureWatcher.shared,
             featureCatalog: FeatureCatalog(capabilities: proCapabilities)
         )
         #endif
@@ -82,11 +88,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @ObservationIgnored private let runtimeOptions = AppRuntimeOptions()
     @ObservationIgnored private var settingsWindowController: NSWindowController?
+    @ObservationIgnored private var settingsOwnsSystemMonitorLease = false
     @ObservationIgnored private var onboardingWindowController: NSWindowController?
     /// See `WeatherReactiveService.preferenceObserver` — same pattern.
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var showOnboardingObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
+    @ObservationIgnored private let lifecycle = ApplicationLifecycleController()
     #if !LITE_BUILD
     /// Pro only: lives for the lifetime of the app so the
     /// Doctor's probe state survives Settings-window close / re-open and the
@@ -97,12 +105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in-flight coalescing + token bucket survive Settings-window cycles.
     @ObservationIgnored private let workshopServices = WorkshopServices()
     #endif
-    /// True between the first `.terminateLater` reply and the matching
-    /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
-    /// attempts skip the flush so we don't enqueue duplicate writes that
-    /// could outlive the app.
-    @ObservationIgnored private var isWaitingForTerminationFlush = false
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
         if let hint = LogFileSink.shared.tailCommandHint {
@@ -122,6 +124,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runtimeOptions: runtimeOptions,
             onboardingCompleted: UserDefaults.standard.bool(forKey: "Onboarding.Completed")
         )
+
+        #if !LITE_BUILD
+        if !runtimeOptions.isTesting {
+            lifecycle.schedule { [weak self] in
+                guard let self, self.lifecycle.allowsWork else { return }
+                // ScreenManager.refreshScreens() restores WPE sessions from its
+                // initializer. Select the authoritative managed-assets slot first;
+                // otherwise WPEEngineAssetsLibrary can observe a crash-cut tree.
+                await WPEEngineAssetsStartupRecovery.shared.prepareForFirstRead()
+                guard self.lifecycle.allowsWork else { return }
+                self.completeApplicationStartup(startupPlan)
+            }
+            return
+        }
+        #endif
+        completeApplicationStartup(startupPlan)
+    }
+
+    private func completeApplicationStartup(_ startupPlan: AppStartupPlan) {
+        guard lifecycle.allowsWork, screenManager == nil else { return }
         let manager = ScreenManager(startupOptions: startupPlan.screenManagerOptions)
         screenManager = manager
 
@@ -134,9 +156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if startupPlan.screenManagerOptions.restoreSavedWallpapers {
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(1))
-                manager.pruneInvalidConfigurationsIfNeeded()
+            lifecycle.schedule(after: .seconds(1)) { [weak manager] in
+                manager?.pruneInvalidConfigurationsIfNeeded()
             }
         }
 
@@ -147,8 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // texture buckets against the *post-GC* cache contents (so a just-
         // removed orphan's videos go too).
         if !runtimeOptions.isTesting, manager.featureCatalog.isEnabled(.wpeImport) {
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
+            lifecycle.schedule(after: .seconds(2)) {
                 let keepIDs = WPESceneReachability.referencedWorkshopIDs()
                 let cache = WallpaperEngineCache.shared
                 await cache.collectOrphans(keepIDs: keepIDs)
@@ -188,12 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if startupPlan.showSettingsOnLaunch {
             Logger.info("Scheduling settings window on launch", category: .startup)
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(150))
+            lifecycle.schedule(after: .milliseconds(150)) { [weak self] in
                 self?.showSettings()
             }
         } else if startupPlan.showOnboarding {
-            DispatchQueue.main.async { [weak self] in
+            lifecycle.schedule { [weak self] in
                 self?.showOnboarding()
             }
         } else {
@@ -219,8 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !runtimeOptions.isTesting,
            workshopDoctorService.binaryBookmarkData != nil,
            workshopDoctorService.workdirBookmarkData != nil {
-            Task { @MainActor [workshopDoctorService] in
-                try? await Task.sleep(for: .seconds(3))
+            lifecycle.schedule(after: .seconds(3)) { [workshopDoctorService] in
                 await workshopDoctorService.runAll()
             }
         }
@@ -233,8 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first-run onboarding so a brand-new user doesn't get a network
         // prompt before they see their first wallpaper.
         if !startupPlan.showOnboarding && !runtimeOptions.isTesting {
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(5))
+            lifecycle.schedule(after: .seconds(5)) {
                 await UpdateChecker.shared.checkNow(force: false)
             }
         }
@@ -253,33 +270,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Dock Visibility
 
     private func applyDockVisibility() {
+        guard lifecycle.allowsWork else { return }
         let showInDock = SettingsManager.shared.loadGlobalSettings().showInDock
         let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
         NSApp.setActivationPolicy(policy)
     }
 
     private func observeDockVisibilityChanges() {
+        guard lifecycle.allowsWork else { return }
         dockVisibilityObserver = NotificationCenter.default.addObserver(
             forName: .dockVisibilityDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.applyDockVisibility()
+                guard let self, self.lifecycle.allowsWork else { return }
+                self.applyDockVisibility()
             }
         }
     }
 
     private func observeShowOnboardingRequests() {
+        guard lifecycle.allowsWork else { return }
         showOnboardingObserver = NotificationCenter.default.addObserver(
             forName: .showOnboarding,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.showOnboarding()
+                guard let self, self.lifecycle.allowsWork else { return }
+                self.showOnboarding()
             }
         }
+    }
+
+    private func removeLifecycleObservers() {
+        if let observer = dockVisibilityObserver {
+            NotificationCenter.default.removeObserver(observer)
+            dockVisibilityObserver = nil
+        }
+        if let observer = showOnboardingObserver {
+            NotificationCenter.default.removeObserver(observer)
+            showOnboardingObserver = nil
+        }
+    }
+
+    private func closeApplicationWindowsForTermination() {
+        releaseSettingsSystemMonitorLeaseIfNeeded()
+        settingsWindowController?.window?.delegate = nil
+        settingsWindowController?.close()
+        settingsWindowController = nil
+        onboardingWindowController?.window?.delegate = nil
+        onboardingWindowController?.close()
+        onboardingWindowController = nil
     }
 
     nonisolated func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -288,36 +331,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Tears down render sessions (pauses AVPlayers, releases WKWebViews / Metal
     /// renderers — so WebKit's SQLite/WAL closes cleanly and no video/snapshot
-    /// staging is left mid-write) and drains the async persistence actor before
-    /// exit, so the last UI commits (typically a toggle flipped just before
-    /// Cmd-Q) are durable on disk. The teardown is in-process and bounded; the
-    /// flush is the only awaited work and is capped by a watchdog so a stuck
-    /// disk write can't hold the quit past the system terminate deadline.
+    /// staging is left mid-write), awaits the Monitor producer graph, then drains
+    /// cursor + settings persistence. The whole async barrier is capped by a
+    /// watchdog so a stuck source or disk write cannot hold quit indefinitely.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !isWaitingForTerminationFlush else { return .terminateNow }
-        isWaitingForTerminationFlush = true
+        switch lifecycle.beginTermination() {
+        case .wait:
+            return .terminateLater
+        case .terminateNow:
+            return .terminateNow
+        case .begin:
+            break
+        }
+
+        globalShortcutManager?.stop()
+        globalShortcutManager = nil
+        removeLifecycleObservers()
+        closeApplicationWindowsForTermination()
+        SystemMonitor.shared.shutdown()
         screenManager?.tearDownForTermination()
-        // Synchronous, bounded (small JSON): the tail-cursor debounce window
-        // must not drop the last offsets on quit.
-        MonitorSourceRegistration.flushCursorStoreForTermination()
-        Task { @MainActor in
-            // Reply on whichever lands first: the flush, or a 2s watchdog. The
-            // persistence-actor writes don't honor cancellation, so we don't
-            // cancel the flush — we just stop *waiting* on it once the deadline
-            // passes, so a stuck disk write can't hold the quit past the system
-            // terminate watchdog. `replied` guards the single allowed reply.
-            var replied = false
-            let reply = {
-                guard !replied else { return }
-                replied = true
+        #if !LITE_BUILD
+        SystemAudioCaptureManager.shared.shutdown()
+        #endif
+
+        Task { @MainActor [weak self] in
+            // Reply on whichever lands first: the ordered shutdown, or a 2s
+            // watchdog. The work is intentionally not cancelled when the
+            // watchdog wins: persistence writes may not honor cancellation, and
+            // the process can still finish useful cleanup before AppKit exits.
+            let reply = { [weak self] in
+                guard let self, self.lifecycle.markReplied() else { return }
                 sender.reply(toApplicationShouldTerminate: true)
             }
-            let flush = Task { await SettingsManager.shared.flushPendingConfigurationWrites() }
             let watchdog = Task {
-                try? await Task.sleep(for: .seconds(2))
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
                 reply()
             }
-            await flush.value
+
+            await AppTerminationCoordinator.shutdownForApplication()
             watchdog.cancel()
             reply()
         }
@@ -327,16 +384,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings Window
 
     private func scheduleSettingsWindowPrewarm() {
-        guard !runtimeOptions.isTesting else { return }
+        guard !runtimeOptions.isTesting, lifecycle.allowsWork else { return }
 
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
+        lifecycle.schedule(after: .milliseconds(1_200)) { [weak self] in
             self?.prewarmSettingsWindow()
         }
     }
 
     func prewarmSettingsWindow() {
-        guard settingsWindowController == nil,
+        guard lifecycle.allowsWork,
+              settingsWindowController == nil,
               let manager = screenManager
         else { return }
 
@@ -353,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         initialAddWallpaperPromptKind: String? = nil,
         opensGeneralSettings: Bool = false
     ) {
-        guard let manager = screenManager else { return }
+        guard lifecycle.allowsWork, let manager = screenManager else { return }
         Logger.info("Settings window requested", category: .ui)
 
         if let controller = settingsWindowController {
@@ -431,9 +488,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentSettingsWindow(_ controller: NSWindowController) {
         controller.showWindow(nil)
+        guard let window = controller.window else { return }
         NSApp.activate(ignoringOtherApps: true)
-        controller.window?.makeKeyAndOrderFront(nil)
-        controller.window?.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        guard window.isVisible else { return }
+        acquireSettingsSystemMonitorLeaseIfNeeded()
+    }
+
+    private func acquireSettingsSystemMonitorLeaseIfNeeded() {
+        guard !settingsOwnsSystemMonitorLease,
+              screenManager?.featureCatalog.isEnabled(.systemMonitor) == true else { return }
+        settingsOwnsSystemMonitorLease = true
+        SystemMonitor.shared.startMonitoring()
+    }
+
+    private func releaseSettingsSystemMonitorLeaseIfNeeded() {
+        guard settingsOwnsSystemMonitorLease else { return }
+        settingsOwnsSystemMonitorLease = false
+        SystemMonitor.shared.stopMonitoring()
     }
 
     private func postSettingsWindowRequest(
@@ -441,7 +514,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         initialAddWallpaperPromptKind: String?,
         opensGeneralSettings: Bool
     ) {
-        DispatchQueue.main.async {
+        lifecycle.schedule { [weak self] in
+            guard let self, self.lifecycle.allowsWork else { return }
             if opensGeneralSettings {
                 NotificationCenter.default.post(name: .openGeneralSettings, object: nil)
             }
@@ -467,6 +541,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shows the first-run onboarding flow. Also used by the General Settings
     /// "Welcome Tour" tile to re-trigger the tour after first-run.
     func showOnboarding() {
+        guard lifecycle.allowsWork else { return }
         Logger.info("Onboarding window requested", category: .ui)
 
         if let controller = onboardingWindowController {
@@ -498,8 +573,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.onboardingWindowController?.close()
             },
             onShowAppleAerials: { [weak self] in
-                self?.showSettings()
-                DispatchQueue.main.async {
+                guard let self, self.lifecycle.allowsWork else { return }
+                self.showSettings()
+                self.lifecycle.schedule { [weak self] in
+                    guard let self, self.lifecycle.allowsWork else { return }
                     NotificationCenter.default.post(name: .openAppleAerials, object: nil)
                 }
             }
@@ -543,6 +620,7 @@ extension AppDelegate: NSWindowDelegate {
     /// regular close-and-release semantics.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender == settingsWindowController?.window {
+            releaseSettingsSystemMonitorLeaseIfNeeded()
             sender.orderOut(nil)
             return false
         }
@@ -552,12 +630,29 @@ extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
 
-        // The settings window never reaches here — windowShouldClose
-        // suppresses the close. Only onboarding cleans up its controller.
+        if closingWindow == settingsWindowController?.window {
+            releaseSettingsSystemMonitorLeaseIfNeeded()
+            return
+        }
+
         if closingWindow == onboardingWindowController?.window {
             onboardingWindowController = nil
             return
         }
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window == settingsWindowController?.window else { return }
+        releaseSettingsSystemMonitorLeaseIfNeeded()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        guard lifecycle.allowsWork,
+              let window = notification.object as? NSWindow,
+              window == settingsWindowController?.window,
+              window.isVisible else { return }
+        acquireSettingsSystemMonitorLeaseIfNeeded()
     }
 }
 

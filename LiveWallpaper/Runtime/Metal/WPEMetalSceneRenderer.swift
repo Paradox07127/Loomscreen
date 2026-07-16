@@ -195,6 +195,22 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Current hover state per scripted layer (cursorEnter/Leave transitions).
     var layerHoverStates: [String: Bool] = [:]
     var sceneScriptSharedState: WPESharedScriptState?
+    let sceneScriptLoadState = WPESceneScriptLoadState()
+    /// Last complete cross-family presentation. If a runtime resource ceiling
+    /// latches between script families, transforms/text stay on this snapshot
+    /// instead of falling back to their baked values while layer state freezes.
+    var lastStableScriptTransforms = LiveScriptTransforms()
+    var lastStableScriptTextByID: [String: String] = [:]
+    var sceneScriptVideoCommandBuffer = WPESceneScriptVideoCommandBuffer()
+    /// Staged with the SceneScript video transaction. The eventual AVPlayer
+    /// seek is allowed only after every script family and frame encode succeed.
+    var sceneScriptIntroPhaseAlignPending = false
+    /// Stable renderer identity used only by the process-wide SceneScript
+    /// admission governor. It is safe to derive without touching actor state,
+    /// including from the nonisolated deinitializer fail-safe.
+    nonisolated var sceneScriptTraversalDomainID: UInt64 {
+        UInt64(UInt(bitPattern: ObjectIdentifier(self)))
+    }
     /// Image-object alpha field scripts keyed by objectID. These return an alpha
     /// scalar from `update(value)` and intentionally do not affect visibility.
     var layerAlphaScriptInstances: [String: WPELayerScriptInstance] = [:] {
@@ -280,7 +296,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// flag-freeze pass).
     var textureCacheBudgetBytesResolved: Int?
     var staticTexturePlaceholderPaths: Set<String> = []
-    var pendingStaticTextureReloads: Set<String> = []
+    /// Owns admission, generation tickets and retained task handles for
+    /// on-demand static-texture residency reloads.
+    let staticTextureReloadTaskOwner = WPEStaticTextureReloadTaskOwner()
     var staticTextureReloadThrottles: [String: WPEStaticTextureReloadThrottle] = [:]
     /// Memoizes `activeStaticTexturePaths` (the budget's only per-frame walk).
     /// Keyed by a per-layer visibility/shape signature: script or property flips
@@ -543,6 +561,8 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
 
 
     deinit {
+        WPESceneScriptExecutionGovernor.processShared.forgetDomain(domainID: sceneScriptTraversalDomainID)
+        sceneScriptLoadState.retireCurrent()
         stopEngineAssetsAccessIfNeeded()
     }
 

@@ -509,7 +509,8 @@ struct ScreenManagerCoordinationTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(validationError: .validationFailed),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         manager.setVideo(url: fixture.url, bookmarkData: fixture.bookmark, for: screen)
@@ -777,7 +778,8 @@ struct ScreenManagerCoordinationTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         guard manager.getConfiguration(for: screen) != nil else {
@@ -814,7 +816,8 @@ struct ScreenManagerCoordinationTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         defer { screen.resetRuntimeSession() }
@@ -842,7 +845,8 @@ struct ScreenManagerCoordinationTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         defer { screen.resetRuntimeSession() }
@@ -870,7 +874,8 @@ struct ScreenManagerCoordinationTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         defer { screen.resetRuntimeSession() }

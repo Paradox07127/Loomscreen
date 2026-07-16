@@ -109,6 +109,42 @@ jobs:
               --scratch-path "$RUNNER_TEMP/SwiftPM/$package"
           done
 
+  fast-app-contracts:
+    # Hardware-free required shard. It catches source-layer dependency growth,
+    # entitlement widening, trust/privacy regressions and localization drift on
+    # every PR without running the Metal/display-heavy app suite.
+    name: Fast app architecture/security contracts
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify toolchain
+        run: xcodebuild -version
+
+      - name: Run hardware-free app contract shard
+        run: bash scripts/fast_app_contract_tests.sh
+
+  release-contract:
+    name: Release + quality tooling contract
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The quality ratchet compares component baselines and changed lines
+          # against the PR/push base without depending on external tooling.
+          fetch-depth: 0
+
+      - name: Validate portable release and quality tooling
+        env:
+          QUALITY_GATE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/release_contract_check.sh
+
   app-tests:
     # Opt-in only (Actions tab -> CI -> Run workflow -> check the box).
     # The LiveWallpaperTests bundle is large and some tests touch

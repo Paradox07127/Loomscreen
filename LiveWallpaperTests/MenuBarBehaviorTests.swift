@@ -93,6 +93,115 @@ struct MenuBarBehaviorTests {
         #expect(source.contains("updateVideoVolume"))
     }
 
+    @Test("Performance values use the emphasized metric token and keep their combined accessibility label")
+    func performanceValuesUseSemanticMetricContract() throws {
+        let source = try RepositoryRoot.source("LiveWallpaper/Views/MenuBarContent.swift")
+        guard let start = source.range(of: "private func performanceItem"),
+              let end = source.range(of: "private var footer", range: start.upperBound..<source.endIndex) else {
+            Issue.record("Could not isolate MenuBarContent.performanceItem source")
+            return
+        }
+        let performanceItem = String(source[start.lowerBound..<end.lowerBound])
+
+        #expect(performanceItem.contains(".font(DesignTokens.Typography.metricEmphasized)"))
+        #expect(performanceItem.contains(".accessibilityElement(children: .ignore)"))
+        #expect(performanceItem.contains(".accessibilityLabel(Text(\"\\(label) \\(value)\"))"))
+        #expect(
+            Self.performanceItemAccessibilityContractHolds(performanceItem),
+            "Only the Circle status dot may be hidden; the HStack must expose its combined label"
+        )
+
+        let containerHiddenProbe = performanceItem
+            .replacingOccurrences(of: ".accessibilityHidden(true)", with: "")
+            .replacingOccurrences(
+                of: ".lineLimit(1)",
+                with: ".accessibilityHidden(\n    true\n)\n        .lineLimit(1)"
+            )
+        let normalizedContainerHiddenProbe = containerHiddenProbe.filter { !$0.isWhitespace }
+        #expect(
+            normalizedContainerHiddenProbe.components(separatedBy: ".accessibilityHidden(true)").count - 1 == 1
+                && normalizedContainerHiddenProbe.contains("}.accessibilityHidden(true).lineLimit(1)"),
+            "The negative probe must contain exactly one hidden modifier on the HStack"
+        )
+        #expect(
+            !Self.performanceItemAccessibilityContractHolds(containerHiddenProbe),
+            "The accessibility guard must reject whitespace-varied hiding on the whole HStack"
+        )
+
+        let boolContainerHiddenProbe = performanceItem.replacingOccurrences(
+            of: ".lineLimit(1)",
+            with: ".accessibilityHidden(Bool(true)).lineLimit(1)"
+        )
+        #expect(
+            boolContainerHiddenProbe.contains(".accessibilityHidden(Bool(true))"),
+            "The Bool(true) negative probe must hide the HStack"
+        )
+        #expect(
+            !Self.performanceItemAccessibilityContractHolds(boolContainerHiddenProbe),
+            "The accessibility guard must reject non-literal hiding on the whole HStack"
+        )
+
+        let tokens = try RepositoryRoot.source(
+            "Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Tokens/DesignTokens.swift"
+        )
+        guard let tokenStart = tokens.range(of: "public static let metricEmphasized"),
+              let tokenEnd = tokens.range(of: "public static let code", range: tokenStart.upperBound..<tokens.endIndex) else {
+            Issue.record("Could not isolate DesignTokens.Typography.metricEmphasized")
+            return
+        }
+        let token = String(tokens[tokenStart.lowerBound..<tokenEnd.lowerBound])
+        let normalizedToken = token.filter { !$0.isWhitespace }
+        #expect(
+            normalizedToken
+                == "publicstaticletmetricEmphasized=Font.system(.callout,design:.monospaced).weight(.semibold).monospacedDigit()"
+        )
+        let designContract = try RepositoryRoot.source("Packages/LiveWallpaperSharedUI/DESIGN.md")
+        #expect(designContract.contains("+3 emphasized variants"))
+        #expect(designContract.contains("`metricEmphasized` | `.callout.monospaced.semibold.monospacedDigit()`"))
+    }
+
+    private static func performanceItemAccessibilityContractHolds(_ source: String) -> Bool {
+        let normalized = source.filter { !$0.isWhitespace }
+        let hidden = ".accessibilityHidden(true)"
+        guard normalized.components(separatedBy: hidden).count - 1 == 1,
+              let hStack = normalized.range(of: "HStack(spacing:5){") else {
+            return false
+        }
+
+        let openBrace = normalized.index(before: hStack.upperBound)
+        guard let closeBrace = matchingClosingBrace(in: normalized, openingAt: openBrace) else {
+            return false
+        }
+
+        let contentStart = normalized.index(after: openBrace)
+        let content = String(normalized[contentStart..<closeBrace])
+        let containerModifiers = String(normalized[normalized.index(after: closeBrace)...])
+        let statusDot = "Circle().fill(tint).frame(width:6,height:6).animation(.easeInOut(duration:0.25),value:tint)\(hidden)"
+
+        return content.contains(statusDot)
+            && !containerModifiers.contains(".accessibilityHidden(")
+            && containerModifiers.contains(".accessibilityElement(children:.ignore)")
+            && containerModifiers.contains(".accessibilityLabel(Text(\"\\(label)\\(value)\"))")
+    }
+
+    private static func matchingClosingBrace(in source: String, openingAt openBrace: String.Index) -> String.Index? {
+        var depth = 0
+        var index = openBrace
+        while index < source.endIndex {
+            switch source[index] {
+            case "{":
+                depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0 { return index }
+            default:
+                break
+            }
+            index = source.index(after: index)
+        }
+        return nil
+    }
+
     private func withIsolatedGlobalSettings(_ body: () throws -> Void) rethrows {
         let defaults = UserDefaults.standard
         let keys = [

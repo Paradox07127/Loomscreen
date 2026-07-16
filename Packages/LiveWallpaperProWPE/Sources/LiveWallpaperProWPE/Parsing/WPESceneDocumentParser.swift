@@ -11,6 +11,36 @@ public protocol WPESceneTransformScriptResolving {
         properties: [String: WPESceneScriptPropertyValue],
         seed: SIMD3<Double>
     ) -> SIMD3<Double>?
+
+    func resolveBatch(
+        _ requests: [WPESceneTransformScriptRequest]
+    ) -> [SIMD3<Double>?]
+}
+
+public struct WPESceneTransformScriptRequest: Equatable, Sendable {
+    public let script: String
+    public let properties: [String: WPESceneScriptPropertyValue]
+    public let seed: SIMD3<Double>
+
+    public init(
+        script: String,
+        properties: [String: WPESceneScriptPropertyValue],
+        seed: SIMD3<Double>
+    ) {
+        self.script = script
+        self.properties = properties
+        self.seed = seed
+    }
+}
+
+public extension WPESceneTransformScriptResolving {
+    func resolveBatch(
+        _ requests: [WPESceneTransformScriptRequest]
+    ) -> [SIMD3<Double>?] {
+        requests.map {
+            resolveVec3(script: $0.script, properties: $0.properties, seed: $0.seed)
+        }
+    }
 }
 
 /// Textual classification of WPE transform scripts, shared by the parser
@@ -21,7 +51,9 @@ public enum WPETransformScriptStaticAnalysis {
     /// baked value untouched (no regression). Matching is CASE-SENSITIVE on
     /// purpose — `update` contains a lowercase "date", so a case-insensitive
     /// `Date` check would wrongly classify every origin script as dynamic.
-    private static let dynamicTokens = [
+    /// `public` so the app can assert this bake-time gate never drifts from the
+    /// XPC worker's independent re-validation gate (`SceneScriptStaticExecutionPolicy`).
+    public static let dynamicTokens = [
         "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
         "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
         "input.cursorWorldPosition", "shared.", "shared["
@@ -30,7 +62,7 @@ public enum WPETransformScriptStaticAnalysis {
     /// Static resolution runs during parsing, where retaining a hung JSContext is
     /// worse than falling back to the baked value; loop/eval forms are rejected
     /// conservatively and left to the dynamic transform path.
-    private static let staticExecutionBlocklistPatterns = [
+    public static let staticExecutionBlocklistPatterns = [
         #"\bwhile\s*\("#,
         #"\bfor\s*\("#,
         #"\bdo\s*\{"#,
@@ -694,12 +726,16 @@ public enum WPESceneDocumentParser {
         let evaluator = makeResolver(canvasWidth, canvasHeight)
         var resolved: [String: SIMD3<Double>] = [:]
         resolved.reserveCapacity(pending.count)
-        for item in pending {
-            if let origin = evaluator.resolveVec3(
-                script: item.script,
-                properties: item.properties,
-                seed: item.seed
-            ) {
+        let requests = pending.map {
+            WPESceneTransformScriptRequest(
+                script: $0.script,
+                properties: $0.properties,
+                seed: $0.seed
+            )
+        }
+        let outputs = evaluator.resolveBatch(requests)
+        for (item, origin) in zip(pending, outputs) {
+            if let origin {
                 resolved[item.id] = origin
             }
         }

@@ -93,19 +93,15 @@ final class WorkshopDownloadCoordinator {
                 guard let self, self.attempts[itemID] == attemptID, !Task.isCancelled else { return nil }
                 self.phases[itemID] = .importing
                 self.clearProgress(itemID)
-                return try? await self.importService.importProject(folder: folderURL)
+                let result = try? await self.importService.importProject(folder: folderURL)
+                guard !Task.isCancelled, self.attempts[itemID] == attemptID else { return nil }
+                return result
             }
         )
         // A newer attempt may have superseded this one mid-flight; only the
         // current attempt may mutate shared state.
-        guard attempts[itemID] == attemptID else { return }
+        guard !Task.isCancelled, attempts[itemID] == attemptID else { return }
         tasks[itemID] = nil
-        guard !Task.isCancelled else {
-            attempts[itemID] = nil
-            phases[itemID] = .idle
-            clearProgress(itemID)
-            return
-        }
 
         switch result {
         case .imported(let importResult):

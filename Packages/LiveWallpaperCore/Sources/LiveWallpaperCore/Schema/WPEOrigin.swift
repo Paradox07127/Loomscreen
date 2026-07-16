@@ -113,6 +113,30 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         originalType.localizedDisplayName
     }
 
+    /// Compare-and-swap the source-folder grant without rebuilding callers'
+    /// WPE metadata by hand. Returning `nil` protects a newer re-grant from a
+    /// late stale-bookmark refresh.
+    public func replacingSourceFolderBookmark(
+        matching original: Data,
+        with refreshed: Data
+    ) -> WPEOrigin? {
+        guard sourceFolderBookmark == original else { return nil }
+        return WPEOrigin(
+            workshopID: workshopID,
+            title: title,
+            originalType: originalType,
+            sourceFolderBookmark: refreshed,
+            cacheRelativePath: cacheRelativePath,
+            previewFileName: previewFileName,
+            entryFile: entryFile,
+            resourceLocation: resourceLocation,
+            dependencyWorkshopIDs: dependencyWorkshopIDs,
+            missingDependencyIDs: missingDependencyIDs,
+            requiresWindowsPlugin: requiresWindowsPlugin,
+            originKind: originKind
+        )
+    }
+
     public static func defaultResourceLocation(
         originalType: WPEType,
         cacheRelativePath: String?

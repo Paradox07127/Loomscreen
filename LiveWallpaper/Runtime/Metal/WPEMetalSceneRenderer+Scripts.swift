@@ -9,7 +9,10 @@ extension WPEMetalSceneRenderer {
     /// is a SceneScript, maps each to its video source, and applies the script's
     /// `init()` state (visibility/alpha + video stop/seek). Runs after textures so
     /// the video sources exist. No-op for scenes without layer scripts.
-    func loadLayerScripts(from document: WPESceneDocument) {
+    func loadLayerScripts(
+        from document: WPESceneDocument,
+        scriptLoadToken: WPESceneScriptInstanceLimitToken
+    ) {
         layerScriptInstances = [:]
         layerAlphaScriptInstances = [:]
         textVisibleScriptInstances = [:]
@@ -19,10 +22,9 @@ extension WPEMetalSceneRenderer {
         layerVideoSourceKey = [:]
         layerObjectIDByName = [:]
         liveLayerAlpha = [:]
-        introPhaseSource = nil
-        loopPhaseSource = nil
-        introLoopOffset = nil
-        introPhaseToken += 1
+        invalidateIntroPhaseAlign()
+        guard isCurrentSceneScriptLoad(scriptLoadToken),
+              scriptLoadToken.allows(.setup) else { return }
         let visibleScripted = document.imageObjects.filter { $0.visibleScript != nil }
         let alphaScripted = document.imageObjects.filter { $0.alphaScript != nil }
         let textVisibleScripted = document.textObjects.filter { $0.visibleScript != nil }
@@ -56,7 +58,8 @@ extension WPEMetalSceneRenderer {
         debugStage("layerScripts.userProperties", "count=\(userProperties.count)")
         // One `shared` store for the whole scene so WPE's cross-script `shared`
         // global coordinates across the scripts' isolated contexts.
-        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
+        let sharedState = sceneScriptSharedState
+            ?? WPESharedScriptState(sceneScriptLoadToken: scriptLoadToken)
         sceneScriptSharedState = sharedState
         let scriptCanvasSize = SIMD2<Double>(
             max(Double(sceneRenderSize.width), 1),
@@ -64,96 +67,109 @@ extension WPEMetalSceneRenderer {
         )
         for object in scriptHosts {
             do {
-                let instance = try WPELayerScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPELayerScriptInstance(
                     script: object.visibleScript,
                     scriptProperties: object.scriptProperties,
                     shared: sharedState,
-                    canvasSize: scriptCanvasSize
-                )
+                    canvasSize: scriptCanvasSize)
+                }) else { return }
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
                 if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [ScriptHost] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         for object in visibleScripted {
             guard let script = object.visibleScript else { continue }
             do {
-                let instance = try WPELayerScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPELayerScriptInstance(
                     script: script,
                     scriptProperties: object.scriptProperties,
                     shared: sharedState,
-                    canvasSize: scriptCanvasSize
-                )
+                    canvasSize: scriptCanvasSize)
+                }) else { return }
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
                 if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [LayerScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         for object in alphaScripted {
             guard let script = object.alphaScript else { continue }
             do {
-                let instance = try WPELayerScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPELayerScriptInstance(
                     script: script,
                     scriptProperties: object.alphaScriptProperties,
                     shared: sharedState,
                     canvasSize: scriptCanvasSize,
-                    outputMode: .returnedAlpha(initialValue: object.alpha)
-                )
+                    outputMode: .returnedAlpha(initialValue: object.alpha))
+                }) else { return }
                 layerAlphaScriptInstances[object.id] = instance
                 applyLayerAlphaScriptOutput(instance.initialOutput, ownObjectID: object.id)
                 if let output = applyScriptUserProperties(instance, userProperties) {
                     applyLayerAlphaScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [AlphaScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         for object in textVisibleScripted {
             guard let script = object.visibleScript else { continue }
             do {
-                let instance = try WPELayerScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPELayerScriptInstance(
                     script: script,
                     scriptProperties: object.visibleScriptProperties,
                     shared: sharedState,
-                    canvasSize: scriptCanvasSize
-                )
+                    canvasSize: scriptCanvasSize)
+                }) else { return }
                 textVisibleScriptInstances[object.id] = instance
                 applyTextScriptOutput(instance.initialOutput, ownObjectID: object.id)
                 if let output = applyScriptUserProperties(instance, userProperties) {
                     applyTextScriptOutput(output, ownObjectID: object.id)
                 }
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [TextVisibleScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
         for object in textAlphaScripted {
             guard let script = object.alphaScript else { continue }
             do {
-                let instance = try WPELayerScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPELayerScriptInstance(
                     script: script,
                     scriptProperties: object.alphaScriptProperties,
                     shared: sharedState,
                     canvasSize: scriptCanvasSize,
-                    outputMode: .returnedAlpha(initialValue: object.alpha)
-                )
+                    outputMode: .returnedAlpha(initialValue: object.alpha))
+                }) else { return }
                 textAlphaScriptInstances[object.id] = instance
                 liveTextAlpha[object.id] = instance.initialOutput.own.alpha
                 if let output = applyScriptUserProperties(instance, userProperties) {
                     liveTextAlpha[object.id] = output.own.alpha
                 }
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [TextAlphaScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }
-        setUpIntroPhaseAlign(scripted: visibleScripted)
+        setUpIntroPhaseAlign(
+            scripted: visibleScripted,
+            scriptLoadToken: scriptLoadToken
+        )
     }
 
     /// A text object's own `visible` script output → live text visibility (and
@@ -186,8 +202,13 @@ extension WPEMetalSceneRenderer {
     /// one update() each, then transform + text-content consumers seed.
     /// Async mode only: legacy sync ticks already run layer scripts before text
     /// scripts inside every frame, so their first frame is producer-first.
-    func seedSceneScriptsAfterLoad(from document: WPESceneDocument) {
-        guard Self.scriptAsyncTickEnabled else { return }
+    func seedSceneScriptsAfterLoad(
+        from document: WPESceneDocument,
+        scriptLoadToken: WPESceneScriptInstanceLimitToken
+    ) {
+        guard Self.scriptAsyncTickEnabled,
+              isCurrentSceneScriptLoad(scriptLoadToken),
+              scriptLoadToken.allows(.tick) else { return }
         // 1. Script hosts: one bounded synchronous update() each, in scene
         //    order, applied exactly like a frame tick.
         for host in document.scriptHostObjects {
@@ -214,101 +235,6 @@ extension WPEMetalSceneRenderer {
         for object in textObjects {
             textScriptInstances[object.id]?.seedAsyncTick()
         }
-    }
-
-    /// Builds dynamic origin script instances for image layers whose `origin`
-    /// SceneScript depends on live input. Static origin scripts were resolved by
-    /// `WPESceneDocumentParser`, so they do not reach this path.
-    func loadDynamicOriginScripts(from document: WPESceneDocument) {
-        dynamicOriginScriptInstances = [:]
-        dynamicScaleScriptInstances = [:]
-        dynamicAnglesScriptInstances = [:]
-        transformHostLocalTransformsByID = Dictionary(
-            document.transformHostObjects.map { object in
-                (
-                    object.id,
-                    WPERenderObjectTransform(
-                        origin: object.localOrigin,
-                        scale: object.localScale,
-                        angles: object.localAngles
-                    )
-                )
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let originScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.originScript.map { (object.id, $0) }
-        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.originScript.map { (object.id, $0) }
-        } + document.textObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            // TEXT objects with a dynamic origin (3509243656's tooltip labels
-            // that track their star via `shared.xxN`). Ticked into the same
-            // live-origins map the overlay loop reads.
-            object.originScript.map { (object.id, $0) }
-        }
-        let scaleScripts = document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.scaleScript.map { (object.id, $0) }
-        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.scaleScript.map { (object.id, $0) }
-        }
-        // Angles seeds come from scene.json in radians; the script sees degrees
-        // (same boundary as the deg→rad conversion in the per-frame tick).
-        let anglesScripts = (document.imageObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.anglesScript.map { (object.id, $0) }
-        } + document.transformHostObjects.compactMap { object -> (String, WPESceneTransformScript)? in
-            object.anglesScript.map { (object.id, $0) }
-        }).map { (id, script) in
-            (id, WPESceneTransformScript(
-                script: script.script,
-                scriptProperties: script.scriptProperties,
-                seed: script.seed * (180 / .pi)
-            ))
-        }
-        // Keyframed origins ride the same live-transform map as the scripts, so a
-        // moving transform host composes onto its children exactly the same way.
-        dynamicOriginAnimations = Dictionary(
-            document.transformHostObjects.compactMap { object -> (String, WPESceneAnimatedValue)? in
-                object.originAnimation.map { (object.id, $0) }
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        debugStage(
-            "transformScripts.load",
-            "origin=\(originScripts.count) scale=\(scaleScripts.count) angles=\(anglesScripts.count) originAnim=\(dynamicOriginAnimations.count) hosts=\(document.transformHostObjects.count)"
-        )
-        guard !originScripts.isEmpty || !scaleScripts.isEmpty || !anglesScripts.isEmpty else { return }
-        let canvasSize = SIMD2<Double>(
-            max(Double(sceneRenderSize.width), 1),
-            max(Double(sceneRenderSize.height), 1)
-        )
-        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
-        sceneScriptSharedState = sharedState
-        func install(
-            _ scripts: [(String, WPESceneTransformScript)],
-            into instances: inout [String: WPEDynamicTransformScriptInstance],
-            label: String
-        ) {
-            for (objectID, script) in scripts {
-                do {
-                    let instance = try WPEDynamicTransformScriptInstance(
-                        script: script.script,
-                        scriptProperties: script.scriptProperties,
-                        seed: script.seed,
-                        canvasSize: canvasSize,
-                        shared: sharedState
-                    )
-                    // Seeded in seedSceneScriptsAfterLoad() — after the script
-                    // hosts have produced their first `shared` state (a tooltip
-                    // origin script reading `shared.xxN` must not run first).
-                    instances[objectID] = instance
-                } catch {
-                    Logger.warning("Scene \(descriptor.workshopID) [\(label)] init failed for \(objectID): \(error)", category: .wpeRender)
-                }
-            }
-        }
-        install(originScripts, into: &dynamicOriginScriptInstances, label: "OriginScript")
-        install(scaleScripts, into: &dynamicScaleScriptInstances, label: "ScaleScript")
-        install(anglesScripts, into: &dynamicAnglesScriptInstances, label: "AnglesScript")
     }
 
     // MARK: - On-demand video layers
@@ -431,51 +357,6 @@ extension WPEMetalSceneRenderer {
             case .string(let value): result[pair.key] = .string(value)
             }
         }
-    }
-
-    // MARK: - Intro phase align
-
-    /// Identify the intro overlay video and the free-running loop video it reveals,
-    /// then measure their phase offset off-thread (used by `updateIntroPhaseAlign`).
-    /// Intro = a scripted layer that owns a video. Loop = a video no script drives:
-    /// by now every scripted layer's init commands have run, so the intro overlay
-    /// and any button-driven video are already `scriptControlled`, leaving the
-    /// free-running loop as the one that isn't.
-    private func setUpIntroPhaseAlign(scripted: [WPESceneImageObject]) {
-        guard Self.introPhaseAlignEnabled else { return }
-        guard let introKey = scripted.compactMap({ layerVideoSourceKey[$0.id] }).first,
-              let intro = dynamicTextureSources[introKey] as? WPEVideoTextureSource,
-              let introURL = intro.analysisURL else { return }
-        let loop = layerVideoSourceKey.values
-            .compactMap { self.dynamicTextureSources[$0] as? WPEVideoTextureSource }
-            .first { !$0.isScriptControlled }
-        guard let loop, let loopURL = loop.analysisURL else { return }
-        introPhaseSource = intro
-        loopPhaseSource = loop
-        let token = introPhaseToken
-        Task { [weak self] in
-            let offset = await WPEVideoPhaseOffset.measure(introURL: introURL, loopURL: loopURL)
-            guard let self, self.introPhaseToken == token else { return }
-            self.introLoopOffset = offset
-        }
-    }
-
-    /// Keep the revealed loop's playhead leading the intro by the measured offset
-    /// while the intro plays, so the crossfade lands on matching frames. Cheap:
-    /// re-seeks only when phase drifts (after the first correction it stays put).
-    func updateIntroPhaseAlign() {
-        guard let offset = introLoopOffset,
-              let intro = introPhaseSource,
-              let loop = loopPhaseSource,
-              intro.isActivelyPlaying else { return }
-        let duration = loop.loopDurationSeconds
-        guard duration > 0.1 else { return }
-        let target = ((intro.currentPlayheadSeconds + offset)
-            .truncatingRemainder(dividingBy: duration) + duration)
-            .truncatingRemainder(dividingBy: duration)
-        let delta = abs(loop.currentPlayheadSeconds - target)
-        let circularDrift = min(delta, duration - delta)
-        if circularDrift > 0.3 { loop.alignPlayhead(to: target) }
     }
 
     // MARK: - Pointer events
@@ -749,8 +630,8 @@ extension WPEMetalSceneRenderer {
         )
     }
 
-    /// Applies one layer's resolved state: visibility + alpha into the live
-    /// override maps, and any buffered video commands to that layer's video source.
+    /// Applies one layer's resolved state and stages one-shot player mutations
+    /// until every script family in the traversal succeeds.
     private func applyLayerScriptState(_ state: WPELayerScriptState, objectID: String) {
         // A hidden ancestor always wins — the script runtime's `getParent()` is an
         // always-visible stub, so a dock script gating on `parent.visible` can't
@@ -762,17 +643,7 @@ extension WPEMetalSceneRenderer {
         if state.alphaAssigned {
             liveLayerAlpha[objectID] = state.alpha
         }
-        guard !state.videoCommands.isEmpty,
-              let key = layerVideoSourceKey[objectID],
-              let video = dynamicTextureSources[key] as? WPEVideoTextureSource else { return }
-        for command in state.videoCommands {
-            switch command {
-            case .play: video.scriptPlay()
-            case .pause: video.scriptPause()
-            case .stop: video.scriptStop()
-            case .seek(let seconds): video.scriptSetCurrentTime(seconds)
-            }
-        }
+        sceneScriptVideoCommandBuffer.enqueue(state.videoCommands, objectID: objectID)
     }
 
     /// External texture paths a layer references, in pass order — mirrors the

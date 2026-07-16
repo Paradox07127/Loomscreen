@@ -57,19 +57,235 @@ struct MonitorGrantAccess: Sendable {
     )
 }
 
+/// A caller-owned command stream for one logical runtime lease slot. Every
+/// acquire/update/pause/release is enqueued synchronously through this object,
+/// so fire-and-forget UI callbacks cannot reorder an older generation behind a
+/// newer one merely because their Tasks started in a different order.
+final class MonitorRuntimeLeaseSlot: Sendable {
+    private struct State: Sendable {
+        var nextSequence: UInt64 = 0
+        var currentGeneration: UInt64?
+        var desiredState: MonitorRuntimeLeaseDesiredState?
+        var pendingEvent: MonitorRuntimeLeaseEvent?
+        var drainTask: Task<Void, Never>?
+        var drainLaunchCount: UInt64 = 0
+    }
+
+    private static let generationCounter = OSAllocatedUnfairLock(initialState: UInt64(0))
+    private static let completedTask = Task<Void, Never> {}
+
+    private let runtime: MonitorRuntime
+    fileprivate let leaseID = UUID()
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    fileprivate init(runtime: MonitorRuntime) {
+        self.runtime = runtime
+    }
+
+    /// Starts a new generation in this slot and queues its acquire before
+    /// returning. The returned handle is the only authority for later events.
+    func acquire(options: MonitorRuntimeOptions) -> MonitorRuntimeLeaseHandle {
+        let generation = Self.generationCounter.withLock { value -> UInt64 in
+            value &+= 1
+            precondition(value != 0, "Monitor runtime lease generation exhausted")
+            return value
+        }
+        let handle = MonitorRuntimeLeaseHandle(slot: self, generation: generation)
+        handle.enqueue(.acquire(options))
+        return handle
+    }
+
+    fileprivate func enqueue(
+        generation: UInt64,
+        command: MonitorRuntimeLeaseCommand
+    ) -> Task<Void, Never> {
+        state.withLock { state in
+            state.nextSequence &+= 1
+            precondition(state.nextSequence != 0, "Monitor runtime lease sequence exhausted")
+            let sequence = state.nextSequence
+
+            switch command {
+            case let .acquire(options):
+                // Generation allocation happens before this lock. If two
+                // concurrent acquires enter in reverse order, the globally newer
+                // generation remains authoritative.
+                if let current = state.currentGeneration, generation <= current {
+                    return state.drainTask ?? Self.completedTask
+                }
+                state.currentGeneration = generation
+                state.desiredState = .active(options: options, isPaused: false)
+
+            case let .updateOptions(options):
+                guard state.currentGeneration == generation,
+                      case let .active(_, isPaused) = state.desiredState else {
+                    return state.drainTask ?? Self.completedTask
+                }
+                state.desiredState = .active(options: options, isPaused: isPaused)
+
+            case let .setPaused(isPaused):
+                guard state.currentGeneration == generation,
+                      case let .active(options, _) = state.desiredState else {
+                    return state.drainTask ?? Self.completedTask
+                }
+                state.desiredState = .active(options: options, isPaused: isPaused)
+
+            case .release:
+                guard state.currentGeneration == generation,
+                      case .active = state.desiredState else {
+                    return state.drainTask ?? Self.completedTask
+                }
+                state.desiredState = .released
+            }
+
+            guard let desiredState = state.desiredState else {
+                return state.drainTask ?? Self.completedTask
+            }
+
+            // At most one pending snapshot exists per slot. A burst folds into
+            // the newest desired generation/options/pause state while the single
+            // drain worker is blocked in a source rebuild.
+            state.pendingEvent = MonitorRuntimeLeaseEvent(
+                leaseID: leaseID,
+                generation: generation,
+                sequence: sequence,
+                desiredState: desiredState
+            )
+            if let task = state.drainTask { return task }
+
+            state.drainLaunchCount &+= 1
+            let task = Task.detached { [self] in
+                await drain()
+            }
+            state.drainTask = task
+            return task
+        }
+    }
+
+    private func drain() async {
+        while true {
+            let event = state.withLock { state -> MonitorRuntimeLeaseEvent? in
+                guard let event = state.pendingEvent else {
+                    // Clearing under the same lock that enqueue uses closes the
+                    // lost-wakeup race: the next command either belongs to this
+                    // worker or creates exactly one replacement.
+                    state.drainTask = nil
+                    return nil
+                }
+                state.pendingEvent = nil
+                return event
+            }
+            guard let event else { return }
+            await runtime.apply(event)
+        }
+    }
+
+    var debugPendingCommandCount: Int {
+        state.withLock { $0.pendingEvent == nil ? 0 : 1 }
+    }
+
+    var debugDrainWorkerCount: Int {
+        state.withLock { $0.drainTask == nil ? 0 : 1 }
+    }
+
+    var debugDrainLaunchCount: UInt64 {
+        state.withLock { $0.drainLaunchCount }
+    }
+
+    fileprivate var settledTask: Task<Void, Never> { Self.completedTask }
+}
+
+/// Generation-scoped authority returned by `MonitorRuntimeLeaseSlot.acquire`.
+/// Once released, the handle is terminal; stale callbacks become no-ops before
+/// they can even enter the runtime actor.
+final class MonitorRuntimeLeaseHandle: Sendable {
+    private struct State: Sendable {
+        var isReleased = false
+        var tail: Task<Void, Never>?
+    }
+
+    private let slot: MonitorRuntimeLeaseSlot
+    let generation: UInt64
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    fileprivate init(slot: MonitorRuntimeLeaseSlot, generation: UInt64) {
+        self.slot = slot
+        self.generation = generation
+    }
+
+    var leaseID: UUID { slot.leaseID }
+
+    @discardableResult
+    func updateOptions(_ options: MonitorRuntimeOptions) -> Task<Void, Never> {
+        enqueue(.updateOptions(options))
+    }
+
+    @discardableResult
+    func setPaused(_ paused: Bool) -> Task<Void, Never> {
+        enqueue(.setPaused(paused))
+    }
+
+    @discardableResult
+    func release() -> Task<Void, Never> {
+        state.withLock { state in
+            guard !state.isReleased else {
+                return state.tail ?? slot.settledTask
+            }
+            state.isReleased = true
+            let task = slot.enqueue(generation: generation, command: .release)
+            state.tail = task
+            return task
+        }
+    }
+
+    func waitUntilSettled() async {
+        let tail = state.withLock { $0.tail }
+        await tail?.value
+    }
+
+    @discardableResult
+    fileprivate func enqueue(_ command: MonitorRuntimeLeaseCommand) -> Task<Void, Never> {
+        state.withLock { state in
+            guard !state.isReleased else {
+                return state.tail ?? slot.settledTask
+            }
+            let task = slot.enqueue(generation: generation, command: command)
+            state.tail = task
+            return task
+        }
+    }
+}
+
+private enum MonitorRuntimeLeaseCommand: Sendable {
+    case acquire(MonitorRuntimeOptions)
+    case updateOptions(MonitorRuntimeOptions)
+    case setPaused(Bool)
+    case release
+}
+
+private enum MonitorRuntimeLeaseDesiredState: Sendable {
+    case active(options: MonitorRuntimeOptions, isPaused: Bool)
+    case released
+}
+
+private struct MonitorRuntimeLeaseEvent: Sendable {
+    let leaseID: UUID
+    let generation: UInt64
+    let sequence: UInt64
+    let desiredState: MonitorRuntimeLeaseDesiredState
+}
+
 /// App-wide owner of the monitor data pipeline so N displays showing the Monitor
 /// wallpaper share one hub + one set of sources.
 ///
-/// Lifecycle is lease-based: each view acquires under a unique lease ID and later
-/// releases that same ID. Because views issue both calls as fire-and-forget
-/// tasks, a release can reach the actor before its matching acquire — that early
-/// release is remembered and cancels the late acquire instead of leaving an
-/// orphaned pipeline. Same-ID option changes go through `updateOptions` (never
-/// `acquire`) so a refresh that races the lease's own teardown can't resurrect a
-/// released lease. The pipeline always runs with the UNION of every live lease's
-/// UNPAUSED options (so one system-only display can't strip agent modules from
-/// another), and rebuilds are chained through a single task so overlapping
-/// acquire/release/refresh calls never interleave mid-start.
+/// Lifecycle is lease-based: each owner keeps a `MonitorRuntimeLeaseSlot`, starts
+/// a generation-scoped handle, and routes every later event through that handle.
+/// The slot sequences commands before launching Tasks; the actor verifies both
+/// generation and sequence. Therefore a stale generation cannot mutate or
+/// release a newer lease, and no retired-ID tombstones are retained. The
+/// pipeline always runs with the UNION of every live lease's UNPAUSED options
+/// (so one system-only display can't strip agent modules from another), and one
+/// revision-driven rebuild worker folds overlapping changes without interleaving
+/// producer start/stop work.
 ///
 /// `setPaused` is the energy seam: a wallpaper the performance policy suspended
 /// pauses its lease rather than releasing it, so the samplers it alone demanded
@@ -87,9 +303,17 @@ actor MonitorRuntime {
     static let shared = MonitorRuntime()
 
     private let grants: MonitorGrantAccess
+    /// Tests can supply a source seam without mutating the process-global
+    /// MainActor registry. Production leaves this nil and reads the registered
+    /// factories exactly as before.
+    private let sourceFactoriesOverride: [SourceFactory]?
 
-    init(grants: MonitorGrantAccess = .live) {
+    init(
+        grants: MonitorGrantAccess = .live,
+        sourceFactories: [SourceFactory]? = nil
+    ) {
         self.grants = grants
+        self.sourceFactoriesOverride = sourceFactories
     }
 
     typealias SourceFactory = @Sendable (MonitorRuntimeOptions) -> [any MonitorDataSource]
@@ -106,37 +330,16 @@ actor MonitorRuntime {
     /// contributes nothing to the merged options, so whatever it alone demanded is
     /// torn down; every lease paused ⇒ no pipeline at all.
     private struct Lease {
+        var generation: UInt64
+        var lastSequence: UInt64
         var options: MonitorRuntimeOptions
         var isPaused = false
-    }
-
-    /// What is known about a lease ID with no live lease. Views issue acquire,
-    /// setPaused and release as separate fire-and-forget tasks, so calls for one
-    /// ID land in any order and this is the only state that bridges them.
-    ///
-    /// `pausedBeforeAcquire` and `retired` both describe "a pause arrived with no
-    /// lease to apply it to" and MUST stay distinguishable: the first belongs to
-    /// an acquire still in flight, the second to a lease that is already gone. A
-    /// `retired` ID recorded as `pausedBeforeAcquire` would hand the stale pause
-    /// to whatever acquires that ID next — and the HUD/overlay controllers reuse
-    /// one process-constant ID across every show/hide.
-    private enum DetachedLease {
-        /// A release overtook its own acquire: cancel that acquire when it lands.
-        case releasedBeforeAcquire
-        /// A pause overtook its own acquire: apply it to that acquire.
-        case pausedBeforeAcquire(Bool)
-        /// The lease lived and was released. Terminal until the ID is acquired
-        /// again, which starts a fresh lease that inherits nothing.
-        case retired
     }
 
     private var hub: MonitorDataHub?
     private var sources: [any MonitorDataSource] = []
     private var usageTask: Task<Void, Never>?
     private var leases: [UUID: Lease] = [:]
-    /// Out-of-order call state for IDs with no live lease. One small entry per
-    /// lease ID that has been released and not re-acquired.
-    private var detached: [UUID: DetachedLease] = [:]
     /// Union options the current pipeline was requested with (pre-resolution).
     private var activeOptions: MonitorRuntimeOptions?
     /// Roots resolved under the current grants, held open by live leases. Cached
@@ -145,6 +348,23 @@ actor MonitorRuntime {
     /// when the grants are released.
     private var resolvedRoots: (claude: URL?, codex: URL?)?
     private var rebuildTask: Task<Void, Never>?
+    private var rebuildRevision: UInt64 = 0
+    private var forceRebuildRequested = false
+    private var rebuildWorkerLaunchCount: UInt64 = 0
+    /// Termination is a one-way lifecycle for the app-wide runtime. Once
+    /// shutdown begins, late fire-and-forget acquire/release/update tasks from
+    /// view cleanup are ignored rather than rebuilding a producer behind the
+    /// final cursor flush.
+    private enum Lifecycle: Equatable {
+        case running
+        case shuttingDown
+        case terminated
+    }
+    private var lifecycle: Lifecycle = .running
+    /// Shared by every concurrent shutdown caller. This makes shutdown
+    /// idempotent while still requiring every caller to await the same producer
+    /// barrier.
+    private var shutdownTask: Task<Void, Never>?
 
     var debugActiveLeaseCount: Int { leases.count }
     var debugPausedLeaseCount: Int { leases.values.filter(\.isPaused).count }
@@ -152,75 +372,79 @@ actor MonitorRuntime {
     /// exists (no lease, or every lease paused) ⇒ nothing is being sampled.
     var debugActiveOptions: MonitorRuntimeOptions? { activeOptions }
     var debugActiveSourceCount: Int { sources.count }
+    var debugIsTerminated: Bool { lifecycle == .terminated }
+    /// Total actor-side lease bookkeeping. It is intentionally identical to the
+    /// live lease count: completed generations leave no retired-ID state behind.
+    var debugLeaseBookkeepingCount: Int { leases.count }
+    var debugRebuildWorkerCount: Int { rebuildTask == nil ? 0 : 1 }
+    var debugRebuildWorkerLaunchCount: UInt64 { rebuildWorkerLaunchCount }
+    var debugRebuildRevision: UInt64 { rebuildRevision }
 
-    func acquire(leaseID: UUID, options: MonitorRuntimeOptions) async {
-        switch detached.removeValue(forKey: leaseID) {
-        case .releasedBeforeAcquire:
-            return
-        case .pausedBeforeAcquire(let paused):
-            leases[leaseID] = Lease(options: options, isPaused: paused)
-        case .retired, nil:
-            leases[leaseID] = Lease(options: options, isPaused: leases[leaseID]?.isPaused ?? false)
-        }
-        await rebuild()
+    nonisolated func makeLeaseSlot() -> MonitorRuntimeLeaseSlot {
+        MonitorRuntimeLeaseSlot(runtime: self)
     }
 
-    /// Pause/resume one lease's contribution without releasing it. A paused lease
-    /// drops out of the merged options, so the sources only it demanded are
-    /// stopped — this is what makes a suspended wallpaper actually stop sampling
-    /// rather than just stop drawing.
-    func setPaused(leaseID: UUID, paused: Bool) async {
-        guard let lease = leases[leaseID] else {
-            switch detached[leaseID] {
-            case nil, .pausedBeforeAcquire:
-                // Racing its own acquire: remember it so the late acquire applies it.
-                detached[leaseID] = .pausedBeforeAcquire(paused)
-            case .releasedBeforeAcquire, .retired:
-                // The lease this addressed is gone; it dies with that lease
-                // rather than waiting for the ID's next one.
-                break
+    fileprivate func apply(_ event: MonitorRuntimeLeaseEvent) async {
+        guard lifecycle == .running else { return }
+
+        switch event.desiredState {
+        case let .active(options, isPaused):
+            if let current = leases[event.leaseID] {
+                guard event.generation > current.generation
+                    || (event.generation == current.generation && event.sequence > current.lastSequence)
+                else { return }
             }
-            return
-        }
-        guard lease.isPaused != paused else { return }
-        leases[leaseID]?.isPaused = paused
-        await rebuild()
-    }
+            leases[event.leaseID] = Lease(
+                generation: event.generation,
+                lastSequence: event.sequence,
+                options: options,
+                isPaused: isPaused
+            )
 
-    /// Refresh an already-live lease's options WITHOUT creating one. Callers use
-    /// this (not `acquire`) for same-ID option changes so a refresh that races the
-    /// lease's own teardown can't resurrect a released lease: if the `release`
-    /// task wins, this update simply finds no lease and no-ops instead of
-    /// recreating an orphaned pipeline no one owes a release for. A live-lease
-    /// refresh (the common case) mutates in place and rebuilds as before.
-    func updateOptions(leaseID: UUID, options: MonitorRuntimeOptions) async {
-        guard leases[leaseID] != nil else { return }
-        // Mutates only the options: a live-config refresh must not silently
-        // un-pause a suspended wallpaper's lease.
-        leases[leaseID]?.options = options
-        await rebuild()
-    }
-
-    func release(leaseID: UUID) async {
-        guard leases.removeValue(forKey: leaseID) != nil else {
-            switch detached[leaseID] {
-            case nil, .pausedBeforeAcquire:
-                detached[leaseID] = .releasedBeforeAcquire
-            case .releasedBeforeAcquire, .retired:
-                // Already dead — a second release must not re-arm the cancel and
-                // shoot down a legitimate future acquire on a reused ID.
-                break
-            }
-            return
+        case .released:
+            guard let current = leases[event.leaseID] else { return }
+            // A release for a newer generation also retires an actor-side older
+            // generation when acquire+release coalesced before the drain reached
+            // the actor. An older generation can never release a newer one.
+            guard event.generation > current.generation
+                || (event.generation == current.generation && event.sequence > current.lastSequence)
+            else { return }
+            leases.removeValue(forKey: event.leaseID)
         }
-        detached[leaseID] = .retired
         await rebuild()
     }
 
     /// Re-resolves grants and rebuilds under the current leases — call after the
     /// user authorizes a data root so live sources pick it up immediately.
     func refreshSources() async {
+        guard lifecycle == .running else { return }
         await rebuild(force: true)
+    }
+
+    /// Stops the complete producer graph and closes every lease/grant before
+    /// returning. This is the termination-time barrier: callers may safely do
+    /// the final cursor/settings flush only after it completes.
+    ///
+    /// Capturing the single drain worker after switching the lifecycle to
+    /// `shuttingDown` covers every rebuild admitted before this call. Public
+    /// mutations admitted later are rejected by the lifecycle guards. Concurrent
+    /// callers all await the same task.
+    func shutdown() async {
+        if let shutdownTask {
+            await shutdownTask.value
+            return
+        }
+
+        lifecycle = .shuttingDown
+        leases.removeAll()
+
+        let admittedRebuilds = rebuildTask
+        let task = Task { [weak self] in
+            await admittedRebuilds?.value
+            await self?.finishShutdown()
+        }
+        shutdownTask = task
+        await task.value
     }
 
     /// Union across leases: any lease wanting a module turns it on.
@@ -272,29 +496,68 @@ actor MonitorRuntime {
     }
 
     private func rebuild(force: Bool = false) async {
-        let previous = rebuildTask
+        guard lifecycle == .running else { return }
+        rebuildRevision &+= 1
+        precondition(rebuildRevision != 0, "Monitor runtime rebuild revision exhausted")
+        forceRebuildRequested = forceRebuildRequested || force
+
+        if let rebuildTask {
+            await rebuildTask.value
+            return
+        }
+
+        rebuildWorkerLaunchCount &+= 1
         let task = Task { [weak self] in
-            await previous?.value
-            await self?.performRebuild(force: force)
+            guard let self else { return }
+            await runRebuildLoop()
         }
         rebuildTask = task
         await task.value
     }
 
+    /// One actor-owned rebuild worker folds every mutation that arrives while a
+    /// source start/stop is suspended. There is never a task-per-command chain;
+    /// callers admitted during a rebuild await this same bounded worker.
+    private func runRebuildLoop() async {
+        while lifecycle == .running {
+            let revision = rebuildRevision
+            let force = forceRebuildRequested
+            forceRebuildRequested = false
+            await performRebuild(force: force)
+
+            guard lifecycle == .running else { break }
+            if revision == rebuildRevision {
+                rebuildTask = nil
+                return
+            }
+        }
+        rebuildTask = nil
+    }
+
     private func performRebuild(force: Bool) async {
-        // Recomputed at execution time so the last rebuild in a chained burst
+        guard lifecycle == .running else { return }
+        // Recomputed at execution time so the last pass in a coalesced burst
         // settles on the final lease state and earlier ones collapse to no-ops.
         // Paused leases are excluded: with every lease paused this yields nil and
         // the pipeline stops outright.
         let target = Self.merged(leases.values.filter { !$0.isPaused }.map(\.options))
         let rebuilding = force || target != activeOptions
-        if rebuilding { await stopPipeline() }
+        if rebuilding {
+            await stopPipeline()
+            // `stopPipeline()` is an actor-reentrancy point. Termination may
+            // have started while a source was stopping; never rebuild it on the
+            // far side of that await.
+            guard lifecycle == .running else { return }
+        }
         // Grants answer to live leases (paused ones included), not to the
         // pipeline. Reconciled even when the pipeline itself is unchanged: the
         // last lease can go away while every lease was already paused, and
         // `target` stays nil across that, so the no-op guard would skip it.
         let stillWanted = leases.values.contains { $0.options.agents || $0.options.usage }
-        if force || !stillWanted { await releaseGrants() }
+        if force || !stillWanted {
+            await releaseGrants()
+            guard lifecycle == .running else { return }
+        }
         guard rebuilding else { return }
         broker.clear()
         activeOptions = target
@@ -302,6 +565,7 @@ actor MonitorRuntime {
 
         let hub = MonitorDataHub(broker: broker)
         await hub.setModuleEnabled(agents: target.agents, usage: target.usage)
+        guard lifecycle == .running else { return }
         self.hub = hub
 
         var resolved = target
@@ -311,6 +575,7 @@ actor MonitorRuntime {
                 roots = cached
             } else {
                 roots = await grants.resolveRoots()
+                guard lifecycle == .running else { return }
                 // Only a resolution that opened a scope is worth holding: an
                 // unresolved grant keeps being retried, so a grant the user makes
                 // later is picked up without waiting for `refreshSources`.
@@ -335,6 +600,7 @@ actor MonitorRuntime {
                     detail: "folder not granted", lastUpdateAt: Date().timeIntervalSince1970
                 ))
             }
+            guard lifecycle == .running else { return }
         }
 
         var built: [any MonitorDataSource] = []
@@ -351,7 +617,13 @@ actor MonitorRuntime {
                 built.append(SystemMetricsSource(includeTopProcesses: resolved.topProcesses))
             }
         }
-        let factories = await MainActor.run { Self.extraSourceFactories }
+        let factories: [SourceFactory]
+        if let sourceFactoriesOverride {
+            factories = sourceFactoriesOverride
+        } else {
+            factories = await MainActor.run { Self.extraSourceFactories }
+            guard lifecycle == .running else { return }
+        }
         for factory in factories {
             built.append(contentsOf: factory(resolved))
         }
@@ -359,6 +631,10 @@ actor MonitorRuntime {
         sources = built
         for source in built {
             await source.start(sink: hub)
+            // A source start is also reentrant. The shutdown task is waiting on
+            // this rebuild and will stop everything in `sources`; returning now
+            // avoids starting the remaining producers after termination began.
+            guard lifecycle == .running else { return }
         }
         monitorSourcesLog.info("🛰️ pipeline: agents=\(resolved.agents) usage=\(resolved.usage) claudeRoot=\(resolved.claudeRoot != nil) codexRoot=\(resolved.codexRoot != nil) sources=\(built.map(\.sourceID).joined(separator: ","), privacy: .public)")
 
@@ -465,11 +741,27 @@ actor MonitorRuntime {
             task.cancel()
             await task.value
         }
-        for source in sources {
-            await source.stop()
-        }
+        // Detach ownership before awaiting so a re-entrant lifecycle call sees
+        // the truthful target state. Sources are independent producers; stop
+        // them concurrently so one slow filesystem tail does not prevent the
+        // other pipelines from beginning cleanup before the app watchdog.
+        let stoppingSources = sources
         sources.removeAll()
+        await withTaskGroup(of: Void.self) { group in
+            for source in stoppingSources {
+                group.addTask { await source.stop() }
+            }
+        }
         hub = nil
+    }
+
+    private func finishShutdown() async {
+        await stopPipeline()
+        activeOptions = nil
+        broker.clear()
+        await releaseGrants()
+        rebuildTask = nil
+        lifecycle = .terminated
     }
 
     /// Closes the security scopes and drops the cached roots together — the cache

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "metric": "physical_lines",
+  "component_max_loc": {
+    "wpe-metal-shader-dispatcher": 1066,
+    "html-wallpaper-runtime": 1351,
+    "wpe-metal-scene-renderer": 5419,
+    "wpe-metal-render-executor": 6004,
+    "screen-manager": 2583,
+    "wpe-shader-transpiler": 3654
+  }
+}

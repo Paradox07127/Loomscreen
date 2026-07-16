@@ -3,13 +3,6 @@ import Foundation
 // MARK: - Centralized Notification Names
 
 extension Notification.Name {
-    public static let systemMemoryWarning = Notification.Name("SystemMemoryWarning")
-
-    /// System memory usage dropped back below the warning threshold. Paired
-    /// with `systemMemoryWarning` so memory pressure can drive an
-    /// auto-recovering performance-policy state instead of a one-shot pause.
-    public static let systemMemoryNormal = Notification.Name("SystemMemoryNormal")
-
     public static let screensRefreshed = Notification.Name("ScreensRefreshed")
 
     public static let selectScreenInSettings = Notification.Name("SelectScreenInSettings")

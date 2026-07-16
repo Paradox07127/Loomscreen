@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Read-only disk-usage inventory of *downloaded WPE content* — the wallpapers
 /// and shared engine assets the app keeps on disk — as opposed to the

@@ -19,8 +19,6 @@ public struct SystemMonitorPill: View {
 
     public var body: some View {
         content
-            .onAppear { monitor.startMonitoring() }
-            .onDisappear { monitor.stopMonitoring() }
     }
 
     @ViewBuilder

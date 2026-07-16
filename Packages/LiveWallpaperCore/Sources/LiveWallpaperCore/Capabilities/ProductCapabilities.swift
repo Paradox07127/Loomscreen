@@ -2,6 +2,9 @@ import Foundation
 import SwiftUI
 
 public enum ProductSKU: String, Sendable, Codable {
+    /// No product has been selected. This state is intentionally featureless
+    /// and is used by dependency defaults so a missed injection fails closed.
+    case unconfigured
     case lite
     case pro
 }
@@ -9,7 +12,7 @@ public enum ProductSKU: String, Sendable, Codable {
 /// Discrete user-facing capabilities controlled by the SKU. A `WallpaperType`
 /// represents *what* an active wallpaper is; `ProductFeature` represents
 /// *which* product surfaces or ambient subsystems are wired up to support it.
-public enum ProductFeature: String, Sendable, Hashable, Codable {
+public enum ProductFeature: String, Sendable, Hashable, Codable, CaseIterable {
     case video
     case html
     case metalShader
@@ -39,6 +42,10 @@ public enum ProductFeature: String, Sendable, Hashable, Codable {
 
     case systemMonitor
     case globalShortcuts
+
+    /// Local Pro DEBUG diagnostics only. Shipping SKU catalogs deliberately
+    /// exclude this feature; the app target may layer it onto `.pro` while
+    /// compiling a local DEBUG build.
     case developerTools
 
     case lockScreenSnapshots
@@ -60,8 +67,17 @@ public struct ProductCapabilities: Sendable, Equatable {
 
     public init(sku: ProductSKU, enabledFeatures: Set<ProductFeature>) {
         self.sku = sku
-        self.enabledFeatures = enabledFeatures
+        // An unconfigured dependency must never be able to smuggle in a
+        // feature through a hand-built capability set.
+        self.enabledFeatures = sku == .unconfigured ? [] : enabledFeatures
     }
+
+    /// Fail-closed catalog used until an app/test/preview explicitly chooses
+    /// a shipping SKU. It deliberately enables no wallpaper or app feature.
+    public static let unconfigured = ProductCapabilities(
+        sku: .unconfigured,
+        enabledFeatures: []
+    )
 
     /// Lite removes only the heavy GPU pipelines (Wallpaper Engine scene
     /// rendering + custom metal shaders) and the developer-tools harness.
@@ -81,6 +97,8 @@ public struct ProductCapabilities: Sendable, Equatable {
         ]
     )
 
+    /// Shipping Pro capability baseline. Build-local diagnostics are not a
+    /// product feature and must be added explicitly by the app's DEBUG root.
     public static let pro = ProductCapabilities(
         sku: .pro,
         enabledFeatures: [
@@ -88,7 +106,7 @@ public struct ProductCapabilities: Sendable, Equatable {
             .monitorWallpaper, .agentFleet,
             .wpeImport, .videoEffects, .weatherReactive,
             .scheduleAutomation, .playlists,
-            .systemMonitor, .globalShortcuts, .developerTools,
+            .systemMonitor, .globalShortcuts,
             .lockScreenSnapshots, .appleAerials, .inspectorPreview
         ]
     )
@@ -101,7 +119,16 @@ public struct ProductCapabilities: Sendable, Equatable {
     /// app target is the authority on which SKU it is, and adds the
     /// capability at injection time.
     public func withWorkshopOnline() -> ProductCapabilities {
-        ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
+        guard sku == .pro else { return self }
+        return ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
+    }
+
+    /// Adds the local diagnostic surface to a Pro catalog. The compile-time
+    /// DEBUG boundary belongs to the app target because Xcode target build
+    /// conditions are not propagated into this Swift package.
+    public func withLocalDeveloperTools() -> ProductCapabilities {
+        guard sku == .pro else { return self }
+        return ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.developerTools]))
     }
 
     public func canRender(_ type: WallpaperType) -> Bool {
@@ -126,7 +153,8 @@ public struct ProductCapabilities: Sendable, Equatable {
     /// `.playlist` so the picker collapses to a single non-selectable
     /// option rather than disappearing entirely.
     public var selectableWallpaperModes: [WallpaperMode] {
-        WallpaperMode.allCases.filter { mode in
+        guard enabledFeatures.contains(.playlists) else { return [] }
+        return WallpaperMode.allCases.filter { mode in
             switch mode {
             case .playlist: return true
             case .schedule: return enabledFeatures.contains(.scheduleAutomation)
@@ -148,13 +176,14 @@ public struct FeatureCatalog: Sendable, Equatable {
     public func isEnabled(_ feature: ProductFeature) -> Bool {
         capabilities.enabledFeatures.contains(feature)
     }
+
+    public static let unconfigured = FeatureCatalog(capabilities: .unconfigured)
 }
 
 private struct FeatureCatalogKey: EnvironmentKey {
-    /// Default to the full Pro catalog so existing views that have not yet
-    /// been migrated to read the environment value preserve current
-    /// behaviour. Phase 6 Lite shell injects `.lite` at the App level.
-    static let defaultValue = FeatureCatalog(capabilities: .pro)
+    /// Missing SwiftUI injection is a configuration error, not permission to
+    /// expose Pro functionality. Shipping roots inject Lite or Pro explicitly.
+    static let defaultValue = FeatureCatalog.unconfigured
 }
 
 extension EnvironmentValues {

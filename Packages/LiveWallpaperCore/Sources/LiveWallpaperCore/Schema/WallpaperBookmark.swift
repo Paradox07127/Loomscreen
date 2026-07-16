@@ -41,6 +41,62 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
 
     public var wallpaperType: WallpaperType { content.wallpaperType }
 
+    /// CAS replacement for a local HTML grant owned by this saved shortcut.
+    /// The bookmark id identifies the intended shortcut while the original
+    /// Data protects a newer edit/re-grant from a delayed stale refresh. WPE
+    /// web shortcuts duplicate the same grant in `wpeOrigin`, so both copies
+    /// advance together.
+    public func replacingHTMLBookmark(
+        id bookmarkID: UUID,
+        matching original: Data,
+        with refreshed: Data
+    ) -> WallpaperBookmark? {
+        guard id == bookmarkID,
+              case .html(let source, let config) = content,
+              let updatedSource = source.replacingLocalBookmark(
+                matching: original,
+                with: refreshed
+              ) else { return nil }
+
+        var copy = self
+        copy.content = .html(source: updatedSource, config: config)
+        if let origin = copy.wpeOrigin,
+           let updatedOrigin = origin.replacingSourceFolderBookmark(
+            matching: original,
+            with: refreshed
+           ) {
+            copy.wpeOrigin = updatedOrigin
+        }
+        return copy
+    }
+
+    /// CAS replacement for a saved WPE shortcut's source-folder owner. A web
+    /// shortcut may duplicate that grant in its HTML content, so matching
+    /// copies advance together while unrelated content remains untouched.
+    public func replacingWPEOriginBookmark(
+        workshopID: String,
+        matching original: Data,
+        with refreshed: Data
+    ) -> WallpaperBookmark? {
+        guard let origin = wpeOrigin,
+              origin.workshopID == workshopID,
+              let updatedOrigin = origin.replacingSourceFolderBookmark(
+                matching: original,
+                with: refreshed
+              ) else { return nil }
+
+        var copy = self
+        copy.wpeOrigin = updatedOrigin
+        if case .html(let source, let config) = copy.content,
+           let updatedSource = source.replacingLocalBookmark(
+            matching: original,
+            with: refreshed
+           ) {
+            copy.content = .html(source: updatedSource, config: config)
+        }
+        return copy
+    }
+
     public var iconName: String {
         switch content {
         case .video: return "play.rectangle"

@@ -136,7 +136,7 @@ struct MonitorWidgetControlBar: View {
 
     private var removeButton: some View {
         Button {
-            model.removeWidget(placement.id)
+            model.perform(.delete(id: placement.id))
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 12, weight: .medium))
@@ -339,7 +339,7 @@ struct MonitorPanelSizeReader: ViewModifier {
 /// (native controls — size picker, kind-specific options, remove) wrapped in a
 /// dark material so it stays legible floating over the wallpaper/overlay. Edits
 /// route back through the interaction model (`updateWidget` handles the resize
-/// refit; `removeWidget` handles removal). Forced dark so the native controls
+/// refit; the placement command handles removal). Forced dark so the native controls
 /// render light-on-dark regardless of the desktop appearance. Width is fixed
 /// (`cardWidth`, matching the popover's own frame) so the board can place the
 /// card deterministically; content taller than `maxHeight` scrolls internally.
@@ -360,7 +360,7 @@ struct MonitorWidgetSettingsCard: View {
             MonitorWidgetSettingsPopover(
                 placement: placement,
                 onUpdate: { model.updateWidget($0) },
-                onRemove: { model.removeWidget(placement.id) }
+                onRemove: { model.perform(.delete(id: placement.id)) }
             )
             .modifier(MonitorPanelSizeReader(size: $contentSize))
         }
@@ -376,6 +376,25 @@ struct MonitorWidgetSettingsCard: View {
         )
         .shadow(color: Color.black.opacity(0.5), radius: 24, x: 0, y: 14)
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Destructive accessibility actions are exposed only while the board is in
+/// edit mode. The action carries the tile identity directly, so VoiceOver can
+/// never delete a different selected sibling.
+struct MonitorPlacementAccessibilityActions: ViewModifier {
+    @ObservedObject var model: MonitorBoardInteractionModel
+    let placementID: UUID
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if model.isEditing {
+            content.accessibilityAction(named: Text(MonitorBoardStrings.removeWidget)) {
+                model.perform(.delete(id: placementID))
+            }
+        } else {
+            content
+        }
     }
 }
 

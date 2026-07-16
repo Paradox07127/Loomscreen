@@ -16,6 +16,25 @@ import Testing
 @MainActor
 struct OnboardingMultiScreenTests {
 
+    @Test("Unsupported import recovery copy follows the catalog's scene capability")
+    func unsupportedImportCopyFollowsSceneCapability() {
+        let liteCatalog = FeatureCatalog(capabilities: .lite)
+        let proCatalog = FeatureCatalog(capabilities: .pro)
+        let liteSceneCapable = OnboardingImportCopy.sceneCapable(in: liteCatalog)
+        let proSceneCapable = OnboardingImportCopy.sceneCapable(in: proCatalog)
+        let lite = OnboardingImportCopy.unsupportedFileTypeVariant(sceneCapable: liteSceneCapable)
+        let pro = OnboardingImportCopy.unsupportedFileTypeVariant(sceneCapable: proSceneCapable)
+        let liteMessage = OnboardingImportCopy.unsupportedFileTypeMessage(sceneCapable: liteSceneCapable)
+        let proMessage = OnboardingImportCopy.unsupportedFileTypeMessage(sceneCapable: proSceneCapable)
+
+        #expect(!liteSceneCapable)
+        #expect(proSceneCapable)
+        #expect(lite == .videoAndWeb)
+        #expect(pro == .videoWebAndScene)
+        #expect(liteMessage == LocalizedStringResource("That file type isn't supported. Pick a video or web page."))
+        #expect(proMessage == LocalizedStringResource("That file type isn't supported. Pick a video, web page, or scene."))
+    }
+
     // MARK: - ScreenConfiguration cloning
 
     @Test("Cloning a video configuration onto another screen ID preserves every field")
@@ -141,7 +160,8 @@ struct OnboardingMultiScreenTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry(screens: [screen])
+            displayRegistry: FakeDisplayRegistry(screens: [screen]),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
 
         let countBefore = SettingsManager.shared.loadConfigurations().count

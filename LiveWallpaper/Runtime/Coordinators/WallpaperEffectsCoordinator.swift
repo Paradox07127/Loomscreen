@@ -21,6 +21,7 @@ final class WallpaperEffectsCoordinator {
     /// short-circuits when its captured generation is stale, so re-registering
     /// does not cascade into stacked callbacks.
     private var weatherTrackingGeneration: UInt64 = 0
+    private(set) var isShutdown = false
 
     init(
         weatherService: WeatherReactiveService = WeatherReactiveService(),
@@ -43,6 +44,7 @@ final class WallpaperEffectsCoordinator {
     // MARK: - Public API (called from ScreenManager facade)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
+        guard !isShutdown else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig != effectConfig else { return }
         config.effectConfig = effectConfig
@@ -51,6 +53,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
+        guard !isShutdown else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.particleEffect != effect else { return }
         config.particleEffect = effect
@@ -59,6 +62,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func updateParticleDensity(_ density: Double, for screen: Screen) {
+        guard !isShutdown else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let clamped = min(max(density, 0.2), 3.0)
         guard abs(clamped - config.effectConfig.particleDensity) > 0.001 else { return }
@@ -68,6 +72,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
+        guard !isShutdown else { return }
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig.weatherReactive != enabled else { return }
         config.effectConfig.weatherReactive = enabled
@@ -83,6 +88,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func applyWeatherEffects(for screen: Screen) {
+        guard !isShutdown else { return }
         guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig.weatherReactive else { return }
 
@@ -106,11 +112,23 @@ final class WallpaperEffectsCoordinator {
     }
 
     func startWeatherMonitoring() {
+        guard !isShutdown else { return }
         observeWeatherChanges()
         refreshWeatherMonitoringState()
     }
 
+    func shutdown() {
+        guard !isShutdown else { return }
+        isShutdown = true
+        weatherTrackingGeneration &+= 1
+        weatherService.shutdown()
+        for screen in screensProvider() {
+            videoEffectsApplier.cancelInflight(for: screen.id)
+        }
+    }
+
     func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
+        guard !isShutdown else { return }
         guard let player = screen.videoPlayer else {
             Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
             return
@@ -139,6 +157,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     private func refreshWeatherMonitoringState() {
+        guard !isShutdown else { return }
         let activeScreens = screensProvider()
         let activeScreenIDs = Set(activeScreens.map(\.id))
         let configurations = activeScreenIDs.compactMap { configurationStore.get(for: $0) }
@@ -150,6 +169,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     private func observeWeatherChanges() {
+        guard !isShutdown else { return }
         weatherTrackingGeneration &+= 1
         let generation = weatherTrackingGeneration
         withObservationTracking {
@@ -158,6 +178,7 @@ final class WallpaperEffectsCoordinator {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self,
+                      !self.isShutdown,
                       self.weatherTrackingGeneration == generation else { return }
                 for screen in self.screensProvider() {
                     guard let config = self.configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),

@@ -8,15 +8,23 @@ DERIVED_DATA="${DERIVED_DATA:-/tmp/LiveWallpaperReleaseCandidateCheck}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
+BUILD_SETTINGS_LOG="$(mktemp -t livewallpaper-release-build-settings.XXXXXX)"
+LITE_BUILD_LOG="$(mktemp -t livewallpaper-lite-build.XXXXXX)"
+trap 'rm -f "$BUILD_SETTINGS_LOG" "$LITE_BUILD_LOG"' EXIT
+
+echo "== Entitlement source baseline =="
+scripts/check_entitlements.sh --sku pro --source
+scripts/check_entitlements.sh --sku lite --source
+
 echo "== Release build settings =="
 xcodebuild -showBuildSettings \
   -project LiveWallpaper.xcodeproj \
   -scheme LiveWallpaper \
   -configuration Release \
-  | tee /tmp/livewallpaper-release-build-settings.txt \
-  | rg "PRODUCT_BUNDLE_IDENTIFIER|MARKETING_VERSION|CURRENT_PROJECT_VERSION|MACOSX_DEPLOYMENT_TARGET|ENABLE_HARDENED_RUNTIME|CODE_SIGN|DEVELOPMENT_TEAM|ENABLE_APP_SANDBOX|ENABLE_USER_SELECTED_FILES|ENTITLEMENTS"
+  | tee "$BUILD_SETTINGS_LOG" \
+  | grep -E "PRODUCT_BUNDLE_IDENTIFIER|MARKETING_VERSION|CURRENT_PROJECT_VERSION|MACOSX_DEPLOYMENT_TARGET|ENABLE_HARDENED_RUNTIME|CODE_SIGN|DEVELOPMENT_TEAM|ENABLE_APP_SANDBOX|ENABLE_USER_SELECTED_FILES|ENTITLEMENTS"
 
-if ! rg -q "ENABLE_HARDENED_RUNTIME = YES" /tmp/livewallpaper-release-build-settings.txt; then
+if ! grep -q "ENABLE_HARDENED_RUNTIME = YES" "$BUILD_SETTINGS_LOG"; then
   echo "ERROR: Release Hardened Runtime is not enabled." >&2
   exit 1
 fi
@@ -30,7 +38,7 @@ fi
 plutil -lint "$PRIVACY_MANIFEST"
 plutil -extract NSPrivacyAccessedAPITypes raw -o - "$PRIVACY_MANIFEST" >/dev/null
 
-if ! security find-identity -p codesigning -v | rg -q '"Developer ID Application:'; then
+if ! security find-identity -p codesigning -v | grep -q '"Developer ID Application:'; then
   if [[ "${REQUIRE_DEVELOPER_ID:-0}" == "1" ]]; then
     echo "ERROR: No Developer ID Application signing identity found on this Mac." >&2
     exit 1
@@ -85,9 +93,9 @@ xcodebuild build \
   -destination 'platform=macOS' \
   -derivedDataPath "$DERIVED_DATA_LITE" \
   SWIFT_EMIT_LOC_STRINGS=NO \
-  > /tmp/livewallpaper-lite-build.log 2>&1 || {
+  > "$LITE_BUILD_LOG" 2>&1 || {
     echo "ERROR: LiveWallpaperLite build failed. Tail of log:" >&2
-    tail -40 /tmp/livewallpaper-lite-build.log >&2
+    tail -40 "$LITE_BUILD_LOG" >&2
     exit 1
   }
 
@@ -97,7 +105,7 @@ xcodebuild build \
 # proven stable.
 LITE_BIN="$(find "$DERIVED_DATA_LITE/Build/Products" -type f -path '*/Contents/MacOS/*' 2>/dev/null | head -1)"
 if [[ -n "$LITE_BIN" ]]; then
-  if nm "$LITE_BIN" 2>/dev/null | rg -q 'WPEMetalSceneRenderer|WPEMetalRenderExecutor'; then
+  if nm "$LITE_BIN" 2>/dev/null | grep -Eq 'WPEMetalSceneRenderer|WPEMetalRenderExecutor'; then
     echo "WARNING: Lite binary contains Pro-only WPE renderer symbols — check #if !LITE_BUILD gating." >&2
   else
     echo "  ✓ Lite binary free of Pro-only WPE renderer symbols"

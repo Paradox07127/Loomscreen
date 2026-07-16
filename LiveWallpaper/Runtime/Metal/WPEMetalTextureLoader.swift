@@ -47,6 +47,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         label: String,
         colorSpace: WPEMetalColorSpace = .sRGB
     ) async throws -> MTLTexture {
+        try Task.checkCancellation()
         if payload.videoPayload != nil {
             throw WPEMetalTextureLoaderError.malformedPayload(
                 "video payload must be routed through WPEVideoTextureSource"
@@ -105,6 +106,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         var frames: [WPETexAnimatedFrame] = []
         frames.reserveCapacity(animation.frames.count)
         for (frameIndex, frame) in animation.frames.enumerated() {
+            try Task.checkCancellation()
             guard let atlasMip = frame.mipmaps.first else {
                 throw WPEMetalTextureLoaderError.malformedPayload(
                     "animation frame \(frameIndex) is missing its source atlas mipmap"
@@ -144,6 +146,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
         label: String,
         colorSpace: WPEMetalColorSpace = .sRGB
     ) async throws -> MTLTexture {
+        try Task.checkCancellation()
         let device = self.device
         return try await uploadQueue.perform {
             let loader = MTKTextureLoader(device: device)

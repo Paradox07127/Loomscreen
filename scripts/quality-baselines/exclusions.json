@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "wpe-metal-shader-dispatcher",
+      "owner": "wpe-rendering",
+      "reason": "Existing shader-dispatch lint and format debt needs a dedicated behavior-preserving cleanup after renderer characterization.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/Runtime/Metal/WPEMetalShaderDispatcher.swift"
+      ]
+    },
+    {
+      "id": "html-wallpaper-runtime",
+      "owner": "video-web-runtime",
+      "reason": "Existing WebKit runtime debt is isolated until a dedicated cleanup can retain navigation, trust, and lifecycle behavior.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/VideoPlayback/HTMLWallpaperView.swift"
+      ]
+    },
+    {
+      "id": "wpe-metal-scene-renderer",
+      "owner": "wpe-rendering",
+      "reason": "The renderer split intentionally preserved inherited violations; cleanup follows corpus-backed renderer characterization.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+LivePoster.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Load.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Debug.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Text.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Particles.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Scripts.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Lifecycle.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Textures.swift"
+      ]
+    },
+    {
+      "id": "wpe-metal-render-executor",
+      "owner": "wpe-rendering",
+      "reason": "The executor split intentionally preserved inherited violations; cleanup must remain separate from frame-path behavior changes.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutorTypes.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Text.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Particles.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Present.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Targets.swift",
+        "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor+Puppet.swift"
+      ]
+    },
+    {
+      "id": "screen-manager",
+      "owner": "app-runtime",
+      "reason": "The ownership split preserved existing violations; cleanup follows lifecycle characterization so formatting cannot obscure state changes.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/App/ScreenManager.swift",
+        "LiveWallpaper/App/ScreenManagerTypes.swift",
+        "LiveWallpaper/App/ScreenManager+Observers.swift",
+        "LiveWallpaper/App/ScreenManager+Screens.swift",
+        "LiveWallpaper/App/ScreenManager+Wallpaper.swift",
+        "LiveWallpaper/App/ScreenManager+Monitor.swift",
+        "LiveWallpaper/App/ScreenManager+Automation.swift"
+      ]
+    },
+    {
+      "id": "wpe-shader-transpiler",
+      "owner": "wpe-rendering",
+      "reason": "The transpiler split preserved parser-sensitive violations; cleanup requires shader corpus equivalence and a separate review.",
+      "expires_on": "2026-10-31",
+      "paths": [
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Preprocessor.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Main.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Substitutions.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Helpers.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspiler+Render.swift",
+        "LiveWallpaper/Runtime/Metal/WPEShaderTranspilerTypes.swift"
+      ]
+    }
+  ]
+}

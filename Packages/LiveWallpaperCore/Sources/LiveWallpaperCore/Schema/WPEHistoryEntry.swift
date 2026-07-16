@@ -20,4 +20,24 @@ public struct WPEHistoryEntry: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var id: String { origin.workshopID }
+
+    /// CAS replacement for the history row's persistent WPE source owner.
+    /// Other history metadata is retained exactly.
+    public func replacingSourceFolderBookmark(
+        workshopID: String,
+        matching original: Data,
+        with refreshed: Data
+    ) -> WPEHistoryEntry? {
+        guard origin.workshopID == workshopID,
+              let updatedOrigin = origin.replacingSourceFolderBookmark(
+                matching: original,
+                with: refreshed
+              ) else { return nil }
+        return WPEHistoryEntry(
+            origin: updatedOrigin,
+            importedAt: importedAt,
+            lastUsedAt: lastUsedAt,
+            sizeBytes: sizeBytes
+        )
+    }
 }

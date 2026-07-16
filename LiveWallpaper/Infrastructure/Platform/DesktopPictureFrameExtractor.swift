@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import CoreGraphics
+import LiveWallpaperCore
 
 @MainActor
 enum DesktopPictureFrameExtractor {

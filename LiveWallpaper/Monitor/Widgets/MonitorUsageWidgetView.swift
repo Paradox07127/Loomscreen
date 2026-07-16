@@ -161,7 +161,7 @@ struct MonitorUsageWidgetView: View {
             ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                 VStack(spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text(verbatim: Self.wholePercent(pct))
+                        Text(verbatim: Self.wholePercentValue(pct))
                             .font(MonitorDesign.heroFont(size: scale.hero * hubHeroScale))
                             .monospacedDigit()
                             .foregroundStyle(MonitorDesign.inkPrimary)
@@ -274,7 +274,7 @@ struct MonitorUsageWidgetView: View {
                     ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                         VStack(spacing: 0) {
                             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                                Text(verbatim: Self.wholePercent(pct))
+                                Text(verbatim: Self.wholePercentValue(pct))
                                     .font(MonitorDesign.heroFont(size: scale.hero * 0.62))
                                     .monospacedDigit()
                                     .foregroundStyle(MonitorDesign.inkPrimary)
@@ -517,7 +517,7 @@ struct MonitorUsageWidgetView: View {
                 ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                     VStack(spacing: 0) {
                         HStack(alignment: .firstTextBaseline, spacing: 0) {
-                            Text(verbatim: Self.wholePercent(pct))
+                            Text(verbatim: Self.wholePercentValue(pct))
                                 .font(MonitorDesign.heroFont(size: scale.hero * 0.66))
                                 .monospacedDigit()
                                 .foregroundStyle(MonitorDesign.inkPrimary)
@@ -918,7 +918,12 @@ struct MonitorUsageWidgetView: View {
 
     /// Whole-percent string from a 0…1 fraction ("58%").
     nonisolated static func wholePercent(_ fraction: Double) -> String {
-        "\(Int((clampUnit(fraction) * 100).rounded()))%"
+        "\(wholePercentValue(fraction))%"
+    }
+
+    /// Numeric portion used when the percent glyph has its own visual style.
+    nonisolated static func wholePercentValue(_ fraction: Double) -> String {
+        "\(Int((clampUnit(fraction) * 100).rounded()))"
     }
 
     /// True when `limitsStale == true` (nil / false both mean fresh).

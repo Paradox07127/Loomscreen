@@ -4,6 +4,8 @@ import Combine
 
 @MainActor
 final class WallpaperVideoPlayer {
+    typealias AssetLoaderOverride = @MainActor (URL) async throws -> AVURLAsset
+
     // MARK: - Notifications
 
     nonisolated static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
@@ -68,16 +70,24 @@ final class WallpaperVideoPlayer {
     /// engaged. `AVAssetResourceLoader.setDelegate(_:queue:)` only keeps a
     /// weak reference, so we have to own it here.
     private var inMemoryAssetLoader: InMemoryVideoAssetLoader?
-    private var currentVideoComposition: AVVideoComposition?
+    private(set) var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
+    /// The asset whose async property loads are currently outstanding. Swift
+    /// task cancellation is cooperative, so cleanup also asks AVFoundation to
+    /// cancel its own pending property loads before releasing the reference.
+    private var currentLoadingAsset: AVAsset?
+    private var currentFrameRateLoadingAsset: AVAsset?
     private var accessToken = false
     private let initialFrame: CGRect
-    /// Screen used to cap decode resolution to the wallpaper framebuffer's
-    /// physical pixels. Resolved once at player creation.
-    /// TODO: refresh when a wallpaper window moves across displays.
-    private var attachedScreen: NSScreen?
+    private let assetLoaderOverride: AssetLoaderOverride?
     private var fitMode: VideoFitMode = .aspectFill
     private var hasRequestedPlaybackStart = false
+    /// One-way resource-lifecycle latch. Generation checks pair with task
+    /// cancellation because detached mmap work and AVFoundation property loads
+    /// may complete after their parent task was cancelled.
+    private(set) var isCleanedUp = false
+    private var lifecycleGeneration: UInt64 = 0
+    private var frameRateGeneration: UInt64 = 0
     /// Last applied colorspace preference. Re-applied in
     /// `configurePlaybackComponents` so a preference set before the asset
     /// loaded survives the late `VideoContainerView` creation path.
@@ -86,6 +96,7 @@ final class WallpaperVideoPlayer {
     /// Read by composition writers (frame-rate cap, video effects) so they
     /// stand down when Rec.709 tone-mapping owns the `videoComposition` slot.
     var isForceSDRActive: Bool { lastColorSpacePreference == .forceSDR }
+    var hasInstalledPlaybackWindow: Bool { window != nil }
     
     // MARK: - Initialization
     init(
@@ -93,13 +104,15 @@ final class WallpaperVideoPlayer {
         frame: CGRect,
         fitMode: VideoFitMode = .aspectFill,
         packageEntryName: String? = nil,
-        loadImmediately: Bool = true
+        loadImmediately: Bool = true,
+        assetLoaderOverride: AssetLoaderOverride? = nil
     ) {
         Logger.functionStart(category: .videoPlayer)
         self.initialFrame = frame
         self.fitMode = fitMode
         self.videoURL = url
         self.packageEntryName = packageEntryName
+        self.assetLoaderOverride = assetLoaderOverride
         
         guard !frame.isEmpty else {
             let error = NSError(
@@ -124,6 +137,9 @@ final class WallpaperVideoPlayer {
     
     // MARK: - Video Player Setup
     private func setupPlayer(with url: URL) {
+        guard !isCleanedUp else { return }
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
         Logger.debug("Setting up player with URL: \(url.lastPathComponent)", category: .videoPlayer)
         accessToken = url.startAccessingSecurityScopedResource()
         if !accessToken {
@@ -147,9 +163,31 @@ final class WallpaperVideoPlayer {
 
         loadingTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if self.lifecycleGeneration == generation {
+                    self.currentLoadingAsset = nil
+                    self.loadingTask = nil
+                }
+            }
 
             do {
                 let timer = PerformanceTimer(description: "Loading video asset", category: .videoPlayer)
+
+                if let assetLoaderOverride = self.assetLoaderOverride {
+                    let asset = try await assetLoaderOverride(url)
+                    try self.ensureLifecycleActive(generation)
+                    self.currentLoadingAsset = asset
+                    try await self.installPreparedPlayback(
+                        asset: asset,
+                        loader: nil,
+                        bufferDuration: Self.inMemoryBufferDuration,
+                        generation: generation,
+                        timer: timer,
+                        url: url
+                    )
+                    self.finishLoading(asset: asset, generation: generation)
+                    return
+                }
 
                 // In-place packaged video: build a custom-scheme asset backed by
                 // a resource loader windowed into the scene.pkg. The same asset
@@ -161,7 +199,7 @@ final class WallpaperVideoPlayer {
                     let result = try await Task.detached(priority: .utility) {
                         try InMemoryVideoAssetLoader.loadPackageEntry(packageURL: url, entryName: entryName)
                     }.value
-                    try Task.checkCancellation()
+                    try self.ensureLifecycleActive(generation)
                     let memAsset = AVURLAsset(url: result.customURL, options: Self.inMemoryAssetOptions)
                     memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
                     asset = memAsset
@@ -171,32 +209,39 @@ final class WallpaperVideoPlayer {
                     packagedLoader = nil
                 }
 
-                try Task.checkCancellation()
+                try self.ensureLifecycleActive(generation)
+                self.currentLoadingAsset = asset
 
                 let isPlayable = try await asset.load(.isPlayable)
+                try self.ensureLifecycleActive(generation)
 
                 guard isPlayable else {
                     self.stopAccessingResource()
                     Logger.error("Video is not playable: \(url.lastPathComponent)", category: .videoPlayer)
-                    await MainActor.run { [weak self] in
-                        self?.reportError(.mediaNotPlayable(url, code: nil))
-                    }
+                    self.reportError(.mediaNotPlayable(url, code: nil))
                     return
                 }
 
-                try Task.checkCancellation()
-
-                if let videoTrack = try await asset.loadTracks(withMediaType: .video).first {
+                let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                try self.ensureLifecycleActive(generation)
+                if let videoTrack = videoTracks.first {
                     let frameRate = try await videoTrack.load(.nominalFrameRate)
-                    await MainActor.run {
-                        self.videoFrameRate = Double(frameRate)
-                        Logger.debug("Video frame rate: \(self.videoFrameRate) FPS", category: .videoPlayer)
-                    }
+                    try self.ensureLifecycleActive(generation)
+                    self.videoFrameRate = Double(frameRate)
+                    Logger.debug("Video frame rate: \(self.videoFrameRate) FPS", category: .videoPlayer)
                 }
 
-                try Task.checkCancellation()
-
-                let cmDuration = try? await asset.load(.duration)
+                let cmDuration: CMTime?
+                do {
+                    let loadedDuration = try await asset.load(.duration)
+                    try self.ensureLifecycleActive(generation)
+                    cmDuration = loadedDuration
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    try self.ensureLifecycleActive(generation)
+                    cmDuration = nil
+                }
                 let durationSeconds = Self.usableDuration(from: cmDuration)
 
                 let activeAsset: AVURLAsset
@@ -235,7 +280,7 @@ final class WallpaperVideoPlayer {
                             let result = try await Task.detached(priority: .utility) {
                                 try InMemoryVideoAssetLoader.load(from: url)
                             }.value
-                            try Task.checkCancellation()
+                            try self.ensureLifecycleActive(generation)
                             let memAsset = AVURLAsset(url: result.customURL, options: Self.inMemoryAssetOptions)
                             memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
                             activeAsset = memAsset
@@ -244,7 +289,10 @@ final class WallpaperVideoPlayer {
                                 "Loaded \(fileSize / (1024 * 1024)) MB video into RAM — 0 physical reads expected after warmup",
                                 category: .videoPlayer
                             )
+                        } catch is CancellationError {
+                            throw CancellationError()
                         } catch {
+                            try self.ensureLifecycleActive(generation)
                             Logger.info(
                                 "In-memory load failed (\(error.localizedDescription)) — falling back to streaming",
                                 category: .videoPlayer
@@ -265,38 +313,75 @@ final class WallpaperVideoPlayer {
                 }
 
                 timer.checkpoint("Properties loaded")
-
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.inMemoryAssetLoader = loader
-                    self.configurePlaybackComponents(with: activeAsset, bufferDuration: bufferDuration)
-                    timer.checkpoint("Playback configured")
-                }
-
-                do {
-                    // Probe HDR/codec from the active asset: for packaged /
-                    // in-memory videos there is no plain file URL, and the
-                    // windowed custom-scheme asset answers track queries fine.
-                    try await self.detectFormatInfoIfNeeded(asset: activeAsset)
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    Logger.warning("Unable to detect video format: \(error.localizedDescription)", category: .videoPlayer)
-                }
-
-                Logger.debug("Video loaded: \(url.lastPathComponent)", category: .videoPlayer)
+                try await self.installPreparedPlayback(
+                    asset: activeAsset,
+                    loader: loader,
+                    bufferDuration: bufferDuration,
+                    generation: generation,
+                    timer: timer,
+                    url: url
+                )
+                self.finishLoading(asset: activeAsset, generation: generation)
             } catch is CancellationError {
                 Logger.debug("Video loading task was cancelled", category: .videoPlayer)
                 self.stopAccessingResource()
             } catch {
                 self.stopAccessingResource()
+                guard self.isLifecycleActive(generation) else { return }
                 Logger.error("Error loading video: \(error.localizedDescription)", category: .videoPlayer)
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    self.reportError(self.makeRuntimeError(from: error, url: url))
-                }
+                self.reportError(self.makeRuntimeError(from: error, url: url))
             }
+
         }
+    }
+
+    private func installPreparedPlayback(
+        asset: AVURLAsset,
+        loader: InMemoryVideoAssetLoader?,
+        bufferDuration: TimeInterval,
+        generation: UInt64,
+        timer: PerformanceTimer,
+        url: URL
+    ) async throws {
+        try ensureLifecycleActive(generation)
+        currentLoadingAsset = asset
+        inMemoryAssetLoader = loader
+        configurePlaybackComponents(
+            with: asset,
+            bufferDuration: bufferDuration,
+            generation: generation
+        )
+        try ensureLifecycleActive(generation)
+        timer.checkpoint("Playback configured")
+
+        do {
+            // Probe HDR/codec from the active asset: for packaged / in-memory
+            // videos there is no plain file URL, and the custom-scheme asset
+            // answers track queries directly.
+            try await detectFormatInfoIfNeeded(asset: asset, generation: generation)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try ensureLifecycleActive(generation)
+            Logger.warning("Unable to detect video format: \(error.localizedDescription)", category: .videoPlayer)
+        }
+
+        try ensureLifecycleActive(generation)
+        Logger.debug("Video loaded: \(url.lastPathComponent)", category: .videoPlayer)
+    }
+
+    private func ensureLifecycleActive(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard isLifecycleActive(generation) else { throw CancellationError() }
+    }
+
+    private func isLifecycleActive(_ generation: UInt64) -> Bool {
+        !isCleanedUp && lifecycleGeneration == generation
+    }
+
+    private func finishLoading(asset: AVAsset, generation: UInt64) {
+        guard lifecycleGeneration == generation, currentLoadingAsset === asset else { return }
+        currentLoadingAsset = nil
     }
     
     /// Upper bound on `preferredForwardBufferDuration`. Above this we fall
@@ -390,8 +475,12 @@ final class WallpaperVideoPlayer {
         return 5
     }
 
-    private func configurePlaybackComponents(with asset: AVURLAsset, bufferDuration: TimeInterval) {
-        attachedScreen = Self.screen(matching: initialFrame)
+    private func configurePlaybackComponents(
+        with asset: AVURLAsset,
+        bufferDuration: TimeInterval,
+        generation: UInt64
+    ) {
+        guard isLifecycleActive(generation) else { return }
         let playerItem = AVPlayerItem(asset: asset)
 
         playerItem.preferredForwardBufferDuration = bufferDuration
@@ -405,7 +494,6 @@ final class WallpaperVideoPlayer {
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         Logger.debug("Forward buffer hint: \(String(format: "%.1f", bufferDuration))s", category: .videoPlayer)
 
-        Self.applyResolutionCap(to: playerItem, screen: attachedScreen)
         applyAudioPolicy(to: playerItem)
 
         let queuePlayer = AVQueuePlayer()
@@ -467,10 +555,10 @@ final class WallpaperVideoPlayer {
         setupPlayerReadyObserver()
     }
 
-    private func detectFormatInfoIfNeeded(asset: AVURLAsset) async throws {
+    private func detectFormatInfoIfNeeded(asset: AVURLAsset, generation: UInt64) async throws {
         guard formatInfo == nil else { return }
         let detected = try await PlayableVideoLoader.detectFormat(asset: asset)
-        try Task.checkCancellation()
+        try ensureLifecycleActive(generation)
         formatInfo = detected
         applyHDRPreferenceIfNeeded(for: detected)
     }
@@ -574,6 +662,7 @@ final class WallpaperVideoPlayer {
     // MARK: - Playback Controls
 
     func play() {
+        guard !isCleanedUp else { return }
         shouldAutoplayWhenReady = true
         guard let player = player else { return }
         guard !hasRequestedPlaybackStart, player.timeControlStatus != .playing else { return }
@@ -645,31 +734,6 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    /// AVFoundation never lets us pick the decoder backend (hardware vs.
-    /// software) directly — that decision lives in VideoToolbox. What we
-    /// CAN do is stop the decoder from chewing through 8K data when the
-    /// framebuffer is only 4K. Capping at the framebuffer's physical
-    /// pixels is the information ceiling: anything above it would be
-    /// downsampled before display, so the cap saves GPU + memory without
-    /// any visible loss.
-    static func applyResolutionCap(to playerItem: AVPlayerItem, screen: NSScreen?) {
-        guard let screen else {
-            // No screen context yet — leave the defaults so AVFoundation
-            // picks something sane on the first frame. The cap will be
-            // re-applied once `attachedScreen` resolves.
-            return
-        }
-        playerItem.preferredMaximumResolution = CGSize(
-            width: screen.frame.width * screen.backingScaleFactor,
-            height: screen.frame.height * screen.backingScaleFactor
-        )
-        playerItem.preferredPeakBitRate = 0
-    }
-
-    private static func screen(matching frame: CGRect) -> NSScreen? {
-        NSScreen.screens.first { Self.areFramesEquivalent($0.frame, frame) }
-    }
-
     private static func clampedVolume(_ value: Double) -> Double {
         guard value.isFinite else { return 1.0 }
         return min(max(value, 0), 1)
@@ -699,6 +763,7 @@ final class WallpaperVideoPlayer {
     /// mutually exclusive with `setFrameRateLimit` (re-applying either
     /// replaces the active composition).
     func setVideoColorSpace(_ preference: VideoColorSpace) {
+        guard !isCleanedUp else { return }
         let previousPreference = lastColorSpacePreference
         lastColorSpacePreference = preference
         videoView?.applyColorSpacePreference(preference)
@@ -708,6 +773,8 @@ final class WallpaperVideoPlayer {
             // late completion can't race past the Rec.709 install.
             frameRateLimitTask?.cancel()
             frameRateLimitTask = nil
+            currentFrameRateLoadingAsset = nil
+            frameRateGeneration &+= 1
             installSDRComposition()
         } else if previousPreference == .forceSDR {
             // Drop the Rec.709 composition when the user picks a non-forceSDR
@@ -723,6 +790,7 @@ final class WallpaperVideoPlayer {
     }
 
     private func installSDRComposition() {
+        guard !isCleanedUp else { return }
         guard let templateItem = templatePlayerItem else {
             // No asset yet — the composition gets installed on the late path
             // by `configurePlaybackComponents`, which calls back into us via
@@ -767,7 +835,6 @@ final class WallpaperVideoPlayer {
             return
         }
 
-        // TODO P2: refresh attachedScreen and reapply decoder caps on cross-display moves.
         if let window = window, !Self.areFramesEquivalent(window.frame, newFrame) {
             Logger.debug("Updating video window frame to \(newFrame)", category: .videoPlayer)
             window.updateFrame(newFrame, animate: false)
@@ -809,6 +876,7 @@ final class WallpaperVideoPlayer {
     // MARK: - Video Composition
 
     func setVideoComposition(_ composition: AVVideoComposition?) {
+        guard !isCleanedUp else { return }
         currentVideoComposition = composition
         applyCurrentCompositionToQueueItems()
         installCurrentItemRebindIfNeeded()
@@ -830,9 +898,14 @@ final class WallpaperVideoPlayer {
 
     // MARK: - Frame Rate Limiting
     func setFrameRateLimit(_ framesPerSecond: Float) {
+        guard !isCleanedUp else { return }
         requestedFrameRateLimit = framesPerSecond
         frameRateLimitTask?.cancel()
         frameRateLimitTask = nil
+        currentFrameRateLoadingAsset = nil
+        frameRateGeneration &+= 1
+        let taskGeneration = frameRateGeneration
+        let lifecycleGeneration = lifecycleGeneration
 
         // Force SDR owns the active composition (Rec.709 tone-mapping). The
         // frame-rate cap also writes through `videoComposition`, so trying
@@ -857,11 +930,23 @@ final class WallpaperVideoPlayer {
         }
 
         let asset = playerItem.asset
+        currentFrameRateLoadingAsset = asset
         frameRateLimitTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.frameRateGeneration == taskGeneration,
+                   self.currentFrameRateLoadingAsset === asset {
+                    self.currentFrameRateLoadingAsset = nil
+                }
+                if self.frameRateGeneration == taskGeneration {
+                    self.frameRateLimitTask = nil
+                }
+            }
             do {
                 try Task.checkCancellation()
 
                 let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                try self.ensureLifecycleActive(lifecycleGeneration)
                 guard let videoTrack = videoTracks.first else {
                     Logger.warning("Cannot set frame rate limit: No video track found", category: .videoPlayer)
                     return
@@ -870,12 +955,13 @@ final class WallpaperVideoPlayer {
                 try Task.checkCancellation()
 
                 let naturalSize = try await videoTrack.load(.naturalSize)
+                try self.ensureLifecycleActive(lifecycleGeneration)
                 let transform = try await videoTrack.load(.preferredTransform)
-
-                try Task.checkCancellation()
+                try self.ensureLifecycleActive(lifecycleGeneration)
 
                 let targetFPS = framesPerSecond
                 let duration = try await asset.load(.duration)
+                try self.ensureLifecycleActive(lifecycleGeneration)
 
                 let displayed = naturalSize.applying(transform)
                 let renderSize = CGSize(width: abs(displayed.width), height: abs(displayed.height))
@@ -918,13 +1004,18 @@ final class WallpaperVideoPlayer {
                 await MainActor.run { [weak self] in
                     // Bail if Force SDR took ownership of the composition
                     // slot while we were building the frame-rate variant.
-                    guard let self, !self.isForceSDRActive else { return }
+                    guard let self,
+                          self.isLifecycleActive(lifecycleGeneration),
+                          self.frameRateGeneration == taskGeneration,
+                          !self.isForceSDRActive else { return }
                     self.setVideoComposition(composition)
                     Logger.info("Frame rate limit set to \(Int(targetFPS)) FPS", category: .videoPlayer)
                 }
             } catch is CancellationError {
                 Logger.debug("Frame rate limit task was cancelled", category: .videoPlayer)
             } catch {
+                guard self.isLifecycleActive(lifecycleGeneration),
+                      self.frameRateGeneration == taskGeneration else { return }
                 Logger.error("Failed to set frame rate limit: \(error.localizedDescription)", category: .videoPlayer)
             }
         }
@@ -943,7 +1034,9 @@ final class WallpaperVideoPlayer {
     }
 
     private func applyRequestedFrameRateLimitIfReady() {
-        guard requestedFrameRateLimit > 0, currentVideoComposition == nil else { return }
+        guard !isCleanedUp,
+              requestedFrameRateLimit > 0,
+              currentVideoComposition == nil else { return }
         setFrameRateLimit(requestedFrameRateLimit)
     }
 
@@ -972,8 +1065,16 @@ final class WallpaperVideoPlayer {
     
     // MARK: - Cleanup
     func cleanup() {
+        guard !isCleanedUp else { return }
+        isCleanedUp = true
+        lifecycleGeneration &+= 1
+        frameRateGeneration &+= 1
         Logger.debug("Cleaning up video player resources", category: .videoPlayer)
 
+        currentLoadingAsset?.cancelLoading()
+        currentLoadingAsset = nil
+        currentFrameRateLoadingAsset?.cancelLoading()
+        currentFrameRateLoadingAsset = nil
         loadingTask?.cancel()
         loadingTask = nil
         frameRateLimitTask?.cancel()

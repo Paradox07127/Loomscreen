@@ -381,7 +381,10 @@ extension WPEMetalSceneRenderer {
 
     /// Phase 2D-O: spin up the audio runtime and start playback if the scene declared sound objects.
     /// Phase 2D-N: build the WPETextRenderer + cache the parsed text object list.
-    func loadTextOverlays(from document: WPESceneDocument) {
+    func loadTextOverlays(
+        from document: WPESceneDocument,
+        scriptLoadToken: WPESceneScriptInstanceLimitToken
+    ) {
         textObjects = document.textObjects
         guard !textObjects.isEmpty else {
             textRenderer = nil
@@ -411,22 +414,27 @@ extension WPEMetalSceneRenderer {
             msdfTextRenderer = nil
         }
         textScriptInstances.removeAll(keepingCapacity: false)
-        let sharedState = sceneScriptSharedState ?? WPESharedScriptState()
+        guard isCurrentSceneScriptLoad(scriptLoadToken),
+              scriptLoadToken.allows(.setup) else { return }
+        let sharedState = sceneScriptSharedState
+            ?? WPESharedScriptState(sceneScriptLoadToken: scriptLoadToken)
         sceneScriptSharedState = sharedState
         for object in textObjects {
             guard let script = object.textScript else { continue }
             do {
-                let instance = try WPESceneScriptInstance(
+                guard let instance = try constructSceneScript(for: scriptLoadToken, {
+                    try WPESceneScriptInstance(
                     script: script,
                     initialValue: object.text,
                     scriptProperties: object.scriptProperties,
-                    shared: sharedState
-                )
+                    shared: sharedState)
+                }) else { return }
                 // Seeding happens in seedSceneScriptsAfterLoad() — AFTER the
                 // layer/script-host instances exist and have produced their
                 // first `shared` state, never here (WPE evaluation order).
                 textScriptInstances[object.id] = instance
             } catch {
+                _ = latchSceneScriptFailure(error, operation: .setup, token: scriptLoadToken)
                 Logger.warning("Scene \(descriptor.workshopID) [TextScript] init failed for \(object.name): \(error)", category: .wpeRender)
             }
         }

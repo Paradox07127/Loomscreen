@@ -27,62 +27,60 @@ struct MonitorSuspendEnergyTests {
     @Test("Pausing the only lease tears the pipeline down, sources and all")
     func pauseStopsPipeline() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.waitUntilSettled()
 
         // Live: the system source exists and is polling.
         #expect(await runtime.debugActiveSourceCount == 1)
         #expect(await runtime.debugActiveOptions != nil)
 
-        await runtime.setPaused(leaseID: lease, paused: true)
+        await lease.setPaused(true).value
 
         // The point of C1: not merely "no snapshots delivered" but "nothing is
         // sampling". No sources ⇒ no proc_pidinfo walk, no SMC IPC.
         #expect(await runtime.debugActiveSourceCount == 0)
         #expect(await runtime.debugActiveOptions == nil)
 
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
     @Test("A paused lease is kept, not released — resume stays cheap")
     func pauseRetainsLease() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
-        await runtime.setPaused(leaseID: lease, paused: true)
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.setPaused(true).value
 
         // Releasing instead would drop the resolved security-scoped grants and
         // make every resume pay to re-open them.
         #expect(await runtime.debugActiveLeaseCount == 1)
         #expect(await runtime.debugPausedLeaseCount == 1)
 
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
     @Test("Resuming a paused lease brings the pipeline back")
     func resumeRestartsPipeline() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
-        await runtime.setPaused(leaseID: lease, paused: true)
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.setPaused(true).value
         #expect(await runtime.debugActiveSourceCount == 0)
 
-        await runtime.setPaused(leaseID: lease, paused: false)
+        await lease.setPaused(false).value
         #expect(await runtime.debugActiveSourceCount == 1)
         #expect(await runtime.debugPausedLeaseCount == 0)
 
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
     @Test("One suspended display never starves another that is still visible")
     func pausedLeaseDoesNotStopOtherDisplays() async {
         let runtime = MonitorRuntime()
-        let suspended = UUID()
-        let visible = UUID()
-        await runtime.acquire(leaseID: suspended, options: quietSystemOptions(kinds: [.processes]))
-        await runtime.acquire(leaseID: visible, options: quietSystemOptions(kinds: [.network]))
+        let suspended = runtime.makeLeaseSlot().acquire(options: quietSystemOptions(kinds: [.processes]))
+        let visible = runtime.makeLeaseSlot().acquire(options: quietSystemOptions(kinds: [.network]))
+        await suspended.waitUntilSettled()
+        await visible.waitUntilSettled()
 
-        await runtime.setPaused(leaseID: suspended, paused: true)
+        await suspended.setPaused(true).value
 
         // Pipeline stays up for the visible screen — but the expensive walk the
         // suspended screen alone demanded is gone from the union.
@@ -91,52 +89,48 @@ struct MonitorSuspendEnergyTests {
         #expect(options?.activeWidgetKinds == [.network])
         #expect(MonitorRuntime.systemOptions(for: options?.activeWidgetKinds ?? []).topProcesses == false)
 
-        await runtime.release(leaseID: suspended)
-        await runtime.release(leaseID: visible)
+        await suspended.release().value
+        await visible.release().value
     }
 
     @Test("A live-config refresh does not silently un-pause a suspended lease")
     func updateOptionsPreservesPause() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
-        await runtime.setPaused(leaseID: lease, paused: true)
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.setPaused(true).value
 
         // A board edit on a suspended wallpaper round-trips through updateOptions;
         // it must not resurrect the samplers.
-        await runtime.updateOptions(leaseID: lease, options: quietSystemOptions(kinds: [.cpu]))
+        await lease.updateOptions(quietSystemOptions(kinds: [.cpu])).value
         #expect(await runtime.debugPausedLeaseCount == 1)
         #expect(await runtime.debugActiveSourceCount == 0)
         #expect(await runtime.debugActiveOptions == nil)
 
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
-    @Test("A pause that overtakes its own acquire is still applied")
-    func pauseBeforeAcquireIsHonoured() async {
+    @Test("An immediate pause is sequenced behind its own acquire")
+    func immediatePauseIsHonoured() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
 
-        // The view fires acquire and setPaused as separate unstructured tasks, so
-        // a wallpaper suspended right after creation can pause first. Dropping it
-        // would leave the lease sampling while suspended.
-        await runtime.setPaused(leaseID: lease, paused: true)
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
+        // No await between acquire and pause: the slot owns their order instead
+        // of relying on detached-task scheduling.
+        await lease.setPaused(true).value
 
         #expect(await runtime.debugPausedLeaseCount == 1)
         #expect(await runtime.debugActiveSourceCount == 0)
 
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
     @Test("Pausing an already-released lease cannot resurrect it")
     func pauseAfterReleaseDoesNotResurrect() async {
         let runtime = MonitorRuntime()
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
-        await runtime.release(leaseID: lease)
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.release().value
 
-        await runtime.setPaused(leaseID: lease, paused: false)
+        await lease.setPaused(false).value
         #expect(await runtime.debugActiveLeaseCount == 0)
         #expect(await runtime.debugActiveSourceCount == 0)
     }
@@ -144,24 +138,24 @@ struct MonitorSuspendEnergyTests {
     @Test("A pause trailing its own release cannot poison the next lease on that ID")
     func pauseAfterReleaseCannotPoisonReuse() async {
         let runtime = MonitorRuntime()
-        // The HUD and overlay controllers each reuse ONE process-constant lease
-        // ID across every show/hide, so re-acquiring a released ID is routine —
-        // this is the dual of the pause-before-acquire race, not a hypothetical.
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
-        await runtime.release(leaseID: lease)
+        // HUD and overlay keep one slot across every show/hide, so a new
+        // generation in the same slot is routine.
+        let slot = runtime.makeLeaseSlot()
+        let oldLease = slot.acquire(options: quietSystemOptions())
+        await oldLease.release().value
 
         // Issued while the lease was alive, landing after the release took it
         // away. Filing it as a pause-before-acquire would leave an entry nothing
         // ever clears, and the next lease on this ID would start suspended.
-        await runtime.setPaused(leaseID: lease, paused: true)
+        await oldLease.setPaused(true).value
 
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
+        let newLease = slot.acquire(options: quietSystemOptions())
+        await newLease.waitUntilSettled()
         #expect(await runtime.debugPausedLeaseCount == 0)
         #expect(await runtime.debugActiveSourceCount == 1)
         #expect(await runtime.debugActiveOptions != nil)
 
-        await runtime.release(leaseID: lease)
+        await newLease.release().value
     }
 
     // MARK: - Security-scoped grants follow the lease, not the pipeline
@@ -170,11 +164,11 @@ struct MonitorSuspendEnergyTests {
     func pauseKeepsGrantsOpen() async {
         let spy = GrantSpy()
         let runtime = MonitorRuntime(grants: spy.access)
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: agentOptions())
+        let lease = runtime.makeLeaseSlot().acquire(options: agentOptions())
+        await lease.waitUntilSettled()
         #expect(await spy.resolveCount == 1)
 
-        await runtime.setPaused(leaseID: lease, paused: true)
+        await lease.setPaused(true).value
 
         // The samplers are gone — that is C1, and it must stay true…
         #expect(await runtime.debugActiveOptions == nil)
@@ -184,13 +178,13 @@ struct MonitorSuspendEnergyTests {
         // stops here) is what made the "cheap resume" claim false.
         #expect(await spy.releaseCount == 0)
 
-        await runtime.setPaused(leaseID: lease, paused: false)
+        await lease.setPaused(false).value
         #expect(await runtime.debugActiveOptions != nil)
         // The resume resolved no bookmark: it reused the roots still held open.
         #expect(await spy.resolveCount == 1)
 
         // The LEASE ending — not the pipeline stopping — is what closes them.
-        await runtime.release(leaseID: lease)
+        await lease.release().value
         #expect(await spy.releaseCount == 1)
     }
 
@@ -198,15 +192,14 @@ struct MonitorSuspendEnergyTests {
     func releaseWhilePausedClosesGrants() async {
         let spy = GrantSpy()
         let runtime = MonitorRuntime(grants: spy.access)
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: agentOptions())
-        await runtime.setPaused(leaseID: lease, paused: true)
+        let lease = runtime.makeLeaseSlot().acquire(options: agentOptions())
+        await lease.setPaused(true).value
         #expect(await spy.releaseCount == 0)
 
         // The pipeline is already down, so this release leaves the merged target
         // at nil — unchanged. Reconciling grants only when the pipeline rebuilds
         // would leak the scopes past the last lease's life.
-        await runtime.release(leaseID: lease)
+        await lease.release().value
         #expect(await spy.releaseCount == 1)
     }
 
@@ -214,11 +207,11 @@ struct MonitorSuspendEnergyTests {
     func systemOnlyLeaseHoldsNoGrants() async {
         let spy = GrantSpy()
         let runtime = MonitorRuntime(grants: spy.access)
-        let lease = UUID()
-        await runtime.acquire(leaseID: lease, options: quietSystemOptions())
+        let lease = runtime.makeLeaseSlot().acquire(options: quietSystemOptions())
+        await lease.waitUntilSettled()
 
         #expect(await spy.resolveCount == 0)
-        await runtime.release(leaseID: lease)
+        await lease.release().value
     }
 
     // MARK: - The wallpaper view (C1 itself)

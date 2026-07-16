@@ -5,6 +5,7 @@ import Observation
 extension ScreenManager {
     // MARK: - Screen Management
     func refreshScreens(preserveRuntimeSessions: Bool = true) {
+        guard !isTerminating else { return }
         let newScreens = displayRegistry.currentScreens()
         Logger.screensDetected(newScreens.count)
 
@@ -148,7 +149,9 @@ extension ScreenManager {
         adaptiveFrameRateOcclusionThrottled[screen.id] = nil
         suspendedScreenIDs.remove(screen.id)
         bumpTransition(for: screen.id)
-        effectsCoordinator.cancelInflight(for: screen.id)
+        if effectsCoordinatorWasInitialized {
+            effectsCoordinator.cancelInflight(for: screen.id)
+        }
         transitionRegistry.cancelAssetReadiness(for: screen.id)
         setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
@@ -161,17 +164,47 @@ extension ScreenManager {
 
     /// App-termination teardown: synchronously tears down every render session
     /// (each `cleanup()` pauses its AVPlayer, releases its WKWebView / Metal
-    /// renderer, and closes its window) and parks SystemMonitor. Bounded — just
+    /// renderer, and closes its window) and stops lifecycle observers. Bounded — just
     /// a loop of in-process releases, no I/O — so it stays inside the terminate
     /// watchdog. Unlike `resetAllWallpaperSessions()` it skips config-cache
     /// clearing and async UI notifications, which are pointless mid-exit.
     func tearDownForTermination() {
+        guard !isTerminating else { return }
+
+        // The board debounces drag/resize edits. Flush that last user change
+        // while persistence is still admitted; this method is MainActor and
+        // does not suspend, so no other producer can enter before the latch is
+        // closed immediately below.
+        MonitorOverlayController.shared.teardownAll()
+        isTerminating = true
+        memoryPressureWatcher.stop()
+
+        // Close every producer of future ScreenManager work before releasing
+        // the current sessions. This invalidates queued Combine/Observation
+        // callbacks and the 60-second automation loop; in-flight video
+        // validations are invalidated below by each screen's transition bump.
+        cleanupTasks.removeAll()
+        fullScreenTrackingGeneration &+= 1
+        fullScreenDetector.setFallbackPollingEnabled(false)
+        fullScreenDetector.stop()
+        automationOrchestrator.stopMonitoring()
+        #if !LITE_BUILD
+        wpeImportTracker.invalidateForTermination()
+        #endif
+        if effectsCoordinatorWasInitialized {
+            effectsCoordinator.shutdown()
+        }
+        if featureCatalog.isEnabled(.lockScreenSnapshots) {
+            lockScreenSnapshotCoordinator.stop()
+        }
+
+        // The HUD owns a MonitorRuntime lease independently of wallpaper
+        // sessions. The terminating latch also makes any overlay reconcile task
+        // already queued for the next runloop a no-op.
+        MonitorHUDController.shared.shutdown()
+
         for screen in screens {
             releaseRuntimeSession(screen)
-        }
-        if systemMonitorActive {
-            systemMonitorActive = false
-            SystemMonitor.shared.stopMonitoring()
         }
     }
 
@@ -197,10 +230,12 @@ extension ScreenManager {
 
     /// Light launch-time pass: prunes configurations whose local resource bookmark is no longer resolvable.
     func pruneInvalidConfigurationsIfNeeded() {
+        guard !isTerminating else { return }
         persistence.pruneInvalidConfigurations()
     }
 
     func loadConfigurationForScreen(_ screen: Screen) {
+        guard !isTerminating else { return }
         if screen.videoPlayer != nil {
             if let cachedConfig = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) {
                 primeBookmarkDisplayNames(from: cachedConfig)
@@ -219,6 +254,7 @@ extension ScreenManager {
         configuration: ScreenConfiguration,
         preservingState: Bool
     ) {
+        guard !isTerminating else { return }
         // Master gate: when wallpapers are globally disabled we keep the
         // configuration persisted but do NOT build a live session. This avoids
         // allocating the renderer / scene runtime / decoded assets only to
@@ -258,34 +294,42 @@ extension ScreenManager {
     // MARK: - Configuration Update Helpers
 
     func saveConfiguration(_ configuration: ScreenConfiguration) {
+        guard !isTerminating else { return }
         persistence.save(configuration)
     }
 
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updatePlaybackSpeed(speed, for: screen)
     }
 
     func updateMuted(_ muted: Bool, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateMuted(muted, for: screen)
     }
 
     func updateVideoVolume(_ volume: Double, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateVideoVolume(volume, for: screen)
     }
 
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateVideoColorSpace(colorSpace, for: screen)
     }
 
     func updateSceneMouseInteraction(_ enabled: Bool, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateSceneMouseInteraction(enabled, for: screen)
     }
 
     func updateSceneClickCapture(_ enabled: Bool, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateSceneClickCapture(enabled, for: screen)
     }
 
     func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
+        guard !isTerminating else { return }
         guard var sourceConfiguration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               sourceConfiguration.wallpaperType == .video,
               sourceConfiguration.hasConfiguredVideoSource else { return }
@@ -346,18 +390,22 @@ extension ScreenManager {
     }
 
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateFitMode(fitMode, for: screen)
     }
 
     func updateSceneFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateSceneFitMode(fitMode, for: screen)
     }
 
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.updateFrameRateLimit(frameRateLimit, for: screen)
     }
 
     func applyFrameRateLimit(_ frameRateLimit: FrameRateLimit, to screen: Screen) {
+        guard !isTerminating else { return }
         playbackCoordinator.applyFrameRateLimit(frameRateLimit, to: screen)
     }
     
@@ -427,7 +475,8 @@ extension ScreenManager {
 
     /// Copies the active wallpaper + per-screen settings from `source` onto every other registered screen, restoring each runtime session so the new content shows immediately.
     func applyConfigurationToAllDisplays(from source: Screen) {
-        guard screens.count > 1,
+        guard !isTerminating,
+              screens.count > 1,
               let template = configurationStore.get(for: source.id, fingerprint: source.displayFingerprint) else { return }
 
         for target in screens where target.id != source.id {
@@ -445,6 +494,7 @@ extension ScreenManager {
     }
     
     func reloadAllScreens() {
+        guard !isTerminating else { return }
         Logger.notice("Reloading all screens", category: .screenManager)
 
         let removedScreenIDs = configurationStore.pruneInvalidResourceConfigurations(

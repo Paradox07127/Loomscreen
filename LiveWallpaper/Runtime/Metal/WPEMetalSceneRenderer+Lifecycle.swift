@@ -7,12 +7,16 @@ extension WPEMetalSceneRenderer {
     // MARK: - Reload & scene property patching
 
     func reload() async throws {
+        WPESceneScriptExecutionGovernor.processShared.forgetDomain(domainID: sceneScriptTraversalDomainID)
+        sceneScriptLoadState.retireCurrent()
+        didLoad = false
+        let staticTextureReloadDrain = staticTextureReloadTaskOwner.quiesce()
         loadGeneration &+= 1
+        await staticTextureReloadDrain.wait()
         finishAllPendingLivePosterCaptures(image: nil)
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = nil
         pendingAudioStartupDocument = nil
-        didLoad = false
         hasPresentedFrame = false
         outputTexture = nil
         renderGraph = nil
@@ -28,6 +32,7 @@ extension WPEMetalSceneRenderer {
         objectParentByID = [:]
         ownVisibilityByID = [:]
         liveTextVisibility = [:]
+        clearSceneScriptRuntimeState()
         loadDiagnostics = nil
         resolutionTracer.reset()
         releaseDynamicTextureSources()
@@ -38,24 +43,10 @@ extension WPEMetalSceneRenderer {
         textRenderer?.releaseAll()
         textRenderer = nil
         msdfTextRenderer = nil
-        textScriptInstances.removeAll(keepingCapacity: false)
-        layerScriptInstances.removeAll(keepingCapacity: false)
-        sceneScriptSharedState = nil
-        layerAlphaScriptInstances.removeAll(keepingCapacity: false)
-        dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
-        dynamicScaleScriptInstances.removeAll(keepingCapacity: false)
-        dynamicAnglesScriptInstances.removeAll(keepingCapacity: false)
         transformHostLocalTransformsByID.removeAll(keepingCapacity: false)
-        layerVideoSourceKey.removeAll(keepingCapacity: false)
-        layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
         onDemandVideoLoading.removeAll(keepingCapacity: false)
-        liveLayerAlpha.removeAll(keepingCapacity: false)
-        liveCreatedLayers.removeAll(keepingCapacity: false)
         createdLayerTemplatesByImagePath.removeAll(keepingCapacity: false)
-        introPhaseSource = nil
-        loopPhaseSource = nil
-        introLoopOffset = nil
         soundRuntime?.stop()
         soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
@@ -110,6 +101,9 @@ extension WPEMetalSceneRenderer {
             }
         }
 
+        let scriptFailureBeforePatch = sceneScriptLoadState.currentFailureReason
+        let presentationBeforePatch = captureSceneScriptPresentation()
+        beginSceneScriptVideoCommands()
         liveLayerVisibility = nextLayerVisibility
         liveTextVisibility = nextTextVisibility
 
@@ -159,6 +153,25 @@ extension WPEMetalSceneRenderer {
                     }
                 }
             }
+        }
+
+        if scriptFailureBeforePatch == nil {
+            let failureBeforeCommit = sceneScriptLoadState.currentFailureReason
+            let committed = failureBeforeCommit == nil
+                && finishCurrentSceneScriptVideoCommands()
+            if !committed {
+                discardSceneScriptVideoCommands()
+                invalidateIntroPhaseAlign()
+                restoreSceneScriptPresentation(presentationBeforePatch)
+                if let failure = failureBeforeCommit ?? sceneScriptLoadState.currentFailureReason {
+                    Logger.warning(
+                        "Scene \(descriptor.workshopID) discarded its failed SceneScript property traversal: \(failure)",
+                        category: .wpeRender
+                    )
+                }
+            }
+        } else {
+            discardSceneScriptVideoCommands()
         }
 
         if let pipeline = renderPipeline {
@@ -349,6 +362,7 @@ extension WPEMetalSceneRenderer {
             // audio never started (deferred startup) or is already running.
             soundRuntime?.resume()
         case .suspended:
+            WPESceneScriptExecutionGovernor.processShared.cancelReservations(domainID: sceneScriptTraversalDomainID)
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
             mtkView.releaseDrawables()
@@ -362,6 +376,10 @@ extension WPEMetalSceneRenderer {
     // MARK: - Teardown
 
     func cleanup() {
+        WPESceneScriptExecutionGovernor.processShared.forgetDomain(domainID: sceneScriptTraversalDomainID)
+        sceneScriptLoadState.retireCurrent()
+        didLoad = false
+        _ = staticTextureReloadTaskOwner.quiesce()
         loadGeneration &+= 1
         finishAllPendingLivePosterCaptures(image: nil)
         deferredAudioStartupTask?.cancel()
@@ -380,6 +398,7 @@ extension WPEMetalSceneRenderer {
         objectParentByID = [:]
         ownVisibilityByID = [:]
         liveTextVisibility = [:]
+        clearSceneScriptRuntimeState()
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
@@ -388,24 +407,10 @@ extension WPEMetalSceneRenderer {
         textRenderer?.releaseAll()
         textRenderer = nil
         msdfTextRenderer = nil
-        textScriptInstances.removeAll(keepingCapacity: false)
-        layerScriptInstances.removeAll(keepingCapacity: false)
-        sceneScriptSharedState = nil
-        layerAlphaScriptInstances.removeAll(keepingCapacity: false)
-        dynamicOriginScriptInstances.removeAll(keepingCapacity: false)
-        dynamicScaleScriptInstances.removeAll(keepingCapacity: false)
-        dynamicAnglesScriptInstances.removeAll(keepingCapacity: false)
         transformHostLocalTransformsByID.removeAll(keepingCapacity: false)
-        layerVideoSourceKey.removeAll(keepingCapacity: false)
-        layerObjectIDByName.removeAll(keepingCapacity: false)
         onDemandVideoKeyByID.removeAll(keepingCapacity: false)
         onDemandVideoLoading.removeAll(keepingCapacity: false)
-        liveLayerAlpha.removeAll(keepingCapacity: false)
-        liveCreatedLayers.removeAll(keepingCapacity: false)
         createdLayerTemplatesByImagePath.removeAll(keepingCapacity: false)
-        introPhaseSource = nil
-        loopPhaseSource = nil
-        introLoopOffset = nil
         soundRuntime?.stop()
         soundRuntime = nil
         cameraParallaxSettings = .disabled

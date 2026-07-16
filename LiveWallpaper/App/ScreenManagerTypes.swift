@@ -45,10 +45,12 @@ struct ScreenManagerStartupOptions: Equatable {
     var fullScreenDetector: (any FullScreenDetecting)? = nil
     var playableVideoLoader: (any PlayableVideoLoading)? = nil
     var displayRegistry: (any DisplayRegistering)? = nil
-    /// SKU-driven feature toggles. The Lite app target injects
-    /// `FeatureCatalog(capabilities: .lite)`; everything else defaults to
-    /// the full Pro catalogue so legacy entry points keep current behaviour.
-    var featureCatalog: FeatureCatalog = FeatureCatalog(capabilities: .pro)
+    /// Tests/previews remain inert unless they explicitly inject a watcher. The
+    /// production app startup plan supplies the single app-lifetime authority.
+    var memoryPressureWatcher: any MemoryPressureWatching = InactiveMemoryPressureWatcher.shared
+    /// SKU-driven feature toggles. Every production, test, and preview caller
+    /// must explicitly choose Lite, Pro, or the fail-closed unconfigured state.
+    var featureCatalog: FeatureCatalog
     /// Strategy used to keep `ScreenConfiguration.wpeOrigin` in sync with
     /// the active wallpaper. Defaults to the full Pro behaviour so the
     /// monolithic app retains its current bookmark-matching semantics; Lite

@@ -4,7 +4,6 @@ import Observation
 
 @MainActor @Observable
 public final class FullScreenDetector {
-
     // MARK: - Observed State
 
     public private(set) var hiddenScreens: [CGDirectDisplayID: Bool] = [:]
@@ -40,6 +39,14 @@ public final class FullScreenDetector {
         self.pollInterval = pollInterval
         setupNotifications()
         checkFullScreenState()
+    }
+
+    /// Platform-owned surfaces do not represent user-visible window occlusion.
+    /// Finder is intentionally included: `.excludeDesktopElements` removes its
+    /// desktop surface, while ordinary Finder windows must participate in the
+    /// same 85-percent union-area policy as every other application window.
+    public nonisolated static func shouldExcludeWindowOwner(_ ownerName: String) -> Bool {
+        ownerName == "Dock" || ownerName == "Window Server" || ownerName == "SystemUIServer"
     }
 
     // MARK: - Setup
@@ -107,7 +114,9 @@ public final class FullScreenDetector {
 
         if !NSScreen.screensHaveSeparateSpaces {
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
-            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0 }
+            for key in result.keys {
+                result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0
+            }
             updateIfChanged(result, occlusion, fractions)
             return
         }
@@ -115,7 +124,9 @@ public final class FullScreenDetector {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
-            for key in result.keys { result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0 }
+            for key in result.keys {
+                result[key] = isFullScreen; occlusion[key] = isFullScreen; fractions[key] = isFullScreen ? 1 : 0
+            }
             updateIfChanged(result, occlusion, fractions)
             return
         }
@@ -142,8 +153,7 @@ public final class FullScreenDetector {
             else { continue }
 
             let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
-            if ownerName == "Dock" || ownerName == "Window Server"
-                || ownerName == "SystemUIServer" || ownerName == "Finder" {
+            if Self.shouldExcludeWindowOwner(ownerName) {
                 continue
             }
 
@@ -208,15 +218,19 @@ public final class FullScreenDetector {
         let ys = ySet.sorted()
 
         var area: CGFloat = 0
-        for i in 0..<(xs.count - 1) {
+        for i in 0 ..< (xs.count - 1) {
             let x0 = xs[i], x1 = xs[i + 1]
             let w = x1 - x0
-            if w <= 0 { continue }
+            if w <= 0 {
+                continue
+            }
             let cx = (x0 + x1) / 2
-            for j in 0..<(ys.count - 1) {
+            for j in 0 ..< (ys.count - 1) {
                 let y0 = ys[j], y1 = ys[j + 1]
                 let h = y1 - y0
-                if h <= 0 { continue }
+                if h <= 0 {
+                    continue
+                }
                 let cy = (y0 + y1) / 2
                 if rects.contains(where: { $0.minX <= cx && cx < $0.maxX && $0.minY <= cy && cy < $0.maxY }) {
                     area += w * h

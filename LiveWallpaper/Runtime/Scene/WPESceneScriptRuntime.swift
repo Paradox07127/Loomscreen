@@ -3,6 +3,31 @@ import Foundation
 import JavaScriptCore
 import os
 
+/// Instance-limit-token admission + async-overrun quarantine, shared by the
+/// three script engines (scene / layer / dynamic-transform) so the semantics
+/// can't drift between script families. Class-bound because `quarantineIfOverdue`
+/// quarantines the engine by object identity.
+private protocol WPESceneScriptEngineExecutionGuarding: AnyObject {
+    var instanceLimitToken: WPESceneScriptInstanceLimitToken? { get }
+    var asyncExecutionSafety: WPESceneScriptAsyncExecutionSafety { get }
+}
+
+extension WPESceneScriptEngineExecutionGuarding {
+    func allows(_ operation: WPESceneScriptOperation) -> Bool {
+        instanceLimitToken?.allows(operation) ?? true
+    }
+
+    func acceptsCompletion() -> Bool {
+        instanceLimitToken?.acceptsCompletion() ?? true
+    }
+
+    func quarantineAsyncIfOverdue(
+        budget: TimeInterval
+    ) -> WPESceneScriptAsyncExecutionSafety.Overrun? {
+        asyncExecutionSafety.quarantineIfOverdue(budget: budget, engine: self)
+    }
+}
+
 /// Latest-completed-outcome exchange between a script engine's serial queue and
 /// the frame thread (ADR-003 step 1). The queue publishes each finished
 /// evaluation; the frame drains the newest unconsumed one — `takeLatest()`
@@ -11,10 +36,16 @@ import os
 /// video commands) survive being superseded, and the monotonic generation
 /// guarantees an outcome consumed once can never resurface.
 final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
+    struct Claim: Sendable, Equatable {
+        fileprivate let generation: UInt64
+    }
+
     private struct State: Sendable {
         var pending: Outcome?
         var publishedGeneration: UInt64 = 0
         var consumedGeneration: UInt64 = 0
+        var nextTickGeneration: UInt64 = 0
+        var inFlightTickGeneration: UInt64?
         var tickStartedAtUptimeNanos: UInt64?
     }
 
@@ -37,12 +68,25 @@ final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
         }
     }
 
-    /// Frame side: claims the single tick in flight; false = one is still running,
-    /// so the caller skips scheduling this frame (natural back-pressure).
-    func beginTick() -> Bool {
+    /// Frame side: claims the single tick in flight. The generation prevents an
+    /// old rejected/late completion from clearing or overwriting a newer claim.
+    func beginTick() -> Claim? {
         state.withLock { s in
-            guard s.tickStartedAtUptimeNanos == nil else { return false }
+            guard s.inFlightTickGeneration == nil else { return nil }
+            s.nextTickGeneration &+= 1
+            s.inFlightTickGeneration = s.nextTickGeneration
             s.tickStartedAtUptimeNanos = DispatchTime.now().uptimeNanoseconds
+            return Claim(generation: s.nextTickGeneration)
+        }
+    }
+
+    /// Admission failed before queue submission. Releases only this claim.
+    @discardableResult
+    func rejectTick(_ claim: Claim) -> Bool {
+        state.withLock { s in
+            guard s.inFlightTickGeneration == claim.generation else { return false }
+            s.inFlightTickGeneration = nil
+            s.tickStartedAtUptimeNanos = nil
             return true
         }
     }
@@ -57,11 +101,15 @@ final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
         }
     }
 
-    /// Queue side: a frame tick finished (also releases the in-flight claim).
-    func publishTick(_ outcome: Outcome) {
+    /// Queue side: a frame tick finished. A stale generation is discarded.
+    @discardableResult
+    func publishTick(_ outcome: Outcome, for claim: Claim) -> Bool {
         state.withLock { s in
+            guard s.inFlightTickGeneration == claim.generation else { return false }
+            s.inFlightTickGeneration = nil
             s.tickStartedAtUptimeNanos = nil
             Self.store(outcome, into: &s, combine: combine)
+            return true
         }
     }
 
@@ -120,7 +168,9 @@ final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
 /// wall-clock budget; on timeout the instance is poisoned — `tickString`
 /// freezes at `lastValue` and the engine is quarantined (kept alive, never
 /// touched again) because releasing a JSContext whose VM lock is held by
-/// the hung worker could block the releasing thread.
+/// the hung worker could block the releasing thread. The process owner strictly
+/// caps those retained engines; the shared load token fails every script family
+/// closed while the renderer preserves the last stable presentation.
 @MainActor
 final class WPESceneScriptInstance {
     private let engine: Engine
@@ -129,11 +179,6 @@ final class WPESceneScriptInstance {
     private var isPoisoned = false
     private(set) var lastValue: String
     private let asyncOutcomeSlot = WPESceneScriptOutcomeSlot<String?>()
-    private var didWarnTickOverBudget = false
-
-    /// Engines whose worker is stuck inside JS. Retained forever — see the
-    /// class doc. Bounded by the number of hostile scripts ever loaded.
-    private static var quarantine: [Engine] = []
 
     /// Budgets: setup covers the whole module body + `init()` (allow real
     /// work); per-frame `update()` is expected to be microseconds, so an
@@ -144,53 +189,72 @@ final class WPESceneScriptInstance {
         scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
         shared: WPESharedScriptState? = nil,
         setupBudget: TimeInterval = 2.0,
-        tickBudget: TimeInterval = 0.5
+        tickBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor = .processShared
     ) throws {
         self.lastValue = initialValue
         self.tickBudget = tickBudget
-        self.engine = Engine(shared: shared)
+        self.engine = Engine(shared: shared, governor: governor)
         var prepared = Self.preprocess(script: script)
         // Normalize `let/const scriptProperties` → `var` only when injecting, so
         // the scene's overrides reach a reassignable global.
         if !scriptProperties.isEmpty {
             prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
         }
-        guard let outcome = engine.setUp(
+        let setupResult = engine.setUp(
             script: prepared,
             scriptProperties: scriptProperties,
             budget: setupBudget
-        ) else {
-            Self.quarantine.append(engine)
+        )
+        switch setupResult {
+        case .timedOut:
+            shared?.sceneScriptLoadToken?.failClosed(.executionTimedOut(operation: .setup))
             isPoisoned = true
             Logger.warning(
                 "SceneScript setup exceeded \(setupBudget)s — script disabled",
                 category: .wpeRender
             )
             throw WPESceneScriptError.executionTimedOut
-        }
-        switch outcome {
-        case .contextUnavailable:
-            throw WPESceneScriptError.contextUnavailable
-        case .ready(let hasUpdate):
-            self.hasUpdateFunction = hasUpdate
+        case .capacityUnavailable:
+            shared?.sceneScriptLoadToken?.failClosed(.capacityUnavailable(operation: .setup))
+            isPoisoned = true
+            throw WPESceneScriptError.capacityUnavailable(operation: .setup)
+        case let .completed(outcome):
+            switch outcome {
+            case .contextUnavailable:
+                throw WPESceneScriptError.contextUnavailable
+            case let .ready(hasUpdate):
+                self.hasUpdateFunction = hasUpdate
+            }
         }
     }
 
-    func tickString() -> String {
-        guard hasUpdateFunction, !isPoisoned else { return lastValue }
-        guard let outcome = engine.tick(lastValue: lastValue, budget: tickBudget) else {
+    func tickString(
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
+    ) -> String {
+        guard hasUpdateFunction, !isPoisoned,
+              engine.allows(.tick) else { return lastValue }
+        switch engine.tick(
+            lastValue: lastValue,
+            traversalEpoch: traversalEpoch,
+            budget: tickBudget
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning(
                 "SceneScript update() exceeded \(tickBudget)s — script frozen at its last value",
                 category: .wpeRender
             )
             return lastValue
+        case .capacityUnavailable:
+            return lastValue
+        case let .completed(outcome):
+            guard engine.acceptsCompletion() else { return lastValue }
+            if let newValue = outcome {
+                lastValue = newValue
+            }
+            return lastValue
         }
-        if let newValue = outcome {
-            lastValue = newValue
-        }
-        return lastValue
     }
 
     // MARK: Async tick (ADR-003 step 1)
@@ -198,35 +262,55 @@ final class WPESceneScriptInstance {
     /// Load-path seeding: one bounded synchronous tick so the first frame shows
     /// the scripted value instead of popping the authored placeholder.
     func seedAsyncTick() {
-        guard hasUpdateFunction, !isPoisoned else { return }
-        guard let outcome = engine.tick(lastValue: lastValue, budget: tickBudget) else {
+        guard hasUpdateFunction, !isPoisoned,
+              engine.allows(.tick) else { return }
+        switch engine.tick(
+            lastValue: lastValue,
+            traversalEpoch: nil,
+            budget: tickBudget
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning(
                 "SceneScript update() exceeded \(tickBudget)s — script frozen at its last value",
                 category: .wpeRender
             )
             return
+        case .capacityUnavailable:
+            return
+        case let .completed(outcome):
+            guard engine.acceptsCompletion() else { return }
+            asyncOutcomeSlot.publishEvent(outcome)
         }
-        asyncOutcomeSlot.publishEvent(outcome)
     }
 
     /// Frame-path tick, async mode: applies the newest COMPLETED engine outcome,
     /// schedules the next tick when none is in flight, and never waits.
-    func liveTickString() -> String {
+    func liveTickString(
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
+    ) -> String {
         guard hasUpdateFunction, !isPoisoned else { return lastValue }
+        if let overrun = engine.quarantineAsyncIfOverdue(budget: tickBudget) {
+            isPoisoned = true
+            Logger.warning(
+                "SceneScript \(overrun.operation.rawValue) exceeded \(tickBudget)s — frozen at its last value",
+                category: .wpeRender
+            )
+            return lastValue
+        }
+        guard engine.allows(.tick) else { return lastValue }
         if let fresh = asyncOutcomeSlot.takeLatest(), let newValue = fresh {
             lastValue = newValue
         }
-        if asyncOutcomeSlot.beginTick() {
-            engine.tickAsync(lastValue: lastValue, publishTo: asyncOutcomeSlot)
-        } else if !didWarnTickOverBudget,
-                  let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
-            didWarnTickOverBudget = true
-            Logger.warning(
-                "SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last value until it completes",
-                category: .wpeRender
-            )
+        if let claim = asyncOutcomeSlot.beginTick() {
+            if !engine.tickAsync(
+                lastValue: lastValue,
+                traversalEpoch: traversalEpoch,
+                claim: claim,
+                publishTo: asyncOutcomeSlot
+            ) {
+                asyncOutcomeSlot.rejectTick(claim)
+            }
         }
         return lastValue
     }
@@ -234,7 +318,7 @@ final class WPESceneScriptInstance {
     /// Owns the JSContext and the only thread allowed to touch it. The class
     /// is `@unchecked Sendable` because `context`/`updateFunction` are only
     /// ever accessed on `queue`; callers exchange plain `String`s.
-    private final class Engine: @unchecked Sendable {
+    private final class Engine: @unchecked Sendable, WPESceneScriptEngineExecutionGuarding {
         enum SetupOutcome {
             case ready(hasUpdate: Bool)
             case contextUnavailable
@@ -247,50 +331,129 @@ final class WPESceneScriptInstance {
         private var context: JSContext?
         private var updateFunction: JSValue?
         private let shared: WPESharedScriptState?
+        private let governor: WPESceneScriptExecutionGovernor
+        private let participant: WPESceneScriptExecutionGovernor.Participant
+        let instanceLimitToken: WPESceneScriptInstanceLimitToken?
+        let asyncExecutionSafety = WPESceneScriptAsyncExecutionSafety()
         /// Latches after the first uncaught JS exception is logged, so a script
         /// that throws every tick surfaces once instead of spamming per frame.
         private var didLogException = false
 
-        init(shared: WPESharedScriptState?) {
+        init(
+            shared: WPESharedScriptState?,
+            governor: WPESceneScriptExecutionGovernor
+        ) {
             self.shared = shared
+            self.governor = governor
+            self.participant = governor.makeParticipant()
+            self.instanceLimitToken = shared?.sceneScriptLoadToken
         }
 
-        /// nil = budget exceeded (worker still running; engine must be quarantined).
         func setUp(
             script: String,
             scriptProperties: [String: WPESceneScriptPropertyValue],
             budget: TimeInterval
-        ) -> SetupOutcome? {
-            runWithBudget(budget) {
+        ) -> WPESceneScriptBoundedExecutionResult<SetupOutcome> {
+            guard allows(.setup) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .setup, admission: .waitUntilDeadline) {
                 self.setUpOnQueue(script: script, scriptProperties: scriptProperties)
             }
         }
 
-        /// Outer nil = budget exceeded; inner nil = no new value (keep last).
-        func tick(lastValue: String, budget: TimeInterval) -> String?? {
-            runWithBudget(budget) { self.tickOnQueue(lastValue: lastValue) }
+        func tick(
+            lastValue: String,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
+            budget: TimeInterval
+        ) -> WPESceneScriptBoundedExecutionResult<String?> {
+            guard allows(.tick) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .tick, admission: .failFast(traversalEpoch: traversalEpoch)) {
+                self.tickOnQueue(lastValue: lastValue)
+            }
         }
 
         /// Async-mode frame tick: runs on the engine queue and publishes the
         /// completed outcome; the frame thread never waits on it.
-        func tickAsync(lastValue: String, publishTo slot: WPESceneScriptOutcomeSlot<String?>) {
-            queue.async {
-                slot.publishTick(self.tickOnQueue(lastValue: lastValue))
+        func tickAsync(
+            lastValue: String,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
+            claim: WPESceneScriptOutcomeSlot<String?>.Claim,
+            publishTo slot: WPESceneScriptOutcomeSlot<String?>
+        ) -> Bool {
+            guard allows(.tick) else { return false }
+            guard let safety = asyncExecutionSafety.begin(
+                sceneToken: instanceLimitToken,
+                operation: .tick
+            ) else { return false }
+            let permit: WPESceneScriptExecutionGovernor.Permit?
+            if let traversalEpoch {
+                permit = governor.tryAcquire(for: participant, in: traversalEpoch)
+            } else {
+                permit = governor.tryAcquireUnreserved(for: participant)
             }
+            guard let permit else {
+                safety.complete()
+                return false
+            }
+            queue.async {
+                defer {
+                    self.asyncExecutionSafety.complete(safety)
+                    permit.release()
+                }
+                let outcome = self.tickOnQueue(lastValue: lastValue)
+                guard self.acceptsCompletion() else {
+                    slot.rejectTick(claim)
+                    return
+                }
+                slot.publishTick(outcome, for: claim)
+            }
+            return true
         }
 
         private func runWithBudget<T>(
             _ budget: TimeInterval,
+            operation: WPESceneScriptOperation,
+            admission: WPESceneScriptAdmissionPolicy,
             _ work: @escaping @Sendable () -> T
-        ) -> T? {
-            let done = DispatchSemaphore(value: 0)
-            let box = ResultBox<T>()
-            queue.async {
-                box.value = work()
-                done.signal()
+        ) -> WPESceneScriptBoundedExecutionResult<T> {
+            let deadline = DispatchTime.now() + max(budget, 0)
+            guard let safety = WPESceneScriptExecutionSafetyReservation.reserve(
+                sceneToken: instanceLimitToken
+            ) else { return .capacityUnavailable }
+            let permit: WPESceneScriptExecutionGovernor.Permit? = switch admission {
+            case .failFast(let traversalEpoch):
+                if let traversalEpoch {
+                    governor.tryAcquire(for: participant, in: traversalEpoch)
+                } else {
+                    governor.tryAcquireUnreserved(for: participant)
+                }
+            case .waitUntilDeadline:
+                governor.acquire(for: participant, until: deadline)
             }
-            guard done.wait(timeout: .now() + budget) == .success else { return nil }
-            return box.value
+            guard let permit else {
+                safety.complete()
+                return .capacityUnavailable
+            }
+            guard DispatchTime.now() < deadline else {
+                safety.complete()
+                permit.release()
+                return .capacityUnavailable
+            }
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<WPESceneScriptBoundedExecutionResult<T>>()
+            queue.async {
+                defer {
+                    safety.complete()
+                    permit.release()
+                    done.signal()
+                }
+                box.value = .completed(work())
+            }
+            guard done.wait(timeout: deadline) == .success else {
+                _ = safety.quarantine(self, operation: operation)
+                instanceLimitToken?.failClosed(.executionTimedOut(operation: operation))
+                return .timedOut
+            }
+            return box.value ?? .timedOut
         }
 
         private func setUpOnQueue(
@@ -529,6 +692,9 @@ final class WPESceneScriptInstance {
 
 enum WPESceneScriptError: Error, Equatable {
     case contextUnavailable
+    /// No process-wide execution permit was available, so setup was not
+    /// dispatched and no JavaScriptCore worker/context was touched.
+    case capacityUnavailable(operation: WPESceneScriptOperation)
     /// The script exceeded its wall-clock execution budget (runaway loop);
     /// the instance was disabled before it could hang the render thread.
     case executionTimedOut
@@ -634,9 +800,6 @@ final class WPELayerScriptInstance {
     private let asyncOutcomeSlot = WPESceneScriptOutcomeSlot<WPELayerScriptOutput>(
         combine: { WPELayerScriptInstance.mergedOutputs(pending: $0, newer: $1) }
     )
-    private var didWarnTickOverBudget = false
-
-    private static var quarantine: [LayerEngine] = []
 
     init(
         script: String,
@@ -646,14 +809,16 @@ final class WPELayerScriptInstance {
         setupBudget: TimeInterval = 2.0,
         tickBudget: TimeInterval = 0.5,
         nowProviderMillis: (@Sendable () -> Double)? = nil,
-        outputMode: WPELayerScriptOutputMode = .layerState
+        outputMode: WPELayerScriptOutputMode = .layerState,
+        governor: WPESceneScriptExecutionGovernor = .processShared
     ) throws {
         self.tickBudget = tickBudget
         let engine = LayerEngine(
             nowProviderMillis: nowProviderMillis,
             shared: shared,
             canvasSize: canvasSize,
-            outputMode: outputMode
+            outputMode: outputMode,
+            governor: governor
         )
         self.engine = engine
         var prepared = WPESceneScriptInstance.preprocess(script: script)
@@ -668,40 +833,57 @@ final class WPELayerScriptInstance {
         if !scriptProperties.isEmpty {
             prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
         }
-        guard let outcome = engine.setUp(
+        let setupResult = engine.setUp(
             script: prepared,
             scriptProperties: scriptProperties,
             budget: setupBudget
-        ) else {
-            Self.quarantine.append(engine)
+        )
+        switch setupResult {
+        case .timedOut:
+            shared?.sceneScriptLoadToken?.failClosed(.executionTimedOut(operation: .setup))
             isPoisoned = true
             Logger.warning("Layer SceneScript setup exceeded \(setupBudget)s — script disabled", category: .wpeRender)
             throw WPESceneScriptError.executionTimedOut
-        }
-        switch outcome {
-        case .contextUnavailable:
-            throw WPESceneScriptError.contextUnavailable
-        case .ready(let hasUpdate, let output):
-            self.hasUpdateFunction = hasUpdate
-            self.initialOutput = output
+        case .capacityUnavailable:
+            shared?.sceneScriptLoadToken?.failClosed(.capacityUnavailable(operation: .setup))
+            isPoisoned = true
+            throw WPESceneScriptError.capacityUnavailable(operation: .setup)
+        case let .completed(outcome):
+            switch outcome {
+            case .contextUnavailable:
+                throw WPESceneScriptError.contextUnavailable
+            case let .ready(hasUpdate, output):
+                self.hasUpdateFunction = hasUpdate
+                self.initialOutput = output
+            }
         }
     }
 
     /// Tick `update()`; returns the script's new per-layer output, or nil when
-    /// there's no `update()` or the instance is poisoned/timed out.
-    func tick(runtimeSeconds: Double? = nil, pointerFrame: WPEPointerFrame? = nil) -> WPELayerScriptOutput? {
-        guard hasUpdateFunction, !isPoisoned else { return nil }
-        guard let output = engine.tick(
+    /// there's no `update()`, the instance is poisoned/timed out, or global
+    /// capacity is momentarily unavailable.
+    func tick(
+        runtimeSeconds: Double? = nil,
+        pointerFrame: WPEPointerFrame? = nil,
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
+    ) -> WPELayerScriptOutput? {
+        guard hasUpdateFunction, !isPoisoned,
+              engine.allows(.tick) else { return nil }
+        switch engine.tick(
             runtimeSeconds: runtimeSeconds,
             pointerFrame: pointerFrame,
+            traversalEpoch: traversalEpoch,
             budget: tickBudget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript update() exceeded \(tickBudget)s — frozen", category: .wpeRender)
             return nil
+        case .capacityUnavailable:
+            return nil
+        case let .completed(output):
+            return engine.acceptsCompletion() ? output : nil
         }
-        return output
     }
 
     @discardableResult
@@ -710,44 +892,51 @@ final class WPELayerScriptInstance {
         pointerFrame: WPEPointerFrame,
         runtimeSeconds: Double? = nil
     ) -> WPELayerScriptOutput? {
-        guard !isPoisoned else { return nil }
-        guard let output = engine.dispatchCursorEvent(
+        guard !isPoisoned, engine.allows(.event) else { return nil }
+        switch engine.dispatchCursorEvent(
             event,
             pointerFrame: pointerFrame,
             runtimeSeconds: runtimeSeconds,
             budget: tickBudget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript \(event.handlerName)() exceeded \(tickBudget)s — frozen", category: .wpeRender)
             return nil
+        case .capacityUnavailable:
+            return nil
+        case let .completed(output):
+            return engine.acceptsCompletion() ? output : nil
         }
-        return output
     }
 
     /// Invoke the script's `applyUserProperties(changedUserProperties)` with the
     /// scene's user-property values. Time-of-day scripts gate their day/night
     /// switch on a flag set ONLY here (e.g. `timevarying`), so without this the
     /// switch never activates. Returns the resulting layer output (the unchanged
-    /// current state when the script declares no such handler); nil only when
-    /// poisoned, timed out, or given no properties.
+    /// current state when the script declares no such handler); nil when
+    /// poisoned, timed out, given no properties, or global capacity is busy.
     @discardableResult
     func applyUserProperties(
         _ properties: [String: WPESceneScriptPropertyValue],
         runtimeSeconds: Double? = nil
     ) -> WPELayerScriptOutput? {
-        guard !isPoisoned, !properties.isEmpty else { return nil }
-        guard let output = engine.applyUserProperties(
+        guard !isPoisoned, !properties.isEmpty,
+              engine.allows(.userProperties) else { return nil }
+        switch engine.applyUserProperties(
             properties,
             runtimeSeconds: runtimeSeconds,
             budget: tickBudget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript applyUserProperties() exceeded \(tickBudget)s — frozen", category: .wpeRender)
             return nil
+        case .capacityUnavailable:
+            return nil
+        case let .completed(output):
+            return engine.acceptsCompletion() ? output : nil
         }
-        return output
     }
 
     // MARK: Async tick (ADR-003 step 1)
@@ -759,39 +948,47 @@ final class WPELayerScriptInstance {
     /// (the caller keeps the last applied state).
     func liveTick(
         runtimeSeconds: Double? = nil,
-        pointerFrame: WPEPointerFrame? = nil
+        pointerFrame: WPEPointerFrame? = nil,
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
     ) -> WPELayerScriptOutput? {
         guard !isPoisoned else { return nil }
+        if let overrun = engine.quarantineAsyncIfOverdue(budget: tickBudget) {
+            isPoisoned = true
+            Logger.warning(
+                "Layer SceneScript \(overrun.operation.rawValue) exceeded \(tickBudget)s — frozen",
+                category: .wpeRender
+            )
+            return nil
+        }
+        guard engine.allows(.tick) else { return nil }
         let fresh = asyncOutcomeSlot.takeLatest()
         if hasUpdateFunction {
-            if asyncOutcomeSlot.beginTick() {
-                engine.tickAsync(
+            if let claim = asyncOutcomeSlot.beginTick() {
+                if !engine.tickAsync(
                     runtimeSeconds: runtimeSeconds,
                     pointerFrame: pointerFrame,
+                    traversalEpoch: traversalEpoch,
+                    claim: claim,
                     publishTo: asyncOutcomeSlot
-                )
-            } else if !didWarnTickOverBudget,
-                      let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
-                didWarnTickOverBudget = true
-                Logger.warning(
-                    "Layer SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last state until it completes",
-                    category: .wpeRender
-                )
+                ) {
+                    asyncOutcomeSlot.rejectTick(claim)
+                }
             }
         }
         return fresh
     }
 
-    /// Async-mode cursor event: fire-and-forget onto the engine queue; the
-    /// handler's output publishes into the slot and is applied by the next
-    /// frame's `liveTick` drain, so the frame path never waits on it.
+    /// Async-mode cursor event: fire-and-forget onto the engine queue when global
+    /// capacity is available. The handler's output publishes into the slot and
+    /// is applied by the next frame's `liveTick` drain, so the frame path never
+    /// waits; a saturated frame simply skips the event.
     func liveDispatchCursorEvent(
         _ event: WPELayerScriptCursorEvent,
         pointerFrame: WPEPointerFrame,
         runtimeSeconds: Double? = nil
     ) {
-        guard !isPoisoned else { return }
-        engine.dispatchCursorEventAsync(
+        guard !isPoisoned, engine.allows(.event) else { return }
+        _ = engine.dispatchCursorEventAsync(
             event,
             pointerFrame: pointerFrame,
             runtimeSeconds: runtimeSeconds,
@@ -811,19 +1008,24 @@ final class WPELayerScriptInstance {
         _ properties: [String: WPESceneScriptPropertyValue],
         runtimeSeconds: Double? = nil
     ) -> WPELayerScriptOutput? {
-        guard !isPoisoned, !properties.isEmpty else { return nil }
+        guard !isPoisoned, !properties.isEmpty,
+              engine.allows(.userProperties) else { return nil }
         let budget = tickBudget * 2
-        guard let output = engine.applyUserProperties(
+        switch engine.applyUserProperties(
             properties,
             runtimeSeconds: runtimeSeconds,
             budget: budget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
-            Self.quarantine.append(engine)
             Logger.warning("Layer SceneScript applyUserProperties() exceeded \(budget)s — frozen", category: .wpeRender)
             return nil
+        case .capacityUnavailable:
+            return nil
+        case let .completed(output):
+            guard engine.acceptsCompletion() else { return nil }
+            return asyncOutcomeSlot.supersede(with: output)
         }
-        return asyncOutcomeSlot.supersede(with: output)
     }
 
     /// Newest-wins state + accumulated one-shot video commands. `newer` ran later
@@ -847,7 +1049,7 @@ final class WPELayerScriptInstance {
         return merged
     }
 
-    private final class LayerEngine: @unchecked Sendable {
+    private final class LayerEngine: @unchecked Sendable, WPESceneScriptEngineExecutionGuarding {
         enum SetupOutcome {
             case ready(hasUpdate: Bool, output: WPELayerScriptOutput)
             case contextUnavailable
@@ -881,6 +1083,11 @@ final class WPELayerScriptInstance {
         private let shared: WPESharedScriptState?
         private let canvasSize: SIMD2<Double>
         private let outputMode: WPELayerScriptOutputMode
+        private let governor: WPESceneScriptExecutionGovernor
+        private let participant: WPESceneScriptExecutionGovernor.Participant
+        let instanceLimitToken: WPESceneScriptInstanceLimitToken?
+        let asyncExecutionSafety = WPESceneScriptAsyncExecutionSafety()
+        private let evaluationResourceBudget: WPESceneScriptEvaluationResourceBudget
         private var returnedAlphaValue: Double
         private var lastRuntimeSeconds: Double?
         private var cursorScreenPosition: JSValue?
@@ -894,16 +1101,24 @@ final class WPELayerScriptInstance {
             nowProviderMillis: (@Sendable () -> Double)?,
             shared: WPESharedScriptState?,
             canvasSize: SIMD2<Double>,
-            outputMode: WPELayerScriptOutputMode
+            outputMode: WPELayerScriptOutputMode,
+            governor: WPESceneScriptExecutionGovernor
         ) {
             self.nowProviderMillis = nowProviderMillis
             self.shared = shared
             self.canvasSize = SIMD2<Double>(max(canvasSize.x, 1), max(canvasSize.y, 1))
             self.outputMode = outputMode
+            self.governor = governor
+            self.participant = governor.makeParticipant()
+            let instanceLimitToken = shared?.sceneScriptLoadToken
+            self.instanceLimitToken = instanceLimitToken
+            self.evaluationResourceBudget = WPESceneScriptEvaluationResourceBudget(
+                sceneToken: instanceLimitToken
+            )
             switch outputMode {
             case .layerState:
                 self.returnedAlphaValue = 1
-            case .returnedAlpha(let initialValue):
+            case let .returnedAlpha(initialValue):
                 self.returnedAlphaValue = initialValue.isFinite ? initialValue : 1
             }
         }
@@ -912,16 +1127,21 @@ final class WPELayerScriptInstance {
             script: String,
             scriptProperties: [String: WPESceneScriptPropertyValue],
             budget: TimeInterval
-        ) -> SetupOutcome? {
-            runWithBudget(budget) { self.setUpOnQueue(script: script, scriptProperties: scriptProperties) }
+        ) -> WPESceneScriptBoundedExecutionResult<SetupOutcome> {
+            guard allows(.setup) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .setup, admission: .waitUntilDeadline) {
+                self.setUpOnQueue(script: script, scriptProperties: scriptProperties)
+            }
         }
 
         func tick(
             runtimeSeconds: Double?,
             pointerFrame: WPEPointerFrame?,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
             budget: TimeInterval
-        ) -> WPELayerScriptOutput? {
-            runWithBudget(budget) {
+        ) -> WPESceneScriptBoundedExecutionResult<WPELayerScriptOutput> {
+            guard allows(.tick) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .tick, admission: .failFast(traversalEpoch: traversalEpoch)) {
                 self.tickOnQueue(runtimeSeconds: runtimeSeconds, pointerFrame: pointerFrame)
             }
         }
@@ -931,8 +1151,9 @@ final class WPELayerScriptInstance {
             pointerFrame: WPEPointerFrame,
             runtimeSeconds: Double?,
             budget: TimeInterval
-        ) -> WPELayerScriptOutput? {
-            runWithBudget(budget) {
+        ) -> WPESceneScriptBoundedExecutionResult<WPELayerScriptOutput> {
+            guard allows(.event) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .event, admission: .failFast(traversalEpoch: nil)) {
                 self.dispatchCursorEventOnQueue(
                     event,
                     pointerFrame: pointerFrame,
@@ -945,8 +1166,9 @@ final class WPELayerScriptInstance {
             _ properties: [String: WPESceneScriptPropertyValue],
             runtimeSeconds: Double?,
             budget: TimeInterval
-        ) -> WPELayerScriptOutput? {
-            runWithBudget(budget) {
+        ) -> WPESceneScriptBoundedExecutionResult<WPELayerScriptOutput> {
+            guard allows(.userProperties) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .userProperties, admission: .waitUntilDeadline) {
                 self.applyUserPropertiesOnQueue(properties, runtimeSeconds: runtimeSeconds)
             }
         }
@@ -956,14 +1178,41 @@ final class WPELayerScriptInstance {
         func tickAsync(
             runtimeSeconds: Double?,
             pointerFrame: WPEPointerFrame?,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
+            claim: WPESceneScriptOutcomeSlot<WPELayerScriptOutput>.Claim,
             publishTo slot: WPESceneScriptOutcomeSlot<WPELayerScriptOutput>
-        ) {
+        ) -> Bool {
+            guard allows(.tick) else { return false }
+            guard let safety = asyncExecutionSafety.begin(
+                sceneToken: instanceLimitToken,
+                operation: .tick
+            ) else { return false }
+            let permit: WPESceneScriptExecutionGovernor.Permit?
+            if let traversalEpoch {
+                permit = governor.tryAcquire(for: participant, in: traversalEpoch)
+            } else {
+                permit = governor.tryAcquireUnreserved(for: participant)
+            }
+            guard let permit else {
+                safety.complete()
+                return false
+            }
             queue.async {
-                slot.publishTick(self.tickOnQueue(
+                defer {
+                    self.asyncExecutionSafety.complete(safety)
+                    permit.release()
+                }
+                let outcome = self.tickOnQueue(
                     runtimeSeconds: runtimeSeconds,
                     pointerFrame: pointerFrame
-                ))
+                )
+                guard self.acceptsCompletion() else {
+                    slot.rejectTick(claim)
+                    return
+                }
+                slot.publishTick(outcome, for: claim)
             }
+            return true
         }
 
         /// Async-mode cursor event: same handler as the synchronous path, but the
@@ -973,25 +1222,77 @@ final class WPELayerScriptInstance {
             pointerFrame: WPEPointerFrame,
             runtimeSeconds: Double?,
             publishTo slot: WPESceneScriptOutcomeSlot<WPELayerScriptOutput>
-        ) {
+        ) -> Bool {
+            guard allows(.event) else { return false }
+            guard let safety = asyncExecutionSafety.begin(
+                sceneToken: instanceLimitToken,
+                operation: .event
+            ) else { return false }
+            guard let permit = governor.tryAcquireUnreserved(for: participant) else {
+                safety.complete()
+                return false
+            }
             queue.async {
-                slot.publishEvent(self.dispatchCursorEventOnQueue(
+                defer {
+                    self.asyncExecutionSafety.complete(safety)
+                    permit.release()
+                }
+                let outcome = self.dispatchCursorEventOnQueue(
                     event,
                     pointerFrame: pointerFrame,
                     runtimeSeconds: runtimeSeconds
-                ))
+                )
+                guard self.acceptsCompletion() else { return }
+                slot.publishEvent(outcome)
             }
+            return true
         }
 
-        private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
-            let done = DispatchSemaphore(value: 0)
-            let box = ResultBox<T>()
-            queue.async {
-                box.value = work()
-                done.signal()
+        private func runWithBudget<T>(
+            _ budget: TimeInterval,
+            operation: WPESceneScriptOperation,
+            admission: WPESceneScriptAdmissionPolicy,
+            _ work: @escaping @Sendable () -> T
+        ) -> WPESceneScriptBoundedExecutionResult<T> {
+            let deadline = DispatchTime.now() + max(budget, 0)
+            guard let safety = WPESceneScriptExecutionSafetyReservation.reserve(
+                sceneToken: instanceLimitToken
+            ) else { return .capacityUnavailable }
+            let permit: WPESceneScriptExecutionGovernor.Permit? = switch admission {
+            case .failFast(let traversalEpoch):
+                if let traversalEpoch {
+                    governor.tryAcquire(for: participant, in: traversalEpoch)
+                } else {
+                    governor.tryAcquireUnreserved(for: participant)
+                }
+            case .waitUntilDeadline:
+                governor.acquire(for: participant, until: deadline)
             }
-            guard done.wait(timeout: .now() + budget) == .success else { return nil }
-            return box.value
+            guard let permit else {
+                safety.complete()
+                return .capacityUnavailable
+            }
+            guard DispatchTime.now() < deadline else {
+                safety.complete()
+                permit.release()
+                return .capacityUnavailable
+            }
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<WPESceneScriptBoundedExecutionResult<T>>()
+            queue.async {
+                defer {
+                    safety.complete()
+                    permit.release()
+                    done.signal()
+                }
+                box.value = .completed(work())
+            }
+            guard done.wait(timeout: deadline) == .success else {
+                _ = safety.quarantine(self, operation: operation)
+                instanceLimitToken?.failClosed(.executionTimedOut(operation: operation))
+                return .timedOut
+            }
+            return box.value ?? .timedOut
         }
 
         private func setUpOnQueue(
@@ -1016,6 +1317,7 @@ final class WPELayerScriptInstance {
                 _ = context.evaluateScript("Date.now = function(){ return __hostNow(); };")
             }
             context.exceptionHandler = { [weak self] _, _ in self?.didThrow = true }
+            evaluationResourceBudget.beginEvaluation()
             _ = context.evaluateScript(script)
             if !scriptProperties.isEmpty {
                 wpeInstallScriptProperties(
@@ -1033,6 +1335,7 @@ final class WPELayerScriptInstance {
                 updateFunction = nil
             }
             pendingVideo.removeAll(keepingCapacity: true)
+            evaluationResourceBudget.beginEvaluation()
             didThrow = false
             if let initFn = context.objectForKeyedSubscript("init"),
                !initFn.isUndefined, initFn.hasProperty("call") {
@@ -1060,6 +1363,7 @@ final class WPELayerScriptInstance {
                 return WPELayerScriptOutput(own: .init(visible: true, alpha: 1, videoCommands: []), others: [:])
             }
             pendingVideo.removeAll(keepingCapacity: true)
+            evaluationResourceBudget.beginEvaluation()
             switch outputMode {
             case .layerState:
                 _ = updateFunction.call(withArguments: [])
@@ -1084,12 +1388,13 @@ final class WPELayerScriptInstance {
         ) -> WPELayerScriptOutput {
             updateEngineRuntime(runtimeSeconds)
             updateInput(pointerFrame)
+            pendingVideo.removeAll(keepingCapacity: true)
+            evaluationResourceBudget.beginEvaluation()
             guard let context,
                   let fn = context.objectForKeyedSubscript(event.handlerName),
                   !fn.isUndefined, fn.hasProperty("call") else {
                 return readOutput()
             }
-            pendingVideo.removeAll(keepingCapacity: true)
             _ = fn.call(withArguments: [cursorEventObject(event, pointerFrame: pointerFrame, in: context)])
             return readOutput()
         }
@@ -1099,6 +1404,8 @@ final class WPELayerScriptInstance {
             runtimeSeconds: Double?
         ) -> WPELayerScriptOutput {
             updateEngineRuntime(runtimeSeconds)
+            pendingVideo.removeAll(keepingCapacity: true)
+            evaluationResourceBudget.beginEvaluation()
             guard let context,
                   let fn = context.objectForKeyedSubscript("applyUserProperties"),
                   !fn.isUndefined, fn.hasProperty("call"),
@@ -1108,7 +1415,6 @@ final class WPELayerScriptInstance {
             for (name, value) in properties {
                 bag.setObject(value.jsBridged, forKeyedSubscript: name as NSString)
             }
-            pendingVideo.removeAll(keepingCapacity: true)
             _ = fn.call(withArguments: [bag])
             return readOutput()
         }
@@ -1212,6 +1518,9 @@ final class WPELayerScriptInstance {
             scene.setObject(getLayer, forKeyedSubscript: "getLayer" as NSString)
             let createLayer: @convention(block) (JSValue) -> JSValue = { [weak self] spec in
                 guard let self else { return JSValue(nullIn: context) }
+                guard self.instanceLimitToken?.admitCreatedLayer() ?? true else {
+                    return self.neutralLayerStub(in: context)
+                }
                 let key = "__created_\(self.createdLayerCounter)"
                 let handle = self.makeLayerHandle(key: key, in: context)
                 self.createdLayerCounter += 1
@@ -1359,7 +1668,8 @@ final class WPELayerScriptInstance {
         private func makeVideoHandle(key: String, in context: JSContext) -> JSValue {
             let handle = JSValue(newObjectIn: context) ?? JSValue(nullIn: context)!
             let append: @Sendable (WPELayerVideoCommand) -> Void = { [weak self] command in
-                self?.pendingVideo[key, default: []].append(command)
+                guard let self, self.evaluationResourceBudget.admitVideoCommand() else { return }
+                self.pendingVideo[key, default: []].append(command)
             }
             let play: @convention(block) () -> Void = { append(.play) }
             let pause: @convention(block) () -> Void = { append(.pause) }
@@ -1479,8 +1789,13 @@ extension WPESceneScriptPropertyValue {
 /// container mutation is re-published to the store by `wpeInstallSharedState`'s
 /// write-back proxy rather than relying on reference identity.
 final class WPESharedScriptState: @unchecked Sendable {
+    let sceneScriptLoadToken: WPESceneScriptInstanceLimitToken?
     private let lock = NSLock()
     private var storage: [String: Any] = [:]
+
+    init(sceneScriptLoadToken: WPESceneScriptInstanceLimitToken? = nil) {
+        self.sceneScriptLoadToken = sceneScriptLoadToken
+    }
 
     func get(_ key: String) -> Any? {
         lock.lock(); defer { lock.unlock() }
@@ -1488,7 +1803,13 @@ final class WPESharedScriptState: @unchecked Sendable {
     }
 
     func set(_ key: String, _ value: Any?) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
+        guard sceneScriptLoadToken?.acceptsCompletion() ?? true else { return }
+        if storage[key] == nil,
+           sceneScriptLoadToken?.admitNewSharedStateEntry() == false {
+            return
+        }
         storage[key] = value ?? NSNull()
     }
 }
@@ -1647,6 +1968,8 @@ private func wpeInstallScriptProperties(
 final class WPETransformScriptEvaluator: @unchecked Sendable {
     private let canvasSize: SIMD2<Double>
     private let evaluationBudget: TimeInterval
+    private let governor: WPESceneScriptExecutionGovernor
+    private let participant: WPESceneScriptExecutionGovernor.Participant
     private let queue = DispatchQueue(
         label: "com.livewallpaper.wpe-transform-evaluator",
         qos: .userInitiated
@@ -1693,34 +2016,178 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     /// (installSandbox + base classes + module eval) plus `update()`, so it is
     /// generous enough never to falsely time out a legitimate script while still
     /// bounding a runaway loop. Matches `WPESceneScriptInstance`'s tick budget.
-    init(canvasWidth: Double, canvasHeight: Double, evaluationBudget: TimeInterval = 0.5) {
+    init(
+        canvasWidth: Double,
+        canvasHeight: Double,
+        evaluationBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor = .processShared
+    ) {
         self.canvasSize = SIMD2<Double>(canvasWidth, canvasHeight)
         self.evaluationBudget = evaluationBudget
+        self.governor = governor
+        self.participant = governor.makeParticipant()
     }
 
-    // Heuristics live with the package parser so bake-time and runtime agree.
+    /// Heuristics live with the package parser so bake-time and runtime agree.
     static func isStaticallyResolvable(_ script: String) -> Bool {
         WPETransformScriptStaticAnalysis.isStaticallyResolvable(script)
     }
 
     /// Returns the script-computed vec3, or nil if the script is dynamic, fails to
-    /// evaluate, or overruns its budget (caller keeps the baked value). `seed` is
-    /// the baked origin so components the script leaves untouched (z) pass through.
+    /// evaluate, overruns its budget, or global capacity is busy (caller keeps the
+    /// baked value). `seed` is the baked origin so components the script leaves
+    /// untouched (z) pass through.
     func resolveVec3(
         script: String,
         properties: [String: WPESceneScriptPropertyValue],
         seed: SIMD3<Double>
     ) -> SIMD3<Double>? {
+        resolveBatch([
+            WPESceneTransformScriptRequest(
+                script: script,
+                properties: properties,
+                seed: seed
+            )
+        ]).first ?? nil
+    }
+
+    enum StaticTransformExecutionRoute: Equatable {
+        case helperService
+        case keepBakedFailClosed
+        case inProcess
+    }
+
+    /// An application bundle must embed its Pro helper; test runners and CLI
+    /// tools are not `.app`s.
+    static var hostIsApplicationBundle: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    /// Where a statically-resolvable batch runs. The embedded helper is the only
+    /// place a shipping app evaluates untrusted community JavaScript. When a real
+    /// `.app` reports the helper missing (a tampered or incomplete bundle) we fail
+    /// closed and keep baked origins rather than fall back to in-process
+    /// execution. Non-app hosts ship without the helper by design and may
+    /// evaluate in-process, where the local watchdog + quarantine still guard.
+    static func executionRoute(
+        embeddedServiceAvailable: Bool,
+        hostIsApplicationBundle: Bool
+    ) -> StaticTransformExecutionRoute {
+        if embeddedServiceAvailable { return .helperService }
+        return hostIsApplicationBundle ? .keepBakedFailClosed : .inProcess
+    }
+
+    /// Phase-one hard-isolation slice: static parse-time transforms form a pure
+    /// document-scoped batch, so they can cross XPC without serializing renderer
+    /// objects or live SceneScript state. A worker failure keeps every baked
+    /// origin. The local path remains only for hosts that do not embed the Pro
+    /// service (package tests and source-level tools), never as a shipping crash
+    /// fallback that would re-run hostile code in the app process.
+    func resolveBatch(
+        _ requests: [WPESceneTransformScriptRequest]
+    ) -> [SIMD3<Double>?] {
+        guard !isPoisoned, !requests.isEmpty else {
+            return Array(repeating: nil, count: requests.count)
+        }
+        let eligibleIndices = requests.indices.filter {
+            Self.isStaticallyResolvable(requests[$0].script)
+        }
+        guard !eligibleIndices.isEmpty else {
+            return Array(repeating: nil, count: requests.count)
+        }
+        let eligibleRequests = eligibleIndices.map { requests[$0] }
+
+        switch Self.executionRoute(
+            embeddedServiceAvailable: WPESceneScriptXPCClient.shared.isEmbeddedServiceAvailable,
+            hostIsApplicationBundle: Self.hostIsApplicationBundle
+        ) {
+        case .helperService:
+            // Preserve the existing process-wide SceneScript admission
+            // contract even though JavaScript now executes in the helper. A
+            // saturated renderer must reject this batch before dispatching any
+            // XPC work, and the permit bounds host+worker workload together.
+            let deadline = DispatchTime.now() + max(evaluationBudget, 0)
+            guard let permit = governor.acquire(for: participant, until: deadline) else {
+                return Array(repeating: nil, count: requests.count)
+            }
+            defer { permit.release() }
+            let now = DispatchTime.now()
+            guard now < deadline else {
+                return Array(repeating: nil, count: requests.count)
+            }
+            let remainingEvaluationBudget = TimeInterval(
+                Double(deadline.uptimeNanoseconds - now.uptimeNanoseconds)
+                    / 1_000_000_000
+            )
+            switch WPESceneScriptXPCClient.shared.evaluateStaticTransforms(
+                canvasWidth: canvasSize.x,
+                canvasHeight: canvasSize.y,
+                requests: eligibleRequests,
+                evaluationBudget: remainingEvaluationBudget
+            ) {
+            case .completed(let completion):
+                var outputs = Array<SIMD3<Double>?>(repeating: nil, count: requests.count)
+                for (index, value) in zip(eligibleIndices, completion.values) {
+                    outputs[index] = value
+                }
+                return outputs
+            case .rejected:
+                return Array(repeating: nil, count: requests.count)
+            case .transportFailure:
+                poison()
+                return Array(repeating: nil, count: requests.count)
+            }
+
+        case .keepBakedFailClosed:
+            // A shipping .app always embeds its Pro helper; its absence means a
+            // tampered or incomplete bundle. Never re-run untrusted community JS
+            // in the app process — keep every baked origin instead.
+            return Array(repeating: nil, count: requests.count)
+
+        case .inProcess:
+            return requests.map {
+                resolveVec3InProcess(
+                    script: $0.script,
+                    properties: $0.properties,
+                    seed: $0.seed
+                )
+            }
+        }
+    }
+
+    private func resolveVec3InProcess(
+        script: String,
+        properties: [String: WPESceneScriptPropertyValue],
+        seed: SIMD3<Double>
+    ) -> SIMD3<Double>? {
         guard !isPoisoned, Self.isStaticallyResolvable(script) else { return nil }
+        let deadline = DispatchTime.now() + max(evaluationBudget, 0)
+        guard let safety = WPESceneScriptExecutionSafetyReservation.reserve(
+            sceneToken: nil
+        ) else { return nil }
+        guard let permit = governor.acquire(for: participant, until: deadline) else {
+            safety.complete()
+            return nil
+        }
+        guard DispatchTime.now() < deadline else {
+            safety.complete()
+            permit.release()
+            return nil
+        }
         let box = ResultBox()
         let done = DispatchSemaphore(value: 0)
         queue.async { [self] in
+            defer {
+                safety.complete()
+                permit.release()
+                done.signal()
+            }
             box.value = evaluateOnQueue(script: script, properties: properties, seed: seed)
-            done.signal()
         }
-        guard done.wait(timeout: .now() + evaluationBudget) == .success else {
+        guard done.wait(timeout: deadline) == .success else {
             // Runaway script: the worker is still spinning on `queue`. Stop using
             // it so the parse completes; the rest of the scene keeps baked values.
+            _ = safety.quarantine(self, operation: .staticTransform)
             poison()
             return nil
         }
@@ -1817,7 +2284,6 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
     /// value this tick" contract (caller falls back to the baked transform).
     private var lastAsyncInner: SIMD3<Double>?
     private var hasAsyncOutcome = false
-    private var didWarnTickOverBudget = false
 
     init(
         script: String,
@@ -1826,11 +2292,17 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         canvasSize: SIMD2<Double>,
         shared: WPESharedScriptState? = nil,
         setupBudget: TimeInterval = 2.0,
-        tickBudget: TimeInterval = 0.5
+        tickBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor = .processShared
     ) throws {
         self.tickBudget = tickBudget
         self.lastValue = seed
-        self.engine = Engine(seed: seed, canvasSize: canvasSize, shared: shared)
+        self.engine = Engine(
+            seed: seed,
+            canvasSize: canvasSize,
+            shared: shared,
+            governor: governor
+        )
         var prepared = WPESceneScriptInstance.preprocess(script: script)
         prepared = prepared.replacingOccurrences(
             of: #"(?m)^[\t ]*import\b[^\n]*$"#,
@@ -1840,42 +2312,60 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         if !scriptProperties.isEmpty {
             prepared = wpeNormalizeScriptPropertiesDeclaration(prepared)
         }
-        guard let outcome = engine.setUp(
+        let setupResult = engine.setUp(
             script: prepared,
             scriptProperties: scriptProperties,
             budget: setupBudget
-        ) else {
+        )
+        switch setupResult {
+        case .timedOut:
+            // `runWithBudget`'s queued closure strongly retains Engine until it
+            // returns (or forever if JSC never returns), so throwing here cannot
+            // deinitialize a context still executing on its serial queue.
             isPoisoned = true
+            shared?.sceneScriptLoadToken?.failClosed(.executionTimedOut(operation: .setup))
             throw WPESceneScriptError.executionTimedOut
-        }
-        switch outcome {
-        case .contextUnavailable:
-            throw WPESceneScriptError.contextUnavailable
-        case .setupFailed:
-            throw WPESceneScriptError.scriptEvaluationFailed
-        case .ready:
-            break
+        case .capacityUnavailable:
+            isPoisoned = true
+            shared?.sceneScriptLoadToken?.failClosed(.capacityUnavailable(operation: .setup))
+            throw WPESceneScriptError.capacityUnavailable(operation: .setup)
+        case let .completed(outcome):
+            switch outcome {
+            case .contextUnavailable:
+                throw WPESceneScriptError.contextUnavailable
+            case .setupFailed:
+                throw WPESceneScriptError.scriptEvaluationFailed
+            case .ready:
+                break
+            }
         }
     }
 
     func tick(
         pointerPosition: SIMD2<Double>,
-        runtimeSeconds: Double? = nil
+        runtimeSeconds: Double? = nil,
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
     ) -> SIMD3<Double>? {
-        guard !isPoisoned else { return nil }
-        guard let result = engine.tick(
+        guard !isPoisoned, engine.allows(.tick) else { return nil }
+        switch engine.tick(
             currentValue: lastValue,
             pointerPosition: pointerPosition,
             runtimeSeconds: runtimeSeconds,
+            traversalEpoch: traversalEpoch,
             budget: tickBudget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
             return nil
+        case .capacityUnavailable:
+            return lastValue
+        case let .completed(result):
+            guard engine.acceptsCompletion() else { return nil }
+            if let result {
+                lastValue = result
+            }
+            return result
         }
-        if let result {
-            lastValue = result
-        }
-        return result
     }
 
     // MARK: Async tick (ADR-003 step 1)
@@ -1883,24 +2373,43 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
     /// Load-path seeding: one bounded synchronous tick so the first frame uses
     /// the scripted transform instead of popping from the baked value.
     func seedAsyncTick(pointerPosition: SIMD2<Double>, runtimeSeconds: Double? = nil) {
-        guard !isPoisoned else { return }
-        guard let outcome = engine.tick(
+        guard !isPoisoned, engine.allows(.tick) else { return }
+        switch engine.tick(
             currentValue: lastValue,
             pointerPosition: pointerPosition,
             runtimeSeconds: runtimeSeconds,
+            traversalEpoch: nil,
             budget: tickBudget
-        ) else {
+        ) {
+        case .timedOut:
             isPoisoned = true
             return
+        case .capacityUnavailable:
+            return
+        case let .completed(outcome):
+            guard engine.acceptsCompletion() else { return }
+            asyncOutcomeSlot.publishEvent(outcome)
         }
-        asyncOutcomeSlot.publishEvent(outcome)
     }
 
     /// Frame-path tick, async mode. Returns the latest known scripted value —
     /// while a tick is in flight the previous result persists (keep-last); a
     /// completed inner-nil maps to nil exactly like the legacy contract.
-    func liveTick(pointerPosition: SIMD2<Double>, runtimeSeconds: Double? = nil) -> SIMD3<Double>? {
+    func liveTick(
+        pointerPosition: SIMD2<Double>,
+        runtimeSeconds: Double? = nil,
+        traversalEpoch: WPESceneScriptTraversalEpoch? = nil
+    ) -> SIMD3<Double>? {
         guard !isPoisoned else { return nil }
+        if let overrun = engine.quarantineAsyncIfOverdue(budget: tickBudget) {
+            isPoisoned = true
+            Logger.warning(
+                "Transform SceneScript \(overrun.operation.rawValue) exceeded \(tickBudget)s — frozen",
+                category: .wpeRender
+            )
+            return nil
+        }
+        guard engine.allows(.tick) else { return nil }
         if let fresh = asyncOutcomeSlot.takeLatest() {
             hasAsyncOutcome = true
             lastAsyncInner = fresh
@@ -1908,26 +2417,23 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
                 lastValue = fresh
             }
         }
-        if asyncOutcomeSlot.beginTick() {
-            engine.tickAsync(
+        if let claim = asyncOutcomeSlot.beginTick() {
+            if !engine.tickAsync(
                 currentValue: lastValue,
                 pointerPosition: pointerPosition,
                 runtimeSeconds: runtimeSeconds,
+                traversalEpoch: traversalEpoch,
+                claim: claim,
                 publishTo: asyncOutcomeSlot
-            )
-        } else if !didWarnTickOverBudget,
-                  let overdue = asyncOutcomeSlot.inFlightTickSeconds(exceeding: tickBudget) {
-            didWarnTickOverBudget = true
-            Logger.warning(
-                "Transform SceneScript update() still running after \(String(format: "%.2f", overdue))s (budget \(tickBudget)s) — keeping last transform until it completes",
-                category: .wpeRender
-            )
+            ) {
+                asyncOutcomeSlot.rejectTick(claim)
+            }
         }
         guard hasAsyncOutcome else { return nil }
         return lastAsyncInner == nil ? nil : lastValue
     }
 
-    private final class Engine: @unchecked Sendable {
+    private final class Engine: @unchecked Sendable, WPESceneScriptEngineExecutionGuarding {
         enum SetupOutcome {
             case ready
             case contextUnavailable
@@ -1938,33 +2444,50 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         private let seed: SIMD3<Double>
         private let canvasSize: SIMD2<Double>
         private let shared: WPESharedScriptState?
+        private let governor: WPESceneScriptExecutionGovernor
+        private let participant: WPESceneScriptExecutionGovernor.Participant
+        let instanceLimitToken: WPESceneScriptInstanceLimitToken?
+        let asyncExecutionSafety = WPESceneScriptAsyncExecutionSafety()
         private var context: JSContext?
         private var updateFunction: JSValue?
         private var cursorWorldPosition: JSValue?
         private var lastRuntimeSeconds: Double?
         private var didThrow = false
 
-        init(seed: SIMD3<Double>, canvasSize: SIMD2<Double>, shared: WPESharedScriptState?) {
+        init(
+            seed: SIMD3<Double>,
+            canvasSize: SIMD2<Double>,
+            shared: WPESharedScriptState?,
+            governor: WPESceneScriptExecutionGovernor
+        ) {
             self.seed = seed
             self.canvasSize = canvasSize
             self.shared = shared
+            self.governor = governor
+            self.participant = governor.makeParticipant()
+            self.instanceLimitToken = shared?.sceneScriptLoadToken
         }
 
         func setUp(
             script: String,
             scriptProperties: [String: WPESceneScriptPropertyValue],
             budget: TimeInterval
-        ) -> SetupOutcome? {
-            runWithBudget(budget) { self.setUpOnQueue(script: script, scriptProperties: scriptProperties) }
+        ) -> WPESceneScriptBoundedExecutionResult<SetupOutcome> {
+            guard allows(.setup) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .setup, admission: .waitUntilDeadline) {
+                self.setUpOnQueue(script: script, scriptProperties: scriptProperties)
+            }
         }
 
         func tick(
             currentValue: SIMD3<Double>,
             pointerPosition: SIMD2<Double>,
             runtimeSeconds: Double?,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
             budget: TimeInterval
-        ) -> SIMD3<Double>?? {
-            runWithBudget(budget) {
+        ) -> WPESceneScriptBoundedExecutionResult<SIMD3<Double>?> {
+            guard allows(.tick) else { return .capacityUnavailable }
+            return runWithBudget(budget, operation: .tick, admission: .failFast(traversalEpoch: traversalEpoch)) {
                 self.tickOnQueue(
                     currentValue: currentValue,
                     pointerPosition: pointerPosition,
@@ -1979,26 +2502,89 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
             currentValue: SIMD3<Double>,
             pointerPosition: SIMD2<Double>,
             runtimeSeconds: Double?,
+            traversalEpoch: WPESceneScriptTraversalEpoch?,
+            claim: WPESceneScriptOutcomeSlot<SIMD3<Double>?>.Claim,
             publishTo slot: WPESceneScriptOutcomeSlot<SIMD3<Double>?>
-        ) {
+        ) -> Bool {
+            guard allows(.tick) else { return false }
+            guard let safety = asyncExecutionSafety.begin(
+                sceneToken: instanceLimitToken,
+                operation: .tick
+            ) else { return false }
+            let permit: WPESceneScriptExecutionGovernor.Permit?
+            if let traversalEpoch {
+                permit = governor.tryAcquire(for: participant, in: traversalEpoch)
+            } else {
+                permit = governor.tryAcquireUnreserved(for: participant)
+            }
+            guard let permit else {
+                safety.complete()
+                return false
+            }
             queue.async {
-                slot.publishTick(self.tickOnQueue(
+                defer {
+                    self.asyncExecutionSafety.complete(safety)
+                    permit.release()
+                }
+                let outcome = self.tickOnQueue(
                     currentValue: currentValue,
                     pointerPosition: pointerPosition,
                     runtimeSeconds: runtimeSeconds
-                ))
+                )
+                guard self.acceptsCompletion() else {
+                    slot.rejectTick(claim)
+                    return
+                }
+                slot.publishTick(outcome, for: claim)
             }
+            return true
         }
 
-        private func runWithBudget<T>(_ budget: TimeInterval, _ work: @escaping @Sendable () -> T) -> T? {
-            let done = DispatchSemaphore(value: 0)
-            let box = ResultBox<T>()
-            queue.async {
-                box.value = work()
-                done.signal()
+        private func runWithBudget<T>(
+            _ budget: TimeInterval,
+            operation: WPESceneScriptOperation,
+            admission: WPESceneScriptAdmissionPolicy,
+            _ work: @escaping @Sendable () -> T
+        ) -> WPESceneScriptBoundedExecutionResult<T> {
+            let deadline = DispatchTime.now() + max(budget, 0)
+            guard let safety = WPESceneScriptExecutionSafetyReservation.reserve(
+                sceneToken: instanceLimitToken
+            ) else { return .capacityUnavailable }
+            let permit: WPESceneScriptExecutionGovernor.Permit? = switch admission {
+            case .failFast(let traversalEpoch):
+                if let traversalEpoch {
+                    governor.tryAcquire(for: participant, in: traversalEpoch)
+                } else {
+                    governor.tryAcquireUnreserved(for: participant)
+                }
+            case .waitUntilDeadline:
+                governor.acquire(for: participant, until: deadline)
             }
-            guard done.wait(timeout: .now() + budget) == .success else { return nil }
-            return box.value
+            guard let permit else {
+                safety.complete()
+                return .capacityUnavailable
+            }
+            guard DispatchTime.now() < deadline else {
+                safety.complete()
+                permit.release()
+                return .capacityUnavailable
+            }
+            let done = DispatchSemaphore(value: 0)
+            let box = ResultBox<WPESceneScriptBoundedExecutionResult<T>>()
+            queue.async {
+                defer {
+                    safety.complete()
+                    permit.release()
+                    done.signal()
+                }
+                box.value = .completed(work())
+            }
+            guard done.wait(timeout: deadline) == .success else {
+                _ = safety.quarantine(self, operation: operation)
+                instanceLimitToken?.failClosed(.executionTimedOut(operation: operation))
+                return .timedOut
+            }
+            return box.value ?? .timedOut
         }
 
         private func setUpOnQueue(

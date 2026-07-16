@@ -343,6 +343,10 @@ final class WallpaperAutomationOrchestrator {
         )
     }
 
+    func stopMonitoring() {
+        automationCoordinator.stop()
+    }
+
     private func replacePlaylistBookmark(
         in config: inout ScreenConfiguration,
         cursor: Int,

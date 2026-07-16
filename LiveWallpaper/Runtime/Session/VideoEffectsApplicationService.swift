@@ -3,7 +3,16 @@ import CoreGraphics
 
 @MainActor
 final class VideoEffectsApplicationService {
+    typealias CompositionBuilder = @MainActor (
+        _ asset: AVAsset,
+        _ config: VideoEffectConfig,
+        _ frameDuration: CMTime
+    ) async throws -> AVVideoComposition
+    typealias AssetProvider = @MainActor (WallpaperVideoPlayer) -> AVAsset?
+
     private let effectsManager = VideoEffectsManager()
+    private let compositionBuilder: CompositionBuilder?
+    private let assetProvider: AssetProvider
     private var inflightTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
     private var generations: [CGDirectDisplayID: Int] = [:]
     /// Hash of (effectConfig, frameRateLimit) most recently APPLIED for each
@@ -17,6 +26,18 @@ final class VideoEffectsApplicationService {
     }
     private var appliedFingerprints: [CGDirectDisplayID: AppliedFingerprint] = [:]
 
+    init(
+        compositionBuilder: CompositionBuilder? = nil,
+        assetProvider: @escaping AssetProvider = { $0.player?.currentItem?.asset }
+    ) {
+        self.compositionBuilder = compositionBuilder
+        self.assetProvider = assetProvider
+    }
+
+    func hasInflightTask(for screenID: CGDirectDisplayID) -> Bool {
+        inflightTasks[screenID] != nil
+    }
+
     func applyEffects(
         to player: WallpaperVideoPlayer,
         screenID: CGDirectDisplayID,
@@ -24,7 +45,7 @@ final class VideoEffectsApplicationService {
         screenRefreshRate: Int,
         noEffectsHandler: () -> Void
     ) {
-        guard let playerItem = player.player?.currentItem else {
+        guard let asset = assetProvider(player) else {
             Logger.debug("Skip apply-effects: no active player for screen \(screenID) yet", category: .videoPlayer)
             return
         }
@@ -69,22 +90,25 @@ final class VideoEffectsApplicationService {
         let generation = (generations[screenID] ?? 0) &+ 1
         generations[screenID] = generation
 
-        let task = Task { [weak self, weak player, weak playerItem] in
+        let task = Task { [weak self, weak player] in
             do {
-                guard let asset = playerItem?.asset, let self else { return }
-                let composition = try await self.effectsManager.buildComposition(
-                    for: asset,
-                    config: config.effectConfig,
-                    frameDuration: frameDuration
-                )
+                guard let self else { return }
+                let composition: AVVideoComposition
+                if let compositionBuilder = self.compositionBuilder {
+                    composition = try await compositionBuilder(asset, config.effectConfig, frameDuration)
+                } else {
+                    composition = try await self.effectsManager.buildComposition(
+                        for: asset,
+                        config: config.effectConfig,
+                        frameDuration: frameDuration
+                    )
+                }
                 try Task.checkCancellation()
                 await MainActor.run { [weak self, weak player] in
-                    guard let self,
-                          let player,
-                          self.generations[screenID] == generation,
-                          !player.isForceSDRActive else { return }
-                    player.setVideoComposition(composition)
+                    guard let self, self.generations[screenID] == generation else { return }
                     self.inflightTasks[screenID] = nil
+                    guard let player, !player.isForceSDRActive else { return }
+                    player.setVideoComposition(composition)
                     self.appliedFingerprints[screenID] = AppliedFingerprint(
                         effects: config.effectConfig,
                         limit: config.frameRateLimit
@@ -94,8 +118,9 @@ final class VideoEffectsApplicationService {
                 return
             } catch {
                 await MainActor.run { [weak self] in
+                    guard let self, self.generations[screenID] == generation else { return }
                     Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
-                    self?.inflightTasks[screenID] = nil
+                    self.inflightTasks[screenID] = nil
                 }
             }
         }
@@ -105,6 +130,11 @@ final class VideoEffectsApplicationService {
     func cancelInflight(for screenID: CGDirectDisplayID) {
         inflightTasks[screenID]?.cancel()
         inflightTasks[screenID] = nil
+        // Cancellation can race a completion that already passed its final
+        // Task.checkCancellation() and is queued for MainActor. Bump the token
+        // as well so that queued closure cannot install a composition after
+        // session/termination teardown.
+        generations[screenID] = (generations[screenID] ?? 0) &+ 1
         appliedFingerprints[screenID] = nil
     }
 }

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.automation.startup-items</key>
+	<true/>
+	<key>com.apple.security.device.power</key>
+	<true/>
+	<!-- AVPlayer contacts this system service during ordinary video playback. -->
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.audioanalyticsd</string>
+	</array>
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+	<!-- Monitor reads AppleSMC sensors but never writes SMC state. -->
+	<key>com.apple.security.temporary-exception.iokit-user-client-class</key>
+	<array>
+		<string>AppleSMCClient</string>
+	</array>
+	<!-- Monitor's process list is read-only and excludes argv/control operations. -->
+	<key>com.apple.security.temporary-exception.sbpl</key>
+	<array>
+		<string>(allow process-info-listpids)</string>
+		<string>(allow process-info-pidinfo)</string>
+		<string>(allow process-info-rusage)</string>
+	</array>
+</dict>
+</plist>

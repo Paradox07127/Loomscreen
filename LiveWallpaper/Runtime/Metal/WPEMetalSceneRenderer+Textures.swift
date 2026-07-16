@@ -28,7 +28,7 @@ extension WPEMetalSceneRenderer {
     /// whose construction is `@MainActor`-isolated and is handled serially.
     /// `@unchecked Sendable` is the idiomatic escape hatch for ferrying an
     /// `MTLTexture` (documented thread-safe) across the actor hop.
-    private enum WPEParallelTextureResult: @unchecked Sendable {
+    enum WPEParallelTextureResult: @unchecked Sendable {
         case staticTexture(MTLTexture)
         case needsOnActor
     }
@@ -295,7 +295,13 @@ extension WPEMetalSceneRenderer {
                     // `.tex`. Their source construction is @MainActor-only, so
                     // route through the untouched serial resolver rather than
                     // duplicating that logic in the parallel lane.
-                    try await loadDynamicTextureOnActor(path: jobs[index].path, layerName: jobs[index].layerName)
+                    try await loadDynamicTextureOnActor(
+                        path: jobs[index].path,
+                        layerName: jobs[index].layerName,
+                        publicationAllowed: { [weak self] in
+                            self?.loadGeneration == generation
+                        }
+                    )
                 }
                 _ = spawnNext()
             }
@@ -306,7 +312,7 @@ extension WPEMetalSceneRenderer {
     /// reference needs @MainActor construction. Mirrors the candidate-walk in
     /// `makeTextureResource`; only the static-image / static-payload branches
     /// build here (the upload still flows through the bounded upload queue).
-    private nonisolated static func resolveStaticTextureOrDefer(
+    nonisolated static func resolveStaticTextureOrDefer(
         relativePath: String,
         label: String,
         candidates: [String],
@@ -314,8 +320,10 @@ extension WPEMetalSceneRenderer {
         loader: WPEMetalTextureLoader,
         streamingThreshold: Int
     ) async throws -> WPEParallelTextureResult {
+        try Task.checkCancellation()
         var lastError: Error?
         for candidate in candidates {
+            try Task.checkCancellation()
             do {
                 if shouldTryTexturePayload(candidate) {
                     do {
@@ -323,20 +331,27 @@ extension WPEMetalSceneRenderer {
                             return .needsOnActor
                         }
                         let payload = try resolver.resolveTexturePayload(relativePath: candidate)
+                        try Task.checkCancellation()
                         if payload.videoPayload != nil || payload.animationTrack != nil {
                             return .needsOnActor
                         }
                         return .staticTexture(try await loader.makeTexture(from: payload, label: label))
+                    } catch is CancellationError {
+                        throw CancellationError()
                     } catch {
                         lastError = error
                     }
                 }
                 let image = try resolver.resolveImage(relativePath: candidate)
+                try Task.checkCancellation()
                 return .staticTexture(try await loader.makeTexture(from: image, label: label))
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 lastError = error
             }
         }
+        try Task.checkCancellation()
         throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
     }
 
@@ -373,10 +388,15 @@ extension WPEMetalSceneRenderer {
     /// On-actor build for the dynamic/video/animated/heavy-streaming minority,
     /// reusing the serial `makeTextureResource`. Paths are pre-deduped by the
     /// caller, so no map guard is needed here.
-    func loadDynamicTextureOnActor(path: String, layerName: String) async throws {
+    func loadDynamicTextureOnActor(
+        path: String,
+        layerName: String,
+        publicationAllowed: @MainActor () -> Bool = { true }
+    ) async throws {
         do {
             let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
             try Task.checkCancellation()
+            guard publicationAllowed() else { throw CancellationError() }
             switch resource {
             case .staticTexture(let texture):
                 recordLoadedStaticTexture(
@@ -459,8 +479,10 @@ extension WPEMetalSceneRenderer {
         label: String,
         colorSpace: WPEMetalColorSpace = .sRGB
     ) async throws -> WPELoadedTextureResource {
+        try Task.checkCancellation()
         var lastError: Error?
         for candidate in textureCandidates(for: relativePath) {
+            try Task.checkCancellation()
             do {
                 if shouldTryTexturePayload(candidate) {
                     do {
@@ -477,9 +499,11 @@ extension WPEMetalSceneRenderer {
                         }
 
                         let payload = try resourceResolver.resolveTexturePayload(relativePath: candidate)
+                        try Task.checkCancellation()
 
                         if payload.videoPayload != nil {
                             let source = try await makeVideoTextureSource(from: payload, label: label)
+                            try Task.checkCancellation()
                             return .dynamicSource(source)
                         }
                         if payload.animationTrack != nil {
@@ -491,16 +515,22 @@ extension WPEMetalSceneRenderer {
                         }
 
                         return .staticTexture(try await textureLoader.makeTexture(from: payload, label: label, colorSpace: colorSpace))
+                    } catch is CancellationError {
+                        throw CancellationError()
                     } catch {
                         lastError = error
                     }
                 }
                 let image = try resourceResolver.resolveImage(relativePath: candidate)
+                try Task.checkCancellation()
                 return .staticTexture(try await textureLoader.makeTexture(from: image, label: label, colorSpace: colorSpace))
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 lastError = error
             }
         }
+        try Task.checkCancellation()
         throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
     }
 
@@ -512,6 +542,7 @@ extension WPEMetalSceneRenderer {
     /// `<bare>` and `materials/<bare>.tex` in the same order the eager
     /// path uses).
     private func resolveStreamingPayloadIfHeavy(_ candidate: String) throws -> WPETexStreamingPayload? {
+        try Task.checkCancellation()
         let probeCandidates: [String]
         let ext = (candidate as NSString).pathExtension.lowercased()
         if ext == "tex" {
@@ -524,9 +555,12 @@ extension WPEMetalSceneRenderer {
         }
 
         for probe in probeCandidates {
+            try Task.checkCancellation()
             let payload: WPETexStreamingPayload
             do {
                 payload = try resourceResolver.resolveStreamingTexturePayload(relativePath: probe)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let SceneResourceResolver.ResolveError.texture(decodeError) {
                 switch decodeError {
                 case .unsupportedAnimation, .unsupportedFormat:
@@ -573,6 +607,7 @@ extension WPEMetalSceneRenderer {
         from payload: WPETexTexturePayload,
         label: String
     ) async throws -> WPEVideoTextureSource {
+        try Task.checkCancellation()
         guard let videoPayload = payload.videoPayload else {
             throw WPEMetalTextureLoaderError.malformedPayload("missing video payload")
         }
@@ -584,6 +619,7 @@ extension WPEMetalSceneRenderer {
             workshopID: descriptor.workshopID
         )
         do {
+            try Task.checkCancellation()
             let source = try WPEVideoTextureSource(
                 device: executor.textureSourceDevice,
                 videoURL: url,
@@ -630,7 +666,7 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Static texture cache & LRU budget
 
-    private func recordLoadedStaticTexture(
+    func recordLoadedStaticTexture(
         path: String,
         layerName: String,
         candidates: [String],
@@ -654,7 +690,6 @@ extension WPEMetalSceneRenderer {
     private func forgetStaticTextureCacheRecord(_ path: String) {
         staticTextureCacheRecords.removeValue(forKey: path)
         staticTexturePlaceholderPaths.remove(path)
-        pendingStaticTextureReloads.remove(path)
         staticTextureReloadThrottles.removeValue(forKey: path)
         staticTextureRecordsEpoch += 1
         textureCacheLRU.remove(path)
@@ -663,7 +698,6 @@ extension WPEMetalSceneRenderer {
     private func resetTextureCacheBudgetState() {
         staticTextureCacheRecords.removeAll(keepingCapacity: false)
         staticTexturePlaceholderPaths.removeAll(keepingCapacity: false)
-        pendingStaticTextureReloads.removeAll(keepingCapacity: false)
         staticTextureReloadThrottles.removeAll(keepingCapacity: false)
         cachedActiveStaticPaths.removeAll(keepingCapacity: false)
         cachedActiveStaticSignature = nil
@@ -777,64 +811,6 @@ extension WPEMetalSceneRenderer {
             loadedTextures.removeValue(forKey: path)
             staticTexturePlaceholderPaths.remove(path)
             Logger.info("[WPE.texture-cache] evicted static texture path=\(path)", category: .wpeRender)
-        }
-    }
-
-    /// Reload an evicted static texture off the main thread, then republish on the
-    /// main actor under a `loadGeneration` guard so a reload from a prior scene is
-    /// ignored. Triggers a redraw so the placeholder is replaced once resident.
-    /// Failed attempts back off per path (`WPEStaticTextureReloadThrottle`).
-    private func scheduleStaticTextureReload(for path: String) {
-        guard let record = staticTextureCacheRecords[path],
-              staticTextureReloadThrottles[path, default: .init()]
-                  .allowsAttempt(at: ProcessInfo.processInfo.systemUptime),
-              pendingStaticTextureReloads.insert(path).inserted else { return }
-        let generation = loadGeneration
-        let resolver = resourceResolver
-        let loader = textureLoader
-        let threshold = Self.lazyAnimationRawByteThreshold
-        Task(priority: .utility) { @MainActor [weak self] in
-            let result = try? await Self.resolveStaticTextureOrDefer(
-                relativePath: path,
-                label: "WPE texture \(path)",
-                candidates: record.candidates,
-                resolver: resolver,
-                loader: loader,
-                streamingThreshold: threshold
-            )
-            guard let self, self.loadGeneration == generation else { return }
-            self.pendingStaticTextureReloads.remove(path)
-            switch result {
-            case .staticTexture(let texture):
-                self.recordLoadedStaticTexture(
-                    path: path,
-                    layerName: record.layerName,
-                    candidates: record.candidates,
-                    texture: texture
-                )
-            case .needsOnActor:
-                do {
-                    try await self.loadDynamicTextureOnActor(path: path, layerName: record.layerName)
-                } catch {
-                    self.noteStaticTextureReloadFailure(path)
-                    return
-                }
-            case .none:
-                self.noteStaticTextureReloadFailure(path)
-                return
-            }
-            self.mtkView.setNeedsDisplay(self.mtkView.bounds)
-        }
-    }
-
-    private func noteStaticTextureReloadFailure(_ path: String) {
-        var throttle = staticTextureReloadThrottles[path, default: .init()]
-        throttle.recordFailure(at: ProcessInfo.processInfo.systemUptime)
-        staticTextureReloadThrottles[path] = throttle
-        if throttle.isExhausted {
-            Logger.warning("[WPE.texture-cache] reload giving up after \(throttle.failureCount) failures path=\(path)", category: .wpeRender)
-        } else {
-            Logger.warning("[WPE.texture-cache] reload failed (attempt \(throttle.failureCount)) path=\(path)", category: .wpeRender)
         }
     }
 

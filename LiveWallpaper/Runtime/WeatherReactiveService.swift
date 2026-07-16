@@ -61,6 +61,14 @@ final class WeatherReactiveService {
     /// (released on an arbitrary queue) also touches it, which Swift 6 can't prove safe.
     @ObservationIgnored nonisolated(unsafe) private var preferenceObserver: NSObjectProtocol?
     @ObservationIgnored private var lastFetchCompletedAt: Date?
+    /// `stopMonitoring()` is restartable for a normal settings toggle;
+    /// `shutdown()` is the process-lifetime barrier used during AppKit quit.
+    @ObservationIgnored private(set) var isShutdown = false
+
+    /// Internal lifecycle seam used by termination tests. MainActor isolation
+    /// keeps the two task references coherent without exposing them publicly.
+    var hasActiveWork: Bool { updateTask != nil || fetchTask != nil }
+    var hasPreferenceObserver: Bool { preferenceObserver != nil }
 
     // MARK: - Open-Meteo Response Model
 
@@ -91,6 +99,7 @@ final class WeatherReactiveService {
     // MARK: - Public API
 
     func startMonitoring() {
+        guard !isShutdown else { return }
         locationProvider.requestCoreLocationAuthorizationIfNeeded()
 
         updateTask?.cancel()
@@ -116,16 +125,32 @@ final class WeatherReactiveService {
         fetchTask = nil
     }
 
+    /// One-way termination barrier: cancel both producers, unregister the
+    /// preference callback that could otherwise call `refresh()` again, and
+    /// reject every later public entry point.
+    func shutdown() {
+        guard !isShutdown else { return }
+        isShutdown = true
+        stopMonitoring()
+        if let observer = preferenceObserver {
+            NotificationCenter.default.removeObserver(observer)
+            preferenceObserver = nil
+        }
+    }
+
     func refresh() {
+        guard !isShutdown else { return }
         startFetch(force: true)
     }
 
     func requestLocationAuthorizationIfNeeded() {
+        guard !isShutdown else { return }
         locationProvider.requestCoreLocationAuthorizationIfNeeded()
     }
 
     /// Single-flight fetch — supersedes any in-flight fetch so refresh taps don't pile up overlapping requests.
     private func startFetch(force: Bool) {
+        guard !isShutdown else { return }
         fetchTask?.cancel()
         fetchTask = Task { [weak self] in
             await self?.fetchWeatherIfPossible(force: force)
@@ -135,14 +160,15 @@ final class WeatherReactiveService {
     // MARK: - Preference Observer
 
     private func observePreferenceChanges() {
-        guard preferenceObserver == nil else { return }
+        guard !isShutdown, preferenceObserver == nil else { return }
         preferenceObserver = NotificationCenter.default.addObserver(
             forName: .weatherLocationPreferenceDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.refresh()
+                guard let self, !self.isShutdown else { return }
+                self.refresh()
             }
         }
     }
@@ -150,6 +176,7 @@ final class WeatherReactiveService {
     // MARK: - Weather Fetch (Open-Meteo)
 
     private func fetchWeatherIfPossible(force: Bool) async {
+        guard !isShutdown else { return }
         // Off means the entire weather-reactive pipeline is dormant: no
         // location query, no Open-Meteo request, no observable updates.
         // We still clear the cached state so a previously-rendered
@@ -175,7 +202,7 @@ final class WeatherReactiveService {
         locationStatus = .fetching
 
         let resolution = await locationProvider.resolveCoordinate()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !isShutdown else { return }
         activeLocationLabel = resolution.displayName
 
         guard let coordinate = resolution.coordinate else {
@@ -198,8 +225,10 @@ final class WeatherReactiveService {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             try Task.checkCancellation()
+            guard !isShutdown else { return }
             let response = try JSONDecoder().decode(OpenMeteoResponse.self, from: data)
             try Task.checkCancellation()
+            guard !isShutdown else { return }
 
             let weatherCode = response.current.weather_code
             let cloudCover = response.current.cloud_cover / 100.0
@@ -216,6 +245,7 @@ final class WeatherReactiveService {
         } catch is CancellationError {
             return
         } catch {
+            guard !isShutdown else { return }
             lastError = error.localizedDescription
             locationStatus = .error
             lastFetchCompletedAt = Date()

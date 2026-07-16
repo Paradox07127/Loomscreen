@@ -45,7 +45,7 @@ Loomscreen is a menu-bar-first macOS wallpaper platform that lets each connected
 | Edition | What you get |
 |---|---|
 | **Loomscreen Lite** | Video / HTML / Apple Aerials, playlists, schedule, bookmarks, shortcuts, weather-reactive effects, performance controls. |
-| **Loomscreen Pro** | Everything in Lite, plus Metal procedural shaders, Wallpaper Engine scenes, local scene import, Workshop preview/download path (direct distribution), and developer tools. |
+| **Loomscreen Pro** | Everything in Lite, plus Metal procedural shaders, Wallpaper Engine scenes, local scene import, and the Workshop preview/download path (direct distribution). |
 
 ### Live preview by scenario
 
@@ -106,7 +106,8 @@ Detailed guide: [docs/quick-start.md](docs/quick-start.md)
 
 ## Updates
 
-- One launch-time GitHub Releases check + manual check path in **Settings → About**.
+- Lite performs one launch-time GitHub Releases check and exposes a manual check
+  in **Settings → About**. Pro currently has no in-app updater.
 - Manual updates: download the new DMG and repeat the `xattr` step once.
 - Public builds do not auto-install updates yet.
 

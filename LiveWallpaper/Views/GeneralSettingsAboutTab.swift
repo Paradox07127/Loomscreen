@@ -11,9 +11,6 @@ extension GeneralSettingsView {
                 #if LITE_BUILD
                 UpdateBannerView()
                 #endif
-                if SparkleUpdateConfiguration.manualChecksEnabled {
-                    SparkleUpdateTestPanel()
-                }
                 aboutTagline
                 aboutActionGrid
                 aboutFooter

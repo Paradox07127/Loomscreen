@@ -89,6 +89,64 @@ struct LocalizationCoverageTests {
         #expect(actionModel.contains("var displayDescriptionKey: LocalizedStringKey"))
     }
 
+    @Test("Onboarding unsupported-import copy remains statically catalogued for both capabilities")
+    func onboardingUnsupportedImportCopyIsCatalogued() throws {
+        let catalog = try StringCatalog.load(named: "Localizable.xcstrings")
+        let keys = [
+            "That file type isn't supported. Pick a video or web page.",
+            "That file type isn't supported. Pick a video, web page, or scene.",
+        ]
+        for key in keys {
+            #expect(catalog.strings[key] != nil, "Missing onboarding recovery key: \(key)")
+            for locale in [catalog.sourceLanguage] + Self.requiredLocales {
+                #expect(
+                    catalog.strings[key]?.localizations?[locale]?.stringUnit?.value.isEmpty == false,
+                    "Missing \(locale) onboarding recovery copy for: \(key)"
+                )
+                #expect(
+                    catalog.strings[key]?.localizations?[locale]?.stringUnit?.state == "translated",
+                    "Onboarding recovery copy is not translated for \(locale): \(key)"
+                )
+            }
+        }
+
+        let source = try Self.projectFile("LiveWallpaper/Views/Onboarding/OnboardingPickerView.swift")
+        #expect(source.contains("unsupportedFileTypeMessage(sceneCapable: Bool) -> LocalizedStringResource"))
+        #expect(source.contains("return \"That file type isn't supported. Pick a video or web page.\""))
+        #expect(source.contains("return \"That file type isn't supported. Pick a video, web page, or scene.\""))
+        #expect(
+            Self.hasDirectOnboardingSceneCapabilityWiring(source),
+            "OnboardingPickerView.sceneCapable must directly use the tested .scene catalog policy"
+        )
+        #expect(
+            Self.hasDirectOnboardingSceneCapabilityPolicy(source),
+            "The onboarding scene policy must directly query FeatureCatalog's .scene capability"
+        )
+        #expect(source.contains(
+            "return fail(OnboardingImportCopy.unsupportedFileTypeMessage(sceneCapable: sceneCapable))"
+        ))
+
+        let invertedWiringProbe = """
+        private var sceneCapable: Bool {
+            !OnboardingImportCopy.sceneCapable(in: featureCatalog)
+        }
+        """
+        #expect(
+            !Self.hasDirectOnboardingSceneCapabilityWiring(invertedWiringProbe),
+            "The capability-wiring guard must reject an inverted scene feature"
+        )
+
+        let invertedPolicyProbe = """
+        static func sceneCapable(in catalog: FeatureCatalog) -> Bool {
+            !catalog.isEnabled(.scene)
+        }
+        """
+        #expect(
+            !Self.hasDirectOnboardingSceneCapabilityPolicy(invertedPolicyProbe),
+            "The capability-policy guard must reject an inverted FeatureCatalog query"
+        )
+    }
+
     @Test("Workshop import copy describes local copied projects, not online Workshop connection")
     func workshopImportCopyAvoidsOnlineConnectionLanguage() throws {
         // Swept, not listed: a hardcoded file list keeps passing after a monolith
@@ -132,6 +190,20 @@ struct LocalizationCoverageTests {
 
     private static func projectFile(_ relativePath: String) throws -> String {
         try RepositoryRoot.source(relativePath)
+    }
+
+    private static func hasDirectOnboardingSceneCapabilityWiring(_ source: String) -> Bool {
+        let normalized = source.filter { !$0.isWhitespace }
+        let expected = "privatevarsceneCapable:Bool{OnboardingImportCopy.sceneCapable(in:featureCatalog)}"
+        return normalized.components(separatedBy: expected).count - 1 == 1
+            && normalized.components(separatedBy: "privatevarsceneCapable:Bool{").count - 1 == 1
+    }
+
+    private static func hasDirectOnboardingSceneCapabilityPolicy(_ source: String) -> Bool {
+        let normalized = source.filter { !$0.isWhitespace }
+        let expected = "staticfuncsceneCapable(incatalog:FeatureCatalog)->Bool{catalog.isEnabled(.scene)}"
+        return normalized.components(separatedBy: expected).count - 1 == 1
+            && normalized.components(separatedBy: "staticfuncsceneCapable(incatalog:FeatureCatalog)->Bool{").count - 1 == 1
     }
 }
 
@@ -225,6 +297,7 @@ private struct StringCatalog: Decodable {
     }
 
     struct StringUnit: Decodable {
+        let state: String?
         let value: String
     }
 }

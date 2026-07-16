@@ -12,6 +12,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     // MARK: - Properties
     let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
+    private let bookmarkResolver: SecurityScopedBookmarkResolver
+    private let onBookmarkRefresh: @MainActor (_ original: Data, _ refreshed: Data) -> Void
     private var allowMouseInteraction = false
     /// Re-entry guard for trackpad-gesture forwarders. When we forward
     /// `scrollWheel/swipe/magnify/rotate` to `webView`, AppKit propagates
@@ -114,7 +116,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Initialization
 
-    init(frame frameRect: NSRect, initialEphemeral: Bool = false) {
+    init(
+        frame frameRect: NSRect,
+        initialEphemeral: Bool = false,
+        bookmarkResolver: SecurityScopedBookmarkResolver = .shared,
+        onBookmarkRefresh: @escaping @MainActor (_ original: Data, _ refreshed: Data) -> Void = { _, _ in }
+    ) {
         let configuration = WKWebViewConfiguration()
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
@@ -127,6 +134,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         let handler = FolderURLSchemeHandler()
         configuration.setURLSchemeHandler(handler, forURLScheme: FolderURLSchemeHandler.scheme)
         self.folderHandler = handler
+        self.bookmarkResolver = bookmarkResolver
+        self.onBookmarkRefresh = onBookmarkRefresh
         self.currentDataStoreIsEphemeral = initialEphemeral
         self.pendingEphemeral = initialEphemeral
 
@@ -631,27 +640,34 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             resetNavigationFailureState()
         }
         stopActiveSecurityScope()
-        if case .folder = source {
+        var effectiveSource = source
+        var resolvedLocalURL: URL?
+        if source.localBookmarkData != nil {
+            guard let resolved = resolveLocalSource(source) else {
+                reportError(.sandboxRevoked)
+                return
+            }
+            effectiveSource = resolved.source
+            resolvedLocalURL = resolved.url
+            // Retry/refresh must reuse the recreated Data, not the stale input.
+            lastSource = effectiveSource
+            wallpaperEngineProjectKey = WallpaperEngineProjectIdentity.key(source: effectiveSource)
+        }
+        if case .folder = effectiveSource {
         } else {
             updateWallpaperEnginePropertyBridge(for: nil)
             folderHandler.folderURL = nil
         }
-        switch source {
-        case .file(let bookmarkData):
-            guard let url = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
-                reportError(.sandboxRevoked)
-                return
-            }
+        switch effectiveSource {
+        case .file:
+            guard let url = resolvedLocalURL else { return }
             activeSecurityScopedURL = url
             let readRoot = Self.readAccessRoot(forFileURL: url)
             currentLocalReadAccessRoot = readRoot
             currentRemoteSourceOrigin = nil
             webView.loadFileURL(url, allowingReadAccessTo: readRoot)
-        case .folder(let bookmarkData, let indexFileName):
-            guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
-                reportError(.sandboxRevoked)
-                return
-            }
+        case .folder(_, let indexFileName):
+            guard let folderURL = resolvedLocalURL else { return }
             activeSecurityScopedURL = folderURL
             currentLocalReadAccessRoot = folderURL
             currentRemoteSourceOrigin = nil
@@ -1097,28 +1113,44 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Bookmark Resolution
 
-    private static func resolveBookmark(_ data: Data) -> URL? {
-        var isStale = false
+    private struct ResolvedLocalSource {
+        let source: HTMLSource
         let url: URL
-        do {
-            url = try URL(
-                resolvingBookmarkData: data,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
+    }
+
+    /// Resolves and starts the scope exactly once for a local runtime load. A
+    /// refreshed bookmark is carried into `lastSource` and synchronously handed
+    /// to the MainActor owner before WebKit begins reading.
+    private func resolveLocalSource(_ source: HTMLSource) -> ResolvedLocalSource? {
+        guard let original = source.localBookmarkData else { return nil }
+        let resolved: SecurityScopedBookmarkResolver.Resolved
+        switch bookmarkResolver.resolve(original, target: .transient) {
+        case .success(let value):
+            resolved = value
+        case .failure(let failure):
+            Logger.warning(
+                "HTMLWallpaperView: bookmark resolution failed — \(failure.localizedDescription)",
+                category: .screenManager
             )
-        } catch {
-            Logger.warning("HTMLWallpaperView: bookmark resolution failed — \(error.localizedDescription)", category: .screenManager)
             return nil
         }
-        if isStale {
-            Logger.warning("HTMLWallpaperView: bookmark for \(url.lastPathComponent) is stale (file may have moved). Re-pick the source to refresh.", category: .screenManager)
+        let effectiveSource: HTMLSource
+        if resolved.didRefresh,
+           let refreshed = source.replacingLocalBookmark(
+            matching: original,
+            with: resolved.bookmarkData
+           ) {
+            effectiveSource = refreshed
+            onBookmarkRefresh(original, resolved.bookmarkData)
+        } else {
+            effectiveSource = source
         }
+        let url = resolved.url
         guard url.startAccessingSecurityScopedResource() else {
             Logger.warning("HTMLWallpaperView: startAccessingSecurityScopedResource failed for \(url.lastPathComponent) — sandbox extension is no longer valid; user must re-pick the source.", category: .screenManager)
             return nil
         }
-        return url
+        return ResolvedLocalSource(source: effectiveSource, url: url)
     }
 
 }

@@ -166,7 +166,7 @@ struct WPEEngineAssetsInstallerTests {
     }
 
     @Test("Ownership preflight cleanup removes app-update state without deleting linked assets")
-    func ownershipPreflightCleanupPreservesLinkedAssets() throws {
+    func ownershipPreflightCleanupPreservesLinkedAssets() async throws {
         let fm = FileManager.default
         let base = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Caches/lw-ownership-cleanup-\(UUID().uuidString)", isDirectory: true)
@@ -183,7 +183,13 @@ struct WPEEngineAssetsInstallerTests {
         try "manifest".write(to: steamApps.appendingPathComponent("appmanifest_431960.acf"), atomically: true, encoding: .utf8)
         try "asset".write(to: managedAssets.appendingPathComponent("noise.png"), atomically: true, encoding: .utf8)
 
-        SteamCMDDoctorService.prepareWallpaperEngineOwnershipProbe(steamApps: steamApps, fileManager: fm)
+        let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
+        try await SteamCMDDoctorOperationCoordinator().withOperation(.ownershipValidation) { lease in
+            owner.cleanupSteamCMDAppState(
+                steamApps: steamApps,
+                authorization: lease.filesystemMutation
+            )
+        }
 
         #expect(!fm.fileExists(atPath: stagedApp.path(percentEncoded: false)))
         #expect(!fm.fileExists(atPath: downloading.appendingPathComponent("state_431960_123.patch").path(percentEncoded: false)))
@@ -250,12 +256,18 @@ struct WPEEngineAssetsInstallerTests {
     }
 
     @Test("Prune keeps assets/ and removes everything else")
-    func pruneKeepsAssets() throws {
+    func pruneKeepsAssets() async throws {
         let fm = FileManager.default
         let tree = try makeInstallTree(leaf: "wallpaper_engine", withAssets: true)
         defer { try? fm.removeItem(at: tree.base) }
 
-        try WPEEngineAssetsInstaller.pruneToAssets(installRoot: tree.installRoot)
+        let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
+        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+            try owner.pruneToAssets(
+                installRoot: tree.installRoot,
+                authorization: lease.filesystemMutation
+            )
+        }
 
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("assets/materials/util/noise.png").path))
         #expect(!fm.fileExists(atPath: tree.installRoot.appendingPathComponent("bin").path))
@@ -263,32 +275,49 @@ struct WPEEngineAssetsInstallerTests {
     }
 
     @Test("Prune refuses a target outside the sandbox container")
-    func pruneRejectsNonContainerPath() {
+    func pruneRejectsNonContainerPath() async throws {
         let outside = URL(fileURLWithPath: "/tmp/lw-not-container/common/wallpaper_engine", isDirectory: true)
-        #expect(throws: WPEEngineAssetsInstaller.PruneError.notContainerInternal) {
-            try WPEEngineAssetsInstaller.pruneToAssets(installRoot: outside)
+        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+            #expect(throws: WPEEngineAssetsFilesystemOwner.Error.notContainerInternal) {
+                try WPEEngineAssetsFilesystemOwner().pruneToAssets(
+                    installRoot: outside,
+                    authorization: lease.filesystemMutation
+                )
+            }
         }
     }
 
     @Test("Prune refuses an unexpected directory name")
-    func pruneRejectsWrongLeaf() throws {
+    func pruneRejectsWrongLeaf() async throws {
         let fm = FileManager.default
         let tree = try makeInstallTree(leaf: "something_else", withAssets: true)
         defer { try? fm.removeItem(at: tree.base) }
-        #expect(throws: WPEEngineAssetsInstaller.PruneError.unexpectedLayout) {
-            try WPEEngineAssetsInstaller.pruneToAssets(installRoot: tree.installRoot)
+        let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
+        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+            #expect(throws: WPEEngineAssetsFilesystemOwner.Error.unexpectedLayout) {
+                try owner.pruneToAssets(
+                    installRoot: tree.installRoot,
+                    authorization: lease.filesystemMutation
+                )
+            }
         }
         // Nothing was touched.
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("bin").path))
     }
 
     @Test("Prune refuses (and touches nothing) when assets/ is absent")
-    func pruneRefusesWithoutAssets() throws {
+    func pruneRefusesWithoutAssets() async throws {
         let fm = FileManager.default
         let tree = try makeInstallTree(leaf: "wallpaper_engine", withAssets: false)
         defer { try? fm.removeItem(at: tree.base) }
-        #expect(throws: WPEEngineAssetsInstaller.PruneError.missingAssets) {
-            try WPEEngineAssetsInstaller.pruneToAssets(installRoot: tree.installRoot)
+        let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
+        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+            #expect(throws: WPEEngineAssetsFilesystemOwner.Error.missingAssets) {
+                try owner.pruneToAssets(
+                    installRoot: tree.installRoot,
+                    authorization: lease.filesystemMutation
+                )
+            }
         }
         // The download was partial — siblings must survive so a re-run can finish.
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("bin").path))

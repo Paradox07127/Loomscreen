@@ -26,6 +26,10 @@ public protocol FullScreenDetecting: AnyObject {
     func occlusionFraction(for screenID: CGDirectDisplayID) -> Double
     func checkNow()
     func setFallbackPollingEnabled(_ enabled: Bool)
+    /// Permanently releases notification subscriptions and polling owned by
+    /// this detector instance. Used by application teardown, not by the
+    /// adaptive polling toggle.
+    func stop()
 }
 
 extension FullScreenDetector: FullScreenDetecting {}

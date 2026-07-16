@@ -62,6 +62,11 @@ public enum DesignTokens {
         /// Tabular digits so dense numeric columns stay compact and don't jitter.
         public static let metric = Font.caption.monospacedDigit()
 
+        /// Emphasized 12pt-equivalent readout for compact headline metrics.
+        public static let metricEmphasized = Font.system(.callout, design: .monospaced)
+            .weight(.semibold)
+            .monospacedDigit()
+
         public static let code = Font.system(.body, design: .monospaced)
 
         /// Caption-scale `code` for dense technical text: log lines, paths, IDs.

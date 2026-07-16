@@ -1,9 +1,94 @@
 import Foundation
-import Testing
 @testable import LiveWallpaper
+import Testing
 
+@Suite(.serialized)
 @MainActor
 struct WPESceneScriptRuntimeTests {
+    /// Runtime semantics tests must not contend through the app-global governor
+    /// when Swift Testing executes unrelated suites in parallel. Test-local
+    /// factories preserve every call site's production-like defaults otherwise.
+    private let isolatedGovernor = WPESceneScriptExecutionGovernor(limit: 4)
+
+    private func WPESceneScriptInstance(
+        script: String,
+        initialValue: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        shared: WPESharedScriptState? = nil,
+        setupBudget: TimeInterval = 2,
+        tickBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor? = nil
+    ) throws -> LiveWallpaper.WPESceneScriptInstance {
+        try LiveWallpaper.WPESceneScriptInstance(
+            script: script,
+            initialValue: initialValue,
+            scriptProperties: scriptProperties,
+            shared: shared,
+            setupBudget: setupBudget,
+            tickBudget: tickBudget,
+            governor: governor ?? isolatedGovernor
+        )
+    }
+
+    private func WPELayerScriptInstance(
+        script: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        shared: WPESharedScriptState? = nil,
+        canvasSize: SIMD2<Double> = SIMD2<Double>(1920, 1080),
+        setupBudget: TimeInterval = 2,
+        tickBudget: TimeInterval = 0.5,
+        nowProviderMillis: (@Sendable () -> Double)? = nil,
+        outputMode: WPELayerScriptOutputMode = .layerState,
+        governor: WPESceneScriptExecutionGovernor? = nil
+    ) throws -> LiveWallpaper.WPELayerScriptInstance {
+        try LiveWallpaper.WPELayerScriptInstance(
+            script: script,
+            scriptProperties: scriptProperties,
+            shared: shared,
+            canvasSize: canvasSize,
+            setupBudget: setupBudget,
+            tickBudget: tickBudget,
+            nowProviderMillis: nowProviderMillis,
+            outputMode: outputMode,
+            governor: governor ?? isolatedGovernor
+        )
+    }
+
+    private func WPETransformScriptEvaluator(
+        canvasWidth: Double,
+        canvasHeight: Double,
+        evaluationBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor? = nil
+    ) -> LiveWallpaper.WPETransformScriptEvaluator {
+        LiveWallpaper.WPETransformScriptEvaluator(
+            canvasWidth: canvasWidth,
+            canvasHeight: canvasHeight,
+            evaluationBudget: evaluationBudget,
+            governor: governor ?? isolatedGovernor
+        )
+    }
+
+    private func WPEDynamicTransformScriptInstance(
+        script: String,
+        scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
+        seed: SIMD3<Double>,
+        canvasSize: SIMD2<Double>,
+        shared: WPESharedScriptState? = nil,
+        setupBudget: TimeInterval = 2,
+        tickBudget: TimeInterval = 0.5,
+        governor: WPESceneScriptExecutionGovernor? = nil
+    ) throws -> LiveWallpaper.WPEDynamicTransformScriptInstance {
+        try LiveWallpaper.WPEDynamicTransformScriptInstance(
+            script: script,
+            scriptProperties: scriptProperties,
+            seed: seed,
+            canvasSize: canvasSize,
+            shared: shared,
+            setupBudget: setupBudget,
+            tickBudget: tickBudget,
+            governor: governor ?? isolatedGovernor
+        )
+    }
 
     @Test("Captures embedded text script during parse")
     func captureTextScriptDuringParse() throws {
@@ -256,38 +341,266 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.tickString() == "Local/1st Arm/42")
     }
 
-    @Test("Runaway update() loop is contained: tick times out and freezes at lastValue")
-    func runawayUpdateLoopIsContained() throws {
-        let script = """
-        export function update(value) {
-            if (value === 'armed') { while (true) {} }
-            return 'armed';
+    @Test("Current synchronous containment is deadline plus poison, not termination")
+    func synchronousTimeoutSourceContract() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("LiveWallpaper/Runtime/Scene/WPESceneScriptRuntime.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let start = try #require(source.range(of: "@MainActor\nfinal class WPESceneScriptInstance"))
+        let end = try #require(source.range(of: "enum WPESceneScriptError", range: start.upperBound ..< source.endIndex))
+        let instanceSource = String(source[start.lowerBound ..< end.lowerBound])
+
+        // Current production waits only at the caller boundary. A deadline
+        // poisons/quarantines the instance, setup throws, and ticks keep the last
+        // value; no public JavaScriptCore termination seam is invoked.
+        #expect(instanceSource.contains("done.wait(timeout: deadline)"))
+        #expect(instanceSource.contains("safety.quarantine(self, operation: operation)"))
+        #expect(!instanceSource.contains("static var quarantine"))
+        #expect(!instanceSource.contains("quarantine.append"))
+        #expect(instanceSource.contains("throw WPESceneScriptError.executionTimedOut"))
+        #expect(instanceSource.contains("return lastValue"))
+        for absentTerminationSeam in [
+            "terminateExecution",
+            "TerminateExecution",
+            "executionTimeLimit",
+            "JSContextGroupSetExecutionTimeLimit",
+        ] {
+            #expect(!instanceSource.contains(absentTerminationSeam))
         }
-        """
-        let instance = try WPESceneScriptInstance(
-            script: script,
-            initialValue: "start",
-            setupBudget: 2.0,
-            tickBudget: 0.2
-        )
-        #expect(instance.tickString() == "armed")
-        // Second tick enters the infinite loop — must return within budget
-        // instead of hanging, then stay frozen (poisoned) without re-touching
-        // the hung JSContext.
-        #expect(instance.tickString() == "armed")
-        #expect(instance.tickString() == "armed")
     }
 
-    @Test("Runaway module body times out at setup instead of hanging load")
-    func runawaySetupTimesOut() {
-        #expect(throws: WPESceneScriptError.executionTimedOut) {
+    @Test("Setup capacity rejection is structured and dispatches no evaluator")
+    func setupCapacityRejectionIsStructured() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        defer { heldPermit.release() }
+        let expected = WPESceneScriptError.capacityUnavailable(operation: .setup)
+
+        #expect(throws: expected) {
             _ = try WPESceneScriptInstance(
-                script: "while (true) {}",
-                initialValue: "init",
-                setupBudget: 0.2,
-                tickBudget: 0.2
+                script: "export function update(value) { return value; }",
+                initialValue: "seed",
+                setupBudget: 0.001,
+                governor: governor
             )
         }
+        #expect(throws: expected) {
+            _ = try WPELayerScriptInstance(
+                script: "export function update() { thisLayer.visible = false; }",
+                setupBudget: 0.001,
+                governor: governor
+            )
+        }
+        #expect(throws: expected) {
+            _ = try WPEDynamicTransformScriptInstance(
+                script: "export function update(value) { return value; }",
+                seed: .zero,
+                canvasSize: SIMD2<Double>(100, 100),
+                setupBudget: 0.001,
+                governor: governor
+            )
+        }
+        let staticEvaluator = WPETransformScriptEvaluator(
+            canvasWidth: 100,
+            canvasHeight: 100,
+            evaluationBudget: 0.001,
+            governor: governor
+        )
+        #expect(staticEvaluator.resolveVec3(
+            script: "export function update(value) { value.x = 7; value.y = 8; return value; }",
+            properties: [:],
+            seed: .zero
+        ) == nil)
+    }
+
+    @Test("Capacity saturation keeps stable values and evaluators recover")
+    func capacitySaturationKeepsStableValues() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let text = try WPESceneScriptInstance(
+            script: "export function update(value) { return 'updated-' + value; }",
+            initialValue: "seed",
+            governor: governor
+        )
+        let layer = try WPELayerScriptInstance(
+            script: "export function update() { thisLayer.visible = false; }",
+            governor: governor
+        )
+        let transform = try WPEDynamicTransformScriptInstance(
+            script: "export function update(value) { value.x += 1; return value; }",
+            seed: .zero,
+            canvasSize: SIMD2<Double>(100, 100),
+            governor: governor
+        )
+        let staticEvaluator = WPETransformScriptEvaluator(
+            canvasWidth: 100,
+            canvasHeight: 100,
+            governor: governor
+        )
+
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        #expect(text.tickString() == "seed")
+        #expect(text.liveTickString() == "seed")
+        #expect(text.liveTickString() == "seed", "capacity rejection must return the async claim")
+        #expect(layer.tick() == nil)
+        #expect(transform.tick(pointerPosition: SIMD2<Double>(0.5, 0.5)) == .zero)
+        #expect(staticEvaluator.resolveVec3(
+            script: "export function update(value) { value.x = 7; value.y = 8; return value; }",
+            properties: [:],
+            seed: .zero
+        ) == nil)
+        heldPermit.release()
+
+        #expect(text.tickString() == "updated-seed")
+        #expect(layer.tick()?.own.visible == false)
+        #expect(transform.tick(pointerPosition: SIMD2<Double>(0.5, 0.5))?.x == 1)
+        #expect(staticEvaluator.resolveVec3(
+            script: "export function update(value) { value.x = 7; value.y = 8; return value; }",
+            properties: [:],
+            seed: .zero
+        ) == SIMD3<Double>(7, 8, 0))
+    }
+
+    @Test("Fair frame admission lets two production evaluators progress at limit one")
+    func fairAdmissionLetsProductionEvaluatorsProgress() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let first = try WPESceneScriptInstance(
+            script: "export function update(value) { return value + '-first'; }",
+            initialValue: "seed",
+            governor: governor
+        )
+        let second = try WPESceneScriptInstance(
+            script: "export function update(value) { return value + '-second'; }",
+            initialValue: "seed",
+            governor: governor
+        )
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        let saturatedEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_001)
+
+        // Reverse the reservation order, then probe in fixed first/second order.
+        // FIFO must make the first probe yield instead of stealing every round.
+        #expect(second.tickString(traversalEpoch: saturatedEpoch) == "seed")
+        #expect(first.tickString(traversalEpoch: saturatedEpoch) == "seed")
+        heldPermit.release()
+
+        let recoveryEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_001)
+        #expect(first.tickString(traversalEpoch: recoveryEpoch) == "seed")
+        #expect(second.tickString(traversalEpoch: recoveryEpoch) == "seed-second")
+        #expect(first.tickString(traversalEpoch: recoveryEpoch) == "seed-first")
+        #expect(second.tickString(traversalEpoch: recoveryEpoch) == "seed-second-second")
+        #expect(first.tickString(traversalEpoch: recoveryEpoch) == "seed-first-first")
+    }
+
+    @Test("Fair frame admission does not starve a tail behind five production evaluators")
+    func fairAdmissionLetsSixProductionEvaluatorsProgress() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let prefix = try (0 ..< 5).map { index in
+            try WPESceneScriptInstance(
+                script: "export function update(value) { return value + '-p\(index)'; }",
+                initialValue: "seed-p\(index)",
+                governor: governor
+            )
+        }
+        let tail = try WPESceneScriptInstance(
+            script: "export function update(value) { return value + '-tail'; }",
+            initialValue: "seed-tail",
+            governor: governor
+        )
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        let firstSaturatedEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_002)
+
+        // Reserve the tail first, then five earlier-in-render-order evaluators.
+        // One explicit traversal token makes every repeated probe inert, so the
+        // prefix cannot evict the tail before its turn when capacity returns.
+        #expect(tail.tickString(traversalEpoch: firstSaturatedEpoch) == "seed-tail")
+        for (index, instance) in prefix.enumerated() {
+            #expect(instance.tickString(traversalEpoch: firstSaturatedEpoch) == "seed-p\(index)")
+        }
+        heldPermit.release()
+
+        // Production evaluator calls, not a test-side governor model. The first
+        // fixed-order traversal must yield to the reserved tail; the following
+        // traversal lets every prefix advance as well.
+        let firstRecoveryEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_002)
+        for instance in prefix {
+            _ = instance.tickString(traversalEpoch: firstRecoveryEpoch)
+        }
+        #expect(tail.tickString(traversalEpoch: firstRecoveryEpoch) == "seed-tail-tail")
+
+        let firstPrefixProgress = prefix.map {
+            $0.tickString(traversalEpoch: firstRecoveryEpoch)
+        }
+        for (index, value) in firstPrefixProgress.enumerated() {
+            #expect(value == "seed-p\(index)-p\(index)")
+        }
+
+        // Repeat the same saturated ordering to prove progress across rounds,
+        // rather than relying on an uncontended follow-up call.
+        let secondHeldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        let secondSaturatedEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_002)
+        #expect(tail.tickString(traversalEpoch: secondSaturatedEpoch) == "seed-tail-tail")
+        for (index, instance) in prefix.enumerated() {
+            #expect(
+                instance.tickString(traversalEpoch: secondSaturatedEpoch)
+                    == "seed-p\(index)-p\(index)"
+            )
+        }
+        secondHeldPermit.release()
+
+        let secondRecoveryEpoch = WPESceneScriptTraversalEpoch.next(domainID: 1_002)
+        for (index, instance) in prefix.enumerated() {
+            #expect(
+                instance.tickString(traversalEpoch: secondRecoveryEpoch)
+                    == "seed-p\(index)-p\(index)"
+            )
+        }
+        #expect(tail.tickString(traversalEpoch: secondRecoveryEpoch) == "seed-tail-tail-tail")
+        for (index, instance) in prefix.enumerated() {
+            #expect(
+                instance.tickString(traversalEpoch: secondRecoveryEpoch)
+                    == "seed-p\(index)-p\(index)-p\(index)"
+            )
+        }
+    }
+
+    @Test("Setup waits fairly through temporary saturation within its deadline")
+    func setupWaitsThroughTemporarySaturation() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        let releaser = DispatchQueue(label: "com.livewallpaper.tests.scenescript-setup-release")
+        releaser.asyncAfter(deadline: .now() + 0.01) {
+            heldPermit.release()
+        }
+
+        let instance = try WPESceneScriptInstance(
+            script: "export function update(value) { return value + '-ready'; }",
+            initialValue: "seed",
+            setupBudget: 1,
+            governor: governor
+        )
+        #expect(instance.tickString() == "seed-ready")
+    }
+
+    @Test("Dynamic sync capacity saturation keeps the last stable transform")
+    func dynamicSyncCapacityKeepsLastValue() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 1)
+        let instance = try WPEDynamicTransformScriptInstance(
+            script: "export function update(value) { value.x += 1; return value; }",
+            seed: SIMD3<Double>(3, 4, 5),
+            canvasSize: SIMD2<Double>(100, 100),
+            governor: governor
+        )
+        let blocker = governor.makeParticipant()
+        let heldPermit = try #require(governor.tryAcquireUnreserved(for: blocker))
+        defer { heldPermit.release() }
+
+        #expect(instance.tick(pointerPosition: .zero) == SIMD3<Double>(3, 4, 5))
     }
 
     // MARK: - WPETransformScriptEvaluator (static origin scripts)
@@ -382,28 +695,35 @@ struct WPESceneScriptRuntimeTests {
         let origin = try #require(evaluator.resolveVec3(
             script: constScript,
             properties: ["x": .number(0.3), "y": .number(0.7)],
-            seed: .init(0, 0, 0)))
-        #expect(abs(origin.x - 300) < 0.001)   // override wins over the const default 0.5
+            seed: .init(0, 0, 0)
+        ))
+        #expect(abs(origin.x - 300) < 0.001) // override wins over the const default 0.5
         #expect(abs(origin.y - 700) < 0.001)
     }
 
     @Test("Dynamic (audio/time/random) scripts are not statically resolved")
     func dynamicScriptsAreSkipped() {
-        #expect(WPETransformScriptEvaluator.isStaticallyResolvable(Self.originScript))
-        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
-            "export function update(v){ v.x = engine.getFrequency(0); return v; }"))
-        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
-            "export function update(v){ v.x = engine.runtime; return v; }"))
-        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
-            "export function update(v){ v.x = Math.random(); return v; }"))
-        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
-            "export function update(v){ v.x = input.cursorWorldPosition.x; return v; }"))
-        #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(
-            "export function update(v){ v.x = shared.xx1; return v; }"))
+        #expect(LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(Self.originScript))
+        #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = engine.getFrequency(0); return v; }"
+        ))
+        #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = engine.runtime; return v; }"
+        ))
+        #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = Math.random(); return v; }"
+        ))
+        #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = input.cursorWorldPosition.x; return v; }"
+        ))
+        #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(
+            "export function update(v){ v.x = shared.xx1; return v; }"
+        ))
         let evaluator = WPETransformScriptEvaluator(canvasWidth: 100, canvasHeight: 100)
         #expect(evaluator.resolveVec3(
             script: "export function update(v){ v.x = engine.getTimeOfDay(); return v; }",
-            properties: [:], seed: .init(1, 2, 3)) == nil)
+            properties: [:], seed: .init(1, 2, 3)
+        ) == nil)
     }
 
     @Test("Dynamic origin script follows cursorWorldPosition in WPE y-up canvas pixels")
@@ -481,11 +801,11 @@ struct WPESceneScriptRuntimeTests {
         let loopScripts = [
             "export function update(v){ while (true) {} return v; }",
             "export function update(v){ for (;;) {} return v; }",
-            "export function update(v){ do {} while (true); return v; }"
+            "export function update(v){ do {} while (true); return v; }",
         ]
 
         for script in loopScripts {
-            #expect(!WPETransformScriptEvaluator.isStaticallyResolvable(script))
+            #expect(!LiveWallpaper.WPETransformScriptEvaluator.isStaticallyResolvable(script))
         }
 
         let evaluator = WPETransformScriptEvaluator(
@@ -1341,7 +1661,7 @@ struct WPESceneScriptRuntimeTests {
     // MARK: - Async latest-snapshot ticks (ADR-003 step 1)
 
     @Test("Outcome slot: newest wins, consume-once, in-flight back-pressure")
-    func outcomeSlotSemantics() {
+    func outcomeSlotSemantics() throws {
         let slot = WPESceneScriptOutcomeSlot<Int>()
         #expect(slot.takeLatest() == nil)
         slot.publishEvent(1)
@@ -1350,12 +1670,15 @@ struct WPESceneScriptRuntimeTests {
         #expect(slot.takeLatest() == 2)
         // Consumed → the keep-last sentinel until something new completes.
         #expect(slot.takeLatest() == nil)
-        #expect(slot.beginTick())
+        let firstClaim = try #require(slot.beginTick())
         // One tick in flight → natural back-pressure, no second claim.
-        #expect(!slot.beginTick())
-        slot.publishTick(3)
-        #expect(slot.beginTick())
-        slot.publishTick(4)
+        #expect(slot.beginTick() == nil)
+        #expect(slot.publishTick(3, for: firstClaim))
+        let rejectedClaim = try #require(slot.beginTick())
+        #expect(slot.rejectTick(rejectedClaim))
+        let freshClaim = try #require(slot.beginTick())
+        #expect(!slot.publishTick(99, for: rejectedClaim))
+        #expect(slot.publishTick(4, for: freshClaim))
         #expect(slot.takeLatest() == 4)
         // A bounded synchronous evaluation folds + consumes pending outcomes, so
         // an older pending tick can't resurface after the newer applied result.
@@ -1373,14 +1696,14 @@ struct WPESceneScriptRuntimeTests {
                     visible: true, alpha: 1, videoCommands: [.seek(0)],
                     visibleAssigned: false, alphaAssigned: false
                 ),
-                "both": WPELayerScriptState(visible: false, alpha: 0, videoCommands: [.pause])
+                "both": WPELayerScriptState(visible: false, alpha: 0, videoCommands: [.pause]),
             ]
         )
         let newer = WPELayerScriptOutput(
             own: WPELayerScriptState(visible: true, alpha: 1, videoCommands: [.stop]),
             others: ["both": WPELayerScriptState(visible: true, alpha: 0.5, videoCommands: [])]
         )
-        let merged = WPELayerScriptInstance.mergedOutputs(pending: pending, newer: newer)
+        let merged = LiveWallpaper.WPELayerScriptInstance.mergedOutputs(pending: pending, newer: newer)
         #expect(merged.own.visible == true)
         #expect(merged.own.videoCommands == [.play, .stop])
         #expect(merged.others["both"]?.visible == true)
@@ -1389,8 +1712,8 @@ struct WPESceneScriptRuntimeTests {
         #expect(merged.others["loop"]?.videoCommands == [.seek(0)])
     }
 
-    @Test("Async text tick never blocks on a slow script and still publishes late")
-    func asyncTickDoesNotBlockOnSlowScript() async throws {
+    @Test("Async text tick fails closed without publishing a late result")
+    func asyncTickFailsClosedOnSlowScript() async throws {
         let script = """
         var n = 0;
         export function update(value) {
@@ -1404,8 +1727,8 @@ struct WPESceneScriptRuntimeTests {
             return 'tick-' + n;
         }
         """
-        // Budget 0.1s < the 0.5s busy loop: legacy would abandon + poison; the
-        // async watchdog only warns and the late result must still publish.
+        // Budget 0.1s < the 0.5s busy loop. The frame call remains nonblocking,
+        // then quarantines the engine and must never accept its late completion.
         let instance = try WPESceneScriptInstance(
             script: script,
             initialValue: "seed",
@@ -1421,15 +1744,18 @@ struct WPESceneScriptRuntimeTests {
         #expect(elapsed < .milliseconds(50))
         // Keep-last sentinel while the tick is in flight.
         #expect(duringBusy == "fast-1")
-        var sawSlowResult = false
-        for _ in 0..<600 {
-            if instance.liveTickString() == "slow-2" {
-                sawSlowResult = true
-                break
-            }
-            try await Task.sleep(nanoseconds: 10_000_000)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let quarantineStart = clock.now
+        #expect(instance.liveTickString() == "fast-1")
+        #expect(clock.now - quarantineStart < .milliseconds(50))
+
+        // Let the abandoned JS call finish; its completion token is no longer
+        // valid, so it cannot overwrite the last stable value.
+        try await Task.sleep(nanoseconds: 450_000_000)
+        for _ in 0..<10 {
+            #expect(instance.liveTickString() == "fast-1")
+            try await Task.sleep(nanoseconds: 5_000_000)
         }
-        #expect(sawSlowResult)
     }
 
     @Test("Seeded text script serves the scripted value on the first live tick")
@@ -1497,7 +1823,7 @@ struct WPESceneScriptRuntimeTests {
     }
 
     @Test("Async cursor event outcome drains through the next liveTick")
-    func asyncCursorEventDrainsThroughLiveTick() throws {
+    func asyncCursorEventDrainsThroughLiveTick() async throws {
         let script = """
         export function cursorDown() {
             thisLayer.getVideoTexture().play();
@@ -1505,7 +1831,10 @@ struct WPESceneScriptRuntimeTests {
         }
         export function update() {}
         """
-        let instance = try WPELayerScriptInstance(script: script)
+        let instance = try WPELayerScriptInstance(
+            script: script,
+            governor: WPESceneScriptExecutionGovernor(limit: 1)
+        )
         let frame = WPEPointerFrame(
             position: SIMD2<Double>(0.5, 0.5),
             clickPosition: SIMD2<Double>(0.5, 0.5),
@@ -1513,11 +1842,17 @@ struct WPESceneScriptRuntimeTests {
             isRightDown: false
         )
         instance.liveDispatchCursorEvent(.down, pointerFrame: frame)
-        // Bounded synchronous engine call as a queue fence: it runs AFTER the
-        // event handler on the serial queue, so the event outcome has published
-        // by the time it returns (the legacy path never touches the slot).
-        _ = instance.tick(pointerFrame: frame)
-        let output = try #require(instance.liveTick(pointerFrame: frame))
+        // The frame path is intentionally nonblocking. Poll subsequent frames
+        // instead of treating the fail-fast synchronous tick as a queue fence.
+        var received: WPELayerScriptOutput?
+        for _ in 0..<100 {
+            if let output = instance.liveTick(pointerFrame: frame) {
+                received = output
+                break
+            }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        let output = try #require(received)
         #expect(output.own.videoCommands.contains(.play))
         #expect(output.own.alpha == 0.25)
     }

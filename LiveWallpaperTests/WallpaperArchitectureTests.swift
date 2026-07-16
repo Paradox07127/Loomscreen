@@ -236,9 +236,65 @@ struct AppRuntimeOptionsTests {
 
         #expect(plan.screenManagerOptions.restoreSavedWallpapers)
         #expect(plan.screenManagerOptions.startAutomation)
+        #if LITE_BUILD
+        #expect(plan.screenManagerOptions.featureCatalog.capabilities.sku == .lite)
+        #expect(!plan.screenManagerOptions.featureCatalog.isEnabled(.workshopOnline))
+        #expect(!plan.screenManagerOptions.featureCatalog.isEnabled(.developerTools))
+        #else
+        #expect(plan.screenManagerOptions.featureCatalog.capabilities.sku == .pro)
+        #expect(plan.screenManagerOptions.featureCatalog.isEnabled(.workshopOnline))
+        #if DEBUG
+        #expect(plan.screenManagerOptions.featureCatalog.isEnabled(.developerTools))
+        #else
+        #expect(!plan.screenManagerOptions.featureCatalog.isEnabled(.developerTools))
+        #endif
+        #endif
         #expect(plan.refreshScreensAfterManagerCreation == false)
         #expect(plan.reloadWallpapersAfterLaunch == false)
         #expect(plan.showOnboarding == false)
+    }
+}
+
+@Suite("Application lifecycle gate")
+@MainActor
+struct ApplicationLifecycleControllerTests {
+    @Test("Termination cancels delayed work and permanently rejects new entries")
+    func terminationCancelsDelayedWork() async throws {
+        let lifecycle = ApplicationLifecycleController()
+        var executionCount = 0
+
+        #expect(lifecycle.schedule(after: .seconds(60)) {
+            executionCount += 1
+        })
+        #expect(lifecycle.pendingTaskCount == 1)
+
+        #expect(lifecycle.beginTermination() == .begin)
+        #expect(lifecycle.pendingTaskCount == 0)
+        #expect(!lifecycle.allowsWork)
+        #expect(!lifecycle.schedule { executionCount += 1 })
+
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(executionCount == 0)
+        #expect(lifecycle.beginTermination() == .wait)
+        #expect(lifecycle.markReplied())
+        #expect(lifecycle.beginTermination() == .terminateNow)
+        #expect(!lifecycle.markReplied())
+    }
+
+    @Test("Queued work rechecks the lifecycle before entering")
+    func queuedWorkRechecksLifecycle() async {
+        let lifecycle = ApplicationLifecycleController()
+        var executionCount = 0
+
+        #expect(lifecycle.schedule(after: .milliseconds(50)) {
+            executionCount += 1
+        })
+        #expect(lifecycle.beginTermination() == .begin)
+
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+        #expect(executionCount == 0)
     }
 }
 
@@ -254,7 +310,8 @@ struct MenuBarPlaybackControlTests {
             powerMonitor: FakePowerMonitor(),
             fullScreenDetector: FakeFullScreenDetector(),
             playableVideoLoader: FakePlayableVideoLoader(),
-            displayRegistry: FakeDisplayRegistry()
+            displayRegistry: FakeDisplayRegistry(),
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
     }
 
@@ -1559,7 +1616,8 @@ struct ScreenRuntimeOwnershipTests {
     func refreshWithoutPreservingSessionsCleansUpConnectedSessions() {
         let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
             restoreSavedWallpapers: false,
-            startAutomation: false
+            startAutomation: false,
+            featureCatalog: FeatureCatalog(capabilities: .pro)
         ))
         guard let screen = manager.screens.first else {
             Issue.record("No screen available for test")
@@ -1643,20 +1701,17 @@ struct InfrastructureRuntimeBoundaryTests {
             Comment(rawValue: "Infrastructure scan found no files at \(infrastructureRoot.path) — the boundary is unenforced, not clean")
         )
 
-        var newCrossings: [String] = []
-        for file in infrastructureFiles {
-            let relativePath = file.path.replacingOccurrences(
-                of: infrastructureRoot.path + "/",
-                with: ""
+        let sources = try infrastructureFiles.map { file in
+            (
+                path: file.path.replacingOccurrences(of: infrastructureRoot.path + "/", with: ""),
+                source: try String(contentsOf: file, encoding: .utf8)
             )
-            let code = stripComments(try String(contentsOf: file, encoding: .utf8))
-            let allowed = Self.baseline[relativePath] ?? []
-
-            for type in runtimeTypes where !allowed.contains(type) {
-                guard containsIdentifier(type, in: code) else { continue }
-                newCrossings.append("\(relativePath) references Runtime type \(type)")
-            }
         }
+        let newCrossings = boundaryCrossings(
+            runtimeTypes: runtimeTypes,
+            infrastructureSources: sources,
+            baseline: Self.baseline
+        )
 
         #expect(
             newCrossings.isEmpty,
@@ -1693,6 +1748,26 @@ struct InfrastructureRuntimeBoundaryTests {
         )
     }
 
+    @Test("Boundary fitness detector rejects a seeded Runtime dependency")
+    func boundaryDetectorRejectsSeededRuntimeDependency() {
+        let runtimeType = "WPEMetalSceneRenderer"
+        let forbidden = boundaryCrossings(
+            runtimeTypes: [runtimeType],
+            infrastructureSources: [(path: "Seed.swift", source: "let renderer: WPEMetalSceneRenderer")],
+            baseline: [:]
+        )
+        let proseOnly = boundaryCrossings(
+            runtimeTypes: [runtimeType],
+            infrastructureSources: [
+                (path: "Seed.swift", source: "// WPEMetalSceneRenderer\nlet note = \"WPEMetalSceneRenderer\"")
+            ],
+            baseline: [:]
+        )
+
+        #expect(forbidden == ["Seed.swift references Runtime type WPEMetalSceneRenderer"])
+        #expect(proseOnly.isEmpty)
+    }
+
     // MARK: - Repository source scanning
 
     private var infrastructureRoot: URL {
@@ -1701,6 +1776,23 @@ struct InfrastructureRuntimeBoundaryTests {
 
     private func infrastructureSwiftFiles() throws -> [URL] {
         RepositoryRoot.swiftFiles(underURL: infrastructureRoot)
+    }
+
+    private func boundaryCrossings(
+        runtimeTypes: Set<String>,
+        infrastructureSources: [(path: String, source: String)],
+        baseline: [String: Set<String>]
+    ) -> [String] {
+        var crossings: [String] = []
+        for file in infrastructureSources {
+            let code = stripComments(file.source)
+            let allowed = baseline[file.path] ?? []
+            for type in runtimeTypes.sorted() where !allowed.contains(type) {
+                guard containsIdentifier(type, in: code) else { continue }
+                crossings.append("\(file.path) references Runtime type \(type)")
+            }
+        }
+        return crossings.sorted()
     }
 
     /// `private`/`fileprivate` declarations are file-scoped, so no Infrastructure

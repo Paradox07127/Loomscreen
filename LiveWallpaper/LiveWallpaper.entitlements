@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Explicit in the source contract as well as ENABLE_APP_SANDBOX=YES so
+	     any manual/archive signing path must preserve the sandbox. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
 	<key>com.apple.security.automation.startup-items</key>
 	<true/>
 	<key>com.apple.security.device.power</key>
@@ -11,10 +15,8 @@
 	    audio-reactive wallpaper feature. Under App Sandbox the tap + private
 	    aggregate device read audio input, which requires this entitlement plus
 	    the user granting "System Audio Recording" (TCC). The consuming code
-	    (SystemAudioCaptureService) is `#if !LITE_BUILD`-gated out of the Lite
-	    binary, but Pro and Lite share this one entitlements file (see
-	    CODE_SIGN_ENTITLEMENTS in project.pbxproj) — the grant itself is
-	    unconditional; only the compiled code that would use it is excluded.
+	    (SystemAudioCaptureService) is compiled only into Pro, so this grant is
+	    intentionally absent from LiveWallpaperLite.entitlements.
 	-->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
@@ -32,25 +34,13 @@
 		<string>com.apple.audioanalyticsd</string>
 	</array>
 	<!--
-	    Sparkle test integration only. Sandboxed apps need this temporary
-	    exception so Sparkle's Installer XPC service can report status and
-	    install updates outside the app container. These expand per SKU at
-	    build time through PRODUCT_BUNDLE_IDENTIFIER.
-	-->
-	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
-	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spki</string>
-	</array>
-	<!--
 	    Read-only access to the package-manager prefixes so the sandboxed app
 	    (and the SteamCMD child it spawns) can locate + load a Homebrew/MacPorts
 	    SteamCMD install and its sibling dylibs, which live outside the sandbox
 	    container. Read-only and scoped to tooling directories; downloads/cache
 	    still go to user-granted or container-local locations. The consuming
-	    code (SteamCMDDoctorService/SteamCMDScriptWriter) is `#if !LITE_BUILD`-
-	    gated, but this file is shared across every build config (no MAS
-	    target exists in this project) — temporary
+	    code (SteamCMDDoctorService/SteamCMDScriptWriter) is compiled only into
+	    Pro, so this grant is intentionally absent from the Lite SKU. Temporary
 	    exceptions like this one are not accepted for a Mac App Store
 	    submission, which would require its own conditionally-stripped
 	    entitlements file, not just excluded Swift code.
@@ -67,7 +57,7 @@
 	    `IOServiceOpen(AppleSMC)` returns kIOReturnNotPermitted; this temporary
 	    exception whitelists that one IOUserClient subclass so the read succeeds
 	    in-process WITHOUT dropping the sandbox or shipping a privileged helper.
-	    Like the Homebrew/Sparkle exceptions above it is a Developer ID / direct
+	    Like the Homebrew exception above it is a Developer ID / direct
 	    distribution measure (not accepted for a Mac App Store submission). Purely
 	    a read path — no SMC writes are ever issued.
 	-->

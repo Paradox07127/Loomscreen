@@ -18,6 +18,7 @@ struct MenuBarContent: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var hudEnabled = MonitorHUDController.shared.isEnabled
+    @State private var ownsSystemMonitorLease = false
 
     private var monitor: SystemMonitor { .shared }
 
@@ -63,6 +64,20 @@ struct MenuBarContent: View {
             .frame(width: MenuBarMetrics.popoverWidth)
         }
         .modifier(MenuBarOuterShell())
+        .onAppear(perform: acquireSystemMonitorLeaseIfNeeded)
+        .onDisappear(perform: releaseSystemMonitorLeaseIfNeeded)
+    }
+
+    private func acquireSystemMonitorLeaseIfNeeded() {
+        guard !ownsSystemMonitorLease else { return }
+        ownsSystemMonitorLease = true
+        monitor.startMonitoring()
+    }
+
+    private func releaseSystemMonitorLeaseIfNeeded() {
+        guard ownsSystemMonitorLease else { return }
+        ownsSystemMonitorLease = false
+        monitor.stopMonitoring()
     }
 
     /// Subtle horizontal rule used between sections inside the single glass
@@ -405,9 +420,8 @@ struct MenuBarContent: View {
                 .foregroundStyle(.secondary)
 
             Text(verbatim: value)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(DesignTokens.Typography.metricEmphasized)
                 .foregroundStyle(.primary)
-                .monospacedDigit()
         }
         .lineLimit(1)
         .minimumScaleFactor(0.8)

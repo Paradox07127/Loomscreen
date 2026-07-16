@@ -9,6 +9,7 @@ final class FakeFullScreenDetector: FullScreenDetecting {
     private var storedOcclusionFractions: [CGDirectDisplayID: CGFloat]
 
     private(set) var checkNowCallCount = 0
+    private(set) var stopCallCount = 0
     private(set) var setFallbackPollingEnabledValues: [Bool] = []
     private(set) var isDesktopHiddenQueries: [CGDirectDisplayID] = []
 
@@ -65,5 +66,9 @@ final class FakeFullScreenDetector: FullScreenDetecting {
 
     func setFallbackPollingEnabled(_ enabled: Bool) {
         setFallbackPollingEnabledValues.append(enabled)
+    }
+
+    func stop() {
+        stopCallCount += 1
     }
 }

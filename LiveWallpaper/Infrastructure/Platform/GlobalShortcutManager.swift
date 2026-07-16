@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Carbon.HIToolbox
+import LiveWallpaperCore
 
 /// Wires user-configurable global hot keys (registered via Carbon's
 /// `RegisterEventHotKey`) to their corresponding `ScreenManager` actions.

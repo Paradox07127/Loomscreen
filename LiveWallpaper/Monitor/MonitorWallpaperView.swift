@@ -52,16 +52,14 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     private var lastGeneration: UInt64 = 0
     private var isSuspended = false
     private var isCleaningUp = false
-    /// True once we have issued a matching `MonitorRuntime.acquire` we still owe
-    /// a `release` for. Consumed by whichever teardown path runs first
-    /// (`cleanup()` or `deinit`) so the shared runtime is released exactly once.
-    private var owesRuntimeRelease = false
-    /// Identifies this view's runtime lease; the runtime tolerates the release
-    /// task overtaking the acquire task as long as both carry this ID.
-    private let runtimeLeaseID = UUID()
     /// The shared pipeline in production; injectable so the suspend/energy tests
     /// can watch a lease without racing the app-wide singleton.
     private let runtime: MonitorRuntime
+    /// Sequences this view's lease commands before they enter the runtime actor.
+    private let runtimeLeaseSlot: MonitorRuntimeLeaseSlot
+    /// Generation-scoped authority consumed by cleanup/deinit exactly once.
+    private var runtimeLease: MonitorRuntimeLeaseHandle?
+    private var lastRuntimeTask: Task<Void, Never>?
 
     init(
         frame frameRect: NSRect,
@@ -71,6 +69,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     ) {
         self.agentFleetEnabled = agentFleetEnabled
         self.runtime = runtime
+        self.runtimeLeaseSlot = runtime.makeLeaseSlot()
         let gated = Self.gatedConfiguration(configuration, agentFleetEnabled: agentFleetEnabled)
         self.configuration = gated
         self.allowMouseInteraction = gated.mouseInteractionEnabled
@@ -97,9 +96,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         // Route committed board edits back out; re-apply the agent gate before
         // persisting so a stripped board can never write fleet/usage back in.
         boardHost.onConfigurationEdited = { [weak self] edited in
-            guard let self else { return }
-            self.configuration = edited
-            self.onConfigurationEdited?(edited)
+            self?.acceptBoardConfigurationEdit(edited)
         }
 
         // Force mouse interaction on while the board is being edited (both the
@@ -111,11 +108,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
         // Warm the shared pipeline immediately so data is ready by first paint.
         MonitorSourceRegistration.registerDefaultFactories()
-        owesRuntimeRelease = true
-        let leaseID = runtimeLeaseID
-        let options = makeRuntimeOptions()
-        let runtime = self.runtime
-        Task { await runtime.acquire(leaseID: leaseID, options: options) }
+        runtimeLease = runtimeLeaseSlot.acquire(options: makeRuntimeOptions())
 
         startPump()
         // Paint the current snapshot (if any) immediately.
@@ -130,14 +123,25 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         // Balance the runtime acquire even if `cleanup()` was never called
         // (defensive; the session normally calls it).
         pumpTask?.cancel()
-        if owesRuntimeRelease {
-            let leaseID = runtimeLeaseID
-            let runtime = self.runtime
-            Task { await runtime.release(leaseID: leaseID) }
-        }
+        runtimeLease?.release()
     }
 
     // MARK: - Runtime options
+
+    /// Agent-only boards do not need the host metrics pipeline. Keep this
+    /// exhaustive so a newly-added widget kind must declare its source demand.
+    nonisolated static func requiresSystemMetrics(
+        for kinds: Set<MonitorWidgetKind>
+    ) -> Bool {
+        kinds.contains { kind in
+            switch kind {
+            case .usage, .fleet:
+                false
+            case .cpu, .memory, .gpu, .network, .disk, .power, .processes, .aiEngine:
+                true
+            }
+        }
+    }
 
     private func makeRuntimeOptions() -> MonitorRuntimeOptions {
         // The active widget kinds drive on-demand sampling (I1's lease seam):
@@ -152,7 +156,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         // Roots stay nil here: the runtime resolves the security-scoped grants
         // itself so scope lifetime matches pipeline (not view) lifetime.
         return MonitorRuntimeOptions(
-            system: true,
+            system: Self.requiresSystemMetrics(for: kinds),
             agents: wantsAgents,
             usage: wantsUsage,
             topProcesses: wantsProcesses,
@@ -162,15 +166,32 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     /// Repoint the shared lease's on-demand sampling for a live config change.
-    /// Uses the non-creating `updateOptions` (not `acquire`) under the same lease
-    /// ID, so this refresh racing our own teardown can never resurrect a released
-    /// lease — it simply no-ops if the release already landed.
+    /// The generation-scoped handle makes a refresh racing teardown terminal: it
+    /// cannot mutate a later lease generation from this slot.
     private func refreshRuntimeOptions() {
-        guard owesRuntimeRelease, !isCleaningUp else { return }
-        let leaseID = runtimeLeaseID
-        let options = makeRuntimeOptions()
-        let runtime = self.runtime
-        Task { await runtime.updateOptions(leaseID: leaseID, options: options) }
+        guard let runtimeLease, !isCleaningUp else { return }
+        runtimeLease.updateOptions(makeRuntimeOptions())
+    }
+
+    /// Production entry for edits committed by the live board. Update the lease
+    /// before persistence round-trips through ScreenManager: that later
+    /// `apply(configuration:)` correctly no-ops because the view already carries
+    /// the edit, so waiting for it would strand the old sampler demand forever.
+    func acceptBoardConfigurationEdit(_ edited: MonitorBoardConfiguration) {
+        guard !isCleaningUp else { return }
+        let gated = Self.gatedConfiguration(edited, agentFleetEnabled: agentFleetEnabled)
+        configuration = gated
+        refreshRuntimeOptions()
+        restartPumpCadence()
+        onConfigurationEdited?(gated)
+    }
+
+    func waitUntilRuntimeSettled() async {
+        if let runtimeLease {
+            await runtimeLease.waitUntilSettled()
+        } else {
+            await lastRuntimeTask?.value
+        }
     }
 
     // MARK: - Live configuration
@@ -313,10 +334,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     /// security-scoped grants the runtime resolved, making every resume pay to
     /// re-open them.
     private func setRuntimePaused(_ paused: Bool) {
-        guard owesRuntimeRelease, !isCleaningUp else { return }
-        let leaseID = runtimeLeaseID
-        let runtime = self.runtime
-        Task { await runtime.setPaused(leaseID: leaseID, paused: paused) }
+        guard let runtimeLease, !isCleaningUp else { return }
+        runtimeLease.setPaused(paused)
     }
 
     // MARK: - Hit testing
@@ -349,12 +368,9 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         // is cancelled.
         boardHost.flushPendingEdits()
         boardHost.onConfigurationEdited = nil
-        if owesRuntimeRelease {
-            owesRuntimeRelease = false
-            let leaseID = runtimeLeaseID
-            let runtime = self.runtime
-            Task { await runtime.release(leaseID: leaseID) }
-        }
+        let lease = runtimeLease
+        runtimeLease = nil
+        lastRuntimeTask = lease?.release()
     }
 
     // MARK: - Menu-bar top inset

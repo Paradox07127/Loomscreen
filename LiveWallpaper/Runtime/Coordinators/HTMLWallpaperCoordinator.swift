@@ -10,12 +10,19 @@ import Foundation
 /// callbacks for the side-effects ScreenManager still owns.
 @MainActor
 final class HTMLWallpaperCoordinator {
+    typealias SourcePreparer = @MainActor (
+        _ source: HTMLSource,
+        _ bookmarkID: UUID?,
+        _ wpeOrigin: WPEOrigin?
+    ) -> HTMLSource
+
     private let configurationStore: WallpaperConfigurationStore
     private let screensProvider: @MainActor () -> [Screen]
     private let saveConfiguration: @MainActor (ScreenConfiguration) -> Void
     private let restoreWallpaperSession: @MainActor (Screen, ScreenConfiguration, Bool) -> Void
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
     private let originReconciler: any OriginReconciler
+    private let prepareSource: SourcePreparer
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -23,7 +30,8 @@ final class HTMLWallpaperCoordinator {
         saveConfiguration: @MainActor @escaping (ScreenConfiguration) -> Void,
         restoreWallpaperSession: @MainActor @escaping (Screen, ScreenConfiguration, Bool) -> Void,
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
-        originReconciler: any OriginReconciler
+        originReconciler: any OriginReconciler,
+        prepareSource: @escaping SourcePreparer = { source, _, _ in source }
     ) {
         self.configurationStore = configurationStore
         self.screensProvider = screensProvider
@@ -31,6 +39,7 @@ final class HTMLWallpaperCoordinator {
         self.restoreWallpaperSession = restoreWallpaperSession
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
         self.originReconciler = originReconciler
+        self.prepareSource = prepareSource
     }
 
     // MARK: - Multi-instance diagnostics
@@ -91,8 +100,26 @@ final class HTMLWallpaperCoordinator {
         source: HTMLSource,
         config: HTMLConfig = .default,
         forceReload: Bool = false,
+        bookmarkID: UUID? = nil,
+        wpeOrigin: WPEOrigin? = nil,
         for screen: Screen
     ) {
+        // Resolve stale local grants before *any* compatibility/identity probe.
+        // Those probes read the folder too; resolving the obsolete Data there
+        // first can consume the one-shot stale grace and make the later runtime
+        // build fail. Every downstream consumer receives only this source.
+        let effectiveSource = prepareSource(source, bookmarkID, wpeOrigin)
+        let effectiveOrigin: WPEOrigin? = {
+            guard let wpeOrigin,
+                  let original = source.localBookmarkData,
+                  let refreshed = effectiveSource.localBookmarkData,
+                  original != refreshed,
+                  let updated = wpeOrigin.replacingSourceFolderBookmark(
+                    matching: original,
+                    with: refreshed
+                  ) else { return wpeOrigin }
+            return updated
+        }()
         let existingConfiguration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let previousContent = existingConfiguration?.activeWallpaper
         let previousHTMLSource: HTMLSource?
@@ -107,7 +134,7 @@ final class HTMLWallpaperCoordinator {
 
         var persistedConfig = config
         if !persistedConfig.physicalPixelLayout,
-           HTMLWallpaperCompatibilityPolicy.shouldAutoEnablePhysicalPixelLayout(source) {
+           HTMLWallpaperCompatibilityPolicy.shouldAutoEnablePhysicalPixelLayout(effectiveSource) {
             persistedConfig.physicalPixelLayout = true
             Logger.info("HTML wallpaper: auto-enabling physical-pixel layout for Wallpaper Engine folder on screen \(screen.id)", category: .screenManager)
         }
@@ -115,23 +142,26 @@ final class HTMLWallpaperCoordinator {
             in: persistedConfig,
             previousSource: previousHTMLSource,
             previousConfig: previousHTMLConfig,
-            nextSource: source
+            nextSource: effectiveSource
         )
 
         var configuration = existingConfiguration ?? ScreenConfiguration(
             screenID: screen.id,
-            wallpaper: .html(source: source, config: persistedConfig)
+            wallpaper: .html(source: effectiveSource, config: persistedConfig)
         ).applyingDisplayDefaults(SettingsManager.shared.loadDisplayDefaults())
         if !forceReload,
            case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
-           existingSource == source,
+           existingSource == effectiveSource,
            existingConfig == persistedConfig,
            screen.runtimeSession?.wallpaperType == .html {
             Logger.info("HTML wallpaper unchanged for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
             return
         }
 
-        configuration.setHTMLWallpaper(source: source, config: persistedConfig)
+        configuration.setHTMLWallpaper(source: effectiveSource, config: persistedConfig)
+        if let effectiveOrigin {
+            configuration.wpeOrigin = effectiveOrigin
+        }
         originReconciler.reconcile(
             &configuration,
             event: .userReplacedActiveWallpaper(previous: previousContent)

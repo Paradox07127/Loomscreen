@@ -368,11 +368,10 @@ struct WPEParticleSystemTests {
         #expect(spritetrail.trailRenderer?.length == 5)
         #expect(spritetrail.trailRenderer?.maxLength == 40)
 
-        // The ENGINE defaults carry the effect (WPParticleObject.h ParticleRender:
-        // length 0.05, maxlength 10, subdivision 3). 3448877775's meteor authors
-        // only `length: 3`; reading the absent `maxlength` as 0/unbounded let its
-        // speed×3 = 300–750 stretch through as a screen-crossing laser, where the
-        // default 10 clamps it to a streak.
+        // Engine defaults, so an omitted bound is WPE's value rather than 0
+        // (WPParticleObject.h ParticleRender). NOTE these are parsed but NOT fed to
+        // `g_RenderVar0` — RenderDoc shows WPE recomputes that per frame in
+        // `g_bufDynamic`, and none of its components match the authored JSON.
         let defaulted = try #require(ropetrail.trailRenderer)
         #expect(defaulted.maxLength == 10, "absent maxlength is 10, never unbounded")
         #expect(defaulted.subdivision == 3)

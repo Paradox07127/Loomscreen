@@ -47,12 +47,15 @@ struct BookmarkStoreTests {
         ))
     }
 
-    private func sampleWPEOrigin(workshopID: String = "scene-bookmark") -> WPEOrigin {
+    private func sampleWPEOrigin(
+        workshopID: String = "scene-bookmark",
+        bookmark: Data = Data([0xA1, 0xB2])
+    ) -> WPEOrigin {
         WPEOrigin(
             workshopID: workshopID,
             title: "Bookmarked Scene",
             originalType: .scene,
-            sourceFolderBookmark: Data([0xA1, 0xB2]),
+            sourceFolderBookmark: bookmark,
             cacheRelativePath: "wpe-cache/\(workshopID)",
             previewFileName: "preview.jpg",
             entryFile: "scene.json",
@@ -161,6 +164,131 @@ struct BookmarkStoreTests {
         #expect(store.bookmarks.first?.label == "Keep")
         #expect(persistence.stored.map(\.label) == ["Keep"])
         #expect(persistence.saveCount == saveCountBeforeRemove + 1)
+    }
+
+    @Test("WPE bookmark refresh CAS updates matching origin and web content only")
+    func wpeBookmarkRefreshUpdatesOnlyMatchingOwner() throws {
+        let original = Data("stale-bookmark-owner".utf8)
+        let refreshed = Data("refreshed-bookmark-owner".utf8)
+        let matchingOrigin = sampleWPEOrigin(
+            workshopID: "refresh-me",
+            bookmark: original
+        )
+        let matching = WallpaperBookmark(
+            label: "Refresh me",
+            content: .html(
+                source: .folder(bookmarkData: original, indexFileName: "index.html"),
+                config: .default
+            ),
+            sourceDisplayName: "Refresh me",
+            wpeOrigin: matchingOrigin
+        )
+        let unrelated = WallpaperBookmark(
+            label: "Leave me",
+            content: sampleSceneContent(workshopID: "leave-me"),
+            sourceDisplayName: "Leave me",
+            wpeOrigin: sampleWPEOrigin(workshopID: "leave-me", bookmark: original)
+        )
+        let (store, persistence) = makeStore(seed: [matching, unrelated])
+        let saveCountBefore = persistence.saveCount
+
+        #expect(store.replaceWPEOriginBookmark(
+            workshopID: "refresh-me",
+            matching: original,
+            with: refreshed
+        ))
+
+        let updated = try #require(store.bookmarks.first(where: { $0.label == "Refresh me" }))
+        #expect(updated.wpeOrigin?.sourceFolderBookmark == refreshed)
+        #expect(
+            updated.content
+                == .html(
+                    source: .folder(bookmarkData: refreshed, indexFileName: "index.html"),
+                    config: .default
+                )
+        )
+        #expect(store.bookmarks.first(where: { $0.label == "Leave me" }) == unrelated)
+        #expect(persistence.stored == store.bookmarks)
+        #expect(persistence.saveCount == saveCountBefore + 1)
+    }
+
+    @Test("WPE bookmark refresh CAS rejects a newer re-grant without writing")
+    func wpeBookmarkRefreshRejectsRegrant() {
+        let original = Data("stale-bookmark-owner".utf8)
+        let newer = Data("new-user-grant".utf8)
+        let seed = WallpaperBookmark(
+            label: "New grant",
+            content: sampleSceneContent(workshopID: "refresh-me"),
+            sourceDisplayName: "New grant",
+            wpeOrigin: sampleWPEOrigin(workshopID: "refresh-me", bookmark: newer)
+        )
+        let (store, persistence) = makeStore(seed: [seed])
+        let saveCountBefore = persistence.saveCount
+
+        #expect(!store.replaceWPEOriginBookmark(
+            workshopID: "refresh-me",
+            matching: original,
+            with: Data("late-refresh".utf8)
+        ))
+        #expect(store.bookmarks == [seed])
+        #expect(persistence.stored == [seed])
+        #expect(persistence.saveCount == saveCountBefore)
+    }
+
+    @Test("Local HTML refresh CAS survives reload and can be reapplied")
+    func htmlBookmarkRefreshSurvivesReloadAndReapply() throws {
+        let original = Data("stale-html-shortcut".utf8)
+        let refreshed = Data("refreshed-html-shortcut".utf8)
+        let seed = WallpaperBookmark(
+            label: "Local dashboard",
+            content: .html(
+                source: .folder(bookmarkData: original, indexFileName: "index.html"),
+                config: .default
+            )
+        )
+        let persistence = InMemoryBookmarkPersistence()
+        persistence.stored = [seed]
+        let store = BookmarkStore(persistence: persistence)
+
+        #expect(store.replaceHTMLBookmark(
+            id: seed.id,
+            matching: original,
+            with: refreshed
+        ))
+
+        let reloaded = BookmarkStore(persistence: persistence)
+        let reapplied = try #require(reloaded.bookmarks.first)
+        #expect(
+            reapplied.content
+                == .html(
+                    source: .folder(bookmarkData: refreshed, indexFileName: "index.html"),
+                    config: .default
+                )
+        )
+    }
+
+    @Test("Local HTML refresh CAS rejects re-grant and leaves unrelated shortcut unchanged")
+    func htmlBookmarkRefreshRejectsRegrantAndUnrelatedOwner() {
+        let original = Data("stale-html-shortcut".utf8)
+        let newerGrant = Data("new-html-grant".utf8)
+        let target = WallpaperBookmark(
+            label: "Re-granted",
+            content: .html(source: .file(bookmarkData: newerGrant), config: .default)
+        )
+        let unrelated = WallpaperBookmark(
+            label: "Unrelated",
+            content: .html(source: .file(bookmarkData: original), config: .default)
+        )
+        let (store, persistence) = makeStore(seed: [target, unrelated])
+        let saveCountBefore = persistence.saveCount
+
+        #expect(!store.replaceHTMLBookmark(
+            id: target.id,
+            matching: original,
+            with: Data("late-refresh".utf8)
+        ))
+        #expect(store.bookmarks == [target, unrelated])
+        #expect(persistence.saveCount == saveCountBefore)
     }
 
     @Test("remove drops the matching id and persists")

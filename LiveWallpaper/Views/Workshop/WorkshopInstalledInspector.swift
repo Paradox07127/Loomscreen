@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import Foundation
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -40,6 +41,7 @@ struct WPEInstalledInspectorContent: View {
     /// WPE metadata read from the item's local `project.json` — no Steam API.
     /// nil until the off-main read completes; reloaded when the entry changes.
     @State private var localInfo: WPELocalProjectInfo?
+    @State private var localInfoLoadOwner = WorkshopInstalledLocalInfoLoadOwner()
     @State private var descriptionExpanded = false
 
     /// Shared singleton — reading it here makes this view observe the
@@ -53,6 +55,9 @@ struct WPEInstalledInspectorContent: View {
     private var isUpdateRetry: Bool {
         if case .failed = updatePhase { return true }
         return false
+    }
+    private var localInfoLoadIdentity: WorkshopInstalledLocalInfoLoadIdentity {
+        WorkshopInstalledLocalInfoLoadIdentity(entryID: entry.id, importedAt: entry.importedAt)
     }
 
     var body: some View {
@@ -85,10 +90,14 @@ struct WPEInstalledInspectorContent: View {
             }
         }
         .background(DesignTokens.Colors.pageBackground)
-        .task(id: entry.id) {
+        .task(id: localInfoLoadIdentity) {
+            let ticket = localInfoLoadOwner.begin(identity: localInfoLoadIdentity)
             descriptionExpanded = false
-            localInfo = await loadWPELocalProjectInfo(for: entry)
+            let loadedInfo = await loadWPELocalProjectInfo(for: entry)
+            guard localInfoLoadOwner.canPublish(ticket) else { return }
+            localInfo = loadedInfo
         }
+        .onDisappear { localInfoLoadOwner.invalidate() }
     }
 
     private var hero: some View {

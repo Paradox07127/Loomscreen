@@ -6,6 +6,35 @@ public enum HTMLSource: Codable, Equatable, Sendable {
     case url(URL)
     case inline(String)
 
+    /// The persisted grant carried by a local source. Remote and inline
+    /// sources have no security-scoped owner.
+    public var localBookmarkData: Data? {
+        switch self {
+        case .file(let bookmarkData), .folder(let bookmarkData, _):
+            return bookmarkData
+        case .url, .inline:
+            return nil
+        }
+    }
+
+    /// Compare-and-swap a local bookmark while preserving whether it points to
+    /// a file or folder (and the folder's entry filename). `nil` means this
+    /// source no longer owns `original`, so a late stale refresh must be
+    /// discarded instead of overwriting a newer user grant.
+    public func replacingLocalBookmark(
+        matching original: Data,
+        with refreshed: Data
+    ) -> HTMLSource? {
+        switch self {
+        case .file(let bookmarkData) where bookmarkData == original:
+            return .file(bookmarkData: refreshed)
+        case .folder(let bookmarkData, let indexFileName) where bookmarkData == original:
+            return .folder(bookmarkData: refreshed, indexFileName: indexFileName)
+        case .file, .folder, .url, .inline:
+            return nil
+        }
+    }
+
     /// Migrates legacy persisted data (`WallpaperContent.html(String)`).
     public init(legacyString: String) {
         let trimmed = legacyString.trimmingCharacters(in: .whitespacesAndNewlines)

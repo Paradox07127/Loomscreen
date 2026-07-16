@@ -39,13 +39,21 @@ final class SystemAudioCaptureManager {
 
     private var isEnabled = false
     private var consumerCount = 0
+    /// Process-lifetime latch. `shutdown()` is used only from AppKit's
+    /// termination path; unlike a normal disable, it must reject every later
+    /// producer callback instead of allowing a stale settings/UI event to
+    /// recreate the Core Audio tap while `.terminateLater` is outstanding.
+    private(set) var isTerminated = false
     /// Type-erased so the stored property doesn't require macOS 14.2 at the
     /// declaration site (the manager itself is reachable on the 14.0 floor).
     private var serviceBox: AnyObject?
 
-    private init() {}
+    /// Internal so lifecycle tests can exercise an isolated manager without
+    /// poisoning the app-wide singleton for the remainder of the test process.
+    init() {}
 
     func setEnabled(_ enabled: Bool) {
+        guard !isTerminated else { return }
         guard isEnabled != enabled else { return }
         isEnabled = enabled
         Logger.notice("[AudioCapture] manager: enabled=\(enabled)", category: .audioCapture)
@@ -53,6 +61,7 @@ final class SystemAudioCaptureManager {
     }
 
     func retryAccessRequest() {
+        guard !isTerminated else { return }
         if !isEnabled {
             isEnabled = true
         }
@@ -64,13 +73,25 @@ final class SystemAudioCaptureManager {
     /// only runs while something consumes it. (Sinks call these in a later step;
     /// until then capture follows `isEnabled` alone.)
     func retain() {
+        guard !isTerminated else { return }
         consumerCount += 1
         reconcile()
     }
 
     func release() {
+        guard !isTerminated else { return }
         consumerCount = max(0, consumerCount - 1)
         reconcile()
+    }
+
+    /// Application termination is one-way: stop the CoreAudio tap immediately
+    /// and reject the persisted-enabled state for the remainder of this process.
+    func shutdown() {
+        guard !isTerminated else { return }
+        isTerminated = true
+        isEnabled = false
+        consumerCount = 0
+        stopIfNeeded()
     }
 
     // MARK: - Reconciliation

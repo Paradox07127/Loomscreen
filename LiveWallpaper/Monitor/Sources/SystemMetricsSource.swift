@@ -1,6 +1,5 @@
-import Foundation
 import Darwin
-import os
+import Foundation
 
 /// The headline Monitor module for non-AI users: a comprehensive host snapshot
 /// (CPU total + per-core + topology, memory + breakdown + pressure, swap, GPU +
@@ -41,34 +40,61 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
     private let interval: TimeInterval
     private let gpuSampleCadence: Int
     private let options: Options
+    private let loadAverageSampler: @Sendable () -> [Double]?
+    private let pressure: any MemoryPressureReading
     private let state = MetricsState()
-    private let pressure = MemoryPressureWatcher()
     private let netPath = MonitorNetworkPathObserver()
 
     /// Preserves the original call site `SystemMetricsSource(includeTopProcesses:)`;
     /// only the top-processes gate is caller-driven here, everything else defaults.
-    init(includeTopProcesses: Bool = false, interval: TimeInterval = 2.0, gpuSampleCadence: Int = 3) {
+    init(
+        includeTopProcesses: Bool = false,
+        interval: TimeInterval = 2.0,
+        gpuSampleCadence: Int = 3,
+        loadAverageSampler: @escaping @Sendable () -> [Double]? = {
+            SystemMetricsSamplers.sampleLoadAverages()
+        },
+        memoryPressureReader: any MemoryPressureReading = SystemMemoryPressureWatcher.shared
+    ) {
         var options = Options.default
         options.topProcesses = includeTopProcesses
         self.options = options
         self.interval = interval
         self.gpuSampleCadence = gpuSampleCadence
+        self.loadAverageSampler = loadAverageSampler
+        pressure = memoryPressureReader
     }
 
     /// Full demand-gated init for the board orchestrator (wave 3).
-    init(options: Options, interval: TimeInterval = 2.0, gpuSampleCadence: Int = 3) {
+    init(
+        options: Options,
+        interval: TimeInterval = 2.0,
+        gpuSampleCadence: Int = 3,
+        loadAverageSampler: @escaping @Sendable () -> [Double]? = {
+            SystemMetricsSamplers.sampleLoadAverages()
+        },
+        memoryPressureReader: any MemoryPressureReading = SystemMemoryPressureWatcher.shared
+    ) {
         self.options = options
         self.interval = interval
         self.gpuSampleCadence = gpuSampleCadence
+        self.loadAverageSampler = loadAverageSampler
+        pressure = memoryPressureReader
+    }
+
+    /// Pure wire mapping used by the polling actor. Monitor v2 observes the
+    /// app-wide watcher but never owns or mutates its dispatch-source lifecycle.
+    static func memoryPressureWireValue(from reader: any MemoryPressureReading) -> String {
+        reader.currentLevel().rawValue
     }
 
     func start(sink: any MonitorSnapshotSink) async {
-        pressure.start()
         netPath.start()
         await state.startLoop(
             interval: interval,
             gpuSampleCadence: gpuSampleCadence,
             options: options,
+            loadAverageSampler: loadAverageSampler,
             pressure: pressure,
             netPath: netPath,
             sink: sink
@@ -77,7 +103,6 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
 
     func stop() async {
         await state.stopLoop()
-        pressure.stop()
         netPath.stop()
     }
 
@@ -99,7 +124,7 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
         private var prevProcessCounters: [Int32: SystemMetricsSamplers.ProcessCPUCounters] = [:]
         private var lastANE: SystemMetricsSamplers.ANESample?
         private var lastANESampledAt: Date?
-        // Lazily opened on the first sensors-enabled tick; caches its SMC connection.
+        /// Lazily opened on the first sensors-enabled tick; caches its SMC connection.
         private var sensorSampler: MonitorSensorSampler?
         // Hardware identity is fixed for the boot — sample once, then reuse.
         private var cpuInfo: MonitorCPUInfo?
@@ -109,7 +134,8 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             interval: TimeInterval,
             gpuSampleCadence: Int,
             options: Options,
-            pressure: MemoryPressureWatcher,
+            loadAverageSampler: @escaping @Sendable () -> [Double]?,
+            pressure: any MemoryPressureReading,
             netPath: MonitorNetworkPathObserver,
             sink: any MonitorSnapshotSink
         ) {
@@ -117,10 +143,11 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             task = Task { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
-                    await self.tick(
+                    await tick(
                         interval: interval,
                         gpuSampleCadence: gpuSampleCadence,
                         options: options,
+                        loadAverageSampler: loadAverageSampler,
                         pressure: pressure,
                         netPath: netPath,
                         sink: sink
@@ -147,7 +174,8 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             interval: TimeInterval,
             gpuSampleCadence: Int,
             options: Options,
-            pressure: MemoryPressureWatcher,
+            loadAverageSampler: @Sendable () -> [Double]?,
+            pressure: any MemoryPressureReading,
             netPath: MonitorNetworkPathObserver,
             sink: any MonitorSnapshotSink
         ) async {
@@ -156,7 +184,9 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             let elapsed = lastSampleTime.map { now.timeIntervalSince($0) } ?? interval
             lastSampleTime = now
 
-            if cpuInfo == nil { cpuInfo = SystemMetricsSamplers.sampleCPUInfo() }
+            if cpuInfo == nil {
+                cpuInfo = SystemMetricsSamplers.sampleCPUInfo()
+            }
 
             let cpu = SystemMetricsSamplers.sampleCPU(previous: prevCPU)
             prevCPU = cpu.counters
@@ -187,7 +217,9 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             if options.gpu, MonitoringCadence.shouldSampleGPU(updateCount: updateCount, cadence: gpuSampleCadence) {
                 lastGPU = SystemMetricsSamplers.sampleGPU()
                 lastGPUSampledAt = now.timeIntervalSince1970
-                if gpuDeviceName == nil { gpuDeviceName = SystemMetricsSamplers.sampleGPUDeviceName() }
+                if gpuDeviceName == nil {
+                    gpuDeviceName = SystemMetricsSamplers.sampleGPUDeviceName()
+                }
             }
 
             let power = SystemMetricsSamplers.samplePower()
@@ -225,9 +257,13 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             // sandbox denial makes every sample nil, so the sensor rows stay hidden.
             var sensors: MonitorSensorReadings?
             if options.sensors {
-                if sensorSampler == nil { sensorSampler = MonitorSensorSampler() }
+                if sensorSampler == nil {
+                    sensorSampler = MonitorSensorSampler()
+                }
                 sensors = sensorSampler?.sample()
             }
+
+            let loadAverages = loadAverageSampler()
 
             let snapshot = MonitorSystemSnapshot(
                 cpuTotal: cpu.sample.total,
@@ -236,7 +272,7 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
                 perCore: cpu.sample.perCore.isEmpty ? nil : cpu.sample.perCore,
                 memUsedBytes: memory.usedBytes,
                 memTotalBytes: memory.totalBytes,
-                memPressure: pressure.currentLevel(),
+                memPressure: SystemMetricsSource.memoryPressureWireValue(from: pressure),
                 swapUsedBytes: SystemMetricsSamplers.sampleSwapUsedBytes(),
                 gpuUsage: lastGPU?.deviceUtil,
                 thermalState: SystemMetricsSamplers.thermalString(ProcessInfo.processInfo.thermalState),
@@ -247,10 +283,10 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
                 batteryLevel: power.battery?.level,
                 batteryCharging: power.battery?.charging,
                 uptimeSeconds: ProcessInfo.processInfo.systemUptime,
-                loadAverage1: SystemMetricsSamplers.sampleLoadAverages()?.first,
+                loadAverage1: loadAverages?.first,
                 topProcesses: topProcesses,
                 cpuInfo: cpuInfo,
-                cpuLoadAvg: SystemMetricsSamplers.sampleLoadAverages(),
+                cpuLoadAvg: loadAverages,
                 memBreakdown: memory.breakdown,
                 gpuDeviceName: gpuDeviceName,
                 gpuCoreCount: lastGPU?.coreCount,
@@ -290,7 +326,6 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
             return now.timeIntervalSince(last) >= 5.0
         }
     }
-
 }
 
 /// GPU sampling is 3× more expensive than the rest, so it runs every Nth poll —
@@ -300,46 +335,5 @@ enum MonitoringCadence {
     static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
         guard cadence > 1, updateCount > 1 else { return true }
         return updateCount % cadence == 0
-    }
-}
-
-/// Wraps a `DispatchSource` memory-pressure monitor. The kernel pushes warn/critical
-/// transitions; between events the last level holds (default "normal"). Reads are
-/// lock-guarded because the dispatch handler (writer) and the poll loop (reader) touch
-/// it from different threads.
-final class MemoryPressureWatcher: Sendable {
-    private let level = OSAllocatedUnfairLock(initialState: "normal")
-    private let source: DispatchSourceMemoryPressure
-
-    init() {
-        source = DispatchSource.makeMemoryPressureSource(
-            eventMask: [.normal, .warning, .critical],
-            queue: DispatchQueue(label: "com.livewallpaper.monitor.mempressure", qos: .utility)
-        )
-        let lock = level
-        source.setEventHandler { [weak source] in
-            guard let event = source?.data else { return }
-            let value: String
-            if event.contains(.critical) {
-                value = "critical"
-            } else if event.contains(.warning) {
-                value = "warn"
-            } else {
-                value = "normal"
-            }
-            lock.withLock { $0 = value }
-        }
-    }
-
-    func start() {
-        source.activate()
-    }
-
-    func stop() {
-        source.cancel()
-    }
-
-    func currentLevel() -> String {
-        level.withLock { $0 }
     }
 }

@@ -20,9 +20,15 @@ extension WPEMetalSceneRenderer {
         )
         #endif
         loadGeneration &+= 1
+        let generation = loadGeneration
+        let scriptLoadToken = sceneScriptLoadState.begin(generation: generation)
+        invalidateIntroPhaseAlign()
         debugStage("load.begin", descriptorSummary)
         do {
-            try await performLoad()
+            try await performLoad(scriptLoadToken: scriptLoadToken)
+            try Task.checkCancellation()
+            try checkCurrentSceneScriptLoad(scriptLoadToken)
+            staticTextureReloadTaskOwner.resume(generation: generation)
             loadDiagnostics = nil
             WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
             WPESceneDebugArtifacts.shared.appendLog(
@@ -34,6 +40,11 @@ extension WPEMetalSceneRenderer {
             }
             WPESceneDebugArtifacts.shared.endSession()
         } catch {
+            let ownedFailedLoad = isCurrentSceneScriptLoad(scriptLoadToken)
+            sceneScriptLoadState.retire(scriptLoadToken)
+            if ownedFailedLoad { clearSceneScriptRuntimeState() }
+            didLoad = false
+            _ = staticTextureReloadTaskOwner.quiesce()
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
             WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
@@ -123,7 +134,9 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Scene construction
 
-    private func performLoad() async throws {
+    private func performLoad(
+        scriptLoadToken: WPESceneScriptInstanceLimitToken
+    ) async throws {
         let id = descriptor.workshopID
 
         debugStage("read.entry", "resolving \(descriptor.entryFile)")
@@ -142,7 +155,15 @@ extension WPEMetalSceneRenderer {
             )
             return try WPESceneDocumentParser.parse(data: data, userValues: userValues)
         }.value
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
         debugStage("read.entry.done", "imageObjects=\(document.imageObjects.count) particles=\(document.particleObjects.count) text=\(document.textObjects.count) sound=\(document.soundObjects.count)")
+        let scriptInventory = WPESceneScriptInstanceInventory(document: document)
+        if !scriptLoadToken.prepare(scriptInventory) {
+            Logger.warning(
+                "Scene \(id) has \(scriptInventory.total) SceneScript runtimes, exceeding the per-scene limit of \(WPESceneScriptContainmentDefaults.maximumScriptInstancesPerScene); all runtime scripts disabled",
+                category: .wpeRender
+            )
+        }
         try Task.checkCancellation()
 
         debugStage("graph.build", "begin")
@@ -157,6 +178,7 @@ extension WPEMetalSceneRenderer {
             } ?? WPERenderGraphBuilder(cacheRootURL: cacheRoot, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
             return try builder.build(document: document)
         }.value
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
         debugStage("graph.build.done", "layers=\(graph.layers.count)")
         try Task.checkCancellation()
 
@@ -168,6 +190,7 @@ extension WPEMetalSceneRenderer {
             } ?? WPERenderPipelineBuilder(cacheRootURL: cacheRoot, dependencyMounts: mounts, engineAssetsRootURL: engineRoot)
             return try builder.build(graph: graph)
         }.value
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
         let passCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
         debugStage("pipeline.build.done", "passes=\(passCount)")
         for layer in pipeline.layers {
@@ -272,8 +295,11 @@ extension WPEMetalSceneRenderer {
         cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
-        sceneScriptSharedState = WPESharedScriptState()
-        loadDynamicOriginScripts(from: document)
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
+        sceneScriptSharedState = WPESharedScriptState(
+            sceneScriptLoadToken: scriptLoadToken
+        )
+        loadDynamicOriginScripts(from: document, scriptLoadToken: scriptLoadToken)
 
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
         // load below; awaited at the render.firstFrame gate so the first synchronous
@@ -283,6 +309,7 @@ extension WPEMetalSceneRenderer {
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
         indexOnDemandVideoLayers(pipeline: pipeline)
         debugStage("textures.load.done", "loaded=\(loadedTextures.count) dynamic=\(dynamicTextureSources.count)")
         dumpLoadedTexturesIfRequested()
@@ -291,6 +318,7 @@ extension WPEMetalSceneRenderer {
         debugStage("particles.load", "begin")
         onProgress?("Loading particle systems")
         await loadParticleSystems(from: document)
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
         debugStage(
             "particles.load.done",
             "systems=\(particleSystems.count)"
@@ -299,21 +327,33 @@ extension WPEMetalSceneRenderer {
 
         debugStage("text.load", "begin")
         onProgress?("Loading text overlays")
-        loadTextOverlays(from: document)
+        beginSceneScriptVideoCommands()
+        loadTextOverlays(from: document, scriptLoadToken: scriptLoadToken)
         debugStage("text.load.done", "objects=\(textObjects.count)")
         try Task.checkCancellation()
 
         // Layer visible-scripts (video intros etc.). After textures so the video
         // sources exist; runs each script's init() to seed visibility/alpha and
         // suppress auto-play on script-owned video sources.
-        loadLayerScripts(from: document)
+        loadLayerScripts(from: document, scriptLoadToken: scriptLoadToken)
         // First-evaluation seeding, in WPE order: script hosts (pure compute
         // producers, e.g. 3509243656's MAIN n-body sim writing shared.xx*/ktime)
         // update once FIRST, then transform + text consumers seed. Seeding texts
         // inside loadTextOverlays ran consumers before the producer existed —
         // tooltip scripts threw and the `time` script NaN-poisoned itself.
-        seedSceneScriptsAfterLoad(from: document)
-        try Task.checkCancellation()
+        seedSceneScriptsAfterLoad(from: document, scriptLoadToken: scriptLoadToken)
+        var scriptsAreBaked = resetSceneScriptsToBakedIfFailed(scriptLoadToken)
+        do {
+            try Task.checkCancellation()
+            try checkCurrentSceneScriptLoad(scriptLoadToken)
+        } catch {
+            discardSceneScriptVideoCommands()
+            throw error
+        }
+        try finishSceneScriptLoadVideoCommands(
+            for: scriptLoadToken,
+            scriptsAreBaked: &scriptsAreBaked
+        )
 
         // Audio startup is deferred to after the first frame (see below): the
         // synchronous `runtime.start(sounds:)` is a 300-900ms hit that does not
@@ -323,6 +363,11 @@ extension WPEMetalSceneRenderer {
         // hits warmed entries. By now this has overlapped the entire texture/particle/text
         // load above; on heavy scenes the ~1.9s transpile is already absorbed.
         await shaderWarm
+        try checkCurrentSceneScriptLoad(scriptLoadToken)
+        prepareSceneScriptsForFirstFrame(
+            scriptLoadToken,
+            scriptsAreBaked: &scriptsAreBaked
+        )
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
 

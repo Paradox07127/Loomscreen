@@ -58,7 +58,8 @@ enum HTMLWallpaperCompatibilityPolicy {
     static func runtimeConfig(
         source: HTMLSource,
         config: HTMLConfig,
-        trustedOrigins: Set<TrustedHTMLOrigin>
+        trustedOrigins: Set<TrustedHTMLOrigin>,
+        bookmarkResolver: SecurityScopedBookmarkResolver = .shared
     ) -> HTMLWallpaperCompatibilityResult {
         let trust = HTMLTrust.evaluate(source: source, trustedOrigins: trustedOrigins)
         var effective = config
@@ -67,7 +68,7 @@ enum HTMLWallpaperCompatibilityPolicy {
         effective.audioVolume = trust.effectiveAudioVolume(requested: config.audioVolume)
 
         let shouldEnablePhysicalPixels = !effective.physicalPixelLayout
-            && shouldAutoEnablePhysicalPixelLayout(source)
+            && shouldAutoEnablePhysicalPixelLayout(source, bookmarkResolver: bookmarkResolver)
         if shouldEnablePhysicalPixels {
             effective.physicalPixelLayout = true
         }
@@ -83,9 +84,12 @@ enum HTMLWallpaperCompatibilityPolicy {
     /// entry HTML. Older canvas payloads generally need physical-pixel layout,
     /// while modern Three/PIXI-style pages that read `devicePixelRatio` already
     /// size their own backing store and must remain in CSS-point layout.
-    static func shouldAutoEnablePhysicalPixelLayout(_ source: HTMLSource) -> Bool {
+    static func shouldAutoEnablePhysicalPixelLayout(
+        _ source: HTMLSource,
+        bookmarkResolver: SecurityScopedBookmarkResolver = .shared
+    ) -> Bool {
         guard case .folder(_, let indexFileName) = source else { return false }
-        return withResolvedFolderURL(source) { folderURL in
+        return withResolvedFolderURL(source, bookmarkResolver: bookmarkResolver) { folderURL in
             shouldAutoEnablePhysicalPixelLayout(folderURL: folderURL, indexFileName: indexFileName)
         } ?? false
     }
@@ -96,9 +100,13 @@ enum HTMLWallpaperCompatibilityPolicy {
         return !entryHTMLLooksDPRAware(folderURL: folderURL, indexFileName: indexFileName)
     }
 
-    private static func withResolvedFolderURL<T>(_ source: HTMLSource, _ body: (URL) -> T) -> T? {
+    private static func withResolvedFolderURL<T>(
+        _ source: HTMLSource,
+        bookmarkResolver: SecurityScopedBookmarkResolver,
+        _ body: (URL) -> T
+    ) -> T? {
         guard case .folder(let bookmarkData, _) = source else { return nil }
-        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+        guard case .success(let resolved) = bookmarkResolver.resolve(
             bookmarkData,
             target: .transient
         ) else { return nil }
@@ -124,13 +132,36 @@ enum HTMLWallpaperCompatibilityPolicy {
 
 @MainActor
 final class AmbientWallpaperSessionBuilder {
-    func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
+    typealias BookmarkRefreshHandler = @MainActor (_ original: Data, _ refreshed: Data) -> Void
+    typealias WPEOriginRefreshHandler = @MainActor (_ origin: WPEOrigin, _ refreshed: Data) -> Void
+
+    private let bookmarkResolver: SecurityScopedBookmarkResolver
+
+    init(bookmarkResolver: SecurityScopedBookmarkResolver = .shared) {
+        self.bookmarkResolver = bookmarkResolver
+    }
+
+    func makeHTMLSession(
+        source: HTMLSource,
+        config: HTMLConfig,
+        frame: CGRect,
+        onBookmarkRefresh: @escaping BookmarkRefreshHandler = { _, _ in }
+    ) -> AmbientWallpaperSession {
+        // Resolve once before the compatibility probe. Otherwise that probe can
+        // consume the stale bookmark's grace resolve and leave WKWebView trying
+        // the obsolete Data a second time. The refreshed source is both
+        // persisted by its owner and carried through the rest of this build.
+        let effectiveSource = refreshingHTMLSource(
+            source,
+            onBookmarkRefresh: onBookmarkRefresh
+        )
         let window = VideoWallpaperWindow(frame: frame)
 
         let compatibility = HTMLWallpaperCompatibilityPolicy.runtimeConfig(
-            source: source,
+            source: effectiveSource,
             config: config,
-            trustedOrigins: TrustedHostStore.shared.originSet
+            trustedOrigins: TrustedHostStore.shared.originSet,
+            bookmarkResolver: bookmarkResolver
         )
         let effective = compatibility.config
         if case .untrustedRemote(let origin) = compatibility.trust {
@@ -145,7 +176,12 @@ final class AmbientWallpaperSessionBuilder {
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
         }
 
-        let htmlView = HTMLWallpaperView(frame: frame, initialEphemeral: effective.requiresEphemeralStorage)
+        let htmlView = HTMLWallpaperView(
+            frame: frame,
+            initialEphemeral: effective.requiresEphemeralStorage,
+            bookmarkResolver: bookmarkResolver,
+            onBookmarkRefresh: onBookmarkRefresh
+        )
         window.contentView = htmlView
 
         let session = AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
@@ -154,10 +190,30 @@ final class AmbientWallpaperSessionBuilder {
         }
 
         htmlView.apply(effective)
-        htmlView.loadSource(source)
+        htmlView.loadSource(effectiveSource)
 
         window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         return session
+    }
+
+    /// Runtime preflight for local HTML owners. Kept internal so the injected
+    /// resolver path can be exercised without constructing WebKit in tests.
+    func refreshingHTMLSource(
+        _ source: HTMLSource,
+        onBookmarkRefresh: BookmarkRefreshHandler = { _, _ in }
+    ) -> HTMLSource {
+        guard let original = source.localBookmarkData,
+              case .success(let resolved) = bookmarkResolver.resolve(
+                original,
+                target: .transient
+              ),
+              resolved.didRefresh,
+              let refreshedSource = source.replacingLocalBookmark(
+                matching: original,
+                with: resolved.bookmarkData
+              ) else { return source }
+        onBookmarkRefresh(original, resolved.bookmarkData)
+        return refreshedSource
     }
 
     /// Mounts the native Monitor v2 widget board. Ships in both SKUs;
@@ -205,7 +261,8 @@ final class AmbientWallpaperSessionBuilder {
         dependencyMounts: [WPEAssetMount] = [],
         engineAssetsRootURL: URL? = nil,
         applicationSupportRootURL: URL? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        onOriginBookmarkRefresh: @escaping WPEOriginRefreshHandler = { _, _ in }
     ) -> SceneWallpaperSession? {
         let supportRoot: URL
         if let applicationSupportRootURL {
@@ -241,7 +298,8 @@ final class AmbientWallpaperSessionBuilder {
             descriptor: descriptor,
             origin: origin,
             cacheURL: cacheURL,
-            fileManager: fileManager
+            fileManager: fileManager,
+            onOriginBookmarkRefresh: onOriginBookmarkRefresh
         ) else {
             Logger.warning("Scene source unavailable for in-place read: \(descriptor.workshopID)", category: .screenManager)
             return nil
@@ -314,7 +372,8 @@ final class AmbientWallpaperSessionBuilder {
         descriptor: SceneDescriptor,
         origin: WPEOrigin?,
         cacheURL: URL,
-        fileManager: FileManager
+        fileManager: FileManager,
+        onOriginBookmarkRefresh: @escaping WPEOriginRefreshHandler
     ) -> (provider: (any WPESceneAssetProvider)?, projectRoot: URL)? {
         switch descriptor.assetStorage {
         case .cache:
@@ -327,13 +386,20 @@ final class AmbientWallpaperSessionBuilder {
             if fileManager.fileExists(atPath: cacheURL.path) {
                 return (nil, cacheURL)
             }
-            if let upgraded = cacheFallbackSourceProvider(origin: origin, fileManager: fileManager) {
+            if let upgraded = cacheFallbackSourceProvider(
+                origin: origin,
+                fileManager: fileManager,
+                onOriginBookmarkRefresh: onOriginBookmarkRefresh
+            ) {
                 Logger.info("WPE scene cache absent; reading in place from source for \(descriptor.workshopID)", category: .screenManager)
                 return upgraded
             }
             return (nil, cacheURL)
         case .sourceDirectory:
-            guard let source = resolveSourceFolder(origin: origin) else { return nil }
+            guard let source = resolveSourceFolder(
+                origin: origin,
+                onOriginBookmarkRefresh: onOriginBookmarkRefresh
+            ) else { return nil }
             let provider = WPESecurityScopedSceneAssetProvider(
                 wrapped: WPEDirectorySceneAssetProvider(rootURL: source.url),
                 scopedURL: source.url,
@@ -341,7 +407,10 @@ final class AmbientWallpaperSessionBuilder {
             )
             return (provider, source.url)
         case .packageSource(let fileName):
-            guard let source = resolveSourceFolder(origin: origin) else { return nil }
+            guard let source = resolveSourceFolder(
+                origin: origin,
+                onOriginBookmarkRefresh: onOriginBookmarkRefresh
+            ) else { return nil }
             let packageURL = source.url.appendingPathComponent(fileName, isDirectory: false)
             guard fileManager.fileExists(atPath: packageURL.path),
                   let pkg = try? WPEPackageSceneAssetProvider(packageURL: packageURL) else {
@@ -358,14 +427,38 @@ final class AmbientWallpaperSessionBuilder {
 
     /// Resolves a scene's source folder from its origin bookmark and opens its
     /// security scope. The caller owns the scope for the provider's lifetime.
-    private func resolveSourceFolder(origin: WPEOrigin?) -> (url: URL, didStart: Bool)? {
+    private func resolveSourceFolder(
+        origin: WPEOrigin?,
+        onOriginBookmarkRefresh: @escaping WPEOriginRefreshHandler
+    ) -> (url: URL, didStart: Bool)? {
         guard let origin,
-              case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
-                origin.sourceFolderBookmark, target: .transient
-              ) else {
-            return nil
-        }
+              let resolved = refreshingWPEOrigin(
+                origin,
+                onOriginBookmarkRefresh: onOriginBookmarkRefresh
+              ) else { return nil }
         return (resolved.url, resolved.url.startAccessingSecurityScopedResource())
+    }
+
+    /// Resolves the persistent WPE source owner and carries refreshed Data both
+    /// to the current build and back to its MainActor persistence owner. Kept
+    /// internal so the runtime path is testable without creating a Metal device.
+    func refreshingWPEOrigin(
+        _ origin: WPEOrigin,
+        onOriginBookmarkRefresh: WPEOriginRefreshHandler = { _, _ in }
+    ) -> (origin: WPEOrigin, url: URL)? {
+        guard case .success(let resolved) = bookmarkResolver.resolve(
+            origin.sourceFolderBookmark,
+            target: .transient
+        ) else { return nil }
+        guard resolved.didRefresh,
+              let refreshedOrigin = origin.replacingSourceFolderBookmark(
+                matching: origin.sourceFolderBookmark,
+                with: resolved.bookmarkData
+              ) else {
+            return (origin, resolved.url)
+        }
+        onOriginBookmarkRefresh(origin, resolved.bookmarkData)
+        return (refreshedOrigin, resolved.url)
     }
 
     /// Lazy migration backstop for a legacy `.cache` descriptor whose extracted
@@ -376,9 +469,13 @@ final class AmbientWallpaperSessionBuilder {
     /// provider owns the source's security scope for its lifetime.
     private func cacheFallbackSourceProvider(
         origin: WPEOrigin?,
-        fileManager: FileManager
+        fileManager: FileManager,
+        onOriginBookmarkRefresh: @escaping WPEOriginRefreshHandler
     ) -> (provider: (any WPESceneAssetProvider)?, projectRoot: URL)? {
-        guard let source = resolveSourceFolder(origin: origin) else { return nil }
+        guard let source = resolveSourceFolder(
+            origin: origin,
+            onOriginBookmarkRefresh: onOriginBookmarkRefresh
+        ) else { return nil }
         let packageURL = source.url.appendingPathComponent("scene.pkg", isDirectory: false)
         if fileManager.fileExists(atPath: packageURL.path),
            let pkg = try? WPEPackageSceneAssetProvider(packageURL: packageURL) {
