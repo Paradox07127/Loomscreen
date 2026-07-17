@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// End-to-end Wallpaper Engine workshop import. Reads `project.json`, routes
 /// by `WPEType`, and produces a `WallpaperContent` (.video / .html(.folder) /

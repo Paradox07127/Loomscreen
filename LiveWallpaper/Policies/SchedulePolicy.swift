@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 enum SchedulePolicy {
     enum Decision: Equatable {

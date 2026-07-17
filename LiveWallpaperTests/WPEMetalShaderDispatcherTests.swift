@@ -1,3 +1,4 @@
+import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 

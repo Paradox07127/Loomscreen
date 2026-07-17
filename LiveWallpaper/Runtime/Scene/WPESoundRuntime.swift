@@ -2,6 +2,8 @@
 import Accelerate
 import AVFoundation
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Per-scene audio runtime. Plays every declared sound object via
 /// `AVAudioEngine`, taps the main mixer output, and computes a 64-bin

@@ -1,4 +1,6 @@
 #if !LITE_BUILD
+    import LiveWallpaperProWPE
+
     extension WPESceneScriptInstanceInventory {
         init(document: WPESceneDocument) {
             let text = document.textObjects.reduce(into: 0) { count, object in

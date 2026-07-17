@@ -30,14 +30,14 @@ struct MonitorUsageWidgetView: View {
     /// to a single provider. Invalid/missing ⇒ "all" (unfiltered — the widget's
     /// pre-existing rendering, unchanged).
     private var provider: String {
-        Self.resolvedProvider(context.placement.options["provider"]?.stringValue)
+        MonitorUsagePresentationPolicy.resolvedProvider(context.placement.options["provider"]?.stringValue)
     }
 
     /// `primaryMetric` (placement.options): which of cost/tokens leads the
     /// hero-summary and per-model rows. Invalid/missing ⇒ "tokens" (default —
     /// today's rendering, unchanged).
     private var primaryMetric: String {
-        Self.resolvedPrimaryMetric(context.placement.options["primaryMetric"]?.stringValue)
+        MonitorUsagePresentationPolicy.resolvedPrimaryMetric(context.placement.options["primaryMetric"]?.stringValue)
     }
 
     var body: some View {
@@ -76,10 +76,10 @@ struct MonitorUsageWidgetView: View {
         if let usage {
             switch context.placement.size {
             case .small:
-                if let resets = usage.fiveHourResetsAt, Self.hasQuota(usage), Self.quotaVisible(provider),
-                   !Self.isLimitsStale(usage) {
+                if let resets = usage.fiveHourResetsAt, MonitorUsagePresentationPolicy.hasQuota(usage), MonitorUsagePresentationPolicy.quotaVisible(provider),
+                   !MonitorUsagePresentationPolicy.isLimitsStale(usage) {
                     // "5H RESETS <time>" — localized whole, the countdown a placeholder.
-                    Text(verbatim: String(localized: "5H RESETS \(Self.fiveHourResetText(secondsRemaining: resets - nowEpoch))",
+                    Text(verbatim: String(localized: "5H RESETS \(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: resets - nowEpoch))",
                                           comment: "Usage widget S header: when the 5-hour quota resets; %@ is a countdown."))
                         .font(MonitorDesign.labelFont(size: scale.label))
                         .tracking(MonitorDesign.labelTracking(size: scale.label))
@@ -134,9 +134,9 @@ struct MonitorUsageWidgetView: View {
     @ViewBuilder
     private func smallBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        let stale = Self.isLimitsStale(usage)
+        let stale = MonitorUsagePresentationPolicy.isLimitsStale(usage)
         VStack(alignment: .leading, spacing: scale.label * 0.5) {
-            if Self.hasQuota(usage) && Self.quotaVisible(provider) {
+            if MonitorUsagePresentationPolicy.hasQuota(usage) && MonitorUsagePresentationPolicy.quotaVisible(provider) {
                 quotaRingHero(usage, scale: scale, hubHeroScale: 0.78)
                     .opacity(stale ? 0.5 : 1)
                 weekMicroMeter(usage, scale: scale)
@@ -161,7 +161,7 @@ struct MonitorUsageWidgetView: View {
             ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                 VStack(spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text(verbatim: Self.wholePercentValue(pct))
+                        Text(verbatim: MonitorUsagePresentationPolicy.wholePercentValue(pct))
                             .font(MonitorDesign.heroFont(size: scale.hero * hubHeroScale))
                             .monospacedDigit()
                             .foregroundStyle(MonitorDesign.inkPrimary)
@@ -192,7 +192,7 @@ struct MonitorUsageWidgetView: View {
         QuotaMeter(
             name: "Week",
             fraction: usage.weekUsedPercent ?? 0,
-            resetText: usage.weekResetsAt.map { Self.weekResetText(secondsRemaining: $0 - nowEpoch) },
+            resetText: usage.weekResetsAt.map { MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: $0 - nowEpoch) },
             scale: scale,
             showResetPrefix: false
         )
@@ -205,9 +205,9 @@ struct MonitorUsageWidgetView: View {
     private func todayRowCompact(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
-        let costLeads = Self.costLeads(primaryMetric)
-        let cost = Self.filteredCostTodayUSD(usage, provider: provider)
-        let tokens = Self.filteredTokensToday(usage, provider: provider)
+        let costLeads = MonitorUsagePresentationPolicy.costLeads(primaryMetric)
+        let cost = MonitorUsagePresentationPolicy.filteredCostTodayUSD(usage, provider: provider)
+        let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("TODAY")
                 .font(MonitorDesign.labelFont(size: scale.label))
@@ -247,7 +247,7 @@ struct MonitorUsageWidgetView: View {
     @ViewBuilder
     private func mediumBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        let hasQuota = Self.hasQuota(usage) && Self.quotaVisible(provider)
+        let hasQuota = MonitorUsagePresentationPolicy.hasQuota(usage) && MonitorUsagePresentationPolicy.quotaVisible(provider)
         HStack(alignment: .top, spacing: 14) {
             leftColumn(usage, scale: scale)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -266,15 +266,15 @@ struct MonitorUsageWidgetView: View {
     private func leftColumn(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
-        let stale = Self.isLimitsStale(usage)
+        let stale = MonitorUsagePresentationPolicy.isLimitsStale(usage)
         VStack(alignment: .leading, spacing: scale.label * 0.5) {
             HStack(alignment: .center, spacing: 10) {
-                if Self.hasQuota(usage) && Self.quotaVisible(provider) {
+                if MonitorUsagePresentationPolicy.hasQuota(usage) && MonitorUsagePresentationPolicy.quotaVisible(provider) {
                     let pct = usage.fiveHourUsedPercent ?? 0
                     ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                         VStack(spacing: 0) {
                             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                                Text(verbatim: Self.wholePercentValue(pct))
+                                Text(verbatim: MonitorUsagePresentationPolicy.wholePercentValue(pct))
                                     .font(MonitorDesign.heroFont(size: scale.hero * 0.62))
                                     .monospacedDigit()
                                     .foregroundStyle(MonitorDesign.inkPrimary)
@@ -297,11 +297,11 @@ struct MonitorUsageWidgetView: View {
             }
             // The Claude/Codex split is meaningless once scoped to one provider —
             // hidden alongside the other cross-provider aggregates (§ aggregatesVisible).
-            if Self.aggregatesVisible(provider), let split = Self.providerSplit(usage) {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), let split = MonitorUsagePresentationPolicy.providerSplit(usage) {
                 hairline
                 providerSplitBar(split, scale: scale)
             }
-            if let tokens = Self.filteredTokensToday(usage, provider: provider), tokens != .zero {
+            if let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider), tokens != .zero {
                 hairline
                 cacheRowCompact(tokens, scale: scale)
             }
@@ -323,8 +323,8 @@ struct MonitorUsageWidgetView: View {
             CacheSegmentBar(segments: segments)
                 .frame(height: max(4, scale.caption * 0.42))
                 .frame(maxWidth: .infinity)
-            if let hit = Self.cacheHitRate(tokens) {
-                (Text(verbatim: "\(Self.wholePercent(hit)) ") + Text("hit"))
+            if let hit = MonitorUsagePresentationPolicy.cacheHitRate(tokens) {
+                (Text(verbatim: "\(MonitorUsagePresentationPolicy.wholePercent(hit)) ") + Text("hit"))
                     .font(MonitorDesign.subFont(size: scale.label))
                     .monospacedDigit()
                     .foregroundStyle(MonitorDesign.oklch(0.72, 0.08, 158))
@@ -339,11 +339,11 @@ struct MonitorUsageWidgetView: View {
     private func todayStack(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
-        let costLeads = Self.costLeads(primaryMetric)
+        let costLeads = MonitorUsagePresentationPolicy.costLeads(primaryMetric)
         return VStack(alignment: .leading, spacing: scale.label * 0.4) {
             statLine(key: String(localized: "TODAY $", comment: "Usage widget: today's spend label ($ is a currency glyph)."),
-                     value: MonitorFormat.usd(Self.filteredCostTodayUSD(usage, provider: provider)), scale: scale)
-            if let tokens = Self.filteredTokensToday(usage, provider: provider) {
+                     value: MonitorFormat.usd(MonitorUsagePresentationPolicy.filteredCostTodayUSD(usage, provider: provider)), scale: scale)
+            if let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider) {
                 statLine(key: String(localized: "TOKENS", comment: "Usage widget: today's token-count label."),
                          value: MonitorFormat.tokens(tokens.input + tokens.output), scale: scale, muted: costLeads)
             }
@@ -375,14 +375,14 @@ struct MonitorUsageWidgetView: View {
     private func rightColumn(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale, cellHeight: CGFloat
     ) -> some View {
-        let stale = Self.isLimitsStale(usage)
+        let stale = MonitorUsagePresentationPolicy.isLimitsStale(usage)
         VStack(alignment: .leading, spacing: scale.label * 0.55) {
             Group {
                 QuotaMeter(
                     name: "5H limit",
                     fraction: usage.fiveHourUsedPercent ?? 0,
                     resetText: usage.fiveHourResetsAt.map {
-                        Self.fiveHourResetText(secondsRemaining: $0 - nowEpoch)
+                        MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: $0 - nowEpoch)
                     },
                     scale: scale,
                     showResetPrefix: true
@@ -391,7 +391,7 @@ struct MonitorUsageWidgetView: View {
                     name: "Week",
                     fraction: usage.weekUsedPercent ?? 0,
                     resetText: usage.weekResetsAt.map {
-                        Self.weekResetText(secondsRemaining: $0 - nowEpoch)
+                        MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: $0 - nowEpoch)
                     },
                     scale: scale,
                     showResetPrefix: true
@@ -402,20 +402,20 @@ struct MonitorUsageWidgetView: View {
             // Burn-rate ETA chip — ONLY when honestly derivable (§3.4). Also
             // suppressed while stale (a stale quota can't feed a live slope) or
             // provider-filtered (the slope isn't attributable to one provider).
-            if Self.aggregatesVisible(provider), !stale, let eta = burnETA {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), !stale, let eta = burnETA {
                 burnETAChip(seconds: eta, scale: scale)
             }
 
             // 7-day mini sparkline of daily tokens — cross-provider (no per-day
             // provider split in the schema), so hidden under a provider filter.
-            if Self.aggregatesVisible(provider), let week7 = Self.week7Tokens(usage) {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), let week7 = MonitorUsagePresentationPolicy.week7Tokens(usage) {
                 week7Sparkline(week7, scale: scale)
             }
         }
     }
 
     private func burnETAChip(seconds: Double, scale: MonitorDesign.TypeScale) -> some View {
-        let critical = Self.isETACritical(seconds)
+        let critical = MonitorUsagePresentationPolicy.isETACritical(seconds)
         let accent = critical ? MonitorDesign.signalCoral : MonitorDesign.signalAmber
         return HStack(spacing: 6) {
             // The mock's teardrop `.burnicon` — a rotated rounded square; its
@@ -478,9 +478,9 @@ struct MonitorUsageWidgetView: View {
     @ViewBuilder
     private func largeBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        let stale = Self.isLimitsStale(usage)
-        let hasQuota = Self.hasQuota(usage) && Self.quotaVisible(provider)
-        let showsTrend = Self.aggregatesVisible(provider) && Self.week7Tokens(usage) != nil
+        let stale = MonitorUsagePresentationPolicy.isLimitsStale(usage)
+        let hasQuota = MonitorUsagePresentationPolicy.hasQuota(usage) && MonitorUsagePresentationPolicy.quotaVisible(provider)
+        let showsTrend = MonitorUsagePresentationPolicy.aggregatesVisible(provider) && MonitorUsagePresentationPolicy.week7Tokens(usage) != nil
         VStack(alignment: .leading, spacing: scale.label * 0.72) {
             largeHeroRow(usage, scale: scale, stale: stale, hasQuota: hasQuota)
 
@@ -489,12 +489,12 @@ struct MonitorUsageWidgetView: View {
                 largeQuotaRow(usage, scale: scale, stale: stale)
             }
 
-            if let models = Self.topModels(usage, provider: provider) {
+            if let models = MonitorUsagePresentationPolicy.topModels(usage, provider: provider) {
                 hairline
                 perModelSection(models, scale: scale)
             }
 
-            if Self.hasCache(usage, provider: provider) || showsTrend {
+            if MonitorUsagePresentationPolicy.hasCache(usage, provider: provider) || showsTrend {
                 hairline
                 largeFootRow(usage, scale: scale)
             }
@@ -517,7 +517,7 @@ struct MonitorUsageWidgetView: View {
                 ArcGauge(value: pct, color: Self.quotaBandColor(pct)) {
                     VStack(spacing: 0) {
                         HStack(alignment: .firstTextBaseline, spacing: 0) {
-                            Text(verbatim: Self.wholePercentValue(pct))
+                            Text(verbatim: MonitorUsagePresentationPolicy.wholePercentValue(pct))
                                 .font(MonitorDesign.heroFont(size: scale.hero * 0.66))
                                 .monospacedDigit()
                                 .foregroundStyle(MonitorDesign.inkPrimary)
@@ -552,19 +552,19 @@ struct MonitorUsageWidgetView: View {
     ) -> some View {
         let cost = usage.costBurnRatePerHour
         let tok = usage.tokenBurnRatePerHour
-        let costLeads = Self.costLeads(primaryMetric)
+        let costLeads = MonitorUsagePresentationPolicy.costLeads(primaryMetric)
         VStack(alignment: .leading, spacing: scale.label * 0.55) {
             HStack(alignment: .top, spacing: 14) {
                 statLine(key: String(localized: "TODAY $", comment: "Usage widget: today's spend label ($ is a currency glyph)."),
-                         value: MonitorFormat.usd(Self.filteredCostTodayUSD(usage, provider: provider)), scale: scale)
+                         value: MonitorFormat.usd(MonitorUsagePresentationPolicy.filteredCostTodayUSD(usage, provider: provider)), scale: scale)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let tokens = Self.filteredTokensToday(usage, provider: provider) {
+                if let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider) {
                     statLine(key: String(localized: "TOKENS", comment: "Usage widget: today's token-count label."),
                              value: MonitorFormat.tokens(tokens.input + tokens.output), scale: scale, muted: costLeads)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if Self.aggregatesVisible(provider), cost != nil || tok != nil {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), cost != nil || tok != nil {
                 HStack(alignment: .top, spacing: 14) {
                     burnStatLine(
                         key: String(localized: "BURN $/h", comment: "Usage widget: cost burned per hour label ($/h is a rate unit)."),
@@ -613,7 +613,7 @@ struct MonitorUsageWidgetView: View {
                     name: "5H limit",
                     fraction: usage.fiveHourUsedPercent ?? 0,
                     resetText: usage.fiveHourResetsAt.map {
-                        Self.fiveHourResetText(secondsRemaining: $0 - nowEpoch)
+                        MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: $0 - nowEpoch)
                     },
                     scale: scale,
                     showResetPrefix: true
@@ -623,7 +623,7 @@ struct MonitorUsageWidgetView: View {
                     name: "Week",
                     fraction: usage.weekUsedPercent ?? 0,
                     resetText: usage.weekResetsAt.map {
-                        Self.weekResetText(secondsRemaining: $0 - nowEpoch)
+                        MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: $0 - nowEpoch)
                     },
                     scale: scale,
                     showResetPrefix: true
@@ -632,7 +632,7 @@ struct MonitorUsageWidgetView: View {
             }
             .opacity(stale ? 0.5 : 1)
 
-            if Self.aggregatesVisible(provider), !stale, let eta = burnETA {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), !stale, let eta = burnETA {
                 burnETAChip(seconds: eta, scale: scale)
             }
         }
@@ -644,7 +644,7 @@ struct MonitorUsageWidgetView: View {
     private func perModelSection(
         _ models: [MonitorUsageModelBreakdown], scale: MonitorDesign.TypeScale
     ) -> some View {
-        let total = models.reduce(0) { $0 + Self.modelTokens($1) }
+        let total = models.reduce(0) { $0 + MonitorUsagePresentationPolicy.modelTokens($1) }
         return VStack(alignment: .leading, spacing: scale.label * 0.5) {
             HStack(alignment: .firstTextBaseline) {
                 Text("PER-MODEL")
@@ -674,9 +674,9 @@ struct MonitorUsageWidgetView: View {
     private func modelRow(
         _ model: MonitorUsageModelBreakdown, total: Int, scale: MonitorDesign.TypeScale
     ) -> some View {
-        let tokens = Self.modelTokens(model)
+        let tokens = MonitorUsagePresentationPolicy.modelTokens(model)
         let share = total > 0 ? Double(tokens) / Double(total) : 0
-        let costLeads = Self.costLeads(primaryMetric)
+        let costLeads = MonitorUsagePresentationPolicy.costLeads(primaryMetric)
         let tokensCell = Text(verbatim: MonitorFormat.tokens(tokens))
             .font(MonitorDesign.subFont(size: scale.label))
             .monospacedDigit()
@@ -691,13 +691,13 @@ struct MonitorUsageWidgetView: View {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
                 .fill(Self.modelColor(model.model))
                 .frame(width: scale.label * 0.6, height: scale.label * 0.6)
-            Text(verbatim: Self.modelShortName(model.model))
+            Text(verbatim: MonitorUsagePresentationPolicy.modelShortName(model.model))
                 .font(MonitorDesign.captionFont(size: scale.caption))
                 .foregroundStyle(MonitorDesign.inkMuted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Spacer(minLength: 6)
-            Text(verbatim: Self.wholePercent(share))
+            Text(verbatim: MonitorUsagePresentationPolicy.wholePercent(share))
                 .font(MonitorDesign.captionFont(size: scale.label))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkFaint)
@@ -718,11 +718,11 @@ struct MonitorUsageWidgetView: View {
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            if let tokens = Self.filteredTokensToday(usage, provider: provider), tokens != .zero {
+            if let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider), tokens != .zero {
                 cacheStrip(tokens, scale: scale)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if Self.aggregatesVisible(provider), let week7 = Self.week7Tokens(usage) {
+            if MonitorUsagePresentationPolicy.aggregatesVisible(provider), let week7 = MonitorUsagePresentationPolicy.week7Tokens(usage) {
                 week7Sparkline(week7, scale: scale)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -742,9 +742,9 @@ struct MonitorUsageWidgetView: View {
                     .tracking(MonitorDesign.labelTracking(size: scale.label))
                     .foregroundStyle(MonitorDesign.inkFaint)
                 Spacer(minLength: 4)
-                if let hit = Self.cacheHitRate(tokens) {
+                if let hit = MonitorUsagePresentationPolicy.cacheHitRate(tokens) {
                     // The percentage is data (verbatim); "hit" is a word (localized).
-                    (Text(verbatim: "\(Self.wholePercent(hit)) ") + Text("hit"))
+                    (Text(verbatim: "\(MonitorUsagePresentationPolicy.wholePercent(hit)) ") + Text("hit"))
                         .font(MonitorDesign.subFont(size: scale.label))
                         .monospacedDigit()
                         .foregroundStyle(MonitorDesign.oklch(0.72, 0.08, 158))
@@ -771,7 +771,7 @@ struct MonitorUsageWidgetView: View {
     // MARK: - Provider split bar
 
     private func providerSplitBar(
-        _ split: ProviderSplit, scale: MonitorDesign.TypeScale
+        _ split: MonitorUsagePresentationPolicy.ProviderSplit, scale: MonitorDesign.TypeScale
     ) -> some View {
         VStack(alignment: .leading, spacing: scale.label * 0.4) {
             GeometryReader { g in
@@ -866,36 +866,15 @@ struct MonitorUsageWidgetView: View {
 
     /// Client-derived ETA (seconds) to the 5h cap from the sparse used% history.
     private var burnETA: Double? {
-        Self.burnETASeconds(times: history.usageQuotaTimes, used: history.usageFiveHourUsed)
+        MonitorUsagePresentationPolicy.burnETASeconds(times: history.usageQuotaTimes, used: history.usageFiveHourUsed)
     }
 
-    // MARK: - Pure helpers (nonisolated for tests)
-
-    /// Escalation bands. The near-limit DOT (`quotaBand`) uses `warm`/`crit`; the
-    /// hotter bar-FILL scale (`quotaFill`) uses `warn`/`crit`. Ported from the
-    /// mock's two separate thresholds (p is 0-100 there; here 0…1).
-    enum Band { case normal, warm, warn, crit }
-
-    nonisolated static func quotaBand(_ fraction: Double) -> Band {
-        let f = clampUnit(fraction)
-        if f > 0.85 { return .crit }
-        if f >= 0.40 { return .warm }
-        return .normal
-    }
-
-    /// Bar-fill escalation — a hotter scale than the dot (mock `quotaFill(p)`):
-    /// warn >75%, crit >90%.
-    nonisolated static func quotaFill(_ fraction: Double) -> Band {
-        let f = clampUnit(fraction)
-        if f > 0.90 { return .crit }
-        if f > 0.75 { return .warn }
-        return .normal
-    }
+    // MARK: - SwiftUI rendering helpers
 
     /// Ring/hero colour: reuse the shared load-band steel/amber, but escalate to
     /// coral in the near-limit `crit` band (mirrors the mock's ring treatment).
     nonisolated static func quotaBandColor(_ fraction: Double) -> Color {
-        switch quotaBand(fraction) {
+        switch MonitorUsagePresentationPolicy.quotaBand(fraction) {
         case .normal: return MonitorDesign.loadSteel
         case .warm, .warn: return MonitorDesign.signalAmber
         case .crit: return MonitorDesign.signalCoral
@@ -904,164 +883,12 @@ struct MonitorUsageWidgetView: View {
 
     /// The colour a quota bar fill uses at a given used% (the hotter scale).
     nonisolated static func quotaFillColor(_ fraction: Double) -> Color {
-        switch quotaFill(fraction) {
+        switch MonitorUsagePresentationPolicy.quotaFill(fraction) {
         case .normal: return MonitorDesign.signalSteel
         case .warm, .warn: return MonitorDesign.signalAmber
         case .crit: return MonitorDesign.signalCoral
         }
     }
-
-    /// ETA is "critical" (coral chip) at ≤15 min, matching mock `etaCrit`.
-    nonisolated static func isETACritical(_ seconds: Double) -> Bool {
-        seconds <= 15 * 60
-    }
-
-    /// Whole-percent string from a 0…1 fraction ("58%").
-    nonisolated static func wholePercent(_ fraction: Double) -> String {
-        "\(wholePercentValue(fraction))%"
-    }
-
-    /// Numeric portion used when the percent glyph has its own visual style.
-    nonisolated static func wholePercentValue(_ fraction: Double) -> String {
-        "\(Int((clampUnit(fraction) * 100).rounded()))"
-    }
-
-    /// True when `limitsStale == true` (nil / false both mean fresh).
-    nonisolated static func isLimitsStale(_ usage: MonitorUsageSnapshot) -> Bool {
-        usage.limitsStale == true
-    }
-
-    /// Quota blocks render only when the 5h field exists (statusline installed).
-    nonisolated static func hasQuota(_ usage: MonitorUsageSnapshot) -> Bool {
-        usage.fiveHourUsedPercent != nil
-    }
-
-    // MARK: - Settings read side (`provider` / `primaryMetric`)
-    //
-    // Both options are `.string`; an absent or unrecognised raw value falls back
-    // to the documented default so a stale/mistyped popover write can't corrupt
-    // the read side. Every filtering helper below composes on top of these two.
-
-    /// `provider` raw string ⇒ resolved filter. Anything but "claude"/"codex"
-    /// (including nil/absent) ⇒ "all" — no filtering, today's behaviour.
-    nonisolated static func resolvedProvider(_ raw: String?) -> String {
-        switch raw {
-        case "claude", "codex": return raw!
-        default: return "all"
-        }
-    }
-
-    /// `primaryMetric` raw string ⇒ resolved metric. Anything but "cost"
-    /// (including nil/absent) ⇒ "tokens" — the pre-existing rendering.
-    nonisolated static func resolvedPrimaryMetric(_ raw: String?) -> String {
-        raw == "cost" ? "cost" : "tokens"
-    }
-
-    /// Whether cost should visually lead over tokens (hero summary + per-model
-    /// rows) — true only for the explicit "cost" setting.
-    nonisolated static func costLeads(_ primaryMetric: String) -> Bool {
-        primaryMetric == "cost"
-    }
-
-    /// Quota (5h/week %, resets, burn-ETA) is Claude-only data (§3.4 — sourced
-    /// from the statusline rate-limit capture, which has no Codex equivalent).
-    /// Visible under "all"/"claude"; honestly hidden under "codex" rather than
-    /// showing a Claude limit mislabeled as Codex's.
-    nonisolated static func quotaVisible(_ provider: String) -> Bool {
-        provider != "codex"
-    }
-
-    /// Cross-provider aggregates with no per-provider attribution anywhere in
-    /// the schema — the burn-rate window, the 7-day trend (`dailyActivity` has
-    /// no per-model/provider split), and the Claude/Codex split bar itself
-    /// (meaningless once already scoped to one provider). Shown only under
-    /// "all" so a single-provider view never silently blends in the other
-    /// provider's numbers under a readout that looks scoped.
-    nonisolated static func aggregatesVisible(_ provider: String) -> Bool {
-        provider == "all"
-    }
-
-    /// Today's cost, scoped to `provider`. Codex has no public per-token rate
-    /// (`MonitorTokenPricing`), so `perProvider["codex"].costTodayUSD` is always
-    /// nil — filtering surfaces that honestly (`MonitorFormat.usd(nil)` → "—"),
-    /// never a fabricated figure.
-    nonisolated static func filteredCostTodayUSD(
-        _ usage: MonitorUsageSnapshot, provider: String
-    ) -> Double? {
-        provider == "all" ? usage.costTodayUSD : usage.perProvider?[provider]?.costTodayUSD
-    }
-
-    /// Today's token totals, scoped to `provider`.
-    nonisolated static func filteredTokensToday(
-        _ usage: MonitorUsageSnapshot, provider: String
-    ) -> MonitorTokenTotals? {
-        provider == "all" ? usage.tokensToday : usage.perProvider?[provider]?.tokensToday
-    }
-
-    /// Provider inferred from a model-id, for per-model filtering: Claude always
-    /// prefixes "claude-"; every other id in `perModel` (gpt-5*, the Codex
-    /// fallback literal "codex", …) is Codex-origin — `MonitorUsageLedgerFragment`
-    /// only ever merges these two sources.
-    nonisolated static func modelProvider(_ model: String) -> String {
-        model.lowercased().hasPrefix("claude") ? "claude" : "codex"
-    }
-
-    /// `perModel`, scoped to `provider`; nil when absent, empty, or nothing
-    /// matches the filter (same "absent" contract as the unfiltered field).
-    nonisolated static func filteredPerModel(
-        _ usage: MonitorUsageSnapshot, provider: String
-    ) -> [MonitorUsageModelBreakdown]? {
-        guard let models = usage.perModel, !models.isEmpty else { return nil }
-        guard provider != "all" else { return models }
-        let filtered = models.filter { modelProvider($0.model) == provider }
-        return filtered.isEmpty ? nil : filtered
-    }
-
-    nonisolated static func fiveHourResetText(secondsRemaining: Double) -> String {
-        MonitorFormat.countdown(secondsRemaining)
-    }
-
-    nonisolated static func weekResetText(secondsRemaining: Double) -> String {
-        MonitorFormat.countdownDays(secondsRemaining)
-    }
-
-    /// Least-squares (fallback two-point) slope of used% over time → seconds until
-    /// the series reaches 1.0. Honest-only: needs ≥2 samples and a POSITIVE slope;
-    /// nil otherwise. Already-capped returns 0. The raw ETA is clamped so a
-    /// whisper-slow slope can't produce an absurd horizon.
-    nonisolated static func burnETASeconds(times: [Double], used: [Double]) -> Double? {
-        guard times.count == used.count, used.count >= 2 else { return nil }
-        guard let last = used.last, let lastTime = times.last else { return nil }
-        let currentUsed = clampUnit(last)
-        if currentUsed >= 1.0 { return 0 }
-
-        let n = Double(used.count)
-        let sumT = times.reduce(0, +)
-        let sumU = used.reduce(0, +)
-        let meanT = sumT / n
-        let meanU = sumU / n
-        var num = 0.0, den = 0.0
-        for i in 0..<used.count {
-            let dt = times[i] - meanT
-            num += dt * (used[i] - meanU)
-            den += dt * dt
-        }
-        // Degenerate time axis (all-equal timestamps) → no usable slope.
-        guard den > 0 else { return nil }
-        let slopePerSecond = num / den
-        guard slopePerSecond > 0 else { return nil }
-
-        let remaining = 1.0 - currentUsed
-        let rawETA = remaining / slopePerSecond
-        guard rawETA.isFinite, rawETA >= 0 else { return nil }
-        // Anchor "now" at the last sample; the widget's countdown is relative.
-        _ = lastTime
-        return min(rawETA, burnETAClampSeconds)
-    }
-
-    /// ETA horizon cap — a slope slower than this reads as "not meaningfully
-    /// approaching the cap"; we still show the (clamped) figure rather than lie.
-    nonisolated static let burnETAClampSeconds: Double = 24 * 3600
 
     /// Four cache segments (input / output / cacheRead / cacheWrite) as fractions
     /// of their sum — the same `MonitorTokenTotals` fields, a free four-part strip.
@@ -1076,77 +903,10 @@ struct MonitorUsageWidgetView: View {
         ]
     }
 
-    /// cacheRead / (input + cacheRead) — nil when there were no reads at all.
-    nonisolated static func cacheHitRate(_ tokens: MonitorTokenTotals) -> Double? {
-        let denom = tokens.input + tokens.cacheRead
-        guard denom > 0 else { return nil }
-        return Double(tokens.cacheRead) / Double(denom)
-    }
-
-    /// Provider cost split from `perProvider`; nil when both providers are absent.
-    nonisolated static func providerSplit(_ usage: MonitorUsageSnapshot) -> ProviderSplit? {
-        guard let per = usage.perProvider else { return nil }
-        let claude = per["claude"]?.costTodayUSD ?? 0
-        let codex = per["codex"]?.costTodayUSD ?? 0
-        guard claude > 0 || codex > 0 else { return nil }
-        return ProviderSplit(claudeCost: claude, codexCost: codex)
-    }
-
-    /// Last 7 daily token buckets (input+output), oldest→today; nil when no daily
-    /// activity exists. Honest empty days stay flat (a zero bucket).
-    nonisolated static func week7Tokens(_ usage: MonitorUsageSnapshot) -> [Double]? {
-        guard let daily = usage.dailyActivity, !daily.isEmpty else { return nil }
-        let last7 = daily.suffix(7)
-        return last7.map { Double($0.tokens.input + $0.tokens.output) }
-    }
-
-    /// True when today's token totals carry any cache traffic worth a strip.
-    nonisolated static func hasCache(_ usage: MonitorUsageSnapshot) -> Bool {
-        guard let t = usage.tokensToday else { return false }
-        return t != .zero
-    }
-
-    /// `hasCache`, scoped to `provider` via `filteredTokensToday`.
-    nonisolated static func hasCache(_ usage: MonitorUsageSnapshot, provider: String) -> Bool {
-        guard let t = filteredTokensToday(usage, provider: provider) else { return false }
-        return t != .zero
-    }
-
-    /// Total tokens across the four buckets for one model breakdown.
-    nonisolated static func modelTokens(_ model: MonitorUsageModelBreakdown) -> Int {
-        model.tokens.input + model.tokens.output + model.tokens.cacheRead + model.tokens.cacheWrite
-    }
-
-    /// The top `limit` models by token volume (already sorted descending by the
-    /// rollup), optionally scoped to `provider`; nil when the (filtered)
-    /// breakdown is absent or empty. L shows the busiest few rather than every
-    /// model so the list stays scannable.
-    nonisolated static func topModels(
-        _ usage: MonitorUsageSnapshot, limit: Int = 4, provider: String = "all"
-    ) -> [MonitorUsageModelBreakdown]? {
-        guard let models = filteredPerModel(usage, provider: provider) else { return nil }
-        return Array(models.prefix(max(1, limit)))
-    }
-
-    /// Coarse model family from a raw model-id — drives the per-model swatch hue
-    /// and short label. Prefix-matched like `MonitorTokenPricing`, so unfamiliar
-    /// ids fall through to `.other` (neutral) rather than mis-colouring.
-    enum ModelFamily { case opus, sonnet, haiku, gpt5, gpt5mini, other }
-
-    nonisolated static func modelFamily(_ model: String) -> ModelFamily {
-        let id = model.lowercased()
-        if id.contains("opus") { return .opus }
-        if id.contains("sonnet") { return .sonnet }
-        if id.contains("haiku") { return .haiku }
-        if id.contains("gpt-5-mini") || id.contains("gpt-5m") || id.contains("mini") { return .gpt5mini }
-        if id.contains("gpt-5") || id.contains("gpt5") || id.hasPrefix("gpt") { return .gpt5 }
-        return .other
-    }
-
     /// Per-model swatch colour — the ledger's harmonious warm hues (`--m-*`), all
     /// sitting on the graphite so the list never reads as a rainbow.
     nonisolated static func modelColor(_ model: String) -> Color {
-        switch modelFamily(model) {
+        switch MonitorUsagePresentationPolicy.modelFamily(model) {
         case .opus: return MonitorDesign.oklch(0.72, 0.13, 78)
         case .sonnet: return MonitorDesign.oklch(0.66, 0.10, 55)
         case .haiku: return MonitorDesign.oklch(0.62, 0.055, 150)
@@ -1156,30 +916,10 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// Concise display label for a model-id (privacy: model-ids are allowed). Known
-    /// families collapse to a friendly token; anything else keeps the raw id with a
-    /// trailing date/build suffix trimmed so the row stays short.
-    nonisolated static func modelShortName(_ model: String) -> String {
-        switch modelFamily(model) {
-        case .opus: return "Opus"
-        case .sonnet: return "Sonnet"
-        case .haiku: return "Haiku"
-        case .gpt5: return "GPT-5"
-        case .gpt5mini: return "GPT-5 mini"
-        case .other:
-            // Drop a trailing "-<digits>" build/date stamp; cap length.
-            var name = model
-            if let range = name.range(of: "-[0-9]{4,}$", options: .regularExpression) {
-                name.removeSubrange(range)
-            }
-            return name.count > 16 ? String(name.prefix(15)) + "…" : name
-        }
-    }
-
     struct StatusStyle { var color: Color; var label: String }
 
     nonisolated static func providerStatus(_ usage: MonitorUsageSnapshot) -> StatusStyle {
-        if isLimitsStale(usage) {
+        if MonitorUsagePresentationPolicy.isLimitsStale(usage) {
             return StatusStyle(color: MonitorDesign.signalAmber,
                                label: String(localized: "stale", comment: "Usage widget: the quota/limit data is stale."))
         }
@@ -1187,22 +927,7 @@ struct MonitorUsageWidgetView: View {
                            label: String(localized: "live", comment: "Usage widget: the usage data is live/fresh."))
     }
 
-    private nonisolated static func clampUnit(_ x: Double) -> Double {
-        x.isFinite ? min(1, max(0, x)) : 0
-    }
-
     // MARK: - Value types
-
-    struct ProviderSplit: Equatable {
-        var claudeCost: Double
-        var codexCost: Double
-        /// Claude's share of total cost (0…1); 0.5 when both are zero.
-        var claudeShare: Double {
-            let total = claudeCost + codexCost
-            return total > 0 ? claudeCost / total : 0.5
-        }
-    }
-
     struct CacheSegment: Identifiable, Equatable {
         enum Kind: String, CaseIterable {
             case input, output, cacheRead, cacheWrite
@@ -1300,7 +1025,7 @@ private struct QuotaMeter: View {
     private var clamped: Double { fraction.isFinite ? min(1, max(0, fraction)) : 0 }
 
     private var usedColor: Color {
-        switch MonitorUsageWidgetView.quotaFill(fraction) {
+        switch MonitorUsagePresentationPolicy.quotaFill(fraction) {
         case .normal: return MonitorDesign.inkPrimary
         case .warm, .warn: return MonitorDesign.oklch(0.86, 0.09, 44)
         case .crit: return MonitorDesign.oklch(0.90, 0.07, 38)
@@ -1308,7 +1033,7 @@ private struct QuotaMeter: View {
     }
 
     private var fillGradient: LinearGradient {
-        switch MonitorUsageWidgetView.quotaFill(fraction) {
+        switch MonitorUsagePresentationPolicy.quotaFill(fraction) {
         case .normal:
             return LinearGradient(
                 colors: [MonitorDesign.signalSteel, MonitorDesign.oklch(0.66, 0.06, 210)],
@@ -1413,7 +1138,7 @@ private struct ModelShareBar: View {
         GeometryReader { g in
             HStack(spacing: 0) {
                 ForEach(models, id: \.model) { model in
-                    let share = total > 0 ? Double(MonitorUsageWidgetView.modelTokens(model)) / Double(total) : 0
+                    let share = total > 0 ? Double(MonitorUsagePresentationPolicy.modelTokens(model)) / Double(total) : 0
                     if share > 0 {
                         MonitorUsageWidgetView.modelColor(model.model)
                             .frame(width: max(1, g.size.width * CGFloat(share)))

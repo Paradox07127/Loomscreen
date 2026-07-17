@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 private func isImplicitFBOTextureName(_ name: String) -> Bool {
     name.hasPrefix("_") && !name.hasPrefix("__")

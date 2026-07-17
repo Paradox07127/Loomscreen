@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreLocation
+import LiveWallpaperCore
 @testable import LiveWallpaper
 
 // MARK: - Task 5.2 (Dock toggle) + 5.3 (Weather location) + 5.1 (Shortcuts)

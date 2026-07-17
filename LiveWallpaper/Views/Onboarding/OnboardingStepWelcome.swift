@@ -1,3 +1,5 @@
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 
 struct OnboardingStepWelcome: View {

@@ -31,10 +31,39 @@ scripts/release_candidate_check.sh
 ```
 
 The script runs the Core, ProWPE, and VideoWeb package tests, signed Pro tests,
-the Lite build, release build-setting/privacy checks, and `git diff --check`.
-Package, Pro, and Lite checks are deliberately sequential to avoid shared build
-database and compiler-cache contention. Maintainer-local audit/i18n helpers may
-be run in addition, but are not required by this portable gate.
+the four-surface arm64 link matrix (Pro Debug/Release and Lite Debug/Release),
+Pro and Lite Release archive smokes, release build-setting/privacy checks, and
+`git diff --check`. Every Xcode action uses
+`SWIFT_EMIT_LOC_STRINGS=NO`. Package, Pro, and Lite checks are deliberately
+sequential with isolated build databases to avoid compiler/build database
+contention.
+
+For a reproducible verification run, keep all transient products outside the
+repository:
+
+```sh
+DERIVED_DATA=/tmp/LoomscreenReleaseCandidate-arm64 \
+  scripts/release_candidate_check.sh
+```
+
+The Pro and Lite smoke archives default to
+`/tmp/LoomscreenReleaseCandidate-arm64ProRelease/LiveWallpaper-LinkMatrix.xcarchive`
+and
+`/tmp/LoomscreenReleaseCandidate-arm64LiteRelease/Loomscreen-LinkMatrix.xcarchive`.
+They are ad-hoc signed only to exercise the real archive/signing path. Both
+must contain exactly arm64 executables and valid nested signatures. Pro must
+embed the SceneScript XPC service with exactly its App Sandbox entitlement;
+Lite must contain no embedded XPC service or Pro renderer/SceneScript symbols,
+JavaScriptCore, Sparkle, or manual libc++ dynamic link. Use a fresh
+`DERIVED_DATA`/archive path for each run; the gate refuses to delete or
+overwrite an existing archive.
+
+These ad-hoc archives are verification evidence, **not shipping entitlement
+artifacts**. Xcode's “Sign to Run Locally” path may inject
+`get-task-allow=true`, and `scripts/check_entitlements.sh --app` must reject that
+shape. Effective Pro/Lite shipping entitlement approval, Developer ID trust,
+and notarization must run on the signing Mac against the final Developer ID
+archives; do not waive that failure or substitute the link-matrix archive.
 
 ## Manual packaging
 

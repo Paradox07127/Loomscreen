@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 
@@ -122,7 +123,6 @@ struct WPESoundRuntimeTests {
         runtime.setMasterVolume(2.0)
         // Cached value is consumed at next start; asserts the contract does
         // not throw on out-of-range input.
-        #expect(true)
     }
 
     @Test("prepare() attaches without playing; play() is a no-op when nothing prepared")
@@ -153,6 +153,5 @@ struct WPESoundRuntimeTests {
         // release the engine cleanly without a prior play().
         _ = runtime.prepare(sounds: [])
         runtime.stop()
-        #expect(true)
     }
 }

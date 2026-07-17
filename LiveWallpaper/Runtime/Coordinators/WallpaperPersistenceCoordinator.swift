@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// Centralises the write side of `ScreenConfiguration` persistence (save /
 /// remove / prune, each posting `.wallpaperConfigurationDidChange`).

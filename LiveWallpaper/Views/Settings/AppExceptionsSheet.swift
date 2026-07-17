@@ -1,4 +1,5 @@
 import AppKit
+import LiveWallpaperCore
 import SwiftUI
 import UniformTypeIdentifiers
 

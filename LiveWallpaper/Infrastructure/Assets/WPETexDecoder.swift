@@ -3,6 +3,7 @@ import CoreGraphics
 import Compression
 import Foundation
 import ImageIO
+import LiveWallpaperProWPE
 
 /// Stateless `.tex` decoder for `TEXVxxxx` containers. Errors are precise
 /// (unsupported format vs. truncated bytes vs. unknown version) so the UI

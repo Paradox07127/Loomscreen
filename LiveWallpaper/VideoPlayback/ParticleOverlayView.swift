@@ -1,4 +1,5 @@
 import AppKit
+import LiveWallpaperCore
 import QuartzCore
 
 final class ParticleOverlayView: NSView {

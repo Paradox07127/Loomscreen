@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import SwiftUI
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 
 /// Why a Wallpaper Engine workshop project couldn't be activated. Surfaced
 /// to the inspector so the user gets a specific reason instead of a generic

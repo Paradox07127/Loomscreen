@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 @preconcurrency import WebKit
 import UniformTypeIdentifiers
 

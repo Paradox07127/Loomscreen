@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 import Metal
 
 /// Shared interface for renderer-side texture sources whose content evolves

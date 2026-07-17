@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperProWPE
 @testable import LiveWallpaper
 import Testing
 
@@ -83,9 +84,32 @@ struct WPESceneScriptXPCIntegrationTests {
         #expect(after.workerPID != before.workerPID)
     }
 
-    @Test("Oversized batch is rejected without killing the service")
+    @Test("Distinct document batches reuse the process-scoped worker")
+    func distinctBatchesReuseProcessWorker() throws {
+        let client = WPESceneScriptXPCClient.shared
+        let first = try Self.requireCompletion(Self.benignRequest(client))
+        let second = try Self.requireCompletion(client.evaluateStaticTransforms(
+            canvasWidth: 200,
+            canvasHeight: 100,
+            requests: [
+                .init(
+                    script: "export function update(value) { value.x = 99; return value; }",
+                    properties: [:],
+                    seed: .init(1, 2, 3)
+                )
+            ],
+            evaluationBudget: 0.5
+        ))
+
+        #expect(second.values == [SIMD3<Double>(99, 2, 3)])
+        #expect(second.workerInstanceID == first.workerInstanceID)
+        #expect(second.workerPID == first.workerPID)
+    }
+
+    @Test("Oversized batch is rejected without replacing the process worker")
     func rejectsOversizedBatch() throws {
         let client = WPESceneScriptXPCClient.shared
+        let before = try Self.requireCompletion(Self.benignRequest(client))
         let item = WPESceneTransformScriptRequest(
             script: "export function update(value) { return value; }",
             properties: [:],
@@ -98,8 +122,36 @@ struct WPESceneScriptXPCIntegrationTests {
             evaluationBudget: 0.5
         )
         #expect(result == .rejected(.resourceLimitExceeded))
-        _ = try Self.requireCompletion(Self.benignRequest(client))
+        let after = try Self.requireCompletion(Self.benignRequest(client))
+        #expect(after.workerInstanceID == before.workerInstanceID)
+        #expect(after.workerPID == before.workerPID)
     }
+
+#if DEBUG && !LITE_BUILD
+    @Test("Opt-in client diagnostics retain only completion metadata")
+    func recordsOptInCompletionDiagnostics() throws {
+        let wasEnabled = WPESceneScriptXPCDiagnostics.isEnabled
+        WPESceneScriptXPCDiagnostics.setEnabled(true)
+        WPESceneScriptXPCDiagnostics.reset()
+        defer {
+            WPESceneScriptXPCDiagnostics.reset()
+            WPESceneScriptXPCDiagnostics.setEnabled(wasEnabled)
+        }
+
+        let completion = try Self.requireCompletion(Self.benignRequest(WPESceneScriptXPCClient.shared))
+        let snapshot = WPESceneScriptXPCDiagnostics.snapshot()
+        let attempt = try #require(snapshot.attempts.last)
+
+        #expect(snapshot.isEnabled)
+        #expect(attempt.outcome == .completed)
+        #expect(attempt.workerInstanceID == completion.workerInstanceID)
+        #expect(attempt.workerPID == completion.workerPID)
+        #expect(attempt.measurements.workerReportedNanoseconds == completion.durationNanoseconds)
+        #expect(attempt.measurements.replyWaitNanoseconds > 0)
+        #expect(snapshot.counters.completedAttempts == 1)
+        #expect(snapshot.counters.currentInFlightAttempts == 0)
+    }
+#endif
 
     private static func benignRequest(
         _ client: WPESceneScriptXPCClient,

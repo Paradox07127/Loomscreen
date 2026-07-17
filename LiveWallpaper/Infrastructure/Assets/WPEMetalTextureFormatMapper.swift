@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Metal
+import LiveWallpaperProWPE
 
 /// Color textures request sRGB-encoded pixel formats; data textures (masks,
 /// normal maps, R8/RG8 channels) must stay linear.

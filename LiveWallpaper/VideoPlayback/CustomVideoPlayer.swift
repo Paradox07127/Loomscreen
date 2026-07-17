@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVKit
+import LiveWallpaperCore
 
 struct CustomVideoPlayer: NSViewRepresentable {
     var player: AVPlayer

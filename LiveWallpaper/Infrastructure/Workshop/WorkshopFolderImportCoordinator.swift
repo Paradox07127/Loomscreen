@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Drives "Import from folder…" on the Installed tab — the same managed-library

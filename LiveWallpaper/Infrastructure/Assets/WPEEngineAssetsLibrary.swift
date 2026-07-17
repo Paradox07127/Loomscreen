@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Owns the one-time security-scoped grant to the Wallpaper Engine install

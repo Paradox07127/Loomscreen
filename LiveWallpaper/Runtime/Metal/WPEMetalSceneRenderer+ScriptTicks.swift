@@ -1,5 +1,6 @@
 #if !LITE_BUILD
     import Foundation
+    import LiveWallpaperProWPE
 
     extension WPEMetalSceneRenderer {
         // MARK: - Script tick dispatch (ADR-003 step 1)

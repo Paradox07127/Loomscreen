@@ -1,10 +1,13 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
 
-extension ScreenManager {
-    // MARK: - Video Management
+#if !LITE_BUILD
+import LiveWallpaperProWPE
+#endif
 
+extension ScreenManager {
     /// Replaces the primary video while preserving per-screen settings.
     func setVideo(url: URL, bookmarkData: Data, packageEntryName: String? = nil, for screen: Screen) {
         guard !isTerminating else { return }
@@ -36,7 +39,6 @@ extension ScreenManager {
         playbackCoordinator.setupVideoPlayback(url: url, screen: screen)
     }
 
-    // MARK: - Icon Management
     var wallpaperSessionSummaries: [WallpaperSessionSummary] {
         screens.map { wallpaperSummary(for: $0) }
     }

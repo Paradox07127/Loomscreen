@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Reclaims disk by trashing source `scene.pkg` archives SteamCMD left in the
 /// container Steam download tree. Only *legacy* items qualify: ones an older

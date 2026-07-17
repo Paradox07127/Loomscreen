@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Resolves declared Wallpaper Engine workshop dependency IDs into concrete
 /// roots the runtime is allowed to mount. The lookup order mirrors the import

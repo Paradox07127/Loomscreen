@@ -10,6 +10,7 @@ bash -n \
   scripts/check_entitlements.sh \
   scripts/check_entitlements_self_test.sh \
   scripts/release_candidate_check.sh \
+  scripts/release_contract_check.sh \
   scripts/fast_app_contract_tests.sh
 
 bash scripts/release-app.sh --help >/dev/null
@@ -19,6 +20,61 @@ bash scripts/fast_app_contract_tests.sh --list >/dev/null
 bash scripts/check_entitlements.sh --sku pro --source
 bash scripts/check_entitlements.sh --sku lite --source
 bash scripts/check_entitlements_self_test.sh
+
+pro_test_block="$(sed -n '/^xcodebuild test \\/,/^$/p' scripts/release_candidate_check.sh)"
+grep -q -- '-only-testing:LiveWallpaperTests' <<<"$pro_test_block"
+grep -q -- '-configuration Debug' <<<"$pro_test_block"
+grep -q -- '-destination "$MACOS_DESTINATION"' <<<"$pro_test_block"
+grep -q -- '-enableCodeCoverage NO' <<<"$pro_test_block"
+grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$pro_test_block"
+
+candidate_script="scripts/release_candidate_check.sh"
+grep -Fq 'MACOS_DESTINATION="platform=macOS,arch=arm64"' "$candidate_script"
+grep -Fq 'MACOS_ARCHIVE_DESTINATION="generic/platform=macOS"' "$candidate_script"
+grep -Fq -- "-destination 'platform=macOS,arch=arm64'" scripts/fast_app_contract_tests.sh
+grep -Fq -- '-enableCodeCoverage NO' scripts/fast_app_contract_tests.sh
+if grep -q 'CODE_SIGNING_ALLOWED=NO' "$candidate_script"; then
+  echo "ERROR: release link/archive gates must exercise signing; CODE_SIGNING_ALLOWED=NO is forbidden." >&2
+  exit 1
+fi
+
+pro_release_block="$(sed -n '/^echo "== Link matrix + archive smoke: Pro Release =="/,/^PRO_XPC_SERVICE=/p' "$candidate_script")"
+lite_debug_block="$(sed -n '/^echo "== Link matrix: Lite Debug =="/,/^LITE_DEBUG_BIN=/p' "$candidate_script")"
+lite_release_block="$(sed -n '/^echo "== Link matrix + archive smoke: Lite Release =="/,/^LITE_ARCHIVED_APP=/p' "$candidate_script")"
+
+grep -q 'xcodebuild archive' <<<"$pro_release_block"
+grep -q -- '-scheme LiveWallpaper' <<<"$pro_release_block"
+grep -q -- '-configuration Release' <<<"$pro_release_block"
+grep -q -- '-destination "$MACOS_ARCHIVE_DESTINATION"' <<<"$pro_release_block"
+grep -q -- '-archivePath "$PRO_ARCHIVE_PATH"' <<<"$pro_release_block"
+grep -q 'CODE_SIGN_IDENTITY="-"' <<<"$pro_release_block"
+grep -q 'ARCHS=arm64' <<<"$pro_release_block"
+grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$pro_release_block"
+grep -Fq 'PRO_XPC_SERVICE="$PRO_ARCHIVED_APP/Contents/XPCServices/SceneScriptXPCService.xpc"' "$candidate_script"
+grep -Fq 'codesign --verify --strict --verbose=2 "$PRO_XPC_SERVICE"' "$candidate_script"
+grep -Fq 'assert_exact_xpc_sandbox_entitlements "$PRO_XPC_SERVICE"' "$candidate_script"
+grep -Fq "SceneScript XPC service entitlements must be exactly App Sandbox." "$candidate_script"
+
+grep -q 'xcodebuild build' <<<"$lite_debug_block"
+grep -q -- '-scheme LiveWallpaperLite' <<<"$lite_debug_block"
+grep -q -- '-configuration Debug' <<<"$lite_debug_block"
+grep -q -- '-destination "$MACOS_DESTINATION"' <<<"$lite_debug_block"
+grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$lite_debug_block"
+
+grep -q 'xcodebuild archive' <<<"$lite_release_block"
+grep -q -- '-scheme LiveWallpaperLite' <<<"$lite_release_block"
+grep -q -- '-configuration Release' <<<"$lite_release_block"
+grep -q -- '-destination "$MACOS_ARCHIVE_DESTINATION"' <<<"$lite_release_block"
+grep -q -- '-archivePath "$LITE_ARCHIVE_PATH"' <<<"$lite_release_block"
+grep -q 'CODE_SIGN_IDENTITY="-"' <<<"$lite_release_block"
+grep -q 'ARCHS=arm64' <<<"$lite_release_block"
+grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$lite_release_block"
+
+for scheme_file in \
+  LiveWallpaper.xcodeproj/xcshareddata/xcschemes/LiveWallpaper.xcscheme \
+  LiveWallpaper.xcodeproj/xcshareddata/xcschemes/LiveWallpaperLite.xcscheme; do
+  grep -A2 '<ArchiveAction' "$scheme_file" | grep -q 'buildConfiguration = "Release"'
+done
 
 python3 scripts/check_quality_exclusions.py --self-test
 python3 scripts/check_quality_exclusions.py

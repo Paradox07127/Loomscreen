@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 /// Main-app singletons that reach into `SettingsManager`. The Core type
 /// (TrustedHostStore + TrustedHostPersisting) lives in LiveWallpaperCore;

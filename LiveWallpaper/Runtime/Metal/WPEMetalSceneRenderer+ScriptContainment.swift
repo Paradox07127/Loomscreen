@@ -1,4 +1,7 @@
 #if !LITE_BUILD
+    import LiveWallpaperCore
+    import LiveWallpaperProWPE
+
     extension WPEMetalSceneRenderer {
         func isCurrentSceneScriptLoad(_ token: WPESceneScriptInstanceLimitToken) -> Bool {
             loadGeneration == token.generation && sceneScriptLoadState.isCurrent(token)

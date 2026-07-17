@@ -42,11 +42,11 @@ struct WPESceneScriptXPCContractTests {
         let liteStart = try #require(project.range(
             of: "0CA00000000000000000B001 /* LiveWallpaperLite */ = {"
         ))
-        let serviceStart = try #require(project.range(
-            of: "0C5C10000000000000000010 /* SceneScriptXPCService */ = {",
+        let liteEnd = try #require(project.range(
+            of: "\n\t\t};",
             range: liteStart.upperBound..<project.endIndex
         ))
-        let liteTarget = project[liteStart.lowerBound..<serviceStart.lowerBound]
+        let liteTarget = project[liteStart.lowerBound..<liteEnd.upperBound]
         #expect(!liteTarget.contains("SceneScriptXPC"))
 
         let entitlementURL = Self.repositoryRoot
@@ -69,6 +69,79 @@ struct WPESceneScriptXPCContractTests {
         }
     }
 
+    @Test("SceneScript uses one process worker with serialized bounded evaluation")
+    func processWorkerIsSerializedAndBounded() throws {
+        let client = try Self.read("LiveWallpaper/Runtime/Scene/WPESceneScriptXPCClient.swift")
+        let service = try Self.read("SceneScriptXPCService/SceneScriptXPCService.swift")
+
+        #expect(client.contains("private static let processGate = NSLock()"))
+        #expect(service.contains("private let worker = SceneScriptXPCWorker()"))
+        #expect(service.contains("private let evaluationLock = NSLock()"))
+        #expect(service.contains("evaluationLock.lock()"))
+        #expect(service.contains("defer { evaluationLock.unlock() }"))
+
+        for limit in [
+            "maximumRequestBytes",
+            "maximumBatchItems",
+            "maximumUniqueSources",
+            "maximumScriptBytes",
+            "maximumTotalScriptBytes",
+            "maximumPropertiesPerItem",
+            "maximumPropertyKeyBytes",
+            "maximumPropertyStringBytes",
+            "maximumDeadlineMilliseconds",
+            "maximumCanvasDimension",
+        ] {
+            #expect(service.contains("static let \(limit)"), "Missing service limit: \(limit)")
+        }
+
+        for forbiddenPoolShape in [
+            "workersByScene",
+            "workerByScene",
+            "SceneScriptWorkerPool",
+            "[SceneScriptXPCWorker]",
+        ] {
+            #expect(!service.contains(forbiddenPoolShape))
+            #expect(!client.contains(forbiddenPoolShape))
+        }
+    }
+
+    @Test("Transport recovery admits one XPC attempt after a process-wide cooldown")
+    func transportRecoveryIsCooldownGatedAndSingleAttempt() throws {
+        let source = try Self.read("LiveWallpaper/Runtime/Scene/WPESceneScriptXPCClient.swift")
+        let processGate = try #require(source.range(of: "Self.processGate.lock()"))
+        let circuitGate = try #require(source.range(
+            of: "guard Self.recoveryCircuit.allowsAttempt else"
+        ))
+        let connection = try #require(source.range(
+            of: "let connection = NSXPCConnection("
+        ))
+
+        #expect(processGate.lowerBound < circuitGate.lowerBound)
+        #expect(circuitGate.lowerBound < connection.lowerBound)
+        #expect(source.contains("XPCRecoveryCircuit(cooldownSeconds: 10.5)"))
+        #expect(Self.occurrenceCount("let connection = NSXPCConnection(", in: source) == 1)
+        #expect(Self.occurrenceCount("proxy.evaluateStaticTransforms(", in: source) == 1)
+        #expect(Self.occurrenceCount("Self.recoveryCircuit.recordTransportFailure()", in: source) >= 3)
+        #expect(source.contains("Self.recoveryCircuit.recordHealthyReply()"))
+    }
+
+    @Test("Shipping host never falls back to in-process JavaScript")
+    func shippingHostFailsClosedWithoutHelper() {
+        #expect(
+            WPETransformScriptEvaluator.executionRoute(
+                embeddedServiceAvailable: false,
+                hostIsApplicationBundle: true
+            ) == .keepBakedFailClosed
+        )
+        #expect(
+            WPETransformScriptEvaluator.executionRoute(
+                embeddedServiceAvailable: true,
+                hostIsApplicationBundle: true
+            ) == .helperService
+        )
+    }
+
     private static let repositoryRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
@@ -78,5 +151,9 @@ struct WPESceneScriptXPCContractTests {
             contentsOf: repositoryRoot.appendingPathComponent(relativePath),
             encoding: .utf8
         )
+    }
+
+    private static func occurrenceCount(_ needle: String, in source: String) -> Int {
+        source.components(separatedBy: needle).count - 1
     }
 }

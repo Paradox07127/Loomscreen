@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import MetalKit
 
 extension WPEMetalSceneRenderer {
@@ -385,6 +387,7 @@ extension WPEMetalSceneRenderer {
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = nil
         pendingAudioStartupDocument = nil
+        hasPresentedFrame = false
         mtkView.delegate = nil
         outputTexture = nil
         lastFramePipeline = nil
@@ -469,6 +472,7 @@ extension WPEMetalSceneRenderer {
                 throw error
             }
             didLogFrameFailure = false
+            if presented { hasPresentedFrame = true }
             // Start audio only after the first frame is actually on screen, so
             // the synchronous engine spin-up can never delay the first pixels.
             if presented, pendingAudioStartupDocument != nil {

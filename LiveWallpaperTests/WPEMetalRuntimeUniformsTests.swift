@@ -1,4 +1,6 @@
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import QuartzCore
 import Testing
 @testable import LiveWallpaper

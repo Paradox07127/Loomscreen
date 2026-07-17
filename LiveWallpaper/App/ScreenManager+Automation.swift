@@ -1,11 +1,10 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
 
 extension ScreenManager {
     #if !LITE_BUILD
-    // MARK: - Wallpaper Engine Import
-
     func wpeImportError(for screen: Screen) -> AppError? {
         wpeImportTracker.error(for: screen.id)
     }
@@ -74,8 +73,6 @@ extension ScreenManager {
     }
     #endif
 
-    // MARK: - Video Effects / Weather-Reactive (delegates to coordinator)
-
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
         guard !isTerminating else { return }
         effectsCoordinator.updateEffectConfig(effectConfig, for: screen)
@@ -100,8 +97,6 @@ extension ScreenManager {
         guard !isTerminating else { return }
         effectsCoordinator.startWeatherMonitoring()
     }
-
-    // MARK: - Playlist + Schedule (delegates to WallpaperAutomationOrchestrator)
 
     func updatePlaylistBookmarks(_ bookmarks: [Data], for screen: Screen) {
         guard !isTerminating else { return }

@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
 import MetalKit
@@ -51,8 +52,8 @@ struct WPEMetalSceneRendererTests {
         #expect(renderer.hasPresentedFrame == false)
     }
 
-    @Test("Loads solidcolor scene through Metal executor")
-    func loadsSolidColorScene() async throws {
+    @Test("Loads solidcolor scene without claiming an MTKView present before draw")
+    func loadsSolidColorSceneWithoutClaimingPresentBeforeDraw() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }
@@ -66,7 +67,10 @@ struct WPEMetalSceneRendererTests {
 
         try await renderer.load()
 
-        #expect(renderer.hasPresentedFrame)
+        // `load()` encodes the first texture, but this unhosted test MTKView has
+        // no drawable. The renderer may call itself presented only after
+        // `draw(in:)` successfully submits that texture to a drawable.
+        #expect(renderer.hasPresentedFrame == false)
         #expect(renderer.renderGraph?.layers.count == 1)
         #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidlayer")
     }
@@ -514,7 +518,7 @@ struct WPEMetalSceneRendererTests {
 
         let log = try await Self.sceneDebugLog(
             for: fixture.descriptor.workshopID,
-            containing: "load() succeeded; presented first frame"
+            containing: "load() succeeded; rendered first texture; awaiting present"
         )
         #expect(log.contains("[load.begin]"))
         #expect(!log.contains("[heartbeat]"))

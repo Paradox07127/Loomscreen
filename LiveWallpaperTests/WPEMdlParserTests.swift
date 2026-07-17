@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperProWPE
 import Testing
 import simd
 @testable import LiveWallpaper

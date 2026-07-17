@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Drives "Download" from the Workshop browse UI: runs the SteamCMD download

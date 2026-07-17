@@ -43,5 +43,37 @@ struct W3DeveloperToolsResetTests {
             #expect(defaults.object(forKey: key) == nil, "\(key) must be cleared by Reset all")
         }
     }
+
+    @Test("Reset all also disables and clears volatile XPC diagnostics")
+    func resetClearsVolatileXPCDiagnostics() throws {
+        let suiteName = "W3DeveloperToolsResetTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let wasEnabled = WPESceneScriptXPCDiagnostics.isEnabled
+        defer {
+            WPESceneScriptXPCDiagnostics.reset()
+            WPESceneScriptXPCDiagnostics.setEnabled(wasEnabled)
+        }
+
+        WPESceneScriptXPCDiagnostics.setEnabled(true)
+        WPESceneScriptXPCDiagnostics.reset()
+        let token = try #require(WPESceneScriptXPCDiagnostics.beginAttempt(
+            requestedItemCount: 1,
+            uniqueSourceCount: 1,
+            deadlineMilliseconds: 50,
+            startedAtNanoseconds: 1
+        ))
+        WPESceneScriptXPCDiagnostics.finish(
+            token,
+            outcome: .completed,
+            measurements: .init(),
+            finishedAtNanoseconds: 2
+        )
+
+        DeveloperToolsView.clearAllDiagnosticDefaults(in: defaults)
+
+        #expect(!WPESceneScriptXPCDiagnostics.isEnabled)
+        #expect(WPESceneScriptXPCDiagnostics.snapshot().attempts.isEmpty)
+    }
 }
 #endif

@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import LiveWallpaperCore
 
 /// Resolves a coordinate for the weather pipeline by walking the
 /// user-preferred chain of `WeatherLocationPreference.Source` values.

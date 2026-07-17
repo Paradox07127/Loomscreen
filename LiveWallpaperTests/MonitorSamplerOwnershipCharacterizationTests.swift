@@ -1,6 +1,8 @@
 #if !LITE_BUILD
     import AppKit
     import Foundation
+    import LiveWallpaperCore
+    import LiveWallpaperProFeatures
     @testable import LiveWallpaper
     import os
     import Testing

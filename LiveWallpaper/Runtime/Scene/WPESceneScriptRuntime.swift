@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import Foundation
 import JavaScriptCore
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import os
 
 /// Instance-limit-token admission + async-overrun quarantine, shared by the
@@ -1970,6 +1972,9 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     private let evaluationBudget: TimeInterval
     private let governor: WPESceneScriptExecutionGovernor
     private let participant: WPESceneScriptExecutionGovernor.Participant
+    /// Test-only route seam for signed-host parity runs. Shipping call sites use
+    /// the nil default and therefore retain the bundle-integrity routing below.
+    private let testingExecutionRoute: StaticTransformExecutionRoute?
     private let queue = DispatchQueue(
         label: "com.livewallpaper.wpe-transform-evaluator",
         qos: .userInitiated
@@ -2020,12 +2025,14 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         canvasWidth: Double,
         canvasHeight: Double,
         evaluationBudget: TimeInterval = 0.5,
-        governor: WPESceneScriptExecutionGovernor = .processShared
+        governor: WPESceneScriptExecutionGovernor = .processShared,
+        testingExecutionRoute: StaticTransformExecutionRoute? = nil
     ) {
         self.canvasSize = SIMD2<Double>(canvasWidth, canvasHeight)
         self.evaluationBudget = evaluationBudget
         self.governor = governor
         self.participant = governor.makeParticipant()
+        self.testingExecutionRoute = testingExecutionRoute
     }
 
     /// Heuristics live with the package parser so bake-time and runtime agree.
@@ -2097,10 +2104,11 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         }
         let eligibleRequests = eligibleIndices.map { requests[$0] }
 
-        switch Self.executionRoute(
+        let route = testingExecutionRoute ?? Self.executionRoute(
             embeddedServiceAvailable: WPESceneScriptXPCClient.shared.isEmbeddedServiceAvailable,
             hostIsApplicationBundle: Self.hostIsApplicationBundle
-        ) {
+        )
+        switch route {
         case .helperService:
             // Preserve the existing process-wide SceneScript admission
             // contract even though JavaScript now executes in the helper. A

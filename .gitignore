@@ -11,7 +11,6 @@ project.xcworkspace/
 LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/*
 !LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 !LiveWallpaper.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-xcuserdata/
 *.xcuserdatad/
 
 ## Compatibility with Xcode 8 and earlier (ignoring not required starting Xcode 9)
@@ -109,6 +108,7 @@ Temporary Items
 cache/
 tools/
 trace/
+.playwright-cli/
 scripts/
 skills/
 docs/review/

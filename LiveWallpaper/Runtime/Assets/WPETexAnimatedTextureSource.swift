@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import Metal
 
 /// One pre-uploaded animation frame: a Metal texture sized to the TEXS

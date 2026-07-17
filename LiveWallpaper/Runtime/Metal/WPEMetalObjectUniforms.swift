@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 import simd
 
 /// Per-object (per-layer) transform uniforms for WPE 2.8 model shaders.

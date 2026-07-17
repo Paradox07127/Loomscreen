@@ -227,7 +227,7 @@
             try fm.createDirectory(at: refused, withIntermediateDirectories: true)
             let invalid = refused.appendingPathComponent("assets")
             try Data("do-not-delete".utf8).write(to: invalid)
-            try await SteamCMDDoctorOperationCoordinator().withOperation(.assetsMutation) { lease in
+            _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.assetsMutation) { lease in
                 #expect(throws: WPEEngineAssetsTransaction.TransactionError.invalidCurrentWithoutRecovery) {
                     try transaction.recover(
                         managedRoot: refused,
@@ -287,7 +287,7 @@
                 isDirectory: true
             )
             try fm.createSymbolicLink(at: managedAlias, withDestinationURL: realManaged)
-            try await SteamCMDDoctorOperationCoordinator().withOperation(.assetsMutation) { lease in
+            _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.assetsMutation) { lease in
                 #expect(throws: WPEEngineAssetsTransaction.TransactionError.untrustedRoot) {
                     try transaction.recover(
                         managedRoot: managedAlias,
@@ -304,7 +304,7 @@
             let aliasedParent = root.appendingPathComponent("staging-alias", isDirectory: true)
             try fm.createSymbolicLink(at: aliasedParent, withDestinationURL: realParent)
             let aliasedSource = aliasedParent.appendingPathComponent("431960", isDirectory: true)
-            try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+            _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
                 #expect(throws: WPEEngineAssetsTransaction.TransactionError.untrustedSourceRoot) {
                     try transaction.replaceAssets(
                         from: aliasedSource,

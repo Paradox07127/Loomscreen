@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import Metal
 
 /// ADR-001 B2: data-driven dispatch for the 18 `effect_*` builtin cases.

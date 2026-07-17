@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProFeatures
 import Metal
 import Testing
 import WebKit

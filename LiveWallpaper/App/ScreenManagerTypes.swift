@@ -1,6 +1,10 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
+#if !LITE_BUILD
+import LiveWallpaperProWPE
+#endif
 
 struct WallpaperSessionSummaryCache: Equatable {
     private var summariesByScreenID: [CGDirectDisplayID: WallpaperSessionSummary] = [:]

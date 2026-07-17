@@ -1,5 +1,6 @@
 import Foundation
 import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 
 extension GeneralSettingsView {

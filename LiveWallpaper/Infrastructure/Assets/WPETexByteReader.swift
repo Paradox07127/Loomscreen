@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Lightweight cursor over an immutable `Data` slice. Used by the `.tex`
 /// decoder to read little-endian integers and 8-byte ASCII block magics

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// SettingsManager-backed `ScreenConfigurationPersisting` adapter. Stays in the
 /// main target; the Core store class lives in

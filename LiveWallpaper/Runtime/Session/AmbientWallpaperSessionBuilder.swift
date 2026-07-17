@@ -1,5 +1,11 @@
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 import Metal
+
+#if !LITE_BUILD
+import LiveWallpaperProWPE
+#endif
 
 #if LITE_BUILD
 private enum WPEPathSafety {

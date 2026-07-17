@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C5C10000000000000000005 /* SceneScriptXPCService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = 0C5C10000000000000000003 /* SceneScriptXPCService.xpc */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		0C5C10000000000000000006 /* LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C10000000000000000004 /* LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift */; };
 		0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A002 /* LiveWallpaperCore */; };
 		0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A102 /* LiveWallpaperVideoWeb */; };
 		0CA00000000000000000A203 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A202 /* LiveWallpaperSharedUI */; };
@@ -16,8 +18,6 @@
 		0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B021 /* LiveWallpaperVideoWeb */; };
 		0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B022 /* LiveWallpaperSharedUI */; };
 		0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B023 /* LiveWallpaperProFeatures */; };
-		0C5C10000000000000000005 /* SceneScriptXPCService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = 0C5C10000000000000000003 /* SceneScriptXPCService.xpc */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		0C5C10000000000000000006 /* WPESceneScriptBaseclasses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C10000000000000000004 /* WPESceneScriptBaseclasses.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,12 +54,19 @@
 /* Begin PBXFileReference section */
 		0C322BEF2D6950480033C48B /* LiveWallpaper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		0CA00000000000000000B000 /* Loomscreen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loomscreen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C5C10000000000000000003 /* SceneScriptXPCService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = SceneScriptXPCService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
-		0C5C10000000000000000004 /* WPESceneScriptBaseclasses.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift; sourceTree = SOURCE_ROOT; };
+		0C5C10000000000000000004 /* LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift; sourceTree = SOURCE_ROOT; };
+		0CA00000000000000000B000 /* Loomscreen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loomscreen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0C5C10000000000000000007 /* Exceptions for "SceneScriptXPCService" folder in "SceneScriptXPCService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0C5C10000000000000000010 /* SceneScriptXPCService */;
+		};
 		0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -72,14 +79,6 @@
 				Views/WallpaperSections.swift,
 			);
 			target = 0CA00000000000000000B001 /* LiveWallpaperLite */;
-		};
-		0C5C10000000000000000007 /* Exceptions for "SceneScriptXPCService" folder in "SceneScriptXPCService" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				SceneScriptXPCService.entitlements,
-			);
-			target = 0C5C10000000000000000010 /* SceneScriptXPCService */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -132,6 +131,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0C5C10000000000000000012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0CA00000000000000000B003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -140,13 +146,6 @@
 				0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */,
 				0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */,
 				0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		0C5C10000000000000000012 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,7 +178,7 @@
 		0C5C10000000000000000021 /* Shared Sources */ = {
 			isa = PBXGroup;
 			children = (
-				0C5C10000000000000000004 /* WPESceneScriptBaseclasses.swift */,
+				0C5C10000000000000000004 /* LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift */,
 			);
 			name = "Shared Sources";
 			sourceTree = "<group>";
@@ -238,6 +237,29 @@
 			productReference = 0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		0C5C10000000000000000010 /* SceneScriptXPCService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0C5C10000000000000000019 /* Build configuration list for PBXNativeTarget "SceneScriptXPCService" */;
+			buildPhases = (
+				0C5C10000000000000000011 /* Sources */,
+				0C5C10000000000000000012 /* Frameworks */,
+				0C5C10000000000000000013 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0C5C10000000000000000001 /* SceneScriptXPCShared */,
+				0C5C10000000000000000002 /* SceneScriptXPCService */,
+			);
+			name = SceneScriptXPCService;
+			packageProductDependencies = (
+			);
+			productName = SceneScriptXPCService;
+			productReference = 0C5C10000000000000000003 /* SceneScriptXPCService.xpc */;
+			productType = "com.apple.product-type.xpc-service";
+		};
 		0CA00000000000000000B001 /* LiveWallpaperLite */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0CA00000000000000000B005 /* Build configuration list for PBXNativeTarget "LiveWallpaperLite" */;
@@ -264,29 +286,6 @@
 			productReference = 0CA00000000000000000B000 /* Loomscreen.app */;
 			productType = "com.apple.product-type.application";
 		};
-		0C5C10000000000000000010 /* SceneScriptXPCService */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 0C5C10000000000000000019 /* Build configuration list for PBXNativeTarget "SceneScriptXPCService" */;
-			buildPhases = (
-				0C5C10000000000000000011 /* Sources */,
-				0C5C10000000000000000012 /* Frameworks */,
-				0C5C10000000000000000013 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				0C5C10000000000000000001 /* SceneScriptXPCShared */,
-				0C5C10000000000000000002 /* SceneScriptXPCService */,
-			);
-			name = SceneScriptXPCService;
-			packageProductDependencies = (
-			);
-			productName = SceneScriptXPCService;
-			productReference = 0C5C10000000000000000003 /* SceneScriptXPCService.xpc */;
-			productType = "com.apple.product-type.xpc-service";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -304,11 +303,11 @@
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = 0C322BEE2D6950480033C48B;
 					};
-					0CA00000000000000000B001 = {
-						CreatedOnToolsVersion = 16.2;
-					};
 					0C5C10000000000000000010 = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					0CA00000000000000000B001 = {
+						CreatedOnToolsVersion = 16.2;
 					};
 				};
 			};
@@ -359,14 +358,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		0CA00000000000000000B004 /* Resources */ = {
+		0C5C10000000000000000013 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		0C5C10000000000000000013 /* Resources */ = {
+		0CA00000000000000000B004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -390,18 +389,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		0CA00000000000000000B002 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		0C5C10000000000000000011 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0C5C10000000000000000006 /* WPESceneScriptBaseclasses.swift in Sources */,
+				0C5C10000000000000000006 /* LiveWallpaper/Runtime/Scene/WPESceneScriptBaseclasses.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0CA00000000000000000B002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -649,6 +648,50 @@
 			};
 			name = Release;
 		};
+		0C5C10000000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SceneScriptXPCService/SceneScriptXPCService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = FWJP4B62U7;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SceneScriptXPCService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.2.4;
+				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper.SceneScriptService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		0C5C10000000000000000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SceneScriptXPCService/SceneScriptXPCService.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = FWJP4B62U7;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SceneScriptXPCService/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.2.4;
+				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper.SceneScriptService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 		0CA00000000000000000B006 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -712,50 +755,6 @@
 			};
 			name = Release;
 		};
-		0C5C10000000000000000017 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = SceneScriptXPCService/SceneScriptXPCService.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = FWJP4B62U7;
-				ENABLE_APP_SANDBOX = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SceneScriptXPCService/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.4;
-				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper.SceneScriptService;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Debug;
-		};
-		0C5C10000000000000000018 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = SceneScriptXPCService/SceneScriptXPCService.entitlements;
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = FWJP4B62U7;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SceneScriptXPCService/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.4;
-				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper.SceneScriptService;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -786,20 +785,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		0CA00000000000000000B005 /* Build configuration list for PBXNativeTarget "LiveWallpaperLite" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				0CA00000000000000000B006 /* Debug */,
-				0CA00000000000000000B007 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		0C5C10000000000000000019 /* Build configuration list for PBXNativeTarget "SceneScriptXPCService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				0C5C10000000000000000017 /* Debug */,
 				0C5C10000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0CA00000000000000000B005 /* Build configuration list for PBXNativeTarget "LiveWallpaperLite" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0CA00000000000000000B006 /* Debug */,
+				0CA00000000000000000B007 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

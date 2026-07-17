@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import LiveWallpaperCore
 import Observation
 @testable import LiveWallpaper
 

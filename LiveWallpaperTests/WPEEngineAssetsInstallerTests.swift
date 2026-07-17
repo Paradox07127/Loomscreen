@@ -277,7 +277,7 @@ struct WPEEngineAssetsInstallerTests {
     @Test("Prune refuses a target outside the sandbox container")
     func pruneRejectsNonContainerPath() async throws {
         let outside = URL(fileURLWithPath: "/tmp/lw-not-container/common/wallpaper_engine", isDirectory: true)
-        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+        _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
             #expect(throws: WPEEngineAssetsFilesystemOwner.Error.notContainerInternal) {
                 try WPEEngineAssetsFilesystemOwner().pruneToAssets(
                     installRoot: outside,
@@ -293,7 +293,7 @@ struct WPEEngineAssetsInstallerTests {
         let tree = try makeInstallTree(leaf: "something_else", withAssets: true)
         defer { try? fm.removeItem(at: tree.base) }
         let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
-        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+        _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
             #expect(throws: WPEEngineAssetsFilesystemOwner.Error.unexpectedLayout) {
                 try owner.pruneToAssets(
                     installRoot: tree.installRoot,
@@ -311,7 +311,7 @@ struct WPEEngineAssetsInstallerTests {
         let tree = try makeInstallTree(leaf: "wallpaper_engine", withAssets: false)
         defer { try? fm.removeItem(at: tree.base) }
         let owner = WPEEngineAssetsFilesystemOwner(fileManager: fm)
-        try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
+        _ = try await SteamCMDDoctorOperationCoordinator().withOperation(.appUpdate) { lease in
             #expect(throws: WPEEngineAssetsFilesystemOwner.Error.missingAssets) {
                 try owner.pruneToAssets(
                     installRoot: tree.installRoot,

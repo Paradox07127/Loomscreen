@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import simd
 
 private func isImplicitFBOTextureName(_ name: String) -> Bool {

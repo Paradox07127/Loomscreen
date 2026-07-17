@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Resolves the `project.json` schema for a WPE *scene* descriptor.
 ///

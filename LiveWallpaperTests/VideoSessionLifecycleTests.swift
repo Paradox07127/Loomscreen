@@ -1,6 +1,7 @@
 import AppKit
 @preconcurrency import AVFoundation
 import Foundation
+import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 

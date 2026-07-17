@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CryptoKit
 import Foundation
+import LiveWallpaperCore
 
 enum WorkshopSortMode: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
     case mostPopular

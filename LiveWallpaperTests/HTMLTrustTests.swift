@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import LiveWallpaperCore
 @testable import LiveWallpaper
 
 // MARK: - HTMLTrust pure verdict

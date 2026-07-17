@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 // Pro-side typed `Target`s that persist refreshed bookmarks through
 // `SettingsManager.shared`. The Resolver core lives in LiveWallpaperCore;

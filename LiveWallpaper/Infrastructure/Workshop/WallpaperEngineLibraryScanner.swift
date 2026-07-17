@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Scans a Steam Workshop root for valid Wallpaper Engine projects.
 ///

@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 
 /// Library type kinds for the chip row. No `.all` case — all-or-none selected
 /// means "all". `.unsupported` collects the project types macOS can't run.

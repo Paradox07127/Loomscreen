@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// Behavior layer for playlist + schedule automation on top of the borrowed
 /// `WallpaperAutomationCoordinator` (low-level scheduler service): per-screen

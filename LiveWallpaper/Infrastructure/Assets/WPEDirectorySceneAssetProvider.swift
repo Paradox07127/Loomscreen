@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Reads scene assets from a directory of files — the legacy extracted
 /// `wpe-cache/<id>` root or a folder-import source. Path safety mirrors the

@@ -23,8 +23,6 @@ enum OwnershipFixture {
         case about
     }
 
-    static let pages = Page.allCases
-
     static let fieldsByDomain: [Domain: Set<String>] = [
         .behavior: [
             "appLanguageRawValue",
@@ -77,20 +75,37 @@ enum OwnershipFixture {
         ],
     ]
 
-    static let currentProMountCalls = MountCalls(
-        settingsReads: 1,
-        loginStatusReads: 2,
-        audioStateReads: 2,
-        locationStatusReads: 2
-    )
-
-    static func currentMountCalls(for _: Page, sku: ProductSKU) -> MountCalls {
-        switch sku {
-        case .pro:
-            currentProMountCalls
-        case .lite, .unconfigured:
-            MountCalls(settingsReads: 1, loginStatusReads: 2, audioStateReads: 0, locationStatusReads: 2)
+    static func mountCalls(for page: Page, sku: ProductSKU) -> MountCalls {
+        let statusReads: MountCalls
+        switch page {
+        case .general:
+            statusReads = MountCalls(settingsReads: 0, loginStatusReads: 2, audioStateReads: 0, locationStatusReads: 0)
+        case .audioResponse:
+            let audioStateReads: Int
+            switch sku {
+            case .pro:
+                audioStateReads = 2
+            case .lite, .unconfigured:
+                audioStateReads = 0
+            }
+            statusReads = MountCalls(
+                settingsReads: 0,
+                loginStatusReads: 0,
+                audioStateReads: audioStateReads,
+                locationStatusReads: 0
+            )
+        case .weather:
+            statusReads = MountCalls(settingsReads: 0, loginStatusReads: 0, audioStateReads: 0, locationStatusReads: 2)
+        case .performancePower, .backupRestore, .advanced, .about:
+            statusReads = MountCalls(settingsReads: 0, loginStatusReads: 0, audioStateReads: 0, locationStatusReads: 0)
         }
+
+        return MountCalls(
+            settingsReads: 1,
+            loginStatusReads: statusReads.loginStatusReads,
+            audioStateReads: statusReads.audioStateReads,
+            locationStatusReads: statusReads.locationStatusReads
+        )
     }
 }
 

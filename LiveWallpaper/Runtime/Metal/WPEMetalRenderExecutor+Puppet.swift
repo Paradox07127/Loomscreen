@@ -1,12 +1,12 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
 import MetalKit
 import os
 import simd
-
 extension WPEMetalRenderExecutor {
     /// Release-visible skinning-gate breadcrumb: a gated-off puppet silently renders the static rest
     /// pose (no blink/sway), so surface why in EVERY build — warning for DISABLED (mirrors the

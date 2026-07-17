@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Drives the in-app "download Wallpaper Engine assets" flow: runs SteamCMD

@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 
 struct AppleAerialsLibraryView: View {
     private let library = AppleAerialsLibrary.shared

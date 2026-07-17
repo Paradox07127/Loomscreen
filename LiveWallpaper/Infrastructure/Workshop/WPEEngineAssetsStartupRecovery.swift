@@ -1,5 +1,6 @@
 #if !LITE_BUILD
     import Foundation
+    import LiveWallpaperCore
 
     /// Launch barrier for managed engine assets. It waits only for the utility-lane
     /// rename that selects `assets/`; recursive orphan cleanup is retained as a

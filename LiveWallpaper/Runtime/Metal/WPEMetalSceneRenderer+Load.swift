@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import MetalKit
 
 extension WPEMetalSceneRenderer {
@@ -32,7 +34,7 @@ extension WPEMetalSceneRenderer {
             loadDiagnostics = nil
             WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
             WPESceneDebugArtifacts.shared.appendLog(
-                "load() succeeded; presented first frame",
+                "load() succeeded; rendered first texture; awaiting present",
                 level: .notice
             )
             if let snapshot = cachedSnapshot {
@@ -411,7 +413,6 @@ extension WPEMetalSceneRenderer {
             }
             dumpOutputTextureIfRequested(outputTexture)
         }
-        hasPresentedFrame = true
         didLoad = true
         // Steady-state draw loop: async in production (no per-frame CPU stall on
         // the GPU); stay synchronous only when a per-frame read-back is active

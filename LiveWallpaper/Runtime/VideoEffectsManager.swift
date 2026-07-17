@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreImage
 import Foundation
+import LiveWallpaperCore
 
 struct FilterParameters: Sendable {
     let blurRadius: Double

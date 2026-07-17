@@ -1,3 +1,5 @@
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Inline banner shown above the screen-detail content when the active

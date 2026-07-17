@@ -3,16 +3,8 @@ import Testing
 
 @Suite("App module import boundary")
 struct ModuleImportBoundaryTests {
-    private let expectedLegacyExports: Set<String> = [
-        "LiveWallpaper/App/CoreExports.swift:LiveWallpaperCore",
-        "LiveWallpaper/App/CoreExports.swift:LiveWallpaperProFeatures",
-        "LiveWallpaper/App/CoreExports.swift:LiveWallpaperProWPE",
-        "LiveWallpaper/App/CoreExports.swift:LiveWallpaperSharedUI",
-        "LiveWallpaper/App/CoreExports.swift:LiveWallpaperVideoWeb",
-    ]
-
-    @Test("Blanket re-exports cannot grow or move")
-    func exportedImportInventoryIsFrozen() throws {
+    @Test("App sources contain no package re-exports")
+    func exportedImportInventoryIsEmpty() throws {
         let sources = RepositoryRoot.swiftFiles(under: "LiveWallpaper")
         #expect(!sources.isEmpty)
 
@@ -32,8 +24,8 @@ struct ModuleImportBoundaryTests {
         }
 
         #expect(
-            actual == expectedLegacyExports,
-            Comment(rawValue: "Legacy re-export surface changed: \(actual.sorted())")
+            actual.isEmpty,
+            Comment(rawValue: "Package re-exports are forbidden: \(actual.sorted())")
         )
     }
 

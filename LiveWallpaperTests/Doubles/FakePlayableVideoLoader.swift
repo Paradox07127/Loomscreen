@@ -1,5 +1,6 @@
 import Foundation
 @testable import LiveWallpaper
+import LiveWallpaperCore
 
 enum FakePlayableVideoLoaderError: Error, Equatable, Sendable {
     case validationFailed

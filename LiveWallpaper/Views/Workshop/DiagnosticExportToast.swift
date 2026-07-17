@@ -1,4 +1,5 @@
 #if !LITE_BUILD
+import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Confirmation toast after "Copy diagnostic" on a Workshop error state.

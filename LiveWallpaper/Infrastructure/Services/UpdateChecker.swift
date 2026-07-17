@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 /// Lightweight launch-time update checker for the Loomscreen Lite SKU.
 ///

@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperCore
 import Metal
 
 /// Reads back the renderer's offscreen `MTLTexture` into an `NSImage` for

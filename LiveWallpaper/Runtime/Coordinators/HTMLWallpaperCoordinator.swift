@@ -1,6 +1,8 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 
 /// Owns HTML wallpaper management: the public setters plus the multi-instance
 /// audio-leader / trust-evaluation policy. Carved out of `ScreenManager` so it

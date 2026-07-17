@@ -1,6 +1,8 @@
 import AppKit
 import AVFoundation
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 
 /// Owns per-screen playback configuration mutations + the
 /// `PlaybackTransitionRegistry` for async-transition tracking. The remaining

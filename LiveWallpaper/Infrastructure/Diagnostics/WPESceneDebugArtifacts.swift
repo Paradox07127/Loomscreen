@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 import LiveWallpaperCore
+import LiveWallpaperProWPE
 import Metal
 
 /// Per-scene debug session that mirrors shader compile + pipeline build failures

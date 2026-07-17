@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import MetalKit
 

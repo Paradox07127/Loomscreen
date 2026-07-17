@@ -1,4 +1,5 @@
 #if !LITE_BUILD
+import LiveWallpaperSharedUI
 import SwiftUI
 
 struct StorageOverviewSegment: Identifiable {

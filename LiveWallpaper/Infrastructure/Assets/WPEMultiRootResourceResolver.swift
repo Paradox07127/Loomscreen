@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperProWPE
 
 struct WPEMultiRootResourceResolver: Sendable {
     private let primary: SceneResourceResolver

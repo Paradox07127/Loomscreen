@@ -1,4 +1,7 @@
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
+import LiveWallpaperSharedUI
 import SwiftUI
 import Testing
 @testable import LiveWallpaper

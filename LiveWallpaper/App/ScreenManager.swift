@@ -1,11 +1,11 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 import Observation
 
 @MainActor @Observable
 final class ScreenManager {
-    // MARK: - Properties
-
     var screens: [Screen] = []
     /// Master render gate: whether ALL wallpaper pipelines may display. Persisted
     /// and INDEPENDENT of per-screen play/pause — the menu-bar master switch

@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Resource-availability gate run at scene import time. Resolves every
 /// declared image layer through the same multi-root chain the runtime uses

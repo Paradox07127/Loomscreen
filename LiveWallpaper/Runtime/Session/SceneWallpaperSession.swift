@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import AppKit
 import LiveWallpaperCore
+import LiveWallpaperProWPE
 import LiveWallpaperVideoWeb
 
 /// Adapter that exposes a WPE scene renderer to

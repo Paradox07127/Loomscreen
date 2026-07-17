@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 
 /// Plan describing how a static layer's composites are cached: every named

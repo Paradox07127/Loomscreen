@@ -306,9 +306,12 @@
             }
             return (
                 root,
-                root.appendingPathComponent("assets", isDirectory: true),
-                root.appendingPathComponent("assets.incoming", isDirectory: true),
-                root.appendingPathComponent("assets.previous", isDirectory: true)
+                // Do not attach a directory resource hint here. Recovery must
+                // also see a corrupt regular file occupying one of these slot
+                // names so it can move that entry aside without following it.
+                root.appendingPathComponent("assets"),
+                root.appendingPathComponent("assets.incoming"),
+                root.appendingPathComponent("assets.previous")
             )
         }
 

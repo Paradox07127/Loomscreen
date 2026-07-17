@@ -1,6 +1,8 @@
 import AppKit
 @preconcurrency import AVKit
 import Combine
+import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 
 @MainActor
 final class WallpaperVideoPlayer {

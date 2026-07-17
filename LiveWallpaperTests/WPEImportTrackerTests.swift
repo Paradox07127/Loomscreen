@@ -1,8 +1,10 @@
 import Testing
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import Observation
 import CoreGraphics
+import os
 @testable import LiveWallpaper
 
 /// Behavior-level tests for `WPEImportTracker`. The regression motivating
@@ -108,7 +110,7 @@ struct WPEImportTrackerTests {
         let configurationWrites = ChangeCounter()
         let sessionRestores = ChangeCounter()
         let notifications = ChangeCounter()
-        var lifecycleActive = true
+        let lifecycleActive = OSAllocatedUnfairLock(initialState: true)
         let coordinator = WPEImportCoordinator(
             tracker: tracker,
             configurationStore: WallpaperConfigurationStore(),
@@ -116,7 +118,7 @@ struct WPEImportTrackerTests {
             restoreWallpaperSession: { _, _, _ in sessionRestores.increment() },
             importOperation: { _ in await delayedImport.call() },
             recordImport: { _ in historyWrites.increment() },
-            isLifecycleActive: { lifecycleActive },
+            isLifecycleActive: { lifecycleActive.withLock { $0 } },
             notifyImportCompleted: { _, _, _ in notifications.increment() }
         )
 
@@ -136,7 +138,7 @@ struct WPEImportTrackerTests {
             return
         }
 
-        lifecycleActive = false
+        lifecycleActive.withLock { $0 = false }
         tracker.invalidateForTermination()
         delayedImport.resume(with: .ready(
             .metalShader(.waves),

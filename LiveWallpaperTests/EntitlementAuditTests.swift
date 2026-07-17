@@ -132,7 +132,10 @@ struct EntitlementAuditTests {
         let profile = Self.compiledProfile
         for (key, expected) in profile.values.sorted(by: { $0.key < $1.key }) {
             let actual = Self.runtimeValue(for: key)
-            #expect(actual == expected, Comment(rawValue: "Signed \(profile.name) host has the wrong value for \(key)"))
+            #expect(
+                actual == Self.expectedHostValue(expected, for: key),
+                Comment(rawValue: "Signed \(profile.name) host has the wrong value for \(key)")
+            )
         }
         for key in profile.forbiddenKeys.sorted() {
             #expect(Self.runtimeValue(for: key) == nil, Comment(rawValue: "Signed \(profile.name) host unexpectedly grants \(key)"))
@@ -194,6 +197,23 @@ struct EntitlementAuditTests {
             return nil
         }
         return EntitlementValue(rawValue)
+    }
+
+    private static func expectedHostValue(
+        _ sourceValue: EntitlementValue,
+        for key: String
+    ) -> EntitlementValue {
+        #if DEBUG
+            // Xcode's signed test host adds the repository root ("/") to this
+            // existing entitlement so XCTest can load sources outside the app
+            // container. Release artifacts are still checked against the exact
+            // source fingerprint by scripts/check_entitlements.sh --app.
+            if key == "com.apple.security.temporary-exception.files.absolute-path.read-only",
+               case let .strings(paths) = sourceValue {
+                return .strings(paths + ["/"])
+            }
+        #endif
+        return sourceValue
     }
 
     private static func projectConfiguration(_ objectID: String, in source: String) throws -> Substring {

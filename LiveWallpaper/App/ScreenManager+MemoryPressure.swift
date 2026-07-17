@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 @MainActor
 extension ScreenManager {

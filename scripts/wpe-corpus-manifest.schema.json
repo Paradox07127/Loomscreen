@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loomscreen.local/schemas/wpe-corpus-manifest.v1.json",
+  "$id": "https://loomscreen.local/schemas/wpe-corpus-manifest.v2.json",
   "title": "Loomscreen WPE corpus manifest",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "rootLabel", "summary", "entries"],
   "properties": {
     "schema": {
-      "const": "wpe.corpus-manifest.v1"
+      "const": "wpe.corpus-manifest.v2"
     },
     "rootLabel": {
       "type": "string",
@@ -40,6 +40,8 @@
           "workshopID",
           "projectType",
           "entryFile",
+          "projectJSONSHA256",
+          "dependencies",
           "accessibility",
           "captureCandidate",
           "issues"
@@ -51,6 +53,15 @@
             "enum": ["scene", "web", "video", "application", "unknown"]
           },
           "entryFile": { "type": ["string", "null"] },
+          "projectJSONSHA256": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[^/\\\\]+$" },
+            "uniqueItems": true
+          },
           "accessibility": {
             "type": "object",
             "additionalProperties": false,

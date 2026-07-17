@@ -84,23 +84,34 @@ struct SchemeEnvironmentContractTests {
         let fromPro = capabilities[proStart.lowerBound...]
         let proEnd = try #require(fromPro.range(of: "public func withWorkshopOnline"))
         let shippingProDeclaration = fromPro[..<proEnd.lowerBound]
+        let appCapabilitiesStart = try #require(app.range(of: "let shippingProCapabilities = ProductCapabilities.pro.withWorkshopOnline()"))
+        let fromAppCapabilities = app[appCapabilitiesStart.lowerBound...]
+        let appCapabilitiesEnd = try #require(fromAppCapabilities.range(of: "screenManagerOptions = ScreenManagerStartupOptions("))
+        let appCapabilitiesDeclaration = fromAppCapabilities[..<appCapabilitiesEnd.lowerBound]
+        let appCapabilityLines = appCapabilitiesDeclaration
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let developerModeStart = try #require(htmlWallpaper.range(of: "func applyDeveloperMode(_ enabled: Bool)"))
+        let fromDeveloperMode = htmlWallpaper[developerModeStart.lowerBound...]
+        let developerModeEnd = try #require(fromDeveloperMode.range(of: "private func installBaselineUserScripts"))
+        let developerModeDeclaration = fromDeveloperMode[..<developerModeEnd.lowerBound]
 
         #expect(!shippingProDeclaration.contains(".developerTools"))
-        #expect(app.contains("""
-                #if DEBUG
-                let proCapabilities = shippingProCapabilities.withLocalDeveloperTools()
-                #else
-                let proCapabilities = shippingProCapabilities
-                #endif
-                """))
+        #expect(appCapabilityLines == [
+            "let shippingProCapabilities = ProductCapabilities.pro.withWorkshopOnline()",
+            "#if DEBUG",
+            "let proCapabilities = shippingProCapabilities.withLocalDeveloperTools()",
+            "#else",
+            "let proCapabilities = shippingProCapabilities",
+            "#endif",
+        ])
         #expect(developerToolsView.hasPrefix("#if DEBUG && !LITE_BUILD\n"))
-        #expect(htmlWallpaper.contains("""
-                    #if DEBUG && !LITE_BUILD
-                    webView.isInspectable = enabled
-                    #else
-                    webView.isInspectable = false
-                    #endif
-                """))
+        #expect(developerModeDeclaration.contains("#if DEBUG && !LITE_BUILD"))
+        #expect(developerModeDeclaration.contains("webView.isInspectable = enabled"))
+        #expect(developerModeDeclaration.contains("#else"))
+        #expect(developerModeDeclaration.contains("webView.isInspectable = false"))
+        #expect(developerModeDeclaration.contains("#endif"))
     }
 
     @Test("AppIntents stays out of the target graph until a product integration exists")

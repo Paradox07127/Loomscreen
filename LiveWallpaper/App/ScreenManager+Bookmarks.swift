@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 extension ScreenManager {
     func applyBookmark(_ bookmark: WallpaperBookmark, to screen: Screen) {

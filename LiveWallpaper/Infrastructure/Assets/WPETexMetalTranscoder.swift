@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 import Metal
+import LiveWallpaperProWPE
 
 /// BC1/2/3/7 → RGBA8 transcode using Apple's GPU (sample BC into an
 /// `rgba8Unorm` render target, read back).

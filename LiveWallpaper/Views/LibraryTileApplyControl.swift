@@ -1,3 +1,4 @@
+import LiveWallpaperCore
 import SwiftUI
 
 /// Shared "apply to a display / apply to all" control for library tiles

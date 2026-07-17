@@ -3,6 +3,7 @@ import AppKit
 import CoreGraphics
 import CoreText
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 
 /// CoreText-based text rasterizer producing a coverage mask (opaque white

@@ -1,4 +1,6 @@
 #if !LITE_BUILD
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 
 @MainActor

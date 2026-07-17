@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// CPU pixel-decode paths for the uncompressed `.tex` formats; BC formats
 /// live in `WPETexMetalTranscoder`. Output is `kCGImageAlphaLast` byte order

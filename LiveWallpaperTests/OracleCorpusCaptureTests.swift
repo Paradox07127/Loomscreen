@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 import Metal
 import Testing
 @testable import LiveWallpaper

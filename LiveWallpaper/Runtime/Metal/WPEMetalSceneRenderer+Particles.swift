@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperProWPE
 import MetalKit
 
 extension WPEMetalSceneRenderer {

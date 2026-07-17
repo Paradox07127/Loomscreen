@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 /// Main-target singleton wiring. `BookmarkPersisting` lives in
 /// LiveWallpaperCore; the SettingsManager-backed adapter and the

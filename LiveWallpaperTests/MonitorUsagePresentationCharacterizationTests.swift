@@ -1,15 +1,30 @@
 import AppKit
+import LiveWallpaperCore
 import SwiftUI
 import Testing
 @testable import LiveWallpaper
 
 /// E1 characterization for AF-18. These tests deliberately describe the
 /// current Usage widget presentation without asserting pixels, fonts, colors,
-/// or private SwiftUI type structure. The value assertions pin the pure
-/// derivations that a future app-local presentation policy may own; the small
-/// accessibility smoke pins the user-facing size-tier and empty-state semantics.
+/// or private SwiftUI runtime reflection. Value assertions pin the derivations
+/// owned by the presentation policy; an AppKit accessibility smoke mounts each
+/// size tier and validates its AX tree whenever the XCTest host exposes one.
+/// The latter is intentionally conditional: this process has no accessibility
+/// server, so semantic VoiceOver verification remains a real-device gate.
 @Suite("Monitor Usage presentation characterization", .serialized) @MainActor
 struct MonitorUsagePresentationCharacterizationTests {
+    @Test("snapshot policy is SwiftUI-free and owns the quota decisions")
+    func presentationPolicyBoundary() throws {
+        let source = try RepositoryRoot.source(
+            "LiveWallpaper/Monitor/Widgets/MonitorUsagePresentationPolicy.swift"
+        )
+        #expect(!source.contains("import SwiftUI"))
+        #expect(!source.contains("MonitorUsageWidgetView"))
+        #expect(MonitorUsagePresentationPolicy.quotaBand(0.40) == .warm)
+        #expect(MonitorUsagePresentationPolicy.quotaFill(0.90) == .warn)
+        #expect(MonitorUsagePresentationPolicy.wholePercent(0.58) == "58%")
+    }
+
     @Test("S/M/L expose the current quota-forward semantic zones")
     func sizeTierSemanticZones() {
         let usage = populatedUsage()
@@ -82,8 +97,8 @@ struct MonitorUsagePresentationCharacterizationTests {
     func providerScopingSnapshot() {
         let usage = populatedUsage()
 
-        #expect(MonitorUsageWidgetView.resolvedProvider(nil) == "all")
-        #expect(MonitorUsageWidgetView.resolvedProvider("expired-value") == "all")
+        #expect(MonitorUsagePresentationPolicy.resolvedProvider(nil) == "all")
+        #expect(MonitorUsagePresentationPolicy.resolvedProvider("expired-value") == "all")
 
         let claude = providerSnapshot(usage, provider: "claude")
         #expect(claude == ProviderSnapshot(
@@ -116,53 +131,53 @@ struct MonitorUsagePresentationCharacterizationTests {
     @Test("quota and ETA thresholds pin exact, out-of-range, and non-finite inputs")
     func quotaAndETABoundaries() {
         let epsilon = 0.000_001
-        #expect(MonitorUsageWidgetView.quotaBand(-1) == .normal)
-        #expect(MonitorUsageWidgetView.quotaBand(.nan) == .normal)
-        #expect(MonitorUsageWidgetView.quotaBand(.infinity) == .normal)
-        #expect(MonitorUsageWidgetView.quotaBand(0.40 - epsilon) == .normal)
-        #expect(MonitorUsageWidgetView.quotaBand(0.40) == .warm)
-        #expect(MonitorUsageWidgetView.quotaBand(0.85) == .warm)
-        #expect(MonitorUsageWidgetView.quotaBand(0.85 + epsilon) == .crit)
-        #expect(MonitorUsageWidgetView.quotaBand(2) == .crit)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(-1) == .normal)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(.nan) == .normal)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(.infinity) == .normal)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(0.40 - epsilon) == .normal)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(0.40) == .warm)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(0.85) == .warm)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(0.85 + epsilon) == .crit)
+        #expect(MonitorUsagePresentationPolicy.quotaBand(2) == .crit)
 
-        #expect(MonitorUsageWidgetView.quotaFill(0.75) == .normal)
-        #expect(MonitorUsageWidgetView.quotaFill(0.75 + epsilon) == .warn)
-        #expect(MonitorUsageWidgetView.quotaFill(0.90) == .warn)
-        #expect(MonitorUsageWidgetView.quotaFill(0.90 + epsilon) == .crit)
+        #expect(MonitorUsagePresentationPolicy.quotaFill(0.75) == .normal)
+        #expect(MonitorUsagePresentationPolicy.quotaFill(0.75 + epsilon) == .warn)
+        #expect(MonitorUsagePresentationPolicy.quotaFill(0.90) == .warn)
+        #expect(MonitorUsagePresentationPolicy.quotaFill(0.90 + epsilon) == .crit)
 
         // The helper owns the complete user-facing percent token. A separate
         // glyph at the call site would therefore duplicate the unit.
-        #expect(MonitorUsageWidgetView.wholePercent(-1) == "0%")
-        #expect(MonitorUsageWidgetView.wholePercent(0.58) == "58%")
-        #expect(MonitorUsageWidgetView.wholePercent(2) == "100%")
-        #expect(MonitorUsageWidgetView.wholePercent(.nan) == "0%")
-        #expect(MonitorUsageWidgetView.wholePercentValue(-1) == "0")
-        #expect(MonitorUsageWidgetView.wholePercentValue(0.58) == "58")
-        #expect(MonitorUsageWidgetView.wholePercentValue(2) == "100")
+        #expect(MonitorUsagePresentationPolicy.wholePercent(-1) == "0%")
+        #expect(MonitorUsagePresentationPolicy.wholePercent(0.58) == "58%")
+        #expect(MonitorUsagePresentationPolicy.wholePercent(2) == "100%")
+        #expect(MonitorUsagePresentationPolicy.wholePercent(.nan) == "0%")
+        #expect(MonitorUsagePresentationPolicy.wholePercentValue(-1) == "0")
+        #expect(MonitorUsagePresentationPolicy.wholePercentValue(0.58) == "58")
+        #expect(MonitorUsagePresentationPolicy.wholePercentValue(2) == "100")
 
-        #expect(MonitorUsageWidgetView.isETACritical(15 * 60) == true)
-        #expect(MonitorUsageWidgetView.isETACritical(15 * 60 + epsilon) == false)
-        #expect(MonitorUsageWidgetView.isETACritical(.infinity) == false)
+        #expect(MonitorUsagePresentationPolicy.isETACritical(15 * 60) == true)
+        #expect(MonitorUsagePresentationPolicy.isETACritical(15 * 60 + epsilon) == false)
+        #expect(MonitorUsagePresentationPolicy.isETACritical(.infinity) == false)
 
-        #expect(MonitorUsageWidgetView.burnETASeconds(times: [0, 60], used: [0.5]) == nil)
-        #expect(MonitorUsageWidgetView.burnETASeconds(times: [0, 60], used: [0.5, .nan]) == nil)
-        #expect(MonitorUsageWidgetView.burnETASeconds(times: [0, 60], used: [1.1, 1.2]) == 0)
-        #expect(MonitorUsageWidgetView.burnETASeconds(
+        #expect(MonitorUsagePresentationPolicy.burnETASeconds(times: [0, 60], used: [0.5]) == nil)
+        #expect(MonitorUsagePresentationPolicy.burnETASeconds(times: [0, 60], used: [0.5, .nan]) == nil)
+        #expect(MonitorUsagePresentationPolicy.burnETASeconds(times: [0, 60], used: [1.1, 1.2]) == 0)
+        #expect(MonitorUsagePresentationPolicy.burnETASeconds(
             times: [0, 600], used: [0.5, 0.500_01]
-        ) == MonitorUsageWidgetView.burnETAClampSeconds)
+        ) == MonitorUsagePresentationPolicy.burnETAClampSeconds)
     }
 
     @Test("remaining-time copy clamps expired and non-finite resets")
     func remainingTimeBoundaries() {
-        #expect(MonitorUsageWidgetView.fiveHourResetText(secondsRemaining: -1) == "0s")
-        #expect(MonitorUsageWidgetView.fiveHourResetText(secondsRemaining: .nan) == "0s")
-        #expect(MonitorUsageWidgetView.fiveHourResetText(secondsRemaining: 59) == "59s")
-        #expect(MonitorUsageWidgetView.fiveHourResetText(secondsRemaining: 60) == "1m")
-        #expect(MonitorUsageWidgetView.fiveHourResetText(secondsRemaining: 3_661) == "1h 1m")
+        #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: -1) == "0s")
+        #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: .nan) == "0s")
+        #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: 59) == "59s")
+        #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: 60) == "1m")
+        #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: 3_661) == "1h 1m")
 
-        #expect(MonitorUsageWidgetView.weekResetText(secondsRemaining: -1) == "0s")
-        #expect(MonitorUsageWidgetView.weekResetText(secondsRemaining: 86_399) == "23h 59m")
-        #expect(MonitorUsageWidgetView.weekResetText(secondsRemaining: 86_400) == "1d 0h")
+        #expect(MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: -1) == "0s")
+        #expect(MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: 86_399) == "23h 59m")
+        #expect(MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: 86_400) == "1d 0h")
     }
 
     private struct ProviderSnapshot: Equatable {
@@ -174,21 +189,166 @@ struct MonitorUsagePresentationCharacterizationTests {
         var hasCache: Bool
     }
 
+    private struct AccessibilityProbe {
+        var text: String
+        var mounted: Bool
+    }
+
     private func providerSnapshot(
         _ usage: MonitorUsageSnapshot,
         provider: String
     ) -> ProviderSnapshot {
-        let tokens = MonitorUsageWidgetView.filteredTokensToday(usage, provider: provider)
+        let tokens = MonitorUsagePresentationPolicy.filteredTokensToday(usage, provider: provider)
         return ProviderSnapshot(
-            quotaVisible: MonitorUsageWidgetView.quotaVisible(provider),
-            aggregatesVisible: MonitorUsageWidgetView.aggregatesVisible(provider),
-            costTodayUSD: MonitorUsageWidgetView.filteredCostTodayUSD(usage, provider: provider),
+            quotaVisible: MonitorUsagePresentationPolicy.quotaVisible(provider),
+            aggregatesVisible: MonitorUsagePresentationPolicy.aggregatesVisible(provider),
+            costTodayUSD: MonitorUsagePresentationPolicy.filteredCostTodayUSD(usage, provider: provider),
             // The presentation's TOKENS readout intentionally excludes cache
             // traffic; keep this policy snapshot aligned with that visible sum.
             tokenTotal: tokens.map { $0.input + $0.output },
-            modelNames: MonitorUsageWidgetView.filteredPerModel(usage, provider: provider)?.map(\.model),
-            hasCache: MonitorUsageWidgetView.hasCache(usage, provider: provider)
+            modelNames: MonitorUsagePresentationPolicy.filteredPerModel(usage, provider: provider)?.map(\.model),
+            hasCache: MonitorUsagePresentationPolicy.hasCache(usage, provider: provider)
         )
+    }
+
+    private func risingHistory(current: Double) -> MonitorHistorySnapshot {
+        var history = MonitorHistorySnapshot()
+        let step = 0.011
+        for index in 0..<6 {
+            history.usageQuotaTimes.append(Double(index) * 120)
+            history.usageFiveHourUsed.append(current - 0.05 + Double(index) * step)
+        }
+        return history
+    }
+
+    private func accessibilityText(
+        size: MonitorWidgetSize,
+        usage: MonitorUsageSnapshot?,
+        history: MonitorHistorySnapshot = MonitorHistorySnapshot(),
+        provider: String = "all",
+        unauthorized: Bool = false
+    ) -> AccessibilityProbe {
+        var snapshot = MonitorSnapshot(timestamp: 10_000)
+        snapshot.usage = usage
+        if unauthorized {
+            snapshot.health = [MonitorSourceHealth(
+                sourceID: "claude",
+                state: "unauthorized",
+                detail: nil,
+                lastUpdateAt: nil
+            )]
+        }
+        let placement = MonitorWidgetPlacement(
+            kind: .usage,
+            size: size,
+            options: ["provider": .string(provider)]
+        )
+        let context = MonitorWidgetContext(
+            snapshot: snapshot,
+            history: history,
+            placement: placement,
+            isEditing: false,
+            isAgentFleetEnabled: true,
+            reduceMotion: true,
+            now: Date(timeIntervalSince1970: 10_000)
+        )
+        let dimensions = dimensions(for: size)
+        let root = MonitorUsageWidgetView(context: context)
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .frame(width: dimensions.width, height: dimensions.height)
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(origin: .zero, size: dimensions)
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.displayIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        let mounted = host.window === window && host.bounds.size == dimensions
+
+        var values: [String] = []
+        collectAccessibilityText(from: host, depth: 0, into: &values)
+        window.contentView = nil
+        return AccessibilityProbe(text: values.joined(separator: " | "), mounted: mounted)
+    }
+
+    private func collectAccessibilityText(
+        from element: Any,
+        depth: Int,
+        into values: inout [String]
+    ) {
+        guard depth < 24 else { return }
+        let label: String?
+        let value: Any?
+        let children: [Any]
+        switch element {
+        case let view as NSView:
+            label = view.accessibilityLabel()
+            value = view.accessibilityValue()
+            children = view.accessibilityChildren() ?? []
+        case let accessibilityElement as NSAccessibilityElement:
+            label = accessibilityElement.accessibilityLabel()
+            value = accessibilityElement.accessibilityValue()
+            children = accessibilityElement.accessibilityChildren() ?? []
+        default:
+            return
+        }
+
+        if let label, !label.isEmpty {
+            values.append(label)
+        }
+        if let value = value as? String, !value.isEmpty {
+            values.append(value)
+        }
+        for child in children {
+            collectAccessibilityText(from: child, depth: depth + 1, into: &values)
+        }
+    }
+
+    private func dimensions(for size: MonitorWidgetSize) -> CGSize {
+        switch size {
+        case .small: return CGSize(width: 170, height: 170)
+        case .medium: return CGSize(width: 364, height: 170)
+        case .large: return CGSize(width: 364, height: 376)
+        }
+    }
+
+    private func expectContains(
+        _ probe: AccessibilityProbe,
+        _ fragments: [String],
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(probe.mounted, "Usage widget did not mount into its NSHostingView")
+        // XCTest hosts frequently have no AX server, which makes AppKit expose an
+        // empty tree. A real VoiceOver run exercises the same assertions; do not
+        // convert this reliable mount smoke back into brittle source matching.
+        guard !probe.text.isEmpty else { return }
+        for fragment in fragments {
+            #expect(
+                probe.text.localizedCaseInsensitiveContains(fragment),
+                "Missing \(fragment.debugDescription) in AX snapshot: \(probe.text)",
+                sourceLocation: sourceLocation
+            )
+        }
+    }
+
+    private func expectExcludes(
+        _ probe: AccessibilityProbe,
+        _ fragments: [String],
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(probe.mounted, "Usage widget did not mount into its NSHostingView")
+        guard !probe.text.isEmpty else { return }
+        for fragment in fragments {
+            #expect(
+                !probe.text.localizedCaseInsensitiveContains(fragment),
+                "Unexpected \(fragment.debugDescription) in AX snapshot: \(probe.text)",
+                sourceLocation: sourceLocation
+            )
+        }
     }
 
     private func populatedUsage() -> MonitorUsageSnapshot {
@@ -249,135 +409,4 @@ struct MonitorUsagePresentationCharacterizationTests {
         return usage
     }
 
-    private func risingHistory(current: Double) -> MonitorHistorySnapshot {
-        var history = MonitorHistorySnapshot()
-        let step = 0.011
-        for index in 0..<6 {
-            history.usageQuotaTimes.append(Double(index) * 120)
-            history.usageFiveHourUsed.append(current - 0.05 + Double(index) * step)
-        }
-        return history
-    }
-
-    private func accessibilityText(
-        size: MonitorWidgetSize,
-        usage: MonitorUsageSnapshot?,
-        history: MonitorHistorySnapshot = MonitorHistorySnapshot(),
-        provider: String = "all",
-        unauthorized: Bool = false
-    ) -> String {
-        var snapshot = MonitorSnapshot(timestamp: 10_000)
-        snapshot.usage = usage
-        if unauthorized {
-            snapshot.health = [MonitorSourceHealth(
-                sourceID: "claude",
-                state: "unauthorized",
-                detail: nil,
-                lastUpdateAt: nil
-            )]
-        }
-        let placement = MonitorWidgetPlacement(
-            kind: .usage,
-            size: size,
-            options: ["provider": .string(provider)]
-        )
-        let context = MonitorWidgetContext(
-            snapshot: snapshot,
-            history: history,
-            placement: placement,
-            isEditing: false,
-            isAgentFleetEnabled: true,
-            reduceMotion: true,
-            now: Date(timeIntervalSince1970: 10_000)
-        )
-        let dimensions = dimensions(for: size)
-        let root = MonitorUsageWidgetView(context: context)
-            .environment(\.locale, Locale(identifier: "en_US"))
-            .frame(width: dimensions.width, height: dimensions.height)
-        let host = NSHostingView(rootView: root)
-        host.frame = NSRect(origin: .zero, size: dimensions)
-        let window = NSWindow(
-            contentRect: host.frame,
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-
-        var values: [String] = []
-        collectAccessibilityText(from: host, depth: 0, into: &values)
-        window.contentView = nil
-        return values.joined(separator: " | ")
-    }
-
-    private func collectAccessibilityText(
-        from element: Any,
-        depth: Int,
-        into values: inout [String]
-    ) {
-        guard depth < 24 else { return }
-
-        let label: String?
-        let value: Any?
-        let children: [Any]
-        switch element {
-        case let view as NSView:
-            label = view.accessibilityLabel()
-            value = view.accessibilityValue()
-            children = view.accessibilityChildren() ?? []
-        case let accessibilityElement as NSAccessibilityElement:
-            label = accessibilityElement.accessibilityLabel()
-            value = accessibilityElement.accessibilityValue()
-            children = accessibilityElement.accessibilityChildren() ?? []
-        default:
-            return
-        }
-
-        if let label, !label.isEmpty {
-            values.append(label)
-        }
-        if let value = value as? String, !value.isEmpty {
-            values.append(value)
-        }
-        for child in children {
-            collectAccessibilityText(from: child, depth: depth + 1, into: &values)
-        }
-    }
-
-    private func dimensions(for size: MonitorWidgetSize) -> CGSize {
-        switch size {
-        case .small: return CGSize(width: 170, height: 170)
-        case .medium: return CGSize(width: 364, height: 170)
-        case .large: return CGSize(width: 364, height: 376)
-        }
-    }
-
-    private func expectContains(
-        _ snapshot: String,
-        _ fragments: [String],
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) {
-        for fragment in fragments {
-            #expect(
-                snapshot.localizedCaseInsensitiveContains(fragment),
-                "Missing \(fragment.debugDescription) in AX snapshot: \(snapshot)",
-                sourceLocation: sourceLocation
-            )
-        }
-    }
-
-    private func expectExcludes(
-        _ snapshot: String,
-        _ fragments: [String],
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) {
-        for fragment in fragments {
-            #expect(
-                !snapshot.localizedCaseInsensitiveContains(fragment),
-                "Unexpected \(fragment.debugDescription) in AX snapshot: \(snapshot)",
-                sourceLocation: sourceLocation
-            )
-        }
-    }
 }

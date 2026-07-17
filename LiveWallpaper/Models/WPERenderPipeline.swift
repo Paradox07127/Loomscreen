@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Sits between the JSON render graph and the Metal executor: graph passes are
 /// preserved exactly, while shader-backed passes carry expanded GLSL sources

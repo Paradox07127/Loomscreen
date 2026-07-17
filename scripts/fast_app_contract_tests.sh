@@ -22,17 +22,22 @@ SUITES=(
   MonitorOverlayVisibilityLifecycleCharacterizationTests
   MonitorRuntimeLeaseChurnCharacterizationTests
   MonitorSamplerOwnershipCharacterizationTests
+  MonitorSuspendEnergyTests
   MonitorUsagePresentationCharacterizationTests
   PIISanitizerTests
   RepositoryRootTests
+  RR03RendererLivenessLockTests
   SchemeEnvironmentContractTests
   SecurityScopedBookmarkResolverTests
   SteamCMDDoctorBoundaryCharacterizationTests
+  SteamCMDDoctorLifecycleTests
   SystemMemoryPressureWatcherTests
   VideoResolutionContractCharacterizationTests
   WPECorpusManifestTests
   WPERendererOwnershipCharacterizationTests
+  WPESceneScriptB2bResourceLimitTests
   WPESceneScriptContainmentCharacterizationTests
+  WPESceneScriptXPCCorpusParityTests
   WPESceneScriptXPCContractTests
   WPEUploadCancellationOracleTests
   WorkshopInstalledOwnershipCharacterizationTests
@@ -63,9 +68,10 @@ echo "== Fast app architecture/security contracts (${#SUITES[@]} suites) =="
 xcodebuild test \
   -project LiveWallpaper.xcodeproj \
   -scheme LiveWallpaper \
-  -destination 'platform=macOS' \
+  -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$DERIVED_DATA" \
   -resultBundlePath "$RESULT_BUNDLE" \
+  -enableCodeCoverage NO \
   -parallel-testing-enabled NO \
   "${only_testing[@]}" \
   CODE_SIGN_IDENTITY=- \

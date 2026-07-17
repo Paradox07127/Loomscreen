@@ -1,5 +1,6 @@
 import Foundation
 import LiveWallpaperCore
+import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 

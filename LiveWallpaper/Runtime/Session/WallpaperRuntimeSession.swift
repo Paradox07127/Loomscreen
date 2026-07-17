@@ -1,4 +1,5 @@
 import AppKit
+import LiveWallpaperCore
 
 @MainActor
 protocol WallpaperRuntimeSession: AnyObject {

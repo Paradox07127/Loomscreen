@@ -7,15 +7,7 @@
     "LiveWallpaperSharedUI",
     "LiveWallpaperVideoWeb"
   ],
-  "allowed_exported_imports": {
-    "LiveWallpaper/App/CoreExports.swift": [
-      "LiveWallpaperCore",
-      "LiveWallpaperProFeatures",
-      "LiveWallpaperProWPE",
-      "LiveWallpaperSharedUI",
-      "LiveWallpaperVideoWeb"
-    ]
-  },
+  "allowed_exported_imports": {},
   "migrated_file_requirements": {
     "LiveWallpaper/Infrastructure/Platform/AppleAerialsLibrary.swift": [
       "LiveWallpaperCore"
@@ -33,12 +25,12 @@
       "LiveWallpaperProWPE"
     ]
   },
-  "minimum_explicit_import_files": 132,
+  "minimum_explicit_import_files": 279,
   "minimum_import_occurrences": {
-    "LiveWallpaperCore": 91,
-    "LiveWallpaperProFeatures": 0,
-    "LiveWallpaperProWPE": 21,
-    "LiveWallpaperSharedUI": 42,
-    "LiveWallpaperVideoWeb": 1
+    "LiveWallpaperCore": 202,
+    "LiveWallpaperProFeatures": 3,
+    "LiveWallpaperProWPE": 81,
+    "LiveWallpaperSharedUI": 91,
+    "LiveWallpaperVideoWeb": 8
   }
 }

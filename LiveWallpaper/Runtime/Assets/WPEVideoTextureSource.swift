@@ -3,6 +3,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+import LiveWallpaperCore
 import Metal
 import QuartzCore
 

@@ -1,3 +1,4 @@
+import LiveWallpaperSharedUI
 import SwiftUI
 
 private struct HighlightedSettingsSearchAnchorKey: EnvironmentKey {

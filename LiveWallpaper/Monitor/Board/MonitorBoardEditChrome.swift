@@ -379,9 +379,9 @@ struct MonitorWidgetSettingsCard: View {
     }
 }
 
-/// Destructive accessibility actions are exposed only while the board is in
-/// edit mode. The action carries the tile identity directly, so VoiceOver can
-/// never delete a different selected sibling.
+/// Placement accessibility actions are exposed only while the board is in edit
+/// mode. Each action carries the tile identity directly, so VoiceOver never
+/// changes selection merely to move or delete a different selected sibling.
 struct MonitorPlacementAccessibilityActions: ViewModifier {
     @ObservedObject var model: MonitorBoardInteractionModel
     let placementID: UUID
@@ -389,9 +389,22 @@ struct MonitorPlacementAccessibilityActions: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if model.isEditing {
-            content.accessibilityAction(named: Text(MonitorBoardStrings.removeWidget)) {
-                model.perform(.delete(id: placementID))
-            }
+            content
+                .accessibilityAction(named: Text(MonitorBoardStrings.moveLeft)) {
+                    model.moveWidget(id: placementID, direction: .left)
+                }
+                .accessibilityAction(named: Text(MonitorBoardStrings.moveRight)) {
+                    model.moveWidget(id: placementID, direction: .right)
+                }
+                .accessibilityAction(named: Text(MonitorBoardStrings.moveUp)) {
+                    model.moveWidget(id: placementID, direction: .up)
+                }
+                .accessibilityAction(named: Text(MonitorBoardStrings.moveDown)) {
+                    model.moveWidget(id: placementID, direction: .down)
+                }
+                .accessibilityAction(named: Text(MonitorBoardStrings.removeWidget)) {
+                    model.perform(.delete(id: placementID))
+                }
         } else {
             content
         }
@@ -422,6 +435,10 @@ enum MonitorBoardStrings {
     // each access yields a fresh `LocalizedStringKey`.
     static var addWidget: LocalizedStringKey { "Add Widget" }
     static var removeWidget: LocalizedStringKey { "Remove" }
+    static var moveLeft: LocalizedStringKey { "Move Left" }
+    static var moveRight: LocalizedStringKey { "Move Right" }
+    static var moveUp: LocalizedStringKey { "Move Up" }
+    static var moveDown: LocalizedStringKey { "Move Down" }
     static var widgetSettings: LocalizedStringKey { "Widget Settings" }
     static var widgetCatalog: LocalizedStringKey { "Widget Catalog" }
     static var proBadge: LocalizedStringKey { "PRO" }

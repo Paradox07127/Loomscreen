@@ -286,18 +286,20 @@ final class MonitorBoardInteractionModel: ObservableObject {
         }
     }
 
-    /// Keyboard movement is a small relative nudge, but the resulting absolute
+    /// Moves a specific widget by a small relative nudge. The resulting absolute
     /// origin is still committed by `perform(_:)`, just like a pointer drop.
+    /// Keeping the identity explicit lets accessibility actions move their own
+    /// tile without changing board selection as an incidental side effect.
     @discardableResult
-    func moveSelectedWidget(
-        _ direction: MonitorBoardPlacementDirection,
+    func moveWidget(
+        id: UUID,
+        direction: MonitorBoardPlacementDirection,
         distance: CGFloat = 10
     ) -> Bool {
         guard isEditing,
               distance.isFinite,
               distance > 0,
-              let selectedID,
-              let placement = placements.first(where: { $0.id == selectedID }) else {
+              let placement = placements.first(where: { $0.id == id }) else {
             return false
         }
         let origin = pixelOrigin(for: placement)
@@ -313,9 +315,20 @@ final class MonitorBoardInteractionModel: ObservableObject {
             delta = CGSize(width: 0, height: distance)
         }
         return perform(.move(
-            id: selectedID,
+            id: id,
             pixelOrigin: CGPoint(x: origin.x + delta.width, y: origin.y + delta.height)
         ))
+    }
+
+    /// Keyboard movement shares the targeted-move implementation used by
+    /// VoiceOver; keyboard focus remains the only source of its selected id.
+    @discardableResult
+    func moveSelectedWidget(
+        _ direction: MonitorBoardPlacementDirection,
+        distance: CGFloat = 10
+    ) -> Bool {
+        guard let selectedID else { return false }
+        return moveWidget(id: selectedID, direction: direction, distance: distance)
     }
 
     @discardableResult

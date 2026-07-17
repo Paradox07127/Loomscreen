@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import MetalKit
 
 /// Wraps a texture-load failure with the requested asset path AND the WPE

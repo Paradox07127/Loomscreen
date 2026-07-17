@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import LiveWallpaperCore
 import Testing
 import UniformTypeIdentifiers
 @testable import LiveWallpaper

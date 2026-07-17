@@ -1,5 +1,6 @@
-import SwiftUI
 import AppKit
+import LiveWallpaperSharedUI
+import SwiftUI
 
 /// Apple Music-style playlist row.
 ///

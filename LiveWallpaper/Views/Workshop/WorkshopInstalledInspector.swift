@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 

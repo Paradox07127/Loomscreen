@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import LiveWallpaper
+import LiveWallpaperCore
 
 /// Validates the recents-list behavior the menu-bar surface depends on:
 /// WPE history mutation semantics, idempotent removal, and the absence of

@@ -1,11 +1,12 @@
 import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import ServiceManagement
 import SwiftUI
 import AppKit
 import CoreLocation
 import UniformTypeIdentifiers
 
-enum GeneralSettingsPage {
+enum GeneralSettingsPage: Equatable {
     case general
     case performancePower
     case audioResponse
@@ -27,7 +28,7 @@ struct GeneralSettingsView: View {
     @AppStorage(AppLanguagePreference.storageKey) var appLanguageRawValue = AppLanguagePreference.system.rawValue
     @State var globalPauseOnBattery: Bool
     @State var startOnLogin: Bool
-    @State var loginItemStatus = SMAppService.mainApp.status
+    @State var loginItemStatus: SMAppService.Status
     @State var loginItemStatusRefreshPending = false
     @State private var loginItemStatusRefreshGeneration = 0
     @State var preservePlaybackOnLock: Bool
@@ -46,14 +47,14 @@ struct GeneralSettingsView: View {
     /// Default off — privacy-sensitive opt-in.
     @State var audioResponseEnabled: Bool
     #if !LITE_BUILD
-    @State var audioCaptureState = SystemAudioCaptureManager.shared.state
+    @State var audioCaptureState: SystemAudioCaptureManager.State
     @State var audioStatusRefreshPending = false
     @State private var audioStatusRefreshGeneration = 0
     #endif
     /// Default off — Pro-only scene power saving (adaptive frame rate).
     @State var adaptiveFrameRateEnabled: Bool
     @State var weatherLocation: WeatherLocationPreference
-    @State var locationAuthorizationStatus = CLLocationManager().authorizationStatus
+    @State var locationAuthorizationStatus: CLAuthorizationStatus
     @State var weatherStatusRefreshPending = false
     @State private var weatherStatusRefreshGeneration = 0
 
@@ -96,6 +97,11 @@ struct GeneralSettingsView: View {
         _audioResponseEnabled = State(initialValue: settings.audioResponseEnabled)
         _adaptiveFrameRateEnabled = State(initialValue: settings.adaptiveFrameRateEnabled)
         _weatherLocation = State(initialValue: settings.weatherLocation)
+        _loginItemStatus = State(initialValue: Self.initialLoginItemStatus(for: page))
+        #if !LITE_BUILD
+        _audioCaptureState = State(initialValue: Self.initialAudioCaptureState(for: page))
+        #endif
+        _locationAuthorizationStatus = State(initialValue: Self.initialLocationAuthorizationStatus(for: page))
     }
 
     var body: some View {
@@ -152,6 +158,7 @@ struct GeneralSettingsView: View {
             Text(verbatim: loginItemAlert?.userFacingMessage ?? "")
         }
         .onReceive(NotificationCenter.default.publisher(for: .loginItemRegistrationDidFail)) { note in
+            guard page == .general else { return }
             if let reason = note.userInfo?["reason"] as? LoginItemFailure {
                 loginItemAlert = reason
                 loginItemStatusRefreshPending = false
@@ -249,12 +256,47 @@ struct GeneralSettingsView: View {
 
     // MARK: - System Status Refresh
 
+    /// System privacy/capability probes belong to the page that presents their
+    /// state. Opening Backup, About, or another unrelated settings page must
+    /// not touch Login Items, Core Audio, or Location Services.
     private func refreshSystemStatusIndicators() {
-        loginItemStatus = SMAppService.mainApp.status
-        #if !LITE_BUILD
-        audioCaptureState = SystemAudioCaptureManager.shared.state
-        #endif
-        refreshLocationAuthorizationStatus()
+        for scope in systemStatusScopes {
+            refreshSystemStatus(for: scope)
+        }
+    }
+
+    private var systemStatusScopes: [SystemStatusScope] {
+        switch page {
+        case .general:
+            [.loginItem]
+        case .audioResponse:
+            #if !LITE_BUILD
+            [.audioCapture]
+            #else
+            []
+            #endif
+        case .weather:
+            [.weatherLocation]
+        case .performancePower, .backupRestore, .advanced, .about:
+            []
+        }
+    }
+
+    private static func initialLoginItemStatus(for page: GeneralSettingsPage) -> SMAppService.Status {
+        guard page == .general else { return .notRegistered }
+        return SMAppService.mainApp.status
+    }
+
+    #if !LITE_BUILD
+    private static func initialAudioCaptureState(for page: GeneralSettingsPage) -> SystemAudioCaptureManager.State {
+        guard page == .audioResponse else { return .idle }
+        return SystemAudioCaptureManager.shared.state
+    }
+    #endif
+
+    private static func initialLocationAuthorizationStatus(for page: GeneralSettingsPage) -> CLAuthorizationStatus {
+        guard page == .weather else { return .notDetermined }
+        return CLLocationManager().authorizationStatus
     }
 
     func scheduleSystemStatusRefresh(_ scope: SystemStatusScope) {

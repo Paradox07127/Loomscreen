@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import Compression
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 import Metal
 
 /// On-demand multi-frame `.tex` playback. Keeps each source image's

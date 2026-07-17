@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Per-screen bookkeeping for the Wallpaper Engine import flow:

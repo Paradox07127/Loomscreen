@@ -1,3 +1,4 @@
+import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Leading-column row number that cross-fades into a drag handle on hover/grab.

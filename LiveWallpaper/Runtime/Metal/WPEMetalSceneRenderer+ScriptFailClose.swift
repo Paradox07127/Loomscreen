@@ -1,5 +1,7 @@
 #if !LITE_BUILD
     import Foundation
+    import LiveWallpaperCore
+    import LiveWallpaperProWPE
     import Metal
 
     struct WPESceneScriptPresentationSnapshot {

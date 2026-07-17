@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import LiveWallpaperCore
 
 @MainActor
 final class VideoEffectsApplicationService {

@@ -1,10 +1,9 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
 
 extension ScreenManager {
-    // MARK: - Monitor overlay layer
-
     /// Reconcile the Monitor overlay for every live display against its persisted
     /// `monitorOverlay` config. Runs on startup, screen-set / frame changes, and
     /// after an overlay setting is toggled: tears down overlays for gone or disabled

@@ -1,7 +1,7 @@
 import AppKit
 import LiveWallpaperCore
+import LiveWallpaperVideoWeb
 import WebKit
-
 // HTMLWebView (the context-menu-filtering WKWebView subclass) lives in
 // LiveWallpaperVideoWeb — see its header for why (warn-long importer cost).
 

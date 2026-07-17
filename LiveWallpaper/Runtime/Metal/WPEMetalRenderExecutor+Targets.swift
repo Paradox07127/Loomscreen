@@ -1,12 +1,12 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
 import MetalKit
 import os
 import simd
-
 extension WPEMetalRenderExecutor {
     func releaseTransientResources() {
         targetPool.releaseAll()

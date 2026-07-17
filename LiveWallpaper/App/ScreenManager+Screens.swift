@@ -1,9 +1,9 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
 
 extension ScreenManager {
-    // MARK: - Screen Management
     func refreshScreens(preserveRuntimeSessions: Bool = true) {
         guard !isTerminating else { return }
         let newScreens = displayRegistry.currentScreens()
@@ -226,7 +226,6 @@ extension ScreenManager {
         notifyWallpaperSessionChanged()
     }
     
-    // MARK: - Configuration Management
 
     /// Light launch-time pass: prunes configurations whose local resource bookmark is no longer resolvable.
     func pruneInvalidConfigurationsIfNeeded() {
@@ -291,7 +290,6 @@ extension ScreenManager {
         }
     }
 
-    // MARK: - Configuration Update Helpers
 
     func saveConfiguration(_ configuration: ScreenConfiguration) {
         guard !isTerminating else { return }

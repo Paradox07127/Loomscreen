@@ -1,5 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// Read-only custodian of the retired extraction cache under
 /// `~/Library/Application Support/LiveWallpaper/wpe-cache/<workshopID>/`.

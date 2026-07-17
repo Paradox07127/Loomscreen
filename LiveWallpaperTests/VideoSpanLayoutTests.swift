@@ -1,4 +1,5 @@
 import CoreGraphics
+import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 

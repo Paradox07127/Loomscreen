@@ -209,7 +209,9 @@
                     source: uploadQueue + textureLoader,
                     needles: [
                         "static let shared = WPEMetalTextureUploadQueue(",
-                        "private var waiters: [CheckedContinuation<Void, Never>] = []",
+                        "private var waiterOrder: [UUID] = []",
+                        "private var waiters: [UUID: Waiter] = [:]",
+                        "private var grantedRequestIDs: Set<UUID> = []",
                         "uploadQueue: WPEMetalTextureUploadQueue = .shared",
                     ]
                 ),
@@ -283,6 +285,9 @@
             let scriptSource = try RepositoryRoot.source(
                 "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Scripts.swift"
             )
+            let scriptContainmentSource = try RepositoryRoot.source(
+                "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+ScriptContainment.swift"
+            )
             let executorSource = try RepositoryRoot.source(
                 "LiveWallpaper/Runtime/Metal/WPEMetalRenderExecutor.swift"
             )
@@ -294,11 +299,16 @@
             )
 
             let load = try sourceBlock(loadSource, from: "func load() async throws")
-            let performLoad = try sourceBlock(loadSource, from: "private func performLoad() async throws")
+            let performLoad = try sourceBlock(loadSource, from: "private func performLoad(")
             let reload = try sourceBlock(lifecycleSource, from: "func reload() async throws")
             let cleanup = try sourceBlock(lifecycleSource, from: "func cleanup()")
             let releaseDynamic = try sourceBlock(textureSource, from: "func releaseDynamicTextureSources()")
             let renderFrame = try sourceBlock(frameSource, from: "func renderCurrentFrame() throws")
+            let encodeFrame = try sourceBlock(frameSource, from: "func encodeSceneFrame(")
+            let clearScriptRuntime = try sourceBlock(
+                scriptContainmentSource,
+                from: "func clearSceneScriptRuntimeState()"
+            )
             let lazyVideo = try sourceBlock(scriptSource, from: "private func lazyLoadVideo(key:")
             let releaseTransient = try sourceBlock(targetSource, from: "func releaseTransientResources()")
             let sessionCleanup = try sourceBlock(sceneSessionSource, from: "func cleanup()")
@@ -309,7 +319,13 @@
             expectContains(
                 load,
                 owner: "load entry",
-                ["guard !didLoad else { return }", "loadGeneration &+= 1", "try await performLoad()"]
+                [
+                    "guard !didLoad else { return }",
+                    "loadGeneration &+= 1",
+                    "let scriptLoadToken = sceneScriptLoadState.begin(generation: generation)",
+                    "try await performLoad(scriptLoadToken: scriptLoadToken)",
+                    "try checkCurrentSceneScriptLoad(scriptLoadToken)",
+                ]
             )
             expectContains(
                 performLoad,
@@ -330,7 +346,7 @@
                     "loadGeneration &+= 1",
                     "deferredAudioStartupTask?.cancel()",
                     "releaseDynamicTextureSources()",
-                    "sceneScriptSharedState = nil",
+                    "clearSceneScriptRuntimeState()",
                     "executor.releaseTransientResources()",
                     "try await load()",
                 ]
@@ -361,7 +377,17 @@
             expectContains(
                 renderFrame,
                 owner: "per-frame writes",
-                ["lastFramePipeline = framePipeline", "executor.render("]
+                ["lastFramePipeline = framePipeline", "encodeSceneFrame("]
+            )
+            expectContains(
+                encodeFrame,
+                owner: "per-frame executor publication",
+                ["let frame = try executor.render(", "return frame"]
+            )
+            expectContains(
+                clearScriptRuntime,
+                owner: "scene-script runtime teardown",
+                ["sceneScriptSharedState = nil", "lastStableScriptTransforms = LiveScriptTransforms()"]
             )
             #expect(frameSource.contains("previousPointer = pointer"))
             #expect(frameSource.contains("lastRuntimeUniforms = uniforms"))
@@ -529,8 +555,8 @@
                     "let generation = loadGeneration",
                     "staticTextureReloadTaskOwner.submit(",
                     "!Task.isCancelled",
-                    "self.loadGeneration == generation",
-                    "self.staticTextureReloadTaskOwner.canPublish(ticket)",
+                    "loadGeneration == generation",
+                    "staticTextureReloadTaskOwner.canPublish(ticket)",
                     "catch is CancellationError",
                 ]
             )
@@ -563,9 +589,9 @@
 
             expectOrder(
                 [
-                    "try await performLoad()",
+                    "try await performLoad(scriptLoadToken: scriptLoadToken)",
                     "try Task.checkCancellation()",
-                    "guard loadGeneration == generation else { throw CancellationError() }",
+                    "try checkCurrentSceneScriptLoad(scriptLoadToken)",
                     "staticTextureReloadTaskOwner.resume(generation: generation)",
                 ],
                 in: rendererLoad,

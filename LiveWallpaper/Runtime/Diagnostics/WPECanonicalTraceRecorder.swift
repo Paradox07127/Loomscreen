@@ -1,6 +1,7 @@
 #if !LITE_BUILD && DEBUG
 import CryptoKit
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import simd
 

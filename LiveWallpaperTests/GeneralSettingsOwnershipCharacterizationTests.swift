@@ -22,25 +22,49 @@ struct GeneralSettingsOwnershipCharacterizationTests {
         #expect(actual.count == 37, "Changing the root state surface requires explicitly re-approving the UI-08 lock")
     }
 
-    @Test("Every current page pays the same root mount probe cost")
-    func everyPageCurrentlyPaysCommonMountProbeCost() throws {
+    @Test("Each page mounts only its own system-capability probe")
+    func eachPageMountsOnlyItsOwnSystemCapabilityProbe() throws {
         let source = try RepositoryRoot.source("LiveWallpaper/Views/GeneralSettingsView.swift")
-        let actualPro = try Self.currentProMountCalls(in: source)
+        let propertyDefaults = try Self.slice(
+            source,
+            from: "struct GeneralSettingsView: View {",
+            until: "private let page"
+        )
+        let initializer = try Self.slice(source, from: "init(page: GeneralSettingsPage = .general) {", until: "var body: some View")
+        let scopes = try Self.slice(
+            source,
+            from: "private var systemStatusScopes: [SystemStatusScope] {",
+            until: "private static func initialLoginItemStatus"
+        )
 
-        #expect(actualPro == OwnershipFixture.currentProMountCalls)
+        #expect(!propertyDefaults.contains("SMAppService.mainApp.status"))
+        #expect(!propertyDefaults.contains("SystemAudioCaptureManager.shared.state"))
+        #expect(!propertyDefaults.contains("CLLocationManager().authorizationStatus"))
+        #expect(initializer.contains("Self.initialLoginItemStatus(for: page)"))
+        #expect(initializer.contains("Self.initialAudioCaptureState(for: page)"))
+        #expect(initializer.contains("Self.initialLocationAuthorizationStatus(for: page)"))
         #expect(Self.occurrences(".onAppear { refreshSystemStatusIndicators() }", in: source) == 1)
 
-        for page in OwnershipFixture.pages {
+        for page in [.general, .audioResponse, .weather] as [OwnershipFixture.Page] {
             #expect(
-                OwnershipFixture.currentMountCalls(for: page, sku: .pro) == actualPro,
-                "Current Pro root initializes and refreshes every domain for \(page.rawValue)"
+                scopes.contains("case .\(page.rawValue):"),
+                "Every Settings page needs an explicit system-probe ownership decision"
             )
             #expect(
-                OwnershipFixture.currentMountCalls(for: page, sku: .lite)
-                    == MountCalls(settingsReads: 1, loginStatusReads: 2, audioStateReads: 0, locationStatusReads: 2),
-                "Lite compiles the audio probe out but still pays the other common root costs"
+                OwnershipFixture.mountCalls(for: page, sku: .pro).settingsReads == 1,
+                "All pages still load the shared GlobalSettings snapshot exactly once"
             )
         }
+
+        #expect(scopes.contains("case .general:\n            [.loginItem]"))
+        #expect(scopes.contains("case .audioResponse:\n            #if !LITE_BUILD\n            [.audioCapture]"))
+        #expect(scopes.contains("case .weather:\n            [.weatherLocation]"))
+        #expect(scopes.contains("case .performancePower, .backupRestore, .advanced, .about:\n            []"))
+
+        #expect(OwnershipFixture.mountCalls(for: .general, sku: .pro) == MountCalls(settingsReads: 1, loginStatusReads: 2, audioStateReads: 0, locationStatusReads: 0))
+        #expect(OwnershipFixture.mountCalls(for: .audioResponse, sku: .pro) == MountCalls(settingsReads: 1, loginStatusReads: 0, audioStateReads: 2, locationStatusReads: 0))
+        #expect(OwnershipFixture.mountCalls(for: .weather, sku: .pro) == MountCalls(settingsReads: 1, loginStatusReads: 0, audioStateReads: 0, locationStatusReads: 2))
+        #expect(OwnershipFixture.mountCalls(for: .backupRestore, sku: .lite) == MountCalls(settingsReads: 1, loginStatusReads: 0, audioStateReads: 0, locationStatusReads: 0))
     }
 
     @Test("Mirrored and unrelated global settings survive a durable manager restart")
@@ -215,7 +239,10 @@ struct GeneralSettingsOwnershipCharacterizationTests {
 
         #expect(update.contains("var settings = SettingsManager.shared.loadGlobalSettings()"))
         #expect(update.contains("SettingsManager.shared.saveGlobalSettings(settings)"))
-        #expect(!update.contains("GlobalSettings("), "Page writes must remain read-modify-write")
+        #expect(
+            !update.contains("var settings = GlobalSettings("),
+            "Page writes must remain read-modify-write"
+        )
         for assignment in expectedAssignments {
             #expect(update.contains(assignment), "Missing persistence mapping: \(assignment)")
         }
@@ -266,34 +293,6 @@ private extension GeneralSettingsOwnershipCharacterizationTests {
             guard let nameRange = Range(match.range(at: 2), in: source) else { return nil }
             return String(source[nameRange])
         })
-    }
-
-    static func currentProMountCalls(in source: String) throws -> MountCalls {
-        let propertyDefaults = try slice(source, from: "struct GeneralSettingsView: View {", until: "private let page")
-        let initializer = try slice(source, from: "init(page: GeneralSettingsPage = .general) {", until: "var body: some View")
-        let commonRefresh = try slice(
-            source,
-            from: "private func refreshSystemStatusIndicators() {",
-            until: "func scheduleSystemStatusRefresh"
-        )
-        let locationRefresh = try slice(
-            source,
-            from: "func refreshLocationAuthorizationStatus() {",
-            until: "// MARK: - Settings Persistence"
-        )
-
-        let locationRefreshCalls = occurrences("refreshLocationAuthorizationStatus()", in: commonRefresh)
-        let directLocationReads = occurrences("CLLocationManager().authorizationStatus", in: propertyDefaults)
-            + locationRefreshCalls * occurrences("CLLocationManager().authorizationStatus", in: locationRefresh)
-
-        return MountCalls(
-            settingsReads: occurrences("SettingsManager.shared.loadGlobalSettings()", in: initializer),
-            loginStatusReads: occurrences("SMAppService.mainApp.status", in: propertyDefaults)
-                + occurrences("SMAppService.mainApp.status", in: commonRefresh),
-            audioStateReads: occurrences("SystemAudioCaptureManager.shared.state", in: propertyDefaults)
-                + occurrences("SystemAudioCaptureManager.shared.state", in: commonRefresh),
-            locationStatusReads: directLocationReads
-        )
     }
 
     static func slice(_ source: String, from start: String, until end: String) throws -> String {

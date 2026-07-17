@@ -1,6 +1,8 @@
 #if !LITE_BUILD
     import AppKit
     import Foundation
+    import LiveWallpaperCore
+    import LiveWallpaperProWPE
     import Observation
 
     struct WorkshopInstalledEntryIdentity: Equatable, Hashable, Sendable {

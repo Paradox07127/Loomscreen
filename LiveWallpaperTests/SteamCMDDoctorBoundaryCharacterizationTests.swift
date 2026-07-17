@@ -87,8 +87,15 @@
             #expect(spawn.contains("POSIX_SPAWN_SETPGROUP"))
             #expect(spawn.contains("POSIX_SPAWN_CLOEXEC_DEFAULT"))
             #expect(spawn.contains("sanitizedChildEnvironment()"))
-            for forbidden in ["Process(", "executableURL", "/bin/sh", "/bin/bash", "/bin/zsh", "system(", "popen("] {
+            for forbidden in ["executableURL", "/bin/sh", "/bin/bash", "/bin/zsh"] {
                 #expect(!spawn.contains(forbidden))
+            }
+            for forbiddenPattern in [
+                #"(?<![A-Za-z0-9_])Process\s*\("#,
+                #"(?<![A-Za-z0-9_])system\s*\("#,
+                #"(?<![A-Za-z0-9_])popen\s*\("#,
+            ] {
+                #expect(spawn.range(of: forbiddenPattern, options: .regularExpression) == nil)
             }
 
             let doctor = try doctorSource()
@@ -98,7 +105,7 @@
                 until: "func resolveBinaryURL()"
             )
             #expect(scriptRun.contains("args: [\"+runscript\", scriptURL.path(percentEncoded: false)]"))
-            #expect(!scriptRun.contains("-c"))
+            #expect(!scriptRun.contains(#""-c""#))
         }
 
         @Test("selected SteamCMD execution remains behind Valve signature and hash trust")
@@ -211,7 +218,7 @@
             let downloading = steamApps.appendingPathComponent("downloading", isDirectory: true)
             try fm.createDirectory(at: downloading, withIntermediateDirectories: true)
             try fm.createDirectory(at: outside, withIntermediateDirectories: true)
-            #expect(!WPEEngineAssetsLibrary.isContainerInternal(outside))
+            #expect(!pathContains(outside, in: steamApps))
             let sentinel = outside.appendingPathComponent("keep.bin")
             try Data("keep".utf8).write(to: sentinel)
             let stagedLink = downloading.appendingPathComponent("431960", isDirectory: true)
@@ -527,18 +534,30 @@
             let installer = try productionSource(
                 "LiveWallpaper/Infrastructure/Workshop/WPEEngineAssetsInstaller.swift"
             )
-            let removal = try slice(
+            let orchestration = try slice(
                 installer,
                 from: "private func performRemove(attempt: UUID) async",
+                until: "private func commitRemove("
+            )
+            let commit = try slice(
+                installer,
+                from: "private func commitRemove(",
                 until: "private func fail("
             )
-            let disk = try #require(removal.range(of: "try owner.removeManagedInstall("))
-            let marker = try #require(removal.range(
+            let admission = try #require(commit.range(of: "guard currentAttempt == attempt else { return }"))
+            let disk = try #require(commit.range(of: "try owner.removeManagedInstall("))
+            let marker = try #require(commit.range(
                 of: "SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil"
             ))
-            let failure = try #require(removal.range(of: "} catch {"))
+            let afterMarker = commit[marker.upperBound...]
+            let publication = try #require(afterMarker.range(
+                of: "guard currentAttempt == attempt else { return }"
+            ))
+            #expect(orchestration.contains("try await commitRemove(attempt: attempt, operationLease: lease)"))
+            #expect(orchestration.contains("} catch {"))
+            #expect(admission.lowerBound < disk.lowerBound)
             #expect(disk.lowerBound < marker.lowerBound)
-            #expect(marker.lowerBound < failure.lowerBound)
+            #expect(marker.lowerBound < publication.lowerBound)
         }
 
         @Test("stdout download destination must be the exact approved item target")

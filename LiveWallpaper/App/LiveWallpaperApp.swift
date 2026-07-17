@@ -1,5 +1,8 @@
 import SwiftUI
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperProFeatures
+import LiveWallpaperSharedUI
 
 struct AppRuntimeOptions: Equatable {
     let isTesting: Bool

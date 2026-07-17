@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Ratchet the app target away from blanket package re-exports.
+"""Keep the app target free of blanket package re-exports.
 
-AF-01 is an incremental migration: the legacy umbrella remains until every
-consumer has an explicit import. This offline gate freezes that umbrella,
-checks the files already migrated, and reports reproducible repository-wide
-import statistics. It deliberately does not infer module ownership from symbol
-spelling; the Swift compiler remains the authority for that during later
-directory-by-directory migrations.
+AF-01 retired the legacy umbrella after both SKUs compiled with explicit
+imports. This offline gate rejects every new ``@_exported import``, checks the
+files already migrated, and reports reproducible repository-wide import
+statistics. It deliberately does not infer module ownership from symbol
+spelling; the Swift compiler remains the authority.
 """
 
 from __future__ import annotations
@@ -94,8 +93,8 @@ def validate(root: Path, baseline_path: Path) -> tuple[list[str], dict[str, Any]
 
     raw_exports = document.get("allowed_exported_imports")
     expected_exports: dict[str, list[str]] = {}
-    if not isinstance(raw_exports, dict) or not raw_exports:
-        errors.append("allowed_exported_imports must be a non-empty object")
+    if not isinstance(raw_exports, dict):
+        errors.append("allowed_exported_imports must be an object")
     else:
         for path, raw_values in raw_exports.items():
             if not isinstance(path, str) or not isinstance(raw_values, list) or not all(
@@ -177,7 +176,7 @@ def self_test() -> int:
     baseline = {
         "schema_version": 1,
         "local_package_modules": ["PackageA", "PackageB"],
-        "allowed_exported_imports": {"LiveWallpaper/App/CoreExports.swift": ["PackageA"]},
+        "allowed_exported_imports": {},
         "migrated_file_requirements": {"LiveWallpaper/Leaf.swift": ["PackageA"]},
         "minimum_explicit_import_files": 1,
         "minimum_import_occurrences": {"PackageA": 1, "PackageB": 0},
@@ -188,9 +187,7 @@ def self_test() -> int:
         (root / "scripts/quality-baselines").mkdir(parents=True)
         baseline_path = root / DEFAULT_BASELINE
         baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
-        umbrella = root / "LiveWallpaper/App/CoreExports.swift"
         leaf = root / "LiveWallpaper/Leaf.swift"
-        umbrella.write_text("@_exported import PackageA\n", encoding="utf-8")
         leaf.write_text("import PackageA\n", encoding="utf-8")
 
         checks = 0
@@ -201,14 +198,15 @@ def self_test() -> int:
             failures += 1
             print(f"self-test control failed: {errors}", file=sys.stderr)
 
-        umbrella.write_text("@_exported import PackageA\n@_exported import PackageB\n", encoding="utf-8")
+        rogue = root / "LiveWallpaper/App/RogueExports.swift"
+        rogue.write_text("@_exported import PackageB\n", encoding="utf-8")
         errors, _ = validate(root, baseline_path)
         checks += 1
         if not any("@_exported import inventory changed" in error for error in errors):
             failures += 1
             print("self-test did not reject an added re-export", file=sys.stderr)
 
-        umbrella.write_text("@_exported import PackageA\n", encoding="utf-8")
+        rogue.unlink()
         leaf.write_text("import Foundation\n", encoding="utf-8")
         errors, _ = validate(root, baseline_path)
         checks += 1

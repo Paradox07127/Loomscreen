@@ -192,6 +192,35 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
         #expect(emissions.first?.widgets == model.placements)
     }
 
+    @Test("targeted accessibility move is edit-gated and does not change selection")
+    @MainActor
+    func targetedAccessibilityMoveUsesItsPlacementID() throws {
+        let selectedID = try #require(UUID(uuidString: "A1111111-1111-1111-1111-111111111111"))
+        let targetID = try #require(UUID(uuidString: "B2222222-2222-2222-2222-222222222222"))
+        let selected = MonitorWidgetPlacement(
+            id: selectedID, kind: .cpu, size: .small, x: 0.10, y: 0.20
+        )
+        let target = MonitorWidgetPlacement(
+            id: targetID, kind: .memory, size: .small, x: 0.50, y: 0.20
+        )
+        let model = makeModel(placements: [selected, target])
+        model.selectedID = selectedID
+        var emissions = 0
+        model.onConfigurationEdited = { _ in emissions += 1 }
+
+        #expect(model.moveWidget(id: targetID, direction: .right, distance: 25))
+        #expect(model.selectedID == selectedID)
+        #expect(model.placements[0] == selected)
+        #expect(isApproximatelyEqual(model.placements[1].x, target.x + 25 / boardSize.width))
+        #expect(emissions == 1)
+
+        model.setEditing(false)
+        #expect(!model.moveWidget(id: targetID, direction: .right, distance: 25))
+        #expect(model.selectedID == nil)
+        #expect(isApproximatelyEqual(model.placements[1].x, target.x + 25 / boardSize.width))
+        #expect(emissions == 1)
+    }
+
     @Test("keyboard move clamps the full footprint below the top inset")
     @MainActor
     func keyboardMoveClampsFootprintAndTopInset() throws {
@@ -256,6 +285,8 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
         #expect(interaction.contains("MonitorBoardLayoutEngine.land("))
         #expect(interaction.contains("MonitorBoardLayoutEngine.normalized("))
         #expect(interaction.contains("perform(.move(id: current.widgetID"))
+        #expect(interaction.contains("func moveWidget("))
+        #expect(interaction.contains("return moveWidget(id: selectedID, direction: direction, distance: distance)"))
         #expect(interaction.contains("return perform(.move("))
         #expect(interaction.contains("return perform(.delete(id: selectedID))"))
         #expect(chrome.contains("model.beginDrag(placement.id"))
@@ -268,7 +299,7 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
         #expect(root.contains("model.deleteSelectedWidget()"))
     }
 
-    @Test("keyboard focus and target-specific VoiceOver delete are production entry points")
+    @Test("keyboard focus and target-specific VoiceOver placement actions are production entry points")
     func accessibilityEntryPointSourceContract() throws {
         let root = try source("LiveWallpaper/Monitor/Board/MonitorBoardRootView.swift")
         let chrome = try source("LiveWallpaper/Monitor/Board/MonitorBoardEditChrome.swift")
@@ -279,6 +310,14 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
         #expect(boardUI.contains(".focused($boardFocused)"))
         #expect(boardUI.contains(".accessibilityAction(named:"))
         #expect(chrome.contains("if model.isEditing"))
+        #expect(chrome.contains("MonitorBoardStrings.moveLeft"))
+        #expect(chrome.contains("MonitorBoardStrings.moveRight"))
+        #expect(chrome.contains("MonitorBoardStrings.moveUp"))
+        #expect(chrome.contains("MonitorBoardStrings.moveDown"))
+        #expect(chrome.contains("model.moveWidget(id: placementID, direction: .left)"))
+        #expect(chrome.contains("model.moveWidget(id: placementID, direction: .right)"))
+        #expect(chrome.contains("model.moveWidget(id: placementID, direction: .up)"))
+        #expect(chrome.contains("model.moveWidget(id: placementID, direction: .down)"))
         #expect(chrome.contains("model.perform(.delete(id: placementID))"))
         #expect(interaction.contains("case delete(id: UUID)"))
     }

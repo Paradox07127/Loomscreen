@@ -1,7 +1,7 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 import Metal
-
 /// Dispatches a prepared pass onto a Metal pipeline state. Shares the executor's
 /// pipeline cache; shader-input math and texture resolution live in `WPEMetalShaderInputs`.
 ///

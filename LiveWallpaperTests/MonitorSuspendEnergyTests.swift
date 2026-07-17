@@ -224,20 +224,23 @@ struct MonitorSuspendEnergyTests {
         let runtime = MonitorRuntime()
         let view = MonitorWallpaperView(
             frame: NSRect(x: 0, y: 0, width: 1200, height: 800),
-            configuration: MonitorBoardConfiguration(widgets: [], refreshHz: 1),
+            configuration: MonitorBoardConfiguration(
+                widgets: [MonitorWidgetPlacement(kind: .network, size: .small)],
+                refreshHz: 1
+            ),
             agentFleetEnabled: false,
             runtime: runtime
         )
         defer { view.cleanup() }
 
-        let started = await settles(runtime) { $0 == 1 }
-        #expect(started)
+        await view.waitUntilRuntimeSettled()
+        #expect(await runtime.debugActiveSourceCount == 1)
 
         view.applyPerformanceProfile(.suspended)
+        await view.waitUntilRuntimeSettled()
 
         // Producer stopped…
-        let stopped = await settles(runtime) { $0 == 0 }
-        #expect(stopped)
+        #expect(await runtime.debugActiveSourceCount == 0)
         #expect(await runtime.debugActiveOptions == nil)
         // …lease kept, so resume doesn't re-resolve grants…
         #expect(await runtime.debugActiveLeaseCount == 1)
@@ -246,9 +249,9 @@ struct MonitorSuspendEnergyTests {
         #expect(view.isBoardSuspended == true)
 
         view.applyPerformanceProfile(.quality)
+        await view.waitUntilRuntimeSettled()
 
-        let restarted = await settles(runtime) { $0 == 1 }
-        #expect(restarted)
+        #expect(await runtime.debugActiveSourceCount == 1)
         #expect(await runtime.debugPausedLeaseCount == 0)
         #expect(view.isBoardSuspended == false)
     }
@@ -302,6 +305,7 @@ struct MonitorSuspendEnergyTests {
 
     // MARK: - Breathing dot (H1)
 
+    @MainActor
     @Test("Suspend stills the breathing dot whatever the caller asked for")
     func suspendStillsBreathingDot() {
         // The hottest call site is `BreathingDot(animated: pct > 60)` — it breathes
@@ -311,6 +315,7 @@ struct MonitorSuspendEnergyTests {
         #expect(BreathingDot.shouldBreathe(animated: false, reduceMotion: false, suspended: true) == false)
     }
 
+    @MainActor
     @Test("A visible dot still breathes; reduce-motion still stills it")
     func visibleDotStillBreathes() {
         #expect(BreathingDot.shouldBreathe(animated: true, reduceMotion: false, suspended: false) == true)
@@ -362,19 +367,4 @@ struct MonitorSuspendEnergyTests {
         }
     }
 
-    /// Poll the runtime's live source count until `condition` holds. The view
-    /// issues its acquire/pause calls as fire-and-forget tasks, so there is no
-    /// handle to await — but they land promptly, so this settles in ms.
-    private func settles(
-        _ runtime: MonitorRuntime,
-        within timeout: Duration = .seconds(10),
-        _ condition: @Sendable (Int) -> Bool
-    ) async -> Bool {
-        let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            if condition(await runtime.debugActiveSourceCount) { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return condition(await runtime.debugActiveSourceCount)
-    }
 }

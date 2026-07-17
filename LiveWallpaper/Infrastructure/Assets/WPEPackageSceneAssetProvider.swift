@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 
 /// Reads scene assets in place from a packed `scene.pkg`, the way Wallpaper
 /// Engine treats its mounted pak archives: parse the TOC once, then seek + read

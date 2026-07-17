@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import WebKit
+import LiveWallpaperCore
 @testable import LiveWallpaper
 
 /// Validates the FolderURLSchemeHandler runtime contract: byte-range responses,

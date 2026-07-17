@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LiveWallpaperCore
 import Observation
 
 /// Owns video-effect application (CIFilter pipeline) and weather-reactive

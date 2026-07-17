@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import WebKit
+import LiveWallpaperCore
 @testable import LiveWallpaper
 
 /// Verifies the C1 (HTML local-file isolation) and H2 (async/range scheme

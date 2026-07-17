@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LiveWallpaperCore
 
 enum ApplicationPerformanceRuleEngine {
     /// Returns `false` immediately when no rules are configured (the default),

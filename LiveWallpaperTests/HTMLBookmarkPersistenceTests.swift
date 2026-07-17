@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
@@ -283,7 +284,7 @@ struct HTMLBookmarkPersistenceTests {
         #expect(refresh.lowerBound < leader.lowerBound)
         #expect(leader.lowerBound < policy.lowerBound)
         #expect(policy.lowerBound < builder.lowerBound)
-        #expect(source.contains("private func persistRuntimeHTMLBookmarkRefresh("))
+        #expect(source.contains("func persistRuntimeHTMLBookmarkRefresh("))
         #expect(source.contains("func persistRuntimeWPEBookmarkRefresh("))
     }
 

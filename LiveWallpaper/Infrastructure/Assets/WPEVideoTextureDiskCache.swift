@@ -1,6 +1,8 @@
 #if !LITE_BUILD
 import Foundation
 import CryptoKit
+import LiveWallpaperCore
+import LiveWallpaperProWPE
 
 /// On-disk reuse cache for the MP4 byte runs extracted from `.tex` video
 /// layers, rooted at `~/Library/Caches/wpe-tex-video/`.

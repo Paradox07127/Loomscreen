@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 @testable import LiveWallpaper
 import Testing
 
@@ -186,7 +187,7 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
         let service = metadataService { request in
             #expect(request.url == endpoint)
             #expect(request.httpMethod == "POST")
-            #expect(String(data: request.httpBody ?? Data(), encoding: .utf8)
+            #expect(String(data: WorkshopMetadataRequestBody.data(from: request) ?? Data(), encoding: .utf8)
                 == "itemcount=1&publishedfileids%5B0%5D=100")
             return .http(
                 status: 200,
@@ -454,15 +455,15 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
     @MainActor
     func productionUpdateModelThrottleCacheFlagsAndReimport() async {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let requests = WorkshopMetadataRequestRecorder()
-        let service = metadataService { request in
-            let id = requests.record(request)
+        let requests = WorkshopMetadataResponseGate { id in
             return .http(
                 status: 200,
                 headers: [:],
-                body: Self.metadataPayload(id: id ?? "0", updated: 900_000)
+                body: Self.metadataPayload(id: id, updated: 900_000)
             )
         }
+        defer { requests.releaseAll() }
+        let service = metadataService { requests.response(for: $0) }
         let old = entry(id: "100", importedAt: 100)
         let store = WorkshopInstalledLibraryStoreProbe(
             entries: [old],
@@ -484,7 +485,11 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
         #expect(store.lastCheckSaveCount == 0)
 
         store.lastUpdateCheckEpoch = now.timeIntervalSince1970 - 86401
-        await model.checkForUpdatesIfNeeded()
+        let update = Task { @MainActor in await model.checkForUpdatesIfNeeded() }
+        await requests.waitUntilStarted(count: 1)
+        #expect(model.lifecycleOwner.hasActiveUpdate)
+        requests.releaseNext()
+        await update.value
         #expect(requests.ids == ["100"])
         #expect(store.remoteEpochs == ["100": 900_000])
         #expect(store.remoteSaveCount == 1)
@@ -502,9 +507,8 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
     @MainActor
     func productionUpdateModelRateLimitPartialPreserve() async {
         let now = Date(timeIntervalSince1970: 2_000_000)
-        let requests = WorkshopMetadataRequestRecorder()
-        let service = metadataService { request in
-            switch requests.record(request) {
+        let requests = WorkshopMetadataResponseGate { id in
+            switch id {
             case "100":
                 .http(
                     status: 200,
@@ -517,6 +521,8 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
                 .http(status: 500, headers: [:], body: Data())
             }
         }
+        defer { requests.releaseAll() }
+        let service = metadataService { requests.response(for: $0) }
         let store = WorkshopInstalledLibraryStoreProbe(
             entries: [
                 entry(id: "100", importedAt: 10),
@@ -536,7 +542,14 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
         model.onAppear()
         await Task.yield()
         store.lastUpdateCheckEpoch = now.timeIntervalSince1970 - 86401
-        await model.checkForUpdatesIfNeeded()
+        let update = Task { @MainActor in await model.checkForUpdatesIfNeeded() }
+        await requests.waitUntilStarted(count: 1)
+        #expect(model.lifecycleOwner.hasActiveUpdate)
+        requests.releaseNext()
+        await requests.waitUntilStarted(count: 2)
+        #expect(model.lifecycleOwner.hasActiveUpdate)
+        requests.releaseNext()
+        await update.value
         #expect(requests.ids == ["100", "200"])
         #expect(store.remoteEpochs == ["100": 444, "200": 222, "300": 333])
         #expect(store.remoteSaveCount == 1)
@@ -892,26 +905,84 @@ private final class WorkshopMetadataURLProtocolStub: URLProtocol, @unchecked Sen
     override func stopLoading() {}
 }
 
-private final class WorkshopMetadataRequestRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [String] = []
-
-    var ids: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storage
+private enum WorkshopMetadataRequestBody {
+    static func data(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 512)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
     }
 
-    @discardableResult
-    func record(_ request: URLRequest) -> String? {
-        let body = request.httpBody.flatMap { String(data: $0, encoding: .utf8) }
-        let id = body?.components(separatedBy: "publishedfileids%5B0%5D=").last
-        lock.lock()
-        if let id {
-            storage.append(id)
+    static func publishedFileID(from request: URLRequest) -> String? {
+        guard let data = data(from: request),
+              let body = String(data: data, encoding: .utf8)
+        else { return nil }
+        return body.components(separatedBy: "publishedfileids%5B0%5D=").last
+    }
+}
+
+private final class WorkshopMetadataResponseGate: @unchecked Sendable {
+    typealias Plan = WorkshopMetadataURLProtocolStub.Plan
+
+    private let condition = NSCondition()
+    private let makeResponse: @Sendable (String) -> Plan
+    private var startedIDs: [String] = []
+    private var releasedCount = 0
+
+    init(makeResponse: @escaping @Sendable (String) -> Plan) {
+        self.makeResponse = makeResponse
+    }
+
+    var ids: [String] {
+        condition.lock()
+        defer { condition.unlock() }
+        return startedIDs
+    }
+
+    func response(for request: URLRequest) -> Plan {
+        guard let id = WorkshopMetadataRequestBody.publishedFileID(from: request) else {
+            return .error(URLError(.badURL))
         }
-        lock.unlock()
-        return id
+        condition.lock()
+        startedIDs.append(id)
+        let ordinal = startedIDs.count
+        condition.broadcast()
+        while releasedCount < ordinal {
+            condition.wait()
+        }
+        condition.unlock()
+        return makeResponse(id)
+    }
+
+    @MainActor
+    func waitUntilStarted(count: Int) async {
+        for _ in 0..<10_000 {
+            if ids.count >= count { return }
+            await Task.yield()
+        }
+        Issue.record("Metadata request never entered the production URLSession seam")
+    }
+
+    func releaseNext() {
+        condition.lock()
+        releasedCount += 1
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func releaseAll() {
+        condition.lock()
+        releasedCount = .max
+        condition.broadcast()
+        condition.unlock()
     }
 }
 

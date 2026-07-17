@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import LiveWallpaperCore
 @testable import LiveWallpaper
 
 // MARK: - In-memory persistence
@@ -273,11 +274,13 @@ struct BookmarkStoreTests {
         let newerGrant = Data("new-html-grant".utf8)
         let target = WallpaperBookmark(
             label: "Re-granted",
-            content: .html(source: .file(bookmarkData: newerGrant), config: .default)
+            content: .html(source: .file(bookmarkData: newerGrant), config: .default),
+            sourceDisplayName: "Local file"
         )
         let unrelated = WallpaperBookmark(
             label: "Unrelated",
-            content: .html(source: .file(bookmarkData: original), config: .default)
+            content: .html(source: .file(bookmarkData: original), config: .default),
+            sourceDisplayName: "Local file"
         )
         let (store, persistence) = makeStore(seed: [target, unrelated])
         let saveCountBefore = persistence.saveCount

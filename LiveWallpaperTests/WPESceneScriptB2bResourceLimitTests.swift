@@ -252,6 +252,9 @@
             let rendererContainment = try Self.read(
                 "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+ScriptContainment.swift"
             )
+            let frameFailClose = try Self.read(
+                "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+ScriptFailClose.swift"
+            )
             let frame = try Self.read("LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift")
 
             #expect(!runtime.contains("static var quarantine"))
@@ -268,7 +271,12 @@
             #expect(resources.contains("precondition(state.quarantinedEngines.count < limit"))
             #expect(resources.contains("This cannot terminate `while (true)` in-process"))
             #expect(rendererContainment.contains("resetSceneScriptsToBakedIfFailed"))
-            #expect(frame.contains("restoreSceneScriptPresentation(presentationBeforeFrame)"))
+            #expect(frame.contains("let publicationBeforeFrame = captureSceneScriptFramePublication()"))
+            #expect(frame.contains("restoreSceneScriptPresentation(publicationBeforeFrame.presentation)"))
+            #expect(frameFailClose.contains("restoreSceneScriptPresentation(publicationBeforeFrame.presentation)"))
+            #expect(frameFailClose.contains("lastStableScriptTransforms = publicationBeforeFrame.stableTransforms"))
+            #expect(frameFailClose.contains("lastStableScriptTextByID = publicationBeforeFrame.stableTextByID"))
+            #expect(frameFailClose.contains("lastFramePipeline = publicationBeforeFrame.lastFramePipeline"))
             #expect(runtime.contains("instanceLimitToken?.admitCreatedLayer()"))
             #expect(runtime.contains("evaluationResourceBudget.admitVideoCommand()"))
             #expect(runtime.contains("sceneScriptLoadToken?.admitNewSharedStateEntry()"))

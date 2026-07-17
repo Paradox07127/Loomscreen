@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import Testing
 import simd

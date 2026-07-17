@@ -124,7 +124,13 @@ struct MonitorRuntimeTests {
 
     @Test("A second display's differing lease widens, not replaces, the pipeline")
     func secondLeaseWidens() async {
-        let runtime = MonitorRuntime()
+        let runtime = MonitorRuntime(
+            grants: MonitorGrantAccess(
+                resolveRoots: { (claude: nil, codex: nil) },
+                release: {}
+            ),
+            sourceFactories: []
+        )
         var agentLease = quietOptions
         agentLease.agents = true
         let first = runtime.makeLeaseSlot().acquire(options: quietOptions)

@@ -2,6 +2,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import LiveWallpaperProWPE
 
 /// Resource resolver for `.scene` content. Reads PNG/JPG via ImageIO and `.tex`
 /// via `WPETexDecoder`. All filesystem access goes through a

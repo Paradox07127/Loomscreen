@@ -1,6 +1,8 @@
-import SwiftUI
-import MapKit
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
+import MapKit
+import SwiftUI
 
 struct ManualLocationPicker: View {
     let currentSelection: WeatherLocationPreference.ManualLocation?

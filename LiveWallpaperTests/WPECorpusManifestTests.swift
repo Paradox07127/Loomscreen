@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Darwin
+import CryptoKit
 import Foundation
 import Testing
 
@@ -83,7 +84,12 @@ struct WPECorpusManifestTests {
 
         try Self.makeProject(
             id: "10",
-            manifest: ["workshopid": 10, "type": "scene", "file": "scene.json"],
+            manifest: [
+                "workshopid": 10,
+                "type": "scene",
+                "file": "scene.json",
+                "dependencies": ["900", 800, "900", "../private-dependency"],
+            ],
             root: root
         )
         try Data("fixture".utf8).write(to: root.appendingPathComponent("10/scene.pkg"))
@@ -109,7 +115,11 @@ struct WPECorpusManifestTests {
         #expect(first.summary.directories == 3)
         #expect(first.summary.captureCandidates == 1)
         #expect(first.entries[0].accessibility.scenePackageReadable)
+        #expect(first.entries[0].dependencies == ["800", "900"])
+        #expect(first.entries[0].issues.contains("unsafeDependencyID"))
+        #expect(first.entries[0].projectJSONSHA256?.count == 64)
         #expect(first.entries[2].accessibility.projectJSON == "malformed")
+        #expect(first.entries[2].projectJSONSHA256?.count == 64)
     }
 
     private static func makeProject(id: String, manifest: [String: Any], root: URL) throws {
@@ -130,7 +140,7 @@ private struct CorpusSelection {
 }
 
 private enum WPECorpusManifestBuilder {
-    static let schema = "wpe.corpus-manifest.v1"
+    static let schema = "wpe.corpus-manifest.v2"
     static let maxProjectJSONBytes = 2 * 1024 * 1024
 
     static func build(root: URL, rootLabel: String) throws -> WPECorpusManifest {
@@ -185,6 +195,8 @@ private enum WPECorpusManifestBuilder {
         var workshopID: String? = safeComponent(folderID) ? folderID : nil
         var projectType = "unknown"
         var entryFile: String?
+        var projectJSONSHA256: String?
+        var dependencies: [String] = []
 
         do {
             let values = try projectURL.resourceValues(
@@ -218,6 +230,9 @@ private enum WPECorpusManifestBuilder {
                     projectType: projectType, entryFile: entryFile, state: state, issues: issues
                 )
             }
+            projectJSONSHA256 = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
             let decoded: [String: Any]
             do {
                 guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -249,6 +264,21 @@ private enum WPECorpusManifestBuilder {
             } else {
                 issues.insert("missingEntryFile")
             }
+            if let rawDependencies = decoded["dependencies"] {
+                if let values = rawDependencies as? [Any] {
+                    var safeDependencies: Set<String> = []
+                    for value in values {
+                        guard let dependency = flexibleString(value), safeComponent(dependency) else {
+                            issues.insert("unsafeDependencyID")
+                            continue
+                        }
+                        safeDependencies.insert(dependency)
+                    }
+                    dependencies = safeDependencies.sorted()
+                } else {
+                    issues.insert("dependenciesNotArray")
+                }
+            }
         } catch WPECorpusManifestError.invalidProjectJSON {
             state = "malformed"
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
@@ -261,7 +291,9 @@ private enum WPECorpusManifestBuilder {
         }
         return makeEntry(
             folder: folder, folderID: folderID, workshopID: workshopID,
-            projectType: projectType, entryFile: entryFile, state: state, issues: issues
+            projectType: projectType, entryFile: entryFile,
+            projectJSONSHA256: projectJSONSHA256, dependencies: dependencies,
+            state: state, issues: issues
         )
     }
 
@@ -294,6 +326,8 @@ private enum WPECorpusManifestBuilder {
         workshopID: String?,
         projectType: String,
         entryFile: String?,
+        projectJSONSHA256: String? = nil,
+        dependencies: [String] = [],
         state: String,
         issues: Set<String>
     ) -> WPECorpusManifest.Entry {
@@ -305,6 +339,8 @@ private enum WPECorpusManifestBuilder {
             workshopID: workshopID,
             projectType: projectType,
             entryFile: entryFile,
+            projectJSONSHA256: projectJSONSHA256,
+            dependencies: dependencies,
             accessibility: .init(
                 projectJSON: state,
                 entryFileReadable: entryReadable,
@@ -383,6 +419,8 @@ private struct WPECorpusManifest: Codable, Equatable {
         let workshopID: String?
         let projectType: String
         let entryFile: String?
+        let projectJSONSHA256: String?
+        let dependencies: [String]
         let accessibility: Accessibility
         let captureCandidate: Bool
         let issues: [String]

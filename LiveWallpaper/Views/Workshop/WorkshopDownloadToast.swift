@@ -1,4 +1,5 @@
 #if !LITE_BUILD
+import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Observes the shared `WorkshopToastCenter` so it fires even after the detail

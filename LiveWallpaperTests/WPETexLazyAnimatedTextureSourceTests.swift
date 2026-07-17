@@ -1,5 +1,6 @@
 import Compression
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import Testing
 @testable import LiveWallpaper

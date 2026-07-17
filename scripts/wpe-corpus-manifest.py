@@ -13,6 +13,7 @@ container or any user-authorized external directory.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "wpe.corpus-manifest.v1"
+SCHEMA = "wpe.corpus-manifest.v2"
 DEFAULT_MAX_PROJECT_JSON_BYTES = 2 * 1024 * 1024
 ROOT_LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -53,6 +54,22 @@ def _flexible_string(value: Any) -> str | None:
     return None
 
 
+def _dependency_ids(value: Any, issues: list[str]) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        issues.append("dependenciesNotArray")
+        return []
+    result: set[str] = set()
+    for raw in value:
+        dependency = _flexible_string(raw)
+        if dependency is not None and _safe_component(dependency):
+            result.add(dependency)
+        else:
+            issues.append("unsafeDependencyID")
+    return sorted(result)
+
+
 def _regular_readable_file(path: Path) -> bool:
     """Check without following symlinks or opening large payloads."""
     try:
@@ -69,6 +86,8 @@ def _scan_project(folder: Path, folder_id: str, max_bytes: int) -> dict[str, Any
     workshop_id: str | None = folder_id if _safe_component(folder_id) else None
     project_type = "unknown"
     entry_file: str | None = None
+    project_json_sha256: str | None = None
+    dependencies: list[str] = []
 
     try:
         project_stat = project_path.lstat()
@@ -103,6 +122,7 @@ def _scan_project(folder: Path, folder_id: str, max_bytes: int) -> dict[str, Any
                     manifest_state = "tooLarge"
                     issues.append("projectJSONExceedsReadLimit")
                 else:
+                    project_json_sha256 = hashlib.sha256(raw).hexdigest()
                     try:
                         decoded = json.loads(raw)
                     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -136,6 +156,8 @@ def _scan_project(folder: Path, folder_id: str, max_bytes: int) -> dict[str, Any
                             else:
                                 issues.append("unsafeEntryFile")
 
+                            dependencies = _dependency_ids(decoded.get("dependencies"), issues)
+
     if manifest_state != "readable":
         issues.append(f"projectJSON{manifest_state[0].upper()}{manifest_state[1:]}")
 
@@ -154,6 +176,8 @@ def _scan_project(folder: Path, folder_id: str, max_bytes: int) -> dict[str, Any
         "workshopID": workshop_id,
         "projectType": project_type,
         "entryFile": entry_file,
+        "projectJSONSHA256": project_json_sha256,
+        "dependencies": dependencies,
         "accessibility": {
             "projectJSON": manifest_state,
             "entryFileReadable": entry_readable,
@@ -237,7 +261,12 @@ def self_test() -> None:
         scene = root / "10"
         scene.mkdir()
         (scene / "project.json").write_text(
-            json.dumps({"workshopid": 10, "type": "scene", "file": "scene.json"}),
+            json.dumps({
+                "workshopid": 10,
+                "type": "scene",
+                "file": "scene.json",
+                "dependencies": ["900", 800, "900", "../private-dependency"],
+            }),
             encoding="utf-8",
         )
         (scene / "scene.pkg").write_bytes(b"not-read-by-the-scanner")
@@ -278,8 +307,13 @@ def self_test() -> None:
         assert decoded["summary"]["directories"] == 5
         assert decoded["summary"]["captureCandidates"] == 1
         assert decoded["entries"][0]["accessibility"]["scenePackageReadable"] is True
+        assert decoded["entries"][0]["dependencies"] == ["800", "900"]
+        assert "unsafeDependencyID" in decoded["entries"][0]["issues"]
+        assert re.fullmatch(r"[0-9a-f]{64}", decoded["entries"][0]["projectJSONSHA256"])
         assert decoded["entries"][2]["accessibility"]["projectJSON"] == "malformed"
+        assert re.fullmatch(r"[0-9a-f]{64}", decoded["entries"][2]["projectJSONSHA256"])
         assert decoded["entries"][3]["accessibility"]["projectJSON"] == "tooLarge"
+        assert decoded["entries"][3]["projectJSONSHA256"] is None
         assert decoded["entries"][4]["entryFile"] is None
         assert "unsafeEntryFile" in decoded["entries"][4]["issues"]
         try:

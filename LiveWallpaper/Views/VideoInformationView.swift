@@ -1,4 +1,5 @@
 import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 import AVKit
 

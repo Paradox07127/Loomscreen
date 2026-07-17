@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// Raw system-state signals that drive the performance policy. Every value is
 /// the *ungated* reading (e.g. the detector's raw "is occluded", not already

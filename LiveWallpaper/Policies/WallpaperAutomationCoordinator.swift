@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 @MainActor
 final class WallpaperAutomationCoordinator {

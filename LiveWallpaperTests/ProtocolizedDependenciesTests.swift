@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import LiveWallpaperCore
+import os
 import SwiftUI
 import Testing
 @testable import LiveWallpaper
@@ -294,7 +296,7 @@ struct ProtocolizedDependenciesTests {
         let store = WallpaperConfigurationStore(persistence: persistence)
         let lifecycleChecks = LockedCounter()
         let notificationCount = LockedCounter()
-        var lifecycleActive = true
+        let lifecycleActive = OSAllocatedUnfairLock(initialState: true)
         let coordinator = PlaybackCoordinator(
             configurationStore: store,
             playableVideoLoader: loader,
@@ -308,7 +310,7 @@ struct ProtocolizedDependenciesTests {
             originReconciler: PreservingOriginReconciler(),
             isRuntimeInstallationAllowed: {
                 lifecycleChecks.increment()
-                return lifecycleActive
+                return lifecycleActive.withLock { $0 }
             },
             notifyConfigurationChanged: { _ in notificationCount.increment() }
         )
@@ -321,7 +323,7 @@ struct ProtocolizedDependenciesTests {
             await loader.pendingValidationCount == 1
         }
 
-        lifecycleActive = false
+        lifecycleActive.withLock { $0 = false }
         await loader.resumeAllValidations()
         try await Self.waitUntil(timeout: .seconds(2)) {
             lifecycleChecks.value >= 2

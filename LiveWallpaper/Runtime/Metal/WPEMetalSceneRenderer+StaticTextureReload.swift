@@ -1,5 +1,6 @@
 #if !LITE_BUILD
     import AppKit
+    import LiveWallpaperCore
 
     extension WPEMetalSceneRenderer {
         /// Reload an evicted static texture off the main thread, then republish on the

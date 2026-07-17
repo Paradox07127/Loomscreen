@@ -1,4 +1,5 @@
 import SwiftUI
+import LiveWallpaperCore
 
 /// Network widget — ported from the mock's `net_s` / `net_m`
 /// (`.claude/plan/monitor-design/index.html`). A mirrored dual-area scope where

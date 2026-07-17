@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// Owns the Wallpaper Engine import flow on top of `WPEImportTracker` and the
 /// `WallpaperEngineImportService` / `WPECachedContentResolver` pair.

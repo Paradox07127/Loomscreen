@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperCore
 
 /// WPE fields surfaced in the Installed inspector, read from the item's bundled
 /// `project.json`. Purely local — never spends a Steam Web API request.

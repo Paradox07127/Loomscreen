@@ -1,9 +1,9 @@
 import SwiftUI
 import Combine
+import LiveWallpaperCore
 import Observation
 
 extension ScreenManager {
-    // MARK: - Observers Setup
     func setupPowerMonitoring() {
         powerMonitor.powerSourcePublisher
             .sink { [weak self] powerSource in
@@ -225,7 +225,6 @@ extension ScreenManager {
         refreshPerformancePolicyForAllScreens()
     }
 
-    // MARK: - Power Management
     /// Power changes no longer carry their own play/pause logic — they fold
     /// into the effective performance profile like every other condition, so a
     /// single refresh applies the unified decision (`userIntendsToPlay` for
@@ -416,7 +415,6 @@ extension ScreenManager {
         refreshPerformancePolicyForAllScreens()
     }
     
-    // MARK: - System Events
     private func handleSystemSleep() {
         Logger.info("System sleep detected", category: .lifecycle)
         setUserAbsence(.systemSleep, present: true)
