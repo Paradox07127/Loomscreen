@@ -13,6 +13,10 @@ import Testing
 /// heuristic. These probes exercise the signed Metal host but deliberately do
 /// not change the production decision: dynamic shader/script/video/audio/
 /// particle families remain continuous until the whole-corpus oracle exists.
+///
+/// Metal/GPU-bound: renders real frames and reads them back, so it hangs on the
+/// headless CI runners. Keep it OUT of `fast_app_contract_tests.sh` (the
+/// hardware-free required shard) — it runs in the opt-in Pro Metal job instead.
 @MainActor
 @Suite("RR-03 renderer liveness lock", .serialized)
 struct RR03RendererLivenessLockTests {

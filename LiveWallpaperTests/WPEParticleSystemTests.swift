@@ -338,6 +338,37 @@ struct WPEParticleSystemTests {
         #expect(def.angularDrag == 0.2)
     }
 
+    /// A bare `velocityrandom`/`angularvelocityrandom`/`rotationrandom` (no
+    /// `min`/`max`) must take the reference engine defaults, not zero — else the
+    /// 8 corpus scenes that author bare `angularvelocityrandom` (torchembers,
+    /// fireworks2stars, wildfireembers) render frozen embers instead of spinning.
+    /// Values verified against `WPParticleParser.cpp` `VecRandom` per-operator seeds.
+    @Test("Bare random initializers seed engine defaults, not zero")
+    func bareRandomInitializersTakeEngineDefaults() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "initializer": [
+                {"name": "velocityrandom"},
+                {"name": "angularvelocityrandom"},
+                {"name": "rotationrandom"}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        // velocityrandom: x,y ∈ [-32,32], z = 0
+        #expect(def.velocityMin == SIMD3<Double>(-32, -32, 0))
+        #expect(def.velocityMax == SIMD3<Double>(32, 32, 0))
+        // angularvelocityrandom: z ∈ [-5,5] (the only axis the 2D renderer reads)
+        #expect(def.angularVelocityMin.z == -5)
+        #expect(def.angularVelocityMax.z == 5)
+        // rotationrandom: z max = 2π (x/y stay 0)
+        #expect(def.rotationMax.z == 2 * .pi)
+        #expect(def.rotationMax.x == 0)
+        #expect(def.rotationMax.y == 0)
+    }
+
     /// `ropetrail` must NOT join the whole particle chain into one ribbon: its
     /// particles spawn at random points (`boxrandom` over 360×360), so threading
     /// them draws a random zigzag. RenderDoc on 3448877775 shows each meteor owns

@@ -1010,8 +1010,12 @@ public enum WPEParticleDefinitionParser {
                         sizeMin = v; sizeMax = v
                     }
                 case "velocityrandom":
-                    velocityMin = WPEValueParser.vector3(entry["min"]) ?? velocityMin
-                    velocityMax = WPEValueParser.vector3(entry["max"]) ?? velocityMax
+                    // Reference `WPParticleParser.cpp`: the operator seeds x,y ∈
+                    // [-32,32], z=0 — an absent `min`/`max` keeps that default, NOT
+                    // zero. (Inert on the current corpus: all 120 uses author both
+                    // bounds; kept for reference-parity, like turbulentvelocityrandom.)
+                    velocityMin = WPEValueParser.vector3(entry["min"]) ?? SIMD3(-32, -32, 0)
+                    velocityMax = WPEValueParser.vector3(entry["max"]) ?? SIMD3(32, 32, 0)
                 case "velocity":
                     if let v = WPEValueParser.vector3(entry["value"]) {
                         velocityMin = v; velocityMax = v
@@ -1033,15 +1037,18 @@ public enum WPEParticleDefinitionParser {
                         alphaMin = v; alphaMax = v
                     }
                 case "rotationrandom":
-                    // WPE default range for `rotationrandom` is (0,0,0)..
-                    // (2π,2π,2π) when min/max are absent — the runtime
-                    // wants a full random rotation, not a flat zero.
-                    let fallbackMax = SIMD3<Double>(2 * .pi, 2 * .pi, 2 * .pi)
+                    // Reference `WPParticleParser.cpp`: default max is (0,0,2π) —
+                    // only z spins, x/y stay 0. (x/y are inert here anyway: the 2D
+                    // renderer consumes only `.z`.)
                     rotationMin = WPEValueParser.vector3(entry["min"]) ?? SIMD3(0, 0, 0)
-                    rotationMax = WPEValueParser.vector3(entry["max"]) ?? fallbackMax
+                    rotationMax = WPEValueParser.vector3(entry["max"]) ?? SIMD3(0, 0, 2 * .pi)
                 case "angularvelocityrandom":
-                    angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? angularVelocityMin
-                    angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? angularVelocityMax
+                    // Reference `WPParticleParser.cpp`: the operator seeds z ∈ [-5,5]
+                    // (x/y=0) — an absent `min`/`max` keeps that, NOT zero. Live:
+                    // torchembers / fireworks2stars / wildfireembers author it bare
+                    // and must spin.
+                    angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? SIMD3(0, 0, -5)
+                    angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? SIMD3(0, 0, 5)
                 case "turbulentvelocityrandom":
                     // Absent fields take the reference-renderer engine defaults
                     // (speed 100…250, scale 1, timescale 1, phase 0…0.1, forward +Y,

@@ -290,6 +290,9 @@
             let frameSource = try RepositoryRoot.source(
                 "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift"
             )
+            let frameContextSource = try RepositoryRoot.source(
+                "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+FrameContext.swift"
+            )
             let scriptSource = try RepositoryRoot.source(
                 "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Scripts.swift"
             )
@@ -398,8 +401,10 @@
                 owner: "scene-script runtime teardown",
                 ["sceneScriptSharedState = nil", "lastStableScriptTransforms = LiveScriptTransforms()"]
             )
-            #expect(frameSource.contains("previousPointer = pointer"))
-            #expect(frameSource.contains("lastRuntimeUniforms = uniforms"))
+            // Pointer/uniform state-persistence writes live in `sampleFrameContext`,
+            // which sits in the +FrameContext.swift split-off.
+            #expect(frameContextSource.contains("previousPointer = pointer"))
+            #expect(frameContextSource.contains("lastRuntimeUniforms = uniforms"))
             // M2c1b-3c: the rebuild's generation gating and loading-set cleanup
             // moved into the render actor's named entry; the schedule site only
             // admits + dispatches. Same intent, split across the two sources.

@@ -26,7 +26,6 @@ SUITES=(
   MonitorUsagePresentationCharacterizationTests
   PIISanitizerTests
   RepositoryRootTests
-  RR03RendererLivenessLockTests
   SchemeEnvironmentContractTests
   SecurityScopedBookmarkResolverTests
   SteamCMDDoctorBoundaryCharacterizationTests
