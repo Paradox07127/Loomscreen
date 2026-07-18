@@ -140,7 +140,8 @@ struct WPESceneScriptContainmentCharacterizationTests {
 
         for seam in [
             "sceneScriptLoadState.begin(generation: generation)",
-            "performLoad(scriptLoadToken: scriptLoadToken)",
+            // M2c1b-3c: performLoad carries the render-actor isolation parameter.
+            "performLoad(scriptLoadToken: scriptLoadToken, on: actor)",
             "WPESceneScriptInstanceInventory(document: document)",
             "scriptLoadToken.prepare(scriptInventory)",
             "checkCurrentSceneScriptLoad(scriptLoadToken)",
@@ -197,14 +198,14 @@ struct WPESceneScriptContainmentCharacterizationTests {
         #expect(load.contains("prepareSceneScriptsForFirstFrame("))
         #expect(load.contains("await shaderWarm"))
         let loadCommit = try #require(load.range(of: "try finishSceneScriptLoadVideoCommands("))
-        let firstRender = try #require(load.range(of: "outputTexture = try renderCurrentFrame()"))
+        let firstRender = try #require(load.range(of: "outputTexture = try renderCurrentFrame(inputs: makeFrameInputs())"))
         let firstFrameRegion = String(load[loadCommit.lowerBound ..< firstRender.upperBound])
         let shaderAwait = try #require(firstFrameRegion.range(of: "await shaderWarm"))
         let currentCheck = try #require(
             firstFrameRegion.range(of: "try checkCurrentSceneScriptLoad(scriptLoadToken)")
         )
         let prepare = try #require(firstFrameRegion.range(of: "prepareSceneScriptsForFirstFrame("))
-        let render = try #require(firstFrameRegion.range(of: "outputTexture = try renderCurrentFrame()"))
+        let render = try #require(firstFrameRegion.range(of: "outputTexture = try renderCurrentFrame(inputs: makeFrameInputs())"))
         #expect(shaderAwait.lowerBound < currentCheck.lowerBound)
         #expect(currentCheck.lowerBound < prepare.lowerBound)
         #expect(prepare.lowerBound < render.lowerBound)
@@ -363,9 +364,18 @@ struct WPESceneScriptContainmentCharacterizationTests {
         let containment = try RR10ProductionSource.read(
             "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+ScriptContainment.swift"
         )
-        #expect(phase.contains("self.isCurrentSceneScriptLoad(scriptLoadToken)"))
-        #expect(phase.contains("self.introPhaseSource === intro"))
-        #expect(phase.contains("self.loopPhaseSource === loop"))
+        // M2c1b-3c: the measurement's publication gate moved into the render
+        // actor's `applyIntroLoopOffset` — same identity intent, one funnel: a
+        // reload/invalidate bumps `introPhaseToken` (and sources are only ever
+        // (re)assigned alongside a token that was captured after them), so a
+        // stale measurement can never publish. The script-load token is checked
+        // there too, covering the failed/retired-setup half.
+        let renderActorSource = try RR10ProductionSource.read(
+            "LiveWallpaper/Runtime/Metal/RenderThread/WPEDisplayRenderActor.swift"
+        )
+        #expect(phase.contains("await actor.applyIntroLoopOffset(offset, token: token, scriptLoadToken: scriptLoadToken)"))
+        #expect(renderActorSource.contains("renderer.introPhaseToken == token"))
+        #expect(renderActorSource.contains("renderer.isCurrentSceneScriptLoad(scriptLoadToken)"))
         #expect(phase.contains("introPhaseToken &+= 1"))
         #expect(containment.contains("invalidateIntroPhaseAlign()"))
     }
@@ -777,6 +787,45 @@ struct WPESceneScriptContainmentCharacterizationTests {
             governor.tryAcquire(for: hotRenderer, in: hotEpoch)
         )
         hotPermit.release()
+    }
+
+    /// Regression for the multi-display starvation: a heavy scene's dozens of live
+    /// scripts flood the shared pool's queue first every frame, so under the old
+    /// global-FIFO admission a lightly-scripted display's tick sat permanently
+    /// behind them and its scripted content stuck at a few FPS. Max-min fair
+    /// admission must let the light renderer's tick through within a frame or two,
+    /// regardless of the heavy renderer reserving first each frame.
+    @Test("Heavy renderer flooding the queue first cannot starve a light renderer")
+    func heavyDomainCannotStarveLightDomainAcrossFrames() throws {
+        let governor = WPESceneScriptExecutionGovernor(limit: 4)
+        let heavy = (0 ..< 12).map { _ in governor.makeParticipant() }
+        let light = governor.makeParticipant()
+        let heavyDomain: UInt64 = 30_001
+        let lightDomain: UInt64 = 30_002
+
+        var lightServedFrame: Int?
+        for frame in 0 ..< 8 {
+            let heavyEpoch = WPESceneScriptTraversalEpoch.next(domainID: heavyDomain)
+            let lightEpoch = WPESceneScriptTraversalEpoch.next(domainID: lightDomain)
+            var held: [WPESceneScriptExecutionGovernor.Permit] = []
+            // Heavy renderer floods the queue first every frame.
+            for participant in heavy {
+                if let permit = governor.tryAcquire(for: participant, in: heavyEpoch) {
+                    held.append(permit)
+                }
+            }
+            // Light renderer's single tick probes after the flood.
+            if let permit = governor.tryAcquire(for: light, in: lightEpoch) {
+                if lightServedFrame == nil { lightServedFrame = frame }
+                permit.release()
+            }
+            governor.completeTraversal(heavyEpoch)
+            governor.completeTraversal(lightEpoch)
+            // Frame end: the in-flight evaluations return their permits.
+            for permit in held { permit.release() }
+        }
+        let served = try #require(lightServedFrame, "light renderer was starved for 8 frames")
+        #expect(served <= 2)
     }
 
     @Test("Out-of-order and completed epochs cannot roll participant liveness back")

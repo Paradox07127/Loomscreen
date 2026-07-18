@@ -57,7 +57,13 @@ final class WPEEngineAssetsLibrary {
         }
 
         do {
-            let bookmarkData = try Self.createReadOnlyBookmark(for: engineRoot)
+            // Bookmark exactly what the panel granted, not `engineRoot`: when the
+            // user drills into `assets/` itself, `engineRoot` is its parent via
+            // `deletingLastPathComponent()` — a URL the panel never authorized —
+            // and `.withSecurityScope` bookmark creation on it always threw.
+            // `validatedEngineRoot`/`hasAssetsSubdirectory` already normalize
+            // either form back to a usable root on the read side (below).
+            let bookmarkData = try Self.createReadOnlyBookmark(for: selectedURL)
             // A manual link supersedes any prior downloaded install — drop the
             // managed marker so `resolveAuthorizedRoot` honors the new folder.
             SettingsManager.shared.wpeEngineAssetsManagedBuildID = nil
@@ -196,8 +202,15 @@ extension WPEEngineAssetsLibrary {
                     "Wallpaper Engine assets bookmark is stale; refreshing in place",
                     category: .fileAccess
                 )
-                if let fresh = try? Self.createReadOnlyBookmark(for: rootURL) {
-                    SettingsManager.shared.saveWPEEngineAssetsBookmark(fresh)
+                // Re-bookmark `resolution.url` (what was actually granted/resolved),
+                // not `rootURL`: when the original grant was `assets/` itself,
+                // `rootURL` is its parent and re-bookmarking it hits the same
+                // never-authorized-URL failure as the initial grant did. Bookmark
+                // creation needs an active scope on the URL being re-bookmarked.
+                SecurityScopedBookmarkResolver.withScopedAccess(resolution.url) { _ in
+                    if let fresh = try? Self.createReadOnlyBookmark(for: resolution.url) {
+                        SettingsManager.shared.saveWPEEngineAssetsBookmark(fresh)
+                    }
                 }
             }
 

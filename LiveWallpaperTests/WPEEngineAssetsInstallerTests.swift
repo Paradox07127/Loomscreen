@@ -121,6 +121,39 @@ struct WPEEngineAssetsInstallerTests {
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == true)
     }
 
+    @Test("Staging completeness falls back to populated content when the manifest was pruned away")
+    func stagingCompleteFallsBackAfterManifestPrune() throws {
+        // `cleanupSteamCMDAppState` deletes appmanifest_431960.acf and
+        // `commitAndPrune` cuts the tree to assets/ only, so a committed-and-
+        // pruned install legitimately has no manifest left — unlike the
+        // sibling test above, no appmanifest is ever written here.
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Caches/lw-staging-prune-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let installRoot = root.appendingPathComponent("common/wallpaper_engine", isDirectory: true)
+        let assets = installRoot.appendingPathComponent("assets", isDirectory: true)
+
+        // No manifest, no content dirs at all → not complete.
+        #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
+
+        // No manifest, dirs present but empty (interrupted mid-stage) → not complete.
+        for sub in ["materials", "models", "shaders"] {
+            try fm.createDirectory(at: assets.appendingPathComponent(sub), withIntermediateDirectories: true)
+        }
+        #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
+
+        // No manifest, dirs populated → complete via content evidence.
+        for sub in ["materials", "models", "shaders"] {
+            try "x".write(
+                to: assets.appendingPathComponent(sub).appendingPathComponent("noise.bin"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == true)
+    }
+
     @Test("Public buildid parse doesn't fall through to a sibling branch")
     func publicBuildIDDoesNotLeakFromSibling() {
         let appInfo = """

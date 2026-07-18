@@ -20,18 +20,19 @@ struct RR03RendererLivenessLockTests {
     func staticRendererSettlesWithStableHash() async throws {
         let fixture = try RR03LivenessFixture.make(propertyControlled: false)
         defer { fixture.cleanup() }
-        let renderer = try Self.makeRenderer(fixture)
+        let stack = try Self.makeRenderer(fixture)
+        let renderer = stack.renderer
         defer { renderer.cleanup() }
 
-        try await renderer.load()
+        try await stack.load()
 
         #expect(renderer.needsContinuousFrames == false)
-        #expect(renderer.mtkView.isPaused)
-        #expect(renderer.mtkView.enableSetNeedsDisplay)
+        #expect(stack.surface.mtkView.isPaused)
+        #expect(stack.surface.mtkView.enableSetNeedsDisplay)
         let first = try #require(renderer.outputTexture)
         let firstHash = try Self.textureSHA256(first)
         renderer.executor.synchronizeFrameCompletion = true
-        let second = try renderer.renderCurrentFrame()
+        let second = try renderer.renderCurrentFrame(inputs: renderer.makeFrameInputs())
         let secondHash = try Self.textureSHA256(second)
         #expect(firstHash == secondHash)
     }
@@ -40,10 +41,11 @@ struct RR03RendererLivenessLockTests {
     func propertyPatchRedrawsThenSettles() async throws {
         let fixture = try RR03LivenessFixture.make(propertyControlled: true)
         defer { fixture.cleanup() }
-        let renderer = try Self.makeRenderer(fixture)
+        let stack = try Self.makeRenderer(fixture)
+        let renderer = stack.renderer
         defer { renderer.cleanup() }
 
-        try await renderer.load()
+        try await stack.load()
         let visibleHash = try Self.textureSHA256(try #require(renderer.outputTexture))
         renderer.executor.synchronizeFrameCompletion = true
         let patch = WPEScenePropertyPatch(
@@ -56,42 +58,51 @@ struct RR03RendererLivenessLockTests {
         let hiddenHash = try Self.textureSHA256(try #require(renderer.outputTexture))
         #expect(hiddenHash != visibleHash)
         #expect(renderer.needsContinuousFrames == false)
-        #expect(renderer.mtkView.isPaused)
-        #expect(renderer.mtkView.enableSetNeedsDisplay)
+        #expect(stack.surface.mtkView.isPaused)
+        #expect(stack.surface.mtkView.enableSetNeedsDisplay)
     }
 
     @Test("Pointer capture re-arms a settled renderer and disabling it settles again")
     func pointerCaptureRearmsAndSettles() async throws {
         let fixture = try RR03LivenessFixture.make(propertyControlled: false)
         defer { fixture.cleanup() }
-        let renderer = try Self.makeRenderer(fixture)
+        let stack = try Self.makeRenderer(fixture)
+        let renderer = stack.renderer
         defer { renderer.cleanup() }
 
-        try await renderer.load()
-        #expect(renderer.mtkView.isPaused)
+        try await stack.load()
+        #expect(stack.surface.mtkView.isPaused)
 
         renderer.setClickCaptureEnabled(true)
         #expect(renderer.needsContinuousFrames)
-        #expect(renderer.mtkView.isPaused == false)
-        #expect(renderer.mtkView.enableSetNeedsDisplay == false)
+        #expect(stack.surface.mtkView.isPaused == false)
+        #expect(stack.surface.mtkView.enableSetNeedsDisplay == false)
 
         renderer.setClickCaptureEnabled(false)
         #expect(renderer.needsContinuousFrames == false)
-        #expect(renderer.mtkView.isPaused)
-        #expect(renderer.mtkView.enableSetNeedsDisplay)
+        #expect(stack.surface.mtkView.isPaused)
+        #expect(stack.surface.mtkView.enableSetNeedsDisplay)
     }
 
-    private static func makeRenderer(_ fixture: RR03LivenessFixture) throws -> WPEMetalSceneRenderer {
+    /// Test stack: the renderer plus the surface it renders into and the actor its
+    /// async load runs on. Built from the surface's Sendable seams (mirroring the
+    /// production builder) so the test can inspect the view's pacing directly.
+    private static func makeRenderer(_ fixture: RR03LivenessFixture) throws -> RR03RendererStack {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        return try WPEMetalSceneRenderer(
+        let surface = WPERenderSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64), device: device)
+        let renderer = try WPEMetalSceneRenderer(
             descriptor: fixture.descriptor,
             cacheRootURL: fixture.root,
             projectManifestRootURL: fixture.root,
             dependencyMounts: [],
-            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            surfaceControl: surface,
+            mailbox: surface.mailbox,
+            presentLayer: WPEPresentLayer(layer: surface.metalLayer),
+            drawableSize: surface.metalLayer.drawableSize,
             device: device,
             pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
         )
+        return RR03RendererStack(renderer: renderer, surface: surface, actor: WPEDisplayRenderActor(backing: .main))
     }
 
     private static func textureSHA256(_ texture: MTLTexture) throws -> String {
@@ -107,6 +118,21 @@ struct RR03RendererLivenessLockTests {
         return SHA256.hash(data: Data(bytes))
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+}
+
+/// Renderer + its surface + the render actor its async load runs on.
+@MainActor
+private struct RR03RendererStack {
+    let renderer: WPEMetalSceneRenderer
+    let surface: WPERenderSurface
+    let actor: WPEDisplayRenderActor
+
+    /// Adopt the renderer into the actor (via the one-shot handoff carrier, as the
+    /// production builder does) and run the load on it.
+    func load() async throws {
+        await actor.adopt(WPERendererHandoff(renderer: renderer).renderer)
+        try await actor.load()
     }
 }
 

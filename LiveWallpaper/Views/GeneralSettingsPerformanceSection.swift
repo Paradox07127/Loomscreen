@@ -48,6 +48,24 @@ extension GeneralSettingsView {
                     .accessibilityLabel(Text("Reduce frame rate when covered"))
                     .accessibilityHint(Text("Lower the frame rate when windows cover the desktop or on battery, to save power"))
             }
+
+            SettingRow(
+                icon: "cpu",
+                iconColor: .indigo,
+                title: "Multithreaded rendering",
+                subtitle: "Render each display on its own thread for smoother playback",
+                info: "Each display gets its own render thread, moving frame work off the main thread for smoother playback. Turn this off to render on the main thread — only needed for troubleshooting. Changing it reloads your wallpapers. Affects scene (Wallpaper Engine) wallpapers."
+            ) {
+                // The flag is read once when each session is built, so a live
+                // toggle must rebuild sessions to take effect — reloadAllScreens
+                // tears down and restores every session, re-reading the flag.
+                Toggle("", isOn: $offMainRenderEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: offMainRenderEnabled) { _, _ in screenManager.reloadAllScreens() }
+                    .accessibilityLabel(Text("Multithreaded rendering"))
+                    .accessibilityHint(Text("Render each display on its own thread for smoother playback"))
+            }
             #endif
 
             SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode") {

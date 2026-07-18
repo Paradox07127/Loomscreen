@@ -410,7 +410,7 @@ struct WPESceneCustomSettingsCard: View {
             sliderDebounceTasks[key] = nil
             // Read the live descriptor so concurrent slider drags converge on
             // the latest accumulated value rather than a stale snapshot.
-            screenManager.updateSceneDescriptor(descriptor, for: screen)
+            await screenManager.updateSceneDescriptor(descriptor, for: screen)
         }
     }
 
@@ -421,7 +421,7 @@ struct WPESceneCustomSettingsCard: View {
         // `descriptor` is updated immediately on each drag.
         cancelPendingSliderApplies()
         descriptor = next
-        screenManager.updateSceneDescriptor(next, for: screen)
+        Task { @MainActor in await screenManager.updateSceneDescriptor(next, for: screen) }
     }
 
     private func cancelPendingSliderApplies() {
@@ -433,7 +433,7 @@ struct WPESceneCustomSettingsCard: View {
     private func flushPendingSliderApply() {
         guard !sliderDebounceTasks.isEmpty else { return }
         cancelPendingSliderApplies()
-        screenManager.updateSceneDescriptor(descriptor, for: screen)
+        Task { @MainActor in await screenManager.updateSceneDescriptor(descriptor, for: screen) }
     }
 
 }

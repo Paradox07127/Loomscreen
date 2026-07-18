@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreText
 import Foundation
 import Metal
+import os
 
 struct WPEMSDFGlyphKey: Hashable {
     let fontID: String
@@ -23,8 +24,17 @@ struct WPEMSDFAtlasEntry {
     let metrics: WPEMSDFGlyphMetrics
 }
 
-@MainActor
+// Not `@MainActor` (M2c1b-3c): the atlas is owned and queried inside the
+// renderer's actor isolation. Off-thread glyph generation used to complete via
+// `MainActor.run`; it now writes each result into a `Sendable` lock-box that the
+// render actor harvests on its next query (`harvestCompletedGenerations`).
 final class WPEMSDFAtlas {
+    /// Result channel for one off-thread glyph generation.
+    private enum GlyphGenerationOutcome: Sendable {
+        case pending
+        case done(GeneratedGlyph?)
+    }
+
     private struct SkylineNode {
         var x: Int
         var y: Int
@@ -191,6 +201,9 @@ final class WPEMSDFAtlas {
     private let maxConcurrentGenerations = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
     private var activeGenerations = 0
     private var queuedGenerations: [GlyphGenerationRequest] = []
+    /// In-flight off-thread generations, keyed by glyph. Each work item writes its
+    /// result into the box; `harvestCompletedGenerations()` folds completed ones in.
+    private var generationBoxes: [WPEMSDFGlyphKey: OSAllocatedUnfairLock<GlyphGenerationOutcome>] = [:]
 
     /// Monotonic atlas epoch, bumped every time a page's pixels are reset
     /// (`evict`). A cached draw payload (#4) records the epoch it was built at;
@@ -231,6 +244,7 @@ final class WPEMSDFAtlas {
 
     /// Cache-only lookup (no generation). Cheap; safe to call every frame.
     func cachedEntry(for key: WPEMSDFGlyphKey) -> WPEMSDFAtlasEntry? {
+        harvestCompletedGenerations()
         if let cached = entries[key], let page = page(for: cached.page) {
             touch(page)
             return cached
@@ -270,16 +284,36 @@ final class WPEMSDFAtlas {
             // The scene-load warm-up is user-visible latency, not background
             // housekeeping — `.userInitiated` (not `.utility`) keeps these glyph
             // generations from being starved behind decode/video work.
-            Task.detached(priority: .userInitiated) { [request, weak self] in
+            //
+            // The work item captures only Sendable values (the request + its result
+            // box), never `self`: it generates off-thread and writes into the box.
+            // The render actor folds it in via `harvestCompletedGenerations()`.
+            let box = OSAllocatedUnfairLock<GlyphGenerationOutcome>(initialState: .pending)
+            generationBoxes[request.key] = box
+            Task.detached(priority: .userInitiated) { [request, box] in
                 let generated = request.generator.generate(
                     glyph: request.key.glyph,
                     font: request.font,
                     maxCellSide: request.maxCellSide
                 ).map { GeneratedGlyph(bitmap: $0.bitmap, metrics: $0.metrics) }
-                await MainActor.run { [weak self] in
-                    self?.completeGeneration(generated, for: request.key)
-                }
+                box.withLock { $0 = .done(generated) }
             }
+        }
+    }
+
+    /// Folds any completed off-thread glyph generations into the atlas. Runs on the
+    /// render actor at each query, replacing the old `MainActor.run` completion hop.
+    private func harvestCompletedGenerations() {
+        guard !generationBoxes.isEmpty else { return }
+        var completed: [(WPEMSDFGlyphKey, GeneratedGlyph?)] = []
+        for (key, box) in generationBoxes {
+            if case .done(let generated) = box.withLock({ $0 }) {
+                completed.append((key, generated))
+            }
+        }
+        for (key, generated) in completed {
+            generationBoxes.removeValue(forKey: key)
+            completeGeneration(generated, for: key)
         }
     }
 

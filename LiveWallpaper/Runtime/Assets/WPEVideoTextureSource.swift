@@ -21,7 +21,9 @@ import QuartzCore
 /// Lifecycle: the player stays paused after `init`; the renderer's
 /// `applyPerformanceProfile(currentProfile)` (called once textures finish
 /// loading) decides whether to start it, respecting a pre-load `.suspended`.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): created and pulled inside the renderer's actor
+// isolation. Frame delivery is pull-based (`texture(at:)` copies the newest
+// pixel buffer synchronously), so there is no cross-thread completion to re-home.
 final class WPEVideoTextureSource {
     private let textureCache: CVMetalTextureCache
     private let player: AVQueuePlayer
@@ -409,7 +411,6 @@ extension WPEVideoTextureSource: WPEDynamicTextureSource {}
 /// 32BGRA so the existing `CVMetalTextureCacheCreateTextureFromImage` path
 /// (`.bgra8Unorm[_srgb]`) is unchanged.
 @available(macOS 15.0, *)
-@MainActor
 private final class WPEPlayerLevelVideoOutput {
     private let output: AVPlayerVideoOutput
     private weak var player: AVQueuePlayer?

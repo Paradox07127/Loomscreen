@@ -43,6 +43,7 @@ enum OwnershipFixture {
             "showAppExceptions",
             "videoCacheBudgetMB",
             "adaptiveFrameRateEnabled",
+            "offMainRenderEnabled",
         ],
         .audio: [
             "audioResponseEnabled",

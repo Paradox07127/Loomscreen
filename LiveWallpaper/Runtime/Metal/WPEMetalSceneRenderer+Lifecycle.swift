@@ -8,11 +8,11 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Reload & scene property patching
 
-    func reload() async throws {
+    func reload(on actor: isolated WPEDisplayRenderActor) async throws {
         WPESceneScriptExecutionGovernor.processShared.forgetDomain(domainID: sceneScriptTraversalDomainID)
         sceneScriptLoadState.retireCurrent()
         didLoad = false
-        let staticTextureReloadDrain = staticTextureReloadTaskOwner.quiesce()
+        let staticTextureReloadDrain = await staticTextureReloadTaskOwner.quiesce()
         loadGeneration &+= 1
         await staticTextureReloadDrain.wait()
         finishAllPendingLivePosterCaptures(image: nil)
@@ -57,7 +57,7 @@ extension WPEMetalSceneRenderer {
         lastFramePipeline = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()
-        try await load()
+        try await load(on: actor)
     }
 
     /// Applies a project-property change in place when every changed binding is
@@ -184,13 +184,13 @@ extension WPEMetalSceneRenderer {
             // below is inert and even a forced draw() re-presents the cached
             // outputTexture. Render the patched pipeline once here so the toggle
             // shows immediately instead of waiting for an unrelated live trigger.
-            if !needsContinuousFrames, let frame = try? renderCurrentFrame() {
+            if !needsContinuousFrames, let frame = try? renderCurrentFrame(inputs: makeFrameInputs()) {
                 outputTexture = frame
-                mtkView.draw()
+                surfaceControl.drawImmediately()
                 return true
             }
         }
-        mtkView.setNeedsDisplay(mtkView.bounds)
+        surfaceControl.setNeedsRedraw()
         return true
     }
 
@@ -210,7 +210,7 @@ extension WPEMetalSceneRenderer {
                 system.clearLiveParticles()
             }
             // Re-present so the cleared state shows at once even if the scene is paused.
-            mtkView.setNeedsDisplay(mtkView.bounds)
+            surfaceControl.setNeedsRedraw()
         }
         refreshLiveness()
     }
@@ -222,12 +222,12 @@ extension WPEMetalSceneRenderer {
         guard mode != presentFitMode else { return }
         presentFitMode = mode
         if !needsContinuousFrames, outputTexture != nil {
-            mtkView.draw()
+            surfaceControl.drawImmediately()
         }
     }
 
     func setClickCaptureEnabled(_ enabled: Bool) {
-        mtkView.clickCaptureEnabled = enabled
+        surfaceControl.setClickCaptureEnabled(enabled)
         refreshLiveness()
     }
 
@@ -236,8 +236,10 @@ extension WPEMetalSceneRenderer {
     /// previously-static scene (and turning them off lets it re-pause).
     private func refreshLiveness() {
         guard currentProfile == .quality else { return }
-        mtkView.isPaused = !needsContinuousFrames
-        mtkView.enableSetNeedsDisplay = !needsContinuousFrames
+        surfaceControl.applyPacing(WPERenderPacingUpdate(
+            isPaused: !needsContinuousFrames,
+            enableSetNeedsDisplay: !needsContinuousFrames
+        ))
     }
 
     /// Applies the user-selected frame rate ceiling. `.unlimited` falls
@@ -259,7 +261,7 @@ extension WPEMetalSceneRenderer {
 
     /// The user ceiling, optionally halved (floored at `adaptiveThrottleFloorFPS`,
     /// never above the ceiling) while the adaptive background throttle is active.
-    private var effectiveFPS: Int {
+    var effectiveFPS: Int {
         guard adaptiveThrottleActive else { return userPreferredFPS }
         return min(userPreferredFPS, max(Self.adaptiveThrottleFloorFPS, userPreferredFPS / 2))
     }
@@ -268,7 +270,7 @@ extension WPEMetalSceneRenderer {
     /// next `.quality` transition (mirrors `setFrameRateLimit`'s old guard).
     private func applyEffectiveFrameRate() {
         guard currentProfile != .suspended else { return }
-        mtkView.preferredFramesPerSecond = effectiveFPS
+        surfaceControl.applyPacing(WPERenderPacingUpdate(preferredFramesPerSecond: effectiveFPS))
     }
 
     func setAdaptiveFrameRateThrottle(_ active: Bool) {
@@ -335,7 +337,7 @@ extension WPEMetalSceneRenderer {
             && cameraParallaxSettings.enabled
             && cameraParallaxSettings.amount != 0
             && cameraParallaxSettings.mouseInfluence != 0)
-            || mtkView.clickCaptureEnabled
+            || mailbox.read().clickCaptureEnabled
     }
 
     /// A pass animates per-frame when its shader samples `g_Time` /
@@ -357,17 +359,18 @@ extension WPEMetalSceneRenderer {
         dynamicTextureSources.values.forEach { $0.applyPerformanceProfile(profile) }
         switch profile {
         case .quality:
-            mtkView.isPaused = !needsContinuousFrames
-            mtkView.enableSetNeedsDisplay = !needsContinuousFrames
-            mtkView.preferredFramesPerSecond = effectiveFPS
+            surfaceControl.applyPacing(WPERenderPacingUpdate(
+                isPaused: !needsContinuousFrames,
+                enableSetNeedsDisplay: !needsContinuousFrames,
+                preferredFramesPerSecond: effectiveFPS
+            ))
             // Restart scene audio that a prior `.suspended` paused. No-op when
             // audio never started (deferred startup) or is already running.
             soundRuntime?.resume()
         case .suspended:
             WPESceneScriptExecutionGovernor.processShared.cancelReservations(domainID: sceneScriptTraversalDomainID)
-            mtkView.isPaused = true
-            mtkView.enableSetNeedsDisplay = true
-            mtkView.releaseDrawables()
+            surfaceControl.applyPacing(WPERenderPacingUpdate(isPaused: true, enableSetNeedsDisplay: true))
+            surfaceControl.releaseDrawables()
             // Pause the audio engine + FFT tap so a suspended wallpaper costs no
             // audio CPU; the decoded PCM stays resident for an instant resume.
             soundRuntime?.pause()
@@ -381,14 +384,16 @@ extension WPEMetalSceneRenderer {
         WPESceneScriptExecutionGovernor.processShared.forgetDomain(domainID: sceneScriptTraversalDomainID)
         sceneScriptLoadState.retireCurrent()
         didLoad = false
-        _ = staticTextureReloadTaskOwner.quiesce()
+        // Owner is an actor now; quiesce fire-and-forget from this sync teardown.
+        // It cancels in-flight reload tasks; the discarded Drain isn't awaited.
+        Task { [owner = staticTextureReloadTaskOwner] in _ = await owner.quiesce() }
         loadGeneration &+= 1
         finishAllPendingLivePosterCaptures(image: nil)
         deferredAudioStartupTask?.cancel()
         deferredAudioStartupTask = nil
         pendingAudioStartupDocument = nil
         hasPresentedFrame = false
-        mtkView.delegate = nil
+        surfaceControl.detach()
         outputTexture = nil
         lastFramePipeline = nil
         scenePropertyBindings = [:]
@@ -425,6 +430,9 @@ extension WPEMetalSceneRenderer {
         resolutionTracer.reset()
         executor.releaseTransientResources()
         stopEngineAssetsAccessIfNeeded()
+        #if DEBUG
+        releaseDebugActorIfNeeded()
+        #endif
     }
     nonisolated func stopEngineAssetsAccessIfNeeded() {
         guard let url = activeEngineAssetsRootURL else { return }
@@ -432,22 +440,14 @@ extension WPEMetalSceneRenderer {
         activeEngineAssetsRootURL = nil
     }
 
-    // MARK: - MTKViewDelegate
+    // MARK: - Frame production (driven by the surface's `draw(in:)`)
 
-    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-
-    nonisolated func draw(in view: MTKView) {
-        MainActor.assumeIsolated { [weak self] in
-            self?.drawOnMainActor(in: view)
-        }
-    }
-
-    private func drawOnMainActor(in view: MTKView) {
+    func renderAndPresentFrame() {
         guard didLoad else { return }
         do {
             let textureToPresent: MTLTexture?
             if needsContinuousFrames {
-                let frame = try renderCurrentFrame()
+                let frame = try renderCurrentFrame(inputs: makeFrameInputs())
                 outputTexture = frame
                 textureToPresent = frame
             } else {
@@ -460,7 +460,7 @@ extension WPEMetalSceneRenderer {
             do {
                 presented = try executor.present(
                     texture: texture,
-                    in: view,
+                    layer: metalLayer.layer,
                     fitMode: presentFitMode,
                     presentCompletion: presentCompletion
                 )

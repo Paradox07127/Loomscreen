@@ -447,7 +447,7 @@ extension ScreenManager {
     /// Restarts the wallpaper session so the renderer picks up the new
     /// overrides — there's no in-place apply seam on the WPE runtimes yet,
     /// the way HTML has `applyHTMLConfig`.
-    func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) {
+    func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) async {
         guard !isTerminating else { return }
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         guard case .scene(let current) = configuration.activeWallpaper,
@@ -459,16 +459,17 @@ extension ScreenManager {
         #if !LITE_BUILD
         // Fast path: if every changed property is incrementally applicable
         // (e.g. a visibility toggle), patch the live renderer instead of a full
-        // reload. Falls through to the reload path when the renderer can't.
+        // reload. Falls through to the reload path when the renderer can't. The
+        // bindings read and patch both hop to the render actor (M2c1b-3c).
         if let sceneSession = screen.runtimeSession as? SceneWallpaperSession {
-            let bindings = sceneSession.scenePropertyBindings
+            let bindings = await sceneSession.scenePropertyBindings()
             if !bindings.isEmpty {
                 let patch = WPEScenePropertyPatch(
                     bindingsByProperty: bindings,
                     oldValues: effectiveSceneValues(for: current, origin: configuration.wpeOrigin),
                     newValues: effectiveSceneValues(for: descriptor, origin: configuration.wpeOrigin)
                 )
-                if sceneSession.applyScenePropertyPatch(patch) {
+                if await sceneSession.applyScenePropertyPatch(patch) {
                     configuration.activeWallpaper = .scene(descriptor)
                     configuration.savedSceneDescriptor = descriptor
                     saveConfiguration(configuration)

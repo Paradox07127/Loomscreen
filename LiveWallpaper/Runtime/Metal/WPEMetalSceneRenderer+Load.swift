@@ -7,7 +7,7 @@ import MetalKit
 extension WPEMetalSceneRenderer {
     // MARK: - Load entry point
 
-    func load() async throws {
+    func load(on actor: isolated WPEDisplayRenderActor) async throws {
         guard !didLoad else { return }
         let descriptorSummary = "\(descriptor.workshopID) tier=\(descriptor.capabilityTier.rawValue) entry=\(descriptor.entryFile)"
         WPESceneDebugArtifacts.shared.beginSession(
@@ -27,10 +27,10 @@ extension WPEMetalSceneRenderer {
         invalidateIntroPhaseAlign()
         debugStage("load.begin", descriptorSummary)
         do {
-            try await performLoad(scriptLoadToken: scriptLoadToken)
+            try await performLoad(scriptLoadToken: scriptLoadToken, on: actor)
             try Task.checkCancellation()
             try checkCurrentSceneScriptLoad(scriptLoadToken)
-            staticTextureReloadTaskOwner.resume(generation: generation)
+            await staticTextureReloadTaskOwner.resume(generation: generation)
             loadDiagnostics = nil
             WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
             WPESceneDebugArtifacts.shared.appendLog(
@@ -46,7 +46,7 @@ extension WPEMetalSceneRenderer {
             sceneScriptLoadState.retire(scriptLoadToken)
             if ownedFailedLoad { clearSceneScriptRuntimeState() }
             didLoad = false
-            _ = staticTextureReloadTaskOwner.quiesce()
+            _ = await staticTextureReloadTaskOwner.quiesce()
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
             WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
@@ -137,7 +137,8 @@ extension WPEMetalSceneRenderer {
     // MARK: - Scene construction
 
     private func performLoad(
-        scriptLoadToken: WPESceneScriptInstanceLimitToken
+        scriptLoadToken: WPESceneScriptInstanceLimitToken,
+        on actor: isolated WPEDisplayRenderActor
     ) async throws {
         let id = descriptor.workshopID
 
@@ -264,7 +265,7 @@ extension WPEMetalSceneRenderer {
         // FBO cost change. Kill switch: WPEMetalPerspectiveNativeResolution -bool NO.
         if document.general.usesPerspectiveProjection,
            Self.perspectiveNativeResolutionEnabled {
-            let drawable = mtkView.drawableSize
+            let drawable = surfaceDrawableSize
             let base = cameraUniforms.renderSize
             let cap = CGSize(width: 3840, height: 2160)
             var targetW = min(max(drawable.width, base.width), cap.width)
@@ -306,11 +307,15 @@ extension WPEMetalSceneRenderer {
         // Pre-warm shader transpile off-thread, overlapping the texture/particle/text
         // load below; awaited at the render.firstFrame gate so the first synchronous
         // render() hits the warmed cache instead of paying the lazy transpile inline.
-        async let shaderWarm: Void = prewarmCustomShaders(for: pipeline, textObjects: document.textObjects)
+        // A child task on the actor (not `async let`, which would try to send `self`
+        // into a concurrent child) — it interleaves at the load's suspension points.
+        let shaderWarmTask = Task { [actor] in
+            await actor.prewarmShaders(pipeline: pipeline, textObjects: document.textObjects)
+        }
 
         debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
-        try await loadTextures(for: pipeline)
+        try await loadTextures(for: pipeline, on: actor)
         try checkCurrentSceneScriptLoad(scriptLoadToken)
         indexOnDemandVideoLayers(pipeline: pipeline)
         debugStage("textures.load.done", "loaded=\(loadedTextures.count) dynamic=\(dynamicTextureSources.count)")
@@ -319,7 +324,7 @@ extension WPEMetalSceneRenderer {
 
         debugStage("particles.load", "begin")
         onProgress?("Loading particle systems")
-        await loadParticleSystems(from: document)
+        await loadParticleSystems(from: document, on: actor)
         try checkCurrentSceneScriptLoad(scriptLoadToken)
         debugStage(
             "particles.load.done",
@@ -364,7 +369,7 @@ extension WPEMetalSceneRenderer {
         // Finish seeding the shader cache before the first (synchronous) render() so it
         // hits warmed entries. By now this has overlapped the entire texture/particle/text
         // load above; on heavy scenes the ~1.9s transpile is already absorbed.
-        await shaderWarm
+        await shaderWarmTask.value
         try checkCurrentSceneScriptLoad(scriptLoadToken)
         prepareSceneScriptsForFirstFrame(
             scriptLoadToken,
@@ -380,7 +385,7 @@ extension WPEMetalSceneRenderer {
         // steady-state draw loop switches to async below.
         executor.synchronizeFrameCompletion = true
         let capture = beginGPUCaptureIfRequested()
-        outputTexture = try renderCurrentFrame()
+        outputTexture = try renderCurrentFrame(inputs: makeFrameInputs())
         capture?.stop()
 
         if let outputTexture {
@@ -419,7 +424,7 @@ extension WPEMetalSceneRenderer {
         // (scene-debug / GPU capture / pass dumps) or pinned via WPEMetalSerializeFrames.
         executor.synchronizeFrameCompletion = shouldSynchronizeFrames()
         applyPerformanceProfile(currentProfile)
-        mtkView.setNeedsDisplay(mtkView.bounds)
+        surfaceControl.setNeedsRedraw()
         debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
         // Defer audio startup to the first actual present (handled in draw(in:))
         // so it never blocks the first visible frame. Empty-sound scenes clear
@@ -457,31 +462,15 @@ extension WPEMetalSceneRenderer {
         runtime.setMasterVolume(pendingAudioVolume)
         let generation = loadGeneration
         let workshopID = descriptor.workshopID
+        guard let actor = displayActor else { return }
         deferredAudioStartupTask?.cancel()
-        deferredAudioStartupTask = Task.detached(priority: .userInitiated) { [weak self] in
-            _ = runtime.prepare(sounds: sounds)   // off-main, decodes files; nothing audible yet
-            await MainActor.run {
-                guard let self, !Task.isCancelled, self.loadGeneration == generation else {
-                    // Scene reloaded / torn down while we were preparing. play()
-                    // never ran, so no stale audio leaked; release the engine.
-                    runtime.stop()
-                    return
-                }
-                // Apply the latest mute/volume (may have changed during prepare),
-                // publish the runtime, THEN start playback only if the scene is
-                // still meant to run. A performance policy may have suspended us
-                // during the off-main prepare window — in that case the runtime
-                // stays prepared-but-silent and the next `.quality`/`resume()`
-                // starts it (otherwise audio would leak on a suspended wallpaper).
-                runtime.setMuted(self.pendingAudioMuted)
-                runtime.setMasterVolume(self.pendingAudioVolume)
-                self.soundRuntime = runtime
-                if self.currentProfile == .quality {
-                    if !runtime.play() {
-                        Logger.warning("Scene \(workshopID) deferred audio failed to start (engine.start)", category: .wpeRender)
-                    }
-                }
-            }
+        deferredAudioStartupTask = Task.detached(priority: .userInitiated) { [actor] in
+            _ = runtime.prepare(sounds: sounds)   // off-actor, decodes files; nothing audible yet
+            // Publish + start on the actor. A reload/cleanup during prepare bumps
+            // the generation, so `publishDeferredAudio` releases the engine instead
+            // of leaking stale audio; a policy suspend leaves it prepared-but-silent
+            // until the next `.quality`/`resume()`.
+            await actor.publishDeferredAudio(runtime: runtime, generation: generation, workshopID: workshopID)
         }
     }
 }

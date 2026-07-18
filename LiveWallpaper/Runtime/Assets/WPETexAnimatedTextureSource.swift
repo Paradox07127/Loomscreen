@@ -27,7 +27,7 @@ struct WPETexAnimatedFrame {
 /// the current frame on a per-frame duration timeline (variable-rate safe).
 /// Shader-aware consumers (particle sprite sheets) slice the atlas via
 /// `spriteSheetFrameRectsNormalized()` instead of relying on per-frame crops.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): lives inside the renderer's actor isolation.
 final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
     private let frames: [WPETexAnimatedFrame]
     private let frameStartTimes: [TimeInterval]

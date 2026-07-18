@@ -40,6 +40,8 @@ struct WPESceneScriptRuntimeTests {
         tickBudget: TimeInterval = 0.5,
         nowProviderMillis: (@Sendable () -> Double)? = nil,
         outputMode: WPELayerScriptOutputMode = .layerState,
+        initialVisible: Bool = true,
+        initialAlpha: Double = 1,
         governor: WPESceneScriptExecutionGovernor? = nil
     ) throws -> LiveWallpaper.WPELayerScriptInstance {
         try LiveWallpaper.WPELayerScriptInstance(
@@ -51,6 +53,8 @@ struct WPESceneScriptRuntimeTests {
             tickBudget: tickBudget,
             nowProviderMillis: nowProviderMillis,
             outputMode: outputMode,
+            initialVisible: initialVisible,
+            initialAlpha: initialAlpha,
             governor: governor ?? isolatedGovernor
         )
     }
@@ -349,7 +353,9 @@ struct WPESceneScriptRuntimeTests {
             .deletingLastPathComponent()
             .appendingPathComponent("LiveWallpaper/Runtime/Scene/WPESceneScriptRuntime.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let start = try #require(source.range(of: "@MainActor\nfinal class WPESceneScriptInstance"))
+        // M2c1b-3c: the instance is no longer @MainActor (it ticks on the render
+        // actor); the class declaration alone is the boundary.
+        let start = try #require(source.range(of: "final class WPESceneScriptInstance"))
         let end = try #require(source.range(of: "enum WPESceneScriptError", range: start.upperBound ..< source.endIndex))
         let instanceSource = String(source[start.lowerBound ..< end.lowerBound])
 
@@ -1362,6 +1368,124 @@ struct WPESceneScriptRuntimeTests {
         #expect(fade.alpha == 0.25)
         #expect(fade.alphaAssigned == true)
         #expect(fade.visibleAssigned == false)
+    }
+
+    @Test("Cursor-only visible script keeps its parsed visible:false seed (3212731906 hover text)")
+    func visibleScriptSeedFalsePreservedWhenNeverAssigned() throws {
+        // 3212731906's hover text: a visible-script that only defines cursor
+        // handlers, never assigning thisLayer.visible in init/update. The parsed
+        // `visible:false` seed must survive — the old default forced own.visible
+        // true (and visibleAssigned true), rendering the hover text permanently.
+        let script = """
+        'use strict';
+        export function cursorEnter() { thisLayer.visible = true; }
+        export function cursorLeave() { thisLayer.visible = false; }
+        """
+        let instance = try WPELayerScriptInstance(script: script, initialVisible: false)
+        #expect(instance.initialOutput.own.visibleAssigned == false)
+        #expect(instance.initialOutput.own.visible == false)
+
+        // cursorEnter explicitly assigns → drives visible true.
+        let entered = try #require(instance.dispatchCursorEvent(
+            .enter,
+            pointerFrame: .neutral
+        ))
+        #expect(entered.own.visibleAssigned == true)
+        #expect(entered.own.visible == true)
+
+        // cursorLeave assigns false again → drives hidden.
+        let left = try #require(instance.dispatchCursorEvent(
+            .leave,
+            pointerFrame: .neutral
+        ))
+        #expect(left.own.visibleAssigned == true)
+        #expect(left.own.visible == false)
+    }
+
+    @Test("Visible script that assigns visible=true overrides a false seed")
+    func visibleScriptExplicitAssignmentOverridesSeed() throws {
+        // A script whose init() sets thisLayer.visible = true must SHOW the layer
+        // even though the parsed seed was false — an explicit assignment wins.
+        let script = """
+        'use strict';
+        export function init() { thisLayer.visible = true; }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script, initialVisible: false)
+        #expect(instance.initialOutput.own.visibleAssigned == true)
+        #expect(instance.initialOutput.own.visible == true)
+    }
+
+    @Test("Visible script that never touches alpha keeps the parsed alpha seed")
+    func visibleScriptAlphaSeedPreservedWhenNeverAssigned() throws {
+        // Same clobber family as the visible seed: a layerState-mode script that
+        // never assigns thisLayer.alpha used to report own.alpha=1 with
+        // alphaAssigned=true, overwriting a parsed alpha≠1 on apply.
+        let script = """
+        'use strict';
+        export function init() { thisLayer.visible = true; }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script, initialAlpha: 0.35)
+        #expect(instance.initialOutput.own.alphaAssigned == false)
+        #expect(instance.initialOutput.own.alpha == 0.35)
+        // The tick path preserves the seed too.
+        let ticked = try #require(instance.tick())
+        #expect(ticked.own.alphaAssigned == false)
+        #expect(ticked.own.alpha == 0.35)
+    }
+
+    @Test("Visible script that assigns alpha overrides the parsed seed")
+    func visibleScriptExplicitAlphaOverridesSeed() throws {
+        let script = """
+        'use strict';
+        export function init() { thisLayer.alpha = 0.8; }
+        export function update() {}
+        """
+        let instance = try WPELayerScriptInstance(script: script, initialAlpha: 0.35)
+        #expect(instance.initialOutput.own.alphaAssigned == true)
+        #expect(instance.initialOutput.own.alpha == 0.8)
+    }
+
+    @Test("Cursor-follow transform scripts route to a dedicated lane, not the shared pool")
+    func cursorTransformScriptUsesDedicatedFastLane() throws {
+        // 3212731906's icon card: a per-frame origin script reading
+        // input.cursorWorldPosition. On the shared pool it competes with a scene's
+        // dozen time/audio/n-body scripts and drops to ~1Hz. It must instead route
+        // to the dedicated cursor lane. Explicitly injected governors (test/other
+        // callers) are always honored so pool isolation is preserved.
+        let cursorScript = """
+        'use strict';
+        export function update(value) {
+            value.x = input.cursorWorldPosition.x;
+            value.y = input.cursorWorldPosition.y;
+            return value;
+        }
+        """
+        // Default (production) pool + reads cursor → fast lane.
+        let cursorInstance = try LiveWallpaper.WPEDynamicTransformScriptInstance(
+            script: cursorScript,
+            seed: .zero,
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+        #expect(cursorInstance.debugUsesPointerFastLane == true)
+
+        // Default pool but no cursor read → stays on the shared pool.
+        let timeInstance = try LiveWallpaper.WPEDynamicTransformScriptInstance(
+            script: "export function update(value) { value.y += 1; return value; }",
+            seed: .zero,
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+        #expect(timeInstance.debugUsesPointerFastLane == false)
+
+        // Explicit governor (the test helper injects isolatedGovernor) is never
+        // rerouted, even for a cursor script.
+        let isolated = try WPEDynamicTransformScriptInstance(
+            script: cursorScript,
+            seed: .zero,
+            canvasSize: SIMD2<Double>(100, 100)
+        )
+        #expect(isolated.debugUsesPointerFastLane == false)
     }
 
     @Test("applyUserProperties activates the time-of-day switch (3470764447 后处理层)")

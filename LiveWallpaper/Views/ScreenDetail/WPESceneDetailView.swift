@@ -280,8 +280,9 @@ struct WPESceneDetailView: View {
         }
         lines.append("")
 
-        let loadDiagnostic = session?.sceneRenderer?.loadDiagnostics?.errorDescription
-        let snapshot = session?.sceneRenderer?.resolutionDiagnostics
+        let diagnostics = session?.rendererDiagnostics
+        let loadDiagnostic = diagnostics?.loadDiagnostics?.errorDescription
+        let snapshot = diagnostics?.resolution
 
         if let loadDiagnostic {
             lines.append(loadDiagnostic)
@@ -325,7 +326,7 @@ struct WPESceneDetailView: View {
             lines.append("No render diagnostics yet (scene not loaded).")
         }
 
-        if let shaders = session?.sceneRenderer?.shaderErrorSummary, shaders.count > 0 {
+        if let shaders = diagnostics?.shaderErrors, shaders.count > 0 {
             lines.append("")
             lines.append("Shader compile failures: \(shaders.count) (pass skipped — effect not drawn)")
             for entry in shaders.entries.prefix(20) {
@@ -333,7 +334,7 @@ struct WPESceneDetailView: View {
             }
         }
 
-        if let gpu = session?.sceneRenderer?.gpuErrorSummary, gpu.count > 0 {
+        if let gpu = diagnostics?.gpuErrors, gpu.count > 0 {
             lines.append("")
             lines.append("GPU errors: \(gpu.count)" + (gpu.last.map { " (last: \($0))" } ?? ""))
         }
@@ -603,7 +604,16 @@ struct WPESceneDetailView: View {
     // MARK: - State derivation
 
     private func refreshState() async {
+        // Refresh the session's present/diagnostics caches from the render actor
+        // (M2c1b-3c) before deriving state, so the sync reads below see fresh data.
+        await session?.pollRendererState()
         let next = derivedState()
+        // Whenever we resolve to .ready, push the inspector's profile to the live
+        // renderer (suspend under Reduce Motion). Was a side effect inside
+        // derivedState; hoisted here so the profile push can be async.
+        if case .ready = next {
+            await session?.applyPreviewPerformanceProfile(reduceMotion ? .suspended : .quality)
+        }
         if next != state {
             // Animate so the error console's insertion/removal slides instead of
             // snapping the layout; the `!=` guard keeps the 0.4s poll from
@@ -623,9 +633,9 @@ struct WPESceneDetailView: View {
               case .ready = next,
               livePoster == nil,
               livePosterTask == nil,
-              let renderer = session?.sceneRenderer else { return }
+              let session else { return }
         livePosterTask = Task { @MainActor in
-            let image = await renderer.captureLivePosterFromNextFrame()
+            let image = await session.captureLivePosterFromNextFrame()
             guard !Task.isCancelled else { return }
             livePoster = image
             livePosterTask = nil
@@ -637,14 +647,13 @@ struct WPESceneDetailView: View {
         if let error = session.loadError {
             return .error(mapToFallbackReason(error))
         }
-        guard let renderer = session.sceneRenderer else { return .idle }
-        if !renderer.hasPresentedFrame {
+        // nil = no live renderer (→ .idle); false = renderer present but first
+        // frame not yet drawn (→ .loading). The Reduce-Motion suspend that used
+        // to sit here moved to refreshState (see applyPreviewPerformanceProfile).
+        guard let presented = session.hasPresentedFrame else { return .idle }
+        if !presented {
             return .loading(progress: session.loadProgress)
         }
-        // Still suspend the *live* renderer under Reduce Motion; the inspector
-        // shows a static reused frame (or the preview GIF poster) anyway, so
-        // there's no separate paused state.
-        renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
         return .ready
     }
 

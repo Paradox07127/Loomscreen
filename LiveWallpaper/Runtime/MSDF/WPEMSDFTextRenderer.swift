@@ -23,7 +23,7 @@ struct WPEMSDFTextDrawPayload {
     let shaderRequest: WPEShaderCompileRequest
 }
 
-@MainActor
+// Not `@MainActor` (M2c1b-3c): lives inside the renderer's actor isolation.
 final class WPEMSDFTextRenderer {
     private let device: MTLDevice
     private let resolver: WPEMultiRootResourceResolver

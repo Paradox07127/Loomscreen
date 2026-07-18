@@ -44847,6 +44847,90 @@
           }
         }
       }
+    },
+    "Multithreaded rendering" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multithreaded rendering"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マルチスレッドレンダリング"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多线程渲染"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多執行緒算繪"
+          }
+        }
+      }
+    },
+    "Render each display on its own thread for smoother playback" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Render each display on its own thread for smoother playback"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各ディスプレイを専用スレッドで描画し、再生をより滑らかに"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为每个显示器分配独立的渲染线程，让播放更流畅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為每個顯示器分配獨立的算繪執行緒，讓播放更流暢"
+          }
+        }
+      }
+    },
+    "Each display gets its own render thread, moving frame work off the main thread for smoother playback. Turn this off to render on the main thread — only needed for troubleshooting. Changing it reloads your wallpapers. Affects scene (Wallpaper Engine) wallpapers." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each display gets its own render thread, moving frame work off the main thread for smoother playback. Turn this off to render on the main thread — only needed for troubleshooting. Changing it reloads your wallpapers. Affects scene (Wallpaper Engine) wallpapers."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "各ディスプレイに専用のレンダリングスレッドを割り当て、フレーム処理をメインスレッドから切り離して再生を滑らかにします。オフにするとメインスレッドで描画します（トラブルシューティング時のみ推奨）。変更すると壁紙が再読み込みされます。シーン（Wallpaper Engine）壁紙に適用されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为每个显示器分配专用渲染线程，将帧处理移出主线程以获得更流畅的播放。关闭后将在主线程渲染——仅用于排查问题。更改会重新加载壁纸。适用于场景（Wallpaper Engine）壁纸。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為每個顯示器分配專用算繪執行緒，將影格處理移出主執行緒以獲得更流暢的播放。關閉後將在主執行緒算繪——僅用於排查問題。變更會重新載入桌布。適用於場景（Wallpaper Engine）桌布。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

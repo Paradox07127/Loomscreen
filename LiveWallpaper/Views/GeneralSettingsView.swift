@@ -53,6 +53,12 @@ struct GeneralSettingsView: View {
     #endif
     /// Default off — Pro-only scene power saving (adaptive frame rate).
     @State var adaptiveFrameRateEnabled: Bool
+    #if !LITE_BUILD
+    /// Bound straight to the defaults key the runtime reads at session build
+    /// (`WPEOffMainRenderFlag`). Default `true` mirrors "absent ⇒ on"; toggling
+    /// rebuilds sessions so the freeze-at-construction flag re-reads immediately.
+    @AppStorage(WPEOffMainRenderFlag.defaultsKey) var offMainRenderEnabled = true
+    #endif
     @State var weatherLocation: WeatherLocationPreference
     @State var locationAuthorizationStatus: CLAuthorizationStatus
     @State var weatherStatusRefreshPending = false

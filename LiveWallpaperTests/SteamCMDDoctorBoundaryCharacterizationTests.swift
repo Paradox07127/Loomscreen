@@ -485,6 +485,19 @@
             let callback = try #require(performDownload.range(of: "onContentReady(folder)"))
             #expect(revalidation.lowerBound < callback.lowerBound)
 
+            // Disk fallback (stdout's success line can be dropped by a sandboxed
+            // steamcmd thread race) must sit AFTER every explicit stdout error-line
+            // check, so a real error is never masked by a stale on-disk directory.
+            let noConnection = try #require(performDownload.range(of: "failed (No Connection)"))
+            let noMatch = try #require(performDownload.range(of: "failed (No match)"))
+            let failure = try #require(performDownload.range(of: "failed (Failure)"))
+            let diskFallback = try #require(performDownload.range(of: "inventory.validatedItemDirectory"))
+            let diskCallback = try #require(performDownload.range(of: "onContentReady(diskFolder)"))
+            #expect(noConnection.lowerBound < diskFallback.lowerBound)
+            #expect(noMatch.lowerBound < diskFallback.lowerBound)
+            #expect(failure.lowerBound < diskFallback.lowerBound)
+            #expect(diskFallback.lowerBound < diskCallback.lowerBound)
+
             let signOut = try slice(
                 doctor,
                 from: "func signOut() async",
@@ -649,6 +662,42 @@
                 callbackInvoked = true
             }
             #expect(!callbackInvoked)
+        }
+
+        @Test("disk fallback finds a validated item directory when stdout never printed the success line")
+        @MainActor
+        func diskFallbackLocatesValidatedItemWithoutStdout() throws {
+            let fm = FileManager.default
+            let root = temporaryRoot("disk-fallback")
+            defer { try? fm.removeItem(at: root) }
+            let appSupport = root.appendingPathComponent("Application Support", isDirectory: true)
+            let workdir = root.appendingPathComponent("Workdir", isDirectory: true)
+            let inventory = SteamCMDWorkshopFileInventory(
+                fileManager: DoctorFixtureFileManager(applicationSupport: appSupport, home: root)
+            )
+
+            // Nothing on disk yet — steamcmd's sandboxed stdout race dropping the
+            // success line must NOT be read as success when there's no product either.
+            #expect(inventory.validatedItemDirectory(itemID: 100, workdir: workdir) == nil)
+
+            // The download actually landed (container Steam root) even though no
+            // stdout line will ever be checked here — disk alone must resolve it.
+            let containerItem = workshopContentRoot(appSupport: appSupport)
+                .appendingPathComponent("100", isDirectory: true)
+            try fm.createDirectory(at: containerItem, withIntermediateDirectories: true)
+            let resolved = try #require(inventory.validatedItemDirectory(itemID: 100, workdir: workdir))
+            #expect(resolved.url.path == containerItem.path)
+            #expect(inventory.revalidatedURL(for: resolved, requiringProjectJSON: false)?.path == containerItem.path)
+
+            // A workdir-rooted item (custom steamcmd dir, not the container) also resolves.
+            let workdirItem = workdir
+                .appendingPathComponent("steamapps/workshop/content/431960/200", isDirectory: true)
+            try fm.createDirectory(at: workdirItem, withIntermediateDirectories: true)
+            let workdirResolved = try #require(inventory.validatedItemDirectory(itemID: 200, workdir: workdir))
+            #expect(workdirResolved.url.path == workdirItem.path)
+
+            // An item ID with nothing on disk anywhere still fails closed.
+            #expect(inventory.validatedItemDirectory(itemID: 300, workdir: workdir) == nil)
         }
 
         @Test("identity selection is branch-stable and fails closed when unavailable")

@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import Testing
 @testable import LiveWallpaper
@@ -120,6 +121,95 @@ struct WPEMetalNamedFBOAliasTests {
         WPEMetalFrameState(
             output: output,
             sceneSize: CGSize(width: 4, height: 4)
+        )
+    }
+
+    private static func makeScratchTexture(device: MTLDevice) -> MTLTexture? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: 4,
+            height: 4,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead, .renderTarget]
+        descriptor.storageMode = .shared
+        return device.makeTexture(descriptor: descriptor)
+    }
+}
+
+@Suite("WPEMetalShaderInputs — declared-FBO first-read zero fill")
+struct WPEMetalDeclaredFBOZeroFillTests {
+    private static let declaredName = "_rt_FullCompoBuffer1"
+
+    @Test("A declared-but-unwritten FBO first read returns a cached zero stand-in")
+    func declaredFBOFirstReadReturnsZeroTexture() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let output = try #require(Self.makeScratchTexture(device: device))
+        let pool = WPEMetalRenderTargetPool(device: device)
+        pool.prepare(pipeline: Self.pipelineDeclaring(Self.declaredName))
+
+        let frameState = WPEMetalFrameState(
+            output: output,
+            sceneSize: CGSize(width: 4, height: 4),
+            renderTargetPool: pool
+        )
+        // No pass has written the RT this frame — WPE reads it as all-zero.
+        let resolved = try WPEMetalShaderInputs.resolve(
+            reference: .fbo(Self.declaredName),
+            textures: [:],
+            frameState: frameState,
+            currentTargetID: .scene
+        )
+        #expect(resolved.pixelFormat == WPEMetalRenderExecutor.outputPixelFormat)
+
+        // Re-reading the same declared name reuses the cached stand-in (no per-frame
+        // re-allocation).
+        let again = try WPEMetalShaderInputs.resolve(
+            reference: .fbo(Self.declaredName),
+            textures: [:],
+            frameState: frameState,
+            currentTargetID: .scene
+        )
+        #expect(resolved === again)
+    }
+
+    @Test("An UNDECLARED FBO name still throws missingTexture")
+    func undeclaredFBONameStillThrows() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let output = try #require(Self.makeScratchTexture(device: device))
+        let pool = WPEMetalRenderTargetPool(device: device)
+        pool.prepare(pipeline: Self.pipelineDeclaring(Self.declaredName))
+
+        let frameState = WPEMetalFrameState(
+            output: output,
+            sceneSize: CGSize(width: 4, height: 4),
+            renderTargetPool: pool
+        )
+        // A name no layer declares is a genuine graph bug — must stay loud.
+        #expect(throws: (any Error).self) {
+            try WPEMetalShaderInputs.resolve(
+                reference: .fbo("_rt_NotDeclaredAnywhere"),
+                textures: [:],
+                frameState: frameState,
+                currentTargetID: .scene
+            )
+        }
+    }
+
+    private static func pipelineDeclaring(_ fboName: String) -> WPEPreparedRenderPipeline {
+        let layer = WPERenderLayer(
+            objectID: "obj",
+            objectName: "obj",
+            imagePath: "",
+            materialPath: nil,
+            geometry: .identity,
+            compositeA: "comp_a",
+            compositeB: "comp_b",
+            localFBOs: [WPERenderFBO(name: fboName, scale: 1, format: "rgba8888", unique: true)],
+            passes: []
+        )
+        return WPEPreparedRenderPipeline(
+            layers: [WPEPreparedRenderLayer(graphLayer: layer, passes: [])]
         )
     }
 

@@ -2,17 +2,62 @@
 import AppKit
 import LiveWallpaperCore
 import MetalKit
+import os
 
 extension WPEMetalSceneRenderer {
+    // MARK: - Frame instrumentation
+
+    /// Phase-level os_signpost intervals for the per-frame render. Always on;
+    /// with no Instruments observer the emit cost is negligible. Read the stages
+    /// with the os_signpost template to size Phase 2's off-main move.
+    static let frameSignposter = OSSignposter(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.taijia.LiveWallpaper",
+        category: "WPEFrame"
+    )
+
+    /// Wraps a discrete render stage in an os_signpost interval.
+    @inline(__always)
+    func withFrameSignpost<T>(_ name: StaticString, _ body: () throws -> T) rethrows -> T {
+        let signposter = Self.frameSignposter
+        let state = signposter.beginInterval(name, id: signposter.makeSignpostID())
+        defer { signposter.endInterval(name, state) }
+        return try body()
+    }
+
     // MARK: - Frame rendering
 
+    /// Snapshots the pointer inputs `renderCurrentFrame` needs from the mailbox
+    /// (fed by the surface's publisher + view). The frame-rate field is the
+    /// renderer's own `effectiveFPS` — the diagnostic reader (audio log) only, and
+    /// exactly the value the surface applies to the view. See `WPEFrameInputs`.
+    func makeFrameInputs() -> WPEFrameInputs {
+        let pointer = mailbox.read()
+        return WPEFrameInputs(
+            clickCaptureEnabled: pointer.clickCaptureEnabled,
+            pointerSample: pointerSampler.sample(),
+            pointerFrame: pointer.pointerFrame,
+            preferredFramesPerSecond: effectiveFPS
+        )
+    }
+
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
-    func renderCurrentFrame() throws -> MTLTexture {
+    func renderCurrentFrame(inputs: WPEFrameInputs) throws -> MTLTexture {
+        let signposter = Self.frameSignposter
+        let frameState = signposter.beginInterval(
+            "frame",
+            id: signposter.makeSignpostID(),
+            "scene:\(self.descriptor.workshopID, privacy: .public) renderer:\(self.sceneScriptTraversalDomainID, privacy: .public)"
+        )
+        defer { signposter.endInterval("frame", frameState) }
+
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
-        let frameContext = sampleFrameContext()
+        let frameContext = withFrameSignpost("sampleContext") {
+            sampleFrameContext(inputs: inputs)
+        }
         let uniforms = frameContext.uniforms
+        let scriptState = signposter.beginInterval("scriptTick", id: signposter.makeSignpostID())
         let scriptTraversalEpoch = WPESceneScriptTraversalEpoch.next(
             domainID: sceneScriptTraversalDomainID
         )
@@ -122,17 +167,22 @@ extension WPEMetalSceneRenderer {
             )
         }
         lastFramePipeline = framePipeline
+        signposter.endInterval("scriptTick", scriptState)
         // Keep only currently-visible on-demand videos resident (releases hidden
         // ones, rebuilds revealed ones). No-op unless the scene has releasable
         // videos; reads the final per-frame visibility so it covers script-,
         // user-property- and condition-driven switches alike.
-        reconcileVideoResidency(framePipeline)
-        tickParticleSystems(
-            time: uniforms.time,
-            followPointerIsLive: frameContext.followPointerIsLive,
-            pointer: frameContext.pointer,
-            liveTransforms: liveTransforms
-        )
+        withFrameSignpost("videoReconcile") {
+            reconcileVideoResidency(framePipeline)
+        }
+        withFrameSignpost("particleTick") {
+            tickParticleSystems(
+                time: uniforms.time,
+                followPointerIsLive: frameContext.followPointerIsLive,
+                pointer: frameContext.pointer,
+                liveTransforms: liveTransforms
+            )
+        }
         let frame = try encodeSceneFrame(
             pipeline: framePipeline,
             uniforms: uniforms,
@@ -159,28 +209,32 @@ extension WPEMetalSceneRenderer {
         transforms: LiveScriptTransforms,
         parallaxFrame: WPECameraParallaxFrame
     ) throws -> MTLTexture {
-        let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: pipeline)
-        let frame = try executor.render(
-            pipeline: pipeline,
-            size: sceneRenderSize,
-            textures: currentTextures,
-            dynamicTextureNames: dynamicTextureNames,
-            dynamicLayerIDs: staticCacheExcludedLayerIDs,
-            runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms,
-            sceneID: descriptor.workshopID,
-            particleSystems: particleSystems,
-            particleTextures: particleTextures,
-            particleNormalTextures: particleNormalTextures,
-            particleParallax: parallaxFrame
-        )
-        try drawLiveTextOverlays(
-            onto: frame,
-            uniforms: uniforms,
-            liveTextByID: liveTextByID,
-            transforms: transforms,
-            parallaxFrame: parallaxFrame
-        )
+        let frame = try withFrameSignpost("encode") { () throws -> MTLTexture in
+            let currentTextures = try texturesForCurrentFrame(time: uniforms.time, pipeline: pipeline)
+            return try executor.render(
+                pipeline: pipeline,
+                size: sceneRenderSize,
+                textures: currentTextures,
+                dynamicTextureNames: dynamicTextureNames,
+                dynamicLayerIDs: staticCacheExcludedLayerIDs,
+                runtimeUniforms: uniforms,
+                cameraUniforms: cameraUniforms,
+                sceneID: descriptor.workshopID,
+                particleSystems: particleSystems,
+                particleTextures: particleTextures,
+                particleNormalTextures: particleNormalTextures,
+                particleParallax: parallaxFrame
+            )
+        }
+        try withFrameSignpost("textOverlay") {
+            try drawLiveTextOverlays(
+                onto: frame,
+                uniforms: uniforms,
+                liveTextByID: liveTextByID,
+                transforms: transforms,
+                parallaxFrame: parallaxFrame
+            )
+        }
         return frame
     }
 
@@ -200,18 +254,22 @@ extension WPEMetalSceneRenderer {
         let parallaxFrame: WPECameraParallaxFrame
     }
 
-    /// Samples the pointer, advances the frame clock/parallax smoothing, folds in
-    /// live audio spectra, and derives the pointer frame layer scripts see.
-    private func sampleFrameContext() -> FrameContext {
+    /// Advances the frame clock/parallax smoothing, folds in live audio spectra,
+    /// and derives the pointer frame layer scripts see from the main-thread
+    /// `inputs` snapshot. Touches no AppKit/UI state directly — that is the seam
+    /// that lets Phase 2 run this off `@MainActor`.
+    private func sampleFrameContext(inputs: WPEFrameInputs) -> FrameContext {
         // Pin follow-cursor effects to center when disabled, or when the
         // global cursor belongs to another display. Click capture stays
         // independent because Interaction can be enabled without Follow Cursor.
-        let pointerSample = (mouseInteractionEnabled || mtkView.clickCaptureEnabled)
-            ? pointerSampler.sample(mtkView)
+        // The gate on `mouseInteractionEnabled` (renderer state) stays here; the
+        // snapshot always sampled the pointer, so an inactive gate discards it.
+        let pointerSample = (mouseInteractionEnabled || inputs.clickCaptureEnabled)
+            ? inputs.pointerSample
             : .inactive
         let pointerIsInsideView = pointerSample.isInsideView
         let followPointerIsLive = mouseInteractionEnabled && pointerIsInsideView
-        let clickPointerIsLive = mtkView.clickCaptureEnabled && pointerIsInsideView
+        let clickPointerIsLive = inputs.clickCaptureEnabled && pointerIsInsideView
         // The oracle pins the pointer (self = center, fidelity = the replayed
         // Windows cursor) so it never enters the trace as ambient state.
         let pointer = oracleFrameOverride?.pointer ?? (followPointerIsLive
@@ -262,7 +320,7 @@ extension WPEMetalSceneRenderer {
                     let peakL = audio.left.max() ?? 0
                     let peakR = audio.right.max() ?? 0
                     Logger.notice(
-                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) fps=\(mtkView.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
+                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) fps=\(inputs.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
                         category: .audioCapture
                     )
                 }
@@ -282,7 +340,7 @@ extension WPEMetalSceneRenderer {
         // them. `g_PointerPositionLast` tracks motion regardless of click
         // capture; click state is neutral unless the Interaction toggle is on.
         let layerScriptPointerFrame = clickPointerIsLive
-            ? mtkView.pointerFrame
+            ? inputs.pointerFrame
             : WPEPointerFrame(
                 position: pointer,
                 clickPosition: pointer,

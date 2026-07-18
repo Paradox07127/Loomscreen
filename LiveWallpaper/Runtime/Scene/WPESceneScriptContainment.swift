@@ -103,6 +103,15 @@
             var latestTraversalGenerationByDomain: [UInt64: UInt64] = [:]
             var completedTraversalGenerationByDomain: [UInt64: UInt64] = [:]
             var waiters: [Waiter] = []
+            // Per-domain concurrent permits held by frame-tick (reserved) work.
+            // Frame admission is scheduled max-min fair across domains off these
+            // counts so a renderer with dozens of live scripts can't monopolize
+            // the shared pool and starve a lightly-scripted display's ticks
+            // (multi-display: heavy scene dragging a light scene to a few FPS).
+            // Only the reserved path feeds these; unreserved/blocking grants stay
+            // domain-agnostic and are counted solely in `active`.
+            var activeReservedCountByDomain: [UInt64: Int] = [:]
+            var reservedDomainByActiveParticipant: [UInt64: UInt64] = [:]
             #if DEBUG
                 var peak = 0
                 var permitsGranted = 0
@@ -146,33 +155,42 @@
             guard acceptPoll(in: traversalEpoch) else { return nil }
             bind(participantID: participantID, to: traversalEpoch.domainID)
 
-            if let index = waiterIndex(for: participantID) {
-                refreshPoll(at: index, epoch: traversalEpoch)
-                guard !state.activeParticipantIDs.contains(participantID) else { return nil }
-                if waiterCanAcquire(at: index) {
-                    state.waiters.remove(at: index)
-                    return grantPermit(to: participantID)
+            // Defensive: a participant already holding a permit keeps/renews its
+            // reservation but can never double-acquire.
+            if state.activeParticipantIDs.contains(participantID) {
+                if let index = waiterIndex(for: participantID) {
+                    refreshPoll(at: index, epoch: traversalEpoch)
+                } else if state.waiters.count < maximumWaitingParticipants {
+                    state.waiters.append(opportunisticWaiter(
+                        participantID: participantID,
+                        epoch: traversalEpoch
+                    ))
                 }
                 return nil
             }
 
-            if state.activeParticipantIDs.contains(participantID) {
+            // Register (or renew) this probe in the bounded waiter queue, then admit
+            // it only when it wins a free permit under the cross-domain fair
+            // schedule below. Unifying the "new probe" and "renewed reservation"
+            // paths keeps admission ordering identical whatever the frame cadence.
+            let index: Int
+            if let existing = waiterIndex(for: participantID) {
+                refreshPoll(at: existing, epoch: traversalEpoch)
+                index = existing
+            } else {
                 guard state.waiters.count < maximumWaitingParticipants else { return nil }
                 state.waiters.append(opportunisticWaiter(
                     participantID: participantID,
                     epoch: traversalEpoch
                 ))
-                return nil
+                index = state.waiters.count - 1
             }
 
-            if state.waiters.count < availablePermitCount {
-                return grantPermit(to: participantID)
+            if availablePermitCount > 0,
+               reservedFairRank(ofWaiterAt: index) < availablePermitCount {
+                state.waiters.remove(at: index)
+                return grantPermit(to: participantID, reservedDomain: traversalEpoch.domainID)
             }
-            guard state.waiters.count < maximumWaitingParticipants else { return nil }
-            state.waiters.append(opportunisticWaiter(
-                participantID: participantID,
-                epoch: traversalEpoch
-            ))
             return nil
         }
 
@@ -332,6 +350,52 @@
             index < availablePermitCount
         }
 
+        /// Number of waiters the fair schedule serves before the frame-tick waiter
+        /// at `index`, so a permit is granted only when fewer than the free-permit
+        /// count outrank it. Ordering (max-min fair across renderer domains):
+        ///   1. a blocking (load/property) waiter always precedes frame ticks;
+        ///   2. else the domain currently holding fewer reserved permits goes first;
+        ///   3. ties break by each domain's own FIFO position (round-robin), so a
+        ///      domain with many queued scripts can't jump a domain with few;
+        ///   4. final ties break by global insertion order for determinism.
+        /// This is what stops a heavy renderer's dozens of live scripts from
+        /// evicting a light renderer's few ticks on the shared pool.
+        private func reservedFairRank(ofWaiterAt index: Int) -> Int {
+            guard case let .opportunistic(targetDomain, _) = state.waiters[index].mode else {
+                return index
+            }
+            // One O(n) pass to assign each opportunistic waiter its per-domain FIFO
+            // rank (array order == that domain's arrival order).
+            var domainSeen: [UInt64: Int] = [:]
+            var domainRank = [Int](repeating: 0, count: state.waiters.count)
+            for i in state.waiters.indices {
+                if case let .opportunistic(domain, _) = state.waiters[i].mode {
+                    let seen = domainSeen[domain, default: 0]
+                    domainRank[i] = seen
+                    domainSeen[domain] = seen + 1
+                }
+            }
+            let targetActive = state.activeReservedCountByDomain[targetDomain] ?? 0
+            let targetDomainRank = domainRank[index]
+            var rank = 0
+            for i in state.waiters.indices where i != index {
+                switch state.waiters[i].mode {
+                case .blocking:
+                    rank += 1
+                case let .opportunistic(domain, _):
+                    let active = state.activeReservedCountByDomain[domain] ?? 0
+                    if active != targetActive {
+                        if active < targetActive { rank += 1 }
+                    } else if domainRank[i] != targetDomainRank {
+                        if domainRank[i] < targetDomainRank { rank += 1 }
+                    } else if i < index {
+                        rank += 1
+                    }
+                }
+            }
+            return rank
+        }
+
         private func bind(participantID: UInt64, to domainID: UInt64) {
             if let existing = state.traversalDomainByParticipantID[participantID] {
                 precondition(existing == domainID, "SceneScript participant crossed renderer traversal domains")
@@ -378,13 +442,20 @@
             )
         }
 
-        private func grantPermit(to participantID: UInt64) -> Permit {
+        private func grantPermit(
+            to participantID: UInt64,
+            reservedDomain: UInt64? = nil
+        ) -> Permit {
             precondition(state.active < limit, "SceneScript permit limit exceeded")
             precondition(
                 state.activeParticipantIDs.insert(participantID).inserted,
                 "SceneScript participant acquired more than one permit"
             )
             state.active += 1
+            if let reservedDomain {
+                state.activeReservedCountByDomain[reservedDomain, default: 0] += 1
+                state.reservedDomainByActiveParticipant[participantID] = reservedDomain
+            }
             #if DEBUG
                 state.peak = max(state.peak, state.active)
                 state.permitsGranted += 1
@@ -434,6 +505,13 @@
                 "SceneScript participant permit accounting underflow"
             )
             state.active -= 1
+            if let domain = state.reservedDomainByActiveParticipant.removeValue(forKey: participantID) {
+                if let count = state.activeReservedCountByDomain[domain], count > 1 {
+                    state.activeReservedCountByDomain[domain] = count - 1
+                } else {
+                    state.activeReservedCountByDomain.removeValue(forKey: domain)
+                }
+            }
             condition.broadcast()
             condition.unlock()
         }

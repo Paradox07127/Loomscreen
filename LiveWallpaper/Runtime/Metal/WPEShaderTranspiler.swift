@@ -144,7 +144,7 @@ struct WPEShaderTranspiler {
             varyings.map { ($0.name, $0.metalType) },
             uniquingKeysWith: { _, last in last }
         )
-        let preserveTexCoordZW = shouldPreserveTexCoordZW(shaderName: shaderName)
+        let preserveTexCoordZW = shouldPreserveTexCoordZW(shaderName: shaderName, comboValues: comboValues)
         let translatedHelpers = applySubstitutions(
             preMain + "\n" + postMain,
             varyingTypesByName: varyingTypesByName,

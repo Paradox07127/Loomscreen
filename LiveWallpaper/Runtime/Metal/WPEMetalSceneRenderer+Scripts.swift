@@ -94,7 +94,9 @@ extension WPEMetalSceneRenderer {
                     script: script,
                     scriptProperties: object.scriptProperties,
                     shared: sharedState,
-                    canvasSize: scriptCanvasSize)
+                    canvasSize: scriptCanvasSize,
+                    initialVisible: object.visible,
+                    initialAlpha: object.alpha)
                 }) else { return }
                 layerScriptInstances[object.id] = instance
                 applyLayerScriptOutput(instance.initialOutput, ownObjectID: object.id)
@@ -135,7 +137,9 @@ extension WPEMetalSceneRenderer {
                     script: script,
                     scriptProperties: object.visibleScriptProperties,
                     shared: sharedState,
-                    canvasSize: scriptCanvasSize)
+                    canvasSize: scriptCanvasSize,
+                    initialVisible: object.visible,
+                    initialAlpha: object.alpha)
                 }) else { return }
                 textVisibleScriptInstances[object.id] = instance
                 applyTextScriptOutput(instance.initialOutput, ownObjectID: object.id)
@@ -312,25 +316,15 @@ extension WPEMetalSceneRenderer {
 
     private func lazyLoadVideo(key: String) {
         guard dynamicTextureSources[key] == nil,
-              !onDemandVideoLoading.contains(key) else { return }
+              !onDemandVideoLoading.contains(key),
+              let actor = displayActor else { return }
         onDemandVideoLoading.insert(key)
         let generation = loadGeneration
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.onDemandVideoLoading.remove(key) }
-            guard self.loadGeneration == generation else { return }
-            do {
-                try await self.loadDynamicTextureOnActor(path: key, layerName: key)
-            } catch {
-                Logger.warning("Scene \(self.descriptor.workshopID) [OnDemandVideo] rebuild failed for \(key): \(error)", category: .wpeRender)
-                return
-            }
-            // Force-play the freshly-rebuilt (paused) source under the current
-            // profile; a layer script re-issues its own play() next tick.
-            guard self.loadGeneration == generation,
-                  let source = self.dynamicTextureSources[key] as? WPEVideoTextureSource else { return }
-            source.applyPerformanceProfile(self.currentProfile)
-            self.mtkView.setNeedsDisplay(self.mtkView.bounds)
+        // Re-enter the render actor to rebuild + force-play the revealed source
+        // (a layer script re-issues its own play() next tick). Capture only the
+        // actor (Sendable); the renderer is reached through it.
+        Task { [actor] in
+            await actor.rebuildOnDemandVideo(key: key, generation: generation)
         }
     }
 

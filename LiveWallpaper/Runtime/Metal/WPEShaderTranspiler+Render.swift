@@ -219,8 +219,9 @@ extension WPEShaderTranspiler {
                 out.append("    // WPE-DIAGNOSTIC: varying '\(varying.name)' has no reconstruction rule and fell back to a screen-UV default; this likely renders incorrectly.")
             }
             if let arrayLength = varying.arrayLength {
-                let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
-                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
+                let initializers = texCoordBoxFilterInitializers(varying: varying, availableUniforms: uniformNames)
+                    ?? Array(repeating: initializer, count: arrayLength)
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers.joined(separator: ", ")) };")
             } else if let arrayDimension = varying.arrayDimension {
                 // Symbolic, #define-sized array: we can't expand a literal initializer list at
                 // transpile time, so zero-init, then let known vertex-varying reconstructions
@@ -521,6 +522,17 @@ extension WPEShaderTranspiler {
                 );
                 return float4(uv * scale, scale);
             }
+            // swing.vert / twirl.vert v_TexCoord: .z = the layer aspect (swing reads
+            // g_Texture0Resolution.x/.y, twirl .z/.w), .w = sin(t·speed + phase·2π)·amount
+            // — the time-driven swing/twirl phase. Deliberately absent from the
+            // texCoordZWResolutionSlot family table (.zw packs aspect+phase, not a scaled
+            // UV); the float4(in.uv, in.uv) default fed screen position into both, freezing
+            // the animation into a position-dependent warp. Degenerate resolution falls
+            // back to aspect 1 (not 0): both fragments divide by .z on the way out.
+            inline float4 wpe_swing_texcoord(float2 uv, float2 resolution, float time, float speed, float phase, float amount) {
+                float aspect = wpe_safe_ratio(resolution.x, resolution.y);
+                return float4(uv, abs(aspect) > 0.000001 ? aspect : 1.0, sin(time * speed + phase * 6.28318530718) * amount);
+            }
             inline float4 wpe_ripple_texcoord(float2 uv, float time, float animationSpeed, float scrollSpeed, float direction, float ratio, float scale, float4 texture0Resolution) {
                 float animation = time * animationSpeed * animationSpeed;
                 float2 scroll = wpe_rotate_vec2(float2(0.0, 1.0), direction) * scrollSpeed * scrollSpeed * time;
@@ -678,6 +690,22 @@ extension WPEShaderTranspiler {
                 // WPE: mul(vec3(uv,1), inverse(squareToQuad(...))); WPE mul(x,y) == y * x.
                 return wpe_mat3_inverse(wpe_square_to_quad(p0, p1, p2, p3)) * float3(uv, 1.0);
             }
+            // reflection.vert (PERSPECTIVE=0) v_ReflectedCoord: mirror uv across the
+            // horizontal centre (offset shifts the mirror line), then rotate by
+            // g_Direction. Transcribed verbatim — no V flip — because our fullscreen
+            // in.uv already matches WPE a_TexCoord (both top-left, uv.y==0 at the top;
+            // see WPEMetalBuiltins wpe_fullscreen_vertex). Without it the varying fell
+            // back to raw in.uv, so the reflected sample == albedo (a no-op) and water
+            // showed its flat base colour instead of the mirrored sky (scene 3413921910
+            // rendered a solid pink band across the whole water surface).
+            inline float2 wpe_reflection_texcoord(float2 uv, float direction, float offset) {
+                float2 center = float2(0.5, 0.5);
+                float2 delta = uv - center;
+                delta.y += offset;
+                delta.y = -delta.y;
+                delta = wpe_rotate_vec2(delta, direction);
+                return center + delta;
+            }
             """
         )
     }
@@ -712,6 +740,17 @@ extension WPEShaderTranspiler {
             if varying.metalType == "float2" {
                 return "in.uv"
             }
+            // swing/twirl pack aspect + sine phase into .zw; rebuild the exact .vert
+            // formula before the resolution-scaled-UV path (whose MASK ladder would
+            // otherwise mis-fill .zw with a scaled UV). Only the resolution components
+            // differ: swing reads .x/.y, twirl .z/.w.
+            if varying.metalType == "float4",
+               let family = texCoordZWFamilyName(shaderName: shaderName),
+               family == "swing" || family == "twirl",
+               hasUniforms("g_Time", "g_Speed", "g_Phase", "g_Amount", "g_Texture0Resolution", in: availableUniforms) {
+                let components = family == "swing" ? "xy" : "zw"
+                return "wpe_swing_texcoord(in.uv, g_Texture0Resolution.\(components), g_Time, g_Speed, g_Phase, g_Amount)"
+            }
             if varying.metalType == "float4",
                let resolutionUniform = texCoordResolutionUniform(
                 shaderName: shaderName,
@@ -724,6 +763,33 @@ extension WPEShaderTranspiler {
             if varying.metalType == "float4",
                availableUniforms.contains("g_Texture3Resolution") {
                 return "wpe_texcoord_mask(in.uv, g_Texture3Resolution)"
+            }
+        case "v_StepSize":
+            // apply.vert:14 / up_sample.vert:13 (workshop 2822917890 bloom family):
+            // `1.0 / vec4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy)`, the
+            // per-texel step for the box-blur's 4 diagonal taps. The float4(uv,uv)
+            // default fed screen position in as a sample offset (3554161528 sky).
+            if varying.metalType == "float4",
+               availableUniforms.contains("g_Texture0Resolution") {
+                return "1.0 / float4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy)"
+            }
+        case "v_SizeMultiplier":
+            // blur_gaussian.vert:30 (same bloom family):
+            // `vec2(aRatio, 1.0) * (u_radius + u_radius) * iterations * g_TexelSize`
+            // where aRatio = u_ratio under ANAMORPHIC else 1.0, and iterations =
+            // 0.675 under HIGH_QUALITY else 1.5 (compile-time #if, folded here).
+            // The in.uv default made the blur offset grow with screen position.
+            // g_TexelSize stays in the gate as the family fingerprint but is
+            // emitted as 1/g_Texture0Resolution.xy: no packing path ever feeds
+            // g_TexelSize (it would read 0 → no blur), while g_Texture0Resolution
+            // is packed from the actually-bound texture, and the blur input is a
+            // same-size framebuffer so the two are equal by WPE's definition.
+            if varying.metalType == "float2",
+               hasUniforms("g_TexelSize", "u_radius", "g_Texture0Resolution", in: availableUniforms) {
+                let aRatio = comboValues["ANAMORPHIC"] == 1 && availableUniforms.contains("u_ratio")
+                    ? "u_ratio" : "1.0"
+                let iterations = comboValues["HIGH_QUALITY"] == 1 ? "0.675" : "1.5"
+                return "float2(\(aRatio), 1.0) * (u_radius + u_radius) * \(iterations) * (1.0 / g_Texture0Resolution.xy)"
             }
         case "v_Scroll":
             if varying.metalType == "float2",
@@ -740,6 +806,15 @@ extension WPEShaderTranspiler {
             if varying.metalType == "float2",
                availableUniforms.contains("g_Direction2") {
                 return "wpe_rotate_vec2(float2(0.0, 1.0), g_Direction2)"
+            }
+        case "v_ReflectedCoord":
+            // reflection.vert PERSPECTIVE=0: vertical mirror (+ offset) rotated by
+            // g_Direction. The PERSPECTIVE=1 branch uses v_TexCoordPerspective instead,
+            // already handled below. Falling through to raw in.uv makes the reflected
+            // sample identical to albedo (no reflection) — flat water.
+            if varying.metalType == "float2",
+               hasUniforms("g_Direction", "g_ReflectionOffset", in: availableUniforms) {
+                return "wpe_reflection_texcoord(in.uv, g_Direction, g_ReflectionOffset)"
             }
         case "v_TexCoordPerspective", "v_TexCoordFx":
             // PERSPECTIVE / lightshafts: mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3))),
@@ -937,6 +1012,31 @@ extension WPEShaderTranspiler {
         }
     }
 
+    /// down_sample.vert:12-15 / light_map.vert:15-18 (workshop 2822917890 bloom
+    /// family): both compute the same 4-tap diagonal box filter around a_TexCoord,
+    /// `offsets = 1.0 / g_Texture0Resolution.xy`. The generic array path below
+    /// calls `varyingInitializer` ONCE and repeats that single value across all N
+    /// slots, collapsing the box filter to a single point sample (3554161528 sky).
+    /// Matched on varying name + array shape, not shader name, so other bloom/glow
+    /// packages sharing this exact offsets convention reconstruct too.
+    private static func texCoordBoxFilterInitializers(
+        varying: WPEVaryingDecl,
+        availableUniforms: Set<String>
+    ) -> [String]? {
+        guard varying.name == "v_TexCoord",
+              varying.metalType == "float2",
+              varying.arrayLength == 4,
+              availableUniforms.contains("g_Texture0Resolution") else {
+            return nil
+        }
+        return [
+            "in.uv - (1.0 / g_Texture0Resolution.xy)",
+            "in.uv + float2(1.0 / g_Texture0Resolution.x, -1.0 / g_Texture0Resolution.y)",
+            "in.uv + float2(-1.0 / g_Texture0Resolution.x, 1.0 / g_Texture0Resolution.y)",
+            "in.uv + (1.0 / g_Texture0Resolution.xy)",
+        ]
+    }
+
     private static func symbolicArrayReconstructionLines(
         for varying: WPEVaryingDecl,
         availableUniforms: Set<String>,
@@ -989,6 +1089,18 @@ extension WPEShaderTranspiler {
         comboValues: [String: Int] = [:]
     ) -> String? {
         let lowercased = shaderName.lowercased()
+        // Families with a verified .vert use its exact resolution slot: the mask/aux
+        // texture is NOT always g_Texture1 (vhs/filmgrain/nitro/waterripple/clouds/
+        // pulse/motionblur bind it at slot 2, lightshafts at slot 3), and the generic
+        // MASK→T1 ladder below mis-scaled those.
+        if let slot = texCoordZWResolutionSlot(shaderName: shaderName, comboValues: comboValues) {
+            // No falling through to the generic ladder for a recognized family: with the
+            // exact slot's resolution missing (malformed input), the ladder would scale
+            // .zw by a DIFFERENT texture's aspect while the .zw sample stays preserved.
+            // nil leaves .zw = uv — identical to the historical .xy downgrade.
+            let uniform = "g_Texture\(slot)Resolution"
+            return availableUniforms.contains(uniform) ? uniform : nil
+        }
         // WPE distortion shaders (waterwaves/waterripple/foliagesway…) scale
         // `v_TexCoord.zw` by the *active auxiliary texture's* resolution,
         // mirroring the `#if MASK / #elif TIMEOFFSET` ladder in the .vert:

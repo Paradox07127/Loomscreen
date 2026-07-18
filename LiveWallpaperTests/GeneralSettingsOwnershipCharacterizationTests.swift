@@ -19,7 +19,7 @@ struct GeneralSettingsOwnershipCharacterizationTests {
 
         #expect(fixtureValues.count == Set(fixtureValues).count, "A state field must have exactly one candidate owner")
         #expect(actual == Set(fixtureValues))
-        #expect(actual.count == 37, "Changing the root state surface requires explicitly re-approving the UI-08 lock")
+        #expect(actual.count == 38, "Changing the root state surface requires explicitly re-approving the UI-08 lock")
     }
 
     @Test("Each page mounts only its own system-capability probe")

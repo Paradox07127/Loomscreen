@@ -26,6 +26,61 @@ struct WPEMetalSceneRendererTests {
         #expect(view.acceptsFirstMouse(for: nil) == true)
     }
 
+    @Test("Frame inputs snapshot mirrors the pointer mailbox, sampler, and effective FPS")
+    func frameInputsSnapshotMirrorsSources() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device,
+            pointerSampler: .fixed(SIMD2<Double>(0.25, 0.75))
+        )
+        defer { renderer.cleanup() }
+        // click capture + pointer frame now flow through the mailbox the surface
+        // feeds; frame rate is the renderer's own effectiveFPS (mailbox carries no
+        // FPS). Only the pointer *sample* still comes from the injected sampler.
+        renderer.setClickCaptureEnabled(true)
+        let published = WPEPointerFrame(
+            position: SIMD2<Double>(0.1, 0.2),
+            clickPosition: SIMD2<Double>(0.3, 0.4),
+            isDown: true,
+            isRightDown: false
+        )
+        renderer.mailbox.publishPointerFrame(published)
+        renderer.setFrameRateLimit(.fps15)
+
+        let inputs = renderer.makeFrameInputs()
+        #expect(inputs.clickCaptureEnabled == true)
+        #expect(inputs.pointerSample == WPEMetalPointerSample.inside(SIMD2<Double>(0.25, 0.75)))
+        #expect(inputs.pointerFrame == published)
+        #expect(inputs.preferredFramesPerSecond == 15)
+    }
+
+    @Test("Frame inputs carry an inactive pointer sample when the sampler is outside")
+    func frameInputsCarryInactivePointerWhenOutside() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device,
+            pointerSampler: .fixedOutside()
+        )
+        defer { renderer.cleanup() }
+
+        let inputs = renderer.makeFrameInputs()
+        #expect(inputs.clickCaptureEnabled == false)
+        #expect(inputs.pointerSample == .inactive)
+        #expect(inputs.pointerSample.isInsideView == false)
+    }
+
     @Test("Script async-tick kill-switch defaults ON and honors a bool override")
     func scriptAsyncTickKillSwitchResolution() {
         #expect(WPEMetalSceneRenderer.resolvedScriptAsyncTickEnabled(manualValue: nil) == true)
@@ -82,11 +137,18 @@ struct WPEMetalSceneRendererTests {
         defer { fixture.cleanup() }
         try Data("{ not valid json".utf8).write(to: fixture.root.appendingPathComponent("scene.json"))
 
+        // Construct the session the way the builder does (M2c1b-3c): surface +
+        // render actor, adopt the renderer, then drive the load through the actor.
+        let surface = WPERenderSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64), device: device)
+        let renderActor = WPEDisplayRenderActor(backing: .main)
         let renderer = try WPEMetalSceneRenderer(
             descriptor: fixture.descriptor,
             cacheRootURL: fixture.root,
             dependencyMounts: [],
-            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            surfaceControl: surface,
+            mailbox: surface.mailbox,
+            presentLayer: WPEPresentLayer(layer: surface.metalLayer),
+            drawableSize: surface.metalLayer.drawableSize,
             device: device
         )
         let window = NSWindow(
@@ -98,16 +160,14 @@ struct WPEMetalSceneRendererTests {
         // cleanup() closes the window; without this the close() release plus
         // ARC's own release over-releases it (production windows set the same).
         window.isReleasedWhenClosed = false
-        let session = SceneWallpaperSession(window: window, renderer: renderer)
+        let session = SceneWallpaperSession(window: window, renderActor: renderActor, surface: surface)
         defer { session.cleanup() }
 
         var changeCount = 0
         session.onRuntimeErrorChange = { changeCount += 1 }
 
-        session.startLoadIfNeeded()
-        for _ in 0..<100 where session.runtimeError == nil {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        await renderActor.adopt(WPERendererHandoff(renderer: renderer).renderer)
+        await session.beginLoad()
 
         let error = try #require(session.runtimeError)
         guard case .sceneRenderingFailed(let description) = error else {
@@ -118,6 +178,44 @@ struct WPEMetalSceneRendererTests {
         #expect(changeCount == 1)
         #expect(error.canRetry)
         #expect(session.summary.activity == .error)
+    }
+
+    @Test("Config channel applies fire-and-forget setters in order (last write wins)")
+    func configChannelAppliesLastWriteWins() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let surface = WPERenderSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64), device: device)
+        let renderActor = WPEDisplayRenderActor(backing: .main)
+        defer { renderActor.shutdown() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            surfaceControl: surface,
+            mailbox: surface.mailbox,
+            presentLayer: WPEPresentLayer(layer: surface.metalLayer),
+            drawableSize: surface.metalLayer.drawableSize,
+            device: device
+        )
+        await renderActor.adopt(WPERendererHandoff(renderer: renderer).renderer)
+
+        // Submit a scrambled sequence whose LAST value (0.37) is distinct from the
+        // renderer's default volume (1.0) and from every earlier value. FIFO channel
+        // delivery means the renderer must end exactly on 0.37: a dead channel would
+        // leave the 1.0 default, and any reorder would end on a different value.
+        let volumes = [0.11, 0.94, 0.29, 0.53, 0.06, 0.72, 0.48, 0.83, 0.15, 0.37]
+        for volume in volumes {
+            renderActor.submitConfig(.audioVolume(volume))
+        }
+
+        var applied = -1.0
+        for _ in 0..<400 {
+            applied = await renderActor.currentPendingAudioVolume() ?? -1
+            if applied == 0.37 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(applied == 0.37)
     }
 
     @Test("Dynamic origin scripts keep otherwise static scenes on the continuous render loop")

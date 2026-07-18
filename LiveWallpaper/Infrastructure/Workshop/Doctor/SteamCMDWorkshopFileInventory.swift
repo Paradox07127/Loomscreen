@@ -8,6 +8,10 @@
             itemID: UInt64,
             workdir: URL
         ) -> SteamCMDValidatedWorkshopItem?
+        func validatedItemDirectory(
+            itemID: UInt64,
+            workdir: URL
+        ) -> SteamCMDValidatedWorkshopItem?
         func projectFolders(
             under steamRoot: URL,
             anchoredTo trustAnchor: URL,
@@ -86,6 +90,27 @@
                     reported.path(percentEncoded: false) == item.url.path(percentEncoded: false)
                 else { continue }
                 return item
+            }
+            return nil
+        }
+
+        /// Disk-only fallback for `resolveDownloadedItemFolder`: locates the item
+        /// directory by ID alone, without requiring steamcmd's stdout success line.
+        /// steamcmd's stdout under the sandbox has a thread-race that can drop that
+        /// line even though the download completed and the files landed on disk.
+        func validatedItemDirectory(
+            itemID: UInt64,
+            workdir: URL
+        ) -> SteamCMDValidatedWorkshopItem? {
+            for root in approvedSteamRoots(workdir: workdir) {
+                if let item = validatedItemDirectory(
+                    workshopID: String(itemID),
+                    under: root.steamRoot,
+                    anchoredTo: root.trustAnchor,
+                    requiringProjectJSON: false
+                ) {
+                    return item
+                }
             }
             return nil
         }

@@ -96,6 +96,12 @@ final class WPEMetalRenderTargetPool {
     private let maximumTextureDimension2D: Int
     private var slots: [WPEMetalRenderTargetKey: Slot] = [:]
     private var declaredFBOs: [String: WPERenderFBO] = [:]
+    /// One zero stand-in per declared FBO that a pass samples before any pass has
+    /// written it (motionblur's cross-frame `_rt_FullCompoBuffer1` history,
+    /// `unique:true`). WPE treats a freshly created RT as all-zero, so the first
+    /// read must see zero rather than fail the scene. Cached by name so a per-frame
+    /// re-miss reuses it instead of re-allocating.
+    private var zeroPlaceholderTextures: [String: MTLTexture] = [:]
 
     // Aliasing state (per-frame heap-backed sharing of non-overlapping targets).
     private var aliasHeap: MTLHeap?
@@ -130,7 +136,62 @@ final class WPEMetalRenderTargetPool {
     func releaseAll() {
         slots.removeAll(keepingCapacity: true)
         declaredFBOs.removeAll(keepingCapacity: true)
+        zeroPlaceholderTextures.removeAll(keepingCapacity: true)
         releaseAliasState()
+    }
+
+    /// Non-nil ONLY when `name` is a declared local FBO. Returns a cached, CPU-zeroed
+    /// stand-in so a first-frame read of an unwritten declared target resolves to
+    /// all-zero (WPE's semantics for a freshly created RT) instead of throwing.
+    /// Undeclared names return nil so the caller still raises `missingTexture` — a
+    /// genuine graph/transpile bug must stay loud.
+    ///
+    /// TODO(falsifiable): `declaredFBOs` is scene-wide, so two layers declaring the
+    /// same FBO name share one stand-in. Instance-scoping `latestNamedTextures` per
+    /// layer/effect (the real cross-talk fix) is deliberately out of scope here;
+    /// verify with a scene where two layers declare an identically named unwritten FBO.
+    func zeroFilledPlaceholderTexture(forDeclaredFBO name: String) -> MTLTexture? {
+        let lookupName = WPERenderTargetNames.PuppetClip.baseName(of: name) ?? name
+        guard let spec = declaredFBOs[lookupName] else { return nil }
+        if let cached = zeroPlaceholderTextures[name] { return cached }
+
+        let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format, promoteLDRToHDR: promotesLDRFormatsToHDR)
+        // 1×1: a zero texture samples to (0,0,0,0) at every UV, so the stand-in's
+        // literal size is irrelevant to a normalized read; a scene-sized `.shared`
+        // allocation would pin tens of MB for a dummy history buffer.
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: pixelFormat,
+            width: 1,
+            height: 1,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        // CPU-written via `replace`, so it can't be `.private`; discrete GPUs
+        // reject `.shared` for textures, so pick `.managed` there.
+        descriptor.storageMode = device.hasUnifiedMemory ? .shared : .managed
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.label = "WPE \(name) zero placeholder"
+        let bytesPerRow = Self.bytesPerTexel(pixelFormat)
+        let zero = [UInt8](repeating: 0, count: bytesPerRow)
+        zero.withUnsafeBytes { raw in
+            texture.replace(
+                region: MTLRegionMake2D(0, 0, 1, 1),
+                mipmapLevel: 0,
+                withBytes: raw.baseAddress!,
+                bytesPerRow: bytesPerRow
+            )
+        }
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
+        zeroPlaceholderTextures[name] = texture
+        return texture
+    }
+
+    private static func bytesPerTexel(_ format: MTLPixelFormat) -> Int {
+        switch format {
+        case .r8Unorm: return 1
+        case .rgba16Float: return 8
+        default: return 4 // rgba8Unorm(_srgb) / bgra8Unorm
+        }
     }
 
     /// Persistent texture outside the per-frame alias plan: a static layer

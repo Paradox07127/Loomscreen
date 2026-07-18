@@ -877,6 +877,17 @@ final class SteamCMDDoctorService {
             if out.contains("ERROR! Download item \(itemID) failed (No Connection).") { return .notEntitled }
             if out.contains("ERROR! Download item \(itemID) failed (No match).") { return .removedFromSteam }
             if out.contains("ERROR! Download item \(itemID) failed (Failure).") { return .temporarilyUnavailable }
+            // No success line and no error line: steamcmd's sandboxed stdout can
+            // drop the success marker to a thread race even though the download
+            // landed on disk. Disk is the fallback signal, not the primary one —
+            // an explicit error line above always wins.
+            let diskFolder = await Task.detached(priority: .utility) { () -> URL? in
+                guard let candidate = inventory.validatedItemDirectory(itemID: itemID, workdir: workdir) else { return nil }
+                return inventory.revalidatedURL(for: candidate, requiringProjectJSON: false)
+            }.value
+            if let diskFolder {
+                return .imported(await onContentReady(diskFolder))
+            }
             return .failed(reason: "SteamCMD didn't report a successful download. Open the Doctor and use Export diagnostics for the raw output.")
         } catch SteamCMDScriptError.invalidUsername {
             return .notConfigured(reason: "Steam username must match ^[A-Za-z0-9_]{1,32}$.")
@@ -960,17 +971,38 @@ final class SteamCMDDoctorService {
     /// treating an interrupted-mid-stage tree (dirs present, files partial) as
     /// complete. True when the manifest shows the install committed (buildid set)
     /// OR staging fully written (`BytesStaged == BytesToStage`, > 0).
+    ///
+    /// A missing manifest is not itself failure: `cleanupSteamCMDAppState` deletes
+    /// `appmanifest_431960.acf` and `commitAndPrune` cuts the tree to `assets/`
+    /// only, so an already-committed-and-pruned install has no manifest left to
+    /// read. Populated content dirs are the fallback evidence for that case.
     nonisolated static func isWPEStagingComplete(installRoot: URL, fileManager: FileManager) -> Bool {
         let manifest = installRoot
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("appmanifest_\(wallpaperEngineAppID).acf", isDirectory: false)
-        guard let acf = try? String(contentsOf: manifest, encoding: .utf8) else { return false }
+        guard let acf = try? String(contentsOf: manifest, encoding: .utf8) else {
+            return isWPEContentComplete(installRoot: installRoot, fileManager: fileManager)
+                && isWPEContentNonEmpty(installRoot: installRoot, fileManager: fileManager)
+        }
         if let build = parseACFBuildID(acf), build != "0" { return true }
         guard let toStage = parseACFUInt(acf, key: "BytesToStage"),
               let staged = parseACFUInt(acf, key: "BytesStaged"),
               toStage > 0 else { return false }
         return staged == toStage
+    }
+
+    /// Dir-presence alone (`isWPEContentComplete`) survives an interrupted
+    /// download that created empty framework dirs; this additionally requires
+    /// each to hold at least one entry.
+    nonisolated static func isWPEContentNonEmpty(installRoot: URL, fileManager: FileManager) -> Bool {
+        let assets = installRoot.appendingPathComponent("assets", isDirectory: true)
+        return ["materials", "models", "shaders"].allSatisfy { sub in
+            let contents = (try? fileManager.contentsOfDirectory(
+                atPath: assets.appendingPathComponent(sub, isDirectory: true).path(percentEncoded: false)
+            )) ?? []
+            return !contents.isEmpty
+        }
     }
 
     nonisolated static func parseACFUInt(_ acf: String, key: String) -> UInt64? {

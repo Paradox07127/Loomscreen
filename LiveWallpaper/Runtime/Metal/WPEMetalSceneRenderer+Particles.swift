@@ -178,7 +178,10 @@ extension WPEMetalSceneRenderer {
     /// fragment-texture(0) slot stale across systems and produce the
     /// "black background + red grid" overlay seen in workshop 3725117707
     /// before the fix.
-    func loadParticleSystems(from document: WPESceneDocument) async {
+    func loadParticleSystems(
+        from document: WPESceneDocument,
+        on actor: isolated WPEDisplayRenderActor
+    ) async {
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
         particleNormalTextures.removeAll(keepingCapacity: true)
@@ -190,7 +193,8 @@ extension WPEMetalSceneRenderer {
             let groupEffect = await resolveParticleGroupEffect(
                 for: object,
                 objectParentByID: document.objectParentByID,
-                imageObjectsByID: imageObjectsByID
+                imageObjectsByID: imageObjectsByID,
+                on: actor
             )
             await expandParticleTree(
                 path: object.particleRelativePath,
@@ -201,7 +205,8 @@ extension WPEMetalSceneRenderer {
                 followFromParent: false,
                 object: object,
                 sortIndex: document.objectPaintOrder[object.id] ?? 0,
-                groupEffect: groupEffect
+                groupEffect: groupEffect,
+                on: actor
             )
         }
     }
@@ -215,7 +220,8 @@ extension WPEMetalSceneRenderer {
     private func resolveParticleGroupEffect(
         for object: WPESceneParticleObject,
         objectParentByID: [String: String],
-        imageObjectsByID: [String: WPESceneImageObject]
+        imageObjectsByID: [String: WPESceneImageObject],
+        on actor: isolated WPEDisplayRenderActor
     ) async -> (mask: MTLTexture?, tint: SIMD3<Float>)? {
         var tint = SIMD3<Float>(1, 1, 1)
         var maskPath: String?
@@ -243,7 +249,7 @@ extension WPEMetalSceneRenderer {
         var maskTexture: MTLTexture?
         if let maskPath,
            let payload = try? await makeTextureResource(
-               relativePath: maskPath, label: "particle group mask \(maskPath)"),
+               relativePath: maskPath, label: "particle group mask \(maskPath)", on: actor),
            case .staticTexture(let t) = payload {
             maskTexture = t
         }
@@ -265,7 +271,8 @@ extension WPEMetalSceneRenderer {
         followFromParent: Bool,
         object: WPESceneParticleObject,
         sortIndex: Int,
-        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil
+        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil,
+        on actor: isolated WPEDisplayRenderActor
     ) async {
         // Reload/cleanup cancels the owning load task cooperatively; bail
         // before doing any work (or recursing) on behalf of a dead load.
@@ -296,7 +303,8 @@ extension WPEMetalSceneRenderer {
                 requiresFollowParent: followFromParent,
                 sortIndex: sortIndex,
                 isNestedChild: !ancestry.isEmpty,
-                groupEffect: groupEffect
+                groupEffect: groupEffect,
+                on: actor
             )
         } else {
             registered = nil
@@ -318,7 +326,8 @@ extension WPEMetalSceneRenderer {
                 followFromParent: child.isEventFollow,
                 object: object,
                 sortIndex: sortIndex,
-                groupEffect: groupEffect
+                groupEffect: groupEffect,
+                on: actor
             )
         }
     }
@@ -347,7 +356,8 @@ extension WPEMetalSceneRenderer {
         requiresFollowParent: Bool = false,
         sortIndex: Int = 0,
         isNestedChild: Bool = false,
-        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil
+        groupEffect: (mask: MTLTexture?, tint: SIMD3<Float>)? = nil,
+        on actor: isolated WPEDisplayRenderActor
     ) async -> WPEParticleSystem? {
         let material = definition.materialRelativePath
             .flatMap(parseParticleMaterial(at:))
@@ -359,7 +369,8 @@ extension WPEMetalSceneRenderer {
         }
         guard let texturePayload = try? await makeTextureResource(
             relativePath: texturePath,
-            label: "particle texture \(texturePath)"
+            label: "particle texture \(texturePath)",
+            on: actor
         ) else {
             debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
             return nil
@@ -477,7 +488,7 @@ extension WPEMetalSceneRenderer {
         if material?.isRefract == true, let normalPath = material?.normalTexturePath,
            let normalPayload = try? await makeTextureResource(
                relativePath: normalPath, label: "particle normal \(normalPath)",
-               colorSpace: .linear),   // a normal map is DATA — sRGB gamma corrupts its vectors
+               colorSpace: .linear, on: actor),   // a normal map is DATA — sRGB gamma corrupts its vectors
            case .staticTexture(let normalTexture) = normalPayload {
             system.isRefract = true
             system.refractAmount = material?.refractAmount ?? 0.05

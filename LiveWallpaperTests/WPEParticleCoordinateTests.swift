@@ -317,17 +317,54 @@ struct WPEParticleCoordinateTests {
         #expect(abs(def.directionMask.z - 0) < 0.0001)
     }
 
-    @Test("2D sphere random dispersal does not collapse through disabled Z")
-    func sphereRandom2DDispersalDoesNotCollapseThroughDisabledZ() {
-        let dispersal = WPEParticleSystem.dispersalVector(
-            radius: 100,
-            theta: 0.25,
-            phi: 0,
-            mask: SIMD3<Float>(1, 1, 0)
-        )
+    @Test("Sphere surface direction matches WPE GenSphereSurfaceNormal: gaussian(0, directions.axis) per enabled axis, disabled axis forced to 0, result normalized")
+    func sphereSurfaceDirectionMatchesGenSphereSurfaceNormal() {
+        // Algorism.h: `u = direct.x()>0 ? normal_random(0, direct.x()) : 0` (same for
+        // v/w), then `(u,v,w)/|(u,v,w)|`. Mock the sampler to return the requested
+        // stddev verbatim so the expected normalization is hand-verifiable, and to
+        // prove the disabled Z axis is never even queried.
+        var requestedStddevs: [Double] = []
+        let normal = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(3, 4, 0)) { mean, stddev in
+            #expect(mean == 0)
+            requestedStddevs.append(stddev)
+            return stddev
+        }
+        #expect(requestedStddevs == [3, 4], "the disabled Z axis must not be sampled")
+        // (3, 4, 0) normalizes to (0.6, 0.8, 0) — a 3-4-5 triangle.
+        #expect(abs(normal.x - 0.6) < 0.0001)
+        #expect(abs(normal.y - 0.8) < 0.0001)
+        #expect(abs(normal.z) < 0.0001)
+    }
 
-        #expect(abs(hypot(dispersal.x, dispersal.y) - 100) < 0.001)
-        #expect(abs(dispersal.z) < 0.001)
+    @Test("Sphere surface direction with all axes disabled returns zero instead of dividing by zero")
+    func sphereSurfaceDirectionZeroVectorGuard() {
+        let normal = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(0, 0, 0)) { _, stddev in stddev }
+        #expect(normal == SIMD3<Double>(0, 0, 0))
+    }
+
+    @Test("Sphere surface direction with a single enabled axis always lands on ±that axis")
+    func sphereSurfaceDirectionSingleAxisIsAlwaysUnitOnThatAxis() {
+        // Only Z enabled: v = 0, w = gaussian sample (may be negative), normalized
+        // to exactly ±1 — the axis itself never collapses toward zero.
+        let positive = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(0, 0, 5)) { _, _ in 2.5 }
+        #expect(positive == SIMD3<Double>(0, 0, 1))
+        let negative = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(0, 0, 5)) { _, _ in -2.5 }
+        #expect(negative == SIMD3<Double>(0, 0, -1))
+    }
+
+    @Test("Sphere radius sampling is volume-uniform: lerp(pow(rand, 1/3), min, max), not naive lerp(rand, min, max)")
+    func sphereRadiusIsVolumeUniform() {
+        // ParticleEmitter.cpp: `algorism::lerp(pow(Random::get(0,1), 1/3), min, max)`.
+        // At rand=0.5 that lands at 100·0.5^(1/3) ≈ 79.4% of the range — well past
+        // the 50% a naive uniform sampler would give, because a sphere's volume
+        // grows with r³ so most of its mass sits near the outer shell.
+        let r = WPEParticleSystem.sphereRadius(min: 0, max: 100, uniform01: 0.5)
+        #expect(abs(r - 100 * pow(0.5, 1.0 / 3.0)) < 0.0001)
+        #expect(r > 75, "volumetric bias should skew well past the naive-uniform midpoint of 50 (got \(r))")
+
+        // Bounds are respected at the extremes, and shifted min/max still lerp correctly.
+        #expect(abs(WPEParticleSystem.sphereRadius(min: 10, max: 90, uniform01: 0) - 10) < 0.0001)
+        #expect(abs(WPEParticleSystem.sphereRadius(min: 10, max: 90, uniform01: 1) - 90) < 0.0001)
     }
 
     @Test("Direction mask zero collapses dispersal on that axis")

@@ -340,6 +340,25 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Metal scene renderer unavailable on this Mac", category: .screenManager)
             return nil
         }
+        // M2c1b-2: build the main-thread surface up-front, then stand up the
+        // per-display render actor (main-backed unless the off-main flag is set)
+        // and inject the surface. No frame call is dispatched through the actor
+        // yet — it is parked on the session and shut down with it (a no-op for the
+        // default `.main` backing).
+        let backing = WPEOffMainRenderFlag.backing
+        let surface = WPERenderSurface(frame: rendererFrame, device: device)
+        let renderActor = WPEDisplayRenderActor(backing: backing)
+        // M2c2: the pacing seam forks by backing. `.renderThread` drives a
+        // render-thread CADisplayLink through the pacer (MTKView becomes a pure
+        // host); `.main` keeps pacing the MTKView through the bare surface exactly
+        // as before. This is the whole divergence — everything downstream is shared.
+        let surfaceControl: any WPESurfaceControl
+        switch backing {
+        case .main:
+            surfaceControl = surface
+        case .renderThread:
+            surfaceControl = WPERenderThreadFramePacer(surface: surface, renderActor: renderActor)
+        }
         let renderer: WPEMetalSceneRenderer
         do {
             renderer = try WPEMetalSceneRenderer(
@@ -349,7 +368,10 @@ final class AmbientWallpaperSessionBuilder {
                 projectManifestRootURL: assets.projectRoot,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineAssetsRootURL,
-                frame: rendererFrame,
+                surfaceControl: surfaceControl,
+                mailbox: surface.mailbox,
+                presentLayer: WPEPresentLayer(layer: surface.metalLayer),
+                drawableSize: surface.metalLayer.drawableSize,
                 device: device
             )
         } catch {
@@ -357,12 +379,33 @@ final class AmbientWallpaperSessionBuilder {
             return nil
         }
 
+        // Wire the delivery shim onto the surface (M2c1b-3c). The surface owns the
+        // shim, the shim targets the render actor — a graph entirely separate from
+        // the renderer, so the renderer stays `sending`-adoptable.
+        let shim = WPERenderSurfaceClientShim(renderActor: renderActor, backing: backing)
+        surface.attach(client: shim)
+
         let window = VideoWallpaperWindow(frame: frame)
-        window.contentView = renderer.nsView
+        window.contentView = surface.mtkView
         window.orderBack(nil)
 
-        let session = SceneWallpaperSession(window: window, renderer: renderer)
-        session.startLoadIfNeeded()
+        // M2c2: the view now has a window/screen, so stand up the CADisplayLink
+        // frame driver. `.main` mode never starts it — the MTKView paces there.
+        if case .renderThread = backing {
+            surface.startDisplayLinkDriver(renderActor: renderActor)
+        }
+
+        // Adopt the freshly-constructed renderer into the render actor, then drive
+        // the load. The renderer is a disconnected local here (it holds only the
+        // Sendable surface seams), so it transfers cleanly and never enters the
+        // session's region. The session keeps the surface (+ shim) alive.
+        let session = SceneWallpaperSession(window: window, renderActor: renderActor, surface: surface)
+        // Hand the renderer to its actor through the one-shot carrier (see
+        // `WPERendererHandoff`): it is constructed on main and never touched here
+        // again, so the transfer is safe even though the surface seams keep region
+        // isolation from proving it. The session owns the adopt+load task so
+        // cleanup() can cancel and drain it before tearing the actor down.
+        session.startAdoptingRenderer(WPERendererHandoff(renderer: renderer))
         return session
     }
 

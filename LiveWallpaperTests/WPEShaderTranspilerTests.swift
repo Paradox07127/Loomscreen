@@ -650,7 +650,7 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
-    @Test("non-shake/non-water effects still downgrade v_TexCoord.zw to .xy (historical)")
+    @Test("non-vouched effects still downgrade v_TexCoord.zw to .xy (historical)")
     func nonWhitelistedEffectDowngradesTexCoordZW() throws {
         // The .zw preservation is scoped — an effect we haven't vouched for keeps the
         // historical .xy downgrade so this fix doesn't silently change other shaders.
@@ -674,6 +674,275 @@ struct WPEShaderTranspilerTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("reflection MASK samples the opacity mask at v_TexCoord.zw (aspect-scaled), not .xy")
+    func reflectionMaskSamplesAspectScaledZW() throws {
+        // reflection.vert (MASK): v_TexCoord.zw *= g_Texture1Resolution.zw/.xy — the
+        // POT-padding correction for the mask (3840×2176 texture holding a ×2160 image
+        // scales V by 0.9926). The historical .zw→.xy downgrade dropped that scale for
+        // every MASK-bearing effect (found on 3413921910's water reflection).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture1Resolution;
+        uniform float g_ReflectionAlpha;
+        in vec4 v_TexCoord;
+        in vec2 v_ReflectedCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            float mask = texture(g_Texture1, v_TexCoord.zw).r;
+            vec4 reflected = texture(g_Texture0, v_ReflectedCoord);
+            gl_FragColor = mix(albedo, reflected, mask * g_ReflectionAlpha);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/reflection",
+            preprocessedSource: source,
+            comboValues: ["MASK": 1, "PERSPECTIVE": 0]
+        )
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+        #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoord.zw)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("vhs MASK scales v_TexCoord.zw by g_Texture2Resolution (mask binds slot 2, not 1)")
+    func vhsMaskUsesSlotTwoResolution() throws {
+        // vhs.vert (MASK): .zw = uv * g_Texture2Resolution.zw/.xy — slot 1 holds the
+        // VHS noise texture, the opacity mask binds slot 2. The generic MASK→T1 ladder
+        // must not win over the family table here.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform sampler2D g_Texture2;
+        uniform vec4 g_Texture1Resolution;
+        uniform vec4 g_Texture2Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            float vhsBlend = texture(g_Texture1, v_TexCoord.xy).r;
+            vhsBlend *= texture(g_Texture2, v_TexCoord.zw).r;
+            gl_FragColor = albedo * vhsBlend;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/12345/effects/vhs",
+            preprocessedSource: source,
+            comboValues: ["MASK": 1]
+        )
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture2Resolution)"))
+        #expect(result.mslSource.contains("g_Texture2.sample(wpeSampler2, v_TexCoord.zw)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("lightshafts MASK scales v_TexCoord.zw by g_Texture3Resolution")
+    func lightshaftsMaskUsesSlotThreeResolution() throws {
+        // lightshafts.vert (MASK): .zw = a_TexCoord * g_Texture3Resolution.zw/.xy —
+        // the opacity mask binds slot 3 (1 = rays, 2 = noise).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture3;
+        uniform vec4 g_Texture1Resolution;
+        uniform vec4 g_Texture3Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            float maskSample = texture(g_Texture3, v_TexCoord.zw).r;
+            gl_FragColor = albedo * maskSample;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/lightshafts",
+            preprocessedSource: source,
+            comboValues: ["MASK": 1]
+        )
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture3Resolution)"))
+        #expect(result.mslSource.contains("g_Texture3.sample(wpeSampler3, v_TexCoord.zw)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("a recognized family with its exact resolution slot missing never scales by another slot")
+    func missingExactSlotDoesNotFallBackToWrongResolution() throws {
+        // lightshafts' mask resolution is g_Texture3Resolution. If that exact uniform is
+        // absent (malformed input), the initializer must NOT fall through to the generic
+        // MASK→T1 ladder and scale .zw by a different texture's aspect — unscaled
+        // .zw (== uv == the historical .xy behavior) is the safe degradation.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture3;
+        uniform vec4 g_Texture1Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord.xy);
+            float maskSample = texture(g_Texture3, v_TexCoord.zw).r;
+            gl_FragColor = albedo * maskSample;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/lightshafts",
+            preprocessedSource: source,
+            comboValues: ["MASK": 1]
+        )
+        #expect(!result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("swing rebuilds v_TexCoord.zw as aspect (res.x/.y) + sine phase, even under MASK")
+    func swingRebuildsAspectAndSinePhase() throws {
+        // swing.vert: .z = g_Texture0Resolution.x / .y, .w = sin(g_Time·g_Speed +
+        // g_Phase·2π)·g_Amount. Not a resolution-scaled UV — the family table must
+        // not intercept, and MASK=1 must not route .zw through the MASK→T1 ladder
+        // (which would scale a UV into the aspect slot). g_Speed/g_Phase reach the
+        // fragment via the compiler's vert-uniform injection; declared here to match.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture0Resolution;
+        uniform vec4 g_Texture1Resolution;
+        uniform float g_Time;
+        uniform float g_Speed;
+        uniform float g_Phase;
+        uniform float g_Amount;
+        in vec4 v_TexCoord;
+        in vec2 v_TexCoordMask;
+        void main() {
+            vec2 texCoord = v_TexCoord.xy;
+            float aspect = v_TexCoord.z;
+            texCoord.x *= aspect;
+            float anim = v_TexCoord.w;
+            texCoord += anim * 0.01;
+            texCoord.x /= aspect;
+            float mask = texture(g_Texture1, v_TexCoordMask).r;
+            gl_FragColor = texture(g_Texture0, texCoord) * mask;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/swing",
+            preprocessedSource: source,
+            comboValues: ["MASK": 1]
+        )
+        #expect(result.mslSource.contains("wpe_swing_texcoord(in.uv, g_Texture0Resolution.xy, g_Time, g_Speed, g_Phase, g_Amount)"))
+        // Call form, not the bare name: the inline helper definitions are always in the preamble.
+        #expect(!result.mslSource.contains("wpe_texcoord_with_resolution(in.uv"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("twirl rebuilds v_TexCoord.zw with the res.z/.w aspect (workshop path form)")
+    func twirlRebuildsAspectFromZWComponents() throws {
+        // twirl.vert is identical to swing.vert except .z = g_Texture0Resolution.z / .w.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Texture0Resolution;
+        uniform vec2 g_SpinCenter;
+        uniform float g_Time;
+        uniform float g_Speed;
+        uniform float g_Phase;
+        uniform float g_Amount;
+        in vec4 v_TexCoord;
+        void main() {
+            float aspect = v_TexCoord.z;
+            vec2 texCoord = v_TexCoord.xy - g_SpinCenter;
+            texCoord.x *= aspect;
+            float anim = v_TexCoord.w * length(texCoord);
+            texCoord.x /= aspect;
+            texCoord += g_SpinCenter + anim * 0.01;
+            gl_FragColor = texture(g_Texture0, texCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/12345/effects/twirl",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_swing_texcoord(in.uv, g_Texture0Resolution.zw, g_Time, g_Speed, g_Phase, g_Amount)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("swing with the vert-only uniforms missing keeps the historical fallback")
+    func swingWithoutVertUniformsFallsBack() throws {
+        // Malformed input (no injection ran, g_Speed/g_Phase absent): the dedicated
+        // case must not fire with dangling uniform names; the historical float4
+        // default keeps the shader compiling.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Texture0Resolution;
+        uniform float g_Time;
+        in vec4 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + v_TexCoord.zw * 0.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/swing",
+            preprocessedSource: source
+        )
+        #expect(!result.mslSource.contains("wpe_swing_texcoord(in.uv"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("blend preserves v_TexCoord.zw only without TRANSFORMUV")
+    func blendPreservesZWOnlyWithoutTransformUV() throws {
+        // blend.vert scales .zw by g_Texture1Resolution, but TRANSFORMUV == 1 then
+        // applies offset/rotate/scale steps the fragment-only synthesis can't
+        // reproduce — that combo must keep the historical .xy downgrade.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Texture1Resolution;
+        in vec4 v_TexCoord;
+        void main() {
+            vec2 blendUV = v_TexCoord.zw;
+            vec4 blendColor = texture(g_Texture1, blendUV);
+            gl_FragColor = mix(texture(g_Texture0, v_TexCoord.xy), blendColor, blendColor.a);
+        }
+        """
+        let plain = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/blend",
+            preprocessedSource: source,
+            comboValues: ["TRANSFORMUV": 0]
+        )
+        #expect(plain.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+        #expect(plain.mslSource.contains("v_TexCoord.zw"))
+
+        let transformed = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/blend",
+            preprocessedSource: source,
+            comboValues: ["TRANSFORMUV": 1]
+        )
+        #expect(!transformed.mslSource.contains("v_TexCoord.zw"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: plain.mslSource, options: opts)
+        _ = try device.makeLibrary(source: transformed.mslSource, options: opts)
     }
 
     @Test("clipping mask narrows float4 v_TexCoord in vec2 transform arithmetic")
@@ -2047,5 +2316,243 @@ struct WPEShaderTranspilerTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("apply/up_sample v_StepSize reconstructs the box-blur step, not screen UV")
+    func reconstructsStepSizeVarying() throws {
+        // workshop 2822917890 apply.vert:14 / up_sample.vert:13 both compute
+        // `v_StepSize = 1.0 / vec4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy)`.
+        // g_Texture0Resolution is declared in the .vert, never the .frag; only
+        // WPESwiftShaderCompiler's vertex-uniform union exposes it here (covered by
+        // the end-to-end test below). This unit test pins the formula itself.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Texture0Resolution;
+        in vec2 v_TexCoord;
+        in vec4 v_StepSize;
+        void main() {
+            vec3 albedo = texture(g_Texture0, v_TexCoord).rgb;
+            albedo += texture(g_Texture0, v_TexCoord + v_StepSize.xy).rgb;
+            albedo += texture(g_Texture0, v_TexCoord + v_StepSize.zy).rgb;
+            albedo += texture(g_Texture0, v_TexCoord + v_StepSize.xw).rgb;
+            albedo += texture(g_Texture0, v_TexCoord + v_StepSize.zw).rgb;
+            gl_FragColor = vec4(albedo * 0.2, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2822917890/effects/up_sample",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains(
+            "v_StepSize = 1.0 / float4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy);"
+        ))
+        // The buggy screen-space default must NOT be how v_StepSize is initialized.
+        #expect(!result.mslSource.contains("v_StepSize = float4(in.uv, in.uv)"))
+        #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_StepSize'"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("blur_gaussian v_SizeMultiplier reconstructs the blur texel scale, not screen UV")
+    func reconstructsSizeMultiplierVarying() throws {
+        // workshop 2822917890 blur_gaussian.vert:30:
+        // `v_SizeMultiplier = vec2(aRatio, 1.0) * (u_radius + u_radius) * iterations * g_TexelSize`
+        // with aRatio = u_ratio under ANAMORPHIC else 1.0, iterations = 0.675 under
+        // HIGH_QUALITY else 1.5. The in.uv default made the blur offset grow with
+        // screen position instead of staying a fixed texel scale (3554161528 bloom chain).
+        // g_TexelSize has no packing path (would read 0 → blur degenerates to a copy),
+        // so the rule emits the equivalent 1/g_Texture0Resolution.xy, which IS packed
+        // from the bound texture (same-size framebuffer input ⇒ equal by definition).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_TexelSize;
+        uniform vec4 g_Texture0Resolution;
+        uniform float u_radius; // {"material":"radius","default":4}
+        uniform float u_strength; // {"material":"strength","default":1}
+        uniform float u_ratio; // {"material":"ratio","default":2.39}
+        in vec2 v_TexCoord;
+        in vec2 v_SizeMultiplier;
+        void main() {
+            vec3 albedo = vec3(0.0);
+            vec2 offset = vec2(0.0);
+            for (int i = -2; i <= 2; i++) {
+                offset.x = float(i) * v_SizeMultiplier.x;
+                albedo += texture(g_Texture0, v_TexCoord + offset).rgb * u_strength;
+            }
+            gl_FragColor = vec4(albedo / 5.0, 1.0);
+        }
+        """
+        // Default combos: aRatio folds to 1.0, iterations to 1.5.
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2822917890/effects/blur_gaussian",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains(
+            "v_SizeMultiplier = float2(1.0, 1.0) * (u_radius + u_radius) * 1.5 * (1.0 / g_Texture0Resolution.xy);"
+        ))
+        #expect(!result.mslSource.contains("v_SizeMultiplier = in.uv"))
+        #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_SizeMultiplier'"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+
+        // ANAMORPHIC + HIGH_QUALITY: aRatio folds to u_ratio, iterations to 0.675.
+        let anamorphic = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2822917890/effects/blur_gaussian",
+            preprocessedSource: source,
+            comboValues: ["ANAMORPHIC": 1, "HIGH_QUALITY": 1]
+        )
+        #expect(anamorphic.mslSource.contains(
+            "v_SizeMultiplier = float2(u_ratio, 1.0) * (u_radius + u_radius) * 0.675 * (1.0 / g_Texture0Resolution.xy);"
+        ))
+        _ = try device.makeLibrary(source: anamorphic.mslSource, options: opts)
+    }
+
+    @Test("down_sample/light_map v_TexCoord[4] reconstructs 4 distinct box-filter taps")
+    func reconstructsTexCoordBoxFilterArrayVarying() throws {
+        // workshop 2822917890 down_sample.vert:12-15 / light_map.vert:15-18 both
+        // compute `offsets = 1.0 / g_Texture0Resolution.xy` then
+        // v_TexCoord[0..3] = a_TexCoord ± offsets (the 4 diagonal box-filter taps).
+        // The generic array path called varyingInitializer ONCE and repeated it
+        // across all 4 slots, collapsing the box filter to a single point sample
+        // (the 3554161528 sky). Each slot must now get its own distinct offset.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec4 g_Texture0Resolution;
+        in vec2 v_TexCoord[4];
+        void main() {
+            float weight = 0.0;
+            vec3 result = vec3(0.0);
+            for (int i = 0; i < 4; ++i) {
+                vec4 s = texture(g_Texture0, v_TexCoord[i]);
+                result += s.rgb * s.a;
+                weight += s.a;
+            }
+            gl_FragColor = vec4(result / max(0.001, weight), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "workshop/2822917890/effects/down_sample",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains(
+            "v_TexCoord[4] = { in.uv - (1.0 / g_Texture0Resolution.xy), " +
+            "in.uv + float2(1.0 / g_Texture0Resolution.x, -1.0 / g_Texture0Resolution.y), " +
+            "in.uv + float2(-1.0 / g_Texture0Resolution.x, 1.0 / g_Texture0Resolution.y), " +
+            "in.uv + (1.0 / g_Texture0Resolution.xy) };"
+        ))
+        // The buggy collapse-to-one-tap default must NOT survive.
+        #expect(!result.mslSource.contains("v_TexCoord[4] = { in.uv, in.uv, in.uv, in.uv };"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("apply.vert's v_StepSize compiles end-to-end when g_Texture0Resolution is vertex-only")
+    func stepSizeReconstructsFromVertexOnlyResolutionUniformAndCompiles() throws {
+        // Faithful regression: apply.vert declares g_Texture0Resolution but
+        // apply.frag never does — only WPESwiftShaderCompiler's vertex-uniform
+        // union (fragmentSourceByAddingVertexUniformsIfNeeded) exposes it to the
+        // fragment-only transpile our reconstruction rule reads from.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "workshop/2822917890/effects/apply",
+            processedVertexSource: """
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform vec4 g_Texture0Resolution;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            void main() {
+                gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+                v_StepSize = 1.0 / vec4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy);
+            }
+            """,
+            processedFragmentSource: """
+            uniform sampler2D g_Texture0;
+            uniform sampler2D g_Texture2;
+            uniform float u_alpha; // {"material":"opacity","default":1}
+            in vec2 v_TexCoord;
+            in vec4 v_StepSize;
+            void main() {
+                vec4 baseAlbedo = texture(g_Texture2, v_TexCoord);
+                vec3 albedo = texture(g_Texture0, v_TexCoord).rgb;
+                albedo += texture(g_Texture0, v_TexCoord + v_StepSize.xy).rgb;
+                albedo += texture(g_Texture0, v_TexCoord + v_StepSize.zy).rgb;
+                albedo += texture(g_Texture0, v_TexCoord + v_StepSize.xw).rgb;
+                albedo += texture(g_Texture0, v_TexCoord + v_StepSize.zw).rgb;
+                albedo *= 0.4 * u_alpha;
+                gl_FragColor = vec4(albedo, baseAlbedo.a);
+            }
+            """,
+            sourceHash: "bloom-apply-stepsize-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+        let result = try compiler.compile(request)
+        #expect(result.mslSource.contains(
+            "v_StepSize = 1.0 / float4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy);"
+        ))
+        // Adopted from the vertex stage into the fragment's uniform layout.
+        #expect(result.uniformLayout.contains { $0.name == "g_Texture0Resolution" })
+        #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
+    }
+
+    @Test("down_sample.vert's v_TexCoord[4] compiles end-to-end when g_Texture0Resolution is vertex-only")
+    func texCoordArrayReconstructsFromVertexOnlyResolutionUniformAndCompiles() throws {
+        // Faithful regression: down_sample.vert declares g_Texture0Resolution but
+        // down_sample.frag never does — same vertex-uniform-union dependency as
+        // the v_StepSize case above, exercised for the array reconstruction path.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "workshop/2822917890/effects/down_sample",
+            processedVertexSource: """
+            uniform vec4 g_Texture0Resolution;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            void main() {
+                gl_Position = vec4(a_Position, 1.0);
+                vec2 offsets = 1.0 / g_Texture0Resolution.xy;
+                v_TexCoord[0] = a_TexCoord - offsets;
+                v_TexCoord[1] = a_TexCoord + vec2(offsets.x, -offsets.y);
+                v_TexCoord[2] = a_TexCoord + vec2(-offsets.x, offsets.y);
+                v_TexCoord[3] = a_TexCoord + offsets;
+            }
+            """,
+            processedFragmentSource: """
+            uniform sampler2D g_Texture0;
+            in vec2 v_TexCoord[4];
+            void main() {
+                float weight = 0.0;
+                vec3 result = vec3(0.0);
+                for (int i = 0; i < 4; ++i) {
+                    vec4 s = texture(g_Texture0, v_TexCoord[i]);
+                    result += s.rgb * s.a;
+                    weight += s.a;
+                }
+                gl_FragColor = vec4(result / max(0.001, weight), 1.0);
+            }
+            """,
+            sourceHash: "bloom-downsample-texcoord-array-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+        let result = try compiler.compile(request)
+        #expect(result.mslSource.contains(
+            "v_TexCoord[4] = { in.uv - (1.0 / g_Texture0Resolution.xy), " +
+            "in.uv + float2(1.0 / g_Texture0Resolution.x, -1.0 / g_Texture0Resolution.y), " +
+            "in.uv + float2(-1.0 / g_Texture0Resolution.x, 1.0 / g_Texture0Resolution.y), " +
+            "in.uv + (1.0 / g_Texture0Resolution.xy) };"
+        ))
+        #expect(result.uniformLayout.contains { $0.name == "g_Texture0Resolution" })
+        #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
     }
 }

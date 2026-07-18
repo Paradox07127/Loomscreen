@@ -463,7 +463,10 @@ final class WPEMetalRenderExecutor {
             sceneSize: size,
             cameraUniforms: cameraUniforms,
             previousSceneTexture: reusableHistory?.sceneTexture,
-            previousNamedTextures: reusableHistory?.namedTextures ?? [:]
+            previousNamedTextures: reusableHistory?.namedTextures ?? [:],
+            // Threaded so `resolve(.fbo)` can zero-fill a declared-but-unwritten
+            // local FBO on its first read instead of failing the scene at load.
+            renderTargetPool: targetPool
         )
         frameState.cameraParallax = runtimeUniforms.cameraParallax
         currentSceneSize = size

@@ -7,21 +7,26 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Capture batch
 
+    /// Sendable because it holds the render actor (Sendable) and value types only —
+    /// never the non-Sendable renderer. The present-completion callback fires on a
+    /// GPU thread, so this must cross threads; it re-enters the actor to check the
+    /// scene is still current before delivering the poster.
     final class LivePosterCaptureBatch: Sendable {
-        weak let renderer: WPEMetalSceneRenderer?
+        let actor: WPEDisplayRenderActor
         let captures: [UUID: CheckedContinuation<NSImage?, Never>]
         let generation: Int
         let snapshotter: WPEMetalTextureSnapshotter
 
-        @MainActor
         init(
-            renderer: WPEMetalSceneRenderer,
-            captures: [UUID: CheckedContinuation<NSImage?, Never>]
+            actor: WPEDisplayRenderActor,
+            captures: [UUID: CheckedContinuation<NSImage?, Never>],
+            generation: Int,
+            snapshotter: WPEMetalTextureSnapshotter
         ) {
-            self.renderer = renderer
+            self.actor = actor
             self.captures = captures
-            self.generation = renderer.loadGeneration
-            self.snapshotter = renderer.snapshotter
+            self.generation = generation
+            self.snapshotter = snapshotter
         }
 
         func captureAfterPresent(
@@ -37,10 +42,8 @@ extension WPEMetalSceneRenderer {
             Task { [self, snapshotter] in
                 let image = completed ? await snapshotter.snapshotAsync(from: source) : nil
                 releaseSource()
-                await MainActor.run {
-                    let result = renderer?.loadGeneration == generation ? image : nil
-                    finish(image: result)
-                }
+                let stillCurrent = await actor.isCurrentLoadGeneration(generation)
+                finish(image: stillCurrent ? image : nil)
             }
         }
 
@@ -62,7 +65,7 @@ extension WPEMetalSceneRenderer {
     /// inspector poster. This deliberately avoids forcing a fresh synchronous
     /// `renderCurrentFrame()` on the main actor. Dynamic scenes resolve on their
     /// next natural frame; static scenes re-present the retained output texture.
-    func captureLivePosterFromNextFrame() async -> NSImage? {
+    func captureLivePosterFromNextFrame(on actor: isolated WPEDisplayRenderActor) async -> NSImage? {
         guard didLoad, hasPresentedFrame, renderPipeline != nil, currentProfile == .quality else {
             Logger.info(
                 "[live-poster] skipped: didLoad=\(didLoad) presented=\(hasPresentedFrame) pipeline=\(renderPipeline != nil) profile=\(String(describing: currentProfile))",
@@ -77,29 +80,34 @@ extension WPEMetalSceneRenderer {
                 requestLivePosterCaptureFrame()
             }
         } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.finishLivePosterCapture(id: id, image: nil)
+            Task { [actor] in
+                await actor.finishLivePosterCapture(id: id, image: nil)
             }
         }
     }
 
     private func requestLivePosterCaptureFrame() {
         if needsContinuousFrames {
-            mtkView.setNeedsDisplay(mtkView.bounds)
+            surfaceControl.setNeedsRedraw()
         } else if outputTexture != nil {
-            mtkView.draw()
+            surfaceControl.drawImmediately()
         } else {
-            mtkView.setNeedsDisplay(mtkView.bounds)
+            surfaceControl.setNeedsRedraw()
         }
     }
 
     // MARK: - Frame-time drain & completion
 
     func takePendingLivePosterCaptures() -> LivePosterCaptureBatch? {
-        guard !pendingLivePosterCaptures.isEmpty else { return nil }
+        guard !pendingLivePosterCaptures.isEmpty, let actor = displayActor else { return nil }
         let captures = pendingLivePosterCaptures
         pendingLivePosterCaptures.removeAll(keepingCapacity: true)
-        return LivePosterCaptureBatch(renderer: self, captures: captures)
+        return LivePosterCaptureBatch(
+            actor: actor,
+            captures: captures,
+            generation: loadGeneration,
+            snapshotter: snapshotter
+        )
     }
 
     nonisolated private static func capturePendingLivePostersAfterPresent(
@@ -129,7 +137,7 @@ extension WPEMetalSceneRenderer {
         }
     }
 
-    private func finishLivePosterCapture(id: UUID, image: NSImage?) {
+    func finishLivePosterCapture(id: UUID, image: NSImage?) {
         guard let continuation = pendingLivePosterCaptures.removeValue(forKey: id) else { return }
         continuation.resume(returning: image)
     }
@@ -138,7 +146,9 @@ extension WPEMetalSceneRenderer {
         guard !pendingLivePosterCaptures.isEmpty else { return }
         let captures = pendingLivePosterCaptures
         pendingLivePosterCaptures.removeAll(keepingCapacity: false)
-        LivePosterCaptureBatch(renderer: self, captures: captures).finish(image: image)
+        for continuation in captures.values {
+            continuation.resume(returning: image)
+        }
     }
 
     static func finishLivePosterCaptures(

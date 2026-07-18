@@ -6,19 +6,26 @@ import LiveWallpaperProWPE
 import Metal
 import MetalKit
 import os
+import QuartzCore
 import simd
 extension WPEMetalRenderExecutor {
-    @MainActor
+    // Not `@MainActor` (M2c1b-3c): the present path runs on the renderer's
+    // `WPEDisplayRenderActor`. `CAMetalLayer.nextDrawable()` is safe off-main.
     func present(
         texture source: MTLTexture,
-        in view: MTKView,
+        layer: CAMetalLayer,
         fitMode: WPEPresentFitMode = .stretch,
         presentCompletion: (@Sendable (MTLTexture, MTLCommandBuffer, @escaping @Sendable () -> Void) -> Void)? = nil
     ) throws -> Bool {
-        guard let drawable = view.currentDrawable else {
+        // Pull the drawable straight from the layer. `MTKView.currentDrawable`
+        // is exactly a cached `layer.nextDrawable()`, so this is equivalent while
+        // MTKView remains the pacing source — but the executor no longer needs
+        // the view. The MTKView draw path never touches `currentDrawable`, so
+        // there's no double-acquire.
+        guard let drawable = layer.nextDrawable() else {
             #if DEBUG
             Logger.info(
-                "[present] view.currentDrawable=nil — source=\(source.width)x\(source.height) view.bounds=\(view.bounds) drawableSize=\(view.drawableSize)",
+                "[present] layer.nextDrawable()=nil — source=\(source.width)x\(source.height) drawableSize=\(layer.drawableSize)",
                 category: .wpeRender
             )
             #endif

@@ -10,7 +10,8 @@ import Metal
 /// glyphs); the overlay shader applies color + alpha. Cache keyed by the
 /// layout-affecting fields only (not color/alpha) so animated-alpha/tint text
 /// still hits the cache; bounded by `cacheLimit`.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): built and driven entirely inside the renderer's
+// `WPEDisplayRenderActor` isolation, never off it.
 final class WPETextRenderer {
     private struct CacheKey: Hashable {
         let text: String

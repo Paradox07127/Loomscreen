@@ -1114,11 +1114,13 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
 
-    // `spritetrail` / `ropetrail`: orient the quad along the particle's VELOCITY
-    // rather than its rotation and stretch it by the speed — verbatim from
-    // common_particles.h's ComputeParticleTrailTangents. The eye sits at -Z for
-    // our 2D ortho scenes, so `cross(eyeDir, v)` reduces to the in-plane
-    // perpendicular (v.y, -v.x).
+    // `spritetrail`: orient the quad along the particle's VELOCITY rather than its
+    // rotation and stretch it by the speed — verbatim from common_particles.h's
+    // ComputeParticleTrailTangents (up = veldir * clamp(speed*length, 0, maxlength);
+    // height = size*stretch*textureRatio). The eye sits at -Z for our 2D ortho
+    // scenes, so `cross(eyeDir, v)` reduces to the in-plane perpendicular (v.y, -v.x).
+    // Only non-perspective spritetrails set `trail.w > 0.5`; ropetrail and perspective
+    // systems keep the plain sprite quad (see WPEMetalRenderExecutor+Particles).
     if (projection.trail.w > 0.5) {
         float2 v = instance.velocity.xy;
         float speed = length(v);

@@ -59,7 +59,10 @@
                     owner: "per-session mutable renderer roots",
                     source: renderer,
                     needles: [
-                        "let mtkView: WPEInteractiveMTKView",
+                        // M2c1b-3c: the renderer holds the surface's Sendable seams
+                        // (control handle + present layer), not the surface itself.
+                        "let surfaceControl: any WPESurfaceControl",
+                        "let metalLayer: WPEPresentLayer",
                         "let executor: WPEMetalRenderExecutor",
                         "var outputTexture: MTLTexture?",
                     ]
@@ -241,19 +244,24 @@
                     needles: [
                         "func makeSceneSession(",
                         "renderer = try WPEMetalSceneRenderer(",
-                        "let session = SceneWallpaperSession(window: window, renderer: renderer)",
+                        // M2c1b-3c: the session owns the render actor + surface; the
+                        // renderer is adopted into the actor, not held by the session.
+                        "let session = SceneWallpaperSession(window: window, renderActor: renderActor, surface: surface)",
+                        // Adopt+load now runs inside a session-owned startup task so
+                        // cleanup can cancel/drain it before teardown (was a detached task).
+                        "session.startAdoptingRenderer(",
                     ]
                 ),
                 SourceEvidence(
                     owner: "session-owned load task and publication generation",
                     source: sceneSession,
                     needles: [
-                        "private var renderer: WPEMetalSceneRenderer?",
+                        "private let renderActor: WPEDisplayRenderActor",
                         "private var loadTask: Task<Void, Never>?",
                         "private var loadGeneration = 0",
                         "loadTask?.cancel()",
                         "await previous.value",
-                        "guard let self, self.loadGeneration == generation else { return }",
+                        "guard self.loadGeneration == generation else { return }",
                     ]
                 ),
             ]
@@ -298,12 +306,13 @@
                 "LiveWallpaper/Runtime/Session/SceneWallpaperSession.swift"
             )
 
-            let load = try sourceBlock(loadSource, from: "func load() async throws")
+            // M2c1b-3c: the async surfaces carry the render-actor isolation.
+            let load = try sourceBlock(loadSource, from: "func load(on actor: isolated WPEDisplayRenderActor) async throws")
             let performLoad = try sourceBlock(loadSource, from: "private func performLoad(")
-            let reload = try sourceBlock(lifecycleSource, from: "func reload() async throws")
+            let reload = try sourceBlock(lifecycleSource, from: "func reload(on actor: isolated WPEDisplayRenderActor) async throws")
             let cleanup = try sourceBlock(lifecycleSource, from: "func cleanup()")
             let releaseDynamic = try sourceBlock(textureSource, from: "func releaseDynamicTextureSources()")
-            let renderFrame = try sourceBlock(frameSource, from: "func renderCurrentFrame() throws")
+            let renderFrame = try sourceBlock(frameSource, from: "func renderCurrentFrame(inputs: WPEFrameInputs) throws")
             let encodeFrame = try sourceBlock(frameSource, from: "func encodeSceneFrame(")
             let clearScriptRuntime = try sourceBlock(
                 scriptContainmentSource,
@@ -312,9 +321,9 @@
             let lazyVideo = try sourceBlock(scriptSource, from: "private func lazyLoadVideo(key:")
             let releaseTransient = try sourceBlock(targetSource, from: "func releaseTransientResources()")
             let sessionCleanup = try sourceBlock(sceneSessionSource, from: "func cleanup()")
-            let sessionStart = try sourceBlock(sceneSessionSource, from: "func startLoadIfNeeded()")
+            let sessionStart = try sourceBlock(sceneSessionSource, from: "func beginLoad() async")
             let sessionReload = try sourceBlock(sceneSessionSource, from: "func reload() async")
-            let sessionRunLoad = try sourceBlock(sceneSessionSource, from: "private func runLoad(")
+            let sessionRunLoad = try sourceBlock(sceneSessionSource, from: "private func runLoadViaActor()")
 
             expectContains(
                 load,
@@ -323,7 +332,7 @@
                     "guard !didLoad else { return }",
                     "loadGeneration &+= 1",
                     "let scriptLoadToken = sceneScriptLoadState.begin(generation: generation)",
-                    "try await performLoad(scriptLoadToken: scriptLoadToken)",
+                    "try await performLoad(scriptLoadToken: scriptLoadToken, on: actor)",
                     "try checkCurrentSceneScriptLoad(scriptLoadToken)",
                 ]
             )
@@ -335,7 +344,7 @@
                     "Task.detached(priority: .userInitiated)",
                     "renderGraph = graph",
                     "renderPipeline = pipeline",
-                    "outputTexture = try renderCurrentFrame()",
+                    "outputTexture = try renderCurrentFrame(inputs: makeFrameInputs())",
                     "didLoad = true",
                 ]
             )
@@ -348,7 +357,7 @@
                     "releaseDynamicTextureSources()",
                     "clearSceneScriptRuntimeState()",
                     "executor.releaseTransientResources()",
-                    "try await load()",
+                    "try await load(on: actor)",
                 ]
             )
             expectContains(
@@ -357,7 +366,7 @@
                 [
                     "loadGeneration &+= 1",
                     "deferredAudioStartupTask?.cancel()",
-                    "mtkView.delegate = nil",
+                    "surfaceControl.detach()",
                     "releaseDynamicTextureSources()",
                     "soundRuntime?.stop()",
                     "executor.releaseTransientResources()",
@@ -382,7 +391,7 @@
             expectContains(
                 encodeFrame,
                 owner: "per-frame executor publication",
-                ["let frame = try executor.render(", "return frame"]
+                ["try executor.render(", "return frame"]
             )
             expectContains(
                 clearScriptRuntime,
@@ -391,15 +400,29 @@
             )
             #expect(frameSource.contains("previousPointer = pointer"))
             #expect(frameSource.contains("lastRuntimeUniforms = uniforms"))
+            // M2c1b-3c: the rebuild's generation gating and loading-set cleanup
+            // moved into the render actor's named entry; the schedule site only
+            // admits + dispatches. Same intent, split across the two sources.
+            let renderActorSource = try RepositoryRoot.source(
+                "LiveWallpaper/Runtime/Metal/RenderThread/WPEDisplayRenderActor.swift"
+            )
+            let rebuildVideo = try sourceBlock(renderActorSource, from: "func rebuildOnDemandVideo(")
             expectContains(
                 lazyVideo,
                 owner: "on-demand video task",
                 [
                     "onDemandVideoLoading.insert(key)",
                     "let generation = loadGeneration",
-                    "Task { @MainActor [weak self] in",
-                    "guard self.loadGeneration == generation else { return }",
-                    "defer { self.onDemandVideoLoading.remove(key) }",
+                    "Task { [actor] in",
+                    "await actor.rebuildOnDemandVideo(key: key, generation: generation)",
+                ]
+            )
+            expectContains(
+                rebuildVideo,
+                owner: "on-demand video rebuild gating",
+                [
+                    "defer { renderer.onDemandVideoLoading.remove(key) }",
+                    "guard renderer.loadGeneration == generation else { return }",
                 ]
             )
             #expect(executorSource.contains("previousFrameHistory = PreviousFrameHistory("))
@@ -442,26 +465,32 @@
             // independent of the renderer generation. Reload cancels and drains the
             // old task before mutating the renderer, then only the newest task may
             // publish errors or clear the retained task handle.
+            // Terminal cleanup cancels then DRAINS the startup + load tasks before
+            // tearing the renderer down, so teardown never runs ahead of an in-flight
+            // adopt/load (which would touch an already-stopped actor).
             expectOrder(
                 [
-                    "loadTask?.cancel()",
-                    "loadTask = nil",
-                    "renderer?.cleanup()",
-                    "renderer = nil",
                     "window?.close()",
-                    "window = nil",
+                    "loadTask?.cancel()",
+                    "startup?.cancel()",
+                    "await startup?.value",
+                    "await load?.value",
+                    "await actor.teardownRenderer()",
+                    "actor.shutdown()",
                 ],
                 in: sessionCleanup,
-                owner: "session cleanup"
+                owner: "session cleanup drains in-flight startup/load before teardown"
             )
             expectOrder(
                 [
                     "loadGeneration += 1",
                     "let generation = loadGeneration",
-                    "loadTask = Task",
-                    "await self?.runLoad(renderer)",
-                    "self.loadGeneration == generation",
-                    "self.loadTask = nil",
+                    "let task = Task",
+                    "await self.runLoadViaActor()",
+                    "loadTask = task",
+                    "await task.value",
+                    "if loadGeneration == generation",
+                    "loadTask = nil",
                 ],
                 in: sessionStart,
                 owner: "session initial load"
@@ -475,7 +504,7 @@
                     "loadGeneration += 1",
                     "let generation = loadGeneration",
                     "let task = Task",
-                    "try await renderer.reload()",
+                    "try await self.renderActor.reload()",
                     "self.loadGeneration == generation",
                     "self.loadError = nil",
                 ],
@@ -494,7 +523,7 @@
             )
             expectOrder(
                 [
-                    "try await renderer.load()",
+                    "try await renderActor.load()",
                     "guard !Task.isCancelled else { return }",
                     "loadError = nil",
                     "loadProgress = nil",
@@ -528,11 +557,15 @@
                 "LiveWallpaper/Runtime/Metal/WPEStaticTextureReloadTaskOwner.swift"
             )
 
-            let loadTextures = try sourceBlock(textureSource, from: "func loadTextures(for pipeline:")
+            // M2c1b-3c: loadTextures gained the render-actor isolation parameter
+            // (multi-line signature), and the reload body moved into the actor-run
+            // `performStaticTextureReload` — the schedule site only admits/dispatches.
+            let loadTextures = try sourceBlock(textureSource, from: "func loadTextures(")
             let staticReload = try sourceBlock(staticReloadSource, from: "func scheduleStaticTextureReload(for path:")
+            let staticReloadBody = try sourceBlock(staticReloadSource, from: "func performStaticTextureReload(")
             let upload = try sourceBlock(uploadSource, from: "func perform<T>(")
-            let rendererLoad = try sourceBlock(loadSource, from: "func load() async throws")
-            let rendererReload = try sourceBlock(lifecycleSource, from: "func reload() async throws")
+            let rendererLoad = try sourceBlock(loadSource, from: "func load(on actor: isolated WPEDisplayRenderActor) async throws")
+            let rendererReload = try sourceBlock(lifecycleSource, from: "func reload(on actor: isolated WPEDisplayRenderActor) async throws")
             let rendererCleanup = try sourceBlock(lifecycleSource, from: "func cleanup()")
 
             expectContains(
@@ -553,7 +586,14 @@
                 [
                     "guard didLoad",
                     "let generation = loadGeneration",
-                    "staticTextureReloadTaskOwner.submit(",
+                    "owner.submit(path: path, generation: generation)",
+                    "actor.performStaticReload(",
+                ]
+            )
+            expectContains(
+                staticReloadBody,
+                owner: "static reload publication gates",
+                [
                     "!Task.isCancelled",
                     "loadGeneration == generation",
                     "staticTextureReloadTaskOwner.canPublish(ticket)",
@@ -589,7 +629,7 @@
 
             expectOrder(
                 [
-                    "try await performLoad(scriptLoadToken: scriptLoadToken)",
+                    "try await performLoad(scriptLoadToken: scriptLoadToken, on: actor)",
                     "try Task.checkCancellation()",
                     "try checkCurrentSceneScriptLoad(scriptLoadToken)",
                     "staticTextureReloadTaskOwner.resume(generation: generation)",
@@ -600,19 +640,21 @@
             expectOrder(
                 [
                     "didLoad = false",
-                    "let staticTextureReloadDrain = staticTextureReloadTaskOwner.quiesce()",
+                    "let staticTextureReloadDrain = await staticTextureReloadTaskOwner.quiesce()",
                     "loadGeneration &+= 1",
                     "await staticTextureReloadDrain.wait()",
                     "releaseDynamicTextureSources()",
-                    "try await load()",
+                    "try await load(on: actor)",
                 ],
                 in: rendererReload,
                 owner: "renderer reload task drain"
             )
+            // Cleanup is synchronous on the render actor; the @MainActor owner is
+            // quiesced through a fire-and-forget hop (Drain intentionally dropped).
             expectOrder(
                 [
                     "didLoad = false",
-                    "_ = staticTextureReloadTaskOwner.quiesce()",
+                    "Task { [owner = staticTextureReloadTaskOwner] in _ = await owner.quiesce() }",
                     "loadGeneration &+= 1",
                     "releaseDynamicTextureSources()",
                 ],

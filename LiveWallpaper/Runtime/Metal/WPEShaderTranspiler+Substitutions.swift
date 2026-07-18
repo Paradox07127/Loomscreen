@@ -598,12 +598,14 @@ extension WPEShaderTranspiler {
         return String(line[..<rhsStart]) + rewritten + String(line[semicolon...])
     }
 
-    /// waterwaves/waterflow compute a resolution-scaled mask UV into `v_TexCoord.zw`
-    /// (`uv·res.zw/res.xy`), which the fragment-only path synthesizes byte-for-byte via
-    /// `wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)`. For those we keep the
-    /// `.zw` sample so the mask padding correction survives. For every other shader the
-    /// synthesized `.zw` is NOT guaranteed to match the source `.vert` (e.g. blur step,
-    /// clipping-mask transforms), so we keep the historical `.xy` fallback.
+    /// Engine effect `.vert`s compute a resolution-scaled aux UV into `v_TexCoord.zw`
+    /// (`uv·res.zw/res.xy` — the POT-padding/aspect correction for the mask, flow, or
+    /// blend texture), which the fragment-only path synthesizes byte-for-byte via
+    /// `wpe_texcoord_with_resolution(in.uv, g_TextureNResolution)`. For the families in
+    /// `texCoordZWResolutionSlot` we keep the `.zw` sample so that correction survives.
+    /// For every other shader the synthesized `.zw` is NOT guaranteed to match the source
+    /// `.vert` (blur-step verts, swing/twirl's aspect+sine packing, TRANSFORMUV blends),
+    /// so we keep the historical `.xy` fallback.
     private static func rewriteTexCoordMaskUVFallback(
         _ source: String,
         varyingTypesByName: [String: String],
@@ -615,25 +617,80 @@ extension WPEShaderTranspiler {
         return source
     }
 
-    /// These effects synthesize a `v_TexCoord.zw` that matches `wpe_texcoord_with_resolution`
-    /// (resolution-scaled mask/flow UV) in their source `.vert`, so the reconstructed `.zw`
-    /// is correct and must be preserved. `shake` samples its flow map (the per-pixel
-    /// displacement direction) at `.zw`; downgrading it to `.xy` read the flow field from
-    /// the wrong coordinates and turned the glitch/motion into a diagonal smear. Other
-    /// float4-`v_TexCoord` effects whose `.zw` we can't yet vouch for keep historical `.xy`.
-    static func shouldPreserveTexCoordZW(shaderName: String) -> Bool {
+    static func shouldPreserveTexCoordZW(shaderName: String, comboValues: [String: Int]) -> Bool {
+        // swing/twirl: .zw = aspect + sine phase, rebuilt by their varyingInitializer
+        // case. Safe even when its uniform gate fails: the float4 default leaves
+        // .zw == uv — exactly what the historical .xy downgrade produced.
+        if let family = texCoordZWFamilyName(shaderName: shaderName),
+           family == "swing" || family == "twirl" {
+            return true
+        }
+        return texCoordZWResolutionSlot(shaderName: shaderName, comboValues: comboValues) != nil
+    }
+
+    /// Effect families whose source `.vert` writes `v_TexCoord.zw = uv * resN.zw / resN.xy`
+    /// (verified line-by-line against the engine's `assets/effects/*/shaders` `.vert`s).
+    /// Returns the texture slot N whose resolution the `.vert` reads, or nil when the
+    /// family's `.zw` carries different semantics and must keep the `.xy` downgrade.
+    /// Excluded on purpose: blur_precise_gaussian/shine_gaussian/godrays_gaussian
+    /// (directional blur step), shine_combine/godrays_combine (HLSL-only half-texel
+    /// shift; GL `.zw` == uv), swing/twirl (aspect + sine time packing — rebuilt by
+    /// their dedicated `varyingInitializer` case instead), spin (never
+    /// writes `.zw`, so `.xy` is exact), fluidsimulation_clear (pressure decay).
+    static func texCoordZWResolutionSlot(shaderName: String, comboValues: [String: Int]) -> Int? {
+        guard let family = texCoordZWFamilyName(shaderName: shaderName) else { return nil }
+        switch family {
+        case "waterwaves":
+            // waterwaves.vert ladder: MASK scales by T1, else TIMEOFFSET by T2.
+            // Both off leaves .zw unscaled AND unread, so the slot-1 default is inert.
+            return comboValues["TIMEOFFSET"] == 1 && comboValues["MASK"] != 1 ? 2 : 1
+        case "blend", "blendgradient":
+            // TRANSFORMUV == 1 appends offset/rotate/scale steps after the resolution
+            // scale that we don't synthesize — keep the historical .xy downgrade there.
+            return comboValues["TRANSFORMUV"] == 1 ? nil : 1
+        case "foliagesway":
+            // MODE != 0 (vertex-displacement sway) leaves .zw = (0,0) — a constant
+            // mask sample we can't reproduce with a scaled UV; keep the downgrade.
+            return (comboValues["MODE"] ?? 0) == 0 ? 1 : nil
+        // glitter_combine binds its mask at slot 2 but its .vert scales by
+        // g_Texture1Resolution (upstream WPE quirk; slot 1 is the built-in 256²
+        // glitter noise, ratio 1) — replicate verbatim, don't "fix" to slot 2.
+        case "glitter_combine", "waterflow", "tint", "shake", "iris",
+             "localcontrast_combine", "cloudmotion", "chromatic_aberration", "fire",
+             "caustics", "opacity", "blur_combine", "godrays_downsample2",
+             "depthparallax", "reflection", "xray", "shimmer", "shine_downsample2":
+            return 1
+        case "refract", "motionblur_accumulation", "vhs", "pulse", "clouds",
+             "filmgrain", "nitro", "waterripple":
+            return 2
+        case "lightshafts":
+            return 3
+        default:
+            return nil
+        }
+    }
+
+    /// Family key = the shader basename when the path sits in an `effects/` directory
+    /// (`effects/reflection`, `workshop/…/effects/reflection`) or uses the flat
+    /// `effect_reflection` form — the same shapes the old allowlist accepted. Paths
+    /// outside `effects/` return nil so arbitrary workshop shaders that happen to share
+    /// a basename don't inherit engine `.vert` semantics.
+    static func texCoordZWFamilyName(shaderName: String) -> String? {
         let normalized = shaderName
             .lowercased()
             .replacingOccurrences(of: ".frag", with: "")
             .replacingOccurrences(of: ".vert", with: "")
-        for family in ["waterwaves", "waterflow", "shake"] {
-            if normalized == "effect_\(family)"
-                || normalized == "effects/\(family)"
-                || normalized.hasSuffix("/effects/\(family)") {
-                return true
-            }
+        if normalized.hasPrefix("effect_") {
+            return String(normalized.dropFirst("effect_".count))
         }
-        return false
+        guard let range = normalized.range(of: "effects/", options: .backwards) else { return nil }
+        if range.lowerBound != normalized.startIndex,
+           normalized[normalized.index(before: range.lowerBound)] != "/" {
+            return nil
+        }
+        let family = String(normalized[range.upperBound...])
+        guard !family.isEmpty, !family.contains("/") else { return nil }
+        return family
     }
 
     /// Metal accepts aggregate array initializers, not GLSL constructor syntax

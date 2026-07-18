@@ -21,7 +21,7 @@ final class OggAudioTranscoder: @unchecked Sendable {
     private let cacheDirectory: URL
     // Concurrent so one file's (rare) un-interruptible decode hang can't
     // head-of-line block — or falsely poison — every other Ogg.
-    private let queue = DispatchQueue(label: "com.livewallpaper.ogg-transcode", attributes: .concurrent)
+    private let queue = DispatchQueue(label: "com.livewallpaper.ogg-transcode", qos: .utility, attributes: .concurrent)
     private let lock = NSLock()
     private enum Outcome { case ready(URL); case unavailable }
     /// Memoized per-key result. `.unavailable` poisons a file that failed or hung

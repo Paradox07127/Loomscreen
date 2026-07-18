@@ -245,14 +245,14 @@
             introPhaseSource = intro
             loopPhaseSource = loop
             let token = introPhaseToken
-            Task { [weak self] in
+            guard let actor = displayActor else { return }
+            // Measure off-actor from the (Sendable) URLs, then apply on the actor.
+            // `introPhaseToken` is bumped by every reload/invalidate, so a matching
+            // token already implies `introPhaseSource`/`loopPhaseSource` are still
+            // the pair we measured — the old `===` identity checks were redundant.
+            Task { [actor] in
                 let offset = await WPEVideoPhaseOffset.measure(introURL: introURL, loopURL: loopURL)
-                guard let self,
-                      self.introPhaseToken == token,
-                      self.isCurrentSceneScriptLoad(scriptLoadToken),
-                      self.introPhaseSource === intro,
-                      self.loopPhaseSource === loop else { return }
-                self.introLoopOffset = offset
+                await actor.applyIntroLoopOffset(offset, token: token, scriptLoadToken: scriptLoadToken)
             }
         }
 

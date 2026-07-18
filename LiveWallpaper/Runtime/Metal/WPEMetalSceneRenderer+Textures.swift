@@ -49,7 +49,8 @@ extension WPEMetalSceneRenderer {
     /// requests are `Sendable`) — never the non-`Sendable` executor.
     func prewarmCustomShaders(
         for pipeline: WPEPreparedRenderPipeline,
-        textObjects: [WPESceneTextObject]
+        textObjects: [WPESceneTextObject],
+        on actor: isolated WPEDisplayRenderActor
     ) async {
         // Always pre-compile before the first-frame encode: compiling a pipeline
         // state inline during an open render encoder corrupts the pass (3660962877
@@ -207,7 +208,10 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Bulk texture loading
 
-    func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
+    func loadTextures(
+        for pipeline: WPEPreparedRenderPipeline,
+        on actor: isolated WPEDisplayRenderActor
+    ) async throws {
         loadedTextures = [:]
         dynamicTextureSources = [:]
         resetTextureCacheBudgetState()
@@ -302,7 +306,8 @@ extension WPEMetalSceneRenderer {
                         layerName: jobs[index].layerName,
                         publicationAllowed: { [weak self] in
                             self?.loadGeneration == generation
-                        }
+                        },
+                        on: actor
                     )
                 }
                 _ = spawnNext()
@@ -393,12 +398,16 @@ extension WPEMetalSceneRenderer {
     func loadDynamicTextureOnActor(
         path: String,
         layerName: String,
-        publicationAllowed: @MainActor () -> Bool = { true }
+        publicationAllowed: () async -> Bool = { true },
+        on actor: isolated WPEDisplayRenderActor
     ) async throws {
         do {
-            let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
+            let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)", on: actor)
+            // `publicationAllowed` is an async hop (ticket admission); re-check
+            // cancellation AFTER it resumes so a cancel during the hop is caught at
+            // the last moment before publishing into renderer state.
+            guard await publicationAllowed() else { throw CancellationError() }
             try Task.checkCancellation()
-            guard publicationAllowed() else { throw CancellationError() }
             switch resource {
             case .staticTexture(let texture):
                 recordLoadedStaticTexture(
@@ -479,7 +488,8 @@ extension WPEMetalSceneRenderer {
     func makeTextureResource(
         relativePath: String,
         label: String,
-        colorSpace: WPEMetalColorSpace = .sRGB
+        colorSpace: WPEMetalColorSpace = .sRGB,
+        on actor: isolated WPEDisplayRenderActor
     ) async throws -> WPELoadedTextureResource {
         try Task.checkCancellation()
         var lastError: Error?
@@ -493,6 +503,13 @@ extension WPEMetalSceneRenderer {
                                 from: streaming,
                                 label: label
                             )
+                            // Completion pump: a finished off-thread decode hops back
+                            // into this actor and lands immediately (pre-3c contract),
+                            // rather than at the next frame tick.
+                            source.onPrefetchComplete = { [weak actor] in
+                                guard let actor else { return }
+                                Task { await actor.harvestLazyPrefetches() }
+                            }
                             Logger.info(
                                 "WPE Metal lazy .tex animation '\(candidate)' raw=\(streaming.totalUncompressedImageBytes)B frames=\(streaming.frames.count)",
                                 category: .screenManager
@@ -504,7 +521,7 @@ extension WPEMetalSceneRenderer {
                         try Task.checkCancellation()
 
                         if payload.videoPayload != nil {
-                            let source = try await makeVideoTextureSource(from: payload, label: label)
+                            let source = try await makeVideoTextureSource(from: payload, label: label, on: actor)
                             try Task.checkCancellation()
                             return .dynamicSource(source)
                         }
@@ -607,7 +624,8 @@ extension WPEMetalSceneRenderer {
     /// Phase 2E: stages MP4 bytes into the per-process video cache and constructs a `WPEVideoTextureSource` bound to the executor's MTLDevice.
     private func makeVideoTextureSource(
         from payload: WPETexTexturePayload,
-        label: String
+        label: String,
+        on actor: isolated WPEDisplayRenderActor
     ) async throws -> WPEVideoTextureSource {
         try Task.checkCancellation()
         guard let videoPayload = payload.videoPayload else {
@@ -1035,8 +1053,18 @@ extension WPEMetalSceneRenderer {
                 )
             case .missingTexture(let reference):
                 switch reference {
-                case .image(let path), .asset(let path), .fbo(let path):
+                case .image(let path), .asset(let path):
                     return .fileMissing(layer: layerName, path: path)
+                case .fbo(let name):
+                    // A named render target, not a file on disk — "file missing" was
+                    // misleading. A first-frame read of an unwritten DECLARED FBO is
+                    // now zero-filled, so reaching here means an UNDECLARED target: a
+                    // graph/transpile bug. `reason` is developer-facing only (the
+                    // user-visible `.materialUnresolved` string ignores it).
+                    return .materialUnresolved(
+                        layer: layerName,
+                        reason: "Render target \"\(name)\" is not produced by any pass."
+                    )
                 case .previous:
                     return .materialUnresolved(layer: layerName, reason: "Previous-frame effects (motion blur, feedback) are not yet supported.")
                 }

@@ -11,6 +11,12 @@ struct LogPrivacySourceAuditTests {
     /// occurrence count. A new value — even an opaque alias — requires an
     /// explicit privacy review instead of trying to infer sensitivity by name.
     private static let allowedPublicExpressions: [String: [String: Int]] = [
+        // Frame signpost metadata: workshopID is the wallpaper's public Steam
+        // Workshop ID; the traversal domain ID is an opaque per-renderer token.
+        "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift": [
+            "self.descriptor.workshopID": 1,
+            "self.sceneScriptTraversalDomainID": 1,
+        ],
         "LiveWallpaper/Monitor/MonitorRuntime.swift": [
             "built.map(\\.sourceID).joined(separator:\",\")": 1,
         ],

@@ -334,6 +334,58 @@
             #expect(owner.pendingPaths.isEmpty)
         }
 
+        @Test(
+            "Reload admission caps concurrent work at 2 and still drains every submission",
+            .timeLimit(.minutes(1))
+        )
+        @MainActor
+        func reloadAdmissionCapsConcurrencyAndDrainsAllSubmissions() async throws {
+            let owner = WPEStaticTextureReloadTaskOwner()
+            let started = RR14StringRecorder()
+            let secondSlotStarted = RR14AsyncOneShot()
+            let release = RR14DeterministicGate()
+            defer { release.signal() }
+
+            owner.resume(generation: 1)
+            let paths = (0 ..< 5).map { "reload-\($0)" }
+            for path in paths {
+                let ticket = owner.submit(path: path, generation: 1) { _ in
+                    started.append(path)
+                    if started.values.count == 2 {
+                        secondSlotStarted.signal()
+                    }
+                    await release.wait()
+                }
+                #expect(ticket != nil)
+            }
+            #expect(owner.taskCount == paths.count)
+
+            // Duplicate submission while the original path is still pending is
+            // rejected, same as before the concurrency cap existed.
+            #expect(owner.submit(path: paths[0], generation: 1) { _ in } == nil)
+            #expect(owner.taskCount == paths.count)
+
+            // Deterministic, not timing-dependent: `acquireReloadSlot` grants and
+            // increments atomically within the MainActor, so a 3rd reload cannot
+            // reach `started.append` before this point no matter how the 5 tasks
+            // get scheduled — only whichever 2 win the race to run first.
+            try await secondSlotStarted.wait()
+            #expect(started.values.count == 2)
+            #expect(owner.activeReloadCount == 2)
+
+            release.signal()
+            while owner.taskCount > 0 {
+                await Task.yield()
+            }
+
+            #expect(Set(started.values) == Set(paths))
+            #expect(owner.activeReloadCount == 0)
+
+            let drain = owner.quiesce()
+            await drain.wait()
+            #expect(owner.pendingPaths.isEmpty)
+        }
+
         private static func makeUploadTask(
             id: String,
             generation: Int,

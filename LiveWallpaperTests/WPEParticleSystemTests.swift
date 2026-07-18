@@ -359,19 +359,23 @@ struct WPEParticleSystemTests {
 
         // Threading `ropetrail`'s independently-spawned particles into one ribbon
         // drew a random zigzag across the sky — worse than the sprite fallback.
+        // Its `.rope` kind ALSO bars the velocity-stretch (genericropeparticle reads
+        // length as a UV segment scale, not a stretch) so it renders as a sprite.
         let ropetrail = try def("ropetrail", extra: #", "length": 3"#)
         #expect(!ropetrail.isRope, "ropetrail must not join the whole chain")
         #expect(ropetrail.trailRenderer?.length == 3)
+        #expect(ropetrail.trailRenderer?.kind == .rope)
 
+        // `spritetrail` IS the single-quad velocity-stretch kind.
         let spritetrail = try def("spritetrail", extra: #", "length": 5, "maxlength": 40"#)
         #expect(!spritetrail.isRope)
         #expect(spritetrail.trailRenderer?.length == 5)
         #expect(spritetrail.trailRenderer?.maxLength == 40)
+        #expect(spritetrail.trailRenderer?.kind == .sprite)
 
         // Engine defaults, so an omitted bound is WPE's value rather than 0
-        // (WPParticleObject.h ParticleRender). NOTE these are parsed but NOT fed to
-        // `g_RenderVar0` — RenderDoc shows WPE recomputes that per frame in
-        // `g_bufDynamic`, and none of its components match the authored JSON.
+        // (WPParticleObject.h ParticleRender). Fed verbatim into `g_RenderVar0`
+        // (length, maxlength) — RenderDoc on 3448877775's rain confirms the pair.
         let defaulted = try #require(ropetrail.trailRenderer)
         #expect(defaulted.maxLength == 10, "absent maxlength is 10, never unbounded")
         #expect(defaulted.subdivision == 3)
@@ -389,6 +393,129 @@ struct WPEParticleSystemTests {
         #expect(!sprite.isRope)
         #expect(sprite.trailRenderer == nil)
     }
+
+    @Test("Parser reads emitter sign and normalizes each axis to -1/0/1")
+    func parserReadsEmitterSign() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{
+                "name": "sphererandom", "rate": 1,
+                "distancemin": 10, "distancemax": 100,
+                "sign": "0 -0.5 3"
+            }]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        // WPParticleObject.cpp `Emitter::FromJson`: `v != 0 ? v / abs(v) : 0` —
+        // only the SIGN of each authored component survives, not its magnitude.
+        #expect(def.sign == SIMD3<Double>(0, -1, 1))
+    }
+
+    @Test("Emitter sign defaults to zero (no axis forced) when absent")
+    func parserDefaultsSignToZero() throws {
+        let json = #"""
+        {"maxcount": 10, "emitter": [{"name": "sphererandom", "rate": 1}]}
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.sign == SIMD3<Double>(0, 0, 0))
+    }
+
+    @Test("applyEmitterSign forces a nonzero axis to abs(value) * sign, passes zero axes through")
+    func applyEmitterSignForcesOnlyNonzeroAxes() {
+        // ParticleEmitter.cpp `ApplySign`: `if (x != 0) p.x = abs(p.x) * x;` per axis.
+        let p = SIMD3<Double>(-2, 3, -5)
+        let zOnly = WPEParticleSystem.applyEmitterSign(p, sign: SIMD3<Double>(0, 0, 1))
+        #expect(zOnly == SIMD3<Double>(-2, 3, 5))
+
+        // sign flips every axis relative to `p`'s own signs (x was negative,
+        // sign forces positive; y was positive, sign forces negative; z was
+        // negative, sign forces positive) — abs(p) * sign per axis.
+        let allForced = WPEParticleSystem.applyEmitterSign(p, sign: SIMD3<Double>(1, -1, 1))
+        #expect(allForced == SIMD3<Double>(2, -3, 5))
+
+        let untouched = WPEParticleSystem.applyEmitterSign(p, sign: SIMD3<Double>(0, 0, 0))
+        #expect(untouched == p)
+    }
+
+    #if !LITE_BUILD && DEBUG
+    @Test("Sphere emitter sign=\"0 0 1\" keeps every spawned particle at non-negative depth (scene 3462491575 snowperspective dust)")
+    func sphereEmitterSignKeepsParticlesInFrontOfCamera() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let json = #"""
+        {
+            "maxcount": 400, "flags": 4,
+            "emitter": [{
+                "name": "sphererandom", "rate": 100000,
+                "distancemin": 10, "distancemax": 500,
+                "directions": "1 1 1", "sign": "0 0 1"
+            }]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.sign == SIMD3<Double>(0, 0, 1))
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        for step in 1...4 { system.tick(now: Double(step) * 0.05) }
+        try #require(system.liveInstanceCount >= 32)
+
+        var sampled = 0
+        for rawLine in system.particleStateDumpText().split(separator: "\n") {
+            let line = String(rawLine)
+            guard let open = line.range(of: "pos=("),
+                  let close = line.range(of: ")", range: open.upperBound..<line.endIndex)
+            else { continue }
+            let parts = line[open.upperBound..<close.lowerBound].split(separator: ",")
+            guard parts.count == 3, let z = Double(parts[2]) else { continue }
+            #expect(z >= 0, "sign=\"0 0 1\" must force every particle's depth non-negative (z=\(z))")
+            sampled += 1
+        }
+        #expect(sampled >= 32)
+    }
+
+    @Test("Sphere radius sampling is volume-uniform: seeded average lands well past the naive-uniform midpoint")
+    func sphereRadiusSamplingIsVolumeUniformUnderSeed() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // `directions: "0 0 1"` + `sign: "0 0 1"` isolates radius from direction:
+        // the sphere normal is forced to exactly (0,0,1), so each particle's z IS
+        // its sampled radius, unobscured by any XY geometry.
+        let json = #"""
+        {
+            "maxcount": 300,
+            "emitter": [{
+                "name": "sphererandom", "rate": 100000,
+                "distancemin": 0, "distancemax": 100,
+                "directions": "0 0 1", "sign": "0 0 1"
+            }]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        let system = try #require(WPEParticleSystem(definition: def, device: device, seed: 0x00A5_11CE))
+        // The very first `tick` only anchors the clock (dt == 0, no spawns);
+        // the second is what actually advances time and emits.
+        system.tick(now: 0)
+        system.tick(now: 0.01)
+        try #require(system.liveInstanceCount >= 100)
+
+        var total = 0.0
+        var count = 0
+        for rawLine in system.particleStateDumpText().split(separator: "\n") {
+            let line = String(rawLine)
+            guard let open = line.range(of: "pos=("),
+                  let close = line.range(of: ")", range: open.upperBound..<line.endIndex)
+            else { continue }
+            let parts = line[open.upperBound..<close.lowerBound].split(separator: ",")
+            guard parts.count == 3, let z = Double(parts[2]) else { continue }
+            #expect(z >= -0.01 && z <= 100.01)
+            total += z
+            count += 1
+        }
+        try #require(count >= 100)
+        let average = total / Double(count)
+        // Volume-uniform `lerp(pow(rand,1/3), 0, 100)` has mean 75; naive uniform
+        // sampling would average 50. A fixed seed makes this reproducible.
+        #expect(average > 60, "volumetric sampling should skew well past the naive-uniform mean of 50 (got \(average))")
+    }
+    #endif
 
     @Test("alphachange interpolates over lifetime fractions")
     func alphaChangeInterpolatesOverLifetimeFractions() {

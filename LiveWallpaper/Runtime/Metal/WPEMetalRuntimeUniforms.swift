@@ -41,6 +41,12 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
     /// Each axis is scaled by its own depth so WPE's per-axis limiting works
     /// ("1 0" → horizontal only, "0 1" → vertical only). X is negated and Y kept
     /// so the layer moves with the cursor in the renderer's top-left scene space.
+    ///
+    /// A static `(nodePos−camPos)·depth·amount` term (reference `WPShaderValueUpdater.cpp`)
+    /// was tried 2026-07-17 and reverted: our nodePos/camPos coordinate space did
+    /// not match the reference, so scenes shifted while static (multi-layer
+    /// misalignment, full-frame layers pushed off-canvas). Redo it only after using
+    /// the oracle to pin down the nodePos/camPos space convention.
     func pixelOffset(depth: SIMD2<Double>, sceneSize: CGSize) -> SIMD2<Float> {
         let dx = Float(depth.x)
         let dy = Float(depth.y)
@@ -310,29 +316,38 @@ struct WPEMetalPointerSample: Equatable, Sendable {
     }
 }
 
-/// Pointer position sampler. `live` reads `NSEvent.mouseLocation` and maps it
-/// to the renderer view's UV space; `fixed` is for fixtures that need a known
-/// active pointer position regardless of the cursor.
-@MainActor
+/// Pointer position sampler (the renderer's frame-path pointer source). `mailbox`
+/// reads the non-blocking pointer mailbox the surface feeds; `fixed` is for
+/// fixtures that need a known active position regardless of the cursor. The
+/// closure is view-free — the surface, not the renderer, owns the `NSView`.
+// Not `@MainActor` (M2c1b-3c): sampled on the renderer's actor. The closure
+// reads the non-blocking pointer mailbox, which is safe off the main thread.
 struct WPEMetalPointerSampler {
-    let sample: @MainActor @Sendable (NSView) -> WPEMetalPointerSample
+    let sample: @Sendable () -> WPEMetalPointerSample
 
-    static let live = WPEMetalPointerSampler { view in
-        sampleSceneUV(mouseLocation: NSEvent.mouseLocation, in: view)
+    /// Production default: the mailbox's NSView-free `pointerSample`, which is
+    /// bit-equal to `sampleSceneUV` (see `WPEPointerMailboxTests`).
+    static func mailbox(_ mailbox: WPEPointerMailbox) -> WPEMetalPointerSampler {
+        WPEMetalPointerSampler { mailbox.read().pointerSample }
     }
 
     static func fixed(_ uv: SIMD2<Double>) -> WPEMetalPointerSampler {
-        WPEMetalPointerSampler { _ in WPEMetalPointerSample.inside(uv) }
+        WPEMetalPointerSampler { WPEMetalPointerSample.inside(uv) }
     }
 
     static func fixedOutside() -> WPEMetalPointerSampler {
-        WPEMetalPointerSampler { _ in .inactive }
+        WPEMetalPointerSampler { .inactive }
     }
 
+    // @MainActor (not the enclosing struct): only test callers remain (grep-verified,
+    // WPEPointerMailboxTests/WPEMetalRuntimeUniformsTests), both already on the main actor —
+    // this reads NSView.bounds/.window, which are themselves main-actor-isolated.
+    @MainActor
     static func normalizedSceneUV(mouseLocation: CGPoint, in view: NSView) -> SIMD2<Double> {
         sampleSceneUV(mouseLocation: mouseLocation, in: view).position
     }
 
+    @MainActor
     static func sampleSceneUV(mouseLocation: CGPoint, in view: NSView) -> WPEMetalPointerSample {
         guard view.bounds.width > 0, view.bounds.height > 0 else {
             return .inactive

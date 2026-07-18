@@ -80,7 +80,10 @@ extension WPEMetalRenderExecutor {
         )
         // Translate the whole system by its camera-parallax depth (pixels),
         // carried in `padding.xy` and added to each particle's screen position.
-        let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
+        let parallax = cameraParallax.pixelOffset(
+            depth: system.parallaxDepth,
+            sceneSize: sceneSize
+        )
         // A keyframed ancestor `origin` shifts the whole system, exactly like the
         // parallax offset does — ride the same channel rather than rebuilding the
         // system's baked transform every frame.
@@ -89,17 +92,33 @@ extension WPEMetalRenderExecutor {
             parallax.y + system.hostOriginOffset.y,
             0, 0
         )
-        // Orientation only (stretch 1); authored length/maxlength do not derive WPE's trail.
+        // `spritetrail` orient + stretch. WPE's `genericparticle` TRAILRENDERER path
+        // (common_particles.h `ComputeParticleTrailTangents`) does TWO things: it
+        // orients the quad's height axis ALONG velocity (`up = normalize(velocity)`),
+        // then stretches by `clamp(speed*length, minlen, maxlength)`. `g_RenderVar0 =
+        // (length, maxlength, minlen, …)`; catsout WPSceneParser.cpp fills length/
+        // maxlength verbatim — NOT unit-converted. `trail.w > 0.5` enables the path.
         //
-        // `g_RenderVar0` is recomputed in `g_bufDynamic`, not baked from JSON. RenderDoc on
-        // 3448877775 shows the meteor draw (ord 4, `流星.tex`) authors length 3 with no
-        // maxlength but carries `(0.005, 100.0, 0.1585, 3.5)`; none of catsout's static
-        // `{length, maxlength, 0, maxcount-1}` components match either.
-        //
-        // Until the runtime mapping is understood, only grounded textureRatio plus velocity
-        // orientation shapes the streak; guessing caused screen-crossing lasers/over-long rain.
-        if system.definition.trailRenderer != nil {
-            projection.trail = SIMD4<Float>(0, 1, 1, 1)
+        // The velocity orientation is load-bearing even at stretch 1×: with velocity
+        // pointing down, `ComputeParticlePosition`'s `-up*(uv.y-0.5)` puts texture-top
+        // at screen-BOTTOM — a 180° flip. rain's `particle/drop` (32×128) is authored
+        // bulb-at-top / tail-at-bottom precisely so this flip lands the bulb leading
+        // the fall. Drop the orientation and the drop renders head-up (WRONG).
+        //   - `ropetrail` (kind `.rope`) is a different shader (`genericropeparticle`)
+        //     that ribbons through position history; length is a UV segment scale, not
+        //     a velocity stretch. We have no history buffer → plain sprite (no orient).
+        //   - perspective systems (flags&4): keep the velocity orientation, but PIN the
+        //     stretch to its 1× floor (length→0 kills the speed coupling, minlen→1).
+        //     `perspectiveDepthScale` only grows near particles, never shrinks far ones,
+        //     so the full `speed*length`≈15× stretch turned every 32×128 drop into a
+        //     full-screen line. 1× keeps the bare 4:1 drop the team validated, now
+        //     correctly oriented, until real perspective far-shrink exists.
+        if let trail = system.definition.trailRenderer, trail.kind == .sprite {
+            if system.definition.isPerspective {
+                projection.trail = SIMD4<Float>(0, Float(trail.maxLength), 1, 1)
+            } else {
+                projection.trail = SIMD4<Float>(Float(trail.length), Float(trail.maxLength), 0, 1)
+            }
         }
 
         // WPE's particle quad is NOT square: `ComputeParticlePosition` scales the

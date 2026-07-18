@@ -24,6 +24,10 @@ final class WPESoundRuntime: @unchecked Sendable {
     private var sceneVolumes: [Float] = []
     private var masterVolume: Float = 1.0
     private var isMuted: Bool = false
+    /// Performance-profile suspend, orthogonal to `isMuted`. The engine runs iff
+    /// NEITHER reason to be silent applies (see `reconcileEngineRunState`), so a
+    /// muted-then-unsuspended (or vice-versa) runtime can't accidentally start.
+    private var isSuspended: Bool = false
     private let resolver: WPEMultiRootResourceResolver
     /// Lock-protected so the audio render thread (tap) and the Metal
     /// render thread (spectrum read) don't race.
@@ -104,19 +108,34 @@ final class WPESoundRuntime: @unchecked Sendable {
     @discardableResult
     func play() -> Bool {
         guard !players.isEmpty else { return false }
-        do {
-            try engine.start()
-        } catch {
-            // Keep the (already-installed, still-valid) FFT tap so a later
-            // resume() can recover audio-reactive data — the callback can't fire
-            // while the engine is stopped anyway.
-            Logger.warning("WPESoundRuntime play: engine.start() failed: \(error.localizedDescription)", category: .wpeRender)
-            return false
+        reconcileEngineRunState()
+        return engine.isRunning
+    }
+
+    /// Single authority over whether the engine actually runs: it runs iff there
+    /// is something to play AND neither silence reason applies (user mute or a
+    /// `.suspended` performance profile). A silenced runtime is fully PAUSED, not
+    /// left running at volume 0 — an idle-but-running output AU keeps spinning and
+    /// throws `kAudioUnitErr_TooManyFramesToProcess` (-10874) on a device buffer
+    /// mismatch, so pausing both saves CPU and stops that log spam. Idempotent.
+    private func reconcileEngineRunState() {
+        guard !players.isEmpty else { return }
+        guard !isMuted, !isSuspended else {
+            if engine.isRunning { engine.pause() }
+            return
         }
-        for player in players {
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                // Tap stays installed (still valid); a later reconcile retries.
+                Logger.warning("WPESoundRuntime reconcile: engine.start() failed: \(error.localizedDescription)", category: .wpeRender)
+                return
+            }
+        }
+        for player in players where !player.isPlaying {
             player.play()
         }
-        return true
     }
 
     func stop() {
@@ -130,45 +149,32 @@ final class WPESoundRuntime: @unchecked Sendable {
         sceneVolumes.removeAll(keepingCapacity: false)
     }
 
-    /// Suspend playback without discarding the prepared players/buffers/tap.
-    /// Unlike `stop()` (which tears the graph down and needs a full re-decode
-    /// to come back), this just halts the engine so a paused wallpaper costs no
-    /// audio CPU — the FFT tap stops firing — while the loaded PCM stays
-    /// resident for an instant `resume()`. Used by the `.suspended` profile.
+    /// `.suspended` performance profile: halts the engine + tap so a suspended
+    /// wallpaper costs no audio CPU, while the decoded PCM stays resident for an
+    /// instant resume. Keeps the prepared players/buffers (unlike `stop()`, which
+    /// tears the graph down and needs a full re-decode). Orthogonal to user mute.
     func pause() {
-        guard engine.isRunning else { return }
-        engine.pause()
+        isSuspended = true
+        reconcileEngineRunState()
     }
 
-    /// Start (or resume) looping playback for already-prepared players. Handles
-    /// both cases the renderer needs:
-    ///   - resuming after `pause()` (engine paused, players still "playing"), and
-    ///   - starting a runtime that was `prepare`-d while suspended and never
-    ///     `play()`-ed (engine stopped, players idle).
-    /// No-op when nothing was prepared. On engine-start failure the tap is left
-    /// intact (it's still valid) so a later retry can recover audio-reactive FFT.
+    /// Lift the `.suspended` performance profile. Playback only actually resumes
+    /// when the runtime is also un-muted — the run-state gate is the AND of both
+    /// reasons, so this never un-silences a muted wallpaper.
     func resume() {
-        guard !players.isEmpty else { return }
-        if !engine.isRunning {
-            do {
-                try engine.start()
-            } catch {
-                Logger.warning("WPESoundRuntime resume: engine.start() failed: \(error.localizedDescription)", category: .wpeRender)
-                return
-            }
-        }
-        for player in players where !player.isPlaying {
-            player.play()
-        }
+        isSuspended = false
+        reconcileEngineRunState()
     }
 
-    /// Master mute applied on top of the scene-declared per-sound volume.
-    /// `applyAudioState` rebuilds each player's `.volume` so subsequent
-    /// `setMasterVolume(_:)` calls keep the scene mix intact.
+    /// User mute. Fully PAUSES the engine rather than dropping volume to 0, so a
+    /// muted wallpaper stops driving the output AU (no idle-engine CPU, no -10874
+    /// spin). `applyAudioState` still tracks the scene × master mix so an un-mute
+    /// resumes at the exact prior volume — no reload needed.
     func setMuted(_ muted: Bool) {
         guard isMuted != muted else { return }
         isMuted = muted
         applyAudioState()
+        reconcileEngineRunState()
     }
 
     /// `[0, 1]` master gain multiplied into every scene-declared

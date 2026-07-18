@@ -60,19 +60,25 @@ struct WPEMetalFrameState {
     /// Scene-level camera parallax for this frame; object-quad (scene-targeted)
     /// draws translate each layer by `cameraParallax.pixelOffset(depth:…)`.
     var cameraParallax: WPECameraParallaxFrame = .neutral
+    /// The executor's target pool, threaded so `resolve()` can honor a first-frame
+    /// read of an unwritten but declared local FBO (see `resolve(.fbo)`). Optional
+    /// so hand-built frame states (tests) omit it and keep the strict miss→throw.
+    let renderTargetPool: WPEMetalRenderTargetPool?
 
     init(
         output: MTLTexture,
         sceneSize: CGSize,
         cameraUniforms: WPEMetalCameraUniforms = .identity,
         previousSceneTexture: MTLTexture? = nil,
-        previousNamedTextures: [String: MTLTexture] = [:]
+        previousNamedTextures: [String: MTLTexture] = [:],
+        renderTargetPool: WPEMetalRenderTargetPool? = nil
     ) {
         self.output = output
         self.sceneSize = sceneSize
         self.cameraUniforms = cameraUniforms
         self.latestSceneTexture = previousSceneTexture
         self.latestNamedTextures = previousNamedTextures
+        self.renderTargetPool = renderTargetPool
     }
 
     func latestTexture(for targetID: WPEMetalTargetID) -> MTLTexture? {

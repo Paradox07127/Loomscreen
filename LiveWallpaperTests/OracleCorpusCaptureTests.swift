@@ -180,7 +180,11 @@ struct OracleCorpusCaptureTests {
                     device: device,
                     pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
                 )
-                try await renderer.load()
+                // M2c1b-3c: load runs on the render actor; adopt via the one-shot
+                // handoff carrier (as the production builder does), then drive it.
+                let renderActor = WPEDisplayRenderActor(backing: .main)
+                await renderActor.adopt(WPERendererHandoff(renderer: renderer).renderer)
+                try await renderActor.load()
                 try Self.advanceToTracedFrame(
                     renderer: renderer,
                     id: id,
@@ -312,7 +316,7 @@ struct OracleCorpusCaptureTests {
                     descriptor: summary
                 )
             }
-            let texture = try renderer.renderCurrentFrame()
+            let texture = try renderer.renderCurrentFrame(inputs: renderer.makeFrameInputs())
             guard isLast else { continue }
             if perPass {
                 renderer.dumpScenePassesIfRequested(suffix: "-f\(index)")

@@ -535,6 +535,16 @@ final class WPEParticleSystem {
         )
     }
 
+    /// Box–Muller transform over the existing spawn `rng` — matches `std::
+    /// normal_distribution<>(mean, stddev)`'s semantics (WPE's `GenSphereSurfaceNormal`
+    /// sampler) without introducing a second random source.
+    private func gaussian(mean: Double, stddev: Double) -> Double {
+        let u1 = Swift.max(Double.leastNormalMagnitude, Double.random(in: 0..<1, using: &rng))
+        let u2 = Double.random(in: 0..<1, using: &rng)
+        let mag = (-2 * log(u1)).squareRoot()
+        return mean + stddev * mag * cos(2 * Double.pi * u2)
+    }
+
     /// `colorrandom` is the ONE VecRandom that does NOT draw per channel: WPE
     /// pulls a single `t` and lerps all three with it (WPParticleParser.cpp's
     /// `Color()`), so the result always lands on the min→max LINE. Drawing per
@@ -550,45 +560,46 @@ final class WPEParticleSystem {
         )
     }
 
-    static func dispersalVector(
-        radius: Double,
-        theta: Double,
-        phi: Double,
-        mask: SIMD3<Float>
-    ) -> SIMD3<Float> {
-        let enabledX = abs(mask.x) > 0.0001
-        let enabledY = abs(mask.y) > 0.0001
-        let enabledZ = abs(mask.z) > 0.0001
-        let enabledCount = [enabledX, enabledY, enabledZ].filter { $0 }.count
-        let r = Float(radius)
+    /// WPE `algorism::lerp(pow(rand(0,1), 1/3), min, max)` (ParticleEmitter.cpp
+    /// `ParticleSphereEmitterArgs::MakeEmittOp` / Algorism.h `lerp`) — VOLUME-uniform
+    /// radius sampling, not surface-uniform: the cube-root compensates for the
+    /// sphere's volume growing with r³, so most draws land near `max` instead of
+    /// piling up near the emitter center. `uniform01` must be a fresh 0…1 draw.
+    static func sphereRadius(min: Double, max: Double, uniform01: Double) -> Double {
+        let t = pow(Swift.max(0, Swift.min(1, uniform01)), 1.0 / 3.0)
+        return min + t * (max - min)
+    }
 
-        switch enabledCount {
-        case 0:
-            return SIMD3<Float>(0, 0, 0)
-        case 1:
-            let sign: Float = cos(theta) >= 0 ? 1 : -1
-            return SIMD3<Float>(
-                enabledX ? r * sign * mask.x : 0,
-                enabledY ? r * sign * (-mask.y) : 0,
-                enabledZ ? r * sign * mask.z : 0
-            )
-        case 2:
-            let a = r * Float(cos(theta))
-            let b = r * Float(sin(theta))
-            if enabledX && enabledY {
-                return SIMD3<Float>(a * mask.x, b * (-mask.y), 0)
-            }
-            if enabledX && enabledZ {
-                return SIMD3<Float>(a * mask.x, 0, b * mask.z)
-            }
-            return SIMD3<Float>(0, a * (-mask.y), b * mask.z)
-        default:
-            return SIMD3<Float>(
-                Float(radius * sin(phi) * cos(theta) * Double(mask.x)),
-                Float(radius * sin(phi) * sin(theta) * Double(-mask.y)),
-                Float(radius * cos(phi) * Double(mask.z))
-            )
-        }
+    /// WPE `algorism::GenSphereSurfaceNormal` (Algorism.h): each axis whose
+    /// `directions` component is > 0 draws `N(0, directions.axis)`; a non-positive
+    /// axis is forced to 0. The raw (u, v, w) triple is then normalized to a unit
+    /// vector — a LARGER `directions` value pulls more of the spread onto that
+    /// axis, it is not a boolean on/off mask.
+    static func sphereSurfaceDirection(
+        directions: SIMD3<Double>,
+        gaussian: (_ mean: Double, _ stddev: Double) -> Double
+    ) -> SIMD3<Double> {
+        let u = directions.x > 0 ? gaussian(0, directions.x) : 0
+        let v = directions.y > 0 ? gaussian(0, directions.y) : 0
+        let w = directions.z > 0 ? gaussian(0, directions.z) : 0
+        let norm = (u * u + v * v + w * w).squareRoot()
+        // All axes disabled (or, astronomically unlikely, all three Gaussian
+        // draws landing exactly on 0) — WPE's `/norm` would be a NaN-producing
+        // divide by zero; stay at the emitter origin instead.
+        guard norm > 0 else { return SIMD3<Double>(0, 0, 0) }
+        return SIMD3<Double>(u, v, w) / norm
+    }
+
+    /// WPE `ApplySign` (ParticleEmitter.cpp): a nonzero axis forces that
+    /// component to `abs(value) * sign` (±1); a zero axis passes the sampled
+    /// value through untouched. `sign` is already normalized to -1/0/1 by
+    /// `Emitter::FromJson` (`WPEParticleDefinition.sign`).
+    static func applyEmitterSign(_ p: SIMD3<Double>, sign: SIMD3<Double>) -> SIMD3<Double> {
+        SIMD3<Double>(
+            sign.x != 0 ? Swift.abs(p.x) * sign.x : p.x,
+            sign.y != 0 ? Swift.abs(p.y) * sign.y : p.y,
+            sign.z != 0 ? Swift.abs(p.z) * sign.z : p.z
+        )
     }
 
     /// Advance the simulator without writing the GPU instance buffer.
@@ -1100,18 +1111,18 @@ final class WPEParticleSystem {
                 Float(uniform(-ext.z, ext.z))
             )
         case .sphere:
-            let theta = Double.random(in: 0..<2 * .pi, using: &rng)
-            let phi = Double.random(in: 0..<(.pi), using: &rng)
-            let radius = uniform(definition.dispersalMin.x, definition.dispersalMax.x)
-            dispersal = Self.dispersalVector(
-                radius: radius,
-                theta: theta,
-                phi: phi,
-                mask: SIMD3<Float>(
-                    Float(definition.directionMask.x),
-                    Float(definition.directionMask.y),
-                    Float(definition.directionMask.z)
-                )
+            let radius = Self.sphereRadius(
+                min: definition.dispersalMin.x,
+                max: definition.dispersalMax.x,
+                uniform01: Double.random(in: 0..<1, using: &rng)
+            )
+            let normal = Self.sphereSurfaceDirection(
+                directions: definition.directionMask,
+                gaussian: { mean, stddev in self.gaussian(mean: mean, stddev: stddev) }
+            )
+            let signedPoint = Self.applyEmitterSign(normal * radius, sign: definition.sign)
+            dispersal = SIMD3<Float>(
+                Float(signedPoint.x), Float(signedPoint.y), Float(signedPoint.z)
             )
         }
         let emitterOriginLocal = SIMD3<Float>(

@@ -173,7 +173,9 @@ final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
 /// the hung worker could block the releasing thread. The process owner strictly
 /// caps those retained engines; the shared load token fails every script family
 /// closed while the renderer preserves the last stable presentation.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): ticked on the renderer's `WPEDisplayRenderActor`.
+// The JS engine runs on its own dedicated serial queue regardless; the outcome
+// slot is thread-safe, so the caller's isolation is just the render actor.
 final class WPESceneScriptInstance {
     private let engine: Engine
     private let hasUpdateFunction: Bool
@@ -792,7 +794,7 @@ enum WPELayerScriptCursorEvent: Sendable, Equatable {
 /// JSContext on a dedicated serial queue, every evaluation is wall-clock
 /// budgeted, and an overrun poisons the instance (frozen at its last state)
 /// rather than hanging the render thread.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): ticked on the renderer's `WPEDisplayRenderActor`.
 final class WPELayerScriptInstance {
     private let engine: LayerEngine
     private let hasUpdateFunction: Bool
@@ -812,6 +814,8 @@ final class WPELayerScriptInstance {
         tickBudget: TimeInterval = 0.5,
         nowProviderMillis: (@Sendable () -> Double)? = nil,
         outputMode: WPELayerScriptOutputMode = .layerState,
+        initialVisible: Bool = true,
+        initialAlpha: Double = 1,
         governor: WPESceneScriptExecutionGovernor = .processShared
     ) throws {
         self.tickBudget = tickBudget
@@ -820,6 +824,8 @@ final class WPELayerScriptInstance {
             shared: shared,
             canvasSize: canvasSize,
             outputMode: outputMode,
+            initialVisible: initialVisible,
+            initialAlpha: initialAlpha,
             governor: governor
         )
         self.engine = engine
@@ -1085,6 +1091,12 @@ final class WPELayerScriptInstance {
         private let shared: WPESharedScriptState?
         private let canvasSize: SIMD2<Double>
         private let outputMode: WPELayerScriptOutputMode
+        /// Own-layer `visible`/`alpha` seeds (the parsed `object.visible`/`alpha`).
+        /// The getters and `readOutput` fall back to them when the script never
+        /// assigns — so a hover/click-only script no longer clobbers a parsed
+        /// `visible:false` (or alpha≠1) with the handle defaults.
+        private let initialOwnVisible: Bool
+        private let initialOwnAlpha: Double
         private let governor: WPESceneScriptExecutionGovernor
         private let participant: WPESceneScriptExecutionGovernor.Participant
         let instanceLimitToken: WPESceneScriptInstanceLimitToken?
@@ -1104,12 +1116,16 @@ final class WPELayerScriptInstance {
             shared: WPESharedScriptState?,
             canvasSize: SIMD2<Double>,
             outputMode: WPELayerScriptOutputMode,
+            initialVisible: Bool,
+            initialAlpha: Double,
             governor: WPESceneScriptExecutionGovernor
         ) {
             self.nowProviderMillis = nowProviderMillis
             self.shared = shared
             self.canvasSize = SIMD2<Double>(max(canvasSize.x, 1), max(canvasSize.y, 1))
             self.outputMode = outputMode
+            self.initialOwnVisible = initialVisible
+            self.initialOwnAlpha = initialAlpha.isFinite ? initialAlpha : 1
             self.governor = governor
             self.participant = governor.makeParticipant()
             let instanceLimitToken = shared?.sceneScriptLoadToken
@@ -1593,13 +1609,15 @@ final class WPELayerScriptInstance {
         /// actually set — not every layer it merely read.
         private func installAssignmentAccessors(on handle: JSValue, key: String, in context: JSContext) {
             let getVisible: @convention(block) () -> Bool = { [weak self] in
-                self?.assignedVisible[key] ?? true
+                guard let self else { return true }
+                return self.assignedVisible[key] ?? self.defaultVisible(forKey: key)
             }
             let setVisible: @convention(block) (JSValue) -> Void = { [weak self] value in
                 self?.assignedVisible[key] = value.toBool()
             }
             let getAlpha: @convention(block) () -> Double = { [weak self] in
-                self?.assignedAlpha[key] ?? 1
+                guard let self else { return 1 }
+                return self.assignedAlpha[key] ?? self.defaultAlpha(forKey: key)
             }
             let setAlpha: @convention(block) (JSValue) -> Void = { [weak self] value in
                 let scalar = value.toDouble()
@@ -1709,14 +1727,31 @@ final class WPELayerScriptInstance {
             return WPELayerScriptOutput(own: own, others: others, created: created)
         }
 
-        private func stateFor(handle: JSValue?, key: String) -> WPELayerScriptState {
-            let visible = handle?.objectForKeyedSubscript("visible")?.toBool() ?? true
-            let alphaValue = handle?.objectForKeyedSubscript("alpha")
-            let alpha = (alphaValue?.isNumber == true) ? (alphaValue?.toDouble() ?? 1) : 1
+        /// Neutral defaults for a layer the script never assigned: own layer keeps
+        /// its parsed `visible`/`alpha` seeds, other (named) handles stay shown.
+        private func defaultVisible(forKey key: String) -> Bool {
+            key == Self.ownKey ? initialOwnVisible : true
+        }
+
+        private func defaultAlpha(forKey key: String) -> Double {
+            key == Self.ownKey ? initialOwnAlpha : 1
+        }
+
+        private func stateFor(handle _: JSValue?, key: String) -> WPELayerScriptState {
+            // The assigned flags must reflect whether the script EXPLICITLY set the
+            // field — a script that only reads (or only handles cursor events)
+            // leaves `assignedVisible`/`assignedAlpha` nil, so the renderer's
+            // apply paths won't clobber the parsed seeds (scene 3212731906's hover
+            // text was rendered over its `visible:false` because the old defaults
+            // forced visible=true/alpha=1 with assigned=true).
+            let visible = assignedVisible[key]
+            let alpha = assignedAlpha[key]
             return WPELayerScriptState(
-                visible: visible,
-                alpha: alpha.isFinite ? alpha : 1,
-                videoCommands: pendingVideo[key] ?? []
+                visible: visible ?? defaultVisible(forKey: key),
+                alpha: alpha ?? defaultAlpha(forKey: key),
+                videoCommands: pendingVideo[key] ?? [],
+                visibleAssigned: visible != nil,
+                alphaAssigned: alpha != nil
             )
         }
 
@@ -2293,6 +2328,23 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
     private var lastAsyncInner: SIMD3<Double>?
     private var hasAsyncOutcome = false
 
+    /// Dedicated bounded lane for cursor-following transform scripts. On the
+    /// shared 4-permit pool a pointer script competes with a scene's dozen live
+    /// time/audio/n-body scripts and its completion cadence collapses to ~1Hz
+    /// (visible as an icon card that snaps to the cursor once a second). This
+    /// small separate pool keeps those lightweight per-frame scripts unstarved
+    /// without loosening the shared pool's bound. Still bounded, still one permit
+    /// per participant (ed51b687's serial-owner invariant holds); it only adds a
+    /// second cap. Admitted unreserved (no traversal epoch) so it needs none of
+    /// the renderer's completeTraversal/forgetDomain lifecycle wiring.
+    private static let pointerFollowGovernor = WPESceneScriptExecutionGovernor(limit: 2)
+
+    /// True when this script reads `input.cursorWorldPosition` AND was left on the
+    /// shared default pool — i.e. production pointer-follow scripts. Explicit
+    /// test-injected governors keep their pool so isolation/starvation tests are
+    /// unaffected.
+    private let usesPointerFastLane: Bool
+
     init(
         script: String,
         scriptProperties: [String: WPESceneScriptPropertyValue] = [:],
@@ -2305,11 +2357,16 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
     ) throws {
         self.tickBudget = tickBudget
         self.lastValue = seed
+        // Only reroute the production default pool; an explicitly injected
+        // governor (tests) is honored verbatim.
+        let fastLane = (governor === WPESceneScriptExecutionGovernor.processShared)
+            && script.contains("cursorWorldPosition")
+        self.usesPointerFastLane = fastLane
         self.engine = Engine(
             seed: seed,
             canvasSize: canvasSize,
             shared: shared,
-            governor: governor
+            governor: fastLane ? Self.pointerFollowGovernor : governor
         )
         var prepared = WPESceneScriptInstance.preprocess(script: script)
         prepared = prepared.replacingOccurrences(
@@ -2348,6 +2405,11 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
             }
         }
     }
+
+    #if DEBUG
+        /// Test hook: whether this instance was routed to the dedicated cursor lane.
+        var debugUsesPointerFastLane: Bool { usesPointerFastLane }
+    #endif
 
     func tick(
         pointerPosition: SIMD2<Double>,
@@ -2426,11 +2488,16 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
             }
         }
         if let claim = asyncOutcomeSlot.beginTick() {
+            // Fast-lane pointer scripts admit unreserved on their own pool: no
+            // traversal reservation means no dependence on the renderer's
+            // completeTraversal/forgetDomain lifecycle (which only drives the
+            // shared governor), while the uncontended pool still grants a permit
+            // every frame.
             if !engine.tickAsync(
                 currentValue: lastValue,
                 pointerPosition: pointerPosition,
                 runtimeSeconds: runtimeSeconds,
-                traversalEpoch: traversalEpoch,
+                traversalEpoch: usesPointerFastLane ? nil : traversalEpoch,
                 claim: claim,
                 publishTo: asyncOutcomeSlot
             ) {

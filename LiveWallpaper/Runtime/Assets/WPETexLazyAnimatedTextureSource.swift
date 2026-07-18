@@ -4,6 +4,7 @@ import Foundation
 import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
+import os
 
 /// On-demand multi-frame `.tex` playback. Keeps each source image's
 /// LZ4-compressed bytes resident in CPU RAM (≈ source `.tex` file size),
@@ -14,8 +15,19 @@ import Metal
 /// like 3725117707 (60 BC3 source images, 4216×7248 each) lands at
 /// ~785 MB CPU + ~10 MB GPU instead of the ~7.3 GB GPU the eager
 /// transcoded path would demand.
-@MainActor
+// Not `@MainActor` (M2c1b-3c): created and ticked inside the renderer's actor
+// isolation. The off-thread LZ4 prefetch used to hop its completion back to the
+// main actor; now it writes each decode into a `Sendable` lock-box that the
+// render actor harvests on its next tick — so no non-Sendable `self` crosses a
+// thread boundary and the source needs no actor reference.
 final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
+    /// Result channel for one off-thread prefetch decode. `.pending` until the
+    /// prefetch queue writes `.done`; harvested (and removed) on the render actor.
+    private enum PrefetchOutcome: Sendable {
+        case pending
+        case done(Data?)
+    }
+
     enum Failure: Error, Equatable, Sendable {
         case missingFrames
         case unsupportedFormat(Int)
@@ -54,10 +66,11 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private var lastUploadedFrameIndex = -1
     private var decodedImageCache: [Int: Data] = [:]
     private var decodedImageOrder: [Int] = []
-    /// Source images being inflated on `prefetchQueue`, keyed by imageID so a
-    /// scheduled inflate can be cancelled (dedup + bounded backlog + drop on
-    /// invalidate / when the image leaves the look-ahead window).
-    private var prefetchWorkItems: [Int: DispatchWorkItem] = [:]
+    /// Source images being inflated on `prefetchQueue`, keyed by imageID. Each
+    /// job carries its cancellable work item plus the `Sendable` box the work
+    /// item writes its decode into (dedup + bounded backlog + drop on invalidate /
+    /// when the image leaves the look-ahead window).
+    private var prefetchJobs: [Int: (item: DispatchWorkItem, box: OSAllocatedUnfairLock<PrefetchOutcome>)] = [:]
     /// Images whose decode threw — never re-scheduled, so a corrupt frame can't
     /// spin up a background inflate every render tick.
     private var prefetchFailedImageIDs: Set<Int> = []
@@ -65,18 +78,33 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     /// set is stale (playback moved on) and is dropped so it can't LRU-evict the
     /// current/next image.
     private var prefetchWantedImageIDs: Set<Int> = []
-    /// Bumped by `invalidate()` so a prefetch that completes after a reload is
-    /// dropped instead of repopulating a cleared cache.
-    private var prefetchGeneration = 0
     private var lastScheduledFrameIndex = -1
     private var lastErrorDescription: String?
+    /// Completion pump: called (from the prefetch queue) each time an off-thread
+    /// decode finishes, so the owner can hop back into the source's isolation and
+    /// `harvestCompletedPrefetches()` immediately — preserving the pre-3c
+    /// "prefetch lands when it completes" contract instead of waiting for the
+    /// next `texture(at:)` tick. The renderer installs an actor-hop here; when
+    /// unset (unit tests), the debug probes harvest on read.
+    var onPrefetchComplete: (@Sendable () -> Void)?
 
 #if DEBUG
     var debugPrefetchDecodeDelay: TimeInterval = 0
     private(set) var debugSynchronousDecodedImageIDs: [Int] = []
-    var debugDecodedImageCacheIDs: Set<Int> { Set(decodedImageCache.keys) }
-    var debugPrefetchInFlightImageIDs: Set<Int> { Set(prefetchWorkItems.keys) }
-    var debugPrefetchFailedImageIDs: Set<Int> { prefetchFailedImageIDs }
+    // The probes harvest first so a test (no completion pump installed) observes a
+    // finished decode as soon as it polls — the probe IS the caller's isolation.
+    var debugDecodedImageCacheIDs: Set<Int> {
+        harvestCompletedPrefetches()
+        return Set(decodedImageCache.keys)
+    }
+    var debugPrefetchInFlightImageIDs: Set<Int> {
+        harvestCompletedPrefetches()
+        return Set(prefetchJobs.keys)
+    }
+    var debugPrefetchFailedImageIDs: Set<Int> {
+        harvestCompletedPrefetches()
+        return prefetchFailedImageIDs
+    }
 #endif
 
     /// How many DISTINCT upcoming source images to keep warm (wrap-aware). Scanned
@@ -201,9 +229,10 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         lastUploadedFrameIndex = -1
         decodedImageCache.removeAll(keepingCapacity: false)
         decodedImageOrder.removeAll(keepingCapacity: false)
-        prefetchGeneration &+= 1
-        for item in prefetchWorkItems.values { item.cancel() }
-        prefetchWorkItems.removeAll(keepingCapacity: false)
+        // Cancel + drop in-flight jobs; a work item that still runs writes into its
+        // now-orphaned box and is never harvested (the job was removed here).
+        for job in prefetchJobs.values { job.item.cancel() }
+        prefetchJobs.removeAll(keepingCapacity: false)
         prefetchFailedImageIDs.removeAll(keepingCapacity: false)
         prefetchWantedImageIDs.removeAll(keepingCapacity: false)
         lastScheduledFrameIndex = -1
@@ -212,6 +241,8 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     // MARK: - Decode + crop
 
     private func decodedImage(for imageID: Int) throws -> Data {
+        // A prefetch for this image may already have completed off-thread.
+        harvestCompletedPrefetches()
         if let cached = decodedImageCache[imageID] {
             touchDecodedImage(imageID)
             return cached
@@ -247,6 +278,9 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     /// images already cached, in flight, or known-failed. The render thread then
     /// hits the cache instead of decoding synchronously — no loop-seam stutter.
     private func scheduleDecodedImagePrefetch(after frameIndex: Int) {
+        // Fold in any completed off-thread decodes first (every tick, even when the
+        // frame index is unchanged), so a warm image lands in the cache promptly.
+        harvestCompletedPrefetches()
         guard frameIndex != lastScheduledFrameIndex else { return }
         lastScheduledFrameIndex = frameIndex
 
@@ -255,37 +289,62 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
 
         // Cancel jobs for images that have fallen out of the look-ahead window —
         // bounds the in-flight backlog to the window even under a slow queue.
-        // (Collect first; don't mutate `prefetchWorkItems` while iterating it.)
-        let staleImageIDs = prefetchWorkItems.keys.filter { !prefetchWantedImageIDs.contains($0) }
+        // (Collect first; don't mutate `prefetchJobs` while iterating it.)
+        let staleImageIDs = prefetchJobs.keys.filter { !prefetchWantedImageIDs.contains($0) }
         for imageID in staleImageIDs {
-            prefetchWorkItems.removeValue(forKey: imageID)?.cancel()
+            prefetchJobs.removeValue(forKey: imageID)?.item.cancel()
         }
 
         for imageID in wanted {
             guard decodedImageCache[imageID] == nil,
-                  prefetchWorkItems[imageID] == nil,
+                  prefetchJobs[imageID] == nil,
                   !prefetchFailedImageIDs.contains(imageID),
                   compressedImages.indices.contains(imageID),
                   let mipmap = compressedImages[imageID].payloads.first else { continue }
 
-            let generation = prefetchGeneration
 #if DEBUG
             let delay = debugPrefetchDecodeDelay
 #endif
-            // `@Sendable` so the work item is NON-isolated: a plain closure made
-            // inside this @MainActor method would inherit MainActor isolation and
-            // trip an executor assertion when run on `prefetchQueue`.
-            let item = DispatchWorkItem { @Sendable [weak self] in
+            // The work item captures only Sendable values (the compressed mipmap
+            // and its result box), never `self`: it inflates off-thread and writes
+            // the decode into the box. The render actor harvests it on a later tick
+            // (`harvestCompletedPrefetches`), so nothing non-Sendable crosses here.
+            let box = OSAllocatedUnfairLock<PrefetchOutcome>(initialState: .pending)
+            let pump = onPrefetchComplete
+            let item = DispatchWorkItem { @Sendable in
 #if DEBUG
                 if delay > 0 { Thread.sleep(forTimeInterval: delay) }
 #endif
                 let decoded = try? Self.decodedBytes(from: mipmap)
-                Task { @MainActor in
-                    self?.completePrefetchedImage(decoded, imageID: imageID, generation: generation)
-                }
+                box.withLock { $0 = .done(decoded) }
+                // Land the result now (via the owner's isolation hop), not at the
+                // next tick — the pre-3c contract the tests lock.
+                pump?()
             }
-            prefetchWorkItems[imageID] = item
+            prefetchJobs[imageID] = (item, box)
             prefetchQueue.async(execute: item)
+        }
+    }
+
+    /// Moves any completed off-thread prefetch decodes into the cache. Runs in the
+    /// owner's isolation — on completion (via `onPrefetchComplete`'s actor hop),
+    /// before a synchronous decode, on schedule, and from the debug probes. Stale
+    /// results (playback moved past the image, or a decode failure) are dropped
+    /// exactly as the old completion did.
+    func harvestCompletedPrefetches() {
+        guard !prefetchJobs.isEmpty else { return }
+        for (imageID, job) in prefetchJobs {
+            guard case .done(let decoded) = job.box.withLock({ $0 }) else { continue }
+            prefetchJobs.removeValue(forKey: imageID)
+            guard let decoded else {
+                // A failed decode is recorded so it is never re-scheduled.
+                prefetchFailedImageIDs.insert(imageID)
+                continue
+            }
+            // Drop a stale result (playback moved past this image) so it can't
+            // LRU-evict the current/next image we actually need.
+            guard prefetchWantedImageIDs.contains(imageID), decodedImageCache[imageID] == nil else { continue }
+            storeDecodedImage(decoded, for: imageID)
         }
     }
 
@@ -315,22 +374,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     }
 
     private func cancelPrefetch(for imageID: Int) {
-        prefetchWorkItems.removeValue(forKey: imageID)?.cancel()
-    }
-
-    private func completePrefetchedImage(_ decoded: Data?, imageID: Int, generation: Int) {
-        guard generation == prefetchGeneration else { return }
-        prefetchWorkItems.removeValue(forKey: imageID)
-        // A failed decode is recorded so it is never re-scheduled (no per-tick
-        // background respin on a corrupt image).
-        guard let decoded else {
-            prefetchFailedImageIDs.insert(imageID)
-            return
-        }
-        // Drop a stale result (playback moved past this image) so it can't
-        // LRU-evict the current/next image we actually need.
-        guard prefetchWantedImageIDs.contains(imageID), decodedImageCache[imageID] == nil else { return }
-        storeDecodedImage(decoded, for: imageID)
+        prefetchJobs.removeValue(forKey: imageID)?.item.cancel()
     }
 
     private func storeDecodedImage(_ decoded: Data, for imageID: Int) {

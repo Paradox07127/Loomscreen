@@ -181,13 +181,21 @@ public struct WPEParticleOscillateAlpha: Equatable, Sendable {
 /// rain (`length 0.005, maxlength 100` → `g_RenderVar0 = (0.005, 100.0, …)`,
 /// speed 3000 → stretch 15).
 public struct WPEParticleTrailRenderer: Equatable, Sendable {
+    /// `spritetrail` = one velocity-stretched quad per particle (`genericparticle`
+    /// TRAILRENDERER). `ropetrail` = a ribbon threaded through the particle's own
+    /// position history (`genericropeparticle`), where length is a UV segment scale,
+    /// NOT a velocity stretch. We lack the history buffer, so a `.rope` trail renders
+    /// as a plain sprite; the kind gates the stretch in the render executor.
+    public enum Kind: Sendable, Equatable { case sprite, rope }
+    public let kind: Kind
     public let length: Double
     public let maxLength: Double
     /// Trail segment count — `subdivision`, NOT `length`. The default 3 is why
     /// RenderDoc shows `trailPosition` cycling 0,1,2,3 (4 points per particle).
     public let subdivision: Double
 
-    public init(length: Double, maxLength: Double, subdivision: Double) {
+    public init(kind: Kind, length: Double, maxLength: Double, subdivision: Double) {
+        self.kind = kind
         self.length = length
         self.maxLength = maxLength
         self.subdivision = subdivision
@@ -444,6 +452,12 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let dispersalMin: SIMD3<Double>
     public let dispersalMax: SIMD3<Double>
     public let directionMask: SIMD3<Double>
+    /// `emitter[].sign`, normalized to -1/0/1 per axis (WPParticleObject.cpp
+    /// `Emitter::FromJson`: `v != 0 ? v / abs(v) : 0`). A nonzero axis forces
+    /// that component of the sphere dispersal to `abs(value) * sign` — e.g.
+    /// snowperspective's `"0 0 1"` keeps every dust mote in front of camera
+    /// instead of half spawning at negative depth (scene 3462491575).
+    public let sign: SIMD3<Double>
     public let velocityMin: SIMD3<Double>
     public let velocityMax: SIMD3<Double>
     public let colorMin: SIMD3<Double>
@@ -544,6 +558,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         colorMax: SIMD3<Double>,
         fadeInSeconds: Double,
         directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        sign: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         alphaMin: Double = 1,
         alphaMax: Double = 1,
         rotationMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
@@ -594,6 +609,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.dispersalMin = dispersalMin
         self.dispersalMax = dispersalMax
         self.directionMask = directionMask
+        self.sign = sign
         self.velocityMin = velocityMin
         self.velocityMax = velocityMax
         self.colorMin = colorMin
@@ -717,6 +733,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             colorMax: Self.multiplyingColor(colorMax, byNormalizedOverride: instanceOverride.color),
             fadeInSeconds: fadeInSeconds,
             directionMask: directionMask,
+            sign: sign,
             alphaMin: alphaMin * alphaScale,
             alphaMax: alphaMax * alphaScale,
             rotationMin: rotationMin,
@@ -775,6 +792,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             colorMax: colorMax,
             fadeInSeconds: fadeInSeconds,
             directionMask: directionMask,
+            sign: sign,
             alphaMin: alphaMin,
             alphaMax: alphaMax,
             rotationMin: rotationMin,
@@ -881,10 +899,12 @@ public enum WPEParticleDefinitionParser {
             return n.hasSuffix("trail") && !isRope
         }
         // Engine defaults, NOT zero (wpscene/WPParticleObject.h ParticleRender).
-        // An absent `maxlength` means 10, not "unbounded" — the meteor relies on
-        // exactly that to clamp its 750× stretch down to a ~10× streak.
+        // An absent `maxlength` means 10, not "unbounded". `rope`-prefixed names
+        // (`ropetrail`) are the history-ribbon kind — recorded but not stretched.
         let parsedTrail: WPEParticleTrailRenderer? = trailEntry.map {
-            WPEParticleTrailRenderer(
+            let name = ($0["name"] as? String)?.lowercased() ?? ""
+            return WPEParticleTrailRenderer(
+                kind: name.hasPrefix("rope") ? .rope : .sprite,
                 length: WPEValueParser.double($0["length"]) ?? 0.05,
                 maxLength: WPEValueParser.double($0["maxlength"]) ?? 10.0,
                 subdivision: WPEValueParser.double($0["subdivision"]) ?? 3.0
@@ -917,6 +937,7 @@ public enum WPEParticleDefinitionParser {
         // screen-space center in the Metal 2D pipeline, creating bright
         // additive piles for bokeh-style emitters.
         var directionMask: SIMD3<Double> = SIMD3(1, 1, 0)
+        var sign: SIMD3<Double> = SIMD3(0, 0, 0)
 
         if let emitters = json["emitter"] as? [[String: Any]], let first = emitters.first {
             rate = WPEValueParser.double(first["rate"]) ?? 0
@@ -941,6 +962,12 @@ public enum WPEParticleDefinitionParser {
             }
             if let mask = WPEValueParser.vector3(first["directions"]) {
                 directionMask = SIMD3<Double>(abs(mask.x), abs(mask.y), abs(mask.z))
+            }
+            // `Emitter::FromJson` normalizes each component to -1/0/1
+            // (`v != 0 ? v / abs(v) : 0`) before `ApplySign` uses it.
+            if let raw = WPEValueParser.vector3(first["sign"]) {
+                func normalized(_ v: Double) -> Double { v != 0 ? (v > 0 ? 1 : -1) : 0 }
+                sign = SIMD3<Double>(normalized(raw.x), normalized(raw.y), normalized(raw.z))
             }
         }
 
@@ -1207,6 +1234,7 @@ public enum WPEParticleDefinitionParser {
             colorMax: colorMax,
             fadeInSeconds: max(0, fadeInSeconds),
             directionMask: directionMask,
+            sign: sign,
             alphaMin: max(0, min(alphaMin, alphaMax)),
             alphaMax: max(alphaMin, alphaMax),
             rotationMin: rotationMin,

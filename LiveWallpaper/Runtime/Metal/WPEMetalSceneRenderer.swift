@@ -3,6 +3,7 @@ import AppKit
 import LiveWallpaperCore
 import LiveWallpaperProWPE
 import MetalKit
+import os
 
 /// Wraps a texture-load failure with the requested asset path AND the WPE
 /// object/layer name that referenced it so the H1 diagnostic mapper can
@@ -14,8 +15,34 @@ struct WPEMetalTextureLoadContextError: Error {
     let underlying: any Error
 }
 
-@MainActor
-final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
+// Runtime-config protocol conformances (performance / frame-rate / audio) were
+// lifted onto `WPERendererConfigAdapter` (SceneWallpaperSession.swift) so the
+// session, not the renderer, is what consumers depend on. The methods below stay
+// public on the renderer for the adapter to forward into.
+//
+// M2c1b-3c: the renderer is no longer `@MainActor`. It lives inside a single
+// `WPEDisplayRenderActor`'s isolation — the frame path and setters via the
+// actor's `withRenderer` sync entry, the async surfaces (load/reload/…) via
+// methods that take `isolated WPEDisplayRenderActor`. It is non-`Sendable`, so
+// the compiler keeps it in that one domain; the actor's backing thread (main by
+// default, a dedicated render thread when the off-main flag is set) is the only
+// variable. Sync tails that must spawn work (deferred audio, on-demand video,
+// static-texture reload) re-enter through the weakly-held `displayActor`.
+final class WPEMetalSceneRenderer: NSObject {
+    /// The actor this renderer is isolated to (set by `WPEDisplayRenderActor
+    /// .adopt`). Weak: the actor owns the renderer strongly, this points back so
+    /// sync task-spawning tails can capture the actor (Sendable) and re-enter the
+    /// isolation instead of capturing `self`. Nil only before adoption / after
+    /// teardown, in which case those tails no-op.
+    weak var displayActor: WPEDisplayRenderActor?
+
+    #if DEBUG
+    /// Test-only strong reference to the surface built by the `frame:device:`
+    /// convenience init, so tests can reach the MTKView via `nsView`. Never set by
+    /// the production designated init (which takes only Sendable seams), so the
+    /// production renderer's region stays free of the surface.
+    var debugSurface: WPERenderSurface?
+    #endif
     /// Default frame rate target when no user override has been applied.
     /// 30 FPS matches Wallpaper Engine's stock default
     /// (Almamu's reference open-source impl ships `maximumFPS = 30`; the
@@ -141,7 +168,23 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// `nil` falls back to `cacheRootURL` (legacy extracted cache).
     let projectManifestRootURL: URL?
     let resolutionTracer: WPEResolutionTracer
-    let mtkView: WPEInteractiveMTKView
+    /// Non-blocking control seam to the surface (M2c1b). Every renderer call site
+    /// that drove the view goes through this `Sendable` handle. Because it is a
+    /// `Sendable` existential, the surface (and the delivery shim + render actor it
+    /// transitively references) sit in a **separate** isolation region from the
+    /// renderer — that is what keeps the renderer `sending`-adoptable into the
+    /// actor. The renderer therefore holds no strong `WPERenderSurface` and no
+    /// shim; the surface owns the shim and the session owns the surface.
+    let surfaceControl: any WPESurfaceControl
+    /// Render-path pointer source, fed by the surface's publisher + view. Same
+    /// instance the surface owns.
+    let mailbox: WPEPointerMailbox
+    /// The view's `CAMetalLayer`, the present/drawable source, held via a Sendable
+    /// wrapper so the renderer's region does not reach the main-thread surface.
+    let metalLayer: WPEPresentLayer
+    /// Drawable pixel size pushed from the surface (`updateSurfaceGeometry`).
+    /// Read by the perspective native-resolution path in `performLoad`.
+    var surfaceDrawableSize: CGSize
     let executor: WPEMetalRenderExecutor
     let textureLoader: WPEMetalTextureLoader
     var outputTexture: MTLTexture?
@@ -379,8 +422,9 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
     /// Previous captured pointer/button frame used to emit SceneScript cursor
     /// down/up edges exactly once per transition.
     var previousLayerScriptPointerFrame = WPEPointerFrame.neutral
-    /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
-    /// whenever the renderer is not suspended. Defaults to the WPE-compatible
+    /// User-selected frame rate ceiling, applied to the surface's
+    /// `preferredFramesPerSecond` whenever the renderer is not suspended.
+    /// Defaults to the WPE-compatible
     /// 30 FPS until `setFrameRateLimit(_:)` overrides it.
     var userPreferredFPS: Int = WPEMetalSceneRenderer.defaultPreferredFPS
     /// System-driven background throttle (adaptive frame rate). Layered on top
@@ -434,7 +478,7 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         sceneScriptSharedState?.get(key)
     }
 
-    var onProgress: (@MainActor (String) -> Void)?
+    var onProgress: (@Sendable (String) -> Void)?
     var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
         resolutionTracer.snapshot()
     }
@@ -458,10 +502,13 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         projectManifestRootURL: URL? = nil,
         dependencyMounts: [WPEAssetMount],
         engineAssetsRootURL: URL? = nil,
-        frame: CGRect,
+        surfaceControl: any WPESurfaceControl,
+        mailbox: WPEPointerMailbox,
+        presentLayer: WPEPresentLayer,
+        drawableSize: CGSize,
         device: MTLDevice,
         frameClock: WPEMetalFrameClock = WPEMetalFrameClock(),
-        pointerSampler: WPEMetalPointerSampler = .live,
+        pointerSampler: WPEMetalPointerSampler? = nil,
         snapshotter: WPEMetalTextureSnapshotter = .shared
     ) throws {
         self.descriptor = descriptor
@@ -509,9 +556,18 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         self.resolutionTracer = resolutionTracer
         self.executor = executor
         self.textureLoader = WPEMetalTextureLoader(device: device)
-        self.mtkView = WPEInteractiveMTKView(frame: frame, device: device)
+        // The renderer receives only the surface's `Sendable` seams (control
+        // handle, mailbox, present-layer wrapper, drawable size) — never the whole
+        // `WPERenderSurface`. Taking a non-Sendable surface here would merge the
+        // renderer's isolation region with the main-thread surface's and block the
+        // `sending` adoption into the render actor. The builder wires the delivery
+        // shim onto the surface itself.
+        self.surfaceControl = surfaceControl
+        self.mailbox = mailbox
+        self.metalLayer = presentLayer
+        self.surfaceDrawableSize = drawableSize
         self.frameClock = frameClock
-        self.pointerSampler = pointerSampler
+        self.pointerSampler = pointerSampler ?? .mailbox(mailbox)
         self.snapshotter = snapshotter
         super.init()
 
@@ -522,16 +578,53 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             )
         }
 
-        mtkView.delegate = self
-        mtkView.colorPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
-        mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        mtkView.preferredFramesPerSecond = Self.defaultPreferredFPS
-        mtkView.autoresizingMask = [.width, .height]
-        mtkView.enableSetNeedsDisplay = false
-        mtkView.isPaused = true
     }
 
-    var nsView: NSView { mtkView }
+    /// Legacy/test convenience: builds the main-thread surface here (so it must be
+    /// `@MainActor`), extracts its `Sendable` seams, and forwards to the injecting
+    /// designated init. Keeps existing `frame:device:` call sites compiling. The
+    /// production path goes through the session builder, which also wires the shim.
+    @MainActor
+    convenience init(
+        descriptor: SceneDescriptor,
+        cacheRootURL: URL,
+        assetProvider: (any WPESceneAssetProvider)? = nil,
+        projectManifestRootURL: URL? = nil,
+        dependencyMounts: [WPEAssetMount],
+        engineAssetsRootURL: URL? = nil,
+        frame: CGRect,
+        device: MTLDevice,
+        frameClock: WPEMetalFrameClock = WPEMetalFrameClock(),
+        pointerSampler: WPEMetalPointerSampler? = nil,
+        snapshotter: WPEMetalTextureSnapshotter = .shared
+    ) throws {
+        let surface = WPERenderSurface(frame: frame, device: device)
+        try self.init(
+            descriptor: descriptor,
+            cacheRootURL: cacheRootURL,
+            assetProvider: assetProvider,
+            projectManifestRootURL: projectManifestRootURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            surfaceControl: surface,
+            mailbox: surface.mailbox,
+            presentLayer: WPEPresentLayer(layer: surface.metalLayer),
+            drawableSize: surface.metalLayer.drawableSize,
+            device: device,
+            frameClock: frameClock,
+            pointerSampler: pointerSampler,
+            snapshotter: snapshotter
+        )
+        #if DEBUG
+        self.debugSurface = surface
+        #endif
+    }
+
+    /// Surface geometry push (main-thread MTKView drawable size). No live
+    /// consumer beyond `performLoad`'s perspective native-resolution sizing today.
+    func updateSurfaceGeometry(drawableSize: CGSize) {
+        surfaceDrawableSize = drawableSize
+    }
 
 
     #if DEBUG
@@ -567,6 +660,52 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
         sceneScriptLoadState.retireCurrent()
         stopEngineAssetsAccessIfNeeded()
     }
+
+    #if DEBUG
+    /// Test-only: the MTKView of the surface built by the convenience init.
+    @MainActor var nsView: NSView { debugSurface!.mtkView }
+
+    /// Test-only strong hold on the lazily-created main-backed actor, so the weak
+    /// `displayActor` back-link stays alive across the whole test (otherwise the
+    /// deferred-audio / static-reload tails would silently no-op after `load()`).
+    private static let debugActorsLock = OSAllocatedUnfairLock<[ObjectIdentifier: WPEDisplayRenderActor]>(initialState: [:])
+
+    /// Test-only: lazily adopt this renderer into a main-backed actor (once) and
+    /// run its load. Mirrors what the production builder does, so tests keep the
+    /// pre-flip `try await renderer.load()` shape. `@MainActor` so a main-thread
+    /// test calls it without `sending` self across an isolation boundary.
+    @MainActor
+    private func debugAdoptedActor() async -> WPEDisplayRenderActor {
+        if let actor = displayActor { return actor }
+        let actor = WPEDisplayRenderActor(backing: .main)
+        let key = ObjectIdentifier(self)
+        Self.debugActorsLock.withLock { $0[key] = actor }
+        await actor.adopt(WPERendererHandoff(renderer: self).renderer)
+        return actor
+    }
+
+    @MainActor
+    func load() async throws {
+        try await debugAdoptedActor().load()
+    }
+
+    @MainActor
+    func reload() async throws {
+        try await debugAdoptedActor().reload()
+    }
+
+    @MainActor
+    func captureLivePosterFromNextFrame() async -> NSImage? {
+        await debugAdoptedActor().captureLivePoster()
+    }
+
+    /// Drops the strong test-actor hold on cleanup so a torn-down test renderer
+    /// (and the actor that retains it) can deallocate.
+    func releaseDebugActorIfNeeded() {
+        let key = ObjectIdentifier(self)
+        Self.debugActorsLock.withLock { $0[key] = nil }
+    }
+    #endif
 
 
     /// Suppresses repeat `draw(in:)` failure logs within a failure streak so a

@@ -20,7 +20,15 @@ final class WPEInteractiveMTKView: MTKView {
     /// while true does this view consume mouse events.
     var clickCaptureEnabled = false
 
-    private(set) var pointerFrame: WPEPointerFrame = .neutral
+    private(set) var pointerFrame: WPEPointerFrame = .neutral {
+        didSet { onPointerFrameChange?(pointerFrame) }
+    }
+
+    /// Set by `WPERenderSurface` so every latched pointer frame reaches the
+    /// render-path mailbox. The view stays mailbox-agnostic; the surface owns the
+    /// wiring. `didSet` above fires this on each event-driven mutation (never on
+    /// the `.neutral` initializer, which doesn't trigger `didSet`).
+    var onPointerFrameChange: (@MainActor (WPEPointerFrame) -> Void)?
 
     override var acceptsFirstResponder: Bool { clickCaptureEnabled }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { clickCaptureEnabled }
