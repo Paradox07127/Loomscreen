@@ -33,5 +33,21 @@
 		<string>(allow process-info-pidinfo)</string>
 		<string>(allow process-info-rusage)</string>
 	</array>
+	<!--
+	    "Connect Apple Aerials" reads Apple's aerial screensaver videos directly.
+	    A version-spanning read-only pair (same as the Pro SKU): idleassetsd is the
+	    macOS 14/15 system-wide store; com.apple.wallpaper/aerials is the macOS
+	    26/27 per-user store. Lets the scan skip the Powerbox folder-grant (which on
+	    the sandbox reopens at the last-used location); the picker stays as fallback.
+	    Direct distribution only (not accepted for a Mac App Store submission).
+	-->
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/com.apple.idleassetsd/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/com.apple.wallpaper/aerials/</string>
+	</array>
 </dict>
 </plist>

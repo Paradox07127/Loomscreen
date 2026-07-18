@@ -31,13 +31,28 @@ final class AppleAerialsLibrary {
     @ObservationIgnored private var scanTask: Task<Result<[AerialAsset], Error>, Never>?
 
     init() {
-        self.isAuthorized = SettingsManager.shared.loadAerialsDirectoryBookmark() != nil
+        // Authorized if Apple's folder is directly readable (entitlement / standard
+        // install) OR a prior Powerbox grant left a bookmark for a non-standard layout.
+        self.isAuthorized = Self.defaultReadableDirectory() != nil
+            || SettingsManager.shared.loadAerialsDirectoryBookmark() != nil
         self.assets = []
         self.lastScanError = nil
         self.isScanning = false
     }
 
     func requestAccess() async -> Bool {
+        // Fast path: Apple's aerials folder is directly readable (entitlement /
+        // standard install), so no Powerbox folder-grant is needed. This also
+        // sidesteps the sandbox quirk where the panel reopens at the last-used
+        // location (e.g. the WPE assets folder) instead of our `directoryURL` hint.
+        if Self.defaultReadableDirectory() != nil {
+            isAuthorized = true
+            lastScanError = nil
+            await refresh()
+            return true
+        }
+
+        // Fallback: non-standard / older layout — grant via Powerbox + bookmark.
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -70,16 +85,34 @@ final class AppleAerialsLibrary {
 
     func refresh() async {
         scanTask?.cancel()
-        guard let directoryURL = resolveAuthorizedDirectory() else { return }
 
-        let didStartAccess = directoryURL.startAccessingSecurityScopedResource()
-        guard didStartAccess else {
-            let message = "Cannot access Apple Aerials directory. Grant access again."
-            Logger.error(message, category: .fileAccess)
-            lastScanError = message
-            isAuthorized = false
-            assets = []
+        // Prefer the directly-readable Apple location (no security scope needed);
+        // fall back to a user-granted bookmark for non-standard layouts.
+        let directoryURL: URL
+        let isSecurityScoped: Bool
+        if let direct = Self.defaultReadableDirectory() {
+            directoryURL = direct
+            isSecurityScoped = false
+            isAuthorized = true
+        } else if let scoped = resolveAuthorizedDirectory() {
+            directoryURL = scoped
+            isSecurityScoped = true
+        } else {
             return
+        }
+
+        // A bookmark URL needs its security scope opened; a directly-readable path
+        // does not (and `startAccessingSecurityScopedResource` returns false on a
+        // non-scoped URL, which must NOT be treated as an access failure).
+        if isSecurityScoped {
+            guard directoryURL.startAccessingSecurityScopedResource() else {
+                let message = "Cannot access Apple Aerials directory. Grant access again."
+                Logger.error(message, category: .fileAccess)
+                lastScanError = message
+                isAuthorized = false
+                assets = []
+                return
+            }
         }
 
         scanGeneration &+= 1
@@ -87,7 +120,9 @@ final class AppleAerialsLibrary {
         isScanning = true
 
         defer {
-            directoryURL.stopAccessingSecurityScopedResource()
+            if isSecurityScoped {
+                directoryURL.stopAccessingSecurityScopedResource()
+            }
             if scanGeneration == myGeneration {
                 isScanning = false
             }
@@ -487,13 +522,39 @@ extension AppleAerialsLibrary {
 // MARK: - Default Locations
 
 extension AppleAerialsLibrary {
-    /// Default Powerbox location; grants both aerial videos and metadata.
+    /// The user's REAL home. In the App Sandbox `FileManager.homeDirectoryForCurrentUser`
+    /// and `NSHomeDirectory()` both return the container (`~/Library/Containers/<id>/Data`),
+    /// so a path built from them points at a folder that does NOT exist — which is why
+    /// the grant panel used to ignore its `directoryURL` and reopen at the last-used
+    /// location. The POSIX user DB reports the true `/Users/<name>`, which is also what
+    /// the home-relative read-only entitlement is resolved against. (Verified: getpwuid
+    /// returns /Users/<name> in-sandbox while NSHomeDirectory returns the container.)
+    nonisolated static func realHomeDirectory() -> URL {
+        if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: home), isDirectory: true)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    }
+
+    /// macOS 26/27 (Tahoe) per-user aerials store; also the grant panel's directory hint.
     nonisolated static func suggestedDirectoryToGrant(fileManager: FileManager = .default) -> URL {
-        fileManager
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("com.apple.wallpaper", isDirectory: true)
-            .appendingPathComponent("aerials", isDirectory: true)
+        realHomeDirectory()
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials", isDirectory: true)
+    }
+
+    /// The known Apple aerials locations readable WITHOUT a Powerbox grant (covered
+    /// by the read-only entitlement exceptions). Returns the first that exists,
+    /// newest layout first. `nil` when neither is present (non-standard install) —
+    /// the caller then falls back to the folder-grant panel, which stays as the
+    /// version-proof path for any layout these two don't cover.
+    nonisolated static func defaultReadableDirectory(fileManager: FileManager = .default) -> URL? {
+        let candidates = [
+            // macOS 26/27 (Tahoe): per-user store (videos + manifest + thumbnails).
+            realHomeDirectory()
+                .appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials", isDirectory: true),
+            // macOS 14/15 (Sonoma/Sequoia): system-wide idle assets.
+            URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd", isDirectory: true),
+        ]
+        return candidates.first { directoryExists($0, fileManager: fileManager) }
     }
 }

@@ -8,10 +8,14 @@ import MetalKit
 import os
 import simd
 extension WPEMetalRenderExecutor {
-    /// Release-visible skinning-gate breadcrumb: a gated-off puppet silently renders the static rest
-    /// pose (no blink/sway), so surface why in EVERY build — warning for DISABLED (mirrors the
-    /// v19/v20 character-sheet path), info for ENABLED — and mirror the state into the scene-debug
-    /// layer-placements dump so a bug-report dump carries the gate decision.
+    /// Skinning-gate breadcrumb. A gated-off puppet silently renders the static rest pose (no
+    /// blink/sway), so the console log surfaces why — warning for DISABLED (mirrors the v19/v20
+    /// character-sheet path), info for ENABLED. The console emission is OFF by default and opt-in
+    /// via `defaults write … WPEPuppetSkinDebugLog -bool YES`; the scene-debug layer-placements dump
+    /// (`recordPuppetSkinningStates`, gated separately by `WPESceneDebugArtifactsEnabled`) always
+    /// carries the gate decision regardless, so a bug-report dump is unaffected.
+    private static let puppetSkinBreadcrumbEnabled = UserDefaults.standard.bool(forKey: "WPEPuppetSkinDebugLog")
+
     func recordPuppetSkinningBreadcrumbs(
         pipeline: WPEPreparedRenderPipeline,
         skinningByObjectID: [String: PuppetSkinningState]
@@ -24,6 +28,7 @@ extension WPEMetalRenderExecutor {
             let reason = state?.reason ?? "no-state"
             let summary = "\(enabled ? "ENABLED" : "DISABLED")/\(reason)"
             states.append((objectID, summary))
+            guard Self.puppetSkinBreadcrumbEnabled else { continue }
             guard lastLoggedPuppetSkinningReason[objectID] != summary else { continue }
             lastLoggedPuppetSkinningReason[objectID] = summary
             let message = "🦴 [puppet-skin] obj=\(objectID) name=\(layer.graphLayer.objectName) "

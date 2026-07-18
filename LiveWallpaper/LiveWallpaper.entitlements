@@ -50,6 +50,27 @@
 		<string>/opt/homebrew/</string>
 		<string>/usr/local/</string>
 		<string>/opt/local/</string>
+		<!--
+		    macOS 14/15 (Sonoma/Sequoia) stores Apple's aerial screensaver videos
+		    system-wide under /Library/Application Support/com.apple.idleassetsd/.
+		    Read-only exception lets "Connect Apple Aerials" scan them directly
+		    without a Powerbox folder-grant (which on the sandbox reopens at the
+		    last-used location, not our directoryURL hint). macOS 26/27 moved the
+		    store to the per-user path below. Direct distribution only (not MAS).
+		-->
+		<string>/Library/Application Support/com.apple.idleassetsd/</string>
+	</array>
+	<!--
+	    macOS 26/27 (Tahoe) consolidated the aerials store under the per-user
+	    ~/Library/Application Support/com.apple.wallpaper/aerials/ (videos +
+	    manifest + thumbnails). Home-relative so it resolves per user. Same purpose
+	    as the idleassetsd absolute exception above — a version-spanning pair that
+	    lets the app read Apple's folder directly; the Powerbox picker stays as the
+	    fallback for any layout neither path covers.
+	-->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/com.apple.wallpaper/aerials/</string>
 	</array>
 	<!--
 	    Read-only Apple SMC access for the Monitor widget board's temperature /
