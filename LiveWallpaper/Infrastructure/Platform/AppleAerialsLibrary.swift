@@ -41,10 +41,10 @@ final class AppleAerialsLibrary {
     }
 
     func requestAccess() async -> Bool {
-        // Fast path: Apple's aerials folder is directly readable (entitlement /
-        // standard install), so no Powerbox folder-grant is needed. This also
-        // sidesteps the sandbox quirk where the panel reopens at the last-used
-        // location (e.g. the WPE assets folder) instead of our `directoryURL` hint.
+        // Fast path: if the sandbox lets us list Apple's aerials store directly, no
+        // Powerbox folder-grant is needed. No sandbox exception is claimed (kept MAS-
+        // safe), so this only fires where the host actually permits the read; a strict
+        // sandbox falls through to the picker below.
         if Self.defaultReadableDirectory() != nil {
             isAuthorized = true
             lastScanError = nil
@@ -555,6 +555,19 @@ extension AppleAerialsLibrary {
             // macOS 14/15 (Sonoma/Sequoia): system-wide idle assets.
             URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd", isDirectory: true),
         ]
-        return candidates.first { directoryExists($0, fileManager: fileManager) }
+        // Probe real readability, not just existence: with no sandbox exception a
+        // strict host can allow stat() while denying the directory read, and an
+        // existence-only check would authorize a store we can't actually scan (and
+        // then never fall through to the Powerbox grant). A successful shallow list
+        // is the real gate — the opportunistic fast path, valid with or without an
+        // entitlement.
+        return candidates.first { directoryIsReadable($0, fileManager: fileManager) }
+    }
+
+    nonisolated private static func directoryIsReadable(_ url: URL, fileManager: FileManager) -> Bool {
+        guard directoryExists(url, fileManager: fileManager) else { return false }
+        return (try? fileManager.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )) != nil
     }
 }
