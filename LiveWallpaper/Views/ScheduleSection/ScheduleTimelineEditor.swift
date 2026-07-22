@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Interactive 24h timeline. Edits are commit-on-drag-end via
 /// `onCommitTimeChange`; on parent rejection the preview unwinds back to

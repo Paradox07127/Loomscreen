@@ -1,5 +1,5 @@
 #if !LITE_BUILD
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Shared Workshop pane header, hosted *inside* each tab's

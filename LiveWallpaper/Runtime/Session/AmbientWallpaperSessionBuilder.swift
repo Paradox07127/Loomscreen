@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperVideoWeb
 import Metal
 
 #if !LITE_BUILD

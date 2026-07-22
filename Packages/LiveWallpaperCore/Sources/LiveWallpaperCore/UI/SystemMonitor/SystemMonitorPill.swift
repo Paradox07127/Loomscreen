@@ -1,4 +1,3 @@
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Sidebar-footer entry point for the system dashboard. The collapsed row keeps

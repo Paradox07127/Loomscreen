@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Time-of-day wallpaper scheduling. The 24h `ScheduleTimelineEditor` is the
 /// primary editing surface; the row list mirrors it and adds a wrap-aware

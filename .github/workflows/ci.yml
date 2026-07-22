@@ -2,7 +2,7 @@ name: CI
 
 # Build gate for both SKUs. The previous CI (release-loomscreen.yml, deleted in
 # 3324b442) pinned Xcode 16.2 on macos-15 and died compiling
-# LiveWallpaperSharedUI: AdaptiveGlass.swift uses macOS 26 SDK APIs
+# AdaptiveGlass.swift (now LiveWallpaperCore/UI/Components) uses macOS 26 SDK APIs
 # (glassEffect / GlassEffectContainer / .buttonStyle(.glass)) that do not exist
 # in the macOS 15.x SDKs shipped with Xcode 16.x — #available gates the
 # runtime, not the compile. This workflow pins Xcode 26.6 (17F113) on the
@@ -102,7 +102,7 @@ jobs:
       - name: Run package tests (sequential)
         run: |
           set -euo pipefail
-          for package in LiveWallpaperCore LiveWallpaperProWPE LiveWallpaperVideoWeb; do
+          for package in LiveWallpaperCore LiveWallpaperProWPE; do
             echo "== $package =="
             swift test \
               --package-path "Packages/$package" \

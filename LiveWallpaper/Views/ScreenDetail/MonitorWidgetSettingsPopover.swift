@@ -1,5 +1,4 @@
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Per-widget settings popover shown from the inspector's instrument list.

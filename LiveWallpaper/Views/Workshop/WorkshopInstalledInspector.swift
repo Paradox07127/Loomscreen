@@ -2,7 +2,6 @@
 import AppKit
 import Foundation
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Trailing detail inspector for an installed item. Apply happens here

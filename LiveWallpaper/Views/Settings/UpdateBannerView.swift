@@ -1,7 +1,7 @@
 #if LITE_BUILD
 import SwiftUI
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 
 /// Renders only in the Loomscreen Lite build. Update delivery remains a manual
 /// download from GitHub Releases; this view does not install updates.

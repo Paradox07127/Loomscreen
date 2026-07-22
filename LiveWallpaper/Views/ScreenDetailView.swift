@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import UniformTypeIdentifiers
 
 struct ScreenDetailView: View {

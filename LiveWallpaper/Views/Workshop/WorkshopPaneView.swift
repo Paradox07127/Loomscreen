@@ -1,5 +1,5 @@
 #if !LITE_BUILD
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Unified Workshop pane: one sidebar entry, two tabs. "Installed" embeds the

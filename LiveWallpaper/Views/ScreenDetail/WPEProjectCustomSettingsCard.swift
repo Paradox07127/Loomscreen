@@ -1,6 +1,5 @@
 #if !LITE_BUILD
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Pro-only inspector card that mirrors Wallpaper Engine's right-hand

@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Validates the 32-hex shape, probes Valve's `GetSupportedAPIList`, and stores

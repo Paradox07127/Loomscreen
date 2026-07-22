@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Steam does not return remaining quota, so we can only truthfully show an

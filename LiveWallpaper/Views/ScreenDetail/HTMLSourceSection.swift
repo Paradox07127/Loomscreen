@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Picker and options for URL- or locally-backed HTML wallpapers. The
 /// File vs. Folder distinction collapsed into a single "Local" segment —

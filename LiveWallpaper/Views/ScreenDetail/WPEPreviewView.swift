@@ -3,7 +3,6 @@ import SwiftUI
 import AppKit
 import ImageIO
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// `.autoPlay` is the back-compatible default; grid / list call sites pass `.hoverToPlay`.
 enum WPEPreviewPlaybackMode {

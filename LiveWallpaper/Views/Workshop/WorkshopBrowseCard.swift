@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Grid card for the online browse view. Square preview tile matching the

@@ -1,7 +1,7 @@
 #if DEBUG && !LITE_BUILD
 import SwiftUI
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 
 /// Pro-only diagnostic surface compiled into local DEBUG builds only — it
 /// ships in no Release binary at all, so it can never reach end users (and the

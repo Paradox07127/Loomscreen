@@ -1,5 +1,4 @@
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Modal sheet shown when the user clicks "Report a Bug…".

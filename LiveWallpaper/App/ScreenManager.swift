@@ -1,7 +1,6 @@
 import SwiftUI
 import Combine
 import LiveWallpaperCore
-import LiveWallpaperVideoWeb
 import Observation
 
 @MainActor @Observable

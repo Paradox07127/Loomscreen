@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Lists every `GlobalShortcutAction` with a capture button so the user can

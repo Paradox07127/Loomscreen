@@ -100,7 +100,7 @@ custom_rules:
   token_bypass_textstyle_font:
     name: "Inline text-style font"
     regex: '\.font\(\.system\(\.'
-    message: "Use DesignTokens.Typography instead of .font(.system(.textStyle…)) — SharedUI DESIGN.md rule 1"
+    message: "Use DesignTokens.Typography instead of .font(.system(.textStyle…)) — Core DESIGN.md rule 1"
     severity: warning
   token_bypass_custom_font:
     name: "Inline custom font"

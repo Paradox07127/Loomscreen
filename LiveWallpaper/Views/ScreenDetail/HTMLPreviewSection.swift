@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Inspector-side preview for HTML wallpapers. The selected screen's live

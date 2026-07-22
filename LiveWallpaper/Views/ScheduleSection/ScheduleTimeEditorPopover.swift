@@ -1,6 +1,5 @@
 import SwiftUI
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Popover anchored to a slot row's time-range label.
 ///

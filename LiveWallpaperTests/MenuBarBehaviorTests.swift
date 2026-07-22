@@ -143,7 +143,7 @@ struct MenuBarBehaviorTests {
         )
 
         let tokens = try RepositoryRoot.source(
-            "Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Tokens/DesignTokens.swift"
+            "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/Tokens/DesignTokens.swift"
         )
         guard let tokenStart = tokens.range(of: "public static let metricEmphasized"),
               let tokenEnd = tokens.range(of: "public static let code", range: tokenStart.upperBound..<tokens.endIndex) else {
@@ -156,7 +156,7 @@ struct MenuBarBehaviorTests {
             normalizedToken
                 == "publicstaticletmetricEmphasized=Font.system(.callout,design:.monospaced).weight(.semibold).monospacedDigit()"
         )
-        let designContract = try RepositoryRoot.source("Packages/LiveWallpaperSharedUI/DESIGN.md")
+        let designContract = try RepositoryRoot.source("Packages/LiveWallpaperCore/DESIGN.md")
         #expect(designContract.contains("+3 emphasized variants"))
         #expect(designContract.contains("`metricEmphasized` | `.callout.monospaced.semibold.monospacedDigit()`"))
     }

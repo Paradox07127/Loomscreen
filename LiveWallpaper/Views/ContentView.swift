@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperProFeatures
-import LiveWallpaperSharedUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {

@@ -63,7 +63,7 @@ struct LocalizationCoverageTests {
 
     @Test("Shared package UI resolves app-localized Text from the app bundle")
     func sharedPackageUIResolvesTextFromAppBundle() throws {
-        let source = try Self.projectFile("Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/SettingRow.swift")
+        let source = try Self.projectFile("Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/Components/SettingRow.swift")
 
         #expect(source.contains("Text(title, bundle: .main)"))
         #expect(source.contains("Text($0, bundle: .main)"))

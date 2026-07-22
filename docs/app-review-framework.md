@@ -17,7 +17,7 @@
 基于对仓库的扫描(`git` 快照 + 结构测绘),先建立"打哪里最省力"的地图。**Review 不是平均用力,而是把强模型的注意力压到热点上。**
 
 **体量与形态**
-- **534 个 Swift 文件 / ~166.7k LoC**;主 app target ~272 文件;**5 个 SPM 包**(`Core` / `SharedUI` / `ProWPE` / `ProFeatures` / `VideoWeb`,共 111 文件);测试 122 文件(~41.6k LoC,重资产)。
+- **534 个 Swift 文件 / ~166.7k LoC**;主 app target ~272 文件;**2 个 SPM 包**(`Core` / `ProWPE`,共 106 文件);测试 122 文件(~41.6k LoC,重资产)。
 - **2 个构建变体**:`Lite`(`LITE_BUILD`,无 Metal/WPE,video-only)、`Pro`(默认,全 Metal renderer + Steam Workshop 在线)。
 - 仅 2 个 `.metal` 文件 —— **shader 绝大多数是运行时 GLSL→MSL transpile**,这是本 app 独有的结构性风险点(见下)。
 - **无 CI 入库**(归档在 `build/DerivedData/…`);发版靠 `scripts/release-app.sh`。
@@ -44,7 +44,7 @@
 1. **硬编码 shader dispatcher**(`WPEMetalShaderDispatcher.swift`,25 个 `case` 手写分支)—— memory 早已锁定这是**唯一真正需要重构的 renderer 核心**:应改为数据驱动的 pass-graph 注册表,解锁任意特效链 / ping-pong / MRT / 跨帧反馈。
 2. **巨石文件**:Executor(5.7k)/ SceneRenderer(4.2k)/ ScreenManager(2k)/ HTMLWallpaperView(1.4k)—— 拖慢编译、放大认知负荷、阻碍并行开发。
 3. **Transpiler 无中间 IR**:AST 直出 MSL 文本,难以优化/验证。
-4. **设计系统只做了一半**:`SharedUI/DesignTokens.swift` 存在且在 SharedUI 内部一致使用,但主 app 的 Views(如 GeneralSettingsView)大量内联颜色/透明度(memory:~68% 样式绕过 token)。
+4. **设计系统只做了一半**:`Core/UI/Tokens/DesignTokens.swift` 存在且在 `Core/UI/` 内部一致使用,但主 app 的 Views(如 GeneralSettingsView)大量内联颜色/透明度(memory:~68% 样式绕过 token)。
 5. **死代码/半成品**:`PlaylistSection/`、`ScheduleSection/` 多为 stub/注释 —— 功能取舍(finish vs cut)候选。
 6. **特性开关散落**:大量 `WPEMetal…Enabled` UserDefaults flag,每帧在 Executor 里查 12+ 次、加载时查 13+ 次;宜收敛为类型化 `FeatureFlags` 注册表。
 

@@ -2,7 +2,6 @@
 import AppKit
 import LiveWallpaperCore
 import LiveWallpaperProWPE
-import LiveWallpaperVideoWeb
 
 /// @MainActor forwarding surface for the WPE renderer's runtime-config protocols
 /// (performance / frame-rate / audio). The session hands this out instead of the

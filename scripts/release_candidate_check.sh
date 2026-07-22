@@ -142,7 +142,6 @@ fi
 PACKAGE_TEST_PATHS=(
   "Packages/LiveWallpaperCore"
   "Packages/LiveWallpaperProWPE"
-  "Packages/LiveWallpaperVideoWeb"
 )
 
 echo "== Swift package tests (sequential) =="

@@ -1,4 +1,3 @@
-import LiveWallpaperSharedUI
 import SwiftUI
 
 public struct RAMScopePicker: View {

@@ -1,4 +1,4 @@
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Pairs a main column with a trailing full-height inspector, resolving widths

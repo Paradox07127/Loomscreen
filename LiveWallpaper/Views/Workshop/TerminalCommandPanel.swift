@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Used by Doctor probes and Phase 3 download failures. Offers a redacted

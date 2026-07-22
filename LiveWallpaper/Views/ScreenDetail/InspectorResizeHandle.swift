@@ -1,5 +1,5 @@
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Vertical handle on the inspector's leading edge for click-drag width

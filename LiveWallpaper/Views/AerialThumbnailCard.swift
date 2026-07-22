@@ -1,7 +1,6 @@
 import SwiftUI
 import AVFoundation
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 struct AerialThumbnailCacheKey: Hashable {
     private let path: String

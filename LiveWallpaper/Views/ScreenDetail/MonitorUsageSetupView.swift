@@ -1,5 +1,5 @@
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Standalone sheet explaining how to feed Claude Code account rate limits into

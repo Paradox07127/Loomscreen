@@ -1,5 +1,5 @@
 #if !LITE_BUILD
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// First-time-only sheet shown before the paste sheet opens. Mirrors the

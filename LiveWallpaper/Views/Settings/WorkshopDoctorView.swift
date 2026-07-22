@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Workshop Doctor — vertical probe checklist matching the mockup at

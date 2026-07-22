@@ -2,10 +2,7 @@
   "schema_version": 1,
   "local_package_modules": [
     "LiveWallpaperCore",
-    "LiveWallpaperProFeatures",
-    "LiveWallpaperProWPE",
-    "LiveWallpaperSharedUI",
-    "LiveWallpaperVideoWeb"
+    "LiveWallpaperProWPE"
   ],
   "allowed_exported_imports": {},
   "migrated_file_requirements": {
@@ -27,10 +24,7 @@
   },
   "minimum_explicit_import_files": 279,
   "minimum_import_occurrences": {
-    "LiveWallpaperCore": 202,
-    "LiveWallpaperProFeatures": 3,
-    "LiveWallpaperProWPE": 81,
-    "LiveWallpaperSharedUI": 91,
-    "LiveWallpaperVideoWeb": 8
+    "LiveWallpaperCore": 236,
+    "LiveWallpaperProWPE": 81
   }
 }

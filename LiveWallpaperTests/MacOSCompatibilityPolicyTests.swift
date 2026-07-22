@@ -30,7 +30,7 @@ struct MacOSCompatibilityPolicyTests {
 
     @Test("Liquid Glass APIs stay inside AdaptiveGlass")
     func liquidGlassAPIsAreCentralized() throws {
-        let allowed = "Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/AdaptiveGlass.swift"
+        let allowed = "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/Components/AdaptiveGlass.swift"
         let needles = [
             "GlassEffectContainer",
             ".glassEffect(",

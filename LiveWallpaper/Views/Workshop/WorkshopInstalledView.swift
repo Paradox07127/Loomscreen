@@ -1,7 +1,6 @@
 #if !LITE_BUILD
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 import UniformTypeIdentifiers
 

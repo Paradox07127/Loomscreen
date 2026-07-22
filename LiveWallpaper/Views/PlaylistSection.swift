@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks
 /// each row's frame. We deliberately avoid SwiftUI's `.draggable` /

@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Schedule row mirroring `PlaylistRow`'s 50pt cadence. The active slot
 /// shows an `EQPulseBar` for visual parity with the playlist's

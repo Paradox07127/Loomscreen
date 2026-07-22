@@ -1,7 +1,7 @@
 # LiveWallpaper — Design System Contract
 
 The visual contract for every SwiftUI view in the app (Pro + Lite SKUs). All
-tokens live in `DesignTokens` (this package, re-exported app-wide). New views
+tokens live in `DesignTokens` (`LiveWallpaperCore/UI/Tokens`). New views
 **must** use tokens — no inline magic numbers, fonts, or colors.
 
 ## Visual language (locked 2026-06-05)

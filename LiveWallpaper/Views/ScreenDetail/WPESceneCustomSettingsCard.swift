@@ -1,6 +1,5 @@
 #if !LITE_BUILD
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Companion to the HTML project settings card, diverging on three points:

@@ -1,5 +1,4 @@
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Card grid for a display with no saved configuration. Shader/Scene cards

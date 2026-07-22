@@ -2,7 +2,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Shared Wallpaper Engine gallery card used by both the Scene tab and the
 /// Installed library grid.

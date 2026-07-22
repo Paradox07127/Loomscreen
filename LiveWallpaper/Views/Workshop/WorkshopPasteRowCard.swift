@@ -1,6 +1,5 @@
 #if !LITE_BUILD
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 struct WorkshopPasteRowCard: View {

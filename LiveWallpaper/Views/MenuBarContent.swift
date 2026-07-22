@@ -1,6 +1,4 @@
 import LiveWallpaperCore
-import LiveWallpaperProFeatures
-import LiveWallpaperSharedUI
 import SwiftUI
 import AppKit
 import os

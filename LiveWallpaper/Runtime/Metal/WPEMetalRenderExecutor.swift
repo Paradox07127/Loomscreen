@@ -95,6 +95,7 @@ final class WPEMetalRenderExecutor {
     /// Mirrors the slot-0 precedence used by
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
+    lazy var gpuPassProfiler = WPEMetalPassGPUProfiler.makeIfEnabled(device: device)
     let targetPool: WPEMetalRenderTargetPool
     let depthCache: WPEMetalDepthStateCache
     private let pipelineCache: WPEMetalPipelineCache
@@ -431,6 +432,7 @@ final class WPEMetalRenderExecutor {
         } else if staticLayerCacheSceneSize != nil {
             invalidateStaticLayerCache()
         }
+        gpuPassProfiler?.noteScene(sceneID)
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -1079,6 +1081,7 @@ final class WPEMetalRenderExecutor {
             descriptor.depthAttachment.clearDepth = 1
         }
 
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "\(pass.pass.id)|\(pass.pass.shader)")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -1391,6 +1394,7 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].loadAction = .clear
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = color
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "clear")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -1469,6 +1473,7 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = clearColor(for: destination.id)
 
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "copy|\(layer.objectName)")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }

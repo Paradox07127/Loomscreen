@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import Combine
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// The "Browse Online" tab content, embedded headerless inside `WorkshopPaneView`.

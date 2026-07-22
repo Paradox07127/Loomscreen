@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperVideoWeb
 import os
 
 /// Desktop wallpaper host for the native Monitor v2 widget board.

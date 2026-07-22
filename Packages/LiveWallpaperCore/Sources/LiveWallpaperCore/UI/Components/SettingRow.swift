@@ -1,4 +1,3 @@
-import LiveWallpaperCore
 import SwiftUI
 
 /// Inspector row pairing an icon-prefixed title with a trailing control.

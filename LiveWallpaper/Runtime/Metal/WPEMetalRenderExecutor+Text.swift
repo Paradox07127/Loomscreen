@@ -26,6 +26,7 @@ extension WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].texture = output
         descriptor.colorAttachments[0].loadAction = .load
         descriptor.colorAttachments[0].storeAction = .store
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "textOverlay")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -95,6 +96,7 @@ extension WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].texture = output
         descriptor.colorAttachments[0].loadAction = .load
         descriptor.colorAttachments[0].storeAction = .store
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "textMSDF")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }

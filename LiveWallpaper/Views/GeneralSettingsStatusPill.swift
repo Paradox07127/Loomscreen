@@ -1,4 +1,4 @@
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 struct GeneralSettingsStatusPill: View {

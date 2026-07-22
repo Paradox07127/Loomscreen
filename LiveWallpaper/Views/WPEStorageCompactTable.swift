@@ -1,6 +1,6 @@
 #if !LITE_BUILD
 import SwiftUI
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 
 /// One row of the compact, macOS-Storage-style file table.
 struct WPEStorageRowItem: Identifiable, Sendable {

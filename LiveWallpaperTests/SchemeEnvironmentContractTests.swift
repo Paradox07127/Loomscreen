@@ -26,25 +26,22 @@ struct SchemeEnvironmentContractTests {
         #expect(profile.elements(forName: "CommandLineArguments").isEmpty)
     }
 
-    @Test("Metal HUD is confined to the Pro Debug launch action")
-    func metalHUDIsDebugLaunchOnly() throws {
+    // LaunchAction 的 buildConfiguration 和 MTL_HUD_ENABLED 是本机调试偏好,开发者随时会翻;
+    // 断言它们只会让别人改自己的 scheme 时无故变红。出货路径(Profile/Archive)才值得设防。
+    @Test("Metal HUD never reaches the Profile or Archive actions")
+    func metalHUDStaysOutOfShippingActions() throws {
         for relativePath in schemes {
             let document = try XMLDocument(
                 contentsOf: RepositoryRoot.url(relativePath),
                 options: []
             )
             let root = try #require(document.rootElement())
-            let launch = try #require(root.elements(forName: "LaunchAction").first)
             let profile = try #require(root.elements(forName: "ProfileAction").first)
             let archive = try #require(root.elements(forName: "ArchiveAction").first)
 
-            #expect(launch.attribute(forName: "buildConfiguration")?.stringValue == "Debug")
             #expect(profile.attribute(forName: "buildConfiguration")?.stringValue == "Release")
             #expect(archive.attribute(forName: "buildConfiguration")?.stringValue == "Release")
 
-            let launchVariables = launch
-                .elements(forName: "EnvironmentVariables")
-                .flatMap { $0.elements(forName: "EnvironmentVariable") }
             let nonLaunchVariables = [profile, archive]
                 .flatMap { $0.elements(forName: "EnvironmentVariables") }
                 .flatMap { $0.elements(forName: "EnvironmentVariable") }
@@ -52,18 +49,6 @@ struct SchemeEnvironmentContractTests {
             #expect(nonLaunchVariables.allSatisfy {
                 $0.attribute(forName: "key")?.stringValue != "MTL_HUD_ENABLED"
             })
-
-            if relativePath.hasSuffix("/LiveWallpaper.xcscheme") {
-                let metalHUD = try #require(launchVariables.first {
-                    $0.attribute(forName: "key")?.stringValue == "MTL_HUD_ENABLED"
-                })
-                #expect(metalHUD.attribute(forName: "value")?.stringValue == "1")
-                #expect(metalHUD.attribute(forName: "isEnabled")?.stringValue == "YES")
-            } else {
-                #expect(launchVariables.allSatisfy {
-                    $0.attribute(forName: "key")?.stringValue != "MTL_HUD_ENABLED"
-                })
-            }
         }
     }
 

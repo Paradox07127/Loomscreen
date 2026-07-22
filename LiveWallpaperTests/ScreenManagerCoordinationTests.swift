@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import LiveWallpaperCore
-import LiveWallpaperVideoWeb
 import Testing
 import WebKit
 @testable import LiveWallpaper

@@ -1,6 +1,5 @@
 import SwiftUI
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 struct BookmarksLibraryView: View {
     @Environment(ScreenManager.self) private var screenManager

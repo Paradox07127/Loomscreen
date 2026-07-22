@@ -1,5 +1,4 @@
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Inspector-header popover for quick-saving the current wallpaper. The full

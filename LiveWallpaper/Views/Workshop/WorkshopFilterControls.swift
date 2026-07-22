@@ -1,5 +1,5 @@
 #if !LITE_BUILD
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 import SwiftUI
 
 /// Shared filter chrome for the Workshop tabs. The Installed library

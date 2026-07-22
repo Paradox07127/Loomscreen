@@ -1,5 +1,3 @@
-import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 public struct SystemMonitorView: View {

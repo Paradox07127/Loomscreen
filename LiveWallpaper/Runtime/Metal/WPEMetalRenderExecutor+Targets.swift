@@ -397,6 +397,7 @@ extension WPEMetalRenderExecutor {
         renderPass.colorAttachments[0].loadAction = .clear
         renderPass.colorAttachments[0].storeAction = .store
         renderPass.colorAttachments[0].clearColor = clearColor(for: targetID)
+        gpuPassProfiler?.attach(renderPass, to: commandBuffer, label: "bootstrapClear")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }

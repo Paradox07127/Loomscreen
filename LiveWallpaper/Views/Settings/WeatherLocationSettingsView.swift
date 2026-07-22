@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import MapKit
 import SwiftUI
 

@@ -1,6 +1,5 @@
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 
 struct ScreenDetailInspectorPanel: View {

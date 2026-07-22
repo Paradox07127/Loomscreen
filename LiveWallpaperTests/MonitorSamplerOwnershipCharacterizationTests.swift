@@ -2,7 +2,6 @@
     import AppKit
     import Foundation
     import LiveWallpaperCore
-    import LiveWallpaperProFeatures
     @testable import LiveWallpaper
     import os
     import Testing
@@ -140,7 +139,7 @@
         @Test("menu root and real settings window are the only legacy owners")
         func visibleConsumerOwnershipSourceContract() throws {
             let monitor = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitor.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Runtime/SystemMonitor.swift"
             )
             let start = try slice(
                 monitor,
@@ -166,14 +165,14 @@
             #expect(shutdown.contains("updateTask?.cancel()"))
 
             let pill = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitorPill.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/SystemMonitor/SystemMonitorPill.swift"
             )
             #expect(!pill.contains("startMonitoring()"))
             #expect(!pill.contains("stopMonitoring()"))
             #expect(pill.contains("SystemMonitorView("))
 
             let expanded = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitorView.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/SystemMonitor/SystemMonitorView.swift"
             )
             #expect(!expanded.contains("monitor.startMonitoring()"))
             #expect(!expanded.contains("monitor.stopMonitoring()"))
@@ -336,7 +335,7 @@
         @Test("legacy and v2 duplicate headline system concerns when a board is active")
         func samplerConcernOverlapSourceContract() throws {
             let legacy = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitor.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Runtime/SystemMonitor.swift"
             )
             let legacySample = try slice(
                 legacy,
@@ -390,7 +389,7 @@
         @Test("visible legacy telemetry retains App and System scope readings")
         func legacyScopeReadingsRemainAvailable() throws {
             let monitor = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitor.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Runtime/SystemMonitor.swift"
             )
             for symbol in [
                 "sampleAppCPUUsage()",
@@ -406,7 +405,7 @@
             }
 
             let view = try productionSource(
-                "Packages/LiveWallpaperProFeatures/Sources/LiveWallpaperProFeatures/SystemMonitor/SystemMonitorView.swift"
+                "Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/UI/SystemMonitor/SystemMonitorView.swift"
             )
             #expect(view.contains("@AppStorage(\"Dashboard.RAMScope\")"))
             #expect(view.contains("ramScopeRaw == \"app\" ? monitor.memoryPercentage()"))

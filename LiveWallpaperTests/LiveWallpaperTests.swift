@@ -2,7 +2,6 @@ import Testing
 import Foundation
 import CoreGraphics
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 import SwiftUI
 @testable import LiveWallpaper
 

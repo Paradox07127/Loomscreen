@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import LiveWallpaperSharedUI
+import LiveWallpaperCore
 
 struct WeatherStatusBadge: View {
     var weatherService: WeatherReactiveService

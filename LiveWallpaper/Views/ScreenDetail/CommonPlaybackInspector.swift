@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 /// Playback controls kept in a positionally stable spot regardless of
 /// `wallpaperType`, so users don't hunt for the same toggle after a

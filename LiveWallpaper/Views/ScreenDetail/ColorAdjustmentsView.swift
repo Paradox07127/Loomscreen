@@ -1,6 +1,5 @@
 import SwiftUI
 import LiveWallpaperCore
-import LiveWallpaperSharedUI
 
 struct ColorAdjustmentsView: View {
     @Binding var effectConfig: VideoEffectConfig

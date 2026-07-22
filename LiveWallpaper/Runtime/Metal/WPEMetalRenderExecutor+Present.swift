@@ -47,6 +47,7 @@ extension WPEMetalRenderExecutor {
             blendMode: "disabled",
             colorPixelFormat: drawable.texture.pixelFormat
         )
+        gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "present")
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -147,6 +148,7 @@ extension WPEMetalRenderExecutor {
             // alpha < 1 — inert only because the bloom shaders hardcode alpha = 1.
             descriptor.colorAttachments[0].loadAction = blendMode == "disabled" ? .dontCare : .load
             descriptor.colorAttachments[0].storeAction = .store
+            gpuPassProfiler?.attach(descriptor, to: commandBuffer, label: "bloom|\(fragment)")
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
                 throw WPEMetalRenderExecutorError.commandBufferFailed
             }
