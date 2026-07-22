@@ -2,12 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Shared filter chrome for the Workshop tabs. The Installed library
-/// (`WorkshopInstalledView`) and the online Browse ribbon
-/// (`WorkshopBrowseFilterRibbon`) render the same "Filters" toggle, category
-/// label rows, and narrowing math; keeping one copy stops the two from
-/// drifting (e.g. the VoiceOver active-count announcement was previously
-/// present only on Browse).
+/// Shared filter chrome for the Workshop tabs.
 struct WorkshopFiltersToggle: View {
     @Binding var isExpanded: Bool
     let activeFilterCount: Int

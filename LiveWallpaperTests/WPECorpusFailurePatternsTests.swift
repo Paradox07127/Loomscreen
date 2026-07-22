@@ -3,13 +3,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Regression fixtures for WPE corpus failure patterns. Each test
-/// reproduces a minimal shader matching a real workshop scene's failure
-/// mode and asserts the Metal translator accepts it.
-///
-/// Synthetic minimal shaders are used instead of real workshop sources
-/// because the corpus is user-specific and each pattern reproduces in
-/// <20 lines.
 @MainActor
 @Suite("WPE corpus failure patterns")
 struct WPECorpusFailurePatternsTests {
@@ -47,9 +40,6 @@ struct WPECorpusFailurePatternsTests {
 
     @Test("Blur helper sampling g_Texture0 threads the per-slot sampler state")
     func helperScopeSamplerStateCompiles() throws {
-        // effects/godrays_gaussian: common_blur helpers sample g_Texture0, whose
-        // rewritten form references the per-slot `wpeSampler0` — the sampler
-        // STATE must be threaded into the helper alongside the texture.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -78,14 +68,8 @@ struct WPECorpusFailurePatternsTests {
 
     // MARK: - Audio spectrum line (3719111841 — audioline workshop effect)
 
-    /// The "音频线 Audio Spectrum" effect: a custom workshop frag that indexes
-    /// `g_AudioSpectrum64Left/Right[64]` DIRECTLY (not via a local copy), uses a
-    /// helper taking the spectrum, `frac`, `pow`, `smoothstep`, and reads the
-    /// framebuffer + `g_Texture0Resolution`. Probe: does it translate + compile?
     @Test("audioline workshop shader translates and compiles")
     func audioLineSpectrumShaderCompiles() throws {
-        // Source as the WPE preprocessor hands it to the transpiler (texSample2D
-        // already rewritten to texture()).
         let source = """
         uniform sampler2D g_Texture0;
         uniform vec3 u_curveColor;

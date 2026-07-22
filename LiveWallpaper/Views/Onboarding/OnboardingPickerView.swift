@@ -28,11 +28,7 @@ enum OnboardingImportCopy {
     }
 }
 
-/// Onboarding source step. Two SKU-derived cards: a single "Import a file"
-/// action that opens one picker and routes by type (video / web / — on Pro —
-/// Wallpaper Engine scene), plus a second card that is either Steam Workshop
-/// (direct Pro) or Apple Aerials. Files can also be dropped straight onto the
-/// step. Applies to every display so the first wallpaper appears immediately.
+/// Onboarding source step.
 struct OnboardingPickerView: View {
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog

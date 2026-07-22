@@ -22,9 +22,6 @@ struct WPERenderPipelineBuilderTests {
 
     @Test("Script-driven alpha/transform rewrites keep shape:quad points")
     func scriptAlphaAndTransformRewritesKeepShapeQuadPoints() throws {
-        // applyingAlpha/applyingTransform rebuild the geometry per script tick;
-        // like the attachment-follow rewrite, they must carry shapePoints or a
-        // scripted quad layer loses its perspective corners at runtime.
         let points = [
             SIMD2<Double>(0.4, 0.25),
             SIMD2<Double>(0.6, 0.25),
@@ -143,11 +140,6 @@ struct WPERenderPipelineBuilderTests {
 
     @Test("Texture-declared combo (MASK) auto-enables when its sampler slot is bound")
     func textureDeclaredComboEnablesWhenSamplerSlotBound() throws {
-        // Mirrors waterwaves.frag: the opacity-mask sampler g_Texture1 declares
-        // `"combo":"MASK"`, gating the displacement mask behind `#if MASK`. WPE
-        // auto-enables MASK when the slot is bound (scene ships textures[1] but
-        // no explicit combos). If MASK stays off, `mask = 1.0` and the WHOLE
-        // layer displaces — the "ghost / stacked layers" artifact.
         let fixture = try makeFixture(files: [
             "shaders/effects/masked.vert": """
             attribute vec3 a_Position;
@@ -200,8 +192,6 @@ struct WPERenderPipelineBuilderTests {
                         shader: "effects/masked",
                         source: .fbo("_rt_imageLayerComposite_9_a"),
                         target: .scene,
-                        // Mask bound to slot 1; MASK combo deliberately NOT set
-                        // explicitly — it must be derived from the bound slot.
                         textures: [1: .asset("masks/waterwaves_mask")],
                         binds: [:],
                         constants: [:],
@@ -268,8 +258,6 @@ struct WPERenderPipelineBuilderTests {
 
     @Test("A pre-v19 puppet generation refuses the whole scene instead of rendering it misaligned")
     func legacyPuppetGenerationRefusesScene() throws {
-        // A parseable puppet tagged MDLV0017 (a generation below the verified character-sheet floor).
-        // loadPuppetModel must throw so the scene is skipped + warned, not silently degraded.
         let fixture = try makeFixture(dataFiles: [
             "models/layer_puppet.mdl": makeLegacyPuppetMDLBelow19()
         ])
@@ -287,8 +275,6 @@ struct WPERenderPipelineBuilderTests {
 
     @Test("An MDLV0019 character-sheet puppet loads (it is assembled by skinning, not refused)")
     func mdlv19PuppetLoadsInsteadOfRefusing() throws {
-        // The v19 exploded character-sheet is recovered by skinning through the MDLA pose, so the
-        // pipeline must now accept it (regression for the old `version >= 21` refusal).
         var mdl = makeSingleTrianglePuppetMDL()
         mdl.replaceSubrange(0..<8, with: "MDLV0019".utf8)
         let fixture = try makeFixture(dataFiles: [
@@ -758,12 +744,6 @@ struct WPERenderPipelineBuilderTests {
 
     @Test("common_fragment.h FORMAT_* constants keep formatcombo branches off the R8 path")
     func commonFragmentFormatConstantsKeepFormatcomboBranchesOffR8() throws {
-        // lightshafts.frag (and every `formatcombo` shader) branches on
-        // `#if TEX2FORMAT == FORMAT_R8 || TEX2FORMAT == FORMAT_RG88` to pick
-        // `.rrr` replication for single/dual-channel gradient maps. Before the
-        // stub carried WPE's FORMAT_* table, implicitConditionalDefines zeroed
-        // FORMAT_R8/FORMAT_RG88 alongside the missing TEXnFORMAT, so `0 == 0`
-        // forced the grayscale branch and RGBA gradients rendered white.
         let fixture = try makeFixture(files: [
             "shaders/effects/shafts_like.vert": """
             attribute vec3 a_Position;
@@ -818,16 +798,11 @@ struct WPERenderPipelineBuilderTests {
         let pass = try #require(pipeline.layers.first?.passes.first)
         let fragmentSource = try #require(pass.shader?.fragmentSource)
 
-        // The stub supplies WPE's real enum values …
         #expect(fragmentSource.contains("#define FORMAT_R8 9"))
         #expect(fragmentSource.contains("#define FORMAT_RG88 8"))
-        // … so the auto-define pass must not zero them anymore.
         #expect(fragmentSource.contains("#define FORMAT_R8 0") == false)
         #expect(fragmentSource.contains("#define FORMAT_RG88 0") == false)
-        // The missing per-slot format combo still auto-defines to 0, which is
-        // FORMAT_RGBA8888 — the layout the texture loader uploads.
         #expect(fragmentSource.contains("#define TEX2FORMAT 0"))
-        // And the unbound slot still resolves the shader-declared default.
         #expect(pass.textureBindings[2] == WPETextureReference.asset("gradient/gradient_iridescent"))
     }
 
@@ -1006,9 +981,6 @@ struct WPERenderPipelineBuilderTests {
                 brightness: 1
             )
         }
-        // A composelayer-group child: its group-buffer pass is drawn from
-        // groupLocalGeometry, so a live fade must land there too (the executor
-        // otherwise draws the child at its authored alpha inside the group).
         let child = WPERenderLayer(
             objectID: "child",
             objectName: "Child",
@@ -1032,7 +1004,6 @@ struct WPERenderPipelineBuilderTests {
         #expect(abs(faded.geometry.alpha - 0.25) < 0.0001)
         #expect(abs((faded.groupLocalGeometry?.alpha ?? -1) - 0.25) < 0.0001)
         #expect(faded.groupLocalGeometry?.alphaAnimation == nil)
-        // Non-alpha fields of the group-local geometry are preserved.
         #expect(faded.groupLocalGeometry?.origin == SIMD3<Double>(5, 7, 0))
     }
 
@@ -1343,8 +1314,6 @@ struct WPERenderPipelineBuilderTests {
             return try #require(pipeline.layers.first?.passes.first)
         }
 
-        // Unbound slot 2 → white (full effect); a black/unbound mask silently
-        // disables the effect (oracle: 3554161528 cloud bands froze).
         let defaulted = try builtPass(textures: [:])
         #expect(defaulted.textureBindings[2] == .asset("util/white"))
 
@@ -1534,7 +1503,7 @@ struct WPERenderPipelineBuilderTests {
     }
 
     @Test(
-        "Recognises Phase 2D-C effect aliases under bare, effects/, and materials/ paths",
+        "Recognises effect aliases under bare, effects/, and materials/ paths",
         arguments: [
             "blur",
             "effects/blur",
@@ -1659,9 +1628,6 @@ struct WPERenderPipelineBuilderTests {
         return data
     }
 
-    /// A parseable puppet below the verified MDLV0019 character-sheet floor. Uses the pre-v19 header
-    /// layout (`u32 flags, u32, u32 meshCount`) with a v17+ 24-byte bbox so the parser succeeds and the
-    /// version guard — not a parse failure — is what refuses the scene.
     private func makeLegacyPuppetMDLBelow19() -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0017".utf8))

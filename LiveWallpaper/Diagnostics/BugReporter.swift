@@ -2,9 +2,7 @@ import AppKit
 import Foundation
 import LiveWallpaperCore
 
-/// `Identifiable` so SwiftUI's `.sheet(item:)` can present the report; the
-/// id changes on every fresh `makeReport(...)` call so re-opening the sheet
-/// re-renders even if the diagnostic content happens to be byte-identical.
+/// `Identifiable` so SwiftUI's `.sheet(item:)` can present the report; the id changes on every fresh `makeReport(...)` call so re-opening the sheet re-renders even if the diagnostic content happens to be byte-identical.
 struct BugReport: Identifiable, Sendable {
     let id = UUID()
     let diagnosticMarkdown: String
@@ -20,16 +18,10 @@ enum BugReporter {
         string: "https://github.com/Paradox07127/Loomscreen/issues/new?template=bug_report.yml"
     ) ?? URL(fileURLWithPath: "/")
 
-    /// How many recent warning/error lines we lift from the runtime log into
-    /// the markdown preview. Five is enough to convey what crashed without
-    /// blowing past GitHub's `body=` URL-parameter ceiling (~8 KB) once the
-    /// markdown is percent-encoded.
+    /// How many recent warning/error lines we lift from the runtime log into the markdown preview.
     private static let recentLogLineCount = 5
     private static let maxLogLineLength = 500
-    /// Hard cap on the markdown body before URL encoding. GitHub returns
-    /// `414 URI Too Long` for very long query strings; staying well under
-    /// 8 KB pre-encoding gives us comfortable headroom even when characters
-    /// like `&`, `#`, newline each expand 3× during percent-encoding.
+    /// Hard cap on the markdown body before URL encoding.
     private static let maxBodyLength = 6 * 1024
 
     @MainActor
@@ -68,10 +60,7 @@ enum BugReporter {
         if recentLogLines.isEmpty {
             sections.append("- **Recent warnings/errors**: (none recorded)")
         } else {
-            // Fenced code block: a single ``` boundary is safer than per-line
-            // backticks because it survives `` ` `` characters embedded in the
-            // log line itself. The fence length is dynamic to defeat any line
-            // that happens to contain ``` itself.
+            // Fenced code block: a single ``` boundary is safer than per-line backticks because it survives `` ` `` characters embedded in the log line itself.
             let fence = safeCodeFence(for: recentLogLines)
             let body = recentLogLines.joined(separator: "\n")
             sections.append("""
@@ -110,9 +99,7 @@ enum BugReporter {
         return "\(displays.count) connected (\(parts.joined(separator: " · ")))"
     }
 
-    /// Picks the shortest fence (`` ``` ``, `` ```` ``, …) that does not appear
-    /// inside any of the lines — preventing user content from prematurely
-    /// closing the code block.
+    /// Picks the shortest fence (`` ``` ``, `` ```` ``, …) that does not appear inside any of the lines — preventing user content from prematurely closing the code block.
     private static func safeCodeFence(for lines: [String]) -> String {
         var fence = "```"
         while lines.contains(where: { $0.contains(fence) }) {
@@ -149,10 +136,7 @@ enum BugReporter {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
-    /// Pulls the most recent WARNING/ERROR/FAULT lines from `LogFileSink`
-    /// (which holds the lock so we never observe a torn write or stale
-    /// rotation). The sink re-scrubs every returned line, including entries
-    /// written by older app versions, before it leaves Core.
+    /// Pulls the most recent WARNING/ERROR/FAULT lines from `LogFileSink` (which holds the lock so we never observe a torn write or stale rotation).
     private static func sanitizedRecentLogLines() -> [String] {
         LogFileSink.shared
             .recentDiagnosticLines(maxLines: recentLogLineCount, maxLineLength: maxLogLineLength)

@@ -1,12 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// The matte instrument-panel body every widget wears: warm-graphite fill, a
-/// hairline border, a faint top-edge light, and a procedural film-grain overlay.
-/// Ported from the mock's `.card` recipe (matte, deliberately NOT glass).
-///
-/// The grain is generated ONCE into a cached `Image` at panel size — a seeded
-/// pseudo-random speckle at whisper opacity, never redrawn per frame.
 struct MonitorPanelChrome: ViewModifier {
     var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
 
@@ -22,7 +16,6 @@ struct MonitorPanelChrome: ViewModifier {
                         )
                     )
                     .overlay(MonitorGrain(cornerRadius: cornerRadius))
-                    // Faint top-edge highlight (inner 1px light) + matte drop.
                     .overlay(
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(
@@ -51,9 +44,7 @@ extension View {
     }
 }
 
-/// Procedural film-grain: a seeded speckle field drawn once into a bitmap and
-/// tiled at whisper opacity via `overlay` blend. The bitmap is rebuilt only when
-/// the panel size changes, so `body` stays cheap.
+/// Procedural film-grain: a seeded speckle field drawn once into a bitmap and tiled at whisper opacity via `overlay` blend.
 struct MonitorGrain: View {
     var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
     var opacity: Double = 0.022
@@ -89,7 +80,6 @@ struct MonitorGrain: View {
         var state: UInt64 = 0x9E3779B97F4A7C15  // fixed seed → stable grain
 
         for i in stride(from: 0, to: pixels.count, by: 4) {
-            // xorshift64 — cheap deterministic noise
             state ^= state << 13
             state ^= state >> 7
             state ^= state << 17

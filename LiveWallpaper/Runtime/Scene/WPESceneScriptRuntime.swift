@@ -31,7 +31,7 @@ extension WPESceneScriptEngineExecutionGuarding {
 }
 
 /// Latest-completed-outcome exchange between a script engine's serial queue and
-/// the frame thread (ADR-003 step 1). The queue publishes each finished
+/// the frame thread. The queue publishes each finished
 /// evaluation; the frame drains the newest unconsumed one — `takeLatest()`
 /// returning nil is the "nothing new, keep last" sentinel. `combine` folds a
 /// not-yet-consumed outcome into the next publish so one-shot payloads (layer
@@ -173,7 +173,7 @@ final class WPESceneScriptOutcomeSlot<Outcome: Sendable>: Sendable {
 /// the hung worker could block the releasing thread. The process owner strictly
 /// caps those retained engines; the shared load token fails every script family
 /// closed while the renderer preserves the last stable presentation.
-// Not `@MainActor` (M2c1b-3c): ticked on the renderer's `WPEDisplayRenderActor`.
+// Not `@MainActor`: ticked on the renderer's `WPEDisplayRenderActor`.
 // The JS engine runs on its own dedicated serial queue regardless; the outcome
 // slot is thread-safe, so the caller's isolation is just the render actor.
 final class WPESceneScriptInstance {
@@ -261,7 +261,7 @@ final class WPESceneScriptInstance {
         }
     }
 
-    // MARK: Async tick (ADR-003 step 1)
+    // MARK: Async Tick
 
     /// Load-path seeding: one bounded synchronous tick so the first frame shows
     /// the scripted value instead of popping the authored placeholder.
@@ -794,7 +794,7 @@ enum WPELayerScriptCursorEvent: Sendable, Equatable {
 /// JSContext on a dedicated serial queue, every evaluation is wall-clock
 /// budgeted, and an overrun poisons the instance (frozen at its last state)
 /// rather than hanging the render thread.
-// Not `@MainActor` (M2c1b-3c): ticked on the renderer's `WPEDisplayRenderActor`.
+// Not `@MainActor`: ticked on the renderer's `WPEDisplayRenderActor`.
 final class WPELayerScriptInstance {
     private let engine: LayerEngine
     private let hasUpdateFunction: Bool
@@ -947,7 +947,7 @@ final class WPELayerScriptInstance {
         }
     }
 
-    // MARK: Async tick (ADR-003 step 1)
+    // MARK: Async Tick
 
     /// Frame-path tick, async mode: drains the newest COMPLETED output (ticks,
     /// cursor events and property pushes all publish into the same slot, so the
@@ -1859,22 +1859,8 @@ private func wpeBridgeJSValueToHost(_ value: JSValue) -> Any? {
     return value.toObject()
 }
 
-/// Install `shared` as a Proxy whose traps route to `store`, so every script in
-/// the scene reads/writes the same state across isolated contexts.
-///
-/// A raw `__sharedGet` hands back a DETACHED copy (values cross the host bridge
-/// by value — `JSValue.toObject()`), so WPE's reference semantics on containers
-/// were silently dropped: `shared.log.push(x)` mutated a temporary and the store
-/// never saw it. 三体 3509243656's 日志 (object 1227) keeps its whole civilisation
-/// state in `shared.logEntries` / `shared.civilizationRecords` / `shared.lastStates`
-/// — every `push`/`unshift` and field write vanished, so the log and the survival
-/// leaderboard stayed permanently empty while the primitive counters ticked on.
-///
-/// Fix: object/array reads return a write-back Proxy bound to the ROOT key. Any
-/// mutating method, property set, or delete — at any depth, including on an
-/// element handed out by `find()` — re-publishes the whole root container to the
-/// store. Primitives keep the direct fast path (no proxy allocation); they are
-/// the hot reads (`shared.xx1`…) and already round-tripped correctly.
+/// Installs `shared` as a cross-context proxy. Container mutations write the root value
+/// back to the host because JavaScriptCore bridge values otherwise cross by copy.
 private func wpeInstallSharedState(_ store: WPESharedScriptState, in context: JSContext) {
     let get: @convention(block) (String) -> Any? = { store.get($0) }
     let set: @convention(block) (String, JSValue) -> Void = { key, value in
@@ -1974,30 +1960,8 @@ private func wpeInstallScriptProperties(
     context.setObject(scriptProperties, forKeyedSubscript: "scriptProperties" as NSString)
 }
 
-/// Resolves STATIC WPE transform scripts (object `origin`/`scale`) once at parse
-/// time so script-driven positions reflect the CURRENT user-property values
-/// instead of the stale baked `value`.
-///
-/// WPE binds e.g. `origin = scriptProperties.{x,y} * engine.canvasSize.{x,y}`,
-/// where `scriptProperties` is bound to user sliders. The editor bakes a `value`
-/// vec3 from whatever the sliders were last set to; after the user tweaks them,
-/// every scripted object keeps sitting at that out-of-date anchor — scene
-/// 3660962877's clock/date text "全部挤在一起". Running the real script reproduces
-/// WPE exactly for ANY origin script, with no pattern hardcoded.
-///
-/// Static only: scripts that read time/audio/random are skipped (the caller keeps
-/// the baked value) — those need a per-frame tick and live input, a separate
-/// feature. One `JSContext` is reused per unique source, so a scene with 67
-/// identical origin scripts pays for a single context evaluated once.
-///
-/// Untrusted input safety: scene packages are community content, so a scripted
-/// `origin` could carry a runaway loop. Every evaluation runs on a dedicated
-/// serial queue while the parser waits with a wall-clock budget (mirroring
-/// `WPESceneScriptInstance`); a single timeout poisons the evaluator so the
-/// remaining objects fall back to their baked values and the parse still
-/// finishes. The cached-context count is also capped so a scene with hundreds of
-/// distinct inline scripts can't exhaust memory at parse time.
-///
+/// Resolves static transform scripts once using current project properties.
+/// Untrusted scripts run under time and context-count limits, falling back to baked values on failure.
 /// `@unchecked Sendable`: every `JSContext`/`JSValue` and the exception flag are
 /// only ever touched on `queue`, the poison state is lock-guarded, and the parser
 /// side exchanges value types. (In practice `resolveVec3` is called serially from
@@ -2438,7 +2402,7 @@ final class WPEDynamicTransformScriptInstance: @unchecked Sendable {
         }
     }
 
-    // MARK: Async tick (ADR-003 step 1)
+    // MARK: Async Tick
 
     /// Load-path seeding: one bounded synchronous tick so the first frame uses
     /// the scripted transform instead of popping from the baked value.

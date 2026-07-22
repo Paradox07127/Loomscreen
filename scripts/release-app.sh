@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 #
-# Build, sign (ad-hoc), and package a release DMG for either SKU.
+# Build, ad-hoc sign, and package a release DMG for either SKU.
 #
-# Both Loomscreen (Lite) and LiveWallpaper (Pro) ship ad-hoc signed — no
-# paid Apple Developer ID yet — so this script overrides
-# CODE_SIGN_IDENTITY="-" / CODE_SIGN_STYLE=Manual to stop xcodebuild from
-# silently picking up an Apple Development cert that would refuse to launch
-# on other Macs.
+# Both SKUs currently ship ad-hoc signed. Manual signing prevents Xcode from
+# selecting an Apple Development certificate that would fail on other Macs.
 #
 # Usage:
 #   scripts/release-app.sh --sku lite --version 0.2.0
@@ -23,8 +20,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# ---------- argument parsing ----------
-
 SKU="lite"
 VERSION=""
 DRY_RUN=0
@@ -38,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run)     DRY_RUN=1; shift ;;
     --plan)        PLAN=1; shift ;;
     --skip-checks) SKIP_CHECKS_FLAG=1; shift ;;
-    -h|--help)     sed -n '3,18p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '3,17p' "$0"; exit 0 ;;
     *) echo "ERROR: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
@@ -52,22 +47,18 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 64
 fi
 
-# ---------- SKU profile ----------
-
 case "$SKU" in
   lite)
     SCHEME="LiveWallpaperLite"
-    APP_NAME="Loomscreen"          # archived .app basename (build product)
-    ARTIFACT="Loomscreen"          # dmg / archive / sha basename
+    APP_NAME="Loomscreen"
+    ARTIFACT="Loomscreen"
     VOLNAME="Loomscreen"
     BUNDLE_ID="com.loomscreen"
-    DISPLAY_NAME="Loomscreen"      # expected CFBundleDisplayName
+    DISPLAY_NAME="Loomscreen"
     ;;
   pro)
     SCHEME="LiveWallpaper"
-    # App bundle is still LiveWallpaper.app (binary rename deferred), but the
-    # artifact carries the unified Loomscreen Pro brand. Lite's in-app updater
-    # does not inspect DMG names; this label is packaging identity only.
+    # The Pro bundle retains its existing name; only release artifacts use Loomscreen Pro.
     APP_NAME="LiveWallpaper"
     ARTIFACT="Loomscreen-Pro"
     VOLNAME="Loomscreen Pro"
@@ -79,8 +70,6 @@ case "$SKU" in
     exit 64
     ;;
 esac
-
-# ---------- environment ----------
 
 DERIVED_DATA="${DERIVED_DATA:-/tmp/${ARTIFACT}Release}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
@@ -105,8 +94,6 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
-# ---------- pre-flight ----------
-
 echo "== [$SKU] Pre-flight: working tree =="
 if ! git diff --quiet HEAD || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   echo "ERROR: working tree has tracked or untracked changes. Commit or stash first." >&2
@@ -127,9 +114,8 @@ if [[ "$PROJECT_MARKETING_VERSION" != "$VERSION" ]]; then
   exit 65
 fi
 
-# Release artifacts are built and gated locally because public distribution is
-# still ad-hoc signed. CI validates the source/contracts, while the RC checks
-# attest the maintainer machine and therefore run unless explicitly skipped.
+# Local release checks attest the maintainer environment and run unless
+# explicitly skipped.
 SKIP_CHECKS=0
 SKIP_REASON=""
 if [[ "$DRY_RUN" == "1" ]]; then
@@ -147,8 +133,6 @@ else
     exit 1
   }
 fi
-
-# ---------- archive ----------
 
 echo "== [$SKU] Cleaning previous artifacts =="
 rm -rf "$ARCHIVE_PATH" "$STAGING_DIR" "$DMG_PATH" "$SHA_PATH"
@@ -180,8 +164,6 @@ if [[ ! -d "$ARCHIVED_APP" ]]; then
   exit 1
 fi
 
-# ---------- stage signed archive ----------
-
 echo "== [$SKU] Staging .app for packaging =="
 mkdir -p "$STAGING_DIR"
 ditto "$ARCHIVED_APP" "$APP_PATH"
@@ -196,12 +178,8 @@ spctl --assess --type execute --verbose "$APP_PATH" 2>&1 | tail -3 \
   || echo "  (spctl rejects ad-hoc signing as expected — users will run xattr -dr com.apple.quarantine.)"
 
 echo "== [$SKU] Entitlement baseline (shipped app) =="
-# What actually ships: the archive-signed app's embedded entitlements must match the
-# reviewed baseline. Catches a widened sandbox reaching the DMG even if the
-# source diff was missed.
+# Validate the archive's effective entitlements, not only the source plist.
 scripts/check_entitlements.sh --sku "$SKU" --app "$APP_PATH"
-
-# ---------- bundle identity sanity ----------
 
 echo "== [$SKU] Bundle identity check =="
 ACTUAL_BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Contents/Info.plist")"
@@ -224,16 +202,12 @@ echo "  ✓ Bundle ID:        $ACTUAL_BUNDLE_ID"
 echo "  ✓ DisplayName:      $ACTUAL_DISPLAY_NAME"
 echo "  ✓ Short version:    $ACTUAL_VERSION"
 
-# ---------- dry-run short-circuit ----------
-
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "== [$SKU] Dry run complete — skipping DMG generation =="
   echo "  Staged app: $APP_PATH"
   echo "  Archive:    $ARCHIVE_PATH"
   exit 0
 fi
-
-# ---------- DMG ----------
 
 echo "== [$SKU] Adding /Applications symlink and READ-ME =="
 ln -sf /Applications "$STAGING_DIR/Applications"
@@ -264,9 +238,7 @@ hdiutil create \
   }
 
 echo "== [$SKU] Verifying DMG =="
-# Mount the packaged DMG read-only and confirm the .app inside still verifies —
-# catches ditto/hdiutil corruption or signature damage during packaging before
-# we publish a SHA for it.
+# Verify the packaged app before publishing its checksum.
 DMG_MOUNT="$(mktemp -d /tmp/lw-dmg-verify.XXXXXX)"
 if ! hdiutil attach "$DMG_PATH" -nobrowse -readonly -mountpoint "$DMG_MOUNT" >/dev/null 2>&1; then
   echo "ERROR: could not mount $DMG_PATH for verification." >&2

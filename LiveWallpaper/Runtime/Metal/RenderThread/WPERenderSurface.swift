@@ -3,16 +3,8 @@ import AppKit
 import MetalKit
 import QuartzCore
 
-/// The single owner of the wallpaper's main-thread "surface": the
-/// `WPEInteractiveMTKView`, its `MTKViewDelegate` role, the pointer `mailbox`,
-/// and the `WPEPointerPublisher` that feeds it. `WPEMetalSceneRenderer` no
-/// longer touches the view — it holds the mailbox + the view's `CAMetalLayer`
-/// and drives pacing / redraw / present through this surface. This is the seam
-/// that lets the renderer family leave `@MainActor` later (M2c1b): everything
-/// AppKit-bound lives here, on main, permanently.
-///
-/// Ownership: the renderer holds this strongly; this holds the renderer weakly
-/// (mirrors `MTKView.delegate`'s weak reference, which this also is). No cycle.
+/// Owns the AppKit-bound Metal surface and pointer publishing on the main actor.
+/// The renderer controls it through a narrow surface protocol and is held weakly to avoid a cycle.
 @MainActor
 final class WPERenderSurface: NSObject, MTKViewDelegate {
     let mtkView: WPEInteractiveMTKView
@@ -22,13 +14,10 @@ final class WPERenderSurface: NSObject, MTKViewDelegate {
     let metalLayer: CAMetalLayer
 
     private let publisher: WPEPointerPublisher
-    /// The delivery shim. Held **strongly** (M2c1b-3c): the renderer no longer
-    /// owns it — decoupling the renderer's object graph from the shim (and thus
-    /// the render actor it targets) is what lets the renderer be `sending`-adopted
-    /// into the actor. The surface is kept alive by the session.
+    /// Strongly held delivery shim; the session owns the surface and the shim targets the render actor.
     private var client: WPERenderSurfaceClient?
 
-    // MARK: - M2c2 display-link frame driver (`.renderThread` only)
+    // MARK: - Display-link Frame Driver
     //
     // In `.renderThread` mode the surface stops being the pacing source (its MTKView
     // stays paused) and instead owns the per-display `CADisplayLink`'s main-thread
@@ -75,7 +64,7 @@ final class WPERenderSurface: NSObject, MTKViewDelegate {
         client.updateSurfaceGeometry(drawableSize: metalLayer.drawableSize)
     }
 
-    // MARK: - Display-link driver lifecycle (M2c2, `.renderThread`)
+    // MARK: - Display-link Driver Lifecycle
 
     /// Stand up the CADisplayLink frame driver once the view is in a window (so it
     /// has a screen). Called by the builder after `orderBack`. Also starts watching
@@ -125,7 +114,7 @@ final class WPERenderSurface: NSObject, MTKViewDelegate {
     // These are the main-thread bodies. The renderer reaches them only through
     // the nonisolated `WPESurfaceControl` seam below, which delivers each call to
     // the main thread. Kept private so every renderer call site goes through the
-    // seam (the point of M2c1b: the renderer can leave `@MainActor` later).
+    // seam so all renderer access remains thread-safe.
 
     private func applyPacingOnMain(_ update: WPERenderPacingUpdate) {
         if let paused = update.isPaused { mtkView.isPaused = paused }
@@ -202,7 +191,7 @@ protocol WPERenderSurfaceClient: AnyObject {
     func updateSurfaceGeometry(drawableSize: CGSize)
 }
 
-/// The renderer→surface control seam (M2c1b). One method per main-thread entry
+/// The renderer-to-surface control seam. One method per main-thread entry
 /// the renderer drove synchronously before; every method is **non-blocking
 /// delivery** — callable from any thread, guaranteed to land on the main thread.
 /// `Sendable` so the renderer can hold `any WPESurfaceControl` after it leaves

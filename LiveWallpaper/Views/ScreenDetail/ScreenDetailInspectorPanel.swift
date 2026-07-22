@@ -33,9 +33,6 @@ struct ScreenDetailInspectorPanel: View {
                         wallpaperModeCard
                     }
 
-                    // Monitor has no audio / fit / frame-rate playback surface;
-                    // it gets its own module + authorization card instead of the
-                    // common playback inspector.
                     if draft.selectedWallpaperType == .monitor {
                         MonitorDetailView(
                             screen: screen,
@@ -97,8 +94,6 @@ struct ScreenDetailInspectorPanel: View {
                     }
 
                     #if !LITE_BUILD
-                    // Scene custom settings live in this persistent right sidebar
-                    // (like HTML's) rather than stacked below the preview.
                     if draft.selectedWallpaperType == .scene,
                        let schema = wpeSceneCustomSettingsSchema,
                        schema.properties.contains(where: WPESceneCustomSettingsCard.isSceneSettingCandidate),
@@ -181,9 +176,7 @@ struct ScreenDetailInspectorPanel: View {
         wpeSceneCustomSettingsSchema = outcome.schema
     }
 
-    /// Drives schema reloads from the panel rather than the card: the panel is
-    /// always mounted while HTML properties are visible, so the async read can't
-    /// deadlock behind an initially empty card body.
+    /// Drives schema reloads from the panel rather than the card: the panel is always mounted while HTML properties are visible, so the async read can't deadlock behind an initially empty card body.
     private var wpeProjectCustomSettingsLoadKey: String {
         guard let projectKey = wpeProjectCustomSettingsProjectKey else {
             return "hidden"

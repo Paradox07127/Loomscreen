@@ -1,15 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Allow-list for hosts that may serve Workshop preview images and other
-/// content URLs returned by Steam Web API responses.
-///
-/// Implementation follows the canonicalization + suffix-match rules in
-/// `docs/2026-05-28-steam-workshop-integration-plan.md` ("CDN host
-/// allow-list for `preview_url` / `file_url`"). Reject everything that
-/// fails any of: HTTPS-only, no userinfo, port `nil` or 443, IDNA-canonical
-/// host, no IP-literal, normalized path, no `..` segments. Suffix match is
-/// applied to the canonical host (lowercased, trailing dot stripped).
+/// Validates and canonicalizes Steam-hosted Workshop content URLs.
 enum WorkshopCDNHostAllowList {
 
     /// Result of a check. `.allowed` carries the canonical URL the caller

@@ -77,7 +77,7 @@ struct WPEMetalShaderDispatcher {
         }
 
         switch kind {
-        // ADR-001 B2: effect cases migrated to the data table
+        // Builtin effects share the data-driven dispatch table.
         // (`WPEMetalEffectDispatchTable.swift`). The snapshot test on
         // `WPEEffectDispatchDescriptor.table` pins that every kind listed here
         // has an entry, so the force-unwrap cannot trip at runtime.

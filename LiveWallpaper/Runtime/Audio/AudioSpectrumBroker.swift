@@ -1,15 +1,7 @@
 import os
 
-/// Thread-safe hand-off point between the audio capture/DSP thread (writer) and
-/// the render + JS-pump threads (readers).
-///
-/// `publish(_:)` uses `withLockIfAvailable` and drops the frame on contention so
-/// the realtime audio callback never blocks on a reader. The locked state holds
-/// preallocated channel buffers, so a successful publish copies element-wise with
-/// no heap allocation and no retain of the producer's arrays — the next DSP frame
-/// can reuse its output buffers without triggering copy-on-write. Readers take
-/// the lock normally and copy out; a dropped frame is invisible at 30–60 fps
-/// render cadence, a stalled audio callback is not.
+/// Transfers spectrum frames from realtime capture to renderer and web consumers.
+/// Publishing drops on contention to prevent the audio callback from blocking.
 final class AudioSpectrumBroker: Sendable {
     private struct State {
         var left: [Float]

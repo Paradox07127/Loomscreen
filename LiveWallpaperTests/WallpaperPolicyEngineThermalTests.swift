@@ -4,8 +4,6 @@ import Testing
 @testable import LiveWallpaper
 
 extension WallpaperPolicyInputs {
-    /// Test factory with "nothing suspends" defaults so each test only sets the
-    /// signal under exercise.
     static func test(
         powerSource: PowerMonitor.PowerSource = .external,
         isHiddenByFullScreen: Bool = false,
@@ -107,8 +105,6 @@ struct WallpaperPolicyEngineThermalTests {
 
     @Test("pauseInGameMode=false neutralises an active game-mode signal in the engine")
     func disabledGameModeSettingDoesNotSuspend() {
-        // The engine owns the setting gating now: even with a live game-mode
-        // signal, `pauseInGameMode: false` must not suspend.
         let settings = GlobalSettings(pauseOnFullScreen: false, pauseInGameMode: false)
 
         let profile = WallpaperPolicyEngine.performanceProfile(

@@ -95,9 +95,7 @@ sign_app "$PRO_APP" "$TMP/unknown.entitlements"
 expect_fail "unknown entitlement remains visible to the exact diff" "com.example.unknown" \
   bash "$CHECKER" --sku pro --app "$PRO_APP"
 
-# A real TeamIdentifier comes from the signature, which an ad-hoc synthetic app
-# cannot provide. Exercise the same structural policy entry point directly with
-# a deterministic signed-identity fixture.
+# Ad-hoc fixtures have no TeamIdentifier, so test signed identity policy directly.
 TEAM_ID="FWJP4B62U7"
 APP_ID="$TEAM_ID.Taijia.LiveWallpaper"
 IDENTITY_PLIST="$TMP/signed-identity.entitlements"

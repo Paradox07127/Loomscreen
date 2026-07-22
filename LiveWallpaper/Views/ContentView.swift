@@ -14,15 +14,11 @@ struct ContentView: View {
     @State private var pendingSettingsSearchAnchor: SettingsSearchAnchor?
     @State private var lastAppNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
-    /// Drives a one-shot prewarm cycle that emulates the user-discovered "drag
-    /// the sidebar closed, then open" gesture, warming NSSplitView state so the
-    /// first real sidebar toggle no longer stalls mid-animation.
+    /// Drives a one-shot prewarm cycle that emulates the user-discovered "drag the sidebar closed, then open" gesture, warming NSSplitView state so the first real sidebar toggle no longer stalls mid-animation.
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var didPrewarmSidebar = false
     @State private var isReloading = false
-    /// Lifted to `ContentView` so `Sidebar` and `DetailContent` see the same
-    /// value — otherwise a stale `.developerTools` selection could mount the
-    /// detail view with the toggle off.
+    /// Lifted to `ContentView` so `Sidebar` and `DetailContent` see the same value — otherwise a stale `.developerTools` selection could mount the detail view with the toggle off.
     @State private var developerModeEnabled: Bool = ContentView.loadDeveloperModeEnabled()
     private let initialAddWallpaperPromptKind: String?
 
@@ -35,9 +31,7 @@ struct ContentView: View {
         self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
-    /// `false` outside local Pro DEBUG builds: the Developer Tools surface
-    /// compiles into DEBUG only, and Lite never auto-lights it from a settings
-    /// import. In DEBUG it defaults on (see `GlobalSettings.defaultDeveloperModeEnabled`).
+    /// `false` outside local Pro DEBUG builds: the Developer Tools surface compiles into DEBUG only, and Lite never auto-lights it from a settings import.
     private static func loadDeveloperModeEnabled() -> Bool {
         #if DEBUG && !LITE_BUILD
         return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
@@ -162,9 +156,7 @@ struct ContentView: View {
         }
     }
 
-    /// Programmatic, animation-suppressed version of the close-then-open warmup
-    /// so there is no visible flash. Fires once per ContentView lifetime; the
-    /// cached NSWindowController preserves the warmed state across window close.
+    /// Programmatic, animation-suppressed version of the close-then-open warmup so there is no visible flash.
     private func prewarmSidebarIfNeeded() {
         guard !didPrewarmSidebar else { return }
         didPrewarmSidebar = true
@@ -190,9 +182,7 @@ struct ContentView: View {
         }
     }
 
-    /// W4 fix — schedule navigation mutations outside the current view-update
-    /// pass so a synchronous poster (now or in the future) cannot trigger
-    /// "Modifying state during view update" warnings.
+    /// Defers navigation mutations to avoid publishing state during a SwiftUI update pass.
     private func scheduleNavigationChange(_ apply: @escaping @MainActor () -> Void) {
         Task { @MainActor in
             apply()
@@ -438,8 +428,6 @@ struct Sidebar: View {
 
         }
         .listStyle(.sidebar)
-        // Pin Usage to the sidebar floor instead of flowing as the last section,
-        // so the gauges stay anchored while the nav list scrolls above.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if featureCatalog.isEnabled(.systemMonitor) {
                 VStack(spacing: 0) {
@@ -459,9 +447,7 @@ struct Sidebar: View {
         )
     }
 
-    /// Reads via `wallpaperSummary(_:)` so it tracks the same
-    /// `wallpaperSessionState` observation channel as `ScreenRow`, keeping the
-    /// Usage chip in lock-step with the sidebar status icons.
+    /// Reads via `wallpaperSummary(_:)` so it tracks the same `wallpaperSessionState` observation channel as `ScreenRow`, keeping the Usage chip in lock-step with the sidebar status icons.
     private var activeWallpaperDisplayCount: Int {
         screenManager.screens.reduce(0) { acc, screen in
             acc + (screenManager.wallpaperSummary(for: screen).activity == .active ? 1 : 0)
@@ -561,11 +547,7 @@ struct ScreenRow: View {
         }
     }
 
-    /// The row icon doubles as the live-status light, so a single glyph shows
-    /// both *what* the wallpaper is (symbol) and *how it's doing* (color). When
-    /// nothing is on the desktop — master switch `.off` or nothing assigned
-    /// (`.inactive`) — it stays neutral gray so a stopped display never reads
-    /// as "live."
+    /// The row icon doubles as the live-status light, so a single glyph shows both *what* the wallpaper is (symbol) and *how it's doing* (color).
     private func iconColor(for summary: WallpaperSessionSummary) -> Color {
         switch summary.activity {
         case .active:   return DesignTokens.Colors.Status.active

@@ -129,9 +129,6 @@ struct WorkshopSettingsView: View {
                 SettingsSearchSectionHeader("Content", anchor: .workshopContent)
             }
         }
-        // Shared settings chrome hides the Form's default system background
-        // (.scrollContentBackground) + insets (.contentMargins) so this tab
-        // doesn't show a different-colored inset panel than other tabs.
         .settingsFormChrome()
         .settingsSearchAnchorScroller(
             pendingSearchAnchor: $pendingSearchAnchor,
@@ -177,16 +174,9 @@ struct WorkshopSettingsView: View {
         }
     }
 
-    /// Routes download/update/check actions through a Doctor preflight: if the
-    /// Doctor is already green, run immediately; otherwise run all probes inline
-    /// and, if it comes up green, proceed — else open the Doctor so the user sees
-    /// exactly what's missing. Saves users from hunting for the Doctor first.
+    /// Runs Workshop actions after a successful Doctor preflight.
     private func preflightThen(_ action: @escaping () -> Void) {
-        // Gate on `isDownloadReady` (configured + cached login), NOT all-green:
-        // the engine download only needs login, and a half-finished prior
-        // app_update leaves the *advisory* ownership probe yellow (it shares app
-        // 431960), which must not block recovery. Not-owned is still caught when
-        // the actual app_update returns "No subscription".
+        // Engine downloads require configuration and cached login; advisory ownership status must not block recovery.
         if doctorService.isDownloadReady { action(); return }
         Task {
             preflightingDoctor = true
@@ -202,10 +192,6 @@ struct WorkshopSettingsView: View {
             switch engineInstaller.phase {
             case .downloading:
                 if let fraction = engineInstaller.progress {
-                    // `.linear` is required: a determinate ProgressView defaults to
-                    // a circular style in a grouped Form, and `.frame(width: 80)`
-                    // would size that ring to ~80pt tall — the cause of the section
-                    // height jumping when a download starts.
                     ProgressView(value: fraction)
                         .progressViewStyle(.linear)
                         .frame(width: 80)
@@ -273,10 +259,6 @@ struct WorkshopSettingsView: View {
     @ViewBuilder
     private var engineAssetsUnlinkedControl: some View {
         HStack(spacing: DesignTokens.Spacing.xs) {
-            // Always offer the in-app download so it's discoverable; when SteamCMD
-            // isn't set up yet, the preflight runs the Doctor and either proceeds
-            // or surfaces what's missing — never a dead end that implies manual
-            // linking is the only option.
             Button("Download from Steam") {
                 preflightThen { engineInstaller.download(using: doctorService) }
             }

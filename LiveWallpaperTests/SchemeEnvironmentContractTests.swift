@@ -26,8 +26,6 @@ struct SchemeEnvironmentContractTests {
         #expect(profile.elements(forName: "CommandLineArguments").isEmpty)
     }
 
-    // LaunchAction 的 buildConfiguration 和 MTL_HUD_ENABLED 是本机调试偏好,开发者随时会翻;
-    // 断言它们只会让别人改自己的 scheme 时无故变红。出货路径(Profile/Archive)才值得设防。
     @Test("Metal HUD never reaches the Profile or Archive actions")
     func metalHUDStaysOutOfShippingActions() throws {
         for relativePath in schemes {

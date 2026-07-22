@@ -5,9 +5,7 @@ import LiveWallpaperProWPE
 import Metal
 import SwiftUI
 
-/// Scene detail card for Wallpaper Engine projects. Reuses the renderer instance
-/// the wallpaper session already mounted into the desktop window, so the preview
-/// seen here is byte-identical to the live wallpaper.
+/// Scene detail card for Wallpaper Engine projects.
 @MainActor
 struct WPESceneDetailView: View {
     private let screenAspectRatio: CGFloat = 16 / 9
@@ -79,14 +77,8 @@ struct WPESceneDetailView: View {
 
     private var previewCard: some View {
         ZStack {
-            // Chrome (clip + shadow) sits on the image layer only, matching the
-            // video / HTML previews, so the info capsule overlays on top rather
-            // than being clipped or shadowed with it.
             ZStack { stateBackground }
                 .screenPreviewChrome()
-            // Info capsule lives INSIDE the aspect-fit ZStack (exactly like the
-            // video / HTML overlays) so it tracks the 16:9 content and never
-            // escapes onto the letterbox margin on a wide window.
             VStack {
                 HStack {
                     SceneInformationOverlay(origin: origin, descriptor: descriptor)
@@ -108,7 +100,6 @@ struct WPESceneDetailView: View {
             fallbackBackground
             LiquidGlassSpinner()
         case .notRendering:
-            // Poster only: nothing is loading, so a spinner would spin forever.
             fallbackBackground
         case .loading(let progress):
             fallbackBackground
@@ -190,7 +181,7 @@ struct WPESceneDetailView: View {
         case .requiresWindowsPlugin:
             return Text("macOS can't load Windows native plugins.")
         case .texContainerUnsupported(let magic):
-            return Text("Container \(magic) — Phase 2.x will add it.", comment: "Texture error detail. The placeholder is a texture container magic value.")
+            return Text("Container \(magic) is unsupported.", comment: "Texture error detail. The placeholder is a texture container magic value.")
         case .texUnsupportedFormat(let code):
             return Text("Format \(code) — not yet decoded.", comment: "Texture error detail. The placeholder is a texture format code.")
         case .texDecodeFailed(let detail):
@@ -218,8 +209,6 @@ struct WPESceneDetailView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                // Combine only the text so it reads as one phrase, leaving the
-                // Log button a separate, focusable VoiceOver node.
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 8)
                 if reason.isActionable {
@@ -262,10 +251,7 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// PII-scrubbed diagnostic text for the log window. Shown in Release too: the
-    /// resolution tracer already runs unconditionally, so surfacing it costs
-    /// nothing and is what makes a user bug report actionable (which refs missed,
-    /// why the capability badge reads the way it does).
+    /// PII-scrubbed diagnostic text for the log window.
     private var fullDiagnosticText: String {
         var lines: [String] = ["Capability: \(descriptor.capabilityTier.localizedLabel)"]
         if let preflight = descriptor.preflightTier, preflight != .nativePlayable {
@@ -304,8 +290,6 @@ struct WPESceneDetailView: View {
                     lines.append("  \(event.ref): \(event.finalOutcome.debugLabel)")
                 }
             }
-            // Refs the scene package didn't carry but a built-in / engine-assets /
-            // dependency mount covered — a "scene shipped incomplete" signal.
             let fallback = Self.fallbackResolvedRefs(snapshot)
             if !fallback.isEmpty {
                 lines.append("Resolved via fallback (not in scene package):")
@@ -313,8 +297,6 @@ struct WPESceneDetailView: View {
                     lines.append("  \(entry.ref) <- \(entry.origin)")
                 }
             }
-            // Capability is computed at import (path probe + parser diagnostics);
-            // a clean runtime resolve means the badge is an import-time false positive.
             if loadDiagnostic == nil
                 && descriptor.capabilityTier == .degraded
                 && snapshot.missedRefs.isEmpty {
@@ -346,9 +328,7 @@ struct WPESceneDetailView: View {
 
     // MARK: - Severity derivation
 
-    /// Maps a fallback reason to a severity tint. User-recoverable problems
-    /// (missing Steam dependency, Windows-only plugin) read as warnings;
-    /// everything else is a hard render failure.
+    /// Maps a fallback reason to a severity tint.
     private func severityColor(for reason: FallbackReason) -> Color {
         switch reason {
         case .missingDependency, .requiresWindowsPlugin: return DesignTokens.Colors.Status.warning
@@ -385,9 +365,7 @@ struct WPESceneDetailView: View {
         return .accentColor
     }
 
-    /// Reuses the live renderer's own frame (already drawn for the desktop —
-    /// no re-render) as the hero, byte-identical to the wallpaper. Falls back to
-    /// the project's preview GIF while loading or if the read-back is unavailable.
+    /// Reuses the live renderer's own frame (already drawn for the desktop — no re-render) as the hero, byte-identical to the wallpaper.
     @ViewBuilder
     private var fallbackBackground: some View {
         Group {
@@ -427,9 +405,7 @@ struct WPESceneDetailView: View {
         return CGSize(width: height * screenAspectRatio, height: height)
     }
 
-    /// Floating glass info bar under the preview — the scene-type analog of the
-    /// video command bar. Display name, live status, and Clear live in the shared
-    /// `ScreenDetailHeader`, so this carries only scene-specific identity.
+    /// Floating glass info bar under the preview — the scene-type analog of the video command bar.
     private var infoBar: some View {
         HStack(spacing: 10) {
             Text(verbatim: origin.title)
@@ -569,11 +545,7 @@ struct WPESceneDetailView: View {
         return lines
     }
 
-    /// Render-behaviour `defaults` knobs surfaced in bug reports so dev-vs-user
-    /// flag drift ("works on my machine") is visible. Only explicitly-set keys
-    /// print; the curated list excludes pure dump/trace toggles.
-    /// `WPERenderFlagRegistryTests` scans the renderer sources and fails when a
-    /// key read there is neither listed here nor excluded there with a reason.
+    /// Render-behaviour `defaults` knobs surfaced in bug reports so dev-vs-user flag drift ("works on my machine") is visible.
     private static let renderFlagKeys = [
         "WPEMetalMemorylessDepthEnabled", "WPEMetalMipChainEnabled", "WPEMetalSerializeFrames",
         "WPEMetalPerspectiveNativeResolution", "WPEMetalSceneBloomEnabled",
@@ -591,8 +563,6 @@ struct WPESceneDetailView: View {
             guard let value = defaults.object(forKey: key) else { return nil }
             return "\(key.dropFirst(3))=\(value)"
         }
-        // Tier defaults apply when the budget key is unset, so an unset key no
-        // longer means "unbounded" — always report the effective value.
         let effectiveBudget = WPEMetalSceneRenderer.textureCacheBudgetBytes
             .map { "\($0 / 1_048_576)MiB" } ?? "unbounded"
         flags.append("MemoryTier=\(WPEMemoryTier.current) textureBudget=\(effectiveBudget)")
@@ -607,16 +577,10 @@ struct WPESceneDetailView: View {
         // (M2c1b-3c) before deriving state, so the sync reads below see fresh data.
         await session?.pollRendererState()
         let next = derivedState()
-        // Whenever we resolve to .ready, push the inspector's profile to the live
-        // renderer (suspend under Reduce Motion). Was a side effect inside
-        // derivedState; hoisted here so the profile push can be async.
         if case .ready = next {
             await session?.applyPreviewPerformanceProfile(reduceMotion ? .suspended : .quality)
         }
         if next != state {
-            // Animate so the error console's insertion/removal slides instead of
-            // snapping the layout; the `!=` guard keeps the 0.4s poll from
-            // re-animating when nothing changed.
             withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
                 state = next
             }
@@ -624,9 +588,7 @@ struct WPESceneDetailView: View {
         captureLivePosterIfNeeded(for: next)
     }
 
-    /// Reuses the next frame the live renderer presents, without forcing an
-    /// extra synchronous render. The GIF/static project preview remains visible
-    /// until the readback finishes.
+    /// Reuses the next frame the live renderer presents, without forcing an extra synchronous render.
     private func captureLivePosterIfNeeded(for next: SceneRenderState) {
         guard !reduceMotion,
               case .ready = next,
@@ -646,9 +608,6 @@ struct WPESceneDetailView: View {
         if let error = session.loadError {
             return .error(mapToFallbackReason(error))
         }
-        // nil = no live renderer (→ .idle); false = renderer present but first
-        // frame not yet drawn (→ .loading). The Reduce-Motion suspend that used
-        // to sit here moved to refreshState (see applyPreviewPerformanceProfile).
         guard let presented = session.hasPresentedFrame else { return .idle }
         if !presented {
             return .loading(progress: session.loadProgress)
@@ -665,8 +624,6 @@ struct WPESceneDetailView: View {
         case .resourceFailed(let diagnostic):
             return Self.fallbackReason(for: diagnostic)
         case .metalRendererUnsupported(let reason):
-            // Map hard renderer gaps onto a parse failure so the inspector still
-            // shows a meaningful diagnostic.
             return .sceneParseFailed(reason)
         }
     }
@@ -844,16 +801,10 @@ private struct DiagnosticLogSheet: View {
 
 enum SceneRenderState: Equatable {
     case idle
-    /// No live session: the menu-bar master switch tears sessions down rather
-    /// than suspending them. Says nothing about the scene itself — which is why
-    /// this is NOT an error state (a missing session used to report
-    /// `.unsupportedType`, i.e. "Scene format not supported", for a scene the
-    /// renderer supports perfectly well).
+    /// No live session: the menu-bar master switch tears sessions down rather than suspending them.
     case notRendering
     case loading(progress: String?)
-    /// Scene loaded and presenting. The live `MTKView` drives the desktop
-    /// wallpaper; the detail card reuses the renderer's current frame as the
-    /// hero poster (captured on demand, off the load path).
+    /// Scene loaded and presenting.
     case ready
     case error(FallbackReason)
 
@@ -878,10 +829,7 @@ enum SceneRenderState: Equatable {
 
 // MARK: - Information overlay
 
-/// Floating dark capsule over the scene preview — the scene-type analog of
-/// `VideoInformationOverlay` / `HTMLInformationOverlay`. Every value reads from
-/// the in-memory descriptor / origin, so there's no project.json parse here.
-/// Short status tags stay verbatim to match the video / HTML badge convention.
+/// Floating dark capsule over the scene preview — the scene-type analog of `VideoInformationOverlay` / `HTMLInformationOverlay`.
 struct SceneInformationOverlay: View {
     let origin: WPEOrigin
     let descriptor: SceneDescriptor
@@ -892,10 +840,6 @@ struct SceneInformationOverlay: View {
                 Image(systemName: "cube.transparent")
                 Text(verbatim: origin.originalType.localizedDisplayName)
             }
-            // High-signal first (warnings, abnormal capability) so the verbose
-            // feature-flag tail is what clips first on a narrow preview. Normal
-            // states (image-only capability, legacy cache storage) stay hidden to
-            // cut clutter.
             if requiresWindowsPlugin {
                 tag("WIN PLUGIN", background: DesignTokens.Colors.Status.danger.opacity(0.55))
             }

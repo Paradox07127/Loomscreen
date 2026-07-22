@@ -91,9 +91,6 @@ struct AudioSpectrumProcessorTests {
     func slidingWindowRetainsHistoryAcrossSmallCallbacks() {
         let processor = AudioSpectrumProcessor()
 
-        // Two 1024-sample callbacks (smaller than the 2048 FFT window): silence
-        // then signal. With a sliding window the second frame's FFT sees a full
-        // window (old silence + new signal) rather than a zero-padded fragment.
         let silence = [Float](repeating: 0, count: 1024)
         _ = processor.process(left: silence, right: silence, timestampNanos: 10)
 
@@ -106,26 +103,17 @@ struct AudioSpectrumProcessorTests {
 
     @Test("Published fast-path frame survives the processor reusing its output buffers")
     func publishedFrameSurvivesProcessorBufferReuse() {
-        // `process()` returns a fast-path frame whose left/right ALIAS the
-        // processor's internal leftOutput/rightOutput (no per-channel copy). The
-        // broker's allocation-free `publish` must therefore copy the values out;
-        // if it retained the frame's arrays instead, the next `process()` — which
-        // mutates those same buffers in place — would retroactively corrupt the
-        // already-published frame. This locks that copy-out invariant, which is
-        // what lets the processor reuse its buffers without copy-on-write.
         let processor = AudioSpectrumProcessor()
         let broker = AudioSpectrumBroker()
 
         let loud = Self.sineWave(cycles: 12, amplitude: 1.0)
         let published = processor.process(left: loud, right: loud, timestampNanos: 1)
-        let expectedLeft = published.left.map { $0 }   // frozen reference copy
+        let expectedLeft = published.left.map { $0 }
         let expectedRight = published.right.map { $0 }
-        #expect(expectedLeft.contains { $0 > 0 })      // guard: frame is non-silent
+        #expect(expectedLeft.contains { $0 > 0 })
 
         broker.publish(published)
 
-        // Reuse (mutate in place) the processor's output buffers with a different
-        // signal; a retained-by-reference frame would now read these new values.
         let silence = [Float](repeating: 0, count: 2048)
         _ = processor.process(left: silence, right: silence, timestampNanos: 2)
 

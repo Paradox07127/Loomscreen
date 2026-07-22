@@ -2,11 +2,7 @@
 import Foundation
 import LiveWallpaperProWPE
 
-/// Reads scene assets from a directory of files — the legacy extracted
-/// `wpe-cache/<id>` root or a folder-import source. Path safety mirrors the
-/// historical resolver exactly (`WPEPathSafety.strictResourceURL`), and reads
-/// use `.mappedIfSafe` so large `.tex` containers keep their low-RSS paging
-/// behavior.
+/// Reads directory-backed scene assets with strict path containment and memory-mapped large files.
 struct WPEDirectorySceneAssetProvider: WPESceneAssetProvider {
     let rootURL: URL
 

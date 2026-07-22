@@ -237,12 +237,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 setAsLockScreen: setAsLockScreen
             )
         case .html, .metalShader, .scene, .monitor:
-            // `.scene` no longer maps to a synthetic HTML placeholder — Phase 2.0
-            // ships a real renderer. This convenience initializer is still
-            // hit by legacy tests and migration paths that have no descriptor;
-            // they degrade to an empty video so the type-pivot UI surfaces a
-            // "not configured" Scene tab instead of crashing. `.monitor` has a
-            // self-contained default config, so it maps to a real dashboard.
+            // Legacy scene payloads without descriptors degrade to an unconfigured video instead of fabricating scene content.
             let wallpaper: WallpaperContent = switch wallpaperType {
             case .html:
                 .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
@@ -435,7 +430,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    /// Phase 2.0 migration: a previously-stored `wallpaperType == .scene` blob from before the `.scene(SceneDescriptor)` case existed cannot carry a descriptor in `activeWallpaper`.
+    /// Reconstructs a scene descriptor from persisted Workshop provenance in pre-descriptor configurations.
     private static func backfillSceneFromLegacyOrigin(_ origin: WPEOrigin?) -> SceneDescriptor? {
         guard let origin,
               origin.originalType == .scene,
@@ -455,9 +450,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         )
     }
 
-    // Inlined predicates so the Core init doesn't pull in WPEPathSafety
-    // (which still lives in the main target's Infrastructure/ folder and
-    // is destined for LiveWallpaperProWPE in Phase 4).
+    // Keep these predicates local so Core does not depend on the ProWPE path-safety module.
     private static func isSafeCacheRelativePath(_ path: String) -> Bool {
         path.hasPrefix("wpe-cache/")
             && !path.contains("\\")

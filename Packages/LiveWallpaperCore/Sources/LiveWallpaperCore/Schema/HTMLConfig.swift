@@ -1,10 +1,6 @@
 import Foundation
 
-/// Where the HTML content came from. Drives sandboxing decisions that should
-/// not be left to the user — Workshop content is forced into an ephemeral data
-/// store regardless of `useEphemeralStorage` so two Workshop wallpapers
-/// sharing the `livewallpaper://wallpaper` origin cannot read each other's
-/// `localStorage` / `IndexedDB` / cookies.
+/// Content provenance used to force isolated ephemeral storage for Workshop imports.
 public enum HTMLOriginKind: String, Codable, Sendable, CaseIterable {
     /// User picked a folder from their own filesystem, or wrote inline HTML.
     /// The `useEphemeralStorage` toggle is the source of truth.
@@ -34,17 +30,10 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// restore the previous level instead of jumping to full volume.
     public var muteAudio: Bool = false
 
-    /// HTML media output level (0.0–1.0). Applied via injected JS to every
-    /// `<audio>` / `<video>` element AND through a master `GainNode` patched
-    /// onto `BaseAudioContext.destination` so Web Audio API graphs are
-    /// covered too. WKWebView has no native volume API so this is the only
-    /// way to get a real slider for HTML wallpapers.
+    /// HTML media output level applied to media elements and Web Audio graphs through injected JavaScript.
     public var audioVolume: Double = 1.0
 
-    /// Auto-reload interval for the embedded page. `0` (the default) disables
-    /// the timer. Stored as seconds because the UI exposes both presets
-    /// (1 min / 5 min / 30 min / 1 h / 6 h) and an arbitrary "every N
-    /// minutes" override.
+    /// Page reload interval in seconds; zero disables automatic reload.
     public var refreshIntervalSeconds: Int = 0
 
     /// CSS `transform: scale()` factor applied to `<body>`. `1.0` is identity.
@@ -64,14 +53,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// `devicePixelRatio`, because applying both paths produces double scaling.
     public var physicalPixelLayout: Bool = false
 
-    /// When `true`, runs `WKWebView` with `WKWebsiteDataStore.nonPersistent()`
-    /// so cookies / cache / localStorage do not persist across sessions —
-    /// useful for kiosk-style wallpapers and untrusted URL sources. Toggling
-    /// this only takes effect on the next session rebuild because WebKit
-    /// cannot swap its data store after init.
-    ///
-    /// `originKind == .workshopImport` overrides this to `true` regardless of
-    /// the stored value; the toggle is honored only for `userLocal` content.
+    /// Requests a nonpersistent WebKit data store on the next session rebuild.
+    /// Workshop imports always use nonpersistent storage regardless of this value.
     public var useEphemeralStorage: Bool = true
 
     /// Origin of the HTML payload; gates ephemeral-storage forcing (see
@@ -88,40 +71,19 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         }
     }
 
-    /// Maximum auto-retry attempts after navigation failures. Exponential
-    /// backoff: 1s, 2s, 4s ... up to `maxRetries`. After the budget is
-    /// exhausted the runtime surfaces the error in the screen-detail banner.
+    /// Maximum navigation retries using exponential backoff before surfacing an error.
     public var maxRetries: Int = 3
 
-    /// Injects a `<meta http-equiv="Content-Security-Policy">` tag before
-    /// the page evaluates its own scripts. The default policy permits any
-    /// HTTPS origin plus the local `livewallpaper://` scheme, but blocks
-    /// data exfiltration over arbitrary schemes (FTP / unknown protocol
-    /// pings). Useful for remote URL wallpapers from semi-trusted sources.
-    /// Off by default because aggressive CSPs break a non-trivial share
-    /// of wallpaper authoring (e.g. authors who load external Three.js
-    /// CDNs over HTTP).
+    /// Injects the configured CSP before page scripts run; disabled by default for compatibility with authored content.
     public var cspEnforcementEnabled: Bool = false
 
-    /// When `true`, suspend additionally asks every GPU-backed canvas to
-    /// release its context so the driver fully releases the backing surface.
-    /// Resume restores those contexts. Useful for known-heavy HTML wallpapers
-    /// that you want to pin to zero GPU when occluded. Off by default because
-    /// some pages do not handle context restore and stay black after the
-    /// round-trip.
+    /// Releases GPU-backed canvas contexts while suspended; disabled by default because some pages cannot restore them.
     public var aggressiveSuspend: Bool = false
 
-    /// Per-project Wallpaper Engine web user property overrides. These are
-    /// intentionally separate from the generic HTML runtime controls above:
-    /// `audioVolume`, `allowMouseInteraction`, and `transformScale` control
-    /// the WebView container, while these values are delivered to the
-    /// wallpaper's own `applyUserProperties` callback.
+    /// Legacy flat Wallpaper Engine web-property overrides delivered to `applyUserProperties`.
     public var wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:]
 
-    /// Project-keyed Wallpaper Engine web user property overrides. New writes
-    /// go here so two HTML projects with the same author property names do not
-    /// share values accidentally. The flat field above remains for decoding
-    /// older configurations and no-key runtimes.
+    /// Project-keyed web-property overrides that prevent values leaking between projects with identical property names.
     public var wallpaperEngineProjectPropertiesByProject: [String: [String: WallpaperEngineProjectPropertyValue]] = [:]
 
     public static let `default` = HTMLConfig()
@@ -265,10 +227,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         }
     }
 
-    /// Returns the overrides for a concrete WPE web project. When no bucket
-    /// exists yet, the legacy flat dictionary is treated as a compatibility
-    /// fallback so existing saved configs keep working until the next edit or
-    /// source switch migrates them.
+    /// Returns project-specific overrides, falling back to the legacy flat dictionary for unmigrated configurations.
     public func projectWallpaperEngineProperties(
         forProjectKey projectKey: String?
     ) -> [String: WallpaperEngineProjectPropertyValue] {

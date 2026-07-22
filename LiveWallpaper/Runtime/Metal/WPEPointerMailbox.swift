@@ -4,21 +4,8 @@ import Foundation
 import os
 import simd
 
-/// Non-blocking hand-off of pointer state from the main thread (writer: mouse
-/// events, window geometry, capture toggle) to the render thread (reader).
-///
-/// Mirrors `AudioSpectrumBroker`: one `OSAllocatedUnfairLock` over a Sendable
-/// value struct, last-write-wins on every slot, torn-free consistent snapshot on
-/// read. Writers are `nonisolated` so the main-thread publisher, the view's
-/// event handlers, and the renderer can all feed it without hopping actors.
-///
-/// Wiring (M2c1a, live on `@MainActor`): `renderer.makeFrameInputs()` reads
-/// `mailbox.read()` — `Reading` maps 1:1 onto the pointer fields of
-/// `WPEFrameInputs`. `WPEPointerPublisher` feeds mouse + geometry;
-/// `WPEInteractiveMTKView`'s `onPointerFrameChange` feeds `pointerFrame`; the
-/// renderer's Interaction toggle (via the surface) feeds `clickCaptureEnabled`.
-/// All feed paths are on main today; the render read is already NSView-free so
-/// it survives the eventual move off `@MainActor` (M2c1b).
+/// Non-blocking, last-write-wins transfer of pointer state from AppKit to the render thread.
+/// A single lock provides torn-free snapshots without exposing NSView across isolation domains.
 final class WPEPointerMailbox: Sendable {
     /// The view's frame in screen coordinates (bottom-left origin), captured on
     /// the main thread whenever the window moves / resizes / changes screen. A

@@ -2,17 +2,10 @@ import SwiftUI
 import LiveWallpaperCore
 
 // MARK: - Widget factory
-//
-// Maps a `MonitorWidgetKind` to its real instrument view, given the
-// orchestrator-owned `MonitorWidgetContext` (snapshot + history + placement +
-// flags). Every kind routes to a concrete widget view under `Monitor/Widgets/`.
 
 enum MonitorWidgetFactory {
 
-    /// Localized display name for a kind — the label a human reads in the widget
-    /// catalog and the inspector's instrument list. Acronyms (CPU/GPU) resolve to
-    /// the same word in every language; the rest translate. Rendered at the call
-    /// site with `Text(verbatim:)` because the localization already happened here.
+    /// Localized display name for a kind — the label a human reads in the widget catalog and the inspector's instrument list.
     static func displayName(_ kind: MonitorWidgetKind) -> String {
         switch kind {
         case .cpu: return String(localized: "CPU", comment: "Monitor widget name: CPU instrument.")
@@ -74,11 +67,7 @@ enum MonitorWidgetFactory {
     }
 }
 
-/// A layout-only placeholder tile: the widget's icon + localized name centered in
-/// the standard panel chrome. The inspector preview renders these instead of the
-/// live instruments — arranging the board is about placement, not live data, so no
-/// snapshot flows through the preview. The wallpaper itself always renders the
-/// real instruments (`MonitorWidgetFactory.tile`).
+/// A layout-only placeholder tile: the widget's icon + localized name centered in the standard panel chrome.
 struct MonitorWidgetNameTile: View {
     let kind: MonitorWidgetKind
     let cellHeight: CGFloat

@@ -33,10 +33,7 @@ struct UpdateBannerView: View {
             .padding(.vertical, 4)
             .padding(.horizontal, 4)
         }
-        // If the launch-time check completes BEFORE the About panel is opened,
-        // the `.onChange` handler below never fires for that transition. So
-        // we ALSO check the snapshot at mount time and present the alert
-        // there — this is the only path that recovers a missed launch prompt.
+        // If the launch-time check completes BEFORE the About panel is opened, the `.onChange` handler below never fires for that transition.
         .onAppear { presentAvailableAlertIfNeeded(for: checker.status) }
         .onChange(of: checker.status) { _, newStatus in
             presentAvailableAlertIfNeeded(for: newStatus)

@@ -25,7 +25,6 @@ struct WPEMetalObjectUniformsTests {
             angles: SIMD3<Double>(0, 0, 0)
         )
         let flat = WPEMetalObjectUniforms.flattenedColumnMajor(m)
-        // Column 3 (indices 12…15) carries the translation.
         #expect(Array(flat[12..<16]) == [5, 6, 7, 1])
     }
 
@@ -40,7 +39,6 @@ struct WPEMetalObjectUniformsTests {
         #expect(model[0] == 2 && model[5] == 4 && model[10] == 1)
 
         let normal = try #require(values["g_NormalModelMatrix"]?.vectorValue)
-        // normal = transpose(inverse(diag(2,4,1))) = diag(0.5, 0.25, 1).
         #expect(abs(normal[0] - 0.5) < 1e-9)
         #expect(abs(normal[4] - 0.25) < 1e-9)
         #expect(abs(normal[8] - 1.0) < 1e-9)

@@ -21,16 +21,12 @@ struct WPEMetalTextureCacheBudgetTests {
     @Test("Perspective native-res pixel budget bounds the FBO blow-up")
     func perspectiveRenderPixelBudget() {
         let base = 1920.0 * 1080.0
-        // constrained never bumps above 1080; HDR halves it further (float16).
         #expect(WPEMemoryTier.constrained.perspectiveRenderPixelBudget(hdr: false) == base)
         #expect(WPEMemoryTier.constrained.perspectiveRenderPixelBudget(hdr: true) == base * 0.5)
-        // standard allows ~1620p SDR, halved for HDR.
         #expect(WPEMemoryTier.standard.perspectiveRenderPixelBudget(hdr: false) == base * 2.25)
         #expect(WPEMemoryTier.standard.perspectiveRenderPixelBudget(hdr: true) == base * 2.25 * 0.5)
-        // expansive allows up to 4K SDR (4×), 2× for HDR.
         #expect(WPEMemoryTier.expansive.perspectiveRenderPixelBudget(hdr: false) == base * 4.0)
         #expect(WPEMemoryTier.expansive.perspectiveRenderPixelBudget(hdr: true) == base * 2.0)
-        // HDR budget is always strictly below the SDR budget (float16 penalty).
         for tier in [WPEMemoryTier.constrained, .standard, .expansive] {
             #expect(tier.perspectiveRenderPixelBudget(hdr: true)
                 < tier.perspectiveRenderPixelBudget(hdr: false))
@@ -52,7 +48,6 @@ struct WPEMetalTextureCacheBudgetTests {
         for tier in [WPEMemoryTier.constrained, .standard, .expansive] {
             #expect(WPEMetalSceneRenderer.resolvedTextureCacheBudgetBytes(manualValue: nil, tier: tier)
                 == tier.defaultTextureCacheBudgetBytes)
-            // Explicit 0 / negative / non-numeric ⇒ manual opt-out to unbounded.
             #expect(WPEMetalSceneRenderer.resolvedTextureCacheBudgetBytes(manualValue: 0, tier: tier) == nil)
             #expect(WPEMetalSceneRenderer.resolvedTextureCacheBudgetBytes(manualValue: -5, tier: tier) == nil)
             #expect(WPEMetalSceneRenderer.resolvedTextureCacheBudgetBytes(manualValue: "junk", tier: tier) == nil)
@@ -86,19 +81,19 @@ struct WPEMetalTextureCacheBudgetTests {
 
         throttle.recordFailure(at: 100)
         #expect(!throttle.allowsAttempt(at: 100.5))
-        #expect(throttle.allowsAttempt(at: 101))          // +1s
+        #expect(throttle.allowsAttempt(at: 101))
         throttle.recordFailure(at: 101)
         #expect(!throttle.allowsAttempt(at: 102.5))
-        #expect(throttle.allowsAttempt(at: 103))          // +2s
+        #expect(throttle.allowsAttempt(at: 103))
         throttle.recordFailure(at: 103)
-        #expect(throttle.allowsAttempt(at: 107))          // +4s
+        #expect(throttle.allowsAttempt(at: 107))
         throttle.recordFailure(at: 107)
-        #expect(throttle.allowsAttempt(at: 115))          // +8s
+        #expect(throttle.allowsAttempt(at: 115))
         #expect(!throttle.isExhausted)
 
         throttle.recordFailure(at: 115)
         #expect(throttle.isExhausted)
-        #expect(!throttle.allowsAttempt(at: 10_000))      // capped out forever
+        #expect(!throttle.allowsAttempt(at: 10_000))
         #expect(throttle.failureCount == WPEStaticTextureReloadThrottle.maxAttempts)
     }
 
@@ -127,8 +122,8 @@ struct WPEMetalTextureCacheBudgetTests {
         var lru = WPEMetalTextureCacheLRU(budgetBytes: 100)
         lru.admit("a", bytes: 40)
         lru.admit("b", bytes: 40)
-        lru.touch("a")          // a now newer than b
-        lru.admit("c", bytes: 40) // over budget (120 > 100)
+        lru.touch("a")
+        lru.admit("c", bytes: 40)
 
         let evicted = lru.evictOverBudget(protecting: [])
 

@@ -3,10 +3,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// W3 finding: "Reset all" in Developer Tools missed the oracle keys because
-/// the reset iterated two ad-hoc lists instead of one shared source of truth.
-/// These tests lock the unified list: every rendered flag key must be in it,
-/// and clearing it must actually remove every key.
 @Suite("W3: Developer Tools reset covers every diagnostic key") @MainActor
 struct W3DeveloperToolsResetTests {
     @Test("Oracle and diagnostic keys are all in the single reset list")

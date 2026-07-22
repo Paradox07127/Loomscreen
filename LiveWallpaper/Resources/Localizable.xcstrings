@@ -8309,31 +8309,31 @@
         }
       }
     },
-    "Container %@ — Phase 2.x will add it." : {
+    "Container %@ is unsupported." : {
       "comment" : "Texture error detail. The placeholder is a texture container magic value.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Container %@ — Phase 2.x will add it."
+            "value" : "Container %@ is unsupported."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "コンテナ %@ — Phase 2.x で対応予定です。"
+            "value" : "コンテナ %@ はサポートされていません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "容器 %@ — Phase 2.x 将添加支持。"
+            "value" : "不支持容器 %@。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "容器 %@ — Phase 2.x 將加入支援。"
+            "value" : "不支援容器 %@。"
           }
         }
       }
@@ -14400,25 +14400,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A rendering feature needed by '%@' is not supported yet."
+            "value" : "A rendering feature needed by '%@' is unsupported."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」に必要なレンダリング機能はまだサポートされていません。"
+            "value" : "「%@」に必要なレンダリング機能はサポートされていません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@”所需的一个渲染功能尚未支持。"
+            "value" : "不支持“%@”所需的渲染功能。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "「%@」所需的渲染功能尚未支援。"
+            "value" : "不支援「%@」所需的算繪功能。"
           }
         }
       }
@@ -18127,31 +18127,31 @@
         }
       }
     },
-    "Image format not supported yet" : {
+    "Unsupported image format" : {
       "comment" : "Wallpaper Engine fallback warning title.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Image format not supported yet"
+            "value" : "Unsupported image format"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この画像形式はまだサポートされていません"
+            "value" : "サポートされていない画像形式"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "暂不支持该图像格式"
+            "value" : "不支持的图像格式"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "尚未支援此圖片格式"
+            "value" : "不支援的圖片格式"
           }
         }
       }
@@ -32970,31 +32970,31 @@
         }
       }
     },
-    "Scene format coming later" : {
+    "Unsupported scene format" : {
       "comment" : "Wallpaper Engine fallback warning title.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scene format coming later"
+            "value" : "Unsupported scene format"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このシーン形式は今後対応予定です"
+            "value" : "サポートされていないシーン形式"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "场景格式将在后续支持"
+            "value" : "不支持的场景格式"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "稍後支援此場景格式"
+            "value" : "不支援的場景格式"
           }
         }
       }
@@ -38287,31 +38287,31 @@
         }
       }
     },
-    "Texture container not supported yet" : {
+    "Unsupported texture container" : {
       "comment" : "Wallpaper Engine fallback warning title.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Texture container not supported yet"
+            "value" : "Unsupported texture container"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "テクスチャコンテナはまだサポートされていません"
+            "value" : "サポートされていないテクスチャコンテナ"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "暂不支持该纹理容器"
+            "value" : "不支持的纹理容器"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "尚不支援此紋理容器"
+            "value" : "不支援的紋理容器"
           }
         }
       }
@@ -38344,60 +38344,60 @@
         }
       }
     },
-    "Texture format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues." : {
+    "Texture format %lld is unsupported. The renderer skips this layer and continues rendering the rest of the scene." : {
       "comment" : "Texture fallback warning body. The placeholder is a texture format code.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Texture format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues."
+            "value" : "Texture format %lld is unsupported. The renderer skips this layer and continues rendering the rest of the scene."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "テクスチャ形式 %lld は Phase 2.1 デコーダーに含まれていません。レンダラーはこのレイヤーだけをスキップし、シーンの残りは続行されます。"
+            "value" : "テクスチャ形式 %lld はサポートされていません。レンダラーはこのレイヤーをスキップし、シーンの残りを引き続きレンダリングします。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纹理格式 %lld 尚未包含在 Phase 2.1 解码器中。渲染器只会跳过该图层，其余场景会继续。"
+            "value" : "不支持纹理格式 %lld。渲染器会跳过该图层，并继续渲染场景的其余部分。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "紋理格式 %lld 尚未納入 Phase 2.1 解碼器。算繪器只會略過此圖層；場景的其餘部分會繼續。"
+            "value" : "不支援紋理格式 %lld。算繪器會略過此圖層，並繼續算繪場景的其餘部分。"
           }
         }
       }
     },
-    "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render." : {
+    "Texture format 8 (RGBA1010102) is unsupported. The renderer skips this layer and continues rendering the rest of the scene." : {
       "comment" : "Texture fallback warning body.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render."
+            "value" : "Texture format 8 (RGBA1010102) is unsupported. The renderer skips this layer and continues rendering the rest of the scene."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "テクスチャ形式 8（RGBA1010102）はまれで、デコーダー対応待ちです。このシーンの他のほとんどのレイヤーは引き続きレンダリングされるはずです。"
+            "value" : "テクスチャ形式 8（RGBA1010102）はサポートされていません。レンダラーはこのレイヤーをスキップし、シーンの残りを引き続きレンダリングします。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纹理格式 8（RGBA1010102）较少见，解码支持仍在排期中。此场景中的大多数其他图层应仍可渲染。"
+            "value" : "不支持纹理格式 8（RGBA1010102）。渲染器会跳过该图层，并继续渲染场景的其余部分。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "紋理格式 8（RGBA1010102）較少見，解碼支援仍待加入。此場景中的大多數其他圖層應仍可算繪。"
+            "value" : "不支援紋理格式 8（RGBA1010102）。算繪器會略過此圖層，並繼續算繪場景的其餘部分。"
           }
         }
       }
@@ -39392,31 +39392,31 @@
         }
       }
     },
-    "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected." : {
+    "This scene requires rendering features that Loomscreen does not support. Other wallpapers continue playing." : {
       "comment" : "Scene fallback warning body.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected."
+            "value" : "This scene requires rendering features that Loomscreen does not support. Other wallpapers continue playing."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このシーンの再生には、Mac ではまだ対応していないレンダリング機能が必要です。Phase 2 の対応範囲を拡大中です。他の壁紙は影響を受けずに再生されます。"
+            "value" : "このシーンには、Loomscreen がサポートしていないレンダリング機能が必要です。他の壁紙の再生には影響しません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此场景需要 Mac 暂不支持的渲染功能。我们正在扩展 Phase 2 支持，其他壁纸会继续正常播放。"
+            "value" : "此场景需要 Loomscreen 不支持的渲染功能。其他壁纸的播放不受影响。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此場景需要 Mac 尚未支援的算繪功能。我們正在擴充 Phase 2 支援；其他桌布會照常播放，不受影響。"
+            "value" : "此場景需要 Loomscreen 不支援的算繪功能。其他桌布的播放不受影響。"
           }
         }
       }
@@ -39605,31 +39605,31 @@
         }
       }
     },
-    "This wallpaper uses a `.tex` container we don't decode yet (%@). Phase 2.x will keep widening coverage as new versions appear." : {
+    "This wallpaper uses an unsupported `.tex` container (%@)." : {
       "comment" : "Wallpaper Engine fallback warning body. The placeholder is a texture container magic value.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This wallpaper uses a `.tex` container we don't decode yet (%@). Phase 2.x will keep widening coverage as new versions appear."
+            "value" : "This wallpaper uses an unsupported `.tex` container (%@)."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この壁紙は、まだデコードしていない `.tex` コンテナ（%@）を使用しています。Phase 2.x は新しいバージョンにあわせて対応範囲を拡大していきます。"
+            "value" : "この壁紙は、サポートされていない `.tex` コンテナ（%@）を使用しています。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此壁纸使用了尚未解码的 `.tex` 容器（%@）。Phase 2.x 会随着新版本继续扩大支持范围。"
+            "value" : "此壁纸使用了不支持的 `.tex` 容器（%@）。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此桌布使用尚未解碼的 `.tex` 容器（%@）。Phase 2.x 會隨著新版本出現持續擴大支援範圍。"
+            "value" : "此桌布使用了不支援的 `.tex` 容器（%@）。"
           }
         }
       }

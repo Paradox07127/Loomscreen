@@ -1,44 +1,12 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// The Fleet instrument — the Pro centrepiece. A native port of the mock's fleet
-/// renderers (`.claude/plan/monitor-design/index.html`, section 12). Every row
-/// answers the engineer's three questions at a glance (SPEC §3.2.4):
-/// **谁等我 / 谁在空转烧钱 / 谁在产出** — who is waiting on me, who is idling and
-/// burning budget, who is producing.
-///
-/// Two live footprints (`allowedSizes == [.medium, .large]`), sized to Apple's
-/// fixed macOS widget frames (M 364×170, L 364×376 pt; content ≈ 332×125 /
-/// 332×331 after the container's insets + header):
-///   • **M** — a roster: Action Strip + up to 3 single-line rows (dot · provider
-///     · name · ask/tool/budget · warn/ctx glyphs · timer). The mock `fleet_m`
-///     three-abreast lanes don't fit 332 pt (~100 pt per lane), so M trades the
-///     per-lane tick track for one legible line per session.
-///   • **L** — mock `fleet_l`: Action Strip + up to 6 two-tier rows (header +
-///     one utility line: ask for needsInput; tool chip · model⑂branch · budget ·
-///     warn · ctx for running). Only the lead row carries the tick track — six
-///     tracked rows would need ~360 pt where the fixed frame gives ~304.
-///     needsInput brightens (coral edge + ask + wait duration); idle collapses
-///     to header only, ended to header + final budget.
-/// S is retained as a defensive `fleet_s` port but is not in `allowedSizes`.
-///
-/// Privacy invariant (SPEC §3.4): only names / counts / times / tool-NAMES that
-/// already live in the contract are rendered — never prompt text, tool arguments,
-/// command output, or diffs.
-///
-/// Time: the in-status timers and the tick track's `now` are driven by
-/// `context.now`, which the single board-level 1 Hz `TimelineView` advances (no
-/// per-widget Timer). Isolated `#Preview`s wrap the view in their own TimelineView
-/// so they stay live without the board.
 struct MonitorFleetWidgetView: View {
     let context: MonitorWidgetContext
 
     private var reduceMotion: Bool { context.reduceMotion }
 
     /// Sessions the module actually has, or nil when the AI-Fleet module is off.
-    /// The module hard-gates on the Pro `agentFleet` entitlement; when it is off
-    /// `agents` is nil (contract), so a disabled module and an empty session list
-    /// both fall through to the honest quiet state.
     private var sessions: [MonitorAgentSessionState]? { context.snapshot.agents }
 
     /// Per-placement tuning bag (read-only here; the settings popover writes it).
@@ -52,9 +20,6 @@ struct MonitorFleetWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // The type scale is cell-derived. Under the Apple frames the divisor
-            // maps M 170→85 and L 376→94, keeping M and L text at near-equal
-            // density instead of doubling L's sizes.
             let rowSpan: CGFloat = context.placement.size == .large ? 4 : 2
             let cellHeight = geo.size.height / rowSpan
             content(cellHeight: cellHeight, now: context.now.timeIntervalSince1970)
@@ -103,8 +68,6 @@ struct MonitorFleetWidgetView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if !visibleSessions.isEmpty {
-                // Sessions present but none running/blocked (all idle/ended) — the
-                // Action Strip + count cluster still answer "what's the fleet doing".
                 VStack(alignment: .leading, spacing: scale.label * 0.6) {
                     actionStrip(scale: scale, now: now)
                     countCluster(scale: scale)
@@ -122,10 +85,7 @@ struct MonitorFleetWidgetView: View {
     @ViewBuilder
     private func mediumBody(cellHeight: CGFloat, now: Double) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        // ~125 pt of content: strip ≈22 + three ≈21 pt line rows + gaps + the
-        // "+N more" whisper ≈ 112. A 4th row would clip the whisper, so 3 is the
-        // no-clip ceiling (`fleetMaxRows` clamps to it). Idle rows and any
-        // overflow fold into the whisper.
+        // ~125 pt of content: strip ≈22 + three ≈21 pt line rows + gaps + the "+N more" whisper ≈ 112.
         let cap = Self.rowCap(options, fallback: 3)
         let rows = Self.mediumRows(ordered, cap: cap)
         let hiddenCount = visibleSessions.count - rows.count
@@ -149,8 +109,6 @@ struct MonitorFleetWidgetView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if !visibleSessions.isEmpty {
-                // Sessions exist but all idle — no live row to show, yet the fleet
-                // isn't empty; keep the aggregate (strip + counts), not "no sessions".
                 VStack(alignment: .leading, spacing: scale.label * 0.5) {
                     actionStrip(scale: scale, now: now)
                     countCluster(scale: scale)
@@ -168,9 +126,7 @@ struct MonitorFleetWidgetView: View {
     @ViewBuilder
     private func largeBody(cellHeight: CGFloat, now: Double) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
-        // ~331 pt of content, ~304 for rows after the strip: worst case (all six
-        // rows live) is lead ≈57 + 5×≈41 + gaps ≈ 282, leaving whisper room —
-        // 6 stays the no-clip ceiling because rows are capped at two tiers.
+        // Six two-tier rows are the largest set that fits without clipping.
         let cap = Self.rowCap(options, fallback: 6)
         let rows = Self.largeRows(ordered, cap: cap)
         let hiddenCount = visibleSessions.count - rows.count
@@ -185,8 +141,6 @@ struct MonitorFleetWidgetView: View {
                     actionStrip(scale: scale, now: now)
                     VStack(alignment: .leading, spacing: scale.label * 0.4) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, session in
-                            // Only the lead row carries the tick track; deeper rows
-                            // stay two-tier so 6 rows fit the fixed 376 pt frame.
                             FleetFullRow(session: session, now: now, isLead: index == 0,
                                          reduceMotion: reduceMotion, scale: scale)
                         }
@@ -220,7 +174,6 @@ struct MonitorFleetWidgetView: View {
                 .font(MonitorDesign.subFont(size: scale.label))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkMuted)
-            // warm normally, coral when someone is waiting (mock `counts.needsInput?"crit":"warm"`).
             Circle()
                 .fill(counts.needsInput > 0 ? MonitorDesign.signalCoral : MonitorDesign.signalAmber)
                 .frame(width: scale.label * 0.5, height: scale.label * 0.5)
@@ -231,9 +184,6 @@ struct MonitorFleetWidgetView: View {
 
     // MARK: - Action Strip (aggregate one-liner)
 
-    /// "1 等你 · 3 跑 · 5h 42m · $12.4" — the aggregate action line (mock
-    /// `fleetActionStrip`). Coral-alert border+glow when someone waits or a warning
-    /// is live; dimmed calm otherwise.
     @ViewBuilder
     private func actionStrip(scale: MonitorDesign.TypeScale, now: Double) -> some View {
         let c = counts
@@ -336,7 +286,6 @@ struct MonitorFleetWidgetView: View {
 
     // MARK: - S: status-count cluster + most-urgent row
 
-    /// Status count dots (mock `.fcounts`): "3 running · 1 waiting · 2 idle · 1 done".
     @ViewBuilder
     private func countCluster(scale: MonitorDesign.TypeScale) -> some View {
         let c = counts
@@ -364,8 +313,6 @@ struct MonitorFleetWidgetView: View {
         .monitorChip(scale)
     }
 
-    /// The single most-urgent session — name + a 等你 pill (if blocked) + its
-    /// in-status timer + a slim tick track (mock `.furgent`).
     @ViewBuilder
     private func urgentRow(_ session: MonitorAgentSessionState,
                            scale: MonitorDesign.TypeScale, now: Double) -> some View {
@@ -419,10 +366,6 @@ struct MonitorFleetWidgetView: View {
 
     // MARK: - Quiet state
 
-    /// Module off, or on but with no active sessions — the honest quiet whisper
-    /// (mock: "no active sessions"). No fabricated rows. When the real cause is
-    /// a missing folder grant (runtime-synthesized `unauthorized` health), say
-    /// THAT instead of implying the fleet is merely idle.
     @ViewBuilder
     private func quietState(scale: MonitorDesign.TypeScale) -> some View {
         let unauthorized = (context.snapshot.health ?? []).contains {
@@ -460,11 +403,7 @@ struct MonitorFleetWidgetView: View {
 
 // MARK: - Line row (M)
 
-/// One session per line at the fixed M width (content ≈ 332×125): dot · provider
-/// · name · state detail · warn/ctx glyphs · in-status timer, ≈21 pt tall. The
-/// state detail is the middle, expendable slot — the ask for needsInput, the
-/// current tool for running, the final budget for ended; warning and context
-/// pressure iconify to a glowing dot / bare percent so the line stays glanceable.
+/// One session per line at the fixed M width (content ≈ 332×125): dot · provider · name · state detail · warn/ctx glyphs · in-status timer, ≈21 pt tall.
 private struct FleetLineRow: View {
     let session: MonitorAgentSessionState
     let now: Double
@@ -547,12 +486,6 @@ private struct FleetLineRow: View {
 
 // MARK: - Full row (L column)
 
-/// One agent row in the L board (mock `fleetStrip(a, "full")`, two-tier under
-/// the fixed 364×376 frame): header (dot · provider · name · timer) + ONE
-/// utility line — the ask for needsInput, tool chip · model⑂branch · budget ·
-/// warn · ctx for running. Only the lead row adds the tick track (six tracked
-/// rows would overrun the frame). `idle` collapses to header only; `ended` to
-/// header + final budget.
 private struct FleetFullRow: View {
     let session: MonitorAgentSessionState
     let now: Double
@@ -612,9 +545,6 @@ private struct FleetFullRow: View {
         }
     }
 
-    /// The running row's one utility line: tool chip + dim model·branch tail on
-    /// the left (both expendable — they truncate first), budget · warn · ctx
-    /// pinned right (mock `.fmeta` + `.ffoot` merged so rows stay two-tier).
     @ViewBuilder
     private var utilityLine: some View {
         let ctx = MonitorFleetWidgetView.contextBand(for: session)
@@ -623,8 +553,6 @@ private struct FleetFullRow: View {
         let hasTool = !(session.statusDetail ?? "").isEmpty
         if hasTool || modelBranchTail != nil || hasBudget || ctx != nil || warn != nil {
             HStack(spacing: scale.label * 0.4) {
-                // Chip beats tail for leftover space; the fixedSize right side
-                // never compresses, so the readouts stay legible.
                 if let detail = session.statusDetail, !detail.isEmpty {
                     FleetToolChip(text: detail, scale: scale)
                         .layoutPriority(1)
@@ -663,8 +591,6 @@ private struct FleetFullRow: View {
 
 // MARK: - Shared row pieces
 
-/// Shared background / accent / border tokens so the M and L rows read as one
-/// material (mock `.frow`), coral-tinted when a row is blocked on the engineer.
 private enum FleetRowStyle {
     static var radius: CGFloat { max(6, MonitorDesign.cornerRadiusMin) }
 
@@ -694,7 +620,6 @@ private enum FleetRowStyle {
     }
 }
 
-/// Provider chip ("CLAUDE" / "CODEX"), coral when the row is blocked (mock `.prov`).
 private struct FleetProviderBadge: View {
     let provider: MonitorAgentProvider
     let isBlocked: Bool
@@ -729,7 +654,6 @@ private struct FleetProviderBadge: View {
     }
 }
 
-/// The in-status timer, or a whispered status word for idle (mock `.timer`/`.fstat`).
 private struct FleetRowTimer: View {
     let session: MonitorAgentSessionState
     let now: Double
@@ -762,8 +686,6 @@ private struct FleetRowTimer: View {
     }
 }
 
-/// The needsInput ASK — the approval prompt the engineer must act on. `statusDetail`
-/// is a redacted verb/tool name only, safe to render verbatim (mock `.ask`).
 private struct FleetAskLine: View {
     let session: MonitorAgentSessionState
     let scale: MonitorDesign.TypeScale
@@ -785,7 +707,6 @@ private struct FleetAskLine: View {
     }
 }
 
-/// The current-tool chip — a redacted, mono, name-only pill (mock `.chip`).
 private struct FleetToolChip: View {
     let text: String
     let scale: MonitorDesign.TypeScale
@@ -800,8 +721,6 @@ private struct FleetToolChip: View {
     }
 }
 
-/// context-pressure micro-bar (mock `.ctxbar`): "ctx ▮▮▮ 91%", coral near
-/// compaction. `ContextBand.fraction` is 0…1.
 private struct FleetContextBar: View {
     let ctx: MonitorFleetWidgetView.ContextBand
     let scale: MonitorDesign.TypeScale
@@ -831,8 +750,6 @@ private struct FleetContextBar: View {
     }
 }
 
-/// Warning chip — the "burning budget" signal (mock `.wchip`): amber for `stale`,
-/// coral for everything else (toolLoop / unknown tokens).
 private struct FleetWarningChip: View {
     let warn: MonitorFleetWidgetView.WarningInfo
     let scale: MonitorDesign.TypeScale
@@ -867,9 +784,6 @@ private struct FleetWarningChip: View {
     }
 }
 
-/// Per-session budget readout — "$1.08 · 84K tok" (mock `.ubudget`); the dollar
-/// figure leads in ink, the token count whispers. Renders nothing when neither is
-/// known (the caller gates on that).
 private struct FleetBudgetLabel: View {
     let session: MonitorAgentSessionState
     let scale: MonitorDesign.TypeScale
@@ -893,24 +807,16 @@ private struct FleetBudgetLabel: View {
 }
 
 // MARK: - Localizable word literals (catalog keys)
-//
-// Every user-facing WORD the Fleet widget renders lives here as a
-// `LocalizedStringKey`, so `Text(key)` resolves through the app's string catalog
-// (all four languages). Reuses the strings already in the catalog where they
-// exist. Data — project names, tool names, timers, counts — is NEVER localized:
-// it is rendered via `Text(verbatim:)`.
 private enum FleetStrings {
     /// The widget title feeds `MonitorWidgetContainer(label:)`, which renders it
     /// verbatim + uppercased on the wallpaper — a short instrument acronym.
     static let title = "Fleet"
 
-    // Computed (not stored) so the enum stays Sendable under strict concurrency.
     static var noActiveSessions: LocalizedStringKey { "No active sessions" }
     /// Why-no-data: a wanted AI source has no folder grant (synthesized
     /// `unauthorized` health from the runtime).
     static var authorizeHint: LocalizedStringKey { "Authorize the agent folders in Monitor settings." }
 
-    // Action-Strip + count-cluster + row keywords (English source keys).
     static var awaitingYou: LocalizedStringKey { "needs you" }
     static var runningKeyword: LocalizedStringKey { "running" }
     static var warnKeyword: LocalizedStringKey { "warn" }
@@ -918,7 +824,6 @@ private enum FleetStrings {
     static var idleKeyword: LocalizedStringKey { "idle" }
     static var doneKeyword: LocalizedStringKey { "done" }
 
-    // Row copy.
     static var needsYou: LocalizedStringKey { "needs you" }
     static var ended: LocalizedStringKey { "ended" }
     static var ctxLabel: LocalizedStringKey { "ctx" }
@@ -953,8 +858,6 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// The per-row status word (mock `STAT_LABEL`) as a catalog key. needsInput →
-    /// "needs you". Rendered via `Text(_ key:)`, so it localizes at the call site.
     nonisolated static func statusWord(_ status: MonitorAgentStatus) -> LocalizedStringKey {
         switch status {
         case .running: return FleetStrings.runningKeyword
@@ -965,10 +868,6 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// Recent-tool tint (mock `.rt.ok/.err`): completed reads brighter, errored
-    /// coral, still-pending (`ok == nil`) neutral. The recent-tool sequence view
-    /// was dropped when L moved to the fixed 364×376 frame; the mapping stays
-    /// (tested) for the tool-result affordance's return on a roomier surface.
     nonisolated static func toolTint(_ ok: Bool?) -> Color {
         switch ok {
         case .some(true): return MonitorDesign.inkMuted
@@ -1010,8 +909,6 @@ extension MonitorFleetWidgetView {
         SortMode(rawValue: options[Option.sort]?.stringValue ?? "") ?? .attention
     }
 
-    /// Per-size row cap: the persisted value clamped to `1…fallback` (the mock max
-    /// for that size), or `fallback` when unset.
     nonisolated static func rowCap(_ options: [String: MonitorWidgetOptionValue], fallback: Int) -> Int {
         guard let raw = options[Option.maxRows]?.numberValue, raw.isFinite else { return fallback }
         return min(max(Int(raw), 1), fallback)
@@ -1019,10 +916,6 @@ extension MonitorFleetWidgetView {
 
     // MARK: sorting
 
-    /// SPEC §3.2.4 ordering: `needsInput > running > idle > ended` (by
-    /// `attentionPriority` desc), then most-recent first (`lastEventAt` desc) so
-    /// equal-status rows surface the freshest. `unknown` sorts below idle (its
-    /// attentionPriority = 1), matching the enum contract.
     nonisolated static func sorted(_ sessions: [MonitorAgentSessionState]) -> [MonitorAgentSessionState] {
         sessions.sorted { lhs, rhs in
             let lp = lhs.status.attentionPriority, rp = rhs.status.attentionPriority
@@ -1031,7 +924,6 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// Ordering under a user-chosen sort mode; `.attention` is the §3.2.4 default.
     nonisolated static func sorted(_ sessions: [MonitorAgentSessionState],
                                    mode: SortMode) -> [MonitorAgentSessionState] {
         switch mode {
@@ -1048,7 +940,6 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// M shows the top non-idle rows (mock `fleet_m`). idle rows fold into "+N more".
     nonisolated static func mediumRows(_ sorted: [MonitorAgentSessionState]) -> [MonitorAgentSessionState] {
         mediumRows(sorted, cap: 3)
     }
@@ -1058,18 +949,13 @@ extension MonitorFleetWidgetView {
         Array(sorted.filter { $0.status != .idle }.prefix(max(cap, 0)))
     }
 
-    /// L shows the top `cap` rows across all statuses (mock `fleet_l`: `slice(0,6)`);
-    /// idle/ended stay in the list but collapse to a calm subset when rendered.
     nonisolated static func largeRows(_ sorted: [MonitorAgentSessionState],
                                       cap: Int) -> [MonitorAgentSessionState] {
         Array(sorted.prefix(max(cap, 0)))
     }
 
-    /// The single most-urgent session for the S aggregate (mock `fleet_s`): the
-    /// first needsInput, else the longest-running (earliest `startedAt`).
     nonisolated static func mostUrgent(_ sessions: [MonitorAgentSessionState]) -> MonitorAgentSessionState? {
         if let blocked = sessions.first(where: { $0.status == .needsInput }) {
-            // Among blocked, the one waiting longest (earliest waitSince) leads.
             return sessions.filter { $0.status == .needsInput }
                 .min { ($0.waitSince ?? .greatestFiniteMagnitude) < ($1.waitSince ?? .greatestFiniteMagnitude) }
                 ?? blocked
@@ -1110,9 +996,6 @@ extension MonitorFleetWidgetView {
         var anyWarn = false
     }
 
-    /// Fleet-wide aggregate (mock `fleetTotals`): live cost + longest active run +
-    /// whether any session carries a warning. Ended sessions don't count toward
-    /// live spend; only running sessions contribute to `longest`.
     nonisolated static func totals(_ sessions: [MonitorAgentSessionState], now: Double) -> Totals {
         var t = Totals()
         for s in sessions {
@@ -1134,13 +1017,6 @@ extension MonitorFleetWidgetView {
         var text: String
     }
 
-    /// In-status timer, sourced per the mock (`fleetStrip`):
-    ///   • running    → counts up from `startedAt`  ("12:04")   — elapsed run.
-    ///   • needsInput → counts up from `waitSince`   ("waiting 0:34").
-    ///   • ended      → "finished <ago> ago" from `lastEventAt`.
-    ///   • idle       → no timer (nil).
-    /// startedAt (not lastEventAt) is the running source: the mock ticks the
-    /// elapsed *session* time, and lastEventAt only feeds the tick track + ended age.
     nonisolated static func timerText(for session: MonitorAgentSessionState, now: Double) -> TimerText? {
         switch session.status {
         case .running:
@@ -1185,11 +1061,6 @@ extension MonitorFleetWidgetView {
         }
     }
 
-    /// Context-pressure band (mock `fleetCtx`): only meaningful for LIVE sessions
-    /// (running / needsInput) — an idle/ended session's window isn't "about to
-    /// compact", so suppress it there. warn ≥ 0.75, crit ≥ 0.90 (coral near
-    /// compaction). Returns nil when `contextUsedPercent` is absent or the session
-    /// isn't live.
     nonisolated static func contextBand(for session: MonitorAgentSessionState) -> ContextBand? {
         guard let ctx = session.contextUsedPercent,
               session.status == .running || session.status == .needsInput else { return nil }
@@ -1206,10 +1077,6 @@ extension MonitorFleetWidgetView {
         var isStale: Bool
     }
 
-    /// Warning-chip mapping (mock `fleetWarn`): the raw `warning` token maps to a
-    /// display label + a "stale" (amber) vs default (coral) styling. Known tokens:
-    /// "toolLoop" → "tool loop", "stale" → "stale". Any other non-empty token is
-    /// surfaced verbatim (forward-compatible with new deriver labels).
     nonisolated static func warningLabel(for session: MonitorAgentSessionState) -> WarningInfo? {
         guard let raw = session.warning, !raw.isEmpty else { return nil }
         switch raw {
@@ -1221,8 +1088,6 @@ extension MonitorFleetWidgetView {
 
     // MARK: budget
 
-    /// Per-session budget readout (mock `fleetBudget`): "$1.08 · 84K tok". Renders
-    /// nothing when neither cost nor tokens are known.
     nonisolated static func budgetText(for session: MonitorAgentSessionState) -> String {
         var parts: [String] = []
         if let cost = session.costUSD { parts.append(MonitorFormat.usd(cost)) }
@@ -1236,8 +1101,6 @@ extension MonitorFleetWidgetView {
 
 #if DEBUG
 private extension MonitorWidgetContext {
-    /// Sample fleet mirroring the mock's FLEET data: a needsInput (blocked) +
-    /// two running (one burning: toolLoop + 91% ctx, one producing) + idle + ended.
     static func fleetSample(size: MonitorWidgetSize) -> MonitorWidgetContext {
         let now = Date().timeIntervalSince1970
         func events(count: Int, step: Double, from offset: Double = 0) -> [Double] {
@@ -1250,7 +1113,6 @@ private extension MonitorWidgetContext {
         }
 
         let sessions: [MonitorAgentSessionState] = [
-            // ① NEEDS ME — coral, waiting on an approval.
             {
                 var s = MonitorAgentSessionState(
                     id: "codex:1", provider: .codex, projectName: "api-server",
@@ -1264,7 +1126,6 @@ private extension MonitorWidgetContext {
                 s.recentTools = tools([("Read", true), ("Bash", true), ("Write", true), ("Bash", nil)], step: 4, from: 34)
                 return s
             }(),
-            // ② BURNING — running, tool loop + context near compaction (91%).
             {
                 var s = MonitorAgentSessionState(
                     id: "claude:1", provider: .claude, projectName: "LiveWallpaper",
@@ -1278,7 +1139,6 @@ private extension MonitorWidgetContext {
                 s.recentTools = tools([("Bash", false), ("Edit", true), ("Bash", false), ("Edit", true), ("Bash", false)], step: 3)
                 return s
             }(),
-            // ③ PRODUCING — healthy running session, moderate context.
             {
                 var s = MonitorAgentSessionState(
                     id: "claude:2", provider: .claude, projectName: "docs-site",
@@ -1292,7 +1152,6 @@ private extension MonitorWidgetContext {
                 s.recentTools = tools([("Grep", true), ("Read", true), ("Edit", true), ("Edit", true)], step: 6)
                 return s
             }(),
-            // ④ IDLE — collapsed, calm.
             {
                 var s = MonitorAgentSessionState(
                     id: "claude:4", provider: .claude, projectName: "infra",
@@ -1300,7 +1159,6 @@ private extension MonitorWidgetContext {
                 s.startedAt = now - 900; s.turnCount = 2
                 return s
             }(),
-            // ⑤ ENDED — dim, sage.
             {
                 var s = MonitorAgentSessionState(
                     id: "claude:3", provider: .claude, projectName: "scratch",
@@ -1342,9 +1200,6 @@ private extension MonitorWidgetContext {
     }
 }
 
-// The board supplies `context.now` in production; in isolated previews we wrap the
-// widget in a TimelineView so timers stay live without the board.
-// Frames below are Apple's fixed macOS widget sizes (M 364×170, L 364×376).
 #Preview("Fleet · M") {
     TimelineView(.periodic(from: .now, by: 1)) { t in
         VStack(spacing: 20) {

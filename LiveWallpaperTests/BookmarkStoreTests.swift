@@ -3,8 +3,6 @@ import Foundation
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-// MARK: - In-memory persistence
-
 @MainActor
 private final class InMemoryBookmarkPersistence: BookmarkPersisting {
     var stored: [WallpaperBookmark] = []
@@ -17,8 +15,6 @@ private final class InMemoryBookmarkPersistence: BookmarkPersisting {
         saveCount += 1
     }
 }
-
-// MARK: - BookmarkStore behavior
 
 @Suite("BookmarkStore behavior")
 @MainActor
@@ -380,8 +376,6 @@ struct BookmarkStoreTests {
         #expect(label == "Aurora")
     }
 }
-
-// MARK: - WallpaperBookmark Codable round-trip
 
 @Suite("WallpaperBookmark Codable")
 struct WallpaperBookmarkCodableTests {

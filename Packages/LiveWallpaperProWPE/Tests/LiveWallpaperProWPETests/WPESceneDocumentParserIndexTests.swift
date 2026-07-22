@@ -72,7 +72,7 @@ struct WPESceneDocumentParserIndexTests {
 
     @Test("A nested group's attachment is inherited by a deep descendant image")
     func nestedGroupAttachmentInheritedByDeepChild() throws {
-        // body(10) → groupA(20, attachment 头部) → groupB(30, no attachment) →
+        // body(10) → groupA(20, attachment name fixture) → groupB(30, no attachment) →
         // image(40). The child walks past the attachment-less nearer group to the
         // first group carrying an anchor, inheriting its name and the group's parent.
         let payload: [String: Any] = [

@@ -7,12 +7,6 @@ import CoreGraphics
 import os
 @testable import LiveWallpaper
 
-/// Behavior-level tests for `WPEImportTracker`. The regression motivating
-/// the `@Observable` markup: when the tracker lived as a private dict on the
-/// `@Observable` `ScreenManager`, SwiftUI views reading the error via
-/// `screenManager.wpeImportError(for:)` re-rendered on every record/clear.
-/// After the extraction we have to keep that invalidation flow alive — these
-/// tests assert it via `withObservationTracking`.
 @Suite("WPEImportTracker")
 @MainActor
 struct WPEImportTrackerTests {
@@ -165,10 +159,6 @@ struct WPEImportTrackerTests {
     }
 }
 
-/// Reference-type counter used to capture Observation callback fires from
-/// `withObservationTracking { ... } onChange:`. The `onChange` block runs in
-/// a non-isolated context that Swift 6 won't let us mutate a captured `var`
-/// from; a `final class` with locked mutation satisfies that constraint.
 private final class ChangeCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var _value = 0

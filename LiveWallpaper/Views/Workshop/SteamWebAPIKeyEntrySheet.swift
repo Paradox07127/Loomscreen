@@ -3,9 +3,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Validates the 32-hex shape, probes Valve's `GetSupportedAPIList`, and stores
-/// the key in the Workshop Keychain slot (`WhenUnlockedThisDeviceOnly`, no
-/// iCloud sync).
+/// Validates the 32-hex shape, probes Valve's `GetSupportedAPIList`, and stores the key in the Workshop Keychain slot (`WhenUnlockedThisDeviceOnly`, no iCloud sync).
 struct SteamWebAPIKeyEntrySheet: View {
     let services: WorkshopServices
     let onSaved: () -> Void

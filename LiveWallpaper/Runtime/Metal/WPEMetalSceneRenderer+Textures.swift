@@ -7,7 +7,7 @@ import MetalKit
 extension WPEMetalSceneRenderer {
     // MARK: - Loaded texture resource types
 
-    /// Phase 2E: differentiates between a one-shot static texture and a
+    /// Differentiates between a one-shot static texture and a
     /// dynamic source (animated TEX or video) so the renderer can either
     /// stuff the result into `loadedTextures` or hold the source for
     /// per-frame refresh via `texturesForCurrentFrame(time:)`.
@@ -484,7 +484,7 @@ extension WPEMetalSceneRenderer {
     }
 
 
-    /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a raw texture so the caller can route MP4 video and multi-frame animations through dedicated dynamic sources.
+    /// Returns a loaded resource so callers can route videos and animations through dynamic sources.
     func makeTextureResource(
         relativePath: String,
         label: String,
@@ -621,7 +621,7 @@ extension WPEMetalSceneRenderer {
         return nil
     }
 
-    /// Phase 2E: stages MP4 bytes into the per-process video cache and constructs a `WPEVideoTextureSource` bound to the executor's MTLDevice.
+    /// Stages MP4 bytes in the process cache and constructs a device-bound video texture source.
     private func makeVideoTextureSource(
         from payload: WPETexTexturePayload,
         label: String,
@@ -659,7 +659,7 @@ extension WPEMetalSceneRenderer {
         }
     }
 
-    /// Phase 2E: returns a 1×1 transparent texture used as a temporary stand-in for dynamic sources whose first frame has not yet decoded.
+    /// Returns a transparent placeholder until a dynamic source decodes its first frame.
     func makeDynamicPlaceholderTexture(label: String) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: WPEMetalRenderExecutor.outputPixelFormat,
@@ -867,7 +867,7 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Per-frame textures
 
-    /// Phase 2E: pulls fresh `MTLTexture`s from dynamic sources and enforces the
+    /// Pulls fresh `MTLTexture`s from dynamic sources and enforces the
     /// optional static-texture VRAM budget before every render call.
     func texturesForCurrentFrame(time: TimeInterval, pipeline: WPEPreparedRenderPipeline) throws -> [String: MTLTexture] {
         for (path, source) in dynamicTextureSources {
@@ -931,11 +931,8 @@ extension WPEMetalSceneRenderer {
             return [path]
         }
         if !extensionName.isEmpty, Self.knownRawImageExtensions.contains(extensionName) {
-            // WPE converts source images to `<name>.<ext>.tex` (e.g. a particle
-            // sprite `workshop/…/雪花.jpg` is stored as
-            // `materials/workshop/…/雪花.jpg.tex`). Try the literal image, then
-            // the converted `.tex`, including under the `materials/` root —
-            // otherwise extension-bearing refs never find their `.tex`.
+            // WPE stores converted source images as `<name>.<ext>.tex`; try both
+            // literal and converted paths, including the `materials/` root.
             var candidates = [path, "\(path).tex"]
             let anchored = ["materials/", "models/", "shaders/", "fonts/",
                             "scripts/", "particles/", "sounds/", "scenes/", "../", "_"]
@@ -1106,7 +1103,7 @@ extension WPEMetalSceneRenderer {
     }
 }
 
-/// Phase 2C: filters out FBO/previous references at the texture-discovery
+/// Filters out FBO and previous-frame references at the texture-discovery
 /// layer so the renderer never tries to load an in-graph FBO from disk.
 /// Those references resolve at executor time via the frame state.
 private extension WPETextureReference {

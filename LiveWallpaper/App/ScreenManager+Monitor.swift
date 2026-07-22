@@ -4,19 +4,14 @@ import LiveWallpaperCore
 import Observation
 
 extension ScreenManager {
-    /// Reconcile the Monitor overlay for every live display against its persisted
-    /// `monitorOverlay` config. Runs on startup, screen-set / frame changes, and
-    /// after an overlay setting is toggled: tears down overlays for gone or disabled
-    /// displays and creates/updates the rest. Idempotent.
+    /// Reconcile the Monitor overlay for every live display against its persisted `monitorOverlay` config.
     func reconcileMonitorOverlays() {
         guard !isTerminating else {
             MonitorOverlayController.shared.teardownAll()
             updateFullScreenFallbackPolling()
             return
         }
-        // Desktop overlays consume the detector independently of wallpaper
-        // pause settings. Refresh synchronously so startup, wake, and display
-        // hot-plug reconciliation never seed visibility from a stale cache.
+        // Desktop overlays consume the detector independently of wallpaper pause settings.
         if hasEnabledDesktopMonitorOverlay {
             fullScreenDetector.checkNow()
         }
@@ -43,10 +38,7 @@ extension ScreenManager {
         updateFullScreenFallbackPolling()
     }
 
-    /// Bridge ScreenManager's lifecycle state and FullScreenDetector's 85%
-    /// union-window occlusion result into the overlay-specific visibility policy.
-    /// Front overlays remain visible while the user is present; desktop overlays
-    /// suspend when their display is detector-occluded.
+    /// Bridge ScreenManager's lifecycle state and FullScreenDetector's 85% union-window occlusion result into the overlay-specific visibility policy.
     func refreshMonitorOverlayVisibility() {
         let occludedScreenIDs = Set(screens.compactMap { screen in
             fullScreenDetector.isDesktopOccluded(for: screen.id) ? screen.id : nil
@@ -57,12 +49,7 @@ extension ScreenManager {
         )
     }
 
-    /// Reconcile on the NEXT runloop tick. Menu controls (the overlay toggle /
-    /// layer picker) mutate config inside a SwiftUI action; running the reconcile
-    /// there would push the board's observable state DURING the view update
-    /// ("Publishing changes from within view updates"). Deferring moves the whole
-    /// create/apply/push chain out of that cycle. Idempotent, so coalescing rapid
-    /// toggles is harmless.
+    /// Reconcile on the NEXT runloop tick.
     private func scheduleMonitorOverlayReconcile() {
         Task { @MainActor [weak self] in
             guard let self, !self.isTerminating else { return }
@@ -70,9 +57,7 @@ extension ScreenManager {
         }
     }
 
-    /// Persist an overlay board edit made ON the floating overlay back into the
-    /// screen's `monitorOverlay`. The edit already shows on the overlay, so this
-    /// only writes it through — no push-back needed.
+    /// Persist an overlay board edit made ON the floating overlay back into the screen's `monitorOverlay`.
     private func persistMonitorOverlayBoard(_ board: MonitorBoardConfiguration, screenID: CGDirectDisplayID) {
         guard let screen = screens.first(where: { $0.id == screenID }),
               var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
@@ -207,10 +192,7 @@ extension ScreenManager {
 
         switch definition {
         case .html(let source, let htmlConfig):
-            // Refresh before identity/trust/audio-leader policy reads the
-            // source. Those policies key by source identity, so letting the
-            // builder refresh later would briefly classify this screen using
-            // obsolete bookmark Data.
+            // Refresh before identity/trust/audio-leader policy reads the source.
             let effectiveSource = ambientSessionBuilder.refreshingHTMLSource(
                 source,
                 onBookmarkRefresh: { [weak self] original, refreshed in
@@ -248,9 +230,7 @@ extension ScreenManager {
             #endif
         case .scene(let descriptor):
             #if !LITE_BUILD
-            // Dependency discovery resolves the source before the session
-            // builder does. Pre-refresh only when that discovery is needed so
-            // it cannot consume stale grace and hand the builder obsolete Data.
+            // Dependency discovery resolves the source before the session builder does.
             let runtimeOrigin: WPEOrigin? = if !descriptor.dependencyWorkshopIDs.isEmpty,
                                                let origin = configuration.wpeOrigin {
                 ambientSessionBuilder.refreshingWPEOrigin(
@@ -284,21 +264,13 @@ extension ScreenManager {
                 }
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
-                // The old session was already torn down at the top of this
-                // method; without this the menu/inspector summary cache keeps
-                // showing the now-dead scene as active. Refresh so the screen
-                // reads as not-configured instead of silently going stale.
+                // The old session was already torn down at the top of this method; without this the menu/inspector summary cache keeps showing the now-dead scene as active.
                 notifyWallpaperSessionChanged()
                 return
             }
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
-            // Push the persisted playback inspector state into the freshly
-            // installed scene session so the user's saved Frame Rate /
-            // Mute / Volume take effect from the first frame instead of
-            // only after the inspector slider moves. (For mute/volume
-            // this is also why those controls used to be dead UI for
-            // `.scene` — there was nothing to push them through.)
+            // Apply persisted playback settings before the scene's first frame.
             sceneSession.frameRateController?.setFrameRateLimit(configuration.frameRateLimit)
             sceneSession.setMouseInteractionEnabled(configuration.sceneMouseInteractionEnabled)
             sceneSession.setClickCaptureEnabled(configuration.sceneClickCaptureEnabled)
@@ -335,9 +307,7 @@ extension ScreenManager {
         notifyWallpaperSessionChanged()
     }
 
-    /// Persists a local HTML refresh into every screen that still owns the
-    /// original grant. WPE web imports additionally own the same Data through
-    /// `wpeOrigin` and history, so route those through the WPE CAS as well.
+    /// Persists a local HTML refresh into every screen that still owns the original grant.
     func persistRuntimeHTMLBookmarkRefresh(
         matching original: Data,
         with refreshed: Data,
@@ -392,9 +362,7 @@ extension ScreenManager {
         }
     }
 
-    /// MainActor owner for scene/history stale refreshes. Every matching screen
-    /// configuration and the global history row advance together; exact Data
-    /// matching prevents a late refresh from clobbering a newer re-grant.
+    /// MainActor owner for scene/history stale refreshes.
     func persistRuntimeWPEBookmarkRefresh(
         origin: WPEOrigin,
         with refreshed: Data

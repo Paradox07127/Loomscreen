@@ -5,8 +5,6 @@ import Foundation
 @Suite("Claude rate-limit reader")
 struct ClaudeRateLimitReaderTests {
 
-    /// Writes `json` as the statusline payload into a fresh temp root and returns
-    /// (root, payloadURL) so tests can also tweak the file's mtime.
     private func makeRoot(json: String) throws -> (root: URL, payload: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("claude-ratelimit-\(UUID().uuidString)", isDirectory: true)
@@ -35,7 +33,6 @@ struct ClaudeRateLimitReaderTests {
 
     @Test("ISO8601 resets_at strings collapse to epoch seconds")
     func iso8601ResetsForm() throws {
-        // 2026-01-01T00:00:00Z == 1767225600 epoch.
         let json = """
         { "rate_limits": {
             "five_hour": { "used_percentage": 10, "resets_at": "2026-01-01T00:00:00Z" },
@@ -46,7 +43,6 @@ struct ClaudeRateLimitReaderTests {
         let limits = try #require(ClaudeRateLimitReader(rootURL: root).currentLimits())
 
         #expect(limits.fiveHourResetsAt == 1767225600)
-        // Fractional form parses too (0.5s past the same instant).
         let week = try #require(limits.weekResetsAt)
         #expect(abs(week - 1767225600.5) < 0.01)
     }
@@ -130,7 +126,6 @@ struct ClaudeRateLimitReaderTests {
 
     @Test("Old file mtime trips stale when payload omits timestamp")
     func staleFromFileMTime() throws {
-        // No timestamp field ⇒ falls back to mtime, which we backdate.
         let json = #"{ "rate_limits": { "five_hour": { "used_percentage": 5 } } }"#
         let (root, payload) = try makeRoot(json: json)
         defer { try? FileManager.default.removeItem(at: root) }

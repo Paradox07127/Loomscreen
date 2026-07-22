@@ -103,8 +103,6 @@ extension WPECacheManagementView {
         let title = displayTitle(for: entry.workshopID)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                // Workshop names can be 60+ chars; without explicit truncation one
-                // long entry forces every row to the longest title's width and wraps.
                 Text(verbatim: title)
                     .font(DesignTokens.Typography.body)
                     .lineLimit(1)

@@ -10,15 +10,10 @@ struct WPEMetalRenderExecutorTests {
 
     @Test("WPE depthtest:enabled maps to a real depth comparison, not always-pass")
     func depthTestEnabledMapsToRealComparison() throws {
-        // WPE materials write depthtest as "enabled"/"disabled" (never a GL compare
-        // name). "enabled" must occlude by depth — the old `default: .always` left a
-        // no-cull sphere half-broken and let a far skybox overwrite nearer stars.
         #expect(WPEMetalDepthStateCache.compareFunction(for: "enabled") == .lessEqual)
         #expect(WPEMetalDepthStateCache.compareFunction(for: "true") == .lessEqual)
-        // "disabled" passes carry no depth attachment, so always-pass is correct.
         #expect(WPEMetalDepthStateCache.compareFunction(for: "disabled") == .always)
         #expect(WPEMetalDepthStateCache.compareFunction(for: "always") == .always)
-        // Explicit GL compare names still round-trip for any material that uses them.
         #expect(WPEMetalDepthStateCache.compareFunction(for: "less") == .less)
         #expect(WPEMetalDepthStateCache.compareFunction(for: "lequal") == .lessEqual)
     }
@@ -55,10 +50,6 @@ struct WPEMetalRenderExecutorTests {
     func attachmentFollowOriginRewriteKeepsShapeQuadPoints() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
-        // Runtime dual of the graph builder's anchor rewrite: this one runs per
-        // frame whenever a puppet attachment resolves, so dropping a geometry
-        // field here strips it from every rendered frame even though the graph
-        // (and its tests) still carry it.
         let points = [
             SIMD2<Double>(0.4, 0.25),
             SIMD2<Double>(0.6, 0.25),
@@ -84,19 +75,12 @@ struct WPEMetalRenderExecutorTests {
             sceneSize: CGSize(width: 3840, height: 2160)
         )
 
-        // The anchor delta moved the origin…
         #expect(followed.geometry.origin == SIMD3<Double>(1012, 1292, 0))
-        // …and the perspective-quad corners survive the rebuild. Regression:
-        // they were dropped, collapsing the DIRECTDRAW beam to the object quad.
         #expect(followed.geometry.shapePoints == points)
     }
 
     @Test("Destination-reading blend modes load the existing attachment (incl. screen)")
     func destinationReadingBlendModesRequireExistingDestination() throws {
-        // Screen/additive/multiply read the destination as their `dst` operand, so
-        // the attachment must be `.load`ed, not `.clear`ed — clearing it drops the
-        // backdrop and (for screen) makes the layer paint over nothing. Regression
-        // guard for scene 3521337568's atmosphere overlay (colorBlendMode 7).
         for mode in ["screen", "premultipliedScreen", "additive", "premultipliedAdditive",
                      "premultipliedMultiply", "multiply", "darken", "lighten"] {
             #expect(
@@ -104,7 +88,6 @@ struct WPEMetalRenderExecutorTests {
                 "\(mode) must load the existing destination"
             )
         }
-        // Over/replace modes fully define the pixel, so a fresh clear is correct.
         for mode in ["disabled", "premultipliedDisabled", "normal", "premultiplied", "translucent"] {
             #expect(
                 !WPEMetalRenderExecutor.blendModeRequiresExistingDestination(mode),
@@ -124,11 +107,9 @@ struct WPEMetalRenderExecutorTests {
         #expect(frameState.hasFreshRefractionSnapshot(for: output))
         #expect(!frameState.hasFreshRefractionSnapshot(for: scratch))
 
-        // A write to a different texture must not invalidate the snapshot.
         frameState.registerWrite(texture: scratch, targetID: .named("scratch"))
         #expect(frameState.hasFreshRefractionSnapshot(for: output))
 
-        // A write to the same output texture invalidates it (next pass re-blits).
         frameState.registerWrite(texture: output, targetID: .scene)
         #expect(!frameState.hasFreshRefractionSnapshot(for: output))
     }
@@ -189,15 +170,12 @@ struct WPEMetalRenderExecutorTests {
                 uniformValues: [:]
             )
         }
-        // MODE=1 with a non-zero top (3470764447's audio bar): detected + params read.
         let vertexSkew = skewPrepared(mode: 1, top: 0.34)
         #expect(executor.isVertexSkewPass(vertexSkew))
         let params = executor.vertexSkewParams(for: vertexSkew).topBottomLeftRight
         #expect(abs(params.x - 0.34) < 0.0001)
         #expect(params.y == 0 && params.z == 0 && params.w == 0)
-        // MODE=0 (UV) is handled by the transpiled fragment, not the vertex path.
         #expect(!executor.isVertexSkewPass(skewPrepared(mode: 0, top: 0.34)))
-        // MODE=1 but all-zero params = skew disabled → keep the plain object quad.
         #expect(!executor.isVertexSkewPass(skewPrepared(mode: 1, top: 0)))
     }
 
@@ -666,11 +644,6 @@ struct WPEMetalRenderExecutorTests {
             ])
         }
 
-        // Submit more frames than the in-flight bound. Non-blocking submission
-        // (the default) DROPS excess frames — render() throws
-        // WPEMetalFrameInFlightBudgetExhausted rather than blocking the caller —
-        // so the loop must complete either way (no deadlock), and dropped frames
-        // must not leak permits (verified by the synchronous render below).
         executor.synchronizeFrameCompletion = false
         let size = CGSize(width: 4, height: 4)
         var rendered = 0
@@ -680,13 +653,10 @@ struct WPEMetalRenderExecutorTests {
                 #expect(output.width == 4)
                 rendered += 1
             } catch is WPEMetalFrameInFlightBudgetExhausted {
-                // Expected when the in-flight budget is momentarily full.
             }
         }
         #expect(rendered >= 1)
 
-        // Back on the synchronous path the same executor still renders correct
-        // pixels (semaphore balanced, output ring intact after the async run).
         executor.synchronizeFrameCompletion = true
         let output = try executor.render(pipeline: makePipeline(), size: size, textures: [:])
         let pixel = try readPixel(output, x: 2, y: 2)
@@ -870,19 +840,11 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    // The custom-shader dispatch binds each texture slot's sampler from the bound
-    // texture's TEXI ClampUVs flag. A tiling map (ClampUVs unset) must sample with
-    // `repeat` so time-scrolled UVs keep advancing instead of clamping to a frozen
-    // edge — the waterripple "ripples stop after a few minutes" bug. This drives an
-    // out-of-range sample and checks the flag flips repeat vs clamp.
     @Test("Custom-shader sampler honors the TEXI ClampUVs flag (repeat vs clamp)")
     func customShaderSamplerHonorsClampUVsFlag() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 
-        // 2×1 source: texel 0 red, texel 1 green. Sample at u=1.25:
-        //   repeat → fract(1.25)=0.25 → texel-0 centre → RED
-        //   clamp  → 1.0 → texel-1 edge → GREEN
         func makeSplitTexture() throws -> MTLTexture {
             try makeRGBAInputTexture(
                 device: device, width: 2, height: 1,
@@ -929,7 +891,6 @@ struct WPEMetalRenderExecutorTests {
             ])
         }
 
-        // ClampUVs unset → repeat → wraps to the red texel.
         let repeatTex = try makeSplitTexture()
         WPEMetalTextureMetadataRegistry.shared.register(
             texture: repeatTex, imageWidth: 2, imageHeight: 1, clampUVs: false
@@ -942,8 +903,6 @@ struct WPEMetalRenderExecutorTests {
         #expect(repeatPixel.r >= 200)
         #expect(repeatPixel.g <= 60)
 
-        // ClampUVs set → clamp-to-edge → the green edge texel (teeth: proves the flag
-        // actually drives the address mode, not a constant).
         let clampTex = try makeSplitTexture()
         WPEMetalTextureMetadataRegistry.shared.register(
             texture: clampTex, imageWidth: 2, imageHeight: 1, clampUVs: true
@@ -1078,20 +1037,11 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.g <= 40)
     }
 
-    // Oracle diff: the builtin waterwaves fallback (wpe_effect_waterwaves_fragment,
-    // used only when a scene ships no waterwaves source) must sample the flow mask at
-    // the same scaled UV as the transpiled real-WPE path — v_TexCoord.zw =
-    // wpe_texcoord_with_resolution(uv, g_Texture1Resolution). With a padded mask
-    // (imageWidth < textureWidth) the two paths only agree once the builtin applies
-    // the image/texture ratio; sampling plain in.uv makes them diverge on the right
-    // half, where the ratio maps the sample back into the valid image region.
     @Test("Builtin waterwaves fallback scales mask UV to match the transpiled path")
     func builtinWaterwavesFallbackScalesMaskUVLikeTranspiledPath() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 
-        // Source: 8×1, texels 0–5 red, 6–7 green. Sampling at a texel centre avoids
-        // linear-filter blend: uv.x=0.6875 → texel5 (red), uv.x=0.9375 → texel7 (green).
         var sourceBytes = [UInt8]()
         for x in 0..<8 {
             sourceBytes += (x < 6) ? [255, 0, 0, 255] : [0, 255, 0, 255]
@@ -1099,10 +1049,6 @@ struct WPEMetalRenderExecutorTests {
         let source = try makeRGBAInputTexture(
             device: device, width: 8, height: 1, bytes: Data(sourceBytes)
         )
-        // Mask: physical 4×1 (texels 0–1 white, 2–3 black) but a 2-wide image, so the
-        // image/texture ratio is 0.5. At output pixel 5 (uv.x=0.6875): scaled UV 0.34375
-        // lands in the white region (mask≈1 → displacement), plain UV 0.6875 lands in the
-        // black region (mask≈0 → no displacement). Both UVs stay clear of the boundary.
         var maskBytes = [UInt8]()
         for x in 0..<4 {
             maskBytes += (x < 2) ? [255, 255, 255, 255] : [0, 0, 0, 255]
@@ -1112,8 +1058,6 @@ struct WPEMetalRenderExecutorTests {
         )
         WPEMetalTextureMetadataRegistry.shared.register(texture: mask, imageWidth: 2, imageHeight: 1)
 
-        // g_Time·g_Speed = π/2 → sin=1, sign·pow(1,exp)=1; g_Scale=0 makes the phase
-        // spatially constant so displacement.x = strength²·mask = 0.25·mask.
         let uniformValues: [String: WPESceneShaderConstantValue] = [
             "g_Time": .number(Double.pi / 2),
             "g_Speed": .number(1),
@@ -1143,8 +1087,6 @@ struct WPEMetalRenderExecutorTests {
         ]
         let textures = ["materials/base.png": source, "materials/mask.png": mask]
 
-        // Builtin fallback path (WPEPreparedRenderPass.shader == nil → dispatch() switch
-        // → effect dispatch table waterwaves bind → wpe_effect_waterwaves_fragment).
         let builtinPipeline = WPEPreparedRenderPipeline(layers: [
             WPEPreparedRenderLayer(
                 graphLayer: graphLayer(pass: pass),
@@ -1157,7 +1099,6 @@ struct WPEMetalRenderExecutorTests {
                 )]
             )
         ])
-        // Transpiled reference path (real waterwaves.frag → wpe_translated_fragment).
         let transpiledPipeline = WPEPreparedRenderPipeline(layers: [
             WPEPreparedRenderLayer(
                 graphLayer: graphLayer(pass: pass),
@@ -1222,9 +1163,6 @@ struct WPEMetalRenderExecutorTests {
             runtimeUniforms: runtime
         )
 
-        // At output pixel 5 the scaled-UV mask read (≈1) displaces the sample from the
-        // red texel 5 to the green texel 7. The builtin must match the transpiled oracle
-        // there — a plain-in.uv mask read would read ≈0, leaving the pixel red.
         let builtinPixel = try readPixel(builtinOutput, x: 5, y: 0)
         let transpiledPixel = try readPixel(transpiledOutput, x: 5, y: 0)
         #expect(builtinPixel.g >= 200)
@@ -1361,14 +1299,11 @@ struct WPEMetalRenderExecutorTests {
     func audioSpectrumArrayPacksOneBinPerSlot() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
-        // Distinct, recognizable per-bin values so a 4-per-slot mispack (the old
-        // `values:` overload bug) or a stride under-read would be obvious.
         let bins = (0..<64).map { Double($0) + 1 }
         let layout = [
             WPEUniformSlot(name: "g_AudioSpectrum64Left", glslType: "float", slot: 0, slotCount: 64, arrayLength: 64)
         ]
 
-        // `values:` overload (MSDF text path) — previously packed every array as vec4[N].
         let slotsValues = executor.packTranslatedUniforms(
             values: ["g_AudioSpectrum64Left": .vector(bins)],
             layout: layout
@@ -1378,7 +1313,6 @@ struct WPEMetalRenderExecutorTests {
             #expect(slotsValues[i].y == 0 && slotsValues[i].z == 0 && slotsValues[i].w == 0)
         }
 
-        // Per-pass overload (live scene path) must agree bin-for-bin.
         let pass = WPEPreparedRenderPass(
             pass: WPERenderPass(
                 id: "audio.0",
@@ -1410,8 +1344,7 @@ struct WPEMetalRenderExecutorTests {
     func vec2ArrayPacksTwoComponentsPerSlot() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
-        // 4 elements × 2 components = 8 flat values.
-        let flat = (0..<8).map { Double($0) + 1 } // 1,2 | 3,4 | 5,6 | 7,8
+        let flat = (0..<8).map { Double($0) + 1 }
         let layout = [
             WPEUniformSlot(name: "u_Points", glslType: "vec2", slot: 0, slotCount: 4, arrayLength: 4)
         ]
@@ -1447,21 +1380,16 @@ struct WPEMetalRenderExecutorTests {
         }
         typealias Models = WPEMetalSceneCaptureUtilityModels
 
-        // The audio-bar box (scene 3460973721): 2560×1440 × 0.5 = 1280×720, axis-aligned.
         #expect(Models.outputGeometry(
             path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 2560, height: 1440), scale: SIMD3<Double>(0.5, 0.5, 0.5)),
             sceneSize: scene
         ) == .subregion)
-        // ../<dependencyID>/ resolver prefix is tolerated.
         #expect(Models.outputGeometry(
             path: "../3021673417/models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 2560, height: 1440), scale: SIMD3<Double>(0.5, 0.5, 0.5)),
             sceneSize: scene
         ) == .subregion)
-        // Scene 3299228616's Bar 1 is a small audio visualizer box authored with
-        // a half-turn and X mirror. Its footprint is still a local, axis-aligned
-        // subregion; treating it as fullscreen paints a black panel over the cat.
         #expect(Models.outputGeometry(
             path: "models/util/composelayer.json",
             geometry: geo(
@@ -1471,10 +1399,6 @@ struct WPEMetalRenderExecutorTests {
             ),
             sceneSize: scene
         ) == .subregion)
-        // Scene 2986828130's prism/glitch compose layer is a local audio-effect
-        // box. It is rotated and mirrored on both axes, but its footprint is far
-        // smaller than the scene, so it must stay a subregion; the capture pass
-        // samples the matching scene area instead of shrinking the whole frame.
         #expect(Models.outputGeometry(
             path: "models/util/composelayer.json",
             geometry: geo(
@@ -1485,19 +1409,16 @@ struct WPEMetalRenderExecutorTests {
             sceneSize: scene
         ) == .subregion)
 
-        // fullscreenlayer (DoF) and projectlayer (projection) always fullscreen.
         #expect(Models.outputGeometry(path: "models/util/fullscreenlayer.json",
             geometry: geo(size: CGSize(width: 1280, height: 720)), sceneSize: scene) == .fullscreen)
         #expect(Models.outputGeometry(path: "models/util/projectlayer.json",
             geometry: geo(size: CGSize(width: 1280, height: 720)), sceneSize: scene) == .fullscreen)
 
-        // Scene 3479521040 regression guards: rotated oversized compose stays fullscreen.
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 5000, height: 2300), angles: SIMD3<Double>(0, 0, 0.4)),
             sceneSize: scene) == .fullscreen)
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 5000, height: 2300)), sceneSize: scene) == .fullscreen)
-        // Single-axis mirror and missing size stay fullscreen.
         #expect(Models.outputGeometry(path: "models/util/composelayer.json",
             geometry: geo(size: CGSize(width: 1280, height: 720), scale: SIMD3<Double>(-1, 1, 1)),
             sceneSize: scene) == .fullscreen)
@@ -1775,12 +1696,6 @@ struct WPEMetalRenderExecutorTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let source = try makeRGBAInputTexture(device: device, bytes: Data(repeating: 255, count: 4))
-        // Render-time origin is already in the renderer's TOP-LEFT pixel convention
-        // (parser/builder resolved it — confirmed on-device: scene 3460973721 logs
-        // origin (1089.35, 1861.99), not the raw scene.json center-origin). The box
-        // must use the same `origin - sceneSize/2` anchor as a normal placed layer;
-        // an earlier center-origin special-case shoved it off-screen and blanked the
-        // audio bars.
         let geometry = WPERenderLayerGeometry(
             origin: SIMD3<Double>(1089.35, 1861.99, 0),
             scale: SIMD3<Double>(1, 1, 1),
@@ -1807,16 +1722,14 @@ struct WPEMetalRenderExecutorTests {
             sceneSize: CGSize(width: 3840, height: 2160),
             sourceTexture: source
         )
-        // Normal anchor: center = origin - sceneSize/2; size = footprint × scale.
-        #expect(abs(quad.centerAndSize.x - (1089.35 - 1920)) < 0.01) // -830.65
-        #expect(abs(quad.centerAndSize.y - (1861.99 - 1080)) < 0.01) // 781.99
+        #expect(abs(quad.centerAndSize.x - (1089.35 - 1920)) < 0.01)
+        #expect(abs(quad.centerAndSize.y - (1861.99 - 1080)) < 0.01)
         #expect(abs(quad.centerAndSize.z - 2560) < 0.01)
         #expect(abs(quad.centerAndSize.w - 1440) < 0.01)
-        // Center stays on-screen (the off-screen bug produced centerNDC.y = 1.72).
         let ndcX = quad.centerAndSize.x / (3840 / 2)
         let ndcY = quad.centerAndSize.y / (2160 / 2)
-        #expect(ndcX > -1 && ndcX < 0) // -0.43, left of center
-        #expect(ndcY > 0 && ndcY < 1)  // +0.72, upper, on-screen
+        #expect(ndcX > -1 && ndcX < 0)
+        #expect(ndcY > 0 && ndcY < 1)
     }
 
     @Test("Copies sampled input texture to offscreen output")
@@ -2781,8 +2694,6 @@ struct WPEMetalRenderExecutorTests {
             depthTest: "disabled",
             depthWrite: "disabled"
         )
-        // Scene-sized, centered, unrotated composelayer: the identity case that
-        // must reproduce the full frame 1:1 (no inset, no offset).
         let regionGeometry = WPERenderLayerGeometry(
             origin: SIMD3<Double>(2, 2, 0),
             scale: SIMD3<Double>(1, 1, 1),
@@ -2918,8 +2829,6 @@ struct WPEMetalRenderExecutorTests {
             depthTest: "disabled",
             depthWrite: "disabled"
         )
-        // Scene-sized composelayer: the captured frame must cover the WHOLE
-        // output (no shrunken inset), reproducing the halves split 1:1.
         let regionGeometry = WPERenderLayerGeometry(
             origin: SIMD3<Double>(8, 2, 0),
             scale: SIMD3<Double>(1, 1, 1),
@@ -3129,9 +3038,6 @@ struct WPEMetalRenderExecutorTests {
             0, 0, 0, 0
         ]))
         mask.label = "mask-texture"
-        // recordTextureBinding only records while scene-debug is enabled (now
-        // opt-in by default), so force it on for the duration of this diagnostic
-        // test rather than depending on the global default or test run order.
         WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
         defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
@@ -3205,9 +3111,6 @@ struct WPEMetalRenderExecutorTests {
             0, 255, 0, 255
         ]))
         primary.label = "base-texture"
-        // recordTextureBinding only records while scene-debug is enabled (now
-        // opt-in by default), so force it on for the duration of this diagnostic
-        // test rather than depending on the global default or test run order.
         WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
         defer { WPESceneDebugArtifacts.shared.setEnabledForTesting(nil) }
         _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
@@ -3517,9 +3420,6 @@ private extension WPEMetalRenderExecutorTests {
 
     @Test("Generic image copy path is pointer-independent (legacy UV parallax removed)")
     func genericImageCopyPathIgnoresPointer() throws {
-        // Camera parallax is a geometry translation gated by the scene's parallax
-        // settings (neutral here), so moving the pointer must NOT shift the copy
-        // fragment's samples — guards against re-introducing the old UV shift.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 
@@ -3654,7 +3554,7 @@ private func composelayerTestLayer(
     )
 }
 
-// MARK: - Phase 2C helpers and tests
+// MARK: - Render composition helpers and tests
 
 private func solidPass(
     id: String,
@@ -3757,10 +3657,6 @@ private struct BlendFixture: Sendable {
     let expected: Pixel
 }
 
-// `translucent` is a WPE alias for the standard non-premultiplied alpha
-// blend (same factors as `normal`). Pre-fix it was wired as premultiplied
-// (`src.rgb*1 + dst.rgb*(1-src.a)`), which doubled any pass that wrote
-// `vec4(scene.rgb, 0)` into the scene.
 private let blendFixtures: [BlendFixture] = [
     BlendFixture(mode: "normal", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "additive", expected: Pixel(r: 188, g: 0, b: 255, a: 255)),
@@ -3811,12 +3707,6 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    // Guards the head-hole bug: a semi-transparent layer that flows through a
-    // multi-pass premultiplied effect chain must NOT lose RGB by alpha^N.
-    // A half-alpha red (255,0,0,128) premultiplies to ~(128,0,0,128); the old
-    // straight-alpha + .sourceAlpha pipeline re-premultiplied every pass and
-    // decayed red toward ~16 after four passes. Premultiplied render targets
-    // keep it at ~128.
     @Test("Premultiplied FBO copy chain preserves semi-transparent RGB contribution")
     func premultipliedFBOCopyChainPreservesSemiTransparentRGBContribution() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -3885,8 +3775,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 2, y: 2)
 
-        // Premultiplied red at alpha 0.5 ≈ 128. The buggy alpha^N decay would
-        // drop this below ~40 after four passes.
         #expect(pixel.r >= 100, "RGB contribution decayed across the chain; got \(pixel)")
         #expect(pixel.g <= 8)
         #expect(pixel.b <= 8)
@@ -4277,7 +4165,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let scene = CGSize(width: 3840, height: 2160)
 
-        // A local effect FBO uses the layer's own footprint, not the full scene.
         #expect(WPEMetalRenderTargetPool.layerLocalFBOPixelSize(
             fboName: "fxBlur", layer: layer, sceneSize: scene) == CGSize(width: 200, height: 200))
     }
@@ -4744,7 +4631,7 @@ private extension WPEMetalRenderExecutorTests {
     }
 }
 
-// MARK: - Phase 2D-C effect tests
+// MARK: - Effect render tests
 
 private func effectPass(
     id: String,
@@ -5190,23 +5077,18 @@ private extension WPEMetalRenderExecutorTests {
     @Test("Frame-dependent reads are rejected (previous / scene-alias / external FBO / custom shader / multi-scene)")
     func frameDependentLayersAreRejected() {
         let base = ["genericimage4", "compose", "commands/copy"]
-        // .previous (ping-pong / cross-frame feedback) → not invariant.
         #expect(WPEMetalStaticLayerClassifier.cachePlan(
             for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .previous),
             dynamicTextureNames: []) == nil)
-        // Scene-alias FBO resolves to the live scene output (prior layers/particles).
         #expect(WPEMetalStaticLayerClassifier.cachePlan(
             for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .fbo("_rt_FullFrameBuffer")),
             dynamicTextureNames: []) == nil)
-        // An FBO produced by ANOTHER (possibly dynamic) layer.
         #expect(WPEMetalStaticLayerClassifier.cachePlan(
             for: staticCachePreparedLayer(shaderNames: base, injectReadIntoFirstPass: .fbo("_rt_someOtherLayer")),
             dynamicTextureNames: []) == nil)
-        // A custom (non-builtin) material shader could still sample g_Time/pointer/audio.
         #expect(WPEMetalStaticLayerClassifier.cachePlan(
             for: staticCachePreparedLayer(shaderNames: base, isBuiltin: false),
             dynamicTextureNames: []) == nil)
-        // More than one scene pass — only one source would be cached.
         #expect(WPEMetalStaticLayerClassifier.cachePlan(
             for: staticCachePreparedLayer(shaderNames: base, extraScenePass: true),
             dynamicTextureNames: []) == nil)
@@ -5240,9 +5122,6 @@ private func staticCachePreparedLayer(
 ) -> WPEPreparedRenderLayer {
     let compA = "_rt_imageLayerComposite_static_a"
     let compB = "_rt_imageLayerComposite_static_b"
-    // First pass writes compA; middle passes write compB; the last is the scene
-    // copy sampling the final composite. A 2-shader list collapses to one
-    // composite write + scene copy (single-pass, below the cache gate).
     let count = shaderNames.count
     var passes = shaderNames.enumerated().map { index, shader -> WPERenderPass in
         let isLast = index == count - 1

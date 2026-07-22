@@ -3,10 +3,7 @@ import LiveWallpaperCore
 import SwiftUI
 import AppKit
 
-/// Unified "Storage" tab. The dashboard separates user-owned downloads from
-/// reclaimable caches, while migration-only cache details stay conditional so
-/// the page remains short. Stats are computed off the actor so filesystem walks
-/// never block the UI.
+/// Unified "Storage" tab.
 @MainActor
 struct WPECacheManagementView: View {
     @State var stats: WPECacheStats?
@@ -21,9 +18,7 @@ struct WPECacheManagementView: View {
     /// already unpacked into the cache — reclaimable without losing wallpapers.
     @State var reclaimableArchiveBytes: Int64 = 0
     @State var lastReclaimedBytes: UInt64?
-    /// Reachable scene ids (applied / bookmarked / recent / deps). Single keep-set
-    /// shared by the "Clear Unused" button state, confirmation count, and action,
-    /// computed once per refresh rather than per render.
+    /// Reachable scene ids (applied / bookmarked / recent / deps).
     @State var reachableIDs: Set<String> = []
     /// Downloaded content (projects + engine assets) — the actual wallpapers on
     /// disk, kept strictly apart from the reclaimable caches below.

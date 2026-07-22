@@ -1,13 +1,8 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Shared LRU byte-budget bookkeeping (entries/totalBytes/recency clock),
-/// factored out of `WPEMetalTextureCacheLRU` and `WPEMetalStaticLayerCacheLRU`
-/// — the two used to carry byte-identical `Entry`/`entries`/`totalBytes`/`clock`
-/// state and eviction tie-break logic, diverging only in *when* eviction fires
-/// (frame-driven protected-set sweep vs reject/evict inline on admit). This
-/// type owns only the bookkeeping; each caller keeps its own admission and
-/// eviction-triggering policy layered on top.
+/// Shared deterministic LRU byte accounting for Metal texture and static-layer caches.
+/// Callers retain their own admission and eviction-trigger policies.
 struct WPEMetalLRUByteBudget<Key: Hashable & Comparable & Sendable>: Equatable, Sendable {
     struct Entry: Equatable, Sendable {
         let bytes: Int

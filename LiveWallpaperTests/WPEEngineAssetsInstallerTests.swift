@@ -108,25 +108,17 @@ struct WPEEngineAssetsInstallerTests {
 
         func write(_ body: String) throws { try "\"AppState\"\n{\n\(body)\n}".write(to: manifestURL, atomically: true, encoding: .utf8) }
 
-        // Missing manifest → not complete.
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
-        // Staged partially → not complete.
         try write("\t\"buildid\"\t\t\"0\"\n\t\"BytesToStage\"\t\t\"829\"\n\t\"BytesStaged\"\t\t\"400\"")
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
-        // Staging fully written → complete.
         try write("\t\"buildid\"\t\t\"0\"\n\t\"BytesToStage\"\t\t\"829\"\n\t\"BytesStaged\"\t\t\"829\"")
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == true)
-        // Committed (buildid set) → complete regardless of bytes.
         try write("\t\"buildid\"\t\t\"23570248\"")
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == true)
     }
 
     @Test("Staging completeness falls back to populated content when the manifest was pruned away")
     func stagingCompleteFallsBackAfterManifestPrune() throws {
-        // `cleanupSteamCMDAppState` deletes appmanifest_431960.acf and
-        // `commitAndPrune` cuts the tree to assets/ only, so a committed-and-
-        // pruned install legitimately has no manifest left — unlike the
-        // sibling test above, no appmanifest is ever written here.
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Caches/lw-staging-prune-test-\(UUID().uuidString)", isDirectory: true)
@@ -134,16 +126,13 @@ struct WPEEngineAssetsInstallerTests {
         let installRoot = root.appendingPathComponent("common/wallpaper_engine", isDirectory: true)
         let assets = installRoot.appendingPathComponent("assets", isDirectory: true)
 
-        // No manifest, no content dirs at all → not complete.
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
 
-        // No manifest, dirs present but empty (interrupted mid-stage) → not complete.
         for sub in ["materials", "models", "shaders"] {
             try fm.createDirectory(at: assets.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
         #expect(SteamCMDDoctorService.isWPEStagingComplete(installRoot: installRoot, fileManager: fm) == false)
 
-        // No manifest, dirs populated → complete via content evidence.
         for sub in ["materials", "models", "shaders"] {
             try "x".write(
                 to: assets.appendingPathComponent(sub).appendingPathComponent("noise.bin"),
@@ -267,8 +256,6 @@ struct WPEEngineAssetsInstallerTests {
 
     // MARK: - Safe prune
 
-    /// Builds a throwaway install tree under the container home so it passes the
-    /// `isContainerInternal` guard, then deletes it.
     private func makeInstallTree(leaf: String, withAssets: Bool) throws -> (base: URL, installRoot: URL) {
         let fm = FileManager.default
         let base = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
@@ -277,7 +264,6 @@ struct WPEEngineAssetsInstallerTests {
             .appendingPathComponent("common", isDirectory: true)
             .appendingPathComponent(leaf, isDirectory: true)
         try fm.createDirectory(at: installRoot, withIntermediateDirectories: true)
-        // Junk we expect pruned.
         try fm.createDirectory(at: installRoot.appendingPathComponent("bin", isDirectory: true), withIntermediateDirectories: true)
         try "x".write(to: installRoot.appendingPathComponent("wallpaper64.exe"), atomically: true, encoding: .utf8)
         if withAssets {
@@ -334,7 +320,6 @@ struct WPEEngineAssetsInstallerTests {
                 )
             }
         }
-        // Nothing was touched.
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("bin").path))
     }
 
@@ -352,7 +337,6 @@ struct WPEEngineAssetsInstallerTests {
                 )
             }
         }
-        // The download was partial — siblings must survive so a re-run can finish.
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("bin").path))
         #expect(fm.fileExists(atPath: tree.installRoot.appendingPathComponent("wallpaper64.exe").path))
     }

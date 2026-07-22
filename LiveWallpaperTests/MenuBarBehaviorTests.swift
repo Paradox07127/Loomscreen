@@ -3,16 +3,9 @@ import Testing
 @testable import LiveWallpaper
 import LiveWallpaperCore
 
-/// Validates the recents-list behavior the menu-bar surface depends on:
-/// WPE history mutation semantics, idempotent removal, and the absence of
-/// NSOpenPanel coupling in `MenuBarContent.swift`. These guarantees keep the
-/// menu bar a pure shortcut surface backed by `BookmarkStore` + WPE history,
-/// rather than triggering Open dialogs from the system menu.
 @Suite("MenuBar shortcut + recents behavior", .serialized)
 @MainActor
 struct MenuBarBehaviorTests {
-
-    // MARK: - WPE history removal semantics
 
     @Test("Removing a known WPE import drops it from the recents list")
     func removingKnownImportDropsIt() throws {
@@ -70,12 +63,8 @@ struct MenuBarBehaviorTests {
         }
     }
 
-    // MARK: - Structural guarantee: MenuBar surface stays panel-free
-
     @Test("MenuBarContent does not invoke NSOpenPanel directly")
     func menuBarContentHasNoOpenPanelCoupling() throws {
-        // Every MenuBar* file, not just MenuBarContent.swift: splitting the view
-        // out into siblings must not let NSOpenPanel back in unscanned.
         let sources = Self.menuBarSourceFiles()
         #expect(!sources.isEmpty, "No MenuBar sources found under LiveWallpaper/Views — the scan is misconfigured")
 
@@ -266,10 +255,6 @@ struct MenuBarBehaviorTests {
     }
 }
 
-/// Captures the number of times a notification fires. Synchronous observer
-/// keeps the body race-free under Swift 6; the lock guards the count so we
-/// can mark the type Sendable without main-actor isolation, which lets
-/// `deinit` clean the observer up in any cleanup order the runtime picks.
 private final class NotificationObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var _callCount = 0

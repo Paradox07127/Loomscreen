@@ -2,12 +2,7 @@
 import Foundation
 import Observation
 
-/// On-disk library of user-imported Metal shaders. Lives in
-/// `~/Library/Application Support/<bundle-id>/shaders/<uuid>.json`; one file
-/// per shader avoids partial-write corruption hosing the entire library.
-///
-/// All disk reads / writes go through `Task.detached` so the MainActor never
-/// blocks on FileManager; `shaders` updates on MainActor after each completes.
+/// On-disk library of user-imported Metal shaders.
 @MainActor
 @Observable
 public final class CustomShaderStore {

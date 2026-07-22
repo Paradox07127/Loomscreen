@@ -15,7 +15,7 @@ struct WPEMSDFTextMesh {
     var size: CGSize
 }
 
-// Not `@MainActor` (M2c1b-3c): laid out on the renderer's actor. Purely queries
+// Not `@MainActor`: laid out on the renderer's actor. Purely queries
 // the atlas cache; missing glyphs are scheduled off-thread by the atlas itself.
 struct WPEMSDFTextLayout {
     /// Missing glyphs schedule background (off-main) generation and the layout

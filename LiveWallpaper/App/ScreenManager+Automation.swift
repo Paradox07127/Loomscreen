@@ -47,17 +47,7 @@ extension ScreenManager {
         return true
     }
     private func clearActiveWPEWallpaper(workshopID: String) {
-        // If a screen is currently rendering the scene being deleted, switch it
-        // away FIRST — otherwise its live renderer keeps reading the cache files
-        // that the delete is about to move to the Trash. `clearWallpaperOfType`
-        // tears down the scene session (synchronously, on every fallback path)
-        // and falls back to the screen's saved video/html (or blanks it),
-        // persisting the result. Match the active SceneDescriptor — what
-        // actually drives the renderer and names the cache dir — not the
-        // separate `wpeOrigin` metadata, which can be nil or stale.
-        // Match scenes by their live descriptor AND video/web by their persisted
-        // `wpeOrigin` — a packaged video/web import renders as `.video`/`.html`,
-        // so a scene-only match left it rendering from files about to be deleted.
+        // If a screen is currently rendering the scene being deleted, switch it away FIRST — otherwise its live renderer keeps reading the cache files that the delete is about to move to the Trash.
         let cacheRelativePath = "wpe-cache/\(workshopID)"
         for screen in screens {
             guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { continue }

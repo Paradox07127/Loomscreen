@@ -3,9 +3,6 @@ import Foundation
 import LiveWallpaperCore
 
 /// Snapshot of host system + runtime state for the "Report a Bug" sheet.
-/// Deliberately omits anything that could identify the machine or expose user
-/// content: no hostname, no usernames, no file paths, no folder names. Display
-/// info is dimensions-only. Build it at sheet-open — stale values defeat the purpose.
 struct SystemSnapshot: Sendable {
     let appVersion: String
     let appBuild: String

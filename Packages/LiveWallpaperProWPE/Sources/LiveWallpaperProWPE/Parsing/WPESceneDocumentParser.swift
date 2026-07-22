@@ -2,9 +2,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// Bake-time resolver for static transform scripts. Implemented by the app's
-/// JSContext-backed evaluator; the parser package cannot depend on the script
-/// runtime, so the dependency is inverted through this seam (ADR-002 step 2).
+/// Dependency seam for resolving static transform scripts without coupling the parser to JavaScriptCore.
 public protocol WPESceneTransformScriptResolving {
     func resolveVec3(
         script: String,
@@ -46,22 +44,14 @@ public extension WPESceneTransformScriptResolving {
 /// Textual classification of WPE transform scripts, shared by the parser
 /// (bake static origins at parse time) and the runtime evaluator (execution guard).
 public enum WPETransformScriptStaticAnalysis {
-    /// Markers that make a transform script time/audio/random-driven and thus not
-    /// statically resolvable. Conservative: a false "dynamic" only leaves the
-    /// baked value untouched (no regression). Matching is CASE-SENSITIVE on
-    /// purpose — `update` contains a lowercase "date", so a case-insensitive
-    /// `Date` check would wrongly classify every origin script as dynamic.
-    /// `public` so the app can assert this bake-time gate never drifts from the
-    /// XPC worker's independent re-validation gate (`SceneScriptStaticExecutionPolicy`).
+    /// Dynamic markers shared with the XPC revalidation gate; matching is case-sensitive because `Date` would otherwise match `update`.
     public static let dynamicTokens = [
         "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
         "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
         "input.cursorWorldPosition", "shared.", "shared["
     ]
 
-    /// Static resolution runs during parsing, where retaining a hung JSContext is
-    /// worse than falling back to the baked value; loop/eval forms are rejected
-    /// conservatively and left to the dynamic transform path.
+    /// Loop and evaluation forms are rejected to keep parse-time JavaScriptCore work bounded.
     public static let staticExecutionBlocklistPatterns = [
         #"\bwhile\s*\("#,
         #"\bfor\s*\("#,
@@ -78,18 +68,8 @@ public enum WPETransformScriptStaticAnalysis {
     }
 }
 
-/// Stateless flexible parser for Wallpaper Engine `scene.json`. The shipping
-/// format mixes JSON objects, scalar arrays, and space-separated string
-/// vectors (`"0 1 0"`); we accept all three to cover the long tail of
-/// community projects without forking the spec.
-///
-/// Phase 2.0 contract:
-///   - Required: top-level object with `camera` + `general` blocks.
-    ///   - Image objects feed `WPESceneDocument.imageObjects`; object kind is
-    ///     inferred from WPE shape keys when `type` is missing.
-///   - Material/effect/animation metadata is preserved for renderer fallbacks
-///     and future shader passes; unsupported objects and full FBO shader
-///     pipelines still emit diagnostics so import can downgrade capability.
+/// Parses Wallpaper Engine `scene.json`, accepting object, array, and space-separated vector encodings.
+/// Unsupported features are preserved as diagnostics for capability classification.
 public enum WPESceneDocumentParser {
 
     public static func parse(
@@ -253,7 +233,7 @@ public enum WPESceneDocumentParser {
                 unsupportedKinds.append(resolution.primary)
             }
             for kind in unsupportedKinds {
-                diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported in Phase 2.0"))
+                diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported by the current renderer"))
             }
             if resolution.primary == .particle {
                 diagnostics.append(.init(severity: .info, message: "Particle object \(objectName) parsed; rendered by the Metal particle simulator"))
@@ -267,7 +247,7 @@ public enum WPESceneDocumentParser {
 
             if resolution.primary == .unknown {
                 let type = resolution.explicitType ?? "missing"
-                diagnostics.append(.init(severity: .info, message: "Object type \(type) is unsupported in Phase 2.0"))
+                diagnostics.append(.init(severity: .info, message: "Object type \(type) is unsupported by the current renderer"))
             }
         }
 
@@ -285,7 +265,7 @@ public enum WPESceneDocumentParser {
         for key in generalDict.keys {
             let lowered = key.lowercased()
             if lowered.hasPrefix("bloom") || lowered.hasPrefix("camerashake") {
-                diagnostics.append(.init(severity: .info, message: "general.\(key) is unsupported in Phase 2.0"))
+                diagnostics.append(.init(severity: .info, message: "general.\(key) is unsupported by the current renderer"))
             }
         }
 
@@ -662,14 +642,7 @@ public enum WPESceneDocumentParser {
         )
     }
 
-    /// Effective visibility per object id = the object's own `visible` AND every
-    /// ancestor's. WPE hides a whole component by toggling a parent GROUP's
-    /// `visible` (often a condition bound to a user combo, e.g. week1's
-    /// 横/竖/关闭), but groups aren't renderable objects — their children carry
-    /// their own `visible`. Without folding the ancestor chain in, a child whose
-    /// own `visible` is true still renders even though its group is hidden, so
-    /// both the horizontal and vertical variant show at once. Mirrors the image
-    /// graph's `hasHiddenAncestor`, but covers group containers and text too.
+    /// Resolves each object's visibility as its own value combined with every ancestor, including non-renderable groups.
     private static func resolvedObjectVisibility(
         _ objectsByID: [String: [String: Any]]
     ) -> [String: Bool] {
@@ -1857,11 +1830,7 @@ public enum WPESceneDocumentParser {
     }
 
     private static func parseBool(_ raw: Any?) -> Bool? {
-        // WPE binds layer/effect visibility (and other toggles) to a user property as
-        // {"user": {...}, "value": <bool>}; the resolved value is in `value`. Unwrap
-        // it so a property-bound `visible:false` actually hides the layer instead of
-        // defaulting to true — e.g. scene 3461168300's "音频条底" is hidden by the
-        // "音频条/audio strip" style combo (newproperty14=斜), leaving only the diagonal.
+        // Property-bound visibility stores the resolved boolean in the envelope's `value` field.
         if let dict = raw as? [String: Any], let value = dict["value"] {
             return parseBool(value)
         }

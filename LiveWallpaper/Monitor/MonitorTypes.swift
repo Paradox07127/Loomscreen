@@ -1,13 +1,7 @@
 import Foundation
 
 // MARK: - Monitor wallpaper data contract (schema v2)
-// These Codable structs are the single snapshot contract consumed by the
-// native widget board and the HUD — key names are load-bearing; never rename
-// without bumping `schemaVersion`. Every v2 field is Optional so a v1
-// producer round-trips unchanged.
-//
-// Privacy invariant: status/counts/tool NAMES only. Never prompt text,
-// tool arguments, command output, or file diffs.
+// These Codable structs are the single snapshot contract consumed by the native widget board and the HUD — key names are load-bearing; never rename without bumping `schemaVersion`.
 
 enum MonitorAgentProvider: String, Codable, Sendable, CaseIterable {
     case claude
@@ -52,8 +46,6 @@ struct MonitorTokenTotals: Codable, Sendable, Equatable {
 }
 
 /// One live/recent agent session, already normalized + privacy-redacted.
-/// `statusDetail` must only ever carry tool names / short verbs
-/// ("Bash: xcodebuild", "Edit"), never prompt or output text.
 struct MonitorAgentSessionState: Codable, Sendable, Equatable, Identifiable {
     var id: String                    // "<provider>:<sessionID>"
     var provider: MonitorAgentProvider
@@ -69,8 +61,6 @@ struct MonitorAgentSessionState: Codable, Sendable, Equatable, Identifiable {
     var tokens: MonitorTokenTotals = .zero
     var costUSD: Double?
 
-    // v2 Fleet signals — all optional (schemaVersion 2)
-    /// Recent event timestamps (epoch seconds, ≤60 kept) for the tick track.
     var recentEventTimes: [Double]?
     /// Epoch seconds when status flipped to needsInput ("who is waiting on me").
     var waitSince: Double?
@@ -156,8 +146,6 @@ struct MonitorANEProcess: Codable, Sendable, Equatable {
 }
 
 /// B-tier readings, only populated by the Pro-direct sensor helper (W-F).
-/// Absent field == this machine/OS generation doesn't expose it; renderers
-/// must degrade gracefully, never show 0 for a missing sensor.
 struct MonitorSensorReadings: Codable, Sendable, Equatable {
     var cpuTempC: Double?
     var gpuTempC: Double?
@@ -193,7 +181,6 @@ struct MonitorSystemSnapshot: Codable, Sendable, Equatable {
     var loadAverage1: Double?
     var topProcesses: [MonitorProcessSample]?
 
-    // v2 additions — all optional (schemaVersion 2)
     var cpuInfo: MonitorCPUInfo?
     var cpuLoadAvg: [Double]?         // 1 / 5 / 15 min
     var memBreakdown: MonitorMemoryBreakdown?
@@ -234,12 +221,9 @@ struct MonitorUsageSnapshot: Codable, Sendable, Equatable {
     var fiveHourResetsAt: Double?
     var weekUsedPercent: Double?
     var weekResetsAt: Double?
-    /// True when the rate-limit capture file is older than its freshness window,
-    /// so the Usage widget dims the quota block instead of presenting stale
-    /// percentages as current.
+    /// True when the rate-limit capture file is older than its freshness window, so the Usage widget dims the quota block instead of presenting stale percentages as current.
     var limitsStale: Bool?
 
-    // v2 additions — all optional (schemaVersion 2)
     var perModel: [MonitorUsageModelBreakdown]?
     var dailyActivity: [MonitorUsageDayBucket]?
     var tokenBurnRatePerHour: Double?

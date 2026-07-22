@@ -361,8 +361,7 @@ struct WPEPuppetSceneCompositeUniforms {
 
 struct WPEGenericParticleUniforms {
     var color: SIMD4<Float>
-    /// x = alpha, y = brightness, z/w = padding (reserved for spectrum
-    /// reactivity in Phase 4 audio runtime).
+    /// x = alpha, y = brightness, z/w = reserved padding.
     var sizeAndAge: SIMD4<Float>
 }
 

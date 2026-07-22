@@ -117,9 +117,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ], to: root.appendingPathComponent("materials/effects/pulse_.json"))
 
-        // The structured form WPE writes for user-bound effect instances:
-        // constants as an ARRAY of {name, value:{user,value}} entries, and the
-        // per-instance opacity mask as a DICT texture slot entry.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
@@ -166,10 +163,6 @@ struct WPERenderGraphBuilderTests {
         try writeJSON([
             "passes": [["shader": "genericimage2", "textures": ["layer_albedo"]]]
         ], to: root.appendingPathComponent("materials/layer.json"))
-        // The effect declares a non-underscore render target ("blurbuffer"); a
-        // second pass reads it. isImplicitFBOTextureName only catches `_`-prefixed
-        // names, so resolving the override through textureReference (which also
-        // checks declaredFBONames) is what recognizes it as an FBO.
         try writeJSON([
             "fbos": [["name": "blurbuffer", "scale": 1, "format": "rgba8888"]],
             "passes": [
@@ -204,8 +197,6 @@ struct WPERenderGraphBuilderTests {
                     "file": "effects/blur/effect.json",
                     "passes": [
                         [:],
-                        // The user-facing override points the combine pass's slot 0
-                        // at the declared FBO by name (slot 0 = first array entry).
                         ["textures": ["blurbuffer"]]
                     ]
                 ]]
@@ -279,8 +270,6 @@ struct WPERenderGraphBuilderTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        // solidlayer is a builtin material (no file). Only the lightshafts effect
-        // needs to resolve from disk.
         try writeJSON([
             "passes": [[
                 "material": "materials/effects/lightshafts.json",
@@ -324,15 +313,12 @@ struct WPERenderGraphBuilderTests {
         let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
         let layer = try #require(graph.layers.first)
 
-        // Transparent solid base + the lightshafts effect drawn straight to scene.
         #expect(layer.passes.map(\.shader) == ["solidlayer", "effects/lightshafts"])
         let effectPass = try #require(layer.passes.last)
         #expect(effectPass.target == .scene)
         #expect(effectPass.blending == "premultipliedAdditive")
         #expect(effectPass.combos["DIRECTDRAW"] == 1)
 
-        // The perspective-quad corners survive onto the layer geometry so the
-        // renderer can synthesize the 4-corner beam.
         let points = try #require(layer.geometry.shapePoints)
         #expect(points == [
             SIMD2<Double>(0.4, 0.25),
@@ -350,9 +336,6 @@ struct WPERenderGraphBuilderTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
         try writePuppetModelJSON(root: root, path: "models/body.json", puppetPath: "models/body_puppet.mdl")
-        // Fitting mesh (local range [200,1600]x[300,1900] inside 2000x2000, so no
-        // crop rewrite), all vertices skinned to bone 0 -> anchor offset = the
-        // skinned centroid (-100, 100).
         try writePuppetFixture(
             vertices: boundsVertices(minX: -800, minY: -700, maxX: 600, maxY: 900),
             anchor: (name: "头部", boneIndex: 0),
@@ -402,9 +385,7 @@ struct WPERenderGraphBuilderTests {
         let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
         let beam = try #require(graph.layers.first { $0.objectID == "96" })
 
-        // The anchor rewrite ran: parent-composed origin (1100, 1200) + anchor offset (-100, 100).
         #expect(beam.geometry.origin == SIMD3<Double>(1000, 1300, 0))
-        // Regression: the rewritten geometry must keep the perspective-quad corners.
         #expect(beam.geometry.shapePoints == [
             SIMD2<Double>(0.4, 0.25),
             SIMD2<Double>(0.6, 0.25),
@@ -513,11 +494,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ], to: root.appendingPathComponent("materials/child.json"))
 
-        // `copybackground: false` downgrades the material's `_rt_FullFrameBuffer`
-        // to `.previous` (materialRespectingCopyBackground). The group rewrite
-        // must map that back to the group's own buffer — binding `.previous` on
-        // the scene-targeting composite paints the live scene into the group's
-        // quad (3470764447 layer 249's picture-in-picture).
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -580,9 +556,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ], to: root.appendingPathComponent("materials/child.json"))
 
-        // outer(composelayer) -> inner(composelayer) -> image. The image renders
-        // into inner's buffer; inner must composite into OUTER's buffer (not the
-        // live scene) so outer's effects/masking see the inner content.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -628,7 +601,6 @@ struct WPERenderGraphBuilderTests {
         #expect(child.groupRenderTarget == innerTarget)
 
         let inner = try #require(graph.layers.first { $0.objectID == "inner" })
-        // Inner samples its own buffer but draws its composite into the outer buffer.
         #expect(inner.groupCompositeSource == innerTarget)
         #expect(inner.groupRenderTarget == outerTarget)
         #expect(inner.passes.last?.target == .fbo(name: outerTarget))
@@ -639,7 +611,6 @@ struct WPERenderGraphBuilderTests {
         #expect(outer.groupRenderTarget == nil)
         #expect(outer.passes.last?.target == .scene)
 
-        // Producer-before-consumer: child before inner before outer.
         let ids = graph.layers.map(\.objectID)
         let childIdx = try #require(ids.firstIndex(of: "child"))
         let innerIdx = try #require(ids.firstIndex(of: "inner"))
@@ -670,9 +641,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ], to: root.appendingPathComponent("materials/child.json"))
 
-        // outer -> mid -> inner -> image: both outer and mid land in the trailing
-        // emit (their own last descendant is a group), where raw input order
-        // would put the consumer group before its producer.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -693,7 +661,6 @@ struct WPERenderGraphBuilderTests {
         let mid = try #require(graph.layers.first { $0.objectID == "mid" })
         #expect(mid.groupRenderTarget == "_rt_layerGroup_outer")
 
-        // Producer-before-consumer through every level.
         let ids = graph.layers.map(\.objectID)
         let childIdx = try #require(ids.firstIndex(of: "child"))
         let innerIdx = try #require(ids.firstIndex(of: "inner"))
@@ -726,11 +693,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ], to: root.appendingPathComponent("materials/child.json"))
 
-        // 3554161528 shape: outer group -> childless inner composelayer (its real
-        // content is a runtime cursor particle, absent from the graph) + a plain
-        // image sibling. The childless inner must NOT be rerouted into outer —
-        // the executor materializes a group buffer only when the owner encodes,
-        // so an early empty write into it fails scene staging.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -749,7 +711,6 @@ struct WPERenderGraphBuilderTests {
         #expect(hollow.groupRenderTarget == nil)
         #expect(hollow.passes.allSatisfy { $0.target != .fbo(name: "_rt_layerGroup_outer") })
 
-        // The plain sibling still routes into the group as before.
         let child = try #require(graph.layers.first { $0.objectID == "child" })
         #expect(child.groupRenderTarget == "_rt_layerGroup_outer")
     }
@@ -766,10 +727,6 @@ struct WPERenderGraphBuilderTests {
             "passes": [["shader": "compose", "textures": ["_rt_FullFrameBuffer"]]]
         ], to: root.appendingPathComponent("materials/util/composelayer.json"))
 
-        // A composelayer whose ONLY child is a particle system is an isolated
-        // effect wrapper (tint/opacity baked onto the particle in the renderer),
-        // so it must not emit a full-frame-capture layer. Mirrors 3462491575's
-        // matrix-rain compose group 1322.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -819,9 +776,6 @@ struct WPERenderGraphBuilderTests {
             "passes": [["shader": "genericimage2", "textures": ["child_albedo"]]]
         ], to: root.appendingPathComponent("materials/child.json"))
 
-        // `hotspot` is an empty composelayer (a script click zone) whose passthrough material binds
-        // `_rt_FullFrameBuffer`; drawing it would paint the whole scene into its quad (picture-in-
-        // picture). `group` is a real group with an image child and must survive.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -856,7 +810,6 @@ struct WPERenderGraphBuilderTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        // fullscreenlayer util = an identity full-frame copy of the whole scene.
         try writeJSON(["material": "materials/util/fullscreenlayer.json"], to: root.appendingPathComponent("models/util/fullscreenlayer.json"))
         try writeJSON([
             "passes": [["shader": "copy", "textures": ["_rt_FullFrameBuffer"]]]
@@ -865,7 +818,6 @@ struct WPERenderGraphBuilderTests {
         try writeJSON([
             "passes": [["shader": "genericimage2", "textures": ["child_albedo"]]]
         ], to: root.appendingPathComponent("materials/child.json"))
-        // A real post-process effect (e.g. DoF) authored onto a fullscreenlayer.
         try writeJSON([
             "passes": [["material": "materials/workshop/1/effects/blur.json"]]
         ], to: root.appendingPathComponent("effects/workshop/1/blur/effect.json"))
@@ -873,11 +825,6 @@ struct WPERenderGraphBuilderTests {
             "passes": [["shader": "workshop/1/effects/blur"]]
         ], to: root.appendingPathComponent("materials/workshop/1/effects/blur.json"))
 
-        // `postprocess` mirrors scene 3470764447's 后处理层: an effect-less
-        // fullscreenlayer whose only pass is an identity `_rt_FullFrameBuffer`→scene
-        // copy — a WPE no-op that, if drawn, accrues a nested picture-in-picture.
-        // `dof` is a fullscreenlayer WITH a visible effect: a real post-process
-        // that must survive. `bg` is a normal image layer.
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -920,8 +867,6 @@ struct WPERenderGraphBuilderTests {
             "passes": [["shader": "compose", "textures": ["_rt_FullFrameBuffer"]]]
         ], to: root.appendingPathComponent("materials/util/composelayer.json"))
 
-        // outer(compose) → inner(compose) → particle. Neither wrapper has an image descendant, so both
-        // must drop; if `outer` survived it would draw the whole-scene passthrough (picture-in-picture).
         let scenePayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1000, "height": 800, "auto": true]],
@@ -1375,9 +1320,6 @@ struct WPERenderGraphBuilderTests {
             ]]
         ]
         let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
-        // Authored visible, but the user override hides it. Because the
-        // visibility is user-toggleable, the layer must still be built with a
-        // scene-target pass so a later toggle applies without a graph rebuild.
         let document = try WPESceneDocumentParser.parse(data: sceneData, userValues: ["xme": .bool(false)])
         #expect(document.imageObjects.first?.visible == false)
 
@@ -1566,11 +1508,6 @@ struct WPERenderGraphBuilderTests {
 
     @Test("Layer-script-referenced hidden layers survive pruning (3470764447 day/night bands)")
     func layerScriptReferencedHiddenLayersSurvivePruning() throws {
-        // A time-of-day script reveals authored-hidden band layers by name (here in
-        // an array literal, like 3470764447's 后处理层). They must stay in the graph
-        // so their videos load — otherwise the switch lands on a layer that isn't
-        // there → black background. An unrelated hidden layer the script never names
-        // must still get pruned (no regression to all-variants-render, 3226487183).
         let script = """
         var displayVideo = ["day", "night"].map(v => thisScene.getLayer(v));
         export function init() {}
@@ -1610,10 +1547,6 @@ struct WPERenderGraphBuilderTests {
 
     @Test("Script-host getLayer keeps referenced hidden layers, matching image-object scripts")
     func scriptHostReferencedHiddenLayersSurvivePruning() throws {
-        // Same reveal-by-name pattern as above, but the script lives on a
-        // non-renderable scriptHostObject. layerScriptControlledVisibilityIDs must
-        // consult script hosts too (like createLayerImageTemplateIDs) or the host's
-        // getLayer("night") target is pruned → nothing to reveal → black.
         let script = """
         var displayVideo = ["day", "night"].map(v => thisScene.getLayer(v));
         export function init() {}
@@ -2006,9 +1939,6 @@ struct WPERenderGraphBuilderTests {
                 parallaxDepth: SIMD2<Double>(0, 0)
             )
         }
-        // A body-split style variant: a hidden variant background with an authored-visible
-        // child body, alongside the shown variant. Only the shown variant's subtree should
-        // composite — the hidden variant's visible child must inherit the hidden state.
         let document = WPESceneDocument(
             camera: .defaultCamera,
             general: .defaultGeneral,
@@ -2027,21 +1957,15 @@ struct WPERenderGraphBuilderTests {
         ).build(document: document)
 
         let built = Set(graph.layers.map(\.objectID))
-        // Hidden variant and its (authored-visible) descendants are dropped from the graph.
         #expect(!built.contains("hiddenVariant"))
         #expect(!built.contains("hiddenChildBody"))
         #expect(!built.contains("hiddenGrandchildMask"))
-        // The shown variant subtree is unaffected.
         #expect(built.contains("shownVariant"))
         #expect(built.contains("shownChildBody"))
     }
 
     @Test("A visible child of a user-toggleable (condition-less) hidden parent stays in the graph")
     func liveToggleableHiddenParentKeepsVisibleChildren() throws {
-        // Parser-driven so the real property-binding → live-visibility flow runs: the parent
-        // resolves hidden (toggle == false) but its `visible` binding is a condition-less live
-        // toggle, so it stays in the graph — and so must its authored-visible child, otherwise
-        // toggling the parent back on at runtime would reveal an empty subtree.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
@@ -2253,9 +2177,6 @@ struct WPERenderGraphBuilderTests {
                 .build(document: document)
             return try #require(graph.layers.first).passes.map(\.shader)
         }
-        // Plain + depth-test variant must BOTH use `solidlayer` (premultiplied,
-        // rgb*alpha) — not `solidcolor` (straight), which paints opaque white
-        // for a transparent base under the premultiplied blend.
         for model in ["models/util/solidlayer.json", "models/util/solidlayer_depthtest.json"] {
             let used = try shaders(forModel: model)
             #expect(used.contains("solidlayer"), "\(model) should use the solidlayer builtin")
@@ -2284,12 +2205,9 @@ struct WPERenderGraphBuilderTests {
                 animationLayers: [], parallaxDepth: SIMD2<Double>(0, 0)
             )
         }
-        // The 3719111841 audio-line case: alpha 0 + a visible effect → must composite.
         #expect(WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: true), liveVisibilityIDs: []))
-        // Alpha 0 with no effect (or an invisible one) contributes nothing → dropped.
         #expect(!WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: nil), liveVisibilityIDs: []))
         #expect(!WPERenderGraphBuilder.compositesToScene(object(alpha: 0, effectVisible: false), liveVisibilityIDs: []))
-        // Opaque layers are unaffected.
         #expect(WPERenderGraphBuilder.compositesToScene(object(alpha: 1, effectVisible: nil), liveVisibilityIDs: []))
     }
 
@@ -2418,7 +2336,6 @@ struct WPERenderGraphBuilderTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
         try writePuppetModelJSON(root: root, path: "models/p.json", puppetPath: "models/p_puppet.mdl")
-        // Mesh ±800 × ±900 fits inside a 2000×2000 object (local range [200,1800]×[100,1900]).
         try writePuppetFixture(
             vertices: boundsVertices(minX: -800, minY: -900, maxX: 800, maxY: 900),
             to: root.appendingPathComponent("models/p_puppet.mdl")
@@ -2562,7 +2479,7 @@ struct WPERenderGraphBuilderTests {
         if let anchor {
             data.append(contentsOf: Array("MDAT0001".utf8))
             data.append(UInt8(0))
-            data.appendLittleEndian(UInt32.max) // sectionEnd -> clamps to data count
+            data.appendLittleEndian(UInt32.max)
             data.appendLittleEndian(UInt16(1))
             data.appendLittleEndian(anchor.boneIndex)
             data.appendCString(anchor.name)
@@ -2577,8 +2494,6 @@ struct WPERenderGraphBuilderTests {
 
     @Test("Texture names keep significant trailing space (scene 3351072238)")
     func parseTexturePathPreservesSignificantWhitespace() {
-        // The packaged asset is literally `materials/妃咲 60帧 .tex`; trimming the
-        // reference broke the candidate lookup. Verbatim name, blank-only → nil.
         #expect(WPERenderGraphBuilder.parseTexturePath("妃咲 60帧 ") == "妃咲 60帧 ")
         #expect(WPERenderGraphBuilder.parseTexturePath(["name": "妃咲 60帧 "]) == "妃咲 60帧 ")
         #expect(WPERenderGraphBuilder.parseTexturePath("layer_albedo") == "layer_albedo")
@@ -2586,34 +2501,26 @@ struct WPERenderGraphBuilderTests {
         #expect(WPERenderGraphBuilder.parseTexturePath("") == nil)
     }
 
-    // MARK: - ADR-001 B1 unified-contract sentinels
+    // MARK: - Unified render-contract sentinels
 
     @Test("Scene copy command file contract string is frozen")
     func sceneCopyCommandFileIsFrozen() {
-        // WPE external asset path — a hard external constraint, not a renameable
-        // internal symbol. This literal is the one place that still catches an
-        // accidental edit of the shared constant itself.
         #expect(WPERenderPassPhase.sceneCopyCommandFile == "materials/util/copy.json")
     }
 
     @Test("rt-name families keep the bare scene alias and ping-pong vocabularies disjoint")
     func renderTargetNameFamiliesStayDisjoint() {
-        // Bare `_rt_imageLayerComposite` is a SCENE ALIAS, never a ping-pong member…
         #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: "_rt_imageLayerComposite") == nil)
-        // …and a suffixed ping-pong name is never a scene alias.
         #expect(WPETextureReference.isSceneAliasName("_rt_imageLayerComposite_1_a") == false)
-        // Round-trips: make → parse recovers the objectID.
         let pair = WPERenderTargetNames.ImageLayerComposite.make(objectID: "42")
         #expect(pair.a == "_rt_imageLayerComposite_42_a")
         #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: pair.b) == "42")
-        // PuppetClip base/source round-trip; base name itself reverse-parses to nil.
         let base = WPERenderTargetNames.PuppetClip.make(objectID: "7")
         #expect(base == "_rt_puppetClip_7")
         #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 0) == base)
         #expect(WPERenderTargetNames.PuppetClip.makeSource(base: base, index: 2) == "_rt_puppetClip_7_s2")
         #expect(WPERenderTargetNames.PuppetClip.baseName(of: "_rt_puppetClip_7_s2") == base)
         #expect(WPERenderTargetNames.PuppetClip.baseName(of: base) == nil)
-        // Created-layer names never enter ImageLayerComposite's reverse-parse.
         let created = WPERenderTargetNames.CreatedLayerComposite.make(key: "k")
         #expect(WPERenderTargetNames.ImageLayerComposite.layerID(from: created.a) == nil)
         #expect(WPERenderTargetNames.LayerGroup.make(objectID: "9") == "_rt_layerGroup_9")
@@ -2622,14 +2529,11 @@ struct WPERenderGraphBuilderTests {
 
     @Test("WPEBuiltinShaderKind(normalizing:) matches the string-comparison form it replaced")
     func builtinShaderKindNormalizingInitEquivalence() {
-        // Typed judgment == old `normalized(x) == "literal"` judgment, for the
-        // 25 builtins plus representative open-set inputs (ADR-001 B1 batch 3).
         for kind in WPEBuiltinShaderKind.allCases {
             #expect(WPEBuiltinShaderKind(normalizing: kind.rawValue) == kind)
         }
         #expect(WPEBuiltinShaderKind(normalizing: "materials/genericimage4.json") == .genericImage4)
         #expect(WPEBuiltinShaderKind(normalizing: "generic4") == .genericImage4)
-        // Only `materials/` is stripped — a `util/`-nested generic stays open-set.
         #expect(WPEBuiltinShaderKind(normalizing: "materials/util/genericimage4.json") == nil)
         #expect(WPEBuiltinShaderKind(normalizing: "workshop/12345/shaders/custom") == nil)
         #expect(WPEBuiltinShaderKind(normalizing: "effect_someworkshopcustom") == nil)
@@ -2640,10 +2544,8 @@ struct WPERenderGraphBuilderTests {
         #expect(WPEUtilityModelKind.classify("models/util/composelayer.json") == .composeLayer)
         #expect(WPEUtilityModelKind.classify("models/util/projectlayer.json") == .projectLayer)
         #expect(WPEUtilityModelKind.classify("models/util/fullscreenlayer.json") == .fullScreenLayer)
-        // Authoring tolerances: dependency prefix, backslashes, case.
         #expect(WPEUtilityModelKind.classify("../123456/models/util/composelayer.json") == .composeLayer)
         #expect(WPEUtilityModelKind.classify("models\\util\\ProjectLayer.json") == .projectLayer)
-        // solidlayer is a separate GraphBuilder-only classification — must stay out.
         #expect(WPEUtilityModelKind.classify("models/util/solidlayer.json") == nil)
         #expect(WPEUtilityModelKind.classify("models/util/solidlayer_depthtest.json") == nil)
     }

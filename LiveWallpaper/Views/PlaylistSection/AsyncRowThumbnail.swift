@@ -1,9 +1,7 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// First-frame poster delegated to `WallpaperThumbnailService` (already
-/// in-flight-deduplicated + NSCache-backed). Until the image resolves the
-/// view shows a film placeholder so the layout doesn't reflow on load.
+/// First-frame poster delegated to `WallpaperThumbnailService` (already in-flight-deduplicated + NSCache-backed).
 struct AsyncRowThumbnail: View {
     let bookmark: Data
     var size: CGFloat = 36
@@ -68,9 +66,7 @@ struct AsyncRowThumbnail: View {
         Self.cacheKey(for: bookmark)
     }
 
-    /// Stable key used by the row + by external invalidate paths
-    /// (e.g. removing a playlist entry). Kept centralized so callers
-    /// don't drift out of sync with the row's own derivation.
+    /// Stable key used by the row + by external invalidate paths (e.g.
     static func cacheKey(for bookmark: Data) -> String {
         "playlist-row-thumb::\(bookmark.base64EncodedString())"
     }

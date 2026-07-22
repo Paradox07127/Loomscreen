@@ -4,9 +4,7 @@ import LiveWallpaperCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Shader preset gallery embedded in `ScreenDetailPreviewArea`. Import opens
-/// an `NSOpenPanel` as a sheet (not a modal run loop) and validates by
-/// attempting a Metal compile before saving.
+/// Shader preset gallery embedded in `ScreenDetailPreviewArea`.
 struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderSource: ShaderSource
@@ -30,9 +28,6 @@ struct ShaderWallpaperSection: View {
     private static let thumbnailCornerRadius: CGFloat = 8
 
     var body: some View {
-        // Frameless to match the Scene tab's page frame
-        // (`WPESceneSection.historyList`): no titled card, no in-content type
-        // header (the toolbar picker already names the type).
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 builtinSection
@@ -107,9 +102,7 @@ struct ShaderWallpaperSection: View {
 
     // MARK: - Cards
 
-    /// Drives the card "selected" highlight from live runtime state rather than
-    /// the draft `selectedShaderSource`, so it only lights up while a shader is
-    /// actually active. Nil when the screen is on video / html / scene / nothing.
+    /// Drives the card "selected" highlight from live runtime state rather than the draft `selectedShaderSource`, so it only lights up while a shader is actually active.
     private var activeShaderSource: ShaderSource? {
         screenManager.getConfiguration(for: screen)?.activeWallpaper.shaderSource
     }

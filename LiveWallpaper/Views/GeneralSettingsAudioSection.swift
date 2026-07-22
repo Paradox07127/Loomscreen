@@ -49,10 +49,7 @@ extension GeneralSettingsView {
     }
 
     #if !LITE_BUILD
-    /// Single reconcile point for the live capture tap. The Toggle's onChange
-    /// and the config-bundle import both route through here — the import path
-    /// runs on the Backup & Restore page where the Toggle (and its onChange)
-    /// is not in the view tree, so persisting alone would leave the tap stale.
+    /// Single reconcile point for the live capture tap.
     func applyAudioResponseEnabled(_ enabled: Bool) {
         SystemAudioCaptureManager.shared.setEnabled(enabled)
         audioCaptureState = SystemAudioCaptureManager.shared.state

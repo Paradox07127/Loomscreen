@@ -13,7 +13,6 @@ struct CodexSessionModel: Sendable {
     private(set) var lastTerminalEventIsTaskComplete = false
     private(set) var cwd: String?
 
-    // v2 Fleet raw material.
     private(set) var lastUsageInput: Int?
     private(set) var lastUsageCacheRead: Int?
     private(set) var recentEventTimes: [Double] = []
@@ -229,9 +228,6 @@ struct CodexSessionModel: Sendable {
     private mutating func ingestResponseItem(_ payload: [String: Any], timestamp: Date?) {
         guard let toolName = Self.toolName(from: payload) else { return }
         lastToolName = toolName
-        // Codex exposes no metadata-only success/failure marker on the call event
-        // (exit status lives in the tool output we deliberately never read), so ok
-        // stays nil rather than guessing.
         let at = timestamp?.timeIntervalSince1970 ?? lastEventAt?.timeIntervalSince1970 ?? 0
         recentTools.append(MonitorAgentToolEvent(name: toolName, at: at, ok: nil))
         if recentTools.count > MonitorFleetSignalDeriver.recentToolCap * 3 {
@@ -359,8 +355,6 @@ struct CodexSessionModel: Sendable {
     }
 
     private static func sanitizedToolName(_ value: String) -> String? {
-        // Shared allowlist + length-cap discipline (identical to the Claude path);
-        // the Codex-specific alias is applied on top.
         guard let name = MonitorFleetSignalDeriver.sanitizedToolName(value) else { return nil }
         if name == "exec_command" {
             return "shell"

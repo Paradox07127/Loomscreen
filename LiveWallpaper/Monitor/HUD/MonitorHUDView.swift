@@ -3,18 +3,12 @@ import SwiftUI
 
 // MARK: - Signal palette
 
-/// Ambient-Instrument signal colours, converted from the mock's OKLCH values to
-/// the closest sRGB. Fixed (non-adaptive) on purpose: the capsule floats on its
-/// own dark graphite glass over arbitrary wallpaper, so it never inherits the
-/// system light/dark surface.
 private enum HUDSignal {
     static let running = Color(red: 0.921, green: 0.701, blue: 0.334)   // amber  oklch(.80 .128 78)
     static let needsInput = Color(red: 0.959, green: 0.453, blue: 0.340) // coral  oklch(.705 .165 34)
     static let done = Color(red: 0.469, green: 0.771, blue: 0.599)       // sage   oklch(.76 .10 158)
     static let idle = Color(red: 0.470, green: 0.454, blue: 0.432)       // neutral oklch(.56 .010 76)
-    /// Warnings (tool-loop / stale) reuse the warm amber attention signal —
-    /// "burning / stuck" is an attention cue, distinct from the coral "needs you"
-    /// but not a new colour in the capsule's vocabulary.
+    /// Warnings (tool-loop / stale) reuse the warm amber attention signal — "burning / stuck" is an attention cue, distinct from the coral "needs you" but not a new colour in the capsule's vocabulary.
     static let warning = running
 
     static let ink = Color(red: 0.924, green: 0.907, blue: 0.875)
@@ -53,9 +47,7 @@ private struct HUDVisualEffect: NSViewRepresentable {
 
 // MARK: - HUD view
 
-/// Native capsule shown in the floating panel. Collapsed by default (compact
-/// pill: provider dots + fleet aggregate, dimmed until hover); expands with a
-/// coral breathing glow when a session needs input.
+/// Native capsule shown in the floating panel.
 struct MonitorHUDView: View {
     let model: MonitorHUDModel
     /// Filled by the router at integration; nil = no-op (button hidden).
@@ -164,7 +156,6 @@ struct MonitorHUDView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                // "· 4m" — how long this session has been waiting on you.
                 if let waited = waitLabel(blocked) {
                     Text(verbatim: "· \(waited)")
                         .font(.system(size: 11, weight: .medium))
@@ -183,9 +174,6 @@ struct MonitorHUDView: View {
                     .truncationMode(.tail)
             }
 
-            // Subtle affordances for the focused session: a warning chip
-            // ("who's stuck") and a near-compaction pressure hint. Both stay
-            // one-line and absent unless the signal fires (calm at rest).
             if blocked.warning != nil || blocked.showsContextPressure {
                 HStack(spacing: 6) {
                     if let warning = blocked.warning {

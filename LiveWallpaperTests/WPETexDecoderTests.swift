@@ -24,19 +24,14 @@ struct WPETexDecoderTests {
 
     @Test("RG88 alphaChannelPriority expands to luminance+alpha (R,R,R,G)")
     func rg88AlphaChannelPriorityExpandsToLuminanceAlpha() throws {
-        // Two pixels: (R=200, G=50) and (R=10, G=255).
         let input = Data([200, 50, 10, 255])
 
-        // Default (normal-map style): independent channels, opaque.
         let normal = try WPETexPixelDecoder.decodeRG88(input, width: 2, height: 1, mipmap: 0)
         #expect(
             Array(normal.pixels) == [200, 50, 0, 255, 10, 255, 0, 255],
             "default RG88 must stay (R, G, 0, 255) so normal maps read .xy correctly"
         )
 
-        // Alpha-channel-priority (light glow): LUMINANCE_ALPHA → (R, R, R, G).
-        // This is the fix for the "red square light" artifact: the glow's
-        // falloff lives in G (alpha), not a forced 255.
         let glow = try WPETexPixelDecoder.decodeRG88(
             input, width: 2, height: 1, mipmap: 0, alphaChannelPriority: true
         )
@@ -110,12 +105,6 @@ struct WPETexDecoderTests {
         #expect(image.height == 4)
     }
 
-    // Single-frame static `.tex` (util/black, util/clouds_256, mask textures
-    // on saber 3526278753) carry one image and no TEXS schedule. They decode
-    // through the eager static path at full resolution; the lazy *streaming*
-    // path declines them with `unsupportedAnimation` by design (lazy = animated
-    // only). That benign decline must not be mistaken for a decode failure —
-    // see `WPEResolutionDiagnosticsTests` for the resolution-summary contract.
     @Test("Single-frame static .tex decodes eagerly at full size and declines the streaming path")
     func singleFrameStaticDecodesEagerlyAndDeclinesStreaming() throws {
         let buffer = makeRGBA8888TestImage(width: 256, height: 256)
@@ -204,10 +193,6 @@ struct WPETexDecoderTests {
         }
     }
 
-    // P1: encoded PNG/JPEG + TEXS animation no longer rejects;
-    // bridgeEncodedAnimatedImagePayload should produce a usable
-    // animation track that shares the ImageIO-rasterized atlas across
-    // every TEXS frame, with each frame carrying its own sub-rect.
     @Test("Encoded PNG + TEXS animation extracts an animation track with per-frame sub-rects")
     func encodedPNGWithTEXSExtractsAnimationTrack() throws {
         let buffer = makeEncodedPNGAtlasWithTEXS()
@@ -222,9 +207,6 @@ struct WPETexDecoderTests {
         #expect(track.frames[0].mipmaps.first?.bytes == track.frames[1].mipmaps.first?.bytes)
     }
 
-    // P3: TEXI imageWidth/imageHeight + unknown int0 must reach
-    // WPETexInfo so future runtime / dump consumers can cross-reference
-    // padded atlas dimensions against the texture-coordinate space.
     @Test("TEXI imageWidth/imageHeight/unkInt0 surface into WPETexInfo")
     func texiUnknownFieldsAreRetained() throws {
         let buffer = makeImageWithTEXIImageDimensions(
@@ -243,18 +225,6 @@ struct WPETexDecoderTests {
         #expect(info.imageHeight == 2)
         #expect(info.unknownInt0 == 7)
     }
-
-    // P3: TEXB v4's `v4Param1/v4Param2/v4Condition/v4Param3` block is
-    // only read when the parser keeps `effectiveBitmapVersion == 4`,
-    // which today requires `isVideoMP4 == 1`. The video-payload branch
-    // doesn't expose `WPETexMipmap.v4Fields` through any public API
-    // (extractTexturePayload returns `videoPayload` + empty mipmaps),
-    // so we can't round-trip v4Fields through `.decode` / `extractTexturePayload`
-    // alone. The data flow is exercised end-to-end by
-    // `WPESceneDebugArtifacts.dumpRawTexMetadata` which reads them off
-    // the parser's internal `WPETexBitmapBlock`; the read-not-skip
-    // contract is enforced by `readNullTerminatedString` in the byte
-    // reader (which would otherwise mis-align the next mip read).
 
     @Test("Streaming extraction preserves TEXS sub-rects and compressed image payloads")
     func streamingExtractionPreservesSubRectsAndCompressedPayloads() throws {
@@ -289,7 +259,6 @@ struct WPETexDecoderTests {
 
     // MARK: - Fixture helpers
 
-    /// Synthesises a TEXV0005 / TEXI0001 / TEXB0003 buffer carrying a uniform-colour RGBA8888 mipmap.
     private func makeRGBA8888TestImage(width: Int, height: Int) -> Data {
         let pixel: [UInt8] = [0xff, 0x80, 0x33, 0xff]
         var raw = Data()
@@ -459,38 +428,34 @@ struct WPETexDecoderTests {
         return buffer
     }
 
-    /// PNG atlas (2×2 RGBA bytes encoded as PNG) wrapped in a TEXV0005
-    /// container with a TEXB0003 encoded-payload + TEXS0003 schedule of
-    /// 2 frames at 25 FPS. Synthesises the corpus's "encoded animated"
-    /// shape (3 samples in 431960).
     private func makeEncodedPNGAtlasWithTEXS() -> Data {
         let pngBytes = twoByTwoPNGAtlas()
         var buffer = Data()
         appendMagic(&buffer, magic: "TEXV0005")
         appendMagic(&buffer, magic: "TEXI0001")
         appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
-        appendUInt32(&buffer, 2)   // flags: animation present
-        appendInt32(&buffer, 4)    // textureWidth
-        appendInt32(&buffer, 4)    // textureHeight
-        appendInt32(&buffer, 4)    // imageWidth
-        appendInt32(&buffer, 4)    // imageHeight
-        appendInt32(&buffer, 0)    // unkInt0
+        appendUInt32(&buffer, 2)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 0)
 
         appendMagic(&buffer, magic: "TEXB0003")
-        appendInt32(&buffer, 1)    // imageCount
-        appendInt32(&buffer, 13)   // sourceImageFormatCode (encoded marker)
-        appendInt32(&buffer, 1)    // mipmapCount
-        appendInt32(&buffer, 4)    // mipWidth
-        appendInt32(&buffer, 4)    // mipHeight
-        appendUInt32(&buffer, 0)   // compressed flag
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 13)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 4)
+        appendUInt32(&buffer, 0)
         appendUInt32(&buffer, UInt32(pngBytes.count))
         appendUInt32(&buffer, UInt32(pngBytes.count))
         buffer.append(pngBytes)
 
         appendMagic(&buffer, magic: "TEXS0003")
-        appendInt32(&buffer, 2)    // frame count
-        appendInt32(&buffer, 4)    // gifWidth
-        appendInt32(&buffer, 4)    // gifHeight
+        appendInt32(&buffer, 2)
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, 4)
         for (imageID, rect) in [
             (0, (Float(0), Float(0), Float(2), Float(2))),
             (0, (Float(2), Float(0), Float(2), Float(2)))
@@ -507,11 +472,6 @@ struct WPETexDecoderTests {
         return buffer
     }
 
-    /// Generates a 4×4 RGBA PNG (uniform color per quadrant) used by the
-    /// encoded-animated fixture. The fixture's TEXS schedule slices this
-    /// atlas into two 2×2 sub-rects so the test can assert that
-    /// `bridgeEncodedAnimatedImagePayload` returns 2 animation frames
-    /// pointing at the same atlas with distinct sub-rects.
     private func twoByTwoPNGAtlas() -> Data {
         var pixels = Data()
         pixels.reserveCapacity(4 * 4 * 4)
@@ -543,8 +503,6 @@ struct WPETexDecoderTests {
         return mutable as Data
     }
 
-    /// TEXI fixture asserting that imageWidth/imageHeight/unkInt0
-    /// survive into `WPETexInfo`.
     private func makeImageWithTEXIImageDimensions(
         textureWidth: Int,
         textureHeight: Int,

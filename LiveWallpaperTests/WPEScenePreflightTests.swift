@@ -43,7 +43,7 @@ struct WPEScenePreflightTests {
         let project = Self.makeProject()
         let document = Self.makeDocument(
             imageObjects: [Self.makeImageObject()],
-            diagnostics: [WPESceneDiagnostic(severity: .info, message: "Particle object Stars is unsupported in Phase 2.0")]
+            diagnostics: [WPESceneDiagnostic(severity: .info, message: "Particle object Stars parsed; rendered by the Metal particle simulator")]
         )
 
         let result = WPEScenePreflight.classify(

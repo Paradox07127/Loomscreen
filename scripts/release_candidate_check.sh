@@ -132,13 +132,8 @@ if ! security find-identity -p codesigning -v | grep -q '"Developer ID Applicati
   echo "WARNING: No Developer ID Application signing identity found on this Mac; notarized export must run on a signing machine." >&2
 fi
 
-# The app scheme does not include SwiftPM test products, so a green Pro test
-# action cannot attest to the package boundaries. Run every package that owns a
-# test target explicitly, in dependency order, before compiling either app SKU.
-# Each suite gets an isolated scratch directory below the same run root. The
-# loop is deliberately serial: SwiftPM dependencies and the Xcode schemes may
-# otherwise contend for shared compiler/module-cache state and make failures
-# timing-dependent.
+# App schemes omit SwiftPM test products, so package tests run explicitly first.
+# Serial execution and isolated scratch paths avoid compiler-cache contention.
 PACKAGE_TEST_PATHS=(
   "Packages/LiveWallpaperCore"
   "Packages/LiveWallpaperProWPE"
@@ -168,11 +163,8 @@ xcodebuild test \
   -only-testing:LiveWallpaperTests \
   SWIFT_EMIT_LOC_STRINGS=NO
 
-# A green Pro test action proves the Pro Debug link. Complete the other three
-# app configuration surfaces serially with isolated build databases: Pro
-# Release archive, Lite Debug, and Lite Release archive. Archives are
-# intentionally ad-hoc signed; Developer ID effective-entitlement/notarization
-# remains a separate signing-machine gate.
+# Cover Pro and Lite Debug/Release links with isolated build databases.
+# Developer ID entitlements and notarization remain a separate signing-machine gate.
 PRO_DEBUG_BIN="$DERIVED_DATA/Build/Products/Debug/LiveWallpaper.app/Contents/MacOS/LiveWallpaper"
 [[ -x "$PRO_DEBUG_BIN" ]] || fail_with_log "Pro Debug test action did not produce the app binary."
 assert_no_removed_dynamic_links "$PRO_DEBUG_BIN" "Pro Debug"
@@ -249,7 +241,7 @@ assert_arm64_binary "$LITE_RELEASE_BIN" "Lite Release archive"
 codesign --verify --deep --strict --verbose=2 "$LITE_ARCHIVED_APP"
 assert_no_removed_dynamic_links "$LITE_RELEASE_BIN" "Lite Release archive"
 
-# Lite must remain free of the Pro renderer/SceneScript process boundary.
+# Lite must remain free of Pro renderer and SceneScript components.
 for lite_binary in "$LITE_DEBUG_BIN" "$LITE_RELEASE_BIN"; do
   if nm "$lite_binary" 2>/dev/null | grep -Eq 'WPEMetalSceneRenderer|WPEMetalRenderExecutor|WPESceneScriptXPC'; then
     echo "ERROR: Lite binary contains a Pro-only renderer/XPC symbol." >&2

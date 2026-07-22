@@ -30,9 +30,7 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
     var tag: String? { requiredTags.first }
 }
 
-/// WPE's three maturity ratings, independent multi-select toggles. Inclusion is
-/// expressed by EXCLUDING the unchecked ratings (`excludedtags`), so checking
-/// only Everyone hides Questionable + Mature.
+/// WPE's three maturity ratings, independent multi-select toggles.
 enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
     case everyone
     case questionable
@@ -56,8 +54,6 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
 
 extension WorkshopQueryItem {
     /// True when the item carries Wallpaper Engine's `Mature` maturity tag.
-    /// Drives the click-to-reveal blur over adult thumbnails (Questionable is
-    /// intentionally not blurred — see the maturity-filter design).
     var isMatureRated: Bool {
         tags.contains { $0.caseInsensitiveCompare("Mature") == .orderedSame }
     }
@@ -136,10 +132,7 @@ final class WorkshopBrowseViewModel {
     /// runtime, so never surface them (server-side exclusion, not post-filter).
     nonisolated static let alwaysExcludedTags = ["Application"]
 
-    /// Typing schedules a debounced auto-search (fires after `searchDebounce` of
-    /// quiet); Return / Search submit immediately. The debounce only queries when
-    /// the input actually changes the applied request, so submits/clear/deep-links
-    /// never double-fire.
+    /// Typing schedules a debounced auto-search (fires after `searchDebounce` of quiet); Return / Search submit immediately.
     var searchInput: String = "" {
         didSet {
             guard searchInput != oldValue else { return }
@@ -147,9 +140,6 @@ final class WorkshopBrowseViewModel {
         }
     }
     var preferredSort: WorkshopSortMode = .topRated
-    // All four filters share one model: a multi-select Set defaulting to every
-    // option, with empty == "all". Narrowing DESELECTS → deselected options
-    // become `excludedtags`. Persisted across launches.
     private(set) var selectedTypes: Set<WorkshopContentTypeFilter> = Set(WorkshopContentTypeFilter.selectableCases)
     private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
     private(set) var selectedResolutions: Set<WorkshopResolutionFilter> = Set(WorkshopResolutionFilter.selectableCases)
@@ -201,7 +191,6 @@ final class WorkshopBrowseViewModel {
     var canGoNextPage: Bool {
         guard !isRateLimited, !isLoading, !isPaging else { return false }
         if let totalPages { return pageIndex < totalPages }
-        // Unknown total: allow next while the page came back full.
         return items.count >= Self.perPage
     }
 
@@ -226,8 +215,6 @@ final class WorkshopBrowseViewModel {
     init(services: WorkshopServices) {
         self.services = services
         self.currentRequest = WorkshopQueryRequest(sort: .topRated, timeFrame: .allTime)
-        // Seed `currentRequest` to match the restored filters so
-        // `hasPendingChanges` is false on launch.
         loadPersistedFilters()
         self.currentRequest = makeRequest(page: 1)
     }
@@ -238,10 +225,7 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Restarts the auto-apply countdown; fires `reload()` after `searchDebounce`
-    /// of quiet, but only if it would actually change the applied request (typing
-    /// inside a creator/tag scope, or retyping the submitted query, no-ops). Rapid
-    /// toggling keeps restarting the window, so a burst of edits costs one request.
+    /// Reloads after the search debounce only when the applied request would change.
     private func scheduleAutoApply() {
         autoSearchTask?.cancel()
         autoSearchTask = Task { [weak self] in
@@ -254,7 +238,6 @@ final class WorkshopBrowseViewModel {
 
     func reload() async {
         guard !isRateLimited else { return }
-        // An explicit reload supersedes any pending auto-search.
         autoSearchTask?.cancel()
         inflightFetch?.cancel()
         pageIndex = 1
@@ -332,8 +315,6 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    // Filter mutations below edit state and schedule the shared debounced
-    // auto-apply — none query directly, so a burst of chip toggles costs one request.
 
     func updateSort(_ sort: WorkshopSortMode) {
         preferredSort = sort
@@ -346,10 +327,6 @@ final class WorkshopBrowseViewModel {
     }
 
     // NOTE: each toggle mutates its property directly (no `inout` helper).
-    // Passing `&selectedTypes` as inout held exclusive access to the @Observable
-    // property across the whole call, and `persistFilters()` reads it again →
-    // "simultaneous accesses … requires exclusive access" crash. Mutating in
-    // place first, then persisting, keeps the accesses non-overlapping.
     func toggleType(_ type: WorkshopContentTypeFilter) {
         if selectedTypes.contains(type) { selectedTypes.remove(type) } else { selectedTypes.insert(type) }
         persistFilters()
@@ -374,8 +351,6 @@ final class WorkshopBrowseViewModel {
         scheduleAutoApply()
     }
 
-    // Option-click "isolate" — collapse a category to just one option, or, if
-    // it's already the lone selection, restore the full set.
     func isolateType(_ type: WorkshopContentTypeFilter) {
         selectedTypes = isolated(type, in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases)
         persistFilters()
@@ -434,8 +409,6 @@ final class WorkshopBrowseViewModel {
 
     private func loadPersistedFilters() {
         let defaults = UserDefaults.standard
-        // Absent key → keep the default (all selected). Present (even empty) →
-        // honor the saved selection (empty set == "all" at query time anyway).
         if let raw = defaults.array(forKey: FilterKey.types) as? [String] {
             selectedTypes = Set(raw.compactMap(WorkshopContentTypeFilter.init(rawValue:)))
                 .intersection(Set(WorkshopContentTypeFilter.selectableCases))
@@ -452,9 +425,7 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    /// Returns `true` on a successful page load. `replacingItems` swaps the
-    /// visible set (reload + pagination both replace — no unbounded append);
-    /// `paging` selects which loading flag to clear.
+    /// Returns `true` on a successful page load.
     @discardableResult
     private func runFetch(_ request: WorkshopQueryRequest, replacingItems: Bool, paging: Bool) async -> Bool {
         currentRequestToken &+= 1
@@ -464,7 +435,6 @@ final class WorkshopBrowseViewModel {
             var succeeded = false
             do {
                 let page = try await self.services.queryService.fetch(request)
-                // Drop the result if a newer fetch has started since.
                 guard token == self.currentRequestToken else { return false }
                 if replacingItems {
                     self.items = Self.displayable(page.items)
@@ -480,7 +450,6 @@ final class WorkshopBrowseViewModel {
                     self.rateLimitUntil = Date().addingTimeInterval(retryAfter ?? 60)
                 }
             } catch is CancellationError {
-                // ignore — user-triggered reload
             } catch {
                 guard token == self.currentRequestToken else { return false }
                 self.lastError = .responseParseFailure
@@ -508,8 +477,6 @@ final class WorkshopBrowseViewModel {
     }
 
     private func makeRequest(page: Int) -> WorkshopQueryRequest {
-        // Creator-scoped browse ignores sort / search / tag filters — lists one
-        // creator's published files via GetUserFiles.
         if let creatorFilter {
             return WorkshopQueryRequest(
                 sort: .newest,
@@ -519,8 +486,6 @@ final class WorkshopBrowseViewModel {
             )
         }
 
-        // Tag-scoped browse: items REQUIRED to carry the clicked tag (sort still
-        // applies); deselect filters / search ignored while scoped.
         if let pinnedTag {
             return WorkshopQueryRequest(
                 sort: preferredSort,
@@ -535,9 +500,6 @@ final class WorkshopBrowseViewModel {
 
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Pure-exclusion model: DESELECTED options become `excludedtags`. A
-        // category fully selected OR empty contributes nothing ("empty == all").
-        // No `requiredtags` are sent.
         var excluded: [String] = []
         excluded += deselectedTags(in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases) { $0.tag }
         excluded += deselectedTags(in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases) { $0.tag }

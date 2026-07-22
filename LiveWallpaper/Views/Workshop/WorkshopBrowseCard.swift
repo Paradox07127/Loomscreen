@@ -3,9 +3,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Grid card for the online browse view. Square preview tile matching the
-/// ~192px source thumbnails (no 16:9 letterboxing). Per-item actions live in
-/// the detail sheet and right-click context menu, not on the tile.
+/// Grid card for the online browse view.
 struct WorkshopBrowseCard: View {
     let item: WorkshopQueryItem
     var isInLibrary: Bool = false
@@ -27,9 +25,6 @@ struct WorkshopBrowseCard: View {
     }
 
     var body: some View {
-        // A real Button (not a tap gesture) so the tile is keyboard-focusable and
-        // Return/Space activates it. A blurred tile's first activation reveals it;
-        // a second opens details.
         Button(action: { if shouldBlur { requestReveal() } else { onSelect() } }) {
             VStack(alignment: .leading, spacing: 0) {
                 thumbnailArea
@@ -44,7 +39,6 @@ struct WorkshopBrowseCard: View {
         .onHover { isHovered = $0 }
         .help(item.title)
         .contextMenu { contextMenuItems }
-        // Collapse the rich tile into one labeled element; per-item actions stay on the rotor.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabelText))
         .accessibilityHint(shouldBlur
@@ -155,7 +149,6 @@ struct WorkshopBrowseCard: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
                 .font(DesignTokens.Typography.bodyEmphasized)
-                // Reserve two lines so 1- and 2-line titles produce equal-height cards (no ragged grid).
                 .lineLimit(2, reservesSpace: true)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -183,9 +176,7 @@ struct WorkshopBrowseCard: View {
         }
     }
 
-    /// Leading type glyph, matching the app's existing drag-preview iconography
-    /// (`WorkshopInstalledView.dragIconName`) so Scene/Video/Web read the same
-    /// everywhere.
+    /// Leading type glyph, matching the app's existing drag-preview iconography (`WorkshopInstalledView.dragIconName`) so Scene/Video/Web read the same everywhere.
     private static func typeSymbol(for type: WorkshopContentTypeFilter) -> String? {
         switch type {
         case .scene: return "cube.transparent.fill"
@@ -252,9 +243,7 @@ struct WorkshopBrowseCard: View {
         return nil
     }
 
-    /// VoiceOver names this via `accessibilityLabelText`, so the visible badge is
-    /// `accessibilityHidden`. Download size was moved off the narrow card to the
-    /// detail sheet so the type pill never has to wrap.
+    /// VoiceOver names this via `accessibilityLabelText`, so the visible badge is `accessibilityHidden`.
     private var subscribersLabel: String? {
         guard let subs = item.subscriptionCount, subs > 0 else { return nil }
         return formatSubs(subs)
@@ -291,9 +280,7 @@ struct WorkshopBrowseCard: View {
         "2160 x 3840": "Portrait"
     ]
 
-    /// Derive a label from any embedded "W x H" tag (covers prefixes like
-    /// "Dual 3840 x 1080"). Ratio buckets ultrawide/dual; height buckets the
-    /// landscape resolutions.
+    /// Derive a label from any embedded "W x H" tag (covers prefixes like "Dual 3840 x 1080").
     private static func deriveResolutionLabel(from tag: String) -> String? {
         guard tag.range(of: #"\d+\s*[xX×]\s*\d+"#, options: .regularExpression) != nil else { return nil }
         let nums = tag.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }

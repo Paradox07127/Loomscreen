@@ -2,9 +2,7 @@ import LiveWallpaperCore
 import SwiftUI
 
 extension GeneralSettingsView {
-    /// Per-screen RAM budget for the in-memory video cache. Slider (not a
-    /// 3-mode picker) so each user picks their own RAM-vs-disk-reads trade-off.
-    /// 0 = streaming only; the "total" line makes the multi-screen multiplier explicit.
+    /// Per-screen RAM budget for the in-memory video cache.
     @ViewBuilder
     var performanceSection: some View {
         Section {
@@ -55,9 +53,7 @@ extension GeneralSettingsView {
                 subtitle: "Render each display on its own thread for smoother playback",
                 info: "Each display gets its own render thread, moving frame work off the main thread for smoother playback. Turn this off to render on the main thread — only needed for troubleshooting. Changing it reloads your wallpapers. Affects scene (Wallpaper Engine) wallpapers."
             ) {
-                // The flag is read once when each session is built, so a live
-                // toggle must rebuild sessions to take effect — reloadAllScreens
-                // tears down and restores every session, re-reading the flag.
+                // The flag is read once when each session is built, so a live toggle must rebuild sessions to take effect — reloadAllScreens tears down and restores every session, re-reading the flag.
                 Toggle("", isOn: $offMainRenderEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
@@ -96,8 +92,6 @@ extension GeneralSettingsView {
                 Button("Edit…") { showAppExceptions = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    // Without fixedSize the SettingRow's flexible title column
-                    // (maxWidth: .infinity, layoutPriority 1) starves the button and clips its label to an empty border.
                     .fixedSize()
                     .accessibilityLabel(Text("Edit application exceptions"))
             }

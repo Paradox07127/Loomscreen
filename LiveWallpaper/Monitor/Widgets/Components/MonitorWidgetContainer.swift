@@ -1,32 +1,12 @@
 import SwiftUI
 
-/// The standard widget shell every Monitor widget wraps itself in, so spacing and
-/// typography stay uniform across the board. Composes the instrument-panel chrome,
-/// the HIG content insets, and the mock's `.chd` header idiom — a whisper label
-/// (with optional leading SF Symbol) on the left, a micro-status readout on the
-/// right — above a content slot.
-///
-/// The type scale is cell-derived (pass the widget's rendered height so the
-/// label/caption sizes track SPEC §3.0); the corner radius is NOT — the panel
-/// chrome fills the tile's full bounds with zero inset, so it must share the
-/// one board-wide radius (`MonitorBoardGeometry.cornerRadius`) every tile is
-/// clipped/stroked with, or the fill reads as mis-centred inside its own tile.
-/// The default matches the board's fixed Apple desktop-widget radius, which is
-/// what the live wallpaper (point-scale 1) always renders at; the scaled
-/// inspector preview draws name tiles that receive the geometry radius directly.
-/// Content is caller-provided, so any embedded text should use `Text(verbatim:)`.
 struct MonitorWidgetContainer<Content: View, Status: View>: View {
     var label: String
     /// Optional SF Symbol name shown before the label.
     var systemImage: String?
     /// Cell height in points; drives the type scale only (see corner-radius note above).
     var cellHeight: CGFloat
-    /// Panel corner radius — zero-inset, so this should equal the outer tile's
-    /// radius exactly (see type doc). Defaults to the board's Apple desktop-widget
-    /// radius: the live wallpaper always renders at point-scale 1, so the static
-    /// default matches `MonitorBoardGeometry.cornerRadius` wherever real
-    /// instruments draw (the scaled inspector preview renders name tiles, which
-    /// receive the geometry radius explicitly).
+    /// Panel corner radius — zero-inset, so this should equal the outer tile's radius exactly (see type doc).
     var cornerRadius: CGFloat = MonitorBoardGeometry.appleCornerRadius
     @ViewBuilder var status: () -> Status
     @ViewBuilder var content: () -> Content
@@ -62,8 +42,6 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
     }
 
     private var header: some View {
-        // Title reads one size up from the whisper labels so the instrument's
-        // name anchors the card at the fixed Apple frames.
         let titleSize = scale.label + 1
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let systemImage {
@@ -85,7 +63,6 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
 
 #Preview("Widget container") {
     HStack(spacing: 24) {
-        // 2×2 square footprint
         MonitorWidgetContainer(label: "CPU", systemImage: "cpu", cellHeight: 150) {
             HStack(spacing: 5) {
                 BreathingDot(color: MonitorDesign.signalAmber, size: 6)
@@ -100,7 +77,6 @@ struct MonitorWidgetContainer<Content: View, Status: View>: View {
         }
         .frame(width: 150, height: 150)
 
-        // 4×2 wide footprint
         MonitorWidgetContainer(label: "NETWORK", systemImage: "wifi", cellHeight: 150) {
             Text(verbatim: "6.2 MB/s").foregroundStyle(MonitorDesign.inkMuted)
         } content: {

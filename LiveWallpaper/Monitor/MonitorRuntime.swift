@@ -14,22 +14,12 @@ struct MonitorRuntimeOptions: Sendable, Equatable {
     var claudeRoot: URL?
     var codexRoot: URL?
     /// Widget kinds placed on the board across all screens sharing this lease.
-    /// `nil` (v1 callers) leaves the system source on its default demand gates;
-    /// a non-nil set drives `SystemMetricsSource.Options` so an expensive sampler
-    /// (GPU / top processes / ANE / accessories) only runs when a matching widget
-    /// is actually placed. Unioned across leases like every other option.
     var activeWidgetKinds: Set<MonitorWidgetKind>?
-    /// GPU sampling period in seconds, from the GPU widget's `gpuSampleSeconds`
-    /// option. nil ⇒ the default cadence (~6s). Merged across leases by MIN so
-    /// the fastest request wins.
+    /// GPU sampling period in seconds, from the GPU widget's `gpuSampleSeconds` option.
     var gpuSampleSeconds: Double?
 }
 
-/// Account-level usage-ledger fragment a source can optionally expose (per-model +
-/// per-day history + burn rates). Mirrors `MonitorUsageProviding`: composed by
-/// `MonitorRuntime` because no single source owns the cross-provider ledger.
-/// `MonitorProviderUsage` has no slot for this history, so it rides a separate
-/// seam that the runtime merges via `MonitorUsageRollup`.
+/// Account-level usage-ledger fragment a source can optionally expose (per-model + per-day history + burn rates).
 protocol MonitorUsageLedgerProviding: Sendable {
     func currentUsageLedger() async -> MonitorUsageLedgerFragment
 }
@@ -37,9 +27,7 @@ protocol MonitorUsageLedgerProviding: Sendable {
 extension ClaudeAgentSource: MonitorUsageLedgerProviding {}
 extension CodexAgentSource: MonitorUsageLedgerProviding {}
 
-/// The security-scoped grant plumbing the runtime drives, behind a seam so the
-/// suspend tests can prove a resume re-opens nothing — the property this type
-/// exists to provide is invisible from the outside otherwise.
+/// The security-scoped grant plumbing the runtime drives, behind a seam so the suspend tests can prove a resume re-opens nothing — the property this type exists to provide is invisible from the outside otherwise.
 struct MonitorGrantAccess: Sendable {
     var resolveRoots: @Sendable () async -> (claude: URL?, codex: URL?)
     var release: @Sendable () async -> Void
@@ -57,10 +45,7 @@ struct MonitorGrantAccess: Sendable {
     )
 }
 
-/// A caller-owned command stream for one logical runtime lease slot. Every
-/// acquire/update/pause/release is enqueued synchronously through this object,
-/// so fire-and-forget UI callbacks cannot reorder an older generation behind a
-/// newer one merely because their Tasks started in a different order.
+/// A caller-owned command stream for one logical runtime lease slot.
 final class MonitorRuntimeLeaseSlot: Sendable {
     private struct State: Sendable {
         var nextSequence: UInt64 = 0
@@ -106,9 +91,7 @@ final class MonitorRuntimeLeaseSlot: Sendable {
 
             switch command {
             case let .acquire(options):
-                // Generation allocation happens before this lock. If two
-                // concurrent acquires enter in reverse order, the globally newer
-                // generation remains authoritative.
+                // Generation allocation happens before this lock.
                 if let current = state.currentGeneration, generation <= current {
                     return state.drainTask ?? Self.completedTask
                 }
@@ -141,9 +124,6 @@ final class MonitorRuntimeLeaseSlot: Sendable {
                 return state.drainTask ?? Self.completedTask
             }
 
-            // At most one pending snapshot exists per slot. A burst folds into
-            // the newest desired generation/options/pause state while the single
-            // drain worker is blocked in a source rebuild.
             state.pendingEvent = MonitorRuntimeLeaseEvent(
                 leaseID: leaseID,
                 generation: generation,
@@ -165,9 +145,7 @@ final class MonitorRuntimeLeaseSlot: Sendable {
         while true {
             let event = state.withLock { state -> MonitorRuntimeLeaseEvent? in
                 guard let event = state.pendingEvent else {
-                    // Clearing under the same lock that enqueue uses closes the
-                    // lost-wakeup race: the next command either belongs to this
-                    // worker or creates exactly one replacement.
+                    // Clearing under the same lock that enqueue uses closes the lost-wakeup race: the next command either belongs to this worker or creates exactly one replacement.
                     state.drainTask = nil
                     return nil
                 }
@@ -195,8 +173,6 @@ final class MonitorRuntimeLeaseSlot: Sendable {
 }
 
 /// Generation-scoped authority returned by `MonitorRuntimeLeaseSlot.acquire`.
-/// Once released, the handle is terminal; stale callbacks become no-ops before
-/// they can even enter the runtime actor.
 final class MonitorRuntimeLeaseHandle: Sendable {
     private struct State: Sendable {
         var isReleased = false
@@ -274,38 +250,12 @@ private struct MonitorRuntimeLeaseEvent: Sendable {
     let desiredState: MonitorRuntimeLeaseDesiredState
 }
 
-/// App-wide owner of the monitor data pipeline so N displays showing the Monitor
-/// wallpaper share one hub + one set of sources.
-///
-/// Lifecycle is lease-based: each owner keeps a `MonitorRuntimeLeaseSlot`, starts
-/// a generation-scoped handle, and routes every later event through that handle.
-/// The slot sequences commands before launching Tasks; the actor verifies both
-/// generation and sequence. Therefore a stale generation cannot mutate or
-/// release a newer lease, and no retired-ID tombstones are retained. The
-/// pipeline always runs with the UNION of every live lease's UNPAUSED options
-/// (so one system-only display can't strip agent modules from another), and one
-/// revision-driven rebuild worker folds overlapping changes without interleaving
-/// producer start/stop work.
-///
-/// `setPaused` is the energy seam: a wallpaper the performance policy suspended
-/// pauses its lease rather than releasing it, so the samplers it alone demanded
-/// are torn down while the lease slot survives for a cheap resume.
-///
-/// Agent/usage sources live in separate adapter files wired through
-/// `extraSourceFactories` — registered once at startup — letting this coordinator
-/// compile and run system-only without them. Security-scoped agent roots are
-/// resolved HERE (never by views) so sandbox-scope lifetime is owned by the
-/// pipeline's owner rather than by any one display. Scope lifetime tracks LIVE
-/// LEASES, not the pipeline: every lease pausing tears the samplers down but
-/// keeps the resolved roots open, which is what makes the resume cheap. The
-/// scopes close when no live lease wants AI data any more.
+/// App-wide owner of the monitor data pipeline so N displays showing the Monitor wallpaper share one hub + one set of sources.
 actor MonitorRuntime {
     static let shared = MonitorRuntime()
 
     private let grants: MonitorGrantAccess
-    /// Tests can supply a source seam without mutating the process-global
-    /// MainActor registry. Production leaves this nil and reads the registered
-    /// factories exactly as before.
+    /// Tests can supply a source seam without mutating the process-global MainActor registry.
     private let sourceFactoriesOverride: [SourceFactory]?
 
     init(
@@ -319,16 +269,11 @@ actor MonitorRuntime {
     typealias SourceFactory = @Sendable (MonitorRuntimeOptions) -> [any MonitorDataSource]
 
     /// Registered at app startup by whichever module owns the agent/usage adapters.
-    /// Each factory returns the sources it can build for the given options (or `[]`).
-    /// `@MainActor`-isolated because registration happens once during app launch;
-    /// the actor hops to read it when (re)building the pipeline.
     @MainActor static var extraSourceFactories: [SourceFactory] = []
 
     nonisolated let broker = MonitorSnapshotBroker()
 
-    /// One view's claim on the pipeline. A paused lease keeps its slot but
-    /// contributes nothing to the merged options, so whatever it alone demanded is
-    /// torn down; every lease paused ⇒ no pipeline at all.
+    /// One view's claim on the pipeline.
     private struct Lease {
         var generation: UInt64
         var lastSequence: UInt64
@@ -342,28 +287,20 @@ actor MonitorRuntime {
     private var leases: [UUID: Lease] = [:]
     /// Union options the current pipeline was requested with (pre-resolution).
     private var activeOptions: MonitorRuntimeOptions?
-    /// Roots resolved under the current grants, held open by live leases. Cached
-    /// so a resume (or any rebuild that still wants AI data) reuses the open
-    /// security scopes instead of re-resolving the bookmarks. Cleared exactly
-    /// when the grants are released.
+    /// Roots resolved under the current grants, held open by live leases.
     private var resolvedRoots: (claude: URL?, codex: URL?)?
     private var rebuildTask: Task<Void, Never>?
     private var rebuildRevision: UInt64 = 0
     private var forceRebuildRequested = false
     private var rebuildWorkerLaunchCount: UInt64 = 0
-    /// Termination is a one-way lifecycle for the app-wide runtime. Once
-    /// shutdown begins, late fire-and-forget acquire/release/update tasks from
-    /// view cleanup are ignored rather than rebuilding a producer behind the
-    /// final cursor flush.
+    /// Termination is a one-way lifecycle for the app-wide runtime.
     private enum Lifecycle: Equatable {
         case running
         case shuttingDown
         case terminated
     }
     private var lifecycle: Lifecycle = .running
-    /// Shared by every concurrent shutdown caller. This makes shutdown
-    /// idempotent while still requiring every caller to await the same producer
-    /// barrier.
+    /// Shared by every concurrent shutdown caller.
     private var shutdownTask: Task<Void, Never>?
 
     var debugActiveLeaseCount: Int { leases.count }
@@ -403,9 +340,7 @@ actor MonitorRuntime {
 
         case .released:
             guard let current = leases[event.leaseID] else { return }
-            // A release for a newer generation also retires an actor-side older
-            // generation when acquire+release coalesced before the drain reached
-            // the actor. An older generation can never release a newer one.
+            // A release for a newer generation also retires an actor-side older generation when acquire+release coalesced before the drain reached the actor.
             guard event.generation > current.generation
                 || (event.generation == current.generation && event.sequence > current.lastSequence)
             else { return }
@@ -421,14 +356,7 @@ actor MonitorRuntime {
         await rebuild(force: true)
     }
 
-    /// Stops the complete producer graph and closes every lease/grant before
-    /// returning. This is the termination-time barrier: callers may safely do
-    /// the final cursor/settings flush only after it completes.
-    ///
-    /// Capturing the single drain worker after switching the lifecycle to
-    /// `shuttingDown` covers every rebuild admitted before this call. Public
-    /// mutations admitted later are rejected by the lifecycle guards. Concurrent
-    /// callers all await the same task.
+    /// Stops the complete producer graph and closes every lease/grant before returning.
     func shutdown() async {
         if let shutdownTask {
             await shutdownTask.value
@@ -458,12 +386,9 @@ actor MonitorRuntime {
             merged.topProcesses = merged.topProcesses || entry.topProcesses
             if merged.claudeRoot == nil { merged.claudeRoot = entry.claudeRoot }
             if merged.codexRoot == nil { merged.codexRoot = entry.codexRoot }
-            // Union the placed-widget sets: a kind demanded by ANY screen turns its
-            // sampler on. Absent on every lease ⇒ stays nil ⇒ default demand gates.
             if let kinds = entry.activeWidgetKinds {
                 merged.activeWidgetKinds = (merged.activeWidgetKinds ?? []).union(kinds)
             }
-            // Fastest requested GPU sampling period wins across screens.
             if let seconds = entry.gpuSampleSeconds {
                 merged.gpuSampleSeconds = min(merged.gpuSampleSeconds ?? seconds, seconds)
             }
@@ -482,15 +407,11 @@ actor MonitorRuntime {
     /// demand gates. Each expensive walk runs only when its widget is on the board.
     static func systemOptions(for kinds: Set<MonitorWidgetKind>) -> SystemMetricsSource.Options {
         SystemMetricsSource.Options(
-            // CPU (L "Top by CPU" list) and Memory (L "Top by memory" list) both
-            // show a process attribution, so either — not just the Processes
-            // widget — demands the top-process walk.
             gpu: kinds.contains(.gpu),
             topProcesses: kinds.contains(.processes) || kinds.contains(.cpu) || kinds.contains(.memory),
             ane: kinds.contains(.aiEngine),
             accessories: kinds.contains(.power),
             sensors: kinds.contains(.cpu) || kinds.contains(.gpu) || kinds.contains(.power),
-            // The Disk widget's L "top by I/O" list rides the same walk.
             processIO: kinds.contains(.disk)
         )
     }
@@ -515,9 +436,7 @@ actor MonitorRuntime {
         await task.value
     }
 
-    /// One actor-owned rebuild worker folds every mutation that arrives while a
-    /// source start/stop is suspended. There is never a task-per-command chain;
-    /// callers admitted during a rebuild await this same bounded worker.
+    /// One actor-owned rebuild worker folds every mutation that arrives while a source start/stop is suspended.
     private func runRebuildLoop() async {
         while lifecycle == .running {
             let revision = rebuildRevision
@@ -536,23 +455,13 @@ actor MonitorRuntime {
 
     private func performRebuild(force: Bool) async {
         guard lifecycle == .running else { return }
-        // Recomputed at execution time so the last pass in a coalesced burst
-        // settles on the final lease state and earlier ones collapse to no-ops.
-        // Paused leases are excluded: with every lease paused this yields nil and
-        // the pipeline stops outright.
         let target = Self.merged(leases.values.filter { !$0.isPaused }.map(\.options))
         let rebuilding = force || target != activeOptions
         if rebuilding {
             await stopPipeline()
-            // `stopPipeline()` is an actor-reentrancy point. Termination may
-            // have started while a source was stopping; never rebuild it on the
-            // far side of that await.
+            // `stopPipeline()` is an actor-reentrancy point.
             guard lifecycle == .running else { return }
         }
-        // Grants answer to live leases (paused ones included), not to the
-        // pipeline. Reconciled even when the pipeline itself is unchanged: the
-        // last lease can go away while every lease was already paused, and
-        // `target` stays nil across that, so the no-op guard would skip it.
         let stillWanted = leases.values.contains { $0.options.agents || $0.options.usage }
         if force || !stillWanted {
             await releaseGrants()
@@ -576,16 +485,11 @@ actor MonitorRuntime {
             } else {
                 roots = await grants.resolveRoots()
                 guard lifecycle == .running else { return }
-                // Only a resolution that opened a scope is worth holding: an
-                // unresolved grant keeps being retried, so a grant the user makes
-                // later is picked up without waiting for `refreshSources`.
                 if roots.claude != nil || roots.codex != nil { resolvedRoots = roots }
             }
             resolved.claudeRoot = resolved.claudeRoot ?? roots.claude
             resolved.codexRoot = resolved.codexRoot ?? roots.codex
-            // Why-no-data: when an AI module is wanted but a root can't resolve
-            // (no grant / stale bookmark), say so — both in the log and as a
-            // synthesized health record the widgets' empty states can read.
+            // Why-no-data: when an AI module is wanted but a root can't resolve (no grant / stale bookmark), say so — both in the log and as a synthesized health record the widgets' empty states can read.
             if resolved.claudeRoot == nil {
                 monitorSourcesLog.warning("🛰️ claude root unresolved (no grant?) — agent/usage sources disabled")
                 await hub.updateHealth(MonitorSourceHealth(
@@ -606,14 +510,11 @@ actor MonitorRuntime {
         var built: [any MonitorDataSource] = []
         if resolved.system {
             if let kinds = resolved.activeWidgetKinds {
-                // Demand-gated: only build the samplers the placed widgets need.
                 built.append(SystemMetricsSource(
                     options: Self.systemOptions(for: kinds),
                     gpuSampleCadence: Self.gpuCadence(forSeconds: resolved.gpuSampleSeconds) ?? 3
                 ))
             } else {
-                // v1 path: default demand gates (GPU + accessories on, ANE off),
-                // top processes driven by the legacy module toggle.
                 built.append(SystemMetricsSource(includeTopProcesses: resolved.topProcesses))
             }
         }
@@ -631,9 +532,7 @@ actor MonitorRuntime {
         sources = built
         for source in built {
             await source.start(sink: hub)
-            // A source start is also reentrant. The shutdown task is waiting on
-            // this rebuild and will stop everything in `sources`; returning now
-            // avoids starting the remaining producers after termination began.
+            // A source start is also reentrant.
             guard lifecycle == .running else { return }
         }
         monitorSourcesLog.info("🛰️ pipeline: agents=\(resolved.agents) usage=\(resolved.usage) claudeRoot=\(resolved.claudeRoot != nil) codexRoot=\(resolved.codexRoot != nil) sources=\(built.map(\.sourceID).joined(separator: ","), privacy: .public)")
@@ -643,13 +542,7 @@ actor MonitorRuntime {
                 guard let provider = source as? any MonitorUsageProviding else { return nil }
                 return (source.sourceID, provider)
             }
-            // Ledger providers contribute per-model/per-day history + burn rates via
-            // a separate seam; merged here so the published snapshot carries the full
-            // ledger alongside today/quota. Same source instances, cheap cached reads.
             let ledgerProviders: [any MonitorUsageLedgerProviding] = built.compactMap { $0 as? any MonitorUsageLedgerProviding }
-            // Account rate limits ride in on the Claude Code statusline payload
-            // teed into the (read-only) claude root by the user's capture script;
-            // nil when no root is granted or the user hasn't installed it.
             let limitsReader: ClaudeRateLimitReader? = resolved.claudeRoot.map { ClaudeRateLimitReader(rootURL: $0) }
             if providers.isEmpty && limitsReader == nil {
                 monitorSourcesLog.warning("🛰️ usage task skipped: no providers, no limits reader")
@@ -657,7 +550,6 @@ actor MonitorRuntime {
             if !providers.isEmpty || limitsReader != nil {
                 usageTask = Task { [hub] in
                     while !Task.isCancelled {
-                        // Re-read limits each tick so the freshness window advances.
                         let snapshot = await Self.composeUsageSnapshot(
                             providers: providers,
                             ledgerProviders: ledgerProviders,
@@ -673,12 +565,7 @@ actor MonitorRuntime {
         }
     }
 
-    /// Compose one published usage snapshot from the live providers: today/quota
-    /// from `MonitorUsageProviding`, per-model/per-day history + burn rates from the
-    /// `MonitorUsageLedgerProviding` fragments (pooled buckets rolled through
-    /// `MonitorUsageRollup`, per-provider burn rates summed nil-aware), and account
-    /// limits from the already-read `ClaudeRateLimits`. Pure aside from awaiting the
-    /// providers' cached reads — the test drives it with synthetic providers.
+    /// Composes a usage snapshot from live provider totals and ledger history.
     static func composeUsageSnapshot(
         providers: [(id: String, provider: any MonitorUsageProviding)],
         ledgerProviders: [any MonitorUsageLedgerProviding],
@@ -699,9 +586,6 @@ actor MonitorRuntime {
             }
         }
 
-        // Merge every provider's ledger fragment: pool file buckets for the
-        // perModel/dailyActivity rollup, sum the already-windowed per-provider burn
-        // rates (nil-aware, so nil+nil stays nil).
         var ledgerBuckets: [MonitorFileUsageBuckets] = []
         var tokenBurn: Double?
         var costBurn: Double?
@@ -741,10 +625,7 @@ actor MonitorRuntime {
             task.cancel()
             await task.value
         }
-        // Detach ownership before awaiting so a re-entrant lifecycle call sees
-        // the truthful target state. Sources are independent producers; stop
-        // them concurrently so one slow filesystem tail does not prevent the
-        // other pipelines from beginning cleanup before the app watchdog.
+        // Detach ownership before awaiting so a re-entrant lifecycle call sees the truthful target state.
         let stoppingSources = sources
         sources.removeAll()
         await withTaskGroup(of: Void.self) { group in

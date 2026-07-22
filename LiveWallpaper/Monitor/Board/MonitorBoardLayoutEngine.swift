@@ -2,36 +2,9 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-// MARK: - Monitor v2 board layout engine
-//
-// Pure geometry for the widget board — a native port of the interaction math in
-// `monitor-design/board-mock.html`, reconciled with the CELL-EXACT persistence
-// contract (`MonitorBoardConfiguration.packedPlacements`). Everything here is
-// side-effect-free and unit-tested (`MonitorBoardLayoutEngineTests`); the
-// SwiftUI/AppKit layers call in but hold no geometry of their own.
-//
-// Coordinate model (cell-exact):
-//   • Normalized (x,y) ∈ 0…1 — the persisted top-left corner. NO margin or
-//     gutter is baked in.
-//   • Board pixels — normalized × board size. A widget's pixel footprint is a
-//     pure multiple of the (margin-free, gutter-free) cell pitch.
-//   • Visual gutters are the RENDERER's job: each tile's pixel rect is inset by
-//     `tileInsetX/Y` per axis at draw time. Snap candidates and overlap tests
-//     run on the RAW (pre-inset) cell rects, so tiles pack edge-to-edge in
-//     stored coordinates while still showing a uniform gap on screen.
-//
-// A widget's normalized origin survives display changes; out-of-bounds
-// placements clamp back on rather than being dropped (mock `relayoutAll`).
+// MARK: - Monitor board layout engine
 
-/// Cell geometry for one board size under the cell-exact model, sized to
-/// Apple's official macOS widget frames (HIG Widgets → Specifications):
-/// S 170×170, M 364×170, L 364×376 pt. Decomposed into a fixed-point cell
-/// PITCH + per-axis render inset so all three frames come out exact:
-/// visible = span×pitch − 2×inset ⇒ pitch 194/206 with insets 12/18 gives
-/// 170/364 wide and 170/376 tall, with 24 pt horizontal / 36 pt vertical
-/// gaps between flush neighbours — the same absolute size on every display,
-/// like real desktop widgets. `columns`/`rows` are derived reference counts;
-/// placements are free-form.
+/// Cell geometry for one board size under the cell-exact model, sized to Apple's official macOS widget frames (HIG Widgets → Specifications): S 170×170, M 364×170, L 364×376 pt.
 struct MonitorBoardGeometry: Equatable {
     let boardSize: CGSize
     let columns: Int
@@ -54,9 +27,6 @@ struct MonitorBoardGeometry: Equatable {
     static let appleCornerRadius: CGFloat = 16
 
     init(boardSize: CGSize, referenceWidth: CGFloat = 0, topInsetFraction: CGFloat = 0) {
-        // Point scale: 1 on the wallpaper (the board IS the screen). The
-        // inspector preview passes the real display's width so its miniature
-        // board renders Apple-size widgets to scale (WYSIWYG placements).
         let reference = referenceWidth > 0 ? referenceWidth : boardSize.width
         let s = reference > 0 ? boardSize.width / reference : 1
 
@@ -70,7 +40,6 @@ struct MonitorBoardGeometry: Equatable {
         self.tileInsetX = Self.appleTileInset.width * s
         self.tileInsetY = Self.appleTileInset.height * s
         self.cornerRadius = max(Self.appleCornerRadius * s, 1)
-        // Top forbidden zone (menu-bar avoidance), in board pixels.
         self.topInset = max(0, min(boardSize.height, boardSize.height * topInsetFraction))
     }
 
@@ -97,10 +66,7 @@ struct MonitorBoardGeometry: Equatable {
         return raw.insetBy(dx: dx, dy: dy)
     }
 
-    /// Legal top-left range so the full RAW footprint stays on-board (edges may
-    /// touch the board edges — cell-exact packing puts a full row flush to 0…1),
-    /// with the top clamped to `topInset` so widgets never intrude on the
-    /// menu-bar zone. Oversized footprints pin to the top-left / inset line.
+    /// Constrains the widget footprint to the board and below the menu-bar inset.
     func clampOrigin(_ origin: CGPoint, footprint: CGSize) -> CGPoint {
         let maxX = boardSize.width - footprint.width
         let maxY = boardSize.height - footprint.height
@@ -111,10 +77,6 @@ struct MonitorBoardGeometry: Equatable {
     }
 }
 
-/// A candidate alignment line surfaced during a drag so the view can draw the
-/// magnetic guide. `axis == .vertical` is an x-line, `.horizontal` is a y-line.
-/// `partner` is the sibling RAW rect the line aligns against (nil for board
-/// edges / centre-lines, which the mock draws full-span).
 struct MonitorSnapGuide: Equatable {
     enum Axis { case vertical, horizontal }
     var axis: Axis
@@ -145,14 +107,8 @@ struct MonitorBoardItem: Equatable {
 /// Namespace for the pure layout algorithms. All static; no stored state.
 enum MonitorBoardLayoutEngine {
 
-    /// Snap distance in points (mock `SNAP_TH = 14`).
     static let snapThreshold: CGFloat = 14
-    /// Only siblings within this pixel neighbourhood of the dragged rect emit
-    /// alignment candidates (mock `SNAP_NEAR = 140`).
     static let snapNeighborhood: CGFloat = 140
-    /// Overlap slop so a shared edge counts as touching, not overlapping. In the
-    /// cell-exact model neighbours legitimately share edges, so this keeps that
-    /// from registering as an interpenetration (mock `EPS`).
     static let epsilon: CGFloat = 0.5
 
     static func clamp<T: Comparable>(_ value: T, _ low: T, _ high: T) -> T {
@@ -161,12 +117,10 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Normalized ↔ pixel
 
-    /// Normalized top-left → pixel origin against a board size (mock: `x*bw`).
     static func pixelOrigin(normalized: CGPoint, boardSize: CGSize) -> CGPoint {
         CGPoint(x: normalized.x * boardSize.width, y: normalized.y * boardSize.height)
     }
 
-    /// Pixel origin → normalized (mock `setPos`: `x/bw`). Zero board ⇒ (0,0).
     static func normalized(pixelOrigin origin: CGPoint, boardSize: CGSize) -> CGPoint {
         CGPoint(
             x: boardSize.width > 0 ? origin.x / boardSize.width : 0,
@@ -176,10 +130,7 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: AABB overlap
 
-    /// True when two RAW rects interpenetrate. Shared/touching edges are legal
-    /// (cell-exact neighbours pack flush), so the test uses `epsilon` slop: a
-    /// conflict needs real overlap on BOTH axes. The visible gutter comes from
-    /// the render inset, not from a coordinate gap.
+    /// True when two RAW rects interpenetrate.
     static func conflicts(_ a: CGRect, _ b: CGRect) -> Bool {
         a.minX < b.maxX - epsilon
             && a.maxX > b.minX + epsilon
@@ -187,8 +138,6 @@ enum MonitorBoardLayoutEngine {
             && a.maxY > b.minY + epsilon
     }
 
-    /// A rect is legal when it sits inside the board and doesn't interpenetrate
-    /// any other item (mock `legalAt`, adapted to cell-exact bounds).
     static func isLegal(
         rect: CGRect,
         geometry: MonitorBoardGeometry,
@@ -210,15 +159,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Overlap resolution
 
-    /// Resolve a requested origin to the nearest non-overlapping legal origin.
-    ///
-    /// Clamp on-board first; if already legal, return it. Otherwise build
-    /// candidate x/y coordinates from each sibling's push-out edges (its far
-    /// edge, or its near edge − footprint — flush, since edges may touch)
-    /// crossed with the requested coordinate, and pick the nearest legal
-    /// combination within `maxDisplacement`. Returns nil when nothing qualifies
-    /// (the caller springs back). Port of the mock's `resolveRect`, with the
-    /// cell-exact change that push-out is flush (no gutter added).
     static func resolve(
         origin requested: CGPoint,
         footprint: CGSize,
@@ -265,15 +205,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Magnetic snap
 
-    /// Compute the snapped origin + alignment guides for a free (raw) drag
-    /// origin. Each axis is solved independently. Candidates come from the board
-    /// edges, the board centre-lines, and — for siblings within the snap
-    /// neighbourhood — their L/R/centre edge alignments (which draw a guide)
-    /// plus flush adjacency to their far/near edges (no guide; the ghost frame
-    /// carries the meaning). The nearest candidate within `snapThreshold` wins;
-    /// on a tie a guide-bearing candidate is preferred so its line isn't masked
-    /// by an earlier guide-less one. Port of the mock's `computeSnap`, with
-    /// cell-exact (flush) adjacency and board-edge candidates at 0 / boardW.
     static func snap(
         freeOrigin free: CGPoint,
         footprint: CGSize,
@@ -314,8 +245,6 @@ enum MonitorBoardLayoutEngine {
             }
         }
 
-        // Board edges + centre-lines (full-span guides). The top edge is the
-        // menu-bar forbidden zone's lower line (`topInset`, 0 when unset).
         considerX(target: 0, guidePos: 0, partner: nil)
         considerX(target: bw - dw, guidePos: bw, partner: nil)
         considerX(target: (bw - dw) / 2, guidePos: bw / 2, partner: nil)
@@ -323,7 +252,6 @@ enum MonitorBoardLayoutEngine {
         considerY(target: bh - dh, guidePos: bh, partner: nil)
         considerY(target: (bh - dh) / 2, guidePos: bh / 2, partner: nil)
 
-        // Neighbouring widgets: edge alignment (with guide) + flush adjacency.
         for item in items where item.id != ignoredID {
             let r = item.rect
             let near = !(free.x > r.maxX + snapNeighborhood
@@ -354,10 +282,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Guide line segment geometry
 
-    /// Concrete on-board line segment for a guide, matching the mock's
-    /// `showSnapPreview`: a sibling-anchored guide spans the union of the
-    /// dragged rect and the partner (± a small pad); a board-edge / centre guide
-    /// spans the full board edge-to-edge.
     static func guideSegment(
         _ guide: MonitorSnapGuide,
         draggedRect: CGRect,
@@ -386,10 +310,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Drag landing
 
-    /// Where a widget lands when the pointer is released. Prefers the snapped
-    /// origin (unless snapping was bypassed), then runs overlap resolution with
-    /// `maxDisplacement = max(dw, dh)` — nil ⇒ spring back to `origin` (mock
-    /// `onDragEnd`).
     static func land(
         freeOrigin free: CGPoint,
         snappedOrigin: CGPoint?,
@@ -411,11 +331,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Size toggle re-fit
 
-    /// New origin when a widget changes size, keeping its top-left anchor where
-    /// possible. Tries the anchor, then (if the new footprint overhangs) small
-    /// left/up shifts to the far edge before deferring to full overlap
-    /// resolution. Returns nil when the new size can't be placed near the anchor
-    /// at all (caller flashes "deny"). Mirrors the mock's `changeSize`.
     static func refitForSizeChange(
         anchor: CGPoint,
         newFootprint: CGSize,
@@ -450,10 +365,6 @@ enum MonitorBoardLayoutEngine {
 
     // MARK: Add-widget first fit
 
-    /// First-fit origin for a newly added widget: aim at the lower-centre band
-    /// (mock `addWidget` targets `((bw-dw)/2, bh*0.64)`), resolve to the nearest
-    /// free slot, then apply one in-threshold snap toward a neighbour if that
-    /// snapped position is itself legal. Returns nil when the board is full.
     static func firstFit(
         footprint: CGSize,
         geometry: MonitorBoardGeometry,

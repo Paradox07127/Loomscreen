@@ -2,15 +2,7 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic tests for the Usage widget's data derivations — the burn-ETA slope
-/// math over the sparse 5h-used% series, the two quota-escalation thresholds
-/// (near-limit dot vs bar fill), the cache four-segment fractions, and the
-/// stale-dimming rule. No UI: every case exercises the `nonisolated static`
-/// helpers on `MonitorUsagePresentationPolicy` directly, pinning the ported behaviour
-/// from `index.html` `buildUsageSection` (`quotaBand`/`quotaFill`/burn ETA).
 struct MonitorUsageWidgetTests {
-
-    // MARK: - Burn ETA slope (client-derived "time to 5h cap")
 
     @Test("burn ETA needs ≥2 samples")
     func burnEtaInsufficientSamples() {
@@ -20,7 +12,6 @@ struct MonitorUsageWidgetTests {
 
     @Test("burn ETA from a positive two-point slope reaches 1.0")
     func burnEtaTwoPoint() {
-        // 0.50 → 0.60 over 600 s = +0.10 per 600 s. Remaining 0.40 → 2400 s.
         let eta = MonitorUsagePresentationPolicy.burnETASeconds(times: [0, 600], used: [0.50, 0.60])
         #expect(eta != nil)
         #expect(abs((eta ?? 0) - 2400) < 1.0)
@@ -28,9 +19,6 @@ struct MonitorUsageWidgetTests {
 
     @Test("burn ETA uses least-squares slope across many samples")
     func burnEtaLeastSquares() {
-        // Perfectly linear +0.01 per 60 s → slope 1/6000 per s. From last=0.55,
-        // remaining 0.45 → 0.45 · 6000 = 2700 s. A clean line makes LSQ == the
-        // analytic slope.
         let times = (0..<6).map { Double($0) * 60 }
         let used = (0..<6).map { 0.50 + Double($0) * 0.01 }
         let eta = MonitorUsagePresentationPolicy.burnETASeconds(times: times, used: used)
@@ -52,18 +40,14 @@ struct MonitorUsageWidgetTests {
 
     @Test("ETA is clamped so a whisper-slow slope doesn't overflow the horizon")
     func burnEtaClamped() {
-        // +0.00001 over 600 s → raw ETA ≈ 6.6M s; clamped to the cap.
         let eta = MonitorUsagePresentationPolicy.burnETASeconds(times: [0, 600], used: [0.50, 0.50001])
         #expect(eta == MonitorUsagePresentationPolicy.burnETAClampSeconds)
     }
 
     @Test("zero / negative dt between samples is ignored (no divide-by-zero)")
     func burnEtaGuardsBadTime() {
-        // Same timestamp twice → no usable slope.
         #expect(MonitorUsagePresentationPolicy.burnETASeconds(times: [600, 600], used: [0.4, 0.6]) == nil)
     }
-
-    // MARK: - Quota escalation thresholds (ported quotaBand / quotaFill)
 
     @Test("near-limit dot band: warm ≥40%, crit >85%")
     func quotaBandThresholds() {
@@ -90,8 +74,6 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.isETACritical(38 * 60) == false)
     }
 
-    // MARK: - Cache four-segment fractions
-
     @Test("cache segments are proportions of the four token totals")
     func cacheSegments() {
         var t = MonitorTokenTotals()
@@ -104,7 +86,6 @@ struct MonitorUsageWidgetTests {
         let total = 1_180_000.0 + 960_000 + 5_210_000 + 1_070_000
         #expect(abs(segs[0].fraction - 1_180_000 / total) < 1e-9)
         #expect(abs(segs[2].fraction - 5_210_000 / total) < 1e-9)
-        // Fractions sum to 1.
         #expect(abs(segs.reduce(0) { $0 + $1.fraction } - 1.0) < 1e-9)
     }
 
@@ -122,21 +103,14 @@ struct MonitorUsageWidgetTests {
         let hit = MonitorUsagePresentationPolicy.cacheHitRate(t)
         #expect(hit != nil)
         #expect(abs((hit ?? 0) - 5_210_000 / (1_180_000 + 5_210_000)) < 1e-9)
-        // No reads at all → nil, not 0/0.
         #expect(MonitorUsagePresentationPolicy.cacheHitRate(.zero) == nil)
     }
 
-    // MARK: - Reset-countdown formatting choice
-
     @Test("5h reset uses short countdown, week reset uses days-aware countdown")
     func resetFormatting() {
-        // 5h window: hours+minutes, no days.
         #expect(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: 2 * 3600 + 14 * 60) == "2h 14m")
-        // Week window: days+hours.
         #expect(MonitorUsagePresentationPolicy.weekResetText(secondsRemaining: 3 * 86400 + 5 * 3600) == "3d 5h")
     }
-
-    // MARK: - Stale dimming
 
     @Test("stale dimming keyed on limitsStale == true only")
     func staleDimming() {
@@ -151,8 +125,6 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.hasQuota(makeUsage(five: nil)) == false)
     }
 
-    // MARK: - Per-model breakdown (L layout)
-
     @Test("model family is prefix-matched, unknown ids fall through to .other")
     func modelFamilyClassification() {
         #expect(MonitorUsagePresentationPolicy.modelFamily("claude-opus-4-20250514") == .opus)
@@ -165,7 +137,6 @@ struct MonitorUsageWidgetTests {
 
     @Test("gpt-5-mini classifies before gpt-5 (order matters)")
     func modelFamilyMiniPrecedence() {
-        // A bare "gpt-5" must NOT swallow the "-mini" suffix.
         #expect(MonitorUsagePresentationPolicy.modelFamily("gpt-5-mini") == .gpt5mini)
         #expect(MonitorUsagePresentationPolicy.modelFamily("gpt-5") == .gpt5)
     }
@@ -175,7 +146,6 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.modelShortName("claude-opus-4-20250514") == "Opus")
         #expect(MonitorUsagePresentationPolicy.modelShortName("claude-sonnet-5") == "Sonnet")
         #expect(MonitorUsagePresentationPolicy.modelShortName("gpt-5-mini") == "GPT-5 mini")
-        // Unknown id keeps its name but trims a trailing "-<digits>" stamp.
         #expect(MonitorUsagePresentationPolicy.modelShortName("my-model-20240101") == "my-model")
     }
 
@@ -198,7 +168,6 @@ struct MonitorUsageWidgetTests {
         }
         let top = MonitorUsagePresentationPolicy.topModels(u, limit: 4)
         #expect(top?.count == 4)
-        // Preserves the rollup's descending order (fixture is already sorted).
         #expect(top?.first?.model == "m0")
     }
 
@@ -211,8 +180,6 @@ struct MonitorUsageWidgetTests {
         u.tokensToday = MonitorTokenTotals(input: 5)
         #expect(MonitorUsagePresentationPolicy.hasCache(u) == true)
     }
-
-    // MARK: - `provider` / `primaryMetric` settings (read side)
 
     @Test("resolvedProvider defaults to \"all\", accepts claude/codex, rejects garbage")
     func resolvedProviderDefaults() {
@@ -253,15 +220,11 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.aggregatesVisible("codex") == false)
     }
 
-    // MARK: - Provider-scoped today totals
-
     @Test("filteredCostTodayUSD: all is unfiltered, claude/codex read perProvider")
     func filteredCostTodayUSDByProvider() {
         let u = makeProviderSplitUsage()
         #expect(MonitorUsagePresentationPolicy.filteredCostTodayUSD(u, provider: "all") == 12.4)
         #expect(MonitorUsagePresentationPolicy.filteredCostTodayUSD(u, provider: "claude") == 8.1)
-        // Codex has no public per-token rate — perProvider["codex"].costTodayUSD
-        // is always nil, and filtering must surface that honestly, not fabricate.
         #expect(MonitorUsagePresentationPolicy.filteredCostTodayUSD(u, provider: "codex") == nil)
     }
 
@@ -281,15 +244,12 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.filteredTokensToday(u, provider: "codex")?.input == 1_900_000)
     }
 
-    // MARK: - Per-model provider inference + filtering
-
     @Test("modelProvider: claude- prefix is Claude, everything else (gpt-5*, fallback \"codex\") is Codex")
     func modelProviderInference() {
         #expect(MonitorUsagePresentationPolicy.modelProvider("claude-opus-4-20250514") == "claude")
         #expect(MonitorUsagePresentationPolicy.modelProvider("claude-sonnet-5") == "claude")
         #expect(MonitorUsagePresentationPolicy.modelProvider("gpt-5") == "codex")
         #expect(MonitorUsagePresentationPolicy.modelProvider("gpt-5-mini") == "codex")
-        // The Codex source's undetermined-model fallback literal.
         #expect(MonitorUsagePresentationPolicy.modelProvider("codex") == "codex")
     }
 
@@ -318,7 +278,6 @@ struct MonitorUsageWidgetTests {
         let claudeTop = MonitorUsagePresentationPolicy.topModels(u, limit: 4, provider: "claude")
         #expect(claudeTop?.count == 2)
         #expect(MonitorUsagePresentationPolicy.topModels(u, provider: "codex")?.first?.model == "gpt-5")
-        // Default provider ("all") is unchanged from the pre-existing behaviour.
         #expect(MonitorUsagePresentationPolicy.topModels(u, limit: 4)?.count == 3)
     }
 
@@ -332,8 +291,6 @@ struct MonitorUsageWidgetTests {
         #expect(MonitorUsagePresentationPolicy.hasCache(noCodex, provider: "codex") == false)
     }
 
-    // MARK: - Fixtures
-
     private func makeUsage(
         five: Double? = 0.58, stale: Bool? = false
     ) -> MonitorUsageSnapshot {
@@ -344,8 +301,6 @@ struct MonitorUsageWidgetTests {
         return u
     }
 
-    /// A snapshot with a real Claude/Codex `perProvider` split, mirroring the
-    /// preview fixture's numbers (Codex cost intentionally nil — no public rate).
     private func makeProviderSplitUsage() -> MonitorUsageSnapshot {
         var u = MonitorUsageSnapshot()
         u.costTodayUSD = 12.4
@@ -357,7 +312,6 @@ struct MonitorUsageWidgetTests {
         return u
     }
 
-    /// A snapshot with a mixed-provider `perModel` breakdown (2 Claude models, 1 Codex).
     private func makePerModelUsage() -> MonitorUsageSnapshot {
         var u = MonitorUsageSnapshot()
         u.perModel = [

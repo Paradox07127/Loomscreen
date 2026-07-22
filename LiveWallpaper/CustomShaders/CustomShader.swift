@@ -1,9 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 
-/// User-imported Metal shader. Persisted as a single JSON file per shader in
-/// `~/Library/Application Support/<bundle>/shaders/` so we never have to
-/// reconcile a sidecar `.metal` against a metadata file.
+/// User-imported Metal shader.
 public struct CustomShader: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var name: String

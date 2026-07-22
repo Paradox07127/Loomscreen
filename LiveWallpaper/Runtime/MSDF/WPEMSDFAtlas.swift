@@ -24,7 +24,7 @@ struct WPEMSDFAtlasEntry {
     let metrics: WPEMSDFGlyphMetrics
 }
 
-// Not `@MainActor` (M2c1b-3c): the atlas is owned and queried inside the
+// Not `@MainActor`: the atlas is owned and queried inside the
 // renderer's actor isolation. Off-thread glyph generation used to complete via
 // `MainActor.run`; it now writes each result into a `Sendable` lock-box that the
 // render actor harvests on its next query (`harvestCompletedGenerations`).

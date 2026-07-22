@@ -1,16 +1,8 @@
 import Foundation
 import os
 
-/// Canonical classifier for WPE's three `models/util/*.json` scene-capture
-/// utility models — `composelayer`, `projectlayer`, `fullscreenlayer` — the
-/// placeholder geometries WPE uses to host full-frame post-process effects,
-/// projections, and layer groups. Single source of truth shared by the graph
-/// builder (Infrastructure) and the executor/dispatcher/target pool (Runtime) —
-/// both import this Schema package, so neither crosses the Infra↔Runtime
-/// boundary. Previously hand-copied in both places (ADR-001 B1: a drift between
-/// the two copies causes PiP or fullscreen mis-capture regressions). Does NOT
-/// cover `models/util/solidlayer[_depthtest].json` — that is a separate,
-/// GraphBuilder-only builtin-material classification with a narrower normalizer.
+/// Classifies WPE scene-capture utility models shared by graph construction and render execution.
+/// Solid-layer utility materials are classified separately by the graph builder.
 public enum WPEUtilityModelKind: String, CaseIterable, Equatable, Sendable {
     case composeLayer = "composelayer"
     case projectLayer = "projectlayer"
@@ -27,9 +19,7 @@ public enum WPEUtilityModelKind: String, CaseIterable, Equatable, Sendable {
         return nil
     }
 
-    /// True for any of the three, regardless of which — the executor/
-    /// dispatcher/target-pool "is this a scene-capture utility layer at all"
-    /// gate before asking which kind for geometry purposes.
+    /// Returns whether the path identifies any scene-capture utility model.
     public static func isUtilityModelPath(_ path: String) -> Bool {
         classify(path) != nil
     }

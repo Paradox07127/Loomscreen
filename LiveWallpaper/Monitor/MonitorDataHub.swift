@@ -1,15 +1,6 @@
 import Foundation
 
-/// Fan-in point for all `MonitorDataSource`s. Sources push partial updates (system
-/// metrics, one provider's agent sessions, usage, health) whenever they have news;
-/// the hub keeps the last value per slot, recomposes a full `MonitorSnapshot`, and
-/// publishes it to the broker — but no more than `throttleInterval` apart, so a burst
-/// of source updates collapses into at most one leading + one trailing publish.
-///
-/// A module that has never reported stays `nil` in the composed snapshot (renderers
-/// read `nil` as "module disabled / no data"). `setModuleEnabled` lets the runtime
-/// force a slot back to `nil` so a late in-flight update from a torn-down source
-/// can't resurrect a disabled module.
+/// Fan-in point for all `MonitorDataSource`s.
 actor MonitorDataHub: MonitorSnapshotSink {
     private let broker: MonitorSnapshotBroker
     private let throttleInterval: TimeInterval
@@ -109,9 +100,7 @@ actor MonitorDataHub: MonitorSnapshotSink {
         )
     }
 
-    /// Merge every source's sessions, most attention-worthy first, then most
-    /// recently active. `nil` (not empty) while no agent source has reported so the
-    /// agent widgets can pick their unauthorized / empty state.
+    /// Merge every source's sessions, most attention-worthy first, then most recently active.
     private func composedAgents() -> [MonitorAgentSessionState]? {
         guard agentsEnabled, !agentsBySource.isEmpty else { return nil }
         let merged = agentsBySource.values.flatMap { $0 }

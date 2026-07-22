@@ -57,9 +57,6 @@ struct CodexAgentSourceTests {
         )
         let calendar = Calendar.current
 
-        // A real ten-year shape, kept intentionally sparse at the file level:
-        // the old recursive oracle must still enter every day directory while
-        // the optimized scanner addresses only the 48-hour leaves.
         for year in 2016...2025 {
             for month in 1...12 {
                 for day in 1...28 {
@@ -132,9 +129,6 @@ struct CodexAgentSourceTests {
         let sessions = root.appendingPathComponent("sessions", isDirectory: true)
         try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
 
-        // Put a huge root first. Round-robin traversal must still give the two
-        // neighboring legacy roots a turn before this one consumes the entire
-        // descendant budget.
         for index in 0..<300 {
             try Self.writeFile(
                 sessions
@@ -180,8 +174,6 @@ struct CodexAgentSourceTests {
         let topLevelVisits = observed.filter {
             $0.standardizedFileURL.pathComponents.count - sessionsDepth == 1
         }
-        // These are independent production contracts: 96 raw top-level pulls
-        // plus 256 descendant pulls.
         #expect(topLevelVisits.count <= 96)
         #expect(observed.count <= 96 + 256)
     }
@@ -214,8 +206,6 @@ struct CodexAgentSourceTests {
         let sessions = root.appendingPathComponent("sessions", isDirectory: true)
         try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
 
-        // This catches the former false green where only descendants were
-        // counted while top-level discovery requested every entry at once.
         let filler = Data("ignored".utf8)
         for index in 0 ..< 10000 {
             try filler.write(
@@ -283,8 +273,6 @@ struct CodexAgentSourceTests {
         let now = Date()
         let sessions = root.appendingPathComponent("sessions", isDirectory: true)
 
-        // Files placed by the day-shard their date falls in, so the directory
-        // prune (not just the mtime filter) is what excludes the old ones.
         func shardURL(daysAgo: Int, name: String) throws -> URL {
             let date = calendar.date(byAdding: .day, value: -daysAgo, to: now)!
             let comps = calendar.dateComponents([.year, .month, .day], from: date)
@@ -300,7 +288,6 @@ struct CodexAgentSourceTests {
         let todayURL = try shardURL(daysAgo: 0, name: "rollout-today.jsonl")
         let inWindowURL = try shardURL(daysAgo: 10, name: "rollout-recent.jsonl")
         let oldURL = try shardURL(daysAgo: 40, name: "rollout-old.jsonl")
-        // Non-rollout files in an in-window shard are ignored.
         _ = try shardURL(daysAgo: 1, name: "notes.txt")
 
         let refs = CodexAgentSource.ledgerFileRefs(rootURL: root, now: now)
@@ -430,9 +417,6 @@ struct CodexAgentSourceTests {
             .appendingPathComponent(String(format: "%02d", components.day ?? 0), isDirectory: true)
     }
 
-    /// Test-only copy of the pre-optimization scanner. Keeping this deliberately
-    /// recursive gives the optimized implementation an independent result
-    /// oracle instead of comparing two routes through the new traversal helper.
     private static func legacyFullTreeScan(
         root: URL,
         now: Date,

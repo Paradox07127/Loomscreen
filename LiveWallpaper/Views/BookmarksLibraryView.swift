@@ -12,10 +12,7 @@ struct BookmarksLibraryView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
 
-    // Type chips appear as soon as the library mixes types — a single-type
-    // collection has nothing to filter, but mixed collections benefit from
-    // the chips even at low counts (otherwise the user wonders why the
-    // filter never shows up).
+    // Show type filters only when the library contains multiple content types.
 
     var body: some View {
         DetailPageScaffold(
@@ -151,10 +148,7 @@ struct BookmarksLibraryView: View {
 
     private var filteredBookmarks: [WallpaperBookmark] {
         var result = store.bookmarks
-        // Only honor the type filter while the chip row is visible AND that
-        // type is still present — otherwise the user can land in an invisible
-        // filter (e.g. they pick "Web", delete bookmarks until count ≤ 6 or
-        // until no web bookmarks remain, and the grid silently goes blank).
+        // Only honor the type filter while the chip row is visible AND that type is still present — otherwise the user can land in an invisible filter (e.g.
         if showsTypeChips, case .type(let type) = typeFilter, availableTypes.contains(type) {
             result = result.filter { $0.wallpaperType == type }
         }

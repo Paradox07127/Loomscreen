@@ -2,10 +2,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// Phase 2.0 minimal model of a Wallpaper Engine `scene.json`. Only the
-/// fields that participate in the image-only render pipeline are first-class;
-/// the rest become diagnostics so the import service can downgrade the
-/// capability tier without losing context.
+/// Runtime model of a Wallpaper Engine `scene.json`; unsupported fields remain available as diagnostics.
 public struct WPESceneDocument: Equatable, Sendable {
     public let camera: WPESceneCamera
     public let general: WPESceneGeneral
@@ -717,7 +714,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let copyBackground: Bool
     /// Scene object this layer attaches to (the parent puppet for body-split rigs). `nil` for roots.
     public let parentObjectID: String?
-    /// Named MDAT anchor on the parent puppet this layer follows (e.g. 头部/脖颈/胸部). `nil` when unattached.
+    /// Named MDAT anchor on the parent puppet, or `nil` when unattached.
     public let attachment: String?
     public let origin: SIMD3<Double>
     public let scale: SIMD3<Double>
@@ -731,10 +728,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
-    /// Keyframed `color` (WPE authors day/night tints as a c0/c1/c2 track set).
-    /// `color` holds the authored static `value`, which is only the seed — a
-    /// scene that animates the tint (3448877775's 昼夜变化) freezes on that seed
-    /// unless this drives it per frame.
+    /// Keyframed color track; `color` remains the authored static seed.
     public let colorAnimation: WPESceneAnimatedValue?
     public let brightness: Double
     /// A blend that reads the destination, so it cannot ride a Metal blend

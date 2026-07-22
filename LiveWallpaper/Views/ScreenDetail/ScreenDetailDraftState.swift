@@ -1,11 +1,6 @@
 import Foundation
 import LiveWallpaperCore
 
-/// In-flight, view-local mirror of every `ScreenConfiguration` field bound
-/// to inspector controls. Consolidates 21 `@State` properties so a screen
-/// switch can re-fan the view from a single atomic assignment — closing
-/// the C3 finding where the previous "no-config" branch missed
-/// `videoColorSpace`, `selectedShaderSource`, and `hasPreviewSource` resets.
 struct ScreenDetailDraftState: Sendable, Equatable {
     var playbackSpeed: Double
     var selectedFitMode: VideoFitMode
@@ -33,10 +28,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     /// Scene-only "Interaction" toggle (real click capture).
     var sceneClickCaptureEnabled: Bool
     var hasPreviewSource: Bool
-    /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand
-    /// inspector can bind property overrides without round-tripping
-    /// through the persistence store on every keystroke. Nil for non-
-    /// scene wallpaper types.
+    /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand inspector can bind property overrides without round-tripping through the persistence store on every keystroke.
     var sceneDescriptor: SceneDescriptor?
 
     static let `default` = ScreenDetailDraftState(
@@ -67,11 +59,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
         sceneDescriptor: nil
     )
 
-    /// Maps a `ScreenConfiguration` onto a draft snapshot. When `config`
-    /// is nil the result equals `.default` except `hasPreviewSource`, which
-    /// follows the caller-supplied fallback (typically
-    /// `screen.videoPlayer?.videoURL != nil` so we don't flash an empty
-    /// state while the runtime player is still alive).
+    /// Maps a `ScreenConfiguration` onto a draft snapshot.
     static func from(
         config: ScreenConfiguration?,
         fallbackHasPreviewSource: Bool

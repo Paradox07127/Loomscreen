@@ -2,29 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import os
 
-/// Desktop wallpaper host for the native Monitor v2 widget board.
-///
-/// This replaces the retired v1 WKWebView dashboard: instead of loading a
-/// bundled `dashboard.html` and pushing JSON over a `monitorBridge`, it embeds
-/// the native `MonitorBoardHostView` (SwiftUI/CoreAnimation) and feeds it
-/// `MonitorSnapshot` values pulled from the shared `MonitorRuntime` broker.
-///
-/// Responsibilities carried over 1:1 from v1:
-///   • Lease the shared data pipeline (unique UUID acquire → single release),
-///     now advertising the board's active widget kinds so the runtime only
-///     samples what is on screen.
-///   • Pump the newest snapshot at the configured cadence. While the performance
-///     policy suspends the wallpaper (occlusion / battery / etc.) the pump, the
-///     runtime lease, and the board's own clocks all stop — see `suspend()`.
-///   • Click-through unless `mouseInteractionEnabled` (mirrored by the window's
-///     `ignoresMouseEvents`, set alongside in `makeMonitorSession`).
-///   • Hard-gate the AI-agent modules: when the injected feature catalog does
-///     not unlock `.agentFleet`, usage/fleet placements are stripped before the
-///     board ever sees them.
-///
-/// Board edits (drag/add/remove/resize) surface through `onConfigurationEdited`
-/// — the session builder wires that to the same `ScreenManager` config-update
-/// path every other wallpaper type uses.
+/// Desktop wallpaper host for the native Monitor widget board.
 @MainActor
 final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, WallpaperResourceCleanable {
 
@@ -32,15 +10,10 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     private let boardHost: MonitorBoardHostView
     private var configuration: MonitorBoardConfiguration
-    /// Whether the injected feature catalog unlocks the AI-agent modules. When
-    /// false, usage/fleet placements are stripped before display and the lease
-    /// never requests those kinds.
+    /// Whether the injected feature catalog unlocks the AI-agent modules.
     private let agentFleetEnabled: Bool
 
-    /// Mirrors `configuration.mouseInteractionEnabled`; when false the wallpaper
-    /// stays click-through. The window's own `ignoresMouseEvents` is set
-    /// alongside this in `makeMonitorSession`, and the board host's own
-    /// `hitTest` agrees.
+    /// Mirrors `configuration.mouseInteractionEnabled`; when false the wallpaper stays click-through.
     private var allowMouseInteraction: Bool
 
     /// Fires (debounced by the board host) whenever the user commits a board
@@ -89,8 +62,6 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         boardHost.autoresizingMask = [.width, .height]
         addSubview(boardHost)
 
-        // A fresh session starts with clean rolling history so series don't
-        // bleed across sessions.
         boardHost.resetHistory()
 
         // Route committed board edits back out; re-apply the agent gate before
@@ -99,19 +70,14 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
             self?.acceptBoardConfigurationEdit(edited)
         }
 
-        // Force mouse interaction on while the board is being edited (both the
-        // view's hitTest gate and the window policy), restoring the persisted
-        // click-through state on exit — including the board's own Done control.
         boardHost.onEditingChanged = { [weak self] editing in
             self?.handleEditingChanged(editing)
         }
 
-        // Warm the shared pipeline immediately so data is ready by first paint.
         MonitorSourceRegistration.registerDefaultFactories()
         runtimeLease = runtimeLeaseSlot.acquire(options: makeRuntimeOptions())
 
         startPump()
-        // Paint the current snapshot (if any) immediately.
         pushLatestSnapshot(force: true)
     }
 
@@ -120,8 +86,6 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     deinit {
-        // Balance the runtime acquire even if `cleanup()` was never called
-        // (defensive; the session normally calls it).
         pumpTask?.cancel()
         runtimeLease?.release()
     }
@@ -144,11 +108,6 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     private func makeRuntimeOptions() -> MonitorRuntimeOptions {
-        // The active widget kinds drive on-demand sampling (I1's lease seam):
-        // the runtime only samples the metrics some on-screen widget consumes.
-        // Agent/usage modules stay hard-gated on `agentFleetEnabled`; the config
-        // is already stripped of those placements when the gate is off, so the
-        // kind set can't re-enable them.
         let kinds = Set(configuration.widgets.map(\.kind))
         let wantsAgents = agentFleetEnabled && kinds.contains(.fleet)
         let wantsUsage = agentFleetEnabled && kinds.contains(.usage)
@@ -166,17 +125,12 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     /// Repoint the shared lease's on-demand sampling for a live config change.
-    /// The generation-scoped handle makes a refresh racing teardown terminal: it
-    /// cannot mutate a later lease generation from this slot.
     private func refreshRuntimeOptions() {
         guard let runtimeLease, !isCleaningUp else { return }
         runtimeLease.updateOptions(makeRuntimeOptions())
     }
 
-    /// Production entry for edits committed by the live board. Update the lease
-    /// before persistence round-trips through ScreenManager: that later
-    /// `apply(configuration:)` correctly no-ops because the view already carries
-    /// the edit, so waiting for it would strand the old sampler demand forever.
+    /// Production entry for edits committed by the live board.
     func acceptBoardConfigurationEdit(_ edited: MonitorBoardConfiguration) {
         guard !isCleaningUp else { return }
         let gated = Self.gatedConfiguration(edited, agentFleetEnabled: agentFleetEnabled)
@@ -196,19 +150,13 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     // MARK: - Live configuration
 
-    /// Apply a new board configuration in place (no view rebuild). Strips
-    /// agent-gated placements, forwards to the board, mirrors click-through, and
-    /// repoints the lease's on-demand sampling.
+    /// Apply a new board configuration in place (no view rebuild).
     func apply(configuration newConfiguration: MonitorBoardConfiguration) {
         let gated = Self.gatedConfiguration(newConfiguration, agentFleetEnabled: agentFleetEnabled)
-        // No-op when nothing changed: a board edit made ON this live wallpaper
-        // already reflects in the board, and its persist round-trips back here — so
-        // re-applying the identical config would needlessly rebuild the hosting view.
+        // Avoid rebuilding the host when a persisted board edit is already visible.
         guard gated != configuration else { return }
         configuration = gated
         boardHost.apply(configuration: gated)
-        // While editing, interaction stays forced on regardless of the persisted
-        // flag; the value is restored when edit mode exits.
         let interactive = isEditing ? true : gated.mouseInteractionEnabled
         setMouseInteractionEnabled(interactive)
         (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(interactive)
@@ -218,10 +166,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     // MARK: - Editing
 
-    /// Enter/exit board edit mode (menu-bar "Edit Widgets" drives this). The
-    /// board's own Done control also exits; both routes funnel through the board
-    /// host's `onEditingChanged`, which forces/restores mouse interaction — so
-    /// this only has to flip the board state.
+    /// Enter/exit board edit mode (menu-bar "Edit Widgets" drives this).
     func setEditing(_ editing: Bool) {
         boardHost.setEditing(editing)
     }
@@ -232,10 +177,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     /// Mirrors `isEditing`'s pass-through; the energy regression test asserts on it.
     var isBoardSuspended: Bool { boardHost.isSuspended }
 
-    /// Force mouse interaction on while editing (the persisted wallpaper is
-    /// usually click-through, which would leave the edit chrome unclickable), and
-    /// restore the persisted state on exit. Drives BOTH the view's hitTest gate
-    /// and the enclosing wallpaper window's `ignoresMouseEvents`/level policy.
+    /// Force mouse interaction on while editing (the persisted wallpaper is usually click-through, which would leave the edit chrome unclickable), and restore the persisted state on exit.
     private func handleEditingChanged(_ editing: Bool) {
         let interactive = editing ? true : configuration.mouseInteractionEnabled
         setMouseInteractionEnabled(interactive)
@@ -273,8 +215,6 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     /// Pushes the newest snapshot when it is newer than the last one drawn.
-    /// `force` re-pushes the current newest even if the generation is unchanged
-    /// (used right after init / resume so the board paints immediately).
     private func pushLatestSnapshot(force: Bool) {
         guard !isCleaningUp else { return }
         let broker = runtime.broker
@@ -301,15 +241,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         }
     }
 
-    /// Stop paying for a wallpaper nobody can see. Stopping the pump only stops
-    /// the CONSUMER — both producers keep running unless told otherwise, so all
-    /// three have to be cut:
-    ///   • the pump (no snapshot delivery),
-    ///   • the runtime lease (paused, not released: the per-PID walk and the SMC
-    ///     reads stop, but the lease's resolved grants survive for a cheap resume),
-    ///   • the board (its 1 Hz clock and the widgets' repeating dot animations run
-    ///     off their own CoreAnimation/TimelineView loops, which no absence of data
-    ///     stops — only `monitorSuspended` does).
+    /// Stop paying for a wallpaper nobody can see.
     private func suspend() {
         guard !isSuspended else { return }
         isSuspended = true
@@ -323,16 +255,12 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         isSuspended = false
         setRuntimePaused(false)
         boardHost.setSuspended(false)
-        // Reflect the current state the instant playback resumes, then restart
-        // the cadence. The broker was cleared while paused, so this repaints only
-        // once a fresh sample lands; the board keeps its last values until then.
+        // Reflect the current state the instant playback resumes, then restart the cadence.
         pushLatestSnapshot(force: true)
         startPump()
     }
 
-    /// Pause (never release) the lease on suspend. Release would drop the
-    /// security-scoped grants the runtime resolved, making every resume pay to
-    /// re-open them.
+    /// Pause (never release) the lease on suspend.
     private func setRuntimePaused(_ paused: Bool) {
         guard let runtimeLease, !isCleaningUp else { return }
         runtimeLease.setPaused(paused)
@@ -363,9 +291,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
         guard !isCleaningUp else { return }
         isCleaningUp = true
         stopPump()
-        // Flush any debounced board edit BEFORE detaching the callback, so a final
-        // edit made just before the window closed isn't lost when the pending task
-        // is cancelled.
+        // Flush any debounced board edit BEFORE detaching the callback, so a final edit made just before the window closed isn't lost when the pending task is cancelled.
         boardHost.flushPendingEdits()
         boardHost.onConfigurationEdited = nil
         let lease = runtimeLease
@@ -375,12 +301,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     // MARK: - Menu-bar top inset
 
-    /// Normalized top-inset (menu-bar) forbidden zone for a board filling
-    /// `frame`: the menu-bar height (top diff only — the Dock is a bottom inset
-    /// and stays out) over the screen height, from the `NSScreen` whose frame
-    /// matches. 0 when no screen matches (e.g. mid display-reconfigure) — the
-    /// board simply has no top forbidden zone until the next reconcile. Shared
-    /// by the overlay controller so both hosts derive the fraction identically.
+    /// Returns the normalized menu-bar inset for the matching screen.
     static func menuBarTopInsetFraction(forFrame frame: NSRect) -> CGFloat {
         guard let screen = NSScreen.screens.first(where: { framesMatch($0.frame, frame) }) else { return 0 }
         let height = screen.frame.height
@@ -396,10 +317,7 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     // MARK: - Agent gate
 
-    /// Strip AI-agent placements (fleet / usage) when the Pro `.agentFleet`
-    /// capability is not unlocked, so a Lite user (or a persisted Pro config
-    /// opened under Lite) can never surface locked widgets. A no-op when the
-    /// gate is open.
+    /// Strip AI-agent placements (fleet / usage) when the Pro `.agentFleet` capability is not unlocked, so a Lite user (or a persisted Pro config opened under Lite) can never surface locked widgets.
     static func gatedConfiguration(
         _ configuration: MonitorBoardConfiguration,
         agentFleetEnabled: Bool

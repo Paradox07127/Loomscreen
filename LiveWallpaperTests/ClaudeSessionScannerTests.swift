@@ -5,8 +5,6 @@ import Testing
 @Suite("ClaudeSessionScanner: discovery + liveness")
 struct ClaudeSessionScannerTests {
 
-    /// Build a fake ~/.claude tree: projects/<dir>/<uuid>.jsonl transcripts and
-    /// sessions/<pid>.json descriptors. Everything is synthetic.
     private func makeRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClaudeSessionScannerTests-\(UUID().uuidString)", isDirectory: true)
@@ -84,7 +82,6 @@ struct ClaudeSessionScannerTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let selfPID = ProcessInfo.processInfo.processIdentifier
-        // Use the real start time so the PID-reuse cross-check passes.
         let selfStart = ClaudeSessionScanner.processStartTime(pid: selfPID)
         try writeDescriptor(root: root, pid: selfPID, sessionId: "live-session", startedAt: selfStart)
         try writeDescriptor(root: root, pid: 99_999_999, sessionId: "dead-session", startedAt: Date())
@@ -104,13 +101,11 @@ struct ClaudeSessionScannerTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let selfPID = ProcessInfo.processInfo.processIdentifier
-        // Deliberately wrong start time, far from the real one.
         let bogusStart = Date(timeIntervalSince1970: 1_000)
         try writeDescriptor(root: root, pid: selfPID, sessionId: "reused", startedAt: bogusStart)
 
         let scanner = ClaudeSessionScanner(rootURL: root)
         let descriptors = scanner.loadPIDDescriptors()
-        // Only meaningful when the OS actually reports a start time for us.
         if ClaudeSessionScanner.processStartTime(pid: selfPID) != nil {
             #expect(scanner.isAlive(descriptors[0]) == false)
         }

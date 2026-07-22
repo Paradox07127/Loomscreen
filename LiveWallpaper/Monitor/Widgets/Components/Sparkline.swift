@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// A history series → line path with an optional gradient area fill and a "now"
-/// dot at the last point. Ported from the mock's `segSpark`: the stroke can
-/// follow the per-sample load band (steel/amber/coral) so a busy stretch reads
-/// amber/coral, and the baseline + optional mid guides frame it. Nil-safe for
-/// empty or single-point series.
 struct Sparkline: View {
     var values: [Double]
     /// y-domain. `nil` auto-scales to the data (with headroom); pass a fixed
@@ -100,10 +95,6 @@ struct Sparkline: View {
     private func areaPath(_ pts: [CGPoint], height: CGFloat) -> Path {
         var p = Path()
         guard let first = pts.first, let last = pts.last else { return p }
-        // Baseline-left → up the curve → baseline-right → close. NB: `addLines`
-        // does an implicit `move` to its first point, which would abandon the
-        // baseline start and leave the fill bounded by a chord to the first point
-        // rather than the true area under the curve — so line the points explicitly.
         p.move(to: CGPoint(x: first.x, y: height))
         for point in pts { p.addLine(to: point) }
         p.addLine(to: CGPoint(x: last.x, y: height))

@@ -4,8 +4,6 @@ import LiveWallpaperCore
 @testable import LiveWallpaper
 import Testing
 
-/// UI-09 lock. Value/network/filesystem fixtures drive the production library
-/// model; source contracts only inventory private SwiftUI wiring.
 @Suite("Workshop Installed ownership characterization", .serialized)
 struct WorkshopInstalledOwnershipCharacterizationTests {
     @Test("installed filters preserve category semantics and the current storage-location heuristic")
@@ -27,9 +25,6 @@ struct WorkshopInstalledOwnershipCharacterizationTests {
         #expect(InstalledStorageKind.managed.matches(scene))
         #expect(InstalledStorageKind.linked.matches(video))
         #expect(InstalledStorageKind.linked.matches(packagedVideo))
-        // This filter is only a resourceLocation label, not a delete-ownership
-        // oracle: packaged Workshop video/web may live in the app container
-        // while still carrying `.sourceFolder`.
     }
 
     @Test("selection identity survives re-import while content refreshes")

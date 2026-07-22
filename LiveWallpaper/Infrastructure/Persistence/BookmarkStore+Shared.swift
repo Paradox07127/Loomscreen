@@ -1,10 +1,7 @@
 import Foundation
 import LiveWallpaperCore
 
-/// Main-target singleton wiring. `BookmarkPersisting` lives in
-/// LiveWallpaperCore; the SettingsManager-backed adapter and the
-/// `.shared` singleton stay here so Core stays free of the legacy
-/// SettingsManager surface.
+/// Wires the shared bookmark store to the app's settings persistence.
 @MainActor
 struct SettingsManagerBookmarkPersistence: BookmarkPersisting {
     func load() -> [WallpaperBookmark] { SettingsManager.shared.loadWallpaperBookmarks() }
@@ -12,7 +9,6 @@ struct SettingsManagerBookmarkPersistence: BookmarkPersisting {
 }
 
 extension BookmarkStore {
-    /// App-wide singleton backed by `SettingsManager.shared`. Lite will
-    /// supply its own SKU-scoped singleton in Phase 7.
+    /// App-wide singleton backed by `SettingsManager.shared`.
     static let shared = BookmarkStore(persistence: SettingsManagerBookmarkPersistence())
 }

@@ -3,9 +3,7 @@ import Foundation
 import LiveWallpaperCore
 
 enum ApplicationPerformanceRuleEngine {
-    /// Returns `false` immediately when no rules are configured (the default),
-    /// and only enumerates running apps when a "while running" rule exists — so
-    /// this is a cheap call to make on every policy refresh.
+    /// Evaluates configured application rules without enumerating processes unless required.
     @MainActor
     static func isActive(for settings: GlobalSettings) -> Bool {
         let rules = settings.applicationPerformanceRules
@@ -17,8 +15,7 @@ enum ApplicationPerformanceRuleEngine {
         return shouldPause(frontmostBundleID: frontmost, runningBundleIDs: running, rules: rules)
     }
 
-    /// True when the frontmost app carries a `.neverPause` exception — the
-    /// policy engine uses this to veto discretionary pauses.
+    /// Returns whether the frontmost app vetoes discretionary pauses.
     @MainActor
     static func isFrontmostExcluded(for settings: GlobalSettings) -> Bool {
         let rules = settings.applicationPerformanceRules
@@ -34,8 +31,7 @@ enum ApplicationPerformanceRuleEngine {
         return rules.contains { $0.trigger == .neverPause && $0.bundleID == frontmostBundleID }
     }
 
-    /// True if any rule matches the current foreground / running state, meaning
-    /// the wallpaper should suspend.
+    /// Returns whether any foreground or running-app rule requests suspension.
     static func shouldPause(
         frontmostBundleID: String?,
         runningBundleIDs: Set<String>,

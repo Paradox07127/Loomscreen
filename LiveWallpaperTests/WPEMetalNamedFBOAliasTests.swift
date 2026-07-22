@@ -19,10 +19,6 @@ struct WPEMetalNamedFBOAliasTests {
             name: "blur_start",
             frameState: frameState
         )
-        // resolveAliasedNamedTexture is the *fuzzy* helper; exact-name
-        // matches happen in `resolve(...)`'s primary path, so the fuzzy
-        // helper deliberately does not return on exact hit. Verify it
-        // returns nil so the caller still takes the exact-match branch.
         #expect(resolved == nil)
     }
 
@@ -94,24 +90,18 @@ struct WPEMetalNamedFBOAliasTests {
         }
         var frameState = Self.makeFrameState(output: texture)
 
-        // Snapshot taken at generation 0 (how snapshotFullFrameBufferIfAliasingScene records it).
         frameState.latestNamedTextures["_rt_FullFrameBuffer"] = texture
         frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] = frameState.sceneWriteGeneration
         #expect(frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] == frameState.sceneWriteGeneration)
 
-        // Scene draws (beams, halos) after the capture make it stale — 3521337568's
-        // filmgrain must re-capture or its full-frame redraw erases those layers.
         frameState.registerWrite(texture: texture, targetID: .scene)
         #expect(frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] != frameState.sceneWriteGeneration)
 
-        // FBO writes don't invalidate scene-alias snapshots…
         frameState.registerWrite(texture: texture, targetID: .named("_rt_imageLayerComposite_x_a"))
         let generationAfterFBOWrite = frameState.sceneWriteGeneration
         frameState.sceneAliasSnapshotGenerations["_rt_FullFrameBuffer"] = generationAfterFBOWrite
         #expect(frameState.sceneWriteGeneration == generationAfterFBOWrite)
 
-        // …but a REAL write to an alias-named target retires its snapshot entry,
-        // so the snapshot logic never clobbers real chain output.
         frameState.sceneAliasSnapshotGenerations["_rt_HalfFrameBuffer"] = frameState.sceneWriteGeneration
         frameState.registerWrite(texture: texture, targetID: .named("_rt_HalfFrameBuffer"))
         #expect(frameState.sceneAliasSnapshotGenerations["_rt_HalfFrameBuffer"] == nil)
@@ -153,7 +143,6 @@ struct WPEMetalDeclaredFBOZeroFillTests {
             sceneSize: CGSize(width: 4, height: 4),
             renderTargetPool: pool
         )
-        // No pass has written the RT this frame — WPE reads it as all-zero.
         let resolved = try WPEMetalShaderInputs.resolve(
             reference: .fbo(Self.declaredName),
             textures: [:],
@@ -162,8 +151,6 @@ struct WPEMetalDeclaredFBOZeroFillTests {
         )
         #expect(resolved.pixelFormat == WPEMetalRenderExecutor.outputPixelFormat)
 
-        // Re-reading the same declared name reuses the cached stand-in (no per-frame
-        // re-allocation).
         let again = try WPEMetalShaderInputs.resolve(
             reference: .fbo(Self.declaredName),
             textures: [:],
@@ -185,7 +172,6 @@ struct WPEMetalDeclaredFBOZeroFillTests {
             sceneSize: CGSize(width: 4, height: 4),
             renderTargetPool: pool
         )
-        // A name no layer declares is a genuine graph bug — must stay loud.
         #expect(throws: (any Error).self) {
             try WPEMetalShaderInputs.resolve(
                 reference: .fbo("_rt_NotDeclaredAnywhere"),

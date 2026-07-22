@@ -1,11 +1,7 @@
 import Foundation
 import LiveWallpaperCore
 
-/// SettingsManager-backed entry points for the Core `ConfigurationPorter`.
-/// Stays in the main target — Core stays free of the SettingsManager and
-/// `BookmarkStore.shared` singleton (both still tied to the legacy
-/// UserDefaults-backed persistence). Lite will eventually bind its own
-/// SKU-scoped pair behind the same call site through dependency injection.
+/// Connects the core configuration porter to app settings and bookmarks.
 @MainActor
 extension ConfigurationPorter {
     static func currentBundle() -> ConfigurationBundle {
@@ -33,12 +29,7 @@ extension ConfigurationPorter {
         }
 
         if let global = bundle.globalSettings {
-            // Developer Mode is a per-machine opt-in for diagnostics, not a
-            // user preference that should ride along with a backup. Strip
-            // it on import so a bundle from another machine cannot silently
-            // light up `WKWebView.isInspectable` or the Developer Tools
-            // sidebar entry on this install. The user can flip it back on
-            // in Settings → Advanced if they want.
+            // Developer Mode is a local security opt-in and must not transfer through backups.
             var sanitizedGlobal = global
             sanitizedGlobal.developerModeEnabled = false
             manager.saveGlobalSettings(sanitizedGlobal)

@@ -2,16 +2,11 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic tests for the Processes widget: row ordering + capping, the
-/// integer cpu% readout (no percent sign, rounded), and CPU-bar normalization
-/// to the busiest shown row. View composition is not exercised here.
 struct MonitorProcessesWidgetTests {
 
     private func proc(_ name: String, _ cpu: Double, _ mem: UInt64 = 0) -> MonitorProcessSample {
         MonitorProcessSample(name: name, cpuPercent: cpu, memBytes: mem)
     }
-
-    // MARK: - topProcesses ordering + capping
 
     @Test("nil / empty input yields no rows")
     func emptyInput() {
@@ -41,8 +36,6 @@ struct MonitorProcessesWidgetTests {
         #expect(rows.count == 2)
     }
 
-    // MARK: - cpu% readout
-
     @Test("cpuText: whole number ≥10, one decimal under 10, clamped at 0.0")
     func cpuTextFormat() {
         #expect(MonitorProcessesWidgetView.cpuText(52) == "52")
@@ -50,24 +43,16 @@ struct MonitorProcessesWidgetTests {
         #expect(MonitorProcessesWidgetView.cpuText(23.6) == "24")
         #expect(MonitorProcessesWidgetView.cpuText(0.44) == "0.4")
         #expect(MonitorProcessesWidgetView.cpuText(3.24) == "3.2")
-        // Tenths-first rounding: 9.97 → 10.0 tenths → crosses into the
-        // integer branch, so no trailing ".0".
         #expect(MonitorProcessesWidgetView.cpuText(9.97) == "10")
         #expect(MonitorProcessesWidgetView.cpuText(-3) == "0.0")
     }
 
-    // MARK: - bar normalization
-
     @Test("bar fraction normalizes to the busiest row, clamped 0…1")
     func barNormalizesToMax() {
-        // Busiest row is full; a half-CPU row is half length.
         #expect(MonitorProcessesWidgetView.barFraction(52, maxCPU: 52) == 1)
         #expect(abs(MonitorProcessesWidgetView.barFraction(26, maxCPU: 52) - 0.5) < 1e-9)
-        // Guard: a zero/degenerate max never divides by zero.
         #expect(MonitorProcessesWidgetView.barFraction(0, maxCPU: 0) == 0)
     }
-
-    // MARK: - Physical row capacity at the fixed Apple frames
 
     @Test("capacity at the exact Apple frames: M 170pt fits 7 rows, L 376pt fits 19")
     func rowCapacityAtAppleFrames() {
@@ -87,14 +72,9 @@ struct MonitorProcessesWidgetTests {
         #expect(short <= tall)
     }
 
-    // MARK: - Header text-vs-icon contingency
-
     @Test("header keeps the CPU/MEM acronym when the column is wide enough")
     func headerFitsTextWhenWide() {
-        // The board's actual column width (`--cpucol`/MEM = 3.4em of the caption
-        // base) at both M and L's clamped label/caption sizes.
         #expect(MonitorProcessesWidgetView.headerFitsText(columnWidth: 44, labelSize: 12))
-        // Still fits at the smallest clamp the type scale ever produces.
         #expect(MonitorProcessesWidgetView.headerFitsText(columnWidth: 34, labelSize: 9))
     }
 

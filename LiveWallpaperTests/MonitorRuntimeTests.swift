@@ -6,8 +6,6 @@ import os
 @Suite("Monitor runtime leases")
 struct MonitorRuntimeTests {
     private var quietOptions: MonitorRuntimeOptions {
-        // system:false keeps tests free of real samplers; no factories fire
-        // because agents/usage stay false.
         MonitorRuntimeOptions(system: false)
     }
 
@@ -17,8 +15,6 @@ struct MonitorRuntimeTests {
         let slot = runtime.makeLeaseSlot()
         let lease = slot.acquire(options: quietOptions)
 
-        // No await between the calls: the slot must establish the command order
-        // before either detached task reaches the runtime actor.
         await lease.release().value
 
         #expect(await runtime.debugActiveLeaseCount == 0)
@@ -140,7 +136,6 @@ struct MonitorRuntimeTests {
         await second.waitUntilSettled()
         #expect(await runtime.debugActiveLeaseCount == 2)
 
-        // Dropping the agent lease narrows back down; dropping both stops all.
         await second.release().value
         #expect(await runtime.debugActiveLeaseCount == 1)
         await first.release().value
@@ -174,13 +169,9 @@ struct MonitorRuntimeTests {
             )
         }
 
-        // Hold source.stop() in-flight. Neither final persistence step may run
-        // while a producer can still mutate the cursor generation.
         await probe.waitUntilStopEntered()
         #expect(await probe.events == ["producer-stop-entered"])
 
-        // A duplicate quit request must share the same shutdown barrier rather
-        // than invoke source.stop() twice or deadlock the actor.
         let duplicateShutdown = Task { await runtime.shutdown() }
         await Task.yield()
         #expect(await probe.stopInvocationCount == 1)
@@ -200,8 +191,6 @@ struct MonitorRuntimeTests {
         #expect(await runtime.debugActiveLeaseCount == 0)
         #expect(await runtime.debugActiveSourceCount == 0)
 
-        // Cleanup tasks launched by views can arrive after the barrier. A stale
-        // acquire must not resurrect a producer behind the final flush.
         let staleLease = runtime.makeLeaseSlot().acquire(options: options)
         await staleLease.waitUntilSettled()
         #expect(await runtime.debugActiveLeaseCount == 0)
@@ -214,8 +203,6 @@ struct MonitorRuntimeTests {
         let releaseFlush = DispatchSemaphore(value: 0)
         let mainActorReached = OSAllocatedUnfairLock(initialState: false)
 
-        // Match AppDelegate's call site: termination begins from MainActor, but
-        // the synchronous cursor writer must leave that executor immediately.
         let flush = Task { @MainActor in
             await AppTerminationCoordinator.runBlockingOffMainActor {
                 flushEntered.withLock { $0 = true }

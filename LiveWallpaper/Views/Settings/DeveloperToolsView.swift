@@ -3,11 +3,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Pro-only diagnostic surface compiled into local DEBUG builds only — it
-/// ships in no Release binary at all, so it can never reach end users (and the
-/// scene-debug artifact writer it drives is hard-disabled in Release too).
-/// Within a DEBUG build it is still gated at runtime by the Developer Mode
-/// toggle in Settings → Advanced.
+/// Pro diagnostic surface available only in local debug builds.
 struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
     @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: DeveloperToolsView.captureSceneKey) ?? []
@@ -81,9 +77,7 @@ struct DeveloperToolsView: View {
         captureSceneKey,
     ]
 
-    /// Every UserDefaults key any control in this view writes. "Reset all"
-    /// clears exactly this list — a control whose key is missing here would
-    /// silently survive the reset, so new flags must be added here too.
+    /// Every UserDefaults key any control in this view writes.
     static let allDiagnosticDefaultsKeys: [String] =
         diagnosticBoolFlags.map(\.key)
             + diagnosticStringKeys
@@ -209,11 +203,7 @@ struct DeveloperToolsView: View {
 
     // MARK: - Oracle
 
-    /// Flag-and-reveal convenience for the WPE render oracle (`WPEOracleMode`): a
-    /// master toggle + the frozen scene-time it uses, both plain UserDefaults the
-    /// oracle already reads. No scene is run from here — capture still happens by
-    /// loading a scene in the app (self mode) or via `oracle.py fidelity` (see
-    /// `.claude/skills/wpe-oracle/references/self-oracle-runbook.md`).
+    /// Flag-and-reveal convenience for the WPE render oracle (`WPEOracleMode`): a master toggle + the frozen scene-time it uses, both plain UserDefaults the oracle already reads.
     private var oracleSection: some View {
         GroupBox(label:
             HStack {

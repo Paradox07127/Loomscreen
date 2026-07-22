@@ -49,9 +49,7 @@ struct AppStartupPlan: Equatable {
             originReconciler: PreservingOriginReconciler()
         )
         #else
-        // Build-target-only capabilities are layered on here rather than baked
-        // into the shipping Pro catalog because Xcode does not propagate app
-        // compilation conditions into local SwiftPM packages.
+        // Build-target-only capabilities are layered on here rather than baked into the shipping Pro catalog because Xcode does not propagate app compilation conditions into local SwiftPM packages.
         let shippingProCapabilities = ProductCapabilities.pro.withWorkshopOnline()
         #if DEBUG
         let proCapabilities = shippingProCapabilities.withLocalDeveloperTools()
@@ -76,9 +74,7 @@ enum SettingsWindowMetrics {
     static let sidebarColumnWidth = DesignTokens.Sidebar.width
     static let sidebarColumnMaxWidth = DesignTokens.Sidebar.maxWidth
     static let defaultContentSize = CGSize(width: 1180, height: 720)
-    // Floor must fit the sidebar plus the shared library-page floor. Workshop
-    // can also open an inspector inside that detail column, so width keeps the
-    // previous compressed-grid budget while height tracks the shared page token.
+    // Floor must fit the sidebar plus the shared library-page floor.
     static let minimumContentSize = CGSize(width: 1160, height: DesignTokens.LibraryPage.minHeight)
 }
 
@@ -97,13 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
     @ObservationIgnored private let lifecycle = ApplicationLifecycleController()
     #if !LITE_BUILD
-    /// Pro only: lives for the lifetime of the app so the
-    /// Doctor's probe state survives Settings-window close / re-open and the
-    /// Workshop tab can read it without re-running probes.
+    /// Pro only: lives for the lifetime of the app so the Doctor's probe state survives Settings-window close / re-open and the Workshop tab can read it without re-running probes.
     @ObservationIgnored private let workshopDoctorService = SteamCMDDoctorService()
-    /// Bundles the Keychain + QueryService + on-disk QueryCache actors for
-    /// the v3 online-browse flow. Lives for the lifetime of the app so the
-    /// in-flight coalescing + token bucket survive Settings-window cycles.
+    /// Owns the Keychain, query service, and disk cache used for Workshop browsing.
     @ObservationIgnored private let workshopServices = WorkshopServices()
     #endif
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -113,9 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if !LITE_BUILD
-        // Reclaim WPE package staging dirs orphaned by a prior session's
-        // abnormal termination (deinit never ran). Runs off-main and before any
-        // scene provider is created, so it can't race a live provider's dir.
+        // Reclaim WPE package staging dirs orphaned by a prior session's abnormal termination (deinit never ran).
         if !runtimeOptions.isTesting {
             WPEPackageSceneAssetProvider.sweepStaleStagingDirectoriesAtLaunch()
         }
@@ -130,9 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !runtimeOptions.isTesting {
             lifecycle.schedule { [weak self] in
                 guard let self, self.lifecycle.allowsWork else { return }
-                // ScreenManager.refreshScreens() restores WPE sessions from its
-                // initializer. Select the authoritative managed-assets slot first;
-                // otherwise WPEEngineAssetsLibrary can observe a crash-cut tree.
+                // ScreenManager.refreshScreens() restores WPE sessions from its initializer.
                 await WPEEngineAssetsStartupRecovery.shared.prepareForFirstRead()
                 guard self.lifecycle.allowsWork else { return }
                 self.completeApplicationStartup(startupPlan)
@@ -163,11 +151,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if !LITE_BUILD
-        // Reclaim disk for scenes the user can no longer reach. Deferred so it
-        // never contends with first-frame work. First drop legacy extracted
-        // `wpe-cache` directories for unreferenced ids, then reclaim video-
-        // texture buckets against the *post-GC* cache contents (so a just-
-        // removed orphan's videos go too).
         if !runtimeOptions.isTesting, manager.featureCatalog.isEnabled(.wpeImport) {
             lifecycle.schedule(after: .seconds(2)) {
                 let keepIDs = WPESceneReachability.referencedWorkshopIDs()
@@ -190,17 +173,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             globalShortcutManager?.start()
         }
 
-        // Floating fleet HUD (Pro-only): restore the user's persisted on/off
-        // state. Independent of the Monitor wallpaper — it manages its own
-        // agents-only runtime lease while shown.
         if !runtimeOptions.isTesting,
            manager.featureCatalog.isEnabled(.agentFleet) {
             MonitorHUDController.shared.focusHandler = { MonitorFocusRouter.focus(sessionID: $0) }
             MonitorHUDController.shared.applyPersistedStateAtStartup()
         }
 
-        // Monitor overlay layer: restore any per-display overlay the user left on,
-        // floating the widget board over whatever wallpaper each display shows.
         if !runtimeOptions.isTesting {
             manager.reconcileMonitorOverlays()
         }
@@ -221,8 +199,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if !LITE_BUILD
-        // Resume system-audio capture if the user left audio response on. The
-        // shared manager owns the single tap; sinks read its broker.
         if !runtimeOptions.isTesting {
             let audioResponseEnabled = SettingsManager.shared.loadGlobalSettings().audioResponseEnabled
             SystemAudioCaptureManager.shared.setEnabled(audioResponseEnabled)
@@ -231,11 +207,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         #if !LITE_BUILD
-        // Auto-run the Workshop Doctor once at launch when it's already
-        // configured, so the in-app "Download from Steam" path is ready without
-        // a manual probe run. Deferred + background; skipped when unconfigured
-        // (nothing meaningful to probe) so users who never set up SteamCMD pay
-        // no launch cost.
         if !runtimeOptions.isTesting,
            workshopDoctorService.binaryBookmarkData != nil,
            workshopDoctorService.workdirBookmarkData != nil {
@@ -246,11 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         #if LITE_BUILD
-        // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we
-        // hand-roll a single-shot launch-time update check (no background
-        // timer, throttled to 12 h in UpdateChecker itself). Skip it on
-        // first-run onboarding so a brand-new user doesn't get a network
-        // prompt before they see their first wallpaper.
+        // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we hand-roll a single-shot launch-time update check (no background timer, throttled to 12 h in UpdateChecker itself).
         if !startupPlan.showOnboarding && !runtimeOptions.isTesting {
             lifecycle.schedule(after: .seconds(5)) {
                 await UpdateChecker.shared.checkNow(force: false)
@@ -330,11 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Tears down render sessions (pauses AVPlayers, releases WKWebViews / Metal
-    /// renderers — so WebKit's SQLite/WAL closes cleanly and no video/snapshot
-    /// staging is left mid-write), awaits the Monitor producer graph, then drains
-    /// cursor + settings persistence. The whole async barrier is capped by a
-    /// watchdog so a stuck source or disk write cannot hold quit indefinitely.
+    /// Stops renderers and monitor producers before flushing cursor and settings persistence.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         switch lifecycle.beginTermination() {
         case .wait:
@@ -356,10 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         Task { @MainActor [weak self] in
-            // Reply on whichever lands first: the ordered shutdown, or a 2s
-            // watchdog. The work is intentionally not cancelled when the
-            // watchdog wins: persistence writes may not honor cancellation, and
-            // the process can still finish useful cleanup before AppKit exits.
+            // Reply on whichever lands first: the ordered shutdown, or a 2s watchdog.
             let reply = { [weak self] in
                 guard let self, self.lifecycle.markReplied() else { return }
                 sender.reply(toApplicationShouldTerminate: true)
@@ -473,11 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.backgroundColor = .windowBackgroundColor
         window.isMovableByWindowBackground = false
-        // Pair with `windowShouldClose` returning false: the close button
-        // only `orderOut`s the window so the warmed NavigationSplitView
-        // state survives. `isReleasedWhenClosed = false` keeps AppKit from
-        // releasing the NSWindow if anything else routes through the real
-        // close path (e.g. app quit).
+        // Pair with `windowShouldClose` returning false: the close button only `orderOut`s the window so the warmed NavigationSplitView state survives.
         window.isReleasedWhenClosed = false
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
@@ -608,17 +564,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-        window.orderFrontRegardless()
         Logger.info("Onboarding window shown", category: .ui)
     }
 }
 
 extension AppDelegate: NSWindowDelegate {
-    /// Redirect the settings-window close to `orderOut(nil)` so the warmed
-    /// NavigationSplitView / NSSplitViewController state survives — a full
-    /// close+reopen re-pays the sidebar-bridge materialization cost on the next
-    /// reveal even when the NSWindowController is retained. Onboarding keeps the
-    /// regular close-and-release semantics.
+    /// Hides the settings window on close so its warmed split-view state survives reopening.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender == settingsWindowController?.window {
             releaseSettingsSystemMonitorLeaseIfNeeded()

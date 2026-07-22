@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Canonical, structural entitlement fingerprints and signing metadata policy.
+"""Create structural entitlement fingerprints and validate signing metadata.
 
-The shell release gate deliberately delegates plist parsing to Foundation's
-binary/XML-compatible plist format through Python's plistlib.  Entitlement
-strings may contain tabs or newlines (SBPL commonly does), so a line-oriented
-XML parser is not safe here.
+Plist parsing preserves multiline SBPL values that line-oriented XML parsing
+could miss.
 """
 
 from __future__ import annotations
@@ -16,7 +14,7 @@ import math
 import plistlib
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 APPLICATION_IDENTIFIER = "com.apple.application-identifier"
@@ -84,8 +82,7 @@ def fingerprint(values: dict[str, Any]) -> list[str]:
     records: list[str] = []
     for key, value in values.items():
         if isinstance(value, dict):
-            # Entitlement dictionaries are not part of this product contract.
-            # Failing is safer than flattening a future privilege incorrectly.
+            # Reject dictionaries rather than flatten a future privilege incorrectly.
             raise EntitlementError(f"dictionary value is unsupported for entitlement {key}")
         if isinstance(value, list):
             if not value:
@@ -101,15 +98,13 @@ def normalized_app_entitlements(
     values: dict[str, Any],
     *,
     bundle_id: str,
-    team_id: Optional[str],
+    team_id: str | None,
     expected_team_id: str,
 ) -> dict[str, Any]:
-    """Validate and remove only known Xcode signing-derived metadata.
+    """Validate and remove only metadata derived from the signature and bundle ID.
 
-    Every signing-derived field is optional because ad-hoc, Developer ID and
-    provisioned Xcode archives do not necessarily synthesize the same subset.
-    Presence never means "ignore": each value has to be exactly derivable from
-    the code signature's TeamIdentifier and the app's CFBundleIdentifier.
+    Signing modes emit different subsets, but every present value must match
+    exactly.
     """
 
     if team_id and team_id != expected_team_id:

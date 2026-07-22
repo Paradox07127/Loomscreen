@@ -34,7 +34,6 @@ struct WorkshopAnimatedGIFDecodeTests {
         #expect(gif.frame(at: 0) != nil)
         #expect(gif.frame(at: 2) != nil)
         #expect(gif.frame(at: 3) == nil)
-        // 0.1 s is above the 30 FPS floor, so it survives unchanged.
         #expect(gif.frameDelays.allSatisfy { $0 >= WorkshopAnimatedGIF.minFrameDelay })
     }
 
@@ -62,8 +61,6 @@ struct WorkshopAnimatedGIFDecodeTests {
 
     @Test("Animations over the 120-frame cap degrade to a static poster")
     func overFrameCapDegradesToPoster() throws {
-        // Over-cap animations keep their poster instead of returning nil,
-        // which blanked the tile entirely (8c6ea2e, review item #1).
         let data = GIFTestFixtures.gif(width: 2, height: 2, frameCount: WorkshopAnimatedGIF.maxFrameCount + 1, delay: 0.1)
         let asset = try #require(WorkshopAnimatedGIF.make(from: data))
         guard case .staticImage = asset else {
@@ -75,14 +72,10 @@ struct WorkshopAnimatedGIFDecodeTests {
 
     @Test("Decoded-pixel budget is overflow-safe and rejects oversized animations")
     func pixelBudget() {
-        // A modest still well under budget.
         #expect(WorkshopAnimatedGIF.isWithinPixelBudget(width: 256, height: 256, frameCount: 10))
-        // 4000×4000×4 bytes × 100 frames ≫ 96 MiB.
         #expect(!WorkshopAnimatedGIF.isWithinPixelBudget(width: 4000, height: 4000, frameCount: 100))
-        // Single huge still (decompression-bomb shape): 6000×6000×4 = 144 MiB > 96 MiB.
         #expect(!WorkshopAnimatedGIF.isWithinPixelBudget(width: 6000, height: 6000, frameCount: 1))
         #expect(WorkshopAnimatedGIF.isWithinPixelBudget(width: 4000, height: 4000, frameCount: 1))
-        // Degenerate inputs are rejected, not crashed.
         #expect(!WorkshopAnimatedGIF.isWithinPixelBudget(width: 0, height: 8, frameCount: 1))
         #expect(!WorkshopAnimatedGIF.isWithinPixelBudget(width: Int.max, height: Int.max, frameCount: Int.max))
     }
@@ -122,7 +115,6 @@ struct GIFPlaybackCoordinatorTests {
         for id in ids {
             coordinator.requestPlayback(id: id) { frozen.append(id) }
         }
-        // Bump the oldest so it is now most-recent; the next-oldest should fall.
         coordinator.touch(id: ids[0])
         let newcomer = UUID()
         coordinator.requestPlayback(id: newcomer) { frozen.append(newcomer) }
@@ -231,7 +223,7 @@ struct GIFAnimationControllerTests {
         let controller = GIFAnimationController()
         controller.setAsset(GIFTestFixtures.animatedAsset(frameCount: 3))
         controller.play(debounced: true)
-        controller.stop()                          // exits before the 250 ms fires
+        controller.stop()
         try? await Task.sleep(nanoseconds: 150_000_000)
         #expect(controller.isAnimating == false)
     }
@@ -240,8 +232,6 @@ struct GIFAnimationControllerTests {
 // MARK: - Fixtures
 
 enum GIFTestFixtures {
-    /// Distinct per-`seed` fill so encoded GIF frames are NOT coalesced by
-    /// ImageIO (identical frames collapse, defeating frame-count assertions).
     static func cgImage(width: Int, height: Int, seed: Int = 0) -> CGImage {
         let space = CGColorSpaceCreateDeviceRGB()
         let context = CGContext(
@@ -290,8 +280,6 @@ enum GIFTestFixtures {
         WorkshopAnimatedGIF.make(from: gif(width: 8, height: 8, frameCount: frameCount, delay: 0.1))!
     }
 
-    /// Generous default: under full-suite parallel load the first timer tick
-    /// can land well past 1 s, which made `animatedPlays` flaky.
     @MainActor
     static func waitUntil(timeout: Double = 5.0, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)

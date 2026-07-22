@@ -1,10 +1,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Shared "apply to a display / apply to all" control for library tiles
-/// (Bookmarks, Apple Aerials): a plain play button when there is a single
-/// display, a per-display menu plus "all displays" otherwise. `tint` carries
-/// the tile's accent (bookmark presentation tint vs. app accent).
+/// Shared "apply to a display / apply to all" control for library tiles (Bookmarks, Apple Aerials): a plain play button when there is a single display, a per-display menu plus "all displays" otherwise.
 struct LibraryTileApplyControl: View {
     let screens: [Screen]
     let tint: Color

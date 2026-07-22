@@ -125,12 +125,10 @@ struct JSONLTailReaderTests {
         let reader = JSONLTailReader(url: url)
         _ = try reader.poll()
 
-        // Write half a line — no trailing newline.
         try append("{\"partial\":", to: url)
         let mid = try reader.poll()
         #expect(mid.newLines.isEmpty, "partial line must not surface yet")
 
-        // Complete it.
         try append("true}\n", to: url)
         let done = try reader.poll()
         #expect(linesAsStrings(done) == ["{\"partial\":true}"])
@@ -144,7 +142,6 @@ struct JSONLTailReaderTests {
         let reader = JSONLTailReader(url: url)
         _ = try reader.poll()
 
-        // Replace with shorter content.
         try "{\"new\":1}\n".data(using: .utf8)!.write(to: url)
         let outcome = try reader.poll()
         #expect(outcome.didRotate == true)
@@ -159,7 +156,6 @@ struct JSONLTailReaderTests {
         let reader = JSONLTailReader(url: url)
         _ = try reader.poll()
 
-        // Atomic replace: remove + recreate ⇒ new inode, even if similar size.
         try FileManager.default.removeItem(at: url)
         try "{\"fresh\":1}\n{\"fresh\":2}\n".data(using: .utf8)!.write(to: url)
         let outcome = try reader.poll()
@@ -186,13 +182,10 @@ struct JSONLTailReaderTests {
         let url = try makeTempFile()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
-        // Fabricate > 20 MB so the reader skips to a tail window. Each line is a
-        // small valid JSON object; padded so the file crosses the ceiling fast.
         let pad = String(repeating: "x", count: 512)
         var buffer = Data()
         let template = "{\"i\":%d,\"pad\":\"\(pad)\"}\n"
         var i = 0
-        // ~21 MB worth.
         while buffer.count < 21 << 20 {
             buffer.append(String(format: template, i).data(using: .utf8)!)
             i += 1
@@ -202,8 +195,6 @@ struct JSONLTailReaderTests {
         let reader = JSONLTailReader(url: url)
         let outcome = try reader.poll()
         #expect(reader.startedMidFile == true)
-        // Every surfaced line must be a complete, parseable object (no leading
-        // fragment from the mid-file seek).
         for data in outcome.newLines {
             let obj = try? JSONSerialization.jsonObject(with: data)
             #expect(obj is [String: Any], "mid-file line not well-formed: \(String(data: data, encoding: .utf8) ?? "?")")

@@ -1,28 +1,13 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Pairs a main column with a trailing full-height inspector, resolving widths
-/// against the live container width. Showing/hiding or resizing only
-/// redistributes the detail's own width, so it never pushes a larger minimum
-/// onto a surrounding split view — which is what used to steal width from the
-/// sidebar and overflow the toolbar into `»`.
-///
-/// Two details keep the reveal smooth:
-/// - The inspector subtree stays **mounted** while `isMounted`, so toggling
-///   animates a single width value instead of rebuilding the subtree on the
-///   first animated frame (the old expand stutter).
-/// - The glide is driven by a view-level `.animation(value:)`, which
-///   interpolates wherever the toggle is fired — including from a separately
-///   hosted `NSToolbar` button, where a `withAnimation` transaction wouldn't
-///   reach this content.
+/// Pairs a main column with a trailing full-height inspector, resolving widths against the live container width.
 struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
     /// Keep the (potentially heavy) inspector subtree built. Typically "the
     /// content has an inspector" / "something is selected".
     let isMounted: Bool
     let isVisible: Bool
-    /// The value the width glide is keyed on. Pass the *user-intent* flag
-    /// (toggle / selection), NOT `isVisible`, so programmatic mount changes
-    /// (e.g. switching content type) stay instant.
+    /// The value the width glide is keyed on.
     let animationTrigger: AnyHashable
     let reduceMotion: Bool
 
@@ -32,13 +17,9 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
 
     var minWidth: CGFloat = DesignTokens.Inspector.minWidth
     var maxWidth: CGFloat = DesignTokens.Inspector.maxWidth
-    /// Smallest main-column slice kept visible no matter how wide the inspector
-    /// is dragged — guarantees the main content never collapses under the panel
-    /// or spills past the window edge.
+    /// Smallest main-column slice kept visible no matter how wide the inspector is dragged — guarantees the main content never collapses under the panel or spills past the window edge.
     var mainFloor: CGFloat = 360
-    /// Fired when the user drags the resize handle far enough past the panel's
-    /// minimum to collapse it. When nil, drag-to-close is off and the handle is
-    /// a pure resizer clamped at `minWidth`.
+    /// Fired when the user drags the resize handle far enough past the panel's minimum to collapse it.
     var onClose: (() -> Void)?
 
     @ViewBuilder var main: () -> Main
@@ -65,10 +46,6 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
                 inspector(fullWidth)
                     .frame(width: shownWidth, alignment: .leading)
                     .clipped()
-                    // The panel wins any layout contention, so opening the left
-                    // sidebar (or anything else that narrows the detail column)
-                    // compresses the MAIN column, never the panel. Both edges
-                    // stay put; only the middle gives.
                     .layoutPriority(1)
                     .allowsHitTesting(isVisible)
                     .accessibilityHidden(!isVisible)
@@ -97,7 +74,6 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Drag-resize must be instant, not sprung.
         .transaction(value: liveWidth) { $0.animation = nil }
-        // Glide the width only when the user intent changes (toggle / select).
         .animation(
             reduceMotion ? nil : .smooth(duration: 0.32, extraBounce: 0.04),
             value: animationTrigger
@@ -106,18 +82,14 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
 
     private var dragToCloseEnabled: Bool { onClose != nil }
 
-    /// Candidate width below which a release collapses the panel. Sits a fixed
-    /// over-drag past the minimum so a deliberate yank — not an ordinary
-    /// narrow-down — is what closes it.
+    /// Candidate width below which a release collapses the panel.
     private var closeArmWidth: CGFloat { max(48, minWidth - 56) }
 
     /// Lowest width the live drag may preview. Drag-to-close is evaluated from
     /// the handle's raw cursor travel; the rendered panel itself stops here.
     private var dragLowerBound: CGFloat { minWidth }
 
-    /// Largest inspector width a *drag* may reach — still leaving the main
-    /// column its floor at the current container width. Only the resize handle
-    /// uses this; the rendered width below ignores `available` on purpose.
+    /// Largest inspector width a *drag* may reach — still leaving the main column its floor at the current container width.
     private func maxWidthCap(available: CGFloat) -> CGFloat {
         let room = available - mainFloor
         return min(maxWidth, max(minWidth, room))
@@ -135,14 +107,7 @@ struct ResizableInspectorSplit<Main: View, Inspector: View>: View {
         min(max(candidate, minWidth), maxWidthCap(available: available))
     }
 
-    /// The rendered panel width. Clamped to the design min/max ONLY — never to
-    /// `available` — so opening/closing the left sidebar (which changes the
-    /// detail column width) leaves the panel untouched and lets the main column
-    /// absorb the change. `maxWidth` is small enough that even at the minimum
-    /// window the main column keeps ample room, so this never overflows.
-    ///
-    /// During a live drag the lower bound remains the design minimum; the
-    /// resize handle separately tracks raw over-drag for drag-to-close.
+    /// The rendered panel width.
     private func resolvedWidth() -> CGFloat {
         if let liveWidth {
             return min(max(CGFloat(liveWidth), minWidth), maxWidth)

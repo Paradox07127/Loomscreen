@@ -339,7 +339,7 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Metal scene renderer unavailable on this Mac", category: .screenManager)
             return nil
         }
-        // M2c1b-2: build the main-thread surface up-front, then stand up the
+        // Build the main-thread surface first, then stand up the
         // per-display render actor (main-backed unless the off-main flag is set)
         // and inject the surface. No frame call is dispatched through the actor
         // yet — it is parked on the session and shut down with it (a no-op for the
@@ -347,7 +347,7 @@ final class AmbientWallpaperSessionBuilder {
         let backing = WPEOffMainRenderFlag.backing
         let surface = WPERenderSurface(frame: rendererFrame, device: device)
         let renderActor = WPEDisplayRenderActor(backing: backing)
-        // M2c2: the pacing seam forks by backing. `.renderThread` drives a
+        // The pacing seam forks by backing. `.renderThread` drives a
         // render-thread CADisplayLink through the pacer (MTKView becomes a pure
         // host); `.main` keeps pacing the MTKView through the bare surface exactly
         // as before. This is the whole divergence — everything downstream is shared.
@@ -378,7 +378,7 @@ final class AmbientWallpaperSessionBuilder {
             return nil
         }
 
-        // Wire the delivery shim onto the surface (M2c1b-3c). The surface owns the
+        // Wire the delivery shim onto the surface. The surface owns the
         // shim, the shim targets the render actor — a graph entirely separate from
         // the renderer, so the renderer stays `sending`-adoptable.
         let shim = WPERenderSurfaceClientShim(renderActor: renderActor, backing: backing)
@@ -388,7 +388,7 @@ final class AmbientWallpaperSessionBuilder {
         window.contentView = surface.mtkView
         window.orderBack(nil)
 
-        // M2c2: the view now has a window/screen, so stand up the CADisplayLink
+        // The view now has a window/screen, so stand up the CADisplayLink
         // frame driver. `.main` mode never starts it — the MTKView paces there.
         if case .renderThread = backing {
             surface.startDisplayLinkDriver(renderActor: renderActor)
@@ -509,7 +509,7 @@ final class AmbientWallpaperSessionBuilder {
         return (refreshedOrigin, resolved.url)
     }
 
-    /// Lazy migration backstop for a legacy `.cache` descriptor whose extracted
+    /// Lazy fallback for a `.cache` descriptor whose extracted
     /// directory is gone: builds an in-place provider from the still-resolvable
     /// import source — `.packageSource` when a `scene.pkg` sits at the source
     /// root, otherwise a directory provider. Returns `nil` when the source can't

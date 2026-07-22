@@ -2,15 +2,7 @@ import CryptoKit
 import Foundation
 import os
 
-/// Reads whole transcript files into privacy-safe per-day/per-model token buckets
-/// for the usage ledger's `perModel` + `dailyActivity`. Reads ONLY model id,
-/// token usage, and timestamp — never prompt/argument/output content.
-///
-/// This is the bounded backfill half of the usage pipeline: it scans files whose
-/// mtime falls inside the day window, memoizes each file's buckets against a
-/// (path, size, mtime) fingerprint so an unchanged file is never re-read, and
-/// refreshes no more often than `refreshInterval`. The live tail continues to
-/// drive today's numbers; this fills the trailing history behind them.
+/// Reads whole transcript files into privacy-safe per-day/per-model token buckets for the usage ledger's `perModel` + `dailyActivity`.
 final class MonitorUsageBackfillCache {
     private struct Entry { var fingerprint: MonitorUsageFileFingerprint; var buckets: MonitorFileUsageBuckets }
 
@@ -18,9 +10,7 @@ final class MonitorUsageBackfillCache {
     private var lastRefresh: Date = .distantPast
     private let refreshInterval: TimeInterval
     private let calendar: Calendar
-    /// Files at or above this size are skipped outright — an honest empty bucket
-    /// beats an I/O + memory spike in a wallpaper process. Transcripts this large
-    /// are pathological; the live tail still drives today's numbers regardless.
+    /// Files at or above this size are skipped outright — an honest empty bucket beats an I/O + memory spike in a wallpaper process.
     private let maxFileBytes: UInt64
     /// One-shot flag so the skip is logged once per cache lifetime, not per rescan.
     private var loggedOversized = false
@@ -45,10 +35,7 @@ final class MonitorUsageBackfillCache {
         now.timeIntervalSince(lastRefresh) >= refreshInterval
     }
 
-    /// Rebuild buckets for the given files (already filtered to the mtime window by
-    /// the caller). Unchanged files reuse memoized buckets; vanished files drop
-    /// out. Returns every retained file's buckets for rollup. Marks the refresh
-    /// time so `shouldRefresh` gates the next pass.
+    /// Rebuild buckets for the given files (already filtered to the mtime window by the caller).
     @discardableResult
     func refresh(files: [MonitorUsageFileRef], now: Date) -> [MonitorFileUsageBuckets] {
         lastRefresh = now
@@ -66,10 +53,7 @@ final class MonitorUsageBackfillCache {
                 result.append(existing.buckets)
                 continue
             }
-            // Skip pathologically large transcripts: reading tens of MB into memory
-            // in a wallpaper process is exactly the spike we must avoid. Memoize an
-            // empty bucket under the size-bearing fingerprint so it isn't re-checked
-            // every rescan (a shrink below the cap changes the fingerprint → re-read).
+            // Skip pathologically large transcripts: reading tens of MB into memory in a wallpaper process is exactly the spike we must avoid.
             if file.size >= maxFileBytes {
                 if !loggedOversized {
                     loggedOversized = true
@@ -109,14 +93,9 @@ struct MonitorUsageFileRef: Sendable, Equatable {
     var mtime: Date
 }
 
-/// Whole-file transcript parser producing `MonitorFileUsageBuckets`. Separate
-/// from the live tail models because the ledger wants historic totals, not live
-/// status; it deliberately shares neither state nor mutation with them.
+/// Whole-file transcript parser producing `MonitorFileUsageBuckets`.
 enum MonitorUsageFileParser {
-    /// Stream a transcript from disk line-by-line so peak memory is bounded by the
-    /// chunk size, not the file size. A file that vanishes / can't be opened yields
-    /// empty buckets (same as before). Parse results are identical to the in-memory
-    /// `parse(data:)` path for well-formed files — both fold the same line sequence.
+    /// Stream a transcript from disk line-by-line so peak memory is bounded by the chunk size, not the file size.
     static func parse(url: URL, provider: MonitorAgentProvider, calendar: Calendar = .current) -> MonitorFileUsageBuckets {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return MonitorFileUsageBuckets() }
         defer { try? handle.close() }
@@ -154,10 +133,7 @@ enum MonitorUsageFileParser {
         return buckets
     }
 
-    /// Codex: `token_count` reports a running `total_token_usage`, so per-line
-    /// deltas aren't available. Attribute the file's final total to its last-event
-    /// day + model — a best-effort day bucket (documented imprecision at the day
-    /// boundary for multi-day Codex sessions; the common case is a same-day run).
+    /// Codex: `token_count` reports a running `total_token_usage`, so per-line deltas aren't available.
     static func parseCodex(lines: AnySequence<Data>, calendar: Calendar) -> MonitorFileUsageBuckets {
         var buckets = MonitorFileUsageBuckets()
         var model: String?
@@ -197,11 +173,7 @@ enum MonitorUsageFileParser {
 
     // MARK: - Streaming line reader
 
-    /// Reads a `FileHandle` in bounded chunks and yields one `Data` per newline-
-    /// delimited line, so peak memory is O(chunk + longest line) regardless of file
-    /// size. Semantics match `splitLines`: `\n` splits, empty lines (consecutive
-    /// newlines) are skipped, and a final non-empty segment with no trailing newline
-    /// is emitted. Not thread-safe; a fresh reader is created per parse.
+    /// Reads a `FileHandle` in bounded chunks and yields one `Data` per newline- delimited line, so peak memory is O(chunk + longest line) regardless of file size.
     struct StreamingLineReader: Sequence {
         let handle: FileHandle
         var chunkSize: Int = 1 << 16   // 64 KiB
@@ -225,15 +197,12 @@ enum MonitorUsageFileParser {
             mutating func next() -> Data? {
                 while true {
                     // Emit any complete line already buffered, skipping empty ones.
-                    // Re-base indices off `startIndex` so this is correct even if the
-                    // buffer became a slice after a prior removal.
                     while let nl = buffer.firstIndex(of: newline) {
                         let line = Data(buffer[buffer.startIndex..<nl])
                         buffer = Data(buffer[buffer.index(after: nl)...])
                         if !line.isEmpty { return line }
                     }
                     if atEOF {
-                        // Flush a trailing non-empty segment (no closing newline).
                         guard !buffer.isEmpty else { return nil }
                         let tail = Data(buffer)
                         buffer = Data()

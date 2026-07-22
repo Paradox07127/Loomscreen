@@ -42,9 +42,7 @@ extension WPEMetalSceneRenderer {
                 || !textVisibleScripted.isEmpty || !textAlphaScripted.isEmpty),
               let pipeline = renderPipeline else { return }
 
-        // Map EVERY layer's name→id and (when video-backed) id→video-source-key,
-        // so a script's `thisScene.getLayer(name)` can drive another layer's video
-        // (e.g. the button that controls 千咲入场动画).
+        // Index every layer because scripts can control a different layer's video by name.
         for layer in pipeline.layers {
             let id = layer.graphLayer.objectID
             layerObjectIDByName[layer.graphLayer.objectName] = id
@@ -236,8 +234,7 @@ extension WPEMetalSceneRenderer {
                 instance.seedAsyncTick(pointerPosition: neutralPointer)
             }
         }
-        // 3. Text-content scripts, in scene-object order (hidden compute texts
-        //    write shared.txtN that later data texts read — 三体's 日志).
+        // 3. Seed text scripts in object order because later scripts may consume shared state.
         for object in textObjects {
             textScriptInstances[object.id]?.seedAsyncTick()
         }

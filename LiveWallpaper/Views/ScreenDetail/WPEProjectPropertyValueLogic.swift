@@ -3,11 +3,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// Shared value logic for the web (`WPEProjectCustomSettingsCard`) and scene
-/// (`WPESceneCustomSettingsCard`) settings inspectors: slider normalization,
-/// number formatting, color codecs, and default comparison. One source of
-/// truth so identical authored properties can't render or persist differently
-/// between the two cards — only the storage/commit adapters stay per-card.
+/// Shared value logic for the web (`WPEProjectCustomSettingsCard`) and scene (`WPESceneCustomSettingsCard`) settings inspectors: slider normalization, number formatting, color codecs, and default comparison.
 enum WPEProjectPropertyValueLogic {
     typealias Property = WallpaperEngineProjectPropertySchema.Property
 
@@ -66,18 +62,7 @@ enum WPEProjectPropertyValueLogic {
 
     // MARK: - Default comparison
 
-    /// Type-aware comparison that decides whether a freshly-edited value
-    /// should be persisted as an override or treated as "back to default".
-    /// Plain `==` on the enum is too strict for two cases:
-    ///
-    /// 1. **Slider values** — SwiftUI slider math reproduces the default
-    ///    `20` as `20.000000000000004` after one round-trip, which would
-    ///    permanently mark the slider as overridden.
-    /// 2. **Color values** — the ColorPicker may yield `"0.500000 0.500000
-    ///    0.500000"` for a default authored as `"0.5 0.5 0.5"`.
-    ///
-    /// Compare numerically per component within an epsilon so the Reset
-    /// affordance and the persisted override set both stay honest.
+    /// Type-aware comparison that decides whether a freshly-edited value should be persisted as an override or treated as "back to default".
     static func matchesDefault(
         value: WallpaperEngineProjectPropertyValue,
         for property: Property
@@ -96,13 +81,6 @@ enum WPEProjectPropertyValueLogic {
             if property.type == .color {
                 let lhsComponents = colorComponents(from: lhs)
                 let rhsComponents = colorComponents(from: rhs)
-                // Compare the first three (RGB) components only. WPE
-                // authors mix `"r g b"`, `"#rrggbb"`, and `"#rrggbbaa"`
-                // freely, while SwiftUI's `ColorPicker` (with
-                // `supportsOpacity: false`) always rounds-trips three
-                // components — without trimming we would mark a default
-                // `#808080ff` as "different" from the picker's
-                // `"0.5 0.5 0.5"`.
                 guard lhsComponents.count >= 3, rhsComponents.count >= 3 else {
                     return lhs == rhs
                 }
@@ -129,9 +107,7 @@ enum WPEProjectPropertyValueLogic {
         return parsed.prefix(4).map { min(max($0, 0), 1) }
     }
 
-    /// Recognises WPE's other common color encoding (`"#rrggbb"`,
-    /// `"#rrggbbaa"`, or bare `"rrggbb"`) so authors who used either
-    /// notation interoperate with the SwiftUI ColorPicker round-trip.
+    /// Recognises WPE's other common color encoding (`"#rrggbb"`, `"#rrggbbaa"`, or bare `"rrggbb"`) so authors who used either notation interoperate with the SwiftUI ColorPicker round-trip.
     static func decodeHexColor(_ raw: String) -> [Double]? {
         var hex = raw.lowercased()
         if hex.hasPrefix("#") { hex.removeFirst() }

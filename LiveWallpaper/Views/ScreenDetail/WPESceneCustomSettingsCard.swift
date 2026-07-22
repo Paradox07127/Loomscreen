@@ -2,16 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Companion to the HTML project settings card, diverging on three points:
-///   - storage: scene overrides live on `SceneDescriptor.propertyOverrides`
-///     rather than `HTMLConfig.wallpaperEngineProjectPropertiesByProject`
-///     because there's no parent HTMLConfig in the `.scene(...)` case;
-///   - the apply path goes through `ScreenManager.updateSceneDescriptor`
-///     instead of `updateHTMLConfig`;
-///   - `schemecolor` (the WPE global accent) is HIDDEN by default: most scenes
-///     never bind a field to it, so the picker is a no-op for them. The renderer
-///     still resolves its value via `effectiveSceneValues` for the rare scene
-///     that references it through a `{"user":"schemecolor"}` envelope.
+/// Edits project properties stored directly on a WPE scene descriptor.
 struct WPESceneCustomSettingsCard: View {
     private typealias ValueLogic = WPEProjectPropertyValueLogic
 
@@ -390,9 +381,7 @@ struct WPESceneCustomSettingsCard: View {
         apply(next)
     }
 
-    /// Slider variant of `setValue`: updates `descriptor` immediately so the
-    /// control tracks the drag, but debounces the `updateSceneDescriptor` call
-    /// (~150ms) so a continuous drag triggers a single apply/reload.
+    /// Slider variant of `setValue`: updates `descriptor` immediately so the control tracks the drag, but debounces the `updateSceneDescriptor` call (~150ms) so a continuous drag triggers a single apply/reload.
     private func setSliderValue(
         _ value: WallpaperEngineProjectPropertyValue,
         for property: WallpaperEngineProjectPropertySchema.Property
@@ -415,9 +404,7 @@ struct WPESceneCustomSettingsCard: View {
 
     private func apply(_ next: SceneDescriptor) {
         guard descriptor != next else { return }
-        // A discrete change (toggle/picker/color) supersedes any in-flight
-        // slider debounce; `next` already includes those slider values because
-        // `descriptor` is updated immediately on each drag.
+        // A discrete change (toggle/picker/color) supersedes any in-flight slider debounce; `next` already includes those slider values because `descriptor` is updated immediately on each drag.
         cancelPendingSliderApplies()
         descriptor = next
         Task { @MainActor in await screenManager.updateSceneDescriptor(next, for: screen) }

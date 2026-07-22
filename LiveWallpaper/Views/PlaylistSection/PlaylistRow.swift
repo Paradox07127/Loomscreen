@@ -3,10 +3,6 @@ import LiveWallpaperCore
 import SwiftUI
 
 /// Apple Music-style playlist row.
-///
-/// Drag-reorder is attached **only to the leading-handle hit area** (28×44pt),
-/// not the whole row, so the body's tap "play now" gesture and the context
-/// menu don't race the DragGesture.
 struct PlaylistRow: View {
     let entry: PlaylistEntry
     let index: Int
@@ -51,8 +47,6 @@ struct PlaylistRow: View {
                     }
                 }
                 .onChange(of: isBeingDragged) { _, dragging in
-                    // Swap open-hand ↔ closed-hand cursor when a drag of the
-                    // hovered handle starts/ends.
                     guard isHandleHovering else { return }
                     NSCursor.pop()
                     (dragging ? NSCursor.closedHand : NSCursor.openHand).push()
@@ -101,9 +95,6 @@ struct PlaylistRow: View {
         .contextMenu { rowMenuItems }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
-        // Unnamed action binds VoiceOver's default "double-tap to activate";
-        // `.onTapGesture(count: 2)` isn't an accessibility action so without
-        // this the row would have no primary activation.
         .accessibilityAction { onPlayNow() }
         .accessibilityAction(named: Text("Set as Primary")) { onSetPrimary() }
         .accessibilityAction(named: Text("Play Now")) { onPlayNow() }

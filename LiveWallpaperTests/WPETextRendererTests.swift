@@ -14,8 +14,6 @@ struct WPETextRendererTests {
         #expect(WPESystemFont.isReference("fonts/Monofur.ttf") == false)
         #expect(WPESystemFont.familyName(for: "systemfont_arial") == "Arial")
         #expect(WPESystemFont.familyName(for: "systemfont_comic_sans_ms") == "Comic Sans Ms")
-        // CoreText resolves the family by name (Arial ships on macOS) rather than treating it as a
-        // missing asset path; an unknown name still yields a usable font, never a crash.
         let font = WPESystemFont.font(for: "systemfont_arial", size: 32)
         #expect(CTFontGetSize(font) == 32)
     }
@@ -138,9 +136,6 @@ struct WPETextRendererTests {
         let first = try #require(renderer.rasterize(boxed))
         let second = try #require(renderer.rasterize(boxed))
         #expect(first.texture === second.texture)
-        // Box-fit scaling actually applied: the box-fit render differs in size
-        // from the same text at raw pointSize (proves the memoized effectiveFontSize
-        // returns the scaled value, not the base).
         let unboxed = try #require(renderer.rasterize(object(box: nil)))
         #expect(first.size != unboxed.size)
     }
@@ -153,10 +148,6 @@ struct WPETextRendererTests {
             dependencyMounts: []
         )
         let renderer = WPETextRenderer(device: device, resolver: resolver)
-        // A short word in a near-square box (WPE 3470764447's weekday: box ~471×366,
-        // word "SUNDAY"). WPE fits to HEIGHT and lets the word overflow the width,
-        // so the rendered glyph height must fill most of the box height — NOT the
-        // much smaller size the old min(widthFit, heightFit) produced.
         let object = WPESceneTextObject(
             id: "wd", name: "Weekday", text: "SUNDAY",
             fontRelativePath: nil, pointSize: 32,
@@ -167,12 +158,7 @@ struct WPETextRendererTests {
             boxSize: SIMD2<Double>(471, 366), padding: 0
         )
         let rendered = try #require(renderer.rasterize(object))
-        // Height-fill: rendered text height reaches most of the box height. The old
-        // width-limited fit produced roughly boxWidth/wordWidth × lineHeight, far
-        // short of the box height for a short word in a near-square box.
         #expect(rendered.size.height >= 366 * 0.7)
-        // And the word overflows the box width (that's why WPE letter-spacing/
-        // overflow is expected) — proving the fit is height-driven, not width-capped.
         #expect(rendered.size.width > 471)
     }
 
@@ -184,9 +170,6 @@ struct WPETextRendererTests {
             dependencyMounts: []
         )
         let renderer = WPETextRenderer(device: device, resolver: resolver)
-        // Authored RED: the old baked path would have produced red pixels. The
-        // mask must stay neutral (premultiplied white ⇒ rgb == alpha); color is
-        // applied only by the overlay shader at draw time.
         let object = WPESceneTextObject(
             id: "1", name: "Mask", text: "W",
             fontRelativePath: nil, pointSize: 64,
@@ -216,8 +199,8 @@ struct WPETextRendererTests {
             maxChannelDelta = max(maxChannelDelta, abs(Int(bytes[i + 1]) - a))
             maxChannelDelta = max(maxChannelDelta, abs(Int(bytes[i + 2]) - a))
         }
-        #expect(maxAlpha > 0)           // glyph actually rasterized
-        #expect(maxChannelDelta <= 2)   // neutral premultiplied white, not red
+        #expect(maxAlpha > 0)
+        #expect(maxChannelDelta <= 2)
     }
 
     @Test("Empty text object is rejected at parse time")

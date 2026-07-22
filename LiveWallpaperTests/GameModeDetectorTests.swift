@@ -2,10 +2,7 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// `GameModeDetector` classifies the frontmost app purely on its declared
-/// `LSApplicationCategoryType` — the same signal macOS Game Mode keys on.
-/// Install paths and storefront bundle IDs are deliberately NOT signals, and an
-/// unreadable category is `.unknown` and fails open (no pause).
+/// Verifies category-based game detection; install paths are intentionally not classification signals.
 @Suite("GameModeDetector classification")
 struct GameModeDetectorTests {
 
@@ -37,10 +34,6 @@ struct GameModeDetectorTests {
         #expect(!GameModeDetector.isGameCategory("public.app-category.gamesomething"))
     }
 
-    // The regression this refactor fixes: a Steam-pathed app with no declared
-    // category is `.unknown`, NOT a game. Path heuristics were removed so the
-    // detector can't claim coverage it doesn't have — such games are handled by
-    // the full-screen pause rule or an Application Exception instead.
     @Test("Install path is no longer a game signal")
     func installPathIsNotAGameSignal() {
         let steamPlist = URL(fileURLWithPath:
@@ -61,9 +54,6 @@ struct GameModeDetectorTests {
         #expect(GameModeDetector.evaluate(lowPowerMode: true, classification: .nonGame))
     }
 
-    // First sight of a bundle must not read disk on the MainActor: the answer
-    // is fail-open `.unknown`, and the off-main plist read fills the cache for
-    // the next policy refresh.
     @Test("First sight fails open, then the background read fills the cache")
     @MainActor
     func firstSightFailsOpenThenCacheFills() async throws {

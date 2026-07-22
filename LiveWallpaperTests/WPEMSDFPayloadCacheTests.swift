@@ -6,13 +6,9 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Per-object payload frame cache (#4): an unchanged object reuses its built
-/// MTLBuffers across frames; a text change or an atlas-generation bump rebuilds.
 @MainActor
 struct WPEMSDFPayloadCacheTests {
 
-    /// The resolver keeps its primary root private, so the root comes back
-    /// alongside it for callers to `defer`-remove.
     private func makeEmptyPrimaryResolver() throws -> (resolver: WPEMultiRootResourceResolver, root: URL) {
         let primaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("msdf-payload-\(UUID().uuidString)", isDirectory: true)
@@ -74,7 +70,6 @@ struct WPEMSDFPayloadCacheTests {
         let object = makeTextObject(text: "Hi")
 
         let first = try #require(await awaitPayload(renderer: renderer, object: object, sceneSize: sceneSize))
-        // Second call, identical object → cache HIT, same buffer objects reused.
         let second = try #require(renderer.drawPayload(for: object, sceneSize: sceneSize, parallaxOffset: .zero))
 
         #expect(bufferIdentities(first) == bufferIdentities(second), "unchanged object should reuse cached MTLBuffers")
@@ -91,7 +86,6 @@ struct WPEMSDFPayloadCacheTests {
         let sceneSize = CGSize(width: 256, height: 128)
 
         let first = try #require(await awaitPayload(renderer: renderer, object: makeTextObject(text: "Hi"), sceneSize: sceneSize))
-        // Same object id, new text → geometry key changes → rebuild.
         let changed = try #require(await awaitPayload(renderer: renderer, object: makeTextObject(text: "Yo"), sceneSize: sceneSize))
 
         #expect(bufferIdentities(first) != bufferIdentities(changed), "a text change must rebuild the payload")
@@ -110,8 +104,6 @@ struct WPEMSDFPayloadCacheTests {
         let base = makeTextObject(text: "Hi")
         let first = try #require(await awaitPayload(renderer: renderer, object: base, sceneSize: sceneSize))
 
-        // Same geometry, different alpha + color: must reuse buffers but reflect
-        // the new uniforms.
         var recolored = base
         recolored = WPESceneTextObject(
             id: base.id, name: base.name, text: base.text,
@@ -136,8 +128,6 @@ struct WPEMSDFPayloadCacheTests {
         let (renderer, primaryRoot) = try makeRenderer(device: device)
         defer { try? FileManager.default.removeItem(at: primaryRoot) }
         let sceneSize = CGSize(width: 256, height: 128)
-        // Generation is always async (never blocks the main thread) — poll until
-        // the glyphs land, exactly like the production per-frame loop.
         let object = makeTextObject(text: "12:00")
         let payload = try #require(
             await awaitPayload(renderer: renderer, object: object, sceneSize: sceneSize),
@@ -146,10 +136,6 @@ struct WPEMSDFPayloadCacheTests {
         #expect(!payload.pages.isEmpty)
         #expect(payload.combos["MSDF"] == 1)
 
-        // The prewarm queued digits 0-9 the first time the object was seen, so a
-        // digit NOT in "12:00" (e.g. "7") is already generating/ready without
-        // ever being laid out — no cold-generation flash when the clock ticks to
-        // a minute containing it.
         let sevenObject = makeTextObject(text: "7")
         let seven = try #require(
             await awaitPayload(renderer: renderer, object: sevenObject, sceneSize: sceneSize),
@@ -163,9 +149,6 @@ struct WPEMSDFPayloadCacheTests {
         .enabled(if: MTLCreateSystemDefaultDevice() != nil)
     )
     func atlasGenerationBumpInvalidatesPayload() throws {
-        // Direct atlas-level assertion: the epoch is the invalidation signal the
-        // renderer's payload cache guards on. A tiny single-page atlas forces an
-        // eviction (and thus a generation bump) on the second distinct glyph.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let atlas = WPEMSDFAtlas(device: device, pageSize: 64, maxPages: 1)
         let generator = WPEMSDFGlyphGenerator()
@@ -182,7 +165,6 @@ struct WPEMSDFPayloadCacheTests {
 
         let genBefore = atlas.generation
         _ = try #require(atlas.entry(for: keyA, generator: generator, font: font))
-        // Second glyph evicts the first → generation must advance.
         _ = try #require(atlas.entry(for: keyB, generator: generator, font: font))
         #expect(atlas.generation > genBefore, "an eviction must advance the atlas generation epoch")
     }

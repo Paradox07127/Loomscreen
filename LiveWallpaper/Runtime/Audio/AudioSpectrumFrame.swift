@@ -1,14 +1,7 @@
 import Foundation
 
-/// A single stereo audio analysis result: 64 normalized frequency bins per
-/// channel. This is the sink-agnostic contract shared by every audio-reactive
-/// surface — WPE Metal scene uniforms and the HTML
-/// `wallpaperRegisterAudioListener` web bridge.
-///
-/// Bin values are clamped to `0...1` (low frequency → high). Both initializers
-/// guarantee exactly `binCount` finite entries per channel so downstream
-/// consumers never have to defend against ragged, NaN-laden, or out-of-range
-/// input.
+/// A stereo analysis frame with 64 normalized frequency bins per channel.
+/// Public construction guarantees finite `0...1` values and fixed channel lengths.
 struct AudioSpectrumFrame: Equatable, Sendable {
     static let binCount = 64
 

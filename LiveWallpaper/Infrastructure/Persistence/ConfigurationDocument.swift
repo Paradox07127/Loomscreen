@@ -2,15 +2,9 @@ import LiveWallpaperCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// SwiftUI `FileDocument` wrapper around a pre-encoded configuration
-/// payload. We encode on MainActor before constructing the document (via
-/// `ConfigurationDocument.snapshot()`), then SwiftUI's exporter pipeline
-/// only handles raw bytes — this keeps `FileDocument`'s nonisolated
-/// requirements clean under Swift 6 strict concurrency.
+/// SwiftUI file-document wrapper around a configuration payload encoded on the main actor.
 struct ConfigurationDocument: FileDocument {
-    /// File panels filter to LiveWallpaper's custom UTType; reading a raw
-    /// `.json` export is still possible because the type conforms to
-    /// `public.json`.
+    /// File panels prefer the app's configuration type while accepting raw JSON imports.
     static let readableContentTypes: [UTType] = [ConfigurationBundle.contentType, .json]
     static let writableContentTypes: [UTType] = [ConfigurationBundle.contentType]
 
@@ -27,7 +21,7 @@ struct ConfigurationDocument: FileDocument {
         return ConfigurationDocument(encodedPayload: data)
     }
 
-    /// `FileDocument`'s reading initializer is required even though we never read via this path — import goes through `ConfigurationPorter` so it can show the confirmation alert before applying.
+    /// Required by `FileDocument`; interactive imports use `ConfigurationPorter` for confirmation.
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)

@@ -3,7 +3,7 @@
     import LiveWallpaperProWPE
 
     extension WPEMetalSceneRenderer {
-        // MARK: - Script tick dispatch (ADR-003 step 1)
+        // MARK: - Script Tick Dispatch
 
         func tickLayerScript(
             _ instance: WPELayerScriptInstance,

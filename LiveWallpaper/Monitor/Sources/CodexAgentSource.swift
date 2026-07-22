@@ -9,9 +9,7 @@ final class CodexAgentSource: MonitorDataSource {
     private static let rescanInterval: TimeInterval = 10
     private static let endedRetention: TimeInterval = 2 * 60 * 60
 
-    /// Lifecycle state touched by `start`/`stop`. Lock-guarded so the type is
-    /// `Sendable` without relying on the caller serializing start/stop — matching
-    /// how the sibling `ClaudeAgentSource` confines the same state in an actor.
+    /// Lifecycle state touched by `start`/`stop`.
     private struct Lifecycle {
         var pollTask: Task<Void, Never>?
         var didStartSecurityScope = false
@@ -200,19 +198,12 @@ final class CodexAgentSource: MonitorDataSource {
         ledgerLock.withLock { $0 = fragment }
     }
 
-    /// Enumerate `rollout-*.jsonl` inside the ledger day window, with size for the
-    /// memo fingerprint. Codex stores sessions in date-sharded `YYYY/MM/DD`
-    /// directories, so the walk prunes whole day-shards older than the cutoff
-    /// before descending — a multi-month history never gets fully scanned every
-    /// 5 minutes. A cap+sort mirrors `ClaudeAgentSource.ledgerFileRefs`'s 400 limit
-    /// as a safety belt (and covers any non-sharded stragglers).
+    /// Enumerate `rollout-*.jsonl` inside the ledger day window, with size for the memo fingerprint.
     static let ledgerFileLimit = 400
 
     static func ledgerFileRefs(rootURL: URL, now: Date) -> [MonitorUsageFileRef] {
         let sessionsURL = rootURL.appendingPathComponent("sessions", isDirectory: true)
         let cutoff = now.addingTimeInterval(-TimeInterval(MonitorUsageRollup.dayWindow) * 24 * 3600)
-        // Compare on day granularity so a file written any time on the cutoff day
-        // still survives the directory prune (its dir date == cutoff's day start).
         let cutoffDay = Calendar.current.startOfDay(for: cutoff)
         let dayURLs = dateShardedDayDirectories(under: sessionsURL, onOrAfter: cutoffDay)
 
@@ -238,11 +229,7 @@ final class CodexAgentSource: MonitorDataSource {
         return Array(refs.sorted { $0.mtime > $1.mtime }.prefix(ledgerFileLimit))
     }
 
-    /// Resolve the `sessions/YYYY/MM/DD` leaf directories whose date is on or
-    /// after `cutoffDay`, pruning older year/month/day shards without descending.
-    /// Any directory level that doesn't parse as a date component is kept (walked)
-    /// so an unexpected layout degrades to a normal — still bounded — scan rather
-    /// than silently dropping files.
+    /// Resolve the `sessions/YYYY/MM/DD` leaf directories whose date is on or after `cutoffDay`, pruning older year/month/day shards without descending.
     private static func dateShardedDayDirectories(under sessionsURL: URL, onOrAfter cutoffDay: Date) -> [URL] {
         let calendar = Calendar.current
         let cutoff = calendar.dateComponents([.year, .month, .day], from: cutoffDay)

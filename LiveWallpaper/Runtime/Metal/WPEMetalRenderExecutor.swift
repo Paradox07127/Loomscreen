@@ -19,7 +19,7 @@ final class WPEMetalRenderExecutor {
         static let godraysCombine = "effects/godrays_combine"
     }
 
-    /// Phase 2A H3: every offscreen target and the on-screen swapchain share
+    /// Every offscreen target and the on-screen swapchain share
     /// a single sRGB pixel format so render pipelines built for the offscreen
     /// pass can be reused by `present()` without re-creation, and so the
     /// rendered gamma stays stable across offscreen and onscreen passes.
@@ -101,8 +101,7 @@ final class WPEMetalRenderExecutor {
     private let pipelineCache: WPEMetalPipelineCache
     /// Translates non-built-in shaders via the shipping Swift transpiler.
     let shaderCompiler: WPESwiftShaderCompiler
-    /// Phase 2D-H: memoize the per-shader compile across frames so we
-    /// don't re-translate every draw call.
+    /// Memoizes shader translation across frames.
     var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
 
     /// Per-pass fast path keyed by `WPEPreparedRenderPass.id`. `translatedShaderCache`
@@ -160,8 +159,7 @@ final class WPEMetalRenderExecutor {
             translatedShaderCache[entry.key] = entry.result
         }
     }
-    /// Phase 2D-H: cache MTLRenderPipelineState built from translated
-    /// shaders. Library + blend + format set is the key.
+    /// Caches translated pipeline states by library, blend mode, and format.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
     var previousFrameHistory: PreviousFrameHistory?
     /// Clip-composite role detection depends on the object's animation layers, so cache the resolved
@@ -327,7 +325,7 @@ final class WPEMetalRenderExecutor {
         self.shaderCompiler = WPESwiftShaderCompiler(device: device)
     }
 
-    /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
+    /// Lets `WPEMetalSceneRenderer` hand the executor's device
     /// to `WPEVideoTextureSource` (which needs it to build a
     /// `CVMetalTextureCache`) without exposing the device publicly.
     var textureSourceDevice: MTLDevice {
@@ -1401,7 +1399,7 @@ final class WPEMetalRenderExecutor {
         encoder.endEncoding()
     }
 
-    /// Phase 2C audit fix: blit-copies a prior physical texture into the pool's secondary slot so ping-pong renders that blend or depth-test have a defined source to load.
+    /// Seeds the secondary ping-pong slot so blend and depth loads have a defined source.
     func copyTexture(
         _ source: MTLTexture,
         to destination: MTLTexture,
@@ -1999,7 +1997,7 @@ final class WPEMetalRenderExecutor {
     }
     #endif
 
-    /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
+    /// Packs scene uniforms for the `genericimage*` builtins.
     /// Developer-only image brightness/color diagnostic; gated by its own key so it
     /// is independent of the unrelated audio-reactive DSP log toggle.
     private static let imageUniformDebugEnabled = UserDefaults.standard.bool(forKey: "WPEImageUniformDebugLog")
@@ -2292,7 +2290,7 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// Phase 2D-H: pack a runtime uniform buffer matching the layout the transpiler emitted (every uniform takes 1-4 float4 slots).
+    /// Packs runtime uniforms into the transpiler's one-to-four-float4 slot layout.
     func packTranslatedUniforms(
         for pass: WPEPreparedRenderPass,
         layout: [WPEUniformSlot],

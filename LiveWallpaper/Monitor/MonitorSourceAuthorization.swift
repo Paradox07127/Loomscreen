@@ -2,20 +2,7 @@ import AppKit
 import Foundation
 import LiveWallpaperCore
 
-/// Owns the optional read-only, security-scoped grants to the AI-agent log
-/// roots the monitor wallpaper reads: the Claude root (`~/.claude`) and the
-/// Codex root (`~/.codex`). Both live OUTSIDE the app sandbox container, so a
-/// user-approved `NSOpenPanel` grant + persisted bookmark is required before
-/// the agent data sources can tail them.
-///
-/// A missing grant is not an error — it simply means the corresponding agent
-/// source reports `unauthorized` health and contributes no sessions. Only the
-/// Pro `.agentFleet` capability ever surfaces the authorization UI, but this
-/// store is SKU-agnostic (it compiles into Lite too and just goes unused).
-///
-/// Bookmark resolution goes through the shared `SecurityScopedBookmarkResolver`
-/// so a stale bookmark is transparently refreshed in place; started scopes are
-/// tracked and balanced on `release()`.
+/// Owns the optional read-only, security-scoped grants to the AI-agent log roots the monitor wallpaper reads: the Claude root (`~/.claude`) and the Codex root (`~/.codex`).
 @MainActor
 final class MonitorSourceAuthorization {
     static let shared = MonitorSourceAuthorization()
@@ -68,10 +55,7 @@ final class MonitorSourceAuthorization {
 
     // MARK: - Revoke
 
-    /// Fully drops the user's grant for a provider: stops the live security
-    /// scope and deletes the persisted bookmark so `isAuthorized` reads false
-    /// and nothing can re-resolve it. The corresponding agent source falls back
-    /// to `unauthorized` health on the next `MonitorRuntime.refreshSources()`.
+    /// Fully drops the user's grant for a provider: stops the live security scope and deletes the persisted bookmark so `isAuthorized` reads false and nothing can re-resolve it.
     func revokeAccess(_ provider: Provider) {
         stopAccessing(provider)
         defaults.removeObject(forKey: provider.defaultsKey)
@@ -144,14 +128,7 @@ final class MonitorSourceAuthorization {
         resolveRoot(.codex)
     }
 
-    /// Resolves the Claude grant into an EPHEMERAL security scope that is opened
-    /// and closed entirely within `body`, without ever touching `activeScopes`.
-    ///
-    /// The runtime owns the long-lived scope via `resolveRoot`/`release`; a
-    /// one-shot reader (e.g. session→PID focus routing) must not disturb that
-    /// refcount, so this path starts its own scope on the resolved URL, runs
-    /// `body`, then stops it in a `defer`. Returns `nil` (and skips `body`) when
-    /// no grant is stored or the scope can't be opened.
+    /// Resolves the Claude grant into an EPHEMERAL security scope that is opened and closed entirely within `body`, without ever touching `activeScopes`.
     func withResolvedClaudeRoot<T>(_ body: (URL) throws -> T) rethrows -> T? {
         let provider = Provider.claude
         let target = SecurityScopedBookmarkResolver.Target(label: "monitor.\(provider.defaultDirectoryName).ephemeral") { [weak self] original, refreshed in
@@ -177,14 +154,9 @@ final class MonitorSourceAuthorization {
         return try body(resolved.url)
     }
 
-    /// Resolves the stored grant, starts its security scope, and tracks it so
-    /// `release()` can balance the access. Returns `nil` (source stays
-    /// unauthorized) when no grant is stored or the scope can't be opened.
+    /// Resolves the stored grant, starts its security scope, and tracks it so `release()` can balance the access.
     private func resolveRoot(_ provider: Provider) -> URL? {
         let target = SecurityScopedBookmarkResolver.Target(label: "monitor.\(provider.defaultDirectoryName)") { [weak self] original, refreshed in
-            // Compare-and-swap: only overwrite if the currently stored value is
-            // still the one we resolved from, so a late refresh can't resurrect
-            // a grant the user cleared or re-granted meanwhile.
             guard let self else { return }
             Task { @MainActor in
                 if self.defaults.data(forKey: provider.defaultsKey) == original {
@@ -195,7 +167,6 @@ final class MonitorSourceAuthorization {
 
         switch SecurityScopedBookmarkResolver.shared.resolve(defaults.data(forKey: provider.defaultsKey), target: target) {
         case .success(let resolved):
-            // Replace any previous scope for this provider before starting a new one.
             stopAccessing(provider)
             guard resolved.url.startAccessingSecurityScopedResource() else {
                 Logger.warning("Monitor: startAccessingSecurityScopedResource failed for \(provider.defaultDirectoryName)", category: .fileAccess)
@@ -235,19 +206,7 @@ final class MonitorSourceAuthorization {
 
     // MARK: - Selection validation
 
-    /// The grant must be the provider's own root (`~/.claude` / `~/.codex`), never
-    /// a broader parent the user might pick by mistake — the scanners derive their
-    /// fixed subpaths from this root, and a wider grant would hand the app a
-    /// read-only sandbox extension over unrelated files for the whole pipeline.
-    ///
-    /// The check is STRUCTURAL and runs on the UNRESOLVED selection: the chosen
-    /// folder must itself be named `.claude`/`.codex` and sit directly in the real
-    /// home. Symlinks on the chosen path are deliberately NOT resolved — resolving
-    /// would let a user whose `~/.claude` is a symlink to `~` (or `/`) satisfy the
-    /// check by selecting the broad target, storing a home-wide bookmark. The
-    /// expected root derives from the REAL home (`getpwuid`), because under
-    /// app-sandbox `homeDirectoryForCurrentUser` is the container home and a
-    /// container-derived comparison would reject every legitimate grant.
+    /// Accepts only the provider root to avoid granting a broader sandbox extension.
     private static func isExpectedRoot(_ url: URL, for provider: Provider) -> Bool {
         let chosen = url.standardizedFileURL
         // The selected folder's OWN name must match — this is what blocks picking
@@ -256,8 +215,6 @@ final class MonitorSourceAuthorization {
         let parent = chosen.deletingLastPathComponent().standardizedFileURL
         let home = realHomeDirectory().standardizedFileURL
         if parent.path == home.path { return true }
-        // Accept a parent that only differs by symlink (a relocated/linked home),
-        // now that the folder-name gate has already excluded a broad pick.
         return parent.resolvingSymlinksInPath().standardizedFileURL.path
             == home.resolvingSymlinksInPath().standardizedFileURL.path
     }
@@ -294,10 +251,7 @@ final class MonitorSourceAuthorization {
             .appendingPathComponent(provider.defaultDirectoryName, isDirectory: true)
     }
 
-    /// The user's REAL home directory. Under app-sandbox both
-    /// `homeDirectoryForCurrentUser` and `NSHomeDirectory()` return the
-    /// container home, which would seed the grant panel at a nonexistent
-    /// container `.claude` and make the expected-root check unsatisfiable.
+    /// The user's REAL home directory.
     private static func realHomeDirectory() -> URL {
         if let dir = getpwuid(getuid())?.pointee.pw_dir {
             return URL(fileURLWithPath: String(cString: dir), isDirectory: true)

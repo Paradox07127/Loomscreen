@@ -4,13 +4,9 @@ import LiveWallpaperCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The pane's "Installed" tab, backed by the app-managed Wallpaper Engine
-/// library (WPE import history + cache). Rendered headerless —
-/// `WorkshopPaneView` owns the chrome.
+/// The pane's "Installed" tab, backed by the app-managed Wallpaper Engine library (WPE import history + cache).
 struct WorkshopInstalledView: View {
-    /// Tapping a tag in the detail inspector bubbles up here so the pane can
-    /// switch to Browse Online and scope the grid to that tag. nil = tags are
-    /// shown but inert (e.g. if ever embedded without a Browse tab).
+    /// Tapping a tag in the detail inspector bubbles up here so the pane can switch to Browse Online and scope the grid to that tag.
     var onBrowseTag: ((String) -> Void)?
     /// nil renders no header and contributes no toolbar items (keeps the view
     /// embeddable like Browse).
@@ -28,7 +24,6 @@ struct WorkshopInstalledView: View {
     @AppStorage("Workshop.Installed.InspectorWidth") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
 
-    // 184…220 matches the online Browse grid density (square tiles, ~192px source).
     private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
 
     var body: some View {
@@ -42,13 +37,11 @@ struct WorkshopInstalledView: View {
                 liveWidth: $liveInspectorWidth,
                 minWidth: DesignTokens.Inspector.minWidth,
                 maxWidth: DesignTokens.Inspector.maxWidth,
-                // Dragging the handle past the panel's minimum collapses it.
                 onClose: { model.inspectorHidden = true },
                 main: { mainColumn },
                 inspector: { width in installedInspectorColumn(width: width) }
             )
             .background(DesignTokens.Colors.pageBackground)
-            // Only contributed when hosted in the tabbed pane and a card is selected.
             .toolbar {
                 if paneHeader != nil, model.selectedEntry != nil {
                     ToolbarItem(placement: .primaryAction) {
@@ -204,8 +197,6 @@ struct WorkshopInstalledView: View {
     @ViewBuilder
     private var gallery: some View {
         if model.visibleEntries.isEmpty {
-            // Filtered to nothing: plain empty area (not the illustrated empty
-            // state) so the filter bar above stays put as the in-place way back.
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -229,8 +220,6 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            // Clicking the open card again closes the inspector;
-                            // a new card always reveals the (possibly collapsed) panel.
                             onTap: { model.select(entry) },
                             onRemove: { model.requestDelete(entry) },
                             isBookmarked: bookmarked,
@@ -246,9 +235,6 @@ struct WorkshopInstalledView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                // Tap the gaps/margins to close the inspector. Placed at content
-                // level so in-grid gaps land here (a ScrollView-level background
-                // missed them); behind the cards so Buttons keep their taps.
                 .background(
                     Color.clear
                         .contentShape(Rectangle())
@@ -446,8 +432,6 @@ struct WorkshopInstalledView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, DesignTokens.Spacing.lg)
         .padding(.vertical, DesignTokens.Spacing.md)
-        // NB: a glassEffect backing here absorbed the children's drop
-        // hit-testing, so the drop targets stopped registering. Keep material.
         .background(.regularMaterial)
         .overlay(alignment: .topTrailing) {
             Button { model.endEntryDrag() } label: {
@@ -468,8 +452,6 @@ struct WorkshopInstalledView: View {
         VStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
-                // Opaque fill keeps the tile interior hit-testable for the drop
-                // (a glass backing left it a non-hit-testable "hole").
                 .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(width: 150, height: 90)
                 .overlay {
@@ -483,7 +465,6 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
-        // Whole target (tile + name + gaps) is a forgiving drop region.
         .contentShape(Rectangle())
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
@@ -519,7 +500,6 @@ struct WorkshopInstalledView: View {
                     workshopID: workshopID,
                     loadFailed: loadFailed
                 ) else { return }
-                // Re-resolve the target in case the display topology changed mid-drag.
                 guard let target = screenManager.screens.first(where: { $0.id == screen.id }) else { return }
                 apply(entry, to: target)
             }

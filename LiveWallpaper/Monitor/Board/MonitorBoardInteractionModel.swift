@@ -3,9 +3,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// Live drag state for the widget currently under the pointer. Held only while
-/// a drag is in flight; mutating it never writes config (persistence happens on
-/// drag-end via the model's edit callback).
+/// Live drag state for the widget currently under the pointer.
 struct MonitorBoardDragState: Equatable {
     var widgetID: UUID
     /// Pointer offset inside the widget at grab time, so the ghost tracks 1:1.
@@ -21,15 +19,10 @@ struct MonitorBoardDragState: Equatable {
     var originAtGrab: CGPoint
     var didMove: Bool
 
-    /// Where the ghost frame ("背影方框") should draw: the snapped target when
-    /// snapping, otherwise nil (no ghost under raw / ⌘ drag).
     var ghostOrigin: CGPoint? { snappedOrigin }
 }
 
-/// Every user-facing move or delete resolves to one of these commands before
-/// mutating the persisted widget array. Pointer, keyboard, and accessibility
-/// entry points therefore share identity, clamping, normalization, and delete
-/// semantics instead of maintaining parallel write paths.
+/// Every user-facing move or delete resolves to one of these commands before mutating the persisted widget array.
 enum MonitorBoardPlacementCommand: Equatable {
     case move(id: UUID, pixelOrigin: CGPoint)
     case delete(id: UUID)
@@ -42,10 +35,7 @@ enum MonitorBoardPlacementDirection {
     case down
 }
 
-/// Observable board state driving `MonitorBoardRootView`: the placements, edit
-/// mode, selection, and the in-flight drag. This is the single writer of the
-/// board configuration; every committing mutation funnels through
-/// `emitConfiguration()` so the host can debounce persistence.
+/// Observable board state driving `MonitorBoardRootView`: the placements, edit mode, selection, and the in-flight drag.
 @MainActor
 final class MonitorBoardInteractionModel: ObservableObject {
     @Published private(set) var placements: [MonitorWidgetPlacement]
@@ -62,27 +52,19 @@ final class MonitorBoardInteractionModel: ObservableObject {
     /// the model can resolve normalized placements to pixels for hit-free math.
     @Published var boardSize: CGSize = .zero
 
-    /// Normalized top forbidden zone (menu-bar avoidance) the host sets; folded
-    /// into every `geometry` so clamp / snap / reflow keep widgets below the
-    /// menu bar. 0 on hosts (e.g. no matching NSScreen) that don't set it.
+    /// Normalized top forbidden zone (menu-bar avoidance) the host sets; folded into every `geometry` so clamp / snap / reflow keep widgets below the menu bar.
     var topInsetFraction: CGFloat = 0
 
-    /// Real display width in points the board represents. 0 (wallpaper hosts)
-    /// means the board IS the screen; the inspector preview sets it so its
-    /// miniature board scales Apple-size widgets down WYSIWYG.
+    /// Real display width in points the board represents.
     var referenceWidth: CGFloat = 0
 
     /// Whether AI-agent widget kinds are offered in the catalog (Pro gate).
     let isAgentFleetEnabled: Bool
 
-    /// Fired with a persistence-ready configuration after a committing edit
-    /// (drag-end, add, remove, resize) — never per mouse-move. The host wires
-    /// this to debounced persistence.
+    /// Fired with a persistence-ready configuration after a committing edit (drag-end, add, remove, resize) — never per mouse-move.
     var onConfigurationEdited: ((MonitorBoardConfiguration) -> Void)?
 
-    /// Fired whenever edit mode toggles (menu-driven, the board's own Done, or
-    /// Esc). The host relays it so the wallpaper can force mouse interaction on
-    /// while editing and restore the persisted click-through state on exit.
+    /// Fired whenever edit mode toggles (menu-driven, the board's own Done, or Esc).
     var onEditingChanged: ((Bool) -> Void)?
 
     private var baseConfiguration: MonitorBoardConfiguration
@@ -121,10 +103,6 @@ final class MonitorBoardInteractionModel: ObservableObject {
         if let settingsOpenID, !placements.contains(where: { $0.id == settingsOpenID }) {
             self.settingsOpenID = nil
         }
-        // Externally applied placements may be normalized against another
-        // aspect's reference grid; clamp them onto the live board. The view's
-        // onAppear only covers the first attach — a live config swap lands here
-        // with no onAppear re-fire.
         if boardSize != .zero {
             reflow(boardSize: boardSize)
         }
@@ -225,9 +203,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
         drag = current
     }
 
-    /// Finish the drag. Pure click (no move) restores in place; otherwise lands
-    /// at the snapped/free origin resolved for overlap, springing back on no
-    /// legal spot. Commits + emits config only when the origin actually changed.
+    /// Finish the drag.
     func endDrag(bypassSnap: Bool) {
         guard let current = drag else { return }
         drag = nil
@@ -239,9 +215,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
 
     // MARK: - Add / remove / resize
 
-    /// Shared placement mutation boundary. A move is expressed in board pixels
-    /// so every move caller goes through the same footprint-aware landing and
-    /// normalized-coordinate writeback.
+    /// Shared placement mutation boundary.
     @discardableResult
     func perform(_ command: MonitorBoardPlacementCommand) -> Bool {
         switch command {
@@ -286,10 +260,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
         }
     }
 
-    /// Moves a specific widget by a small relative nudge. The resulting absolute
-    /// origin is still committed by `perform(_:)`, just like a pointer drop.
-    /// Keeping the identity explicit lets accessibility actions move their own
-    /// tile without changing board selection as an incidental side effect.
+    /// Moves a specific widget by a small relative nudge.
     @discardableResult
     func moveWidget(
         id: UUID,
@@ -359,18 +330,12 @@ final class MonitorBoardInteractionModel: ObservableObject {
         return true
     }
 
-    /// Whole-placement writeback from the settings card (`onUpdate`). A size
-    /// change routes through the `setSize` refit path so the board never overlaps;
-    /// if the resize can't be placed the size stays put but the other edits
-    /// (options, etc.) still apply. Same-size edits replace the fields in place,
-    /// keeping the widget's stored position.
+    /// Whole-placement writeback from the settings card (`onUpdate`).
     func updateWidget(_ updated: MonitorWidgetPlacement) {
         guard let index = placements.firstIndex(where: { $0.id == updated.id }) else { return }
         let current = placements[index]
 
         if updated.size != current.size {
-            // Land non-size edits first (old size + position), then attempt the
-            // resize. On success `setSize` emits; on denial we emit the options.
             var applied = updated
             applied.size = current.size
             applied.x = current.x
@@ -389,13 +354,10 @@ final class MonitorBoardInteractionModel: ObservableObject {
         emitConfiguration()
     }
 
-    /// Toggle a widget between S and M, re-fitting around its anchor. Returns
-    /// false (and leaves the widget untouched) when the new size can't be
-    /// placed — the view flashes a "deny" on false.
+    /// Toggle a widget between S and M, re-fitting around its anchor.
     @discardableResult
     func setSize(_ id: UUID, to size: MonitorWidgetSize) -> Bool {
         guard let index = placements.firstIndex(where: { $0.id == id }) else { return false }
-        // Reject sizes the kind doesn't allow (e.g. processes is medium-only).
         guard placements[index].kind.allowedSizes.contains(size) else { return false }
         guard placements[index].size != size else { return true }
         let anchor = pixelOrigin(for: placements[index])
@@ -416,15 +378,11 @@ final class MonitorBoardInteractionModel: ObservableObject {
 
     // MARK: - Reflow on board resize
 
-    /// Re-clamp + de-overlap every placement after a board size change (mock
-    /// `relayoutAll`). Normalized origins survive; only clamped/nudged widgets
-    /// move. Does not emit config — reflow is derived, not a user edit.
     func reflow(boardSize newSize: CGSize) {
         boardSize = newSize
         guard !geometry.isDegenerate else { return }
         let geo = geometry
 
-        // Pass 1: clamp each normalized origin onto the new board.
         for index in placements.indices {
             let footprintSize = geo.pixelSize(for: placements[index].kind, size: placements[index].size)
             let px = MonitorBoardLayoutEngine.pixelOrigin(
@@ -436,7 +394,6 @@ final class MonitorBoardInteractionModel: ObservableObject {
             placements[index].y = normalized.y
         }
 
-        // Pass 2: legalize any resize-induced overlaps.
         for index in placements.indices {
             let footprintSize = geo.pixelSize(for: placements[index].kind, size: placements[index].size)
             let px = MonitorBoardLayoutEngine.pixelOrigin(
@@ -473,10 +430,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
         return config
     }
 
-    /// Default size for a newly added widget: small when the kind allows it and
-    /// reads well at 2×2, otherwise the first allowed size. Fleet-style kinds
-    /// (fleet, processes) read poorly small, so they prefer medium. Honors the
-    /// kind's `allowedSizes` in all cases.
+    /// Default size for a newly added widget: small when the kind allows it and reads well at 2×2, otherwise the first allowed size.
     static func defaultSize(for kind: MonitorWidgetKind) -> MonitorWidgetSize {
         let allowed = kind.allowedSizes
         let prefersMedium: Bool

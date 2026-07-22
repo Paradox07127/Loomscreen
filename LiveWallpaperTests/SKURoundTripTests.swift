@@ -4,12 +4,7 @@ import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 0 §0.6 lock: the Lite SKU must decode + re-encode Pro-only payloads
-/// without losing data. These tests pin the persisted schema as the single
-/// source of truth for cross-SKU round-tripping so a user that switches
-/// between Lite and Pro never sees their playlists / schedule / WPE origin
-/// silently erased.
-@Suite("Phase 0 — cross-SKU Codable round trips")
+@Suite("Cross-SKU Codable round trips")
 struct SKURoundTripTests {
 
     // MARK: - Scene (Pro-only wallpaper type)

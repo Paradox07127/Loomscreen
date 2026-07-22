@@ -198,10 +198,7 @@ private final class SceneScriptXPCHardDeadline: @unchecked Sendable {
         }
         armed = false
         lock.unlock()
-        // Embedded XPC services are demand-launched. A non-zero self-exit is
-        // classified as a crash and can retire this app session's service
-        // stub; a clean hard exit still tears down the wedged JavaScriptCore
-        // process while allowing the next connection to launch a fresh PID.
+        // A clean exit tears down a wedged JavaScriptCore process without marking the demand-launched service as crashed.
         _exit(EXIT_SUCCESS)
     }
 }

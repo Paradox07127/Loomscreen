@@ -2,19 +2,8 @@
 import Foundation
 import LiveWallpaperProWPE
 
-/// Reclaims disk by trashing source `scene.pkg` archives SteamCMD left in the
-/// container Steam download tree. Only *legacy* items qualify: ones an older
-/// build unpacked into `wpe-cache`, whose runtime reads that extracted copy, so
-/// the archive is dead weight. Since extraction was retired an import reads its
-/// `.pkg` in place and purges any cache, so it never enters `cachedIDs` — and
-/// `WPESceneReachability.packageBackedWorkshopIDs` subtracts anything whose live
-/// content still reads from its archive.
-///
-/// Safe because SteamCMD tracks completion via its `appworkshop_431960.acf`
-/// manifest, not a content scan: removing the `.pkg` while leaving the item
-/// folder + manifest intact does not trigger a re-download. Only `.pkg`s of ids
-/// confirmed present in the cache are touched (never the sole copy), and the
-/// archive is moved to the Trash (recoverable), never unlinked.
+/// Trashes redundant source archives only when an extracted cache remains authoritative.
+/// Archives remain recoverable, and package-backed scenes are excluded from reclamation.
 struct WPEDownloadArchiveReclaimer {
     /// Root of downloaded Workshop items (`…/content/431960/`).
     let contentRoot: URL?

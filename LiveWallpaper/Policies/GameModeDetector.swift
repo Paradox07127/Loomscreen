@@ -1,21 +1,8 @@
 import AppKit
 import Foundation
 
-/// Flags "the user is gaming" so the policy engine can suspend wallpaper
-/// rendering and let the active game claim the GPU.
-///
-/// The ONLY positive game signal is the frontmost app's own
-/// `LSApplicationCategoryType` declaring a game category — the same signal
-/// macOS Game Mode itself keys on. macOS exposes no public API for Game Mode
-/// state, and install-path / storefront heuristics are deliberately NOT used:
-/// they can't cover arbitrary game sources (itch, native, emulators, …) and
-/// mis-fire on launchers.
-///
-/// When the category can't be read the result is `.unknown` → the wallpaper is
-/// NOT paused (fail-open). A frozen wallpaper is a worse, more visible failure
-/// than a game that wasn't auto-detected, which the user can still cover via an
-/// Application Exception or the full-screen pause rule. Low Power Mode forces
-/// active as an explicit "yield GPU" request.
+/// Detects games from the frontmost app's declared macOS category.
+/// Unreadable categories fail open; Low Power Mode always yields the GPU.
 @MainActor
 final class GameModeDetector {
     static let shared = GameModeDetector()
@@ -31,11 +18,7 @@ final class GameModeDetector {
         )
     }
 
-    /// Cached per bundle path for the process lifetime: an app's declared
-    /// category is immutable while it's installed, so one plist read per
-    /// distinct frontmost app is enough. Refresh is event-driven off
-    /// `didActivateApplication` (never polled), and the map stays small — one
-    /// entry per app the user actually switches to.
+    /// App categories are immutable for an installed bundle, so cache them for the process lifetime.
     private var cache: [String: Classification] = [:]
     private var pendingLookups: [String: Task<Void, Never>] = [:]
 
@@ -44,12 +27,7 @@ final class GameModeDetector {
         return classification(forBundleAt: bundleURL)
     }
 
-    /// First sight of a bundle answers fail-open `.unknown` immediately and
-    /// resolves the plist off the main thread — the read is normally
-    /// sub-millisecond but can stall on slow/network volumes, and this path
-    /// runs on the MainActor that also drives UI and render policy. The cached
-    /// value takes effect on the next policy refresh (app switch, thermal,
-    /// power, or full-screen change — all frequent while a game spins up).
+    /// Unknown bundles fail open while their property list is read off the main actor.
     func classification(forBundleAt bundleURL: URL) -> Classification {
         let key = bundleURL.path
         if let hit = cache[key] { return hit }
@@ -78,9 +56,7 @@ final class GameModeDetector {
         }
     }
 
-    /// Reads the bundle's declared category straight from its `Info.plist`.
-    /// Under App Sandbox this succeeds for readable locations and returns
-    /// `.unknown` on permission denial / missing key — never throws to the caller.
+    /// Reads the declared category and returns `.unknown` when sandbox access or data is unavailable.
     nonisolated static func readClassification(infoPlistAt infoPlist: URL) -> Classification {
         classification(forCategory: readCategory(infoPlistAt: infoPlist))
     }
@@ -125,7 +101,7 @@ final class GameModeDetector {
         "public.app-category.word-games",
     ]
 
-    /// Single source of the play/pause rule, shared by `isActive` and tests.
+    /// Applies the game and Low Power Mode suspension rule.
     nonisolated static func evaluate(lowPowerMode: Bool, classification: Classification) -> Bool {
         lowPowerMode || classification == .game
     }

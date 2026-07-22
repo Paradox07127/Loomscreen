@@ -339,11 +339,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     // MARK: - Scroll Forwarding
-    //
-    // macOS 在桌面图标层之上的自定义 window level 下，scroll wheel 事件
-    // 偶发不会直接命中 WKWebView（hitTest 返回 self 或事件由 NSWindow 自身
-    // 吞掉），双指上下滑动失效。这里强制把 scroll 事件转发给 webView，
-    // 同时对 swipe / magnify / rotate 一并兜底，保证 trackpad 手势可用。
+
+    // Wallpaper-level windows do not reliably deliver trackpad events to WKWebView,
+    // so the host forwards scroll and gesture events explicitly.
 
     override func scrollWheel(with event: NSEvent) {
         guard allowMouseInteraction else {
@@ -540,7 +538,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// 当前页面已经渲染时的热更新路径：直接改 DOM，不动 user script。
+    /// Applies state to the rendered page without replacing its user scripts.
     private func applyRuntimeState(previous: HTMLConfig?, current: HTMLConfig) {
         var statements: [String] = []
         let audioChanged = previous?.muteAudio != current.muteAudio
@@ -988,7 +986,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         )
     }
 
-    // MARK: - Thermal Throttle (P2)
+    // MARK: - Thermal Throttle
 
     /// Subscribes to `ProcessInfo.thermalStateDidChangeNotification` so the
     /// HTML page can self-throttle on `.fair` without waiting for the
@@ -1192,10 +1190,8 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         }
     }
 
-    /// 导航完成后兜底：autoplay nudge + 重新应用音量/静音（覆盖晚到的元素）。
-    /// 真正的状态保活由 `masterAudioController` 注入的 MutationObserver 完成；
-    /// 这里仅做 autoplay 推动，并对刚渲染好的元素再调一次 `__lwUpdateAudio__`
-    /// 以保证 navigation-finish 时刻的状态与 `lastAppliedConfig` 同步。
+    /// Nudges autoplay and reapplies audio state after navigation; the injected
+    /// mutation observer handles media elements added later.
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Successful navigations don't need a per-load INFO entry —
         // the inspector already shows the active URL and a healthy load
@@ -1331,7 +1327,7 @@ extension HTMLWallpaperView: WKUIDelegate {
 
 // MARK: - JS literal helper
 
-/// 返回可直接嵌入 JS 源码的字符串字面量（含外层引号）。
+/// Returns a quoted JavaScript string literal.
 private func jsStringLiteral(_ value: String) -> String {
     if let data = try? JSONEncoder().encode(value),
        let literal = String(data: data, encoding: .utf8) {

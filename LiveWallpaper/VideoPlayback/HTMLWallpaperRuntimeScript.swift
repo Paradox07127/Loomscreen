@@ -645,7 +645,7 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
-    // MARK: - Lifecycle controller (P0 — JS真正挂起)
+    // MARK: - Lifecycle Controller
 
     /// Installs `window.__lwSuspend__/__lwResume__/__lwSetRafThrottle__`.
     /// Called alongside native `setAllMediaPlaybackSuspended` so the page-side
@@ -889,7 +889,7 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
-    // MARK: - CSP injection (P3)
+    // MARK: - CSP Injection
 
     /// Injects a `<meta http-equiv="Content-Security-Policy">` tag into the
     /// document head before the page's own scripts evaluate. The policy

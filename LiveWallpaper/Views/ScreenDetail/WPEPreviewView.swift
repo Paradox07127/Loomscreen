@@ -83,9 +83,7 @@ struct WPEPreviewView: View {
         }
     }
 
-    /// Tap-gesture'd view, not a `Button`: the parent grid cell is itself a
-    /// `Button`, and AppKit-bridged buttons nested inside another SwiftUI button
-    /// race for hit-tests + confuse VoiceOver focus.
+    /// Tap-gesture'd view, not a `Button`: the parent grid cell is itself a `Button`, and AppKit-bridged buttons nested inside another SwiftUI button race for hit-tests + confuse VoiceOver focus.
     @ViewBuilder
     private var retryBadge: some View {
         HStack(spacing: 4) {
@@ -124,10 +122,7 @@ struct WPEPreviewView: View {
     }
 }
 
-/// The ratio is constant per call site, so the `if`/`else` never flips at
-/// runtime and the CALayer-backed image view keeps a stable identity. Passing
-/// `nil` straight to `.aspectRatio(_:contentMode:)` would instead fall back to
-/// the view's intrinsic ratio — which this preview deliberately doesn't define.
+/// The ratio is constant per call site, so the `if`/`else` never flips at runtime and the CALayer-backed image view keeps a stable identity.
 private struct OptionalAspectRatio: ViewModifier {
     let ratio: CGFloat?
 
@@ -145,10 +140,7 @@ private struct OptionalAspectRatio: ViewModifier {
 
 // MARK: - Aspect-fill bridge
 
-/// In-memory cache of raw image bytes keyed by URL. WorkshopGallery renders
-/// dozens of previews in a single grid; pulling the same Wallpaper Engine
-/// thumbnail off disk N times per scroll was the root cause of the audit
-/// P0-D main-thread stall. `NSCache` evicts under memory pressure on its own.
+/// In-memory cache of raw image bytes keyed by URL.
 private enum WPEPreviewDataCache {
     // NSCache is thread-safe internally; `nonisolated(unsafe)` just suppresses
     // the Swift 6 Sendable diagnostic since NSCache isn't formally Sendable.
@@ -219,8 +211,6 @@ private struct AspectFillImage: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AspectFillAnimatedImageView, context: Context) {
-        // Apply the desired playback state every pass so a hover toggle alone
-        // (with an unchanged URL) starts / freezes the animation.
         nsView.setAnimating(shouldAnimate)
 
         guard let url = imageURL else {
@@ -241,10 +231,6 @@ private struct AspectFillImage: NSViewRepresentable {
 
         if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
             let ok = nsView.setImage(data: cached as Data)
-            // Defer the binding callback: this runs inside SwiftUI's view-update
-            // pass, so a synchronous `onLoadResult(ok)` would mutate the parent's
-            // `loadFailed` @State mid-render and trip "Modifying state during view
-            // update". The async path below is already deferred via Task.
             let resultHandler = onLoadResult
             Task { @MainActor in resultHandler(ok) }
             return
@@ -299,9 +285,7 @@ private struct AspectFillImage: NSViewRepresentable {
     }
 }
 
-/// Used instead of `NSImageView` because the latter only offers fit-style
-/// scaling — we need fill-with-crop so square 512×512 WPE previews don't render
-/// with horizontal letterbox bars.
+/// Used instead of `NSImageView` because the latter only offers fit-style scaling — we need fill-with-crop so square 512×512 WPE previews don't render with horizontal letterbox bars.
 private final class AspectFillAnimatedImageView: NSView {
     private var imageSource: CGImageSource?
     private var frameCount: Int = 0
@@ -329,10 +313,6 @@ private final class AspectFillAnimatedImageView: NSView {
 
     override var intrinsicContentSize: NSSize { .zero }
 
-    // No deinit-side timer invalidation: every Timer is captured weakly
-    // (`[weak self]`), and `setImage` / `clearImage` invalidate the prior timer
-    // first. Swift 6 disallows touching non-Sendable Timer from a nonisolated
-    // deinit anyway.
 
     /// Returns `true` on success, `false` on decode failure.
     @discardableResult
@@ -382,8 +362,6 @@ private final class AspectFillAnimatedImageView: NSView {
     /// restores the poster (frame 0) so a hovered-out tile reads as static.
     func setAnimating(_ animate: Bool) {
         guard wantsAnimation != animate else {
-            // Already in the requested state — but recover if a multi-frame
-            // image was installed while frozen and now wants to animate.
             if animate, frameCount > 1, animationTimer == nil { scheduleNextFrame() }
             return
         }

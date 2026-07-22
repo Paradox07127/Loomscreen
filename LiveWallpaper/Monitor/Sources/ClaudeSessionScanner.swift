@@ -36,9 +36,7 @@ struct ClaudeSessionScanner {
 
     // MARK: - Transcript discovery
 
-    /// List `projects/*/*.jsonl` transcripts modified within `lookback`, newest
-    /// first, capped at `limit`. Throws only if the projects root is unreadable
-    /// (surfaced upstream as an "unauthorized" health state).
+    /// List `projects/*/*.jsonl` transcripts modified within `lookback`, newest first, capped at `limit`.
     func discoverTranscripts(
         now: Date = Date(),
         lookback: TimeInterval = 48 * 3600,
@@ -129,10 +127,7 @@ struct ClaudeSessionScanner {
         return result
     }
 
-    /// Map sessionId → alive?. A descriptor is alive when its PID exists AND,
-    /// when both timestamps are available, the process start time matches the
-    /// recorded `startedAt` (guarding against PID reuse). If a sessionId has
-    /// multiple descriptors, alive wins.
+    /// Map sessionId → alive?.
     func livenessBySession(_ descriptors: [ClaudePIDDescriptor]) -> [String: Bool] {
         var map: [String: Bool] = [:]
         for descriptor in descriptors {
@@ -147,7 +142,6 @@ struct ClaudeSessionScanner {
     func isAlive(_ descriptor: ClaudePIDDescriptor) -> Bool {
         guard descriptor.pid > 0 else { return false }
         if kill(descriptor.pid, 0) != 0 {
-            // ESRCH ⇒ no such process; EPERM ⇒ exists but not ours (still alive).
             return errno == EPERM
         }
         guard

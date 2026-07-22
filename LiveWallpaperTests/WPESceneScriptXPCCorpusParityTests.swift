@@ -109,12 +109,6 @@ struct WPESceneScriptXPCCorpusParityTests {
             return
         }
 
-        // A preceding signed test host can disappear while launchd still has the
-        // same bundle-id service in its restart-suppression window. Do not let
-        // that transient open the client's process circuit on the first corpus
-        // scene and turn every later candidate into a baked-value nil. Establish
-        // one bounded, known-answer connection to the real embedded helper first;
-        // corpus scenes themselves are still sampled exactly once.
         guard let readiness = Self.waitForHelperReadiness(
             WPESceneScriptXPCClient.shared,
             timeout: .seconds(16)
@@ -204,9 +198,6 @@ struct WPESceneScriptXPCCorpusParityTests {
                completion.durationNanoseconds > 0 {
                 return .init(probeCount: probeCount)
             }
-            // During the 10.5 s production circuit cooldown these probes are
-            // fail-fast and issue no XPC request. Once allowed, exactly one new
-            // connection attempt verifies launchd has a healthy worker identity.
             Thread.sleep(forTimeInterval: 0.2)
         }
         return nil

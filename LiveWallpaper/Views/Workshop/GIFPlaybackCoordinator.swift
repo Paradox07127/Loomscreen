@@ -2,9 +2,7 @@
 import AppKit
 import Foundation
 
-/// Background pausing is owned by the coordinator's app-resign observer — this
-/// app hosts SwiftUI in AppKit windows, so SwiftUI `scenePhase` is unreliable
-/// here and is NOT gated on.
+/// Background pausing is owned by the coordinator's app-resign observer — this app hosts SwiftUI in AppKit windows, so SwiftUI `scenePhase` is unreliable here and is NOT gated on.
 struct ThumbnailPlaybackGate: Equatable {
     enum Trigger: Equatable { case hover, auto }
 
@@ -29,14 +27,7 @@ struct ThumbnailPlaybackGate: Equatable {
     }
 }
 
-/// Bounds the number of GIF/APNG previews animating at once via an LRU cap,
-/// freezing evicted clients to their poster frame. With hover-to-play as the
-/// default the cap is rarely approached; it remains a defensive limit for
-/// `.autoPlay` callers and pathological grids.
-///
-/// Also freezes every client when the app resigns active. Resumption is
-/// gate-driven (`ThumbnailPlaybackGate`): on reactivation a tile replays only
-/// if its gate is satisfied again, so backgrounded windows stay quiet.
+/// Bounds the number of GIF/APNG previews animating at once via an LRU cap, freezing evicted clients to their poster frame.
 @MainActor
 final class GIFPlaybackCoordinator {
     static let shared = GIFPlaybackCoordinator()
@@ -47,10 +38,7 @@ final class GIFPlaybackCoordinator {
     private var lruOrder: [UUID] = []
     private var freezers: [UUID: () -> Void] = [:]
 
-    /// The resign-active observer is intentionally never removed: `shared`
-    /// lives for the whole process, and the block captures `self` weakly so a
-    /// deallocated test instance simply no-ops. (Swift 6 also forbids touching
-    /// the non-Sendable observer token from a nonisolated `deinit`.)
+    /// The resign-active observer is intentionally never removed: `shared` lives for the whole process, and the block captures `self` weakly so a deallocated test instance simply no-ops.
     init() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,

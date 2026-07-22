@@ -3,10 +3,7 @@ import Testing
 import WebKit
 @testable import LiveWallpaper
 
-/// Single-shot audit runner: load one wallpaper project under one CSP
-/// candidate, dwell, collect violations, return them. Re-instantiate for
-/// each (project, candidate) pair so leftover state from a previous run
-/// can't contaminate the next.
+/// Runs one project-policy pair in an isolated web view and returns its audit observations.
 @MainActor
 final class CSPAuditHost {
     let project: CSPAuditProject
@@ -23,13 +20,11 @@ final class CSPAuditHost {
         self.collector = collector
 
         let config = WKWebViewConfiguration()
-        // Mirror production preferences enough to make the wallpaper
-        // believe it's in its normal WKWebView host.
         let pagePrefs = WKWebpagePreferences()
         pagePrefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = pagePrefs
         config.mediaTypesRequiringUserActionForPlayback = []
-        // **Always ephemeral** — keeps audit runs independent.
+        // A nonpersistent store prevents state from contaminating later audit cases.
         config.websiteDataStore = .nonPersistent()
 
         let userScript = WKUserScript(
@@ -53,21 +48,10 @@ final class CSPAuditHost {
         self.webView = webView
     }
 
-    deinit {
-        // No explicit teardown needed — ephemeral data store + the per-host
-        // WKWebView are GC'd with the host. The userContentController is owned
-        // by `config`, which is owned by the WKWebView.
-    }
-
-    /// Loads the project, waits `dwell` seconds, then returns the collected
-    /// observations. Throws if the project bundle is malformed.
+    /// Loads the project and collects observations for the requested dwell interval.
     func runOnce(dwellSeconds: TimeInterval) async throws -> [CSPViolationCollector.Observation] {
         folderHandler.folderURL = project.folderURL
-        // Match production: a WPE web wallpaper served in-place from `scene.pkg`
-        // resolves its assets through the package, not loose files. Without this
-        // the audit only ever exercises the loose-folder path and its ≥95 %
-        // zero-violation gate can't observe a package-backed source. Must run
-        // after `folderURL` (which clears any prior backing).
+        // Set package backing after folderURL because assigning the folder clears existing backing.
         folderHandler.setPackageBacking(Self.packageBacking(forFolder: project.folderURL))
         guard let nonce = folderHandler.currentSessionNonce else {
             throw AuditError.missingSessionNonce
@@ -79,14 +63,11 @@ final class CSPAuditHost {
         }
         webView.load(URLRequest(url: entryURL))
         try await Task.sleep(nanoseconds: UInt64(dwellSeconds * 1_000_000_000))
-        // Snapshot observations (avoid handing out the live mutable array).
         let snapshot = collector.observations
         return snapshot
     }
 
-    /// Parses an in-place `scene.pkg` in the project folder so the audit serves
-    /// packaged web assets exactly as production does. Returns `nil` for an
-    /// unpacked folder or an unreadable/invalid package (loose-folder fallback).
+    /// Returns package backing when the project contains a valid in-place `scene.pkg`.
     private static func packageBacking(forFolder folderURL: URL) -> FolderURLSchemeHandler.PackageBacking? {
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         guard FileManager.default.fileExists(atPath: pkgURL.path) else { return nil }
@@ -102,10 +83,7 @@ final class CSPAuditHost {
     }
 }
 
-/// A wallpaper sitting under `~/Documents/Live Wallpapers/431960/<id>/`.
-/// We deliberately don't reuse `WallpaperEngineLibraryScanner` — it
-/// rejects symlinks and runs file-resource queries we don't need. The
-/// audit just wants `(id, folderURL, entryFile)`.
+/// Describes a web wallpaper discovered in the user's Wallpaper Engine library.
 struct CSPAuditProject: Sendable, Equatable {
     let workshopID: String
     let title: String
@@ -113,12 +91,8 @@ struct CSPAuditProject: Sendable, Equatable {
     let entryFile: String
 }
 
-/// Deterministic coverage for the in-place `scene.pkg` path through the CSP
-/// audit host. The long-running corpus suite discovers real user wallpapers and
-/// only ever set `folderURL` (loose folder) before this was added, so a
-/// package-backed WPE web wallpaper — the majority of published web items — was
-/// never exercised by the ≥95 % zero-violation gate. These run on synthetic
-/// packages so they stay fast and hermetic (no `LW_RUN_CSP_AUDIT` gate).
+/// Verifies that package-backed web assets share the document origin and remain CSP-clean.
+/// Synthetic packages keep this regression coverage hermetic and independent of the opt-in corpus audit.
 @Suite("CSP audit — package-backed (wpe scene.pkg) source coverage")
 @MainActor
 struct CSPAuditPackageBackingTests {
@@ -128,9 +102,7 @@ struct CSPAuditPackageBackingTests {
         let folder = Self.makeTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
 
-        // index.html pulls a sibling module from the SAME package: this is the
-        // path that would trip a `default-src 'self'` CSP if the packaged asset
-        // were served from a different origin than the document.
+        // Loading a sibling script detects an incorrect package asset origin.
         let indexHTML = """
         <!doctype html><html><head><meta charset="utf-8"></head>
         <body><script src="app.js"></script></body></html>
@@ -161,8 +133,6 @@ struct CSPAuditPackageBackingTests {
         )
     }
 
-    // MARK: - helpers
-
     private static func makeTemporaryFolder() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("LWCSPPkgAudit-\(UUID().uuidString)", isDirectory: true)
@@ -170,8 +140,7 @@ struct CSPAuditPackageBackingTests {
         return url
     }
 
-    /// Writes a minimal `PKGV0022` blob in the layout the streaming parser reads:
-    /// `[magicLen|magic][count]({nameLen|name|off|size})*[payload]`.
+    /// Writes the minimal `PKGV0022` layout accepted by the streaming parser.
     private static func writePackage(to pkgURL: URL, entries: [(name: String, bytes: Data)]) throws {
         var payload = Data()
         var resolved: [(name: String, offset: UInt32, size: UInt32)] = []

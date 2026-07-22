@@ -2,12 +2,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Picker and options for URL- or locally-backed HTML wallpapers. The
-/// File vs. Folder distinction collapsed into a single "Local" segment —
-/// picking a single .html alone leaves sibling JS/CSS/images unreachable,
-/// so we always bookmark the parent folder and use the picked file name
-/// as the index, matching folder-mode behavior. Legacy `.file` saves keep
-/// loading via their original bookmark for back-compat.
+/// Picker and options for URL- or locally-backed HTML wallpapers.
 struct HTMLSourceSection: View {
     var screen: Screen
     @Binding var source: HTMLSource?
@@ -50,9 +45,7 @@ struct HTMLSourceSection: View {
         /// state for legacy inline-HTML sources, never a pickable option.
         static let pickable: [SourceSegment] = [.url, .local]
 
-        /// `.inline` is excluded from `pickable`, so its label never renders. It
-        /// reuses the read-only pane's title rather than minting a segment string
-        /// that string extraction would surface as an untranslated catalog entry.
+        /// `.inline` is excluded from `pickable`, so its label never renders.
         var labelKey: LocalizedStringKey {
             switch self {
             case .url: return "URL"
@@ -101,10 +94,7 @@ struct HTMLSourceSection: View {
         }
     }
 
-    /// Read-only presentation for a legacy `.inline(html)` source: the raw
-    /// markup must not be surfaced through the URL field (editing it there
-    /// would silently rewrite the content). Tapping URL or Local switches to
-    /// authoring a replacement.
+    /// Read-only presentation for a legacy `.inline(html)` source: the raw markup must not be surfaced through the URL field (editing it there would silently rewrite the content).
     private var inlinePane: some View {
         HStack(spacing: 8) {
             summaryLine(icon: "chevron.left.forwardslash.chevron.right", text: Text("Inline HTML content"))
@@ -317,9 +307,7 @@ struct HTMLSourceSection: View {
         screenManager.setHTMLWallpaper(source: parsed, config: config, for: screen)
     }
 
-    /// Picking a file delegates to `htmlSourceFromPickedFile` so the bookmark is
-    /// promoted to the parent folder (granting sibling JS/CSS/image access);
-    /// folders fall through to index inference.
+    /// Picking a file delegates to `htmlSourceFromPickedFile` so the bookmark is promoted to the parent folder (granting sibling JS/CSS/image access); folders fall through to index inference.
     private func pickLocal() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -363,8 +351,6 @@ struct HTMLSourceSection: View {
         case .file, .folder:
             if selectedSegment != .local { selectedSegment = .local }
         case .inline:
-            // Present inline HTML in its own read-only pane; never load raw
-            // markup into the URL field where an edit could rewrite it.
             if selectedSegment != .inline { selectedSegment = .inline }
             if !urlInput.isEmpty { urlInput = "" }
         }
@@ -485,8 +471,6 @@ struct HTMLOptionsInspector: View {
     }
 
     /// Editor opens in a popover to keep the inspector list compact.
-    /// `.fixedSize()` keeps the `Edit…` label readable when the title + subtitle
-    /// column squeezes the trailing button area.
     private var customCSSRow: some View {
         let isActive = !(config.customCSS ?? "").isEmpty
         return SettingRow(
@@ -659,9 +643,7 @@ struct HTMLTransformInspector: View {
         }
     }
 
-    /// Slider uses an epsilon-guarded binding (drags emit many near-duplicate
-    /// values); the text field bypasses the epsilon so typing `100` over a
-    /// current `99.6` commits cleanly instead of snapping back.
+    /// Slider uses an epsilon-guarded binding (drags emit many near-duplicate values); the text field bypasses the epsilon so typing `100` over a current `99.6` commits cleanly instead of snapping back.
     private var translateRow: some View {
         SettingRow(
             icon: "arrow.up.and.down.and.arrow.left.and.right",

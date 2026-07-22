@@ -12,9 +12,7 @@ extension CodexAgentSource: MonitorUsageProviding {}
 enum MonitorSourceRegistration {
     @MainActor private static var registered = false
 
-    /// One store for every source across pipeline rebuilds, and the handle the
-    /// app's termination path flushes so the debounce window can't drop the
-    /// last cursor updates on quit.
+    /// One store for every source across pipeline rebuilds, and the handle the app's termination path flushes so the debounce window can't drop the last cursor updates on quit.
     static let sharedCursorStore = MonitorTailCursorStore()
 
     static func flushCursorStoreForTermination() {
@@ -27,9 +25,7 @@ enum MonitorSourceRegistration {
         guard !registered else { return }
         registered = true
         MonitorRuntime.extraSourceFactories.append { options in
-            // Usage alone must still build the session sources — they feed the
-            // token/cost ledger; the hub's module gating keeps agent-session
-            // publication off when only usage is enabled.
+            // Usage alone must still build the session sources — they feed the token/cost ledger; the hub's module gating keeps agent-session publication off when only usage is enabled.
             guard options.agents || options.usage else { return [] }
             let cursorStore = sharedCursorStore
             var sources: [any MonitorDataSource] = []

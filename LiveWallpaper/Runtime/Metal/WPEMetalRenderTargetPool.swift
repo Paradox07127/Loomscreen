@@ -146,10 +146,8 @@ final class WPEMetalRenderTargetPool {
     /// Undeclared names return nil so the caller still raises `missingTexture` — a
     /// genuine graph/transpile bug must stay loud.
     ///
-    /// TODO(falsifiable): `declaredFBOs` is scene-wide, so two layers declaring the
-    /// same FBO name share one stand-in. Instance-scoping `latestNamedTextures` per
-    /// layer/effect (the real cross-talk fix) is deliberately out of scope here;
-    /// verify with a scene where two layers declare an identically named unwritten FBO.
+    /// `declaredFBOs` is scene-wide, so equal FBO names share a stand-in across layers.
+    /// Per-layer scoping requires a corpus case with colliding unwritten names before changing this behavior.
     func zeroFilledPlaceholderTexture(forDeclaredFBO name: String) -> MTLTexture? {
         let lookupName = WPERenderTargetNames.PuppetClip.baseName(of: name) ?? name
         guard let spec = declaredFBOs[lookupName] else { return nil }

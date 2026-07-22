@@ -2,11 +2,8 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Confirmation toast after "Copy diagnostic" on a Workshop error state.
-/// Mirrors the chrome in the HTML mockup (`docs/mockups/workshop-ui.html`).
 struct DiagnosticExportToast: View {
     @Binding var isPresented: Bool
-    /// Matches the mockup's 3.5 s linger — long enough to read before it slides away.
     var lingerSeconds: TimeInterval = 3.5
     /// Overridable so the auto-dismiss timer doesn't drive UI in a test runner.
     var clock: ContinuousClock = .continuous

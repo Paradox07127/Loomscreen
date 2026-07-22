@@ -23,9 +23,7 @@ private struct WPEProjectDisplayManifest: Decodable {
     let contentrating: String?
 }
 
-/// Resolve the item's security-scoped folder and decode its `project.json` off
-/// the main actor. nil for items without a manifest (e.g. loose video / web
-/// imports).
+/// Resolve the item's security-scoped folder and decode its `project.json` off the main actor.
 func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELocalProjectInfo? {
     let bookmark = entry.origin.sourceFolderBookmark
     let knownSize = entry.sizeBytes
@@ -36,7 +34,6 @@ func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELocalProjec
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
-        // Walk the tree only on first open; persisted size short-circuits it.
         let size = knownSize ?? directorySize(of: folder)
         let freshSize = (knownSize == nil && size > 0) ? size : nil
 

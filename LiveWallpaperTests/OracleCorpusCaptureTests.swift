@@ -6,23 +6,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Headless oracle capture: drives real workshop scenes through the production
-/// `WPEMetalSceneRenderer.load()` pipeline OFF the GUI (offscreen Metal, no window),
-/// with the render oracle forced on, so each scene writes a deterministic
-/// `WPECanonicalTraceRecorder` trace. Run it on the pre-refactor build → a `before`
-/// label, then on the post-refactor build → `after`, then `oracle.py self-batch` — no
-/// manual per-scene clicking.
-///
-/// Config comes from a JSON file inside the app's container (xcodebuild does not forward
-/// shell env to the sandboxed test runner, and the sandbox only lets the test read/write
-/// its own container). Write it before running, e.g.:
-///
-///     <container>/Application Support/LiveWallpaper/oracle-capture.json
-///     { "corpusRoot": "…/workshop/content/431960", "label": "before",
-///       "scenes": ["3554161528"] }   // "scenes" optional = whole corpus
-///
-/// Traces land in `<container>/…/LiveWallpaper/oracle-out/<label>/<id>.json`. Absent
-/// config ⇒ the test skips cleanly, so it never runs in the normal suite.
 @Suite("Oracle corpus capture")
 struct OracleCorpusCaptureTests {
 
@@ -30,34 +13,15 @@ struct OracleCorpusCaptureTests {
         let corpusRoot: String
         var label: String = "capture"
         var scenes: [String]?
-        /// Opt-in per-pass hashing (slow) — for LOCATING which pass first diverges.
         var perPass: Bool = false
-        /// Opt-in per-pass PNG dumps (`WPEDumpScenePasses` semantics, but set from
-        /// INSIDE the test host — an outside `defaults write` to the container plist
-        /// is a different cfprefsd domain and the sandboxed host never sees it).
         var dumpPNGs: Bool = false
-        /// How many frames to render before taking the trace. 1 (the default) traces
-        /// `load()`'s first frame and is byte-identical to the pre-multi-frame
-        /// capture. >1 makes the oracle able to see cross-frame behaviour at all:
-        /// frame 1 is the one script seeding is *constructed* to make match, so a
-        /// capture that only ever looks at it has zero detection power over anything
-        /// that happens per-frame.
         var frames: Int = 1
-        /// Scene seconds each extra frame advances the frozen clock. 1/60 = one
-        /// nominal frame of scene time.
         var frameStepSeconds: Double = 1.0 / 60.0
 
         private enum CodingKeys: String, CodingKey {
             case corpusRoot, label, scenes, perPass, dumpPNGs, frames, frameStepSeconds
         }
 
-        /// Swift's compiler-synthesized `Decodable.init(from:)` does NOT fall back to a
-        /// property's `= default` for a missing key on a non-Optional field — it throws
-        /// `keyNotFound` instead. A config JSON written before `perPass`/`dumpPNGs`
-        /// existed (or hand-edited without them) would therefore fail to decode, and
-        /// the caller's `try?` turned that into a silent "no config — skipping", so the
-        /// capture never ran yet the test still passed. This hand-written initializer
-        /// applies the intended defaults via `decodeIfPresent` instead.
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             corpusRoot = try container.decode(String.self, forKey: .corpusRoot)
@@ -77,10 +41,6 @@ struct OracleCorpusCaptureTests {
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
         ).appendingPathComponent("LiveWallpaper")
         let configURL = base.appendingPathComponent("oracle-capture.json")
-        // Absent file ⇒ this is the normal (non-opt-in) test run: skip cleanly, never
-        // fail the suite. A file that EXISTS but fails to decode is a real
-        // misconfiguration (typo'd key, wrong JSON shape) — let it throw so the test
-        // FAILS loudly instead of silently no-op'ing like a missing file would.
         guard let data = try? Data(contentsOf: configURL) else {
             print("[oracle-capture] no \(configURL.path) — skipping.")
             return
@@ -88,18 +48,12 @@ struct OracleCorpusCaptureTests {
         let config = try JSONDecoder().decode(Config.self, from: data)
         try #require(!config.corpusRoot.isEmpty, "oracle-capture.json corpusRoot must not be empty")
         let root = URL(fileURLWithPath: config.corpusRoot)
-        // NOT wiped between invocations: the corpus runs one scene PER PROCESS (fresh GPU
-        // memory ⇒ deterministic — multi-scene-per-process inherits non-deterministic
-        // residue in unwritten FBO regions), so successive single-scene runs accumulate
-        // into the same label dir. Per-scene `<id>.json` is overwritten below.
         let outDir = base.appendingPathComponent("oracle-out").appendingPathComponent(config.label)
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let filter = config.scenes.map(Set.init)
         print("[oracle-capture] config: corpusRoot=\(config.corpusRoot) label=\(config.label) "
               + "scenes=\(config.scenes ?? ["<all>"]) frames=\(config.frames) step=\(config.frameStepSeconds)")
 
-        // Force the oracle on for this run regardless of the machine default (seeds
-        // particles, freezes the clock, writes the canonical trace).
         WPEOracleMode.testingOverride = true
         WPESceneDebugArtifacts.shared.setEnabledForTesting(true)
         if config.perPass {
@@ -107,8 +61,6 @@ struct OracleCorpusCaptureTests {
         }
         defer {
             WPEOracleMode.testingOverride = nil
-            // Global, so it MUST be reset — a leaked advance would silently shift
-            // the frozen clock for every later oracle run in this process.
             WPEOracleMode.frameAdvanceSeconds = 0
             WPESceneDebugArtifacts.shared.setEnabledForTesting(nil)
             if config.perPass {
@@ -161,8 +113,6 @@ struct OracleCorpusCaptureTests {
             if config.dumpPNGs {
                 UserDefaults.standard.set(id, forKey: "WPEDumpScenePasses")
             }
-            // Per-scene reset: the previous scene left the advance at its last
-            // frame, which would otherwise offset this scene's load-path frame.
             WPEOracleMode.frameAdvanceSeconds = 0
             let descriptor = SceneDescriptor(
                 workshopID: id,
@@ -180,8 +130,6 @@ struct OracleCorpusCaptureTests {
                     device: device,
                     pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
                 )
-                // M2c1b-3c: load runs on the render actor; adopt via the one-shot
-                // handoff carrier (as the production builder does), then drive it.
                 let renderActor = WPEDisplayRenderActor(backing: .main)
                 await renderActor.adopt(WPERendererHandoff(renderer: renderer).renderer)
                 try await renderActor.load()
@@ -215,8 +163,6 @@ struct OracleCorpusCaptureTests {
 
     @Test("Config decode fills in defaults for keys a config file omits")
     func configDecodeFillsDefaultsForMissingKeys() throws {
-        // Only corpusRoot — the shape of a config written before perPass/dumpPNGs/label
-        // existed. Must decode, not throw, with every omitted field at its intended default.
         let json = Data(#"{"corpusRoot": "/tmp/corpus"}"#.utf8)
         let config = try JSONDecoder().decode(Config.self, from: json)
         #expect(config.corpusRoot == "/tmp/corpus")
@@ -224,8 +170,6 @@ struct OracleCorpusCaptureTests {
         #expect(config.scenes == nil)
         #expect(config.perPass == false)
         #expect(config.dumpPNGs == false)
-        // frames defaults to 1 = the single-frame behaviour every existing config
-        // and golden was captured under.
         #expect(config.frames == 1)
         #expect(config.frameStepSeconds == 1.0 / 60.0)
     }
@@ -238,10 +182,6 @@ struct OracleCorpusCaptureTests {
         #expect(config.frameStepSeconds == 0.5)
     }
 
-    /// The frozen clock must actually MOVE when a multi-frame capture steps it —
-    /// `WPEOracleFrameOverride.time` is computed for exactly this reason, and a
-    /// regression back to a stored property would silently make every extra frame
-    /// render at the same instant (the failure mode `frames` exists to fix).
     @Test("Frozen clock advances with frameAdvanceSeconds, and is inert at 0")
     func frozenClockAdvancesWithFrameAdvance() throws {
         WPEOracleMode.testingOverride = true
@@ -249,27 +189,18 @@ struct OracleCorpusCaptureTests {
             WPEOracleMode.testingOverride = nil
             WPEOracleMode.frameAdvanceSeconds = 0
         }
-        // Deltas, not absolutes: `loadFrameOverride` prefers a persisted
-        // WPEOracleReplayTime over freezeTime, and the test host shares the app's
-        // defaults domain — asserting the absolute value would fail on any machine
-        // that has run a fidelity capture.
         WPEOracleMode.frameAdvanceSeconds = 0
         let override = try #require(WPEOracleMode.loadFrameOverride())
         let frozen = override.time
         #expect(override.time == override.baseTime, "advance 0 must leave the clock exactly frozen")
 
         WPEOracleMode.frameAdvanceSeconds = 0.25
-        // Same stored override the renderer sampled at init; only `time` moves.
         #expect(override.time == frozen + 0.25)
         #expect(override.baseTime == frozen)
     }
 
     @Test("Config decode throws on a malformed config instead of silently defaulting")
     func configDecodeThrowsOnMalformedConfig() {
-        // corpusRoot is required with no default; a config file that exists but omits
-        // it (or has the wrong shape) must fail to decode so the caller's `try` — no
-        // longer swallowed by `try?` — turns it into a real test failure, not the
-        // same silent skip as a plain missing file.
         let missingCorpusRoot = Data(#"{"label": "oops"}"#.utf8)
         #expect(throws: (any Error).self) {
             _ = try JSONDecoder().decode(Config.self, from: missingCorpusRoot)
@@ -281,16 +212,6 @@ struct OracleCorpusCaptureTests {
         }
     }
 
-    /// Renders frames 2…N and re-traces the LAST one, so the capture describes a
-    /// frame the renderer had to *evolve* into rather than the one it loaded.
-    ///
-    /// `frames <= 1` returns immediately — the load-path trace stands untouched.
-    ///
-    /// Why the trace has to be re-taken rather than accumulated: `load()` already
-    /// called `finishFrame`, which latches the recorder, so these re-renders record
-    /// nothing. Re-opening with `beginScene` immediately before the final frame is
-    /// what makes the trace describe that frame ALONE — opening earlier would stack
-    /// every intervening frame's passes into one trace.
     @MainActor
     private static func advanceToTracedFrame(
         renderer: WPEMetalSceneRenderer,
@@ -304,8 +225,6 @@ struct OracleCorpusCaptureTests {
         guard frames > 1 else { return }
         let summary = "\(id) oracle-capture frames=\(frames) step=\(stepSeconds)"
         for index in 1..<frames {
-            // The renderer samples `oracleFrameOverride` once at init, so the clock
-            // is stepped through the override's computed `time` instead.
             WPEOracleMode.frameAdvanceSeconds = Double(index) * stepSeconds
             let isLast = index == frames - 1
             if isLast {
@@ -334,7 +253,6 @@ struct OracleCorpusCaptureTests {
         }
     }
 
-    /// Newest `scene-debug/<stamp>-<id>/trace.json` the recorder just wrote for this scene.
     private static func latestTrace(forID id: String) -> URL? {
         guard let root = WPESceneDebugArtifacts.rootURL else { return nil }
         let sessions = ((try? FileManager.default.contentsOfDirectory(

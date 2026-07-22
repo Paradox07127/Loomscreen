@@ -2,14 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Shared Workshop pane header, hosted *inside* each tab's
-/// `ResizableInspectorSplit` main column (not as a full-width bar above the
-/// split) so the trailing detail panel runs full-height alongside the header,
-/// matching the screen-detail inspector.
-///
-/// The Installed / Workshop switcher and detail-panel toggle do NOT live here:
-/// both sit in the window toolbar (`.principal` / `.primaryAction`) so they
-/// stay put while this header compresses with the panel.
+/// Shared Workshop header hosted inside each tab's main split column.
 struct WorkshopPaneHeader: View {
     let selectedTab: WorkshopPaneTab
     let installedCount: Int
@@ -30,8 +23,6 @@ struct WorkshopPaneHeader: View {
         .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
     }
 
-    // Matches the Bookmarks / Aerials hero (`DetailHeaderBar`): icon disc,
-    // semibold title, caption stat line.
     private var brandMark: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             ZStack {

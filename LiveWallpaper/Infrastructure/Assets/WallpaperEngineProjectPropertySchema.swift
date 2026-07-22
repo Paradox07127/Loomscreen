@@ -212,12 +212,7 @@ extension WallpaperEngineProjectPropertySchema {
         let condition: String?
         let options: [Option]
         let fileType: String?
-        /// True when this entry is an embedded ad / donation / external-link
-        /// block rather than a real wallpaper setting. WPE authors abuse the
-        /// properties panel to render clickable HTML (`<a href>`, `<img src>`,
-        /// QR codes, Ko-fi / Patreon / 爱发电 links); the engine never binds
-        /// these to the render graph, so toggling them changes nothing. The
-        /// scene inspector hides them. See `Self.detectPromotionalLink`.
+        /// True for promotional or external-link markup that does not bind to the render graph.
         let isPromotionalLink: Bool
 
         fileprivate init?(key: String, dict: [String: Any], localization: Localization) {
@@ -249,10 +244,7 @@ extension WallpaperEngineProjectPropertySchema {
             )
         }
 
-        /// Tokens that betray a promotional/donation/external-link entry. They
-        /// appear either inside an HTML-derived key (punctuation stripped, e.g.
-        /// `ahrefhttpskoficom…`) or in the property's display text / option
-        /// labels (with punctuation, e.g. `<a href=`).
+        /// Tokens used to identify promotional links in generated keys and visible labels.
         private static let promoKeyTokens = [
             "href", "http", "www", "imgsrc", "kofi", "ko-fi", "patreon", "paypal",
             "donate", "sponsor", "discord", "afdian", "aifadian", "爱发电", "赞助", "赞赏", "打赏"
@@ -263,20 +255,7 @@ extension WallpaperEngineProjectPropertySchema {
             "爱发电", "赞助", "赞赏", "打赏"
         ]
 
-        /// Narrow ad/link detector (validated against 57 real workshop scenes:
-        /// flags ~12% of editable properties, all genuine links/donations, with
-        /// no false hit on settings that merely use `<h2>` / `<font>` for label
-        /// styling — those cosmetic tags are stripped for display elsewhere).
-        ///
-        /// A property is promotional when ANY of:
-        ///  - its key is HTML-derived — WPE auto-generates the key from the
-        ///    author's HTML text when no explicit `name` is set, yielding keys
-        ///    like `ahrefhttpskoficom…` / `imgsrchttp…`. A merely long key is not
-        ///    enough; it must also carry a promo token, so a descriptive long key
-        ///    for a real control is never hidden;
-        ///  - its `text` / option labels (raw *and* localized) contain a
-        ///    hyperlink (`<a`, `href=`), an embedded image (`<img`, `src=`), a
-        ///    bare URL, or a donation/social keyword (Ko-fi, Patreon, 赞助, …).
+        /// Detects embedded promotional markup while preserving ordinary styled labels.
         fileprivate static func detectPromotionalLink(
             key: String,
             rawText: String,

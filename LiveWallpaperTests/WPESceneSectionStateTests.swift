@@ -5,9 +5,6 @@ import SwiftUI
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 2.0 Day 5 lock: SceneRenderState transitions and SceneRenderingError
-/// → FallbackReason mapping. Pure value-level tests so they don't pull in
-/// renderer/UI dependencies and stay snappy in CI.
 @Suite("WPESceneSection state machine")
 struct WPESceneSectionStateTests {
 
@@ -53,8 +50,6 @@ struct WPESceneSectionStateTests {
 
     @Test("FallbackReason severity tint distinguishes warn vs hard block")
     func severityTintIsHonest() {
-        // Recoverable/actionable failures use the caution token, permanent
-        // blockers the warning token (Status tokens since 2b11734).
         let caution = DesignTokens.Colors.Status.caution
         let warning = DesignTokens.Colors.Status.warning
         #expect(FallbackReason.missingDependency(workshopIDs: ["1"]).severityTint == caution)

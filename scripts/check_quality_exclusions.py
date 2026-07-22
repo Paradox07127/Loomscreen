@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Offline AF-10 gate for lint/format hotspot exclusions.
+"""Validate lint and format hotspot exclusions without invoking either tool.
 
-The gate intentionally does not invoke SwiftLint or SwiftFormat. It validates
-their excluded Swift-source inventory, time-bounds every exception, ratchets
-physical lines by component, and rejects newly added high-risk lines.
+The gate time-bounds exceptions, ratchets physical lines by component, and
+rejects newly added high-risk lines.
 """
 
 from __future__ import annotations
@@ -247,8 +246,7 @@ def normalized_base(raw_base: str | None, errors: list[str]) -> str | None:
 def json_at_revision(base: str, relative_path: str, errors: list[str]) -> dict[str, Any] | None:
     result = git_output(["show", f"{base}:{relative_path}"])
     if result.returncode != 0:
-        # The first AF-10 adoption has no historical baseline; later failures
-        # must not silently disable comparison.
+        # An initial adoption may lack a baseline; other failures remain errors.
         if "exists on disk, but not in" in result.stderr or "does not exist" in result.stderr:
             return None
         errors.append(f"cannot read historical {relative_path}: {result.stderr.strip()}")
@@ -354,8 +352,7 @@ def changed_line_violations(base: str | None, paths: set[str], errors: list[str]
         return []
     violations = parse_added_risky_lines(result.stdout, paths)
 
-    # `git diff` omits untracked files. Treat an untracked hotspot as wholly
-    # added so a local pre-commit run cannot bypass the changed-line gate.
+    # Treat untracked hotspots as wholly added because `git diff` omits them.
     for path in sorted(paths):
         tracked = git_output(["ls-files", "--error-unmatch", "--", path])
         if tracked.returncode == 0 or not (ROOT / path).is_file():

@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// A horizontal time axis rendering event timestamps as thin vertical ticks with
-/// age-based fade — the fleet activity track. Ported from the mock's `tickTrack`:
-/// x=0 is the oldest edge of the window, x=1 is *now*; very recent events stand
-/// taller and brighter. The `now` reference is passed IN so `body` never calls
-/// `Date()` (cheap, value-driven).
 struct TickTrack: View {
     /// Event timestamps as seconds-since-reference (any monotonic epoch matching
     /// `now`). Events older than `span` or in the future are dropped.
@@ -26,7 +21,6 @@ struct TickTrack: View {
                                                 MonitorDesign.bg0.opacity(0.3)],
                                        startPoint: .top, endPoint: .bottom)
                     )
-                // baseline
                 Rectangle()
                     .fill(MonitorDesign.hairline.opacity(0.5))
                     .frame(height: 1)
@@ -54,8 +48,6 @@ struct TickTrack: View {
         let heightFraction: Double
     }
 
-    /// Map events to positioned ticks. Recency `1 - age/span` drives both x and a
-    /// height in `0.38…0.84` (mock: `38 + recency*46` percent). Pure + testable.
     nonisolated static func ticks(events: [Double], now: Double, span: Double) -> [Tick] {
         guard span > 0 else { return [] }
         return events.compactMap { ts in

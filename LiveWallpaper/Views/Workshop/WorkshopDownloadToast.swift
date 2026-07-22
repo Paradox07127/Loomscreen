@@ -16,13 +16,11 @@ struct WorkshopDownloadToastHost: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: shown?.token)
-        // Reading `lastEvent` ties this host to the @Observable center so each new outcome re-fires.
         .onChange(of: center.lastEvent?.token) { _, _ in
             if let event = center.lastEvent { shown = event }
         }
         .task(id: shown?.token) {
             guard let event = shown else { return }
-            // Errors linger longer than successes so they can be read.
             try? await Task.sleep(for: .seconds(event.isSuccess ? 4 : 7))
             withAnimation(.easeOut(duration: 0.2)) { shown = nil }
         }

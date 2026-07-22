@@ -95,7 +95,6 @@ struct WPEParticleSpriteSheetTests {
         #expect(sheet.cols == 2)
         #expect(sheet.rows == 2)
         #expect(sheet.frameCount == 4)
-        // duration 2s, 4 frames → 2 fps
         #expect(abs(sheet.baseFrameRate - 2) < 0.001)
     }
 

@@ -2,9 +2,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Time-of-day wallpaper scheduling. The 24h `ScheduleTimelineEditor` is the
-/// primary editing surface; the row list mirrors it and adds a wrap-aware
-/// picker popover for keyboard / VoiceOver flows.
+/// Time-of-day wallpaper scheduling.
 struct ScheduleSection: View {
     @Binding var scheduleSlots: [ScheduleSlot]
     var screen: Screen
@@ -16,9 +14,7 @@ struct ScheduleSection: View {
     @State private var conflictMessage: String?
     @State private var pendingDestructive: PendingDestructive?
 
-    /// Generation counters protect the 1.5s / 3s delayed-clear `Task`s from
-    /// wiping newer UI state: a second conflict raised shortly after the first
-    /// would otherwise be silently cleared when the first timer fires.
+    /// Generation counters protect the 1.5s / 3s delayed-clear `Task`s from wiping newer UI state: a second conflict raised shortly after the first would otherwise be silently cleared when the first timer fires.
     @State private var conflictHighlightGeneration = 0
     @State private var addErrorGeneration = 0
 
@@ -337,10 +333,6 @@ struct ScheduleSection: View {
         let normalizedEnd = free.end % 24
         let preset = SchedulePreset.suggestion(forStartHour: normalizedStart)
         let candidate = ScheduleSlot(startHour: normalizedStart, endHour: normalizedEnd, label: preset.labelKey)
-        // `findFreeRange` already searches against `scheduleSlots`; this
-        // re-check guards against a corrupted persisted config (e.g. a
-        // zero-length range that snuck past an older codepath) reaching
-        // `screenManager.updateScheduleSlots` and writing junk to disk.
         guard normalizedStart != normalizedEnd,
               SchedulePolicy.conflicts(slot: candidate, against: scheduleSlots).isEmpty else {
             flashAddError(noFreeRangeMessage)
@@ -359,7 +351,6 @@ struct ScheduleSection: View {
             screenManager.updateScheduleSlots(scheduleSlots, for: screen)
             return
         }
-        // 2h didn't fit — try 1h
         let oneHour = ScheduleSlot(startHour: hour, endHour: (hour + 1) % 24, label: probe.label)
         guard SchedulePolicy.conflicts(slot: oneHour, against: scheduleSlots).isEmpty else {
             flashAddError(
@@ -437,9 +428,7 @@ struct ScheduleSection: View {
     }
 }
 
-/// Mirrors `GlassCapsuleButtonStyle`'s geometry so this destructive button
-/// balances Add Slot without competing with it; hover tints the fill so the
-/// target stays discoverable next to its glass-filled sibling.
+/// Mirrors `GlassCapsuleButtonStyle`'s geometry so this destructive button balances Add Slot without competing with it; hover tints the fill so the target stays discoverable next to its glass-filled sibling.
 private struct DisableScheduleButton: View {
     let action: () -> Void
 

@@ -3,9 +3,6 @@
     @testable import LiveWallpaper
     import Testing
 
-    /// RR-14 cancellation contract over the production upload lane. The queue's
-    /// admission callback proves the waiter is actually enqueued before cancellation;
-    /// no timing delay or Metal device is involved.
     @Suite("RR-14 upload cancellation oracle")
     struct WPEUploadCancellationOracleTests {
         @Test(
@@ -55,14 +52,10 @@
 
             #expect(queue.admissionSnapshot == .init(grantedCount: 1, waitingCount: 0))
 
-            // Supersede both old-generation requests while the first synchronous
-            // operation is still blocked. It may finish, but its value is stale.
             recorder.advanceGeneration()
             firstBlocker.release()
             await first.value
 
-            // Only start the replacement after the old task handles drain. This
-            // avoids inventing a queue/pending observation seam the product lacks.
             let replacementGeneration = recorder.currentGeneration
             let replacement = Self.makeUploadTask(
                 id: "new",
@@ -78,8 +71,6 @@
             #expect(snapshot.started == ["old-started", "new"])
             #expect(snapshot.synchronousFinished == ["old-started", "new"])
 
-            // Already-started old work is allowed to finish, but the generation gate
-            // drops it. Only the new generation publishes.
             #expect(snapshot.staleDrops == ["old-started"])
             #expect(snapshot.cancelledBeforeSynchronousWork == ["old-cancelled"])
             #expect(snapshot.cancelledAfterSynchronousWork.isEmpty)
@@ -311,8 +302,6 @@
             try await oldStarted.wait()
             try await releaseOld.waitUntilWaiting()
 
-            // Mirrors synchronous cleanup: cancel and detach without awaiting the
-            // old task, then allow a later renderer generation to reuse the path.
             let cleanupDrain = owner.quiesce()
             #expect(releaseOld.waitingCount == 1)
             owner.resume(generation: 8)
@@ -360,15 +349,9 @@
             }
             #expect(owner.taskCount == paths.count)
 
-            // Duplicate submission while the original path is still pending is
-            // rejected, same as before the concurrency cap existed.
             #expect(owner.submit(path: paths[0], generation: 1) { _ in } == nil)
             #expect(owner.taskCount == paths.count)
 
-            // Deterministic, not timing-dependent: `acquireReloadSlot` grants and
-            // increments atomically within the MainActor, so a 3rd reload cannot
-            // reach `started.append` before this point no matter how the 5 tasks
-            // get scheduled — only whichever 2 win the race to run first.
             try await secondSlotStarted.wait()
             #expect(started.values.count == 2)
             #expect(owner.activeReloadCount == 2)
@@ -531,9 +514,6 @@
         deinit { continuation.finish() }
     }
 
-    /// Blocks only the dedicated GCD upload operation, never a Swift cooperative
-    /// executor thread. The test releases it explicitly and retains a hard timeout
-    /// solely to prevent a broken oracle from hanging the test process.
     private final class RR14SynchronousBlocker: @unchecked Sendable {
         private let semaphore = DispatchSemaphore(value: 0)
 
@@ -588,8 +568,6 @@
         }
     }
 
-    /// A one-shot continuation gate with deliberately no cancellation handler.
-    /// Cancelling a waiting Task cannot complete it; only `signal()` resumes it.
     private final class RR14DeterministicGate: @unchecked Sendable {
         private let lock = NSLock()
         private let waiterRegistered = RR14AsyncOneShot()

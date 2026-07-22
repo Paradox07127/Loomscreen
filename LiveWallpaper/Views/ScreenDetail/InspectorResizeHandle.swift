@@ -2,13 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Vertical handle on the inspector's leading edge for click-drag width
-/// resizing. Idle = 1pt hairline only; the full capsule affordance fades in
-/// on hover/drag.
-///
-/// `NSCursor.resizeLeftRight` is pushed while the cursor sits inside the 28pt
-/// hit area regardless of visual state. `onDisappear` pops the cursor if the
-/// view leaves while still hovered to avoid stranding it on the stack.
+/// Vertical handle on the inspector's leading edge for click-drag width resizing.
 struct InspectorResizeHandle: View {
     static let hitAreaWidth: CGFloat = 28
 
@@ -17,10 +11,7 @@ struct InspectorResizeHandle: View {
     let maxWidth: CGFloat
     let onPreviewWidthChange: (CGFloat) -> Void
     let onCommitWidth: (CGFloat) -> Void
-    /// When non-nil, dragging until the raw candidate width drops below
-    /// this value arms a close: releasing there fires `onRequestClose` instead
-    /// of committing a width. The preview width remains clamped at `minWidth`
-    /// so the panel does not crop its contents while the close is armed.
+    /// When non-nil, dragging until the raw candidate width drops below this value arms a close: releasing there fires `onRequestClose` instead of committing a width.
     var closeThreshold: CGFloat?
     var onRequestClose: (() -> Void)?
 
@@ -45,9 +36,6 @@ struct InspectorResizeHandle: View {
                 .frame(width: 1, height: handleHeight * hairlineHeightRatio)
                 .opacity(isActive ? 0 : 1)
 
-            // When armed to close (pulled into the sliver zone) the capsule
-            // switches to accent + grows so "let go to close" reads distinct
-            // from an ordinary resize.
             Capsule()
                 .fill(isClosingArmed ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.regularMaterial))
                 .overlay(

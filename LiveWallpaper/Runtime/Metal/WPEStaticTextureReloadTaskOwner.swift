@@ -5,7 +5,7 @@ import LiveWallpaperCore
 /// Generation-scoped owner for on-demand static-texture reload tasks. Admission
 /// closes atomically with task detachment, so a reload can drain a stable set.
 ///
-/// Stays `@MainActor` after M2c1b-3c: its admission bookkeeping must be ordered
+/// Stays `@MainActor` because its admission bookkeeping must be ordered
 /// deterministically against its callers — a caller that just `submit`ted
 /// observes `canPublish == true` before the spawned task can run (same-executor
 /// scheduling), which an owner-`actor` version cannot guarantee (the task could

@@ -3,10 +3,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Behavioral contract for the `wpe-tex-video` disk cache: content-addressed
-/// dedup, per-scene bucketing, orphan GC keyed to the installed library, LRU
-/// eviction under a byte cap (never evicting a live/leased file), and truthful
-/// on-disk accounting.
 @Suite("WPEVideoTextureDiskCache")
 struct WPEVideoTextureDiskCacheTests {
 
@@ -77,8 +73,6 @@ struct WPEVideoTextureDiskCacheTests {
         let (cache, root) = makeCache()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // Pre-refactor scratch layout: flat UUID-named .mp4s in the root with
-        // no bucket — the source of the leak.
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let legacy = (0..<3).map { _ in root.appendingPathComponent("\(UUID().uuidString).mp4") }
         for url in legacy {
@@ -122,7 +116,6 @@ struct WPEVideoTextureDiskCacheTests {
         let (cache, root) = makeCache()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // Leased and unreferenced — must survive because it's live.
         let live = try await cache.store(Data(repeating: 5, count: 1024), workshopID: "999")
         let freedWhileLeased = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(freedWhileLeased == 0)
@@ -139,12 +132,10 @@ struct WPEVideoTextureDiskCacheTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let data = Data(repeating: 6, count: 1024)
-        // Two live sources share one content-addressed file (fast reload).
         let first = try await cache.store(data, workshopID: "111")
         let second = try await cache.store(data, workshopID: "111")
         #expect(first == second)
 
-        // One holder releasing must not reclaim the shared file.
         await cache.release(first)
         _ = await cache.collectOrphans(referencedWorkshopIDs: [])
         #expect(FileManager.default.fileExists(atPath: first.path))
@@ -161,13 +152,11 @@ struct WPEVideoTextureDiskCacheTests {
 
         let older = try await cache.store(Data(repeating: 1, count: 1_000), workshopID: "111")
         await cache.release(older)
-        // Force a strictly-older mtime so LRU ordering is deterministic.
         try FileManager.default.setAttributes(
             [.modificationDate: Date(timeIntervalSince1970: 1)],
             ofItemAtPath: older.path
         )
 
-        // Writing this pushes the folder over the 1.5 KB cap → oldest evicted.
         let newer = try await cache.store(Data(repeating: 2, count: 1_000), workshopID: "111")
 
         #expect(FileManager.default.fileExists(atPath: older.path) == false)
@@ -182,7 +171,6 @@ struct WPEVideoTextureDiskCacheTests {
         let a = try await cache.store(Data(repeating: 1, count: 1_000), workshopID: "111")
         let b = try await cache.store(Data(repeating: 2, count: 1_000), workshopID: "111")
 
-        // Both leased and over cap → nothing is safe to evict.
         let stats = await cache.stats()
         #expect(stats.fileCount == 2)
         #expect(FileManager.default.fileExists(atPath: a.path))

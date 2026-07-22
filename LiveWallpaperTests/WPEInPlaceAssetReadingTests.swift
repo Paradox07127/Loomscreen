@@ -4,10 +4,7 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 1 of the in-place asset-reading migration: locks the `WPESceneAssetProvider`
-/// backends, package canonical-name lookups, and `SceneDescriptor.assetStorage`
-/// persistence (including back-compat with descriptors written before the field).
-@Suite("WPE in-place asset reading — Phase 1")
+@Suite("WPE in-place asset reading")
 struct WPEInPlaceAssetReadingTests {
 
     // MARK: - Helpers
@@ -55,7 +52,6 @@ struct WPEInPlaceAssetReadingTests {
         #expect(WallpaperEnginePackage.canonicalLookupName("/abs") == nil)
         #expect(WallpaperEnginePackage.canonicalLookupName("") == nil)
         #expect(WallpaperEnginePackage.canonicalLookupName(".") == nil)
-        // A name that merely contains ".." (not a traversal component) is valid.
         #expect(WallpaperEnginePackage.canonicalLookupName("image..png") == "image..png")
     }
 
@@ -75,9 +71,7 @@ struct WPEInPlaceAssetReadingTests {
         #expect(try provider.data(atRelativePath: "scene.json") == "hello".data(using: .utf8))
         #expect(provider.exists(atRelativePath: "materials/a.tex"))
         #expect(!provider.exists(atRelativePath: "missing.json"))
-        // A directory is not a readable regular file.
         #expect(!provider.exists(atRelativePath: "materials"))
-        // Escapes are rejected, never resolved against the tree.
         #expect(throws: WPESceneAssetProviderError.self) {
             _ = try provider.data(atRelativePath: "../escape")
         }
@@ -104,7 +98,6 @@ struct WPEInPlaceAssetReadingTests {
         let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
 
         #expect(try provider.data(atRelativePath: "scene.json") == sceneJSON)
-        // Case-insensitive + normalized lookup, mirroring the directory scheme.
         #expect(try provider.data(atRelativePath: "./materials/a.tex") == texBytes)
         #expect(provider.exists(atRelativePath: "materials/a.tex"))
         #expect(!provider.exists(atRelativePath: "missing.tex"))
@@ -143,7 +136,6 @@ struct WPEInPlaceAssetReadingTests {
         try pkg.write(to: pkgURL)
 
         let provider = try WPEPackageSceneAssetProvider(packageURL: pkgURL)
-        // The prebuilt lowercased index resolves any case to the first stored entry.
         #expect(try provider.data(atRelativePath: "material.json") == Data("first".utf8))
         #expect(try provider.data(atRelativePath: "MATERIAL.JSON") == Data("first".utf8))
     }
@@ -177,9 +169,7 @@ struct WPEInPlaceAssetReadingTests {
         for dir in [staging1, staging2, unrelated] {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-        // A non-empty staging dir must still be removed (mirrors a real session).
         try Data([0xAB]).write(to: staging1.appendingPathComponent("asset.bin"))
-        // A stray top-level entry carrying the prefix is reclaimed too.
         let stray = root.appendingPathComponent("\(prefix)stray", isDirectory: false)
         try Data([0xCD]).write(to: stray)
 

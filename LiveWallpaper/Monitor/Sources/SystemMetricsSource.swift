@@ -1,37 +1,19 @@
 import Darwin
 import Foundation
 
-/// The headline Monitor module for non-AI users: a comprehensive host snapshot
-/// (CPU total + per-core + topology, memory + breakdown + pressure, swap, GPU +
-/// renderer/tiler, thermal, network + per-interface + path, disk, battery + power
-/// detail, accessories, ANE footprint, uptime, load, optional top processes) pushed
-/// every `interval` seconds via `MonitorSnapshotSink`. All readings come from
-/// sandbox-legal read-only kernel / IOKit / sysctl queries (see
-/// `SystemMetricsSamplers`); a probe that returns nothing leaves its field `nil`/`0`
-/// — the snapshot itself never fails.
+/// Publishes host CPU, memory, GPU, thermal, network, disk, and power metrics.
 final class SystemMetricsSource: MonitorDataSource, Sendable {
     let sourceID = "system"
 
-    /// Per-concern demand gates. Each expensive walk (GPU / top processes / ANE /
-    /// accessories) runs only when its flag is set. Defaults preserve the pre-v2
-    /// behavior and the existing public call sites: GPU + accessories on (cheap /
-    /// low-cadence), top processes driven by the caller's flag, ANE off (its
-    /// per-PID rusage walk is the most expensive and only the AI Engine widget needs
-    /// it). Wave 3's board orchestrator computes the union of active widget kinds and
-    /// hands the resulting `Options` in via `init(options:)` — no other call site
-    /// needs to change.
+    /// Per-concern demand gates.
     struct Options: Sendable, Equatable {
         var gpu: Bool = true
         var topProcesses: Bool = false
         var ane: Bool = false
         var accessories: Bool = true
-        /// SMC temperature/power reads (CPU/GPU widgets' B-tier row). Off by
-        /// default — the read is cheap but sandbox-gated, so only turn it on when a
-        /// widget that shows sensors is on the board.
+        /// SMC temperature/power reads (CPU/GPU widgets' B-tier row).
         var sensors: Bool = false
-        /// Per-app disk I/O attribution (rusage deltas inside the top-processes
-        /// walk; needs the `process-info-rusage` sbpl exception). Demanded by
-        /// the Disk widget's L top-list.
+        /// Per-app disk I/O attribution (rusage deltas inside the top-processes walk; needs the `process-info-rusage` sbpl exception).
         var processIO: Bool = false
 
         static let `default` = Options()
@@ -82,7 +64,7 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
         pressure = memoryPressureReader
     }
 
-    /// Pure wire mapping used by the polling actor. Monitor v2 observes the
+    /// Pure wire mapping used by the polling actor. The monitor observes the
     /// app-wide watcher but never owns or mutates its dispatch-source lifecycle.
     static func memoryPressureWireValue(from reader: any MemoryPressureReading) -> String {
         reader.currentLevel().rawValue
@@ -108,9 +90,7 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
 
     // MARK: - Delta bookkeeping + poll loop
 
-    /// Owns everything that must persist across polls (previous counters, GPU cadence
-    /// counter, once-sampled hardware identity, the running Task). An actor keeps it
-    /// Sendable-clean without locks.
+    /// Owns everything that must persist across polls (previous counters, GPU cadence counter, once-sampled hardware identity, the running Task).
     private actor MetricsState {
         private var task: Task<Void, Never>?
         private var updateCount = 0
@@ -126,7 +106,6 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
         private var lastANESampledAt: Date?
         /// Lazily opened on the first sensors-enabled tick; caches its SMC connection.
         private var sensorSampler: MonitorSensorSampler?
-        // Hardware identity is fixed for the boot — sample once, then reuse.
         private var cpuInfo: MonitorCPUInfo?
         private var gpuDeviceName: String?
 
@@ -236,9 +215,6 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
                 let result = SystemMetricsSamplers.sampleTopProcesses(
                     previous: prevProcessCounters,
                     interval: elapsed,
-                    // Matches the widgets' ceiling: the processes stepper and
-                    // the L board tile both go up to 12 rows (Apple L frame
-                    // physically fits 19; 12 keeps the tail readable).
                     limit: 12,
                     includeIO: options.processIO
                 )
@@ -328,9 +304,7 @@ final class SystemMetricsSource: MonitorDataSource, Sendable {
     }
 }
 
-/// GPU sampling is 3× more expensive than the rest, so it runs every Nth poll —
-/// matching `SystemMonitor`'s cadence policy but kept local to avoid depending on the
-/// Pro package.
+/// GPU sampling is 3× more expensive than the rest, so it runs every Nth poll — matching `SystemMonitor`'s cadence policy but kept local to avoid depending on the Pro package.
 enum MonitoringCadence {
     static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
         guard cadence > 1, updateCount > 1 else { return true }

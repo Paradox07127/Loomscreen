@@ -100,8 +100,6 @@ struct WorkshopBrowseFilterTests {
 
     @Test("Selectable cases exclude the no-restriction sentinels")
     func selectableCases() {
-        // The deselect-to-narrow model never offers a `.any` sentinel as a
-        // concrete chip; content type has no sentinel, so all cases are selectable.
         #expect(WorkshopContentTypeFilter.selectableCases == [.scene, .video, .web])
         #expect(!WorkshopResolutionFilter.selectableCases.contains(.any))
     }
@@ -114,7 +112,6 @@ struct WorkshopBrowseFilterTests {
 
     @Test("Application is always excluded from every query")
     func applicationAlwaysExcluded() {
-        // Application wallpapers can't run in this runtime.
         #expect(WorkshopBrowseViewModel.alwaysExcludedTags == ["Application"])
     }
 
@@ -137,10 +134,6 @@ struct WorkshopBrowseFilterTests {
 
     @Test("excludedtags are canonicalized: trimmed, de-duplicated, sorted, exact-case")
     func excludedTagsCanonicalize() {
-        // Steam matches tags by their EXACT display name, so canonicalization
-        // preserves case (it does NOT lowercase) and only trims, de-duplicates,
-        // and sorts. This is the shape the deselected-options + Application list
-        // flows through.
         let request = WorkshopQueryRequest(
             sort: .topRated,
             excludedTags: ["Mature", "Anime", "Application", "Mature", " Memes "]

@@ -6,16 +6,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Pacing & format coverage for the AVPlayer-backed `WPEVideoTextureSource`.
-///
-/// Pre-fix this type ran `AVAssetReader.copyNextSampleBuffer()` in a tight
-/// while-loop with no PTS pacing — clips decoded at hundreds of FPS, so
-/// 24/30/60 FPS sources played back 2-8× faster than authored. These tests
-/// lock in the AVPlayer-based contract: frames come out on the wall clock,
-/// the suspend/resume hooks reach the underlying player, `invalidate()`
-/// clears state and the temp file, and the produced texture is a
-/// BGRA8 variant (sRGB-preferred to match the Metal pipeline's output
-/// attachment, with `.bgra8Unorm` as the fallback).
 @MainActor
 @Suite("WPEVideoTextureSource pacing", .serialized)
 struct WPEVideoTextureSourcePacingTests {
@@ -32,8 +22,6 @@ struct WPEVideoTextureSourcePacingTests {
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         defer { source.invalidate() }
 
-        // Give AVPlayer time to load the asset. If init had called play()
-        // the playhead would have advanced past 0 by now.
         try await Task.sleep(for: .milliseconds(300))
         #expect(source.currentItemPlaybackSeconds == 0, "Source must not auto-start in init — renderer drives play/pause via applyPerformanceProfile")
     }
@@ -61,7 +49,6 @@ struct WPEVideoTextureSourcePacingTests {
     @Test("Playhead advances on the wall clock — not faster (the old AVAssetReader bug)")
     func playheadAdvancesAtRealTime() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // 4s clip gives the playhead a long, monotonic window to land in.
         let videoURL = try await SyntheticVideoFixture.writeMP4(
             durationSeconds: 4.0,
             frameRate: 24
@@ -72,7 +59,6 @@ struct WPEVideoTextureSourcePacingTests {
         defer { source.invalidate() }
         source.applyPerformanceProfile(.quality)
 
-        // Confirm playback started before measuring the playhead delta.
         try #require(try await pollForTexture(from: source, timeout: 2.0) != nil)
         let startSeconds = source.currentItemPlaybackSeconds
 
@@ -82,10 +68,6 @@ struct WPEVideoTextureSourcePacingTests {
         let endSeconds = source.currentItemPlaybackSeconds
         let advanced = endSeconds - startSeconds
 
-        // The unpaced `while true { copyNextSampleBuffer() }` regression
-        // would let the playhead race past the wall-clock delta by 2-8×.
-        // Cap at 2× the measurement window with a generous floor to allow
-        // AVPlayer's startup jitter (first-frame buffering pause).
         #expect(advanced <= measurementWindow * 2.0,
                 "Playhead advanced \(advanced)s over \(measurementWindow)s wall-clock — AVPlayer pacing regression?")
         #expect(advanced >= 0.05,
@@ -129,8 +111,6 @@ struct WPEVideoTextureSourcePacingTests {
             durationSeconds: 1.0,
             frameRate: 24
         )
-        // Net below the assertion, not a replacement for it: invalidate() is
-        // what must delete the file, but a failure here shouldn't strand it.
         defer { try? FileManager.default.removeItem(at: videoURL) }
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
@@ -155,23 +135,20 @@ struct WPEVideoTextureSourcePacingTests {
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         source.invalidate()
-        // Second call must not crash, throw, or otherwise undo invariants.
         source.invalidate()
-        source.applyPerformanceProfile(.quality)   // Also a no-op after invalidate.
+        source.applyPerformanceProfile(.quality)
         #expect(source.texture(at: 0) == nil)
     }
 
     @Test("Script control plays the clip once and freezes — does not keep looping")
     func scriptControlPlaysOnceAndHolds() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // 1s clip; a still-looping source keeps advancing/wrapping past its end.
         let videoURL = try await SyntheticVideoFixture.writeMP4(durationSeconds: 1.0, frameRate: 24)
         defer { try? FileManager.default.removeItem(at: videoURL) }
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         defer { source.invalidate() }
 
-        // Drive texture(at:) like the render loop — that's where wrap-freeze runs.
         func pump(_ seconds: TimeInterval) async throws {
             let deadline = Date().addingTimeInterval(seconds)
             while Date() < deadline {
@@ -180,10 +157,10 @@ struct WPEVideoTextureSourcePacingTests {
             }
         }
 
-        source.scriptPlay()                 // script takes over → play once
-        try await pump(2.0)                 // past the 1s clip + its first wrap → frozen
+        source.scriptPlay()
+        try await pump(2.0)
         let frozenAt = source.currentItemPlaybackSeconds
-        try await pump(0.6)                 // a looping source would keep advancing
+        try await pump(0.6)
         let stillFrozenAt = source.currentItemPlaybackSeconds
 
         #expect(abs(stillFrozenAt - frozenAt) < 0.05,
@@ -193,10 +170,6 @@ struct WPEVideoTextureSourcePacingTests {
 
     // MARK: - Helpers
 
-    /// Polls `texture(at:)` on the main actor every 30 ms until a non-nil
-    /// texture appears or the wall-clock deadline expires. AVPlayer needs
-    /// some setup time — load asset, schedule first frame, fire
-    /// `videoOutput.hasNewPixelBuffer` — so the deadline is generous.
     private func pollForTexture(
         from source: WPEVideoTextureSource,
         timeout seconds: TimeInterval
@@ -215,10 +188,6 @@ struct WPEVideoTextureSourcePacingTests {
 // MARK: - Synthetic MP4 fixture
 
 private enum SyntheticVideoFixture {
-    /// Writes a tiny H.264 MP4 to `temporaryDirectory` so the source can
-    /// open it via the real AVFoundation playback path. All frames carry
-    /// the same payload — these tests cover *pacing*, not pixel content;
-    /// the fixture only has to be a valid MP4 the asset loader accepts.
     static func writeMP4(
         durationSeconds: TimeInterval,
         frameRate: Int32

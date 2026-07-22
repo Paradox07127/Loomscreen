@@ -27,9 +27,7 @@ enum DoctorProbeKind: String, Sendable, CaseIterable, Identifiable {
         }
     }
 
-    /// Non-blocking probes can be `.red` without blocking the Workshop UI as
-    /// a whole — they surface as red rows but do not contribute to
-    /// `DoctorState.done(allGreen:blockingFailures:).blockingFailures`.
+    /// Advisory failures remain visible without blocking Workshop operations.
     var isAdvisory: Bool {
         switch self {
         case .wallpaperEngineOwnership, .codeSignature: return true
@@ -102,7 +100,7 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
-/// `Imported` is generic so the Doctor stays unaware of the library / import types.
+/// Download result independent of the concrete imported-item model.
 enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
     case imported(Imported)
     case notConfigured(reason: String)
@@ -115,9 +113,7 @@ enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
     case failed(reason: String)
 }
 
-/// Outcome of a full Wallpaper Engine (`app_update 431960`) install/update.
-/// `installRoot` is the on-disk `wallpaper_engine` directory SteamCMD wrote to;
-/// `buildID` is the installed Steam build (nil when the manifest couldn't be read).
+/// Outcome of a full Wallpaper Engine installation or update.
 enum WPEAppUpdateResult: Sendable {
     case updated(installRoot: URL, buildID: String?)
     case notConfigured(reason: String)
@@ -141,9 +137,7 @@ final class SteamCMDDoctorService {
 
     private static let valveTeamIdentifier = "MXGJJ98X76"
     private static let identityBannerPattern = #"Steam Console Client \(c\) Valve Corporation - version \d+"#
-    /// SteamCMD prints these while bootstrapping or replacing itself, and that run
-    /// never reaches the identity banner. Seeing them instead of the banner means
-    /// "come back in a moment", not "this binary is not SteamCMD".
+    /// Self-update output is transient and must not be classified as an identity failure.
     private static let selfUpdatePattern =
         #"(Checking for available updates|Downloading update|Verifying installation)"#
 
@@ -151,19 +145,15 @@ final class SteamCMDDoctorService {
         text.range(of: pattern, options: .regularExpression) != nil
     }
 
-    /// Probes worth running when `binaryIdentity` fails, because each one can
-    /// explain that failure. `cachedLogin` / `wallpaperEngineOwnership` are
-    /// excluded: they need a binary that already identifies itself.
+    /// Probes that can diagnose identity failure without executing authenticated operations.
     private static let identityFailureExplainers: [DoctorProbeKind] =
         [.rosetta, .codeSignature, .gatekeeperQuarantine]
     nonisolated static let wallpaperEngineAppID: UInt32 = 431960
-    /// Empirically validated public free WE community item used as the primary
-    /// ownership probe (Phase 0 empirical pass, 2026-05-28).
+    /// Public Workshop item used for the primary ownership probe.
     private static let primaryOwnershipProbeID: UInt64 = 3725117707
-    /// Fallback ids in case the primary item is delisted. The plan calls for
-    /// ≥3 candidates; refresh the list on each release.
+    /// Fallback items protect the ownership probe from individual delistings.
     private static let fallbackOwnershipProbeIDs: [UInt64] = [
-        2932849316, // TODO(post-v2): replace with empirically verified free WE community items
+        2932849316,
         2906898907
     ]
     static var ownershipProbeCandidateIDs: [UInt64] {
@@ -1139,10 +1129,6 @@ final class SteamCMDDoctorService {
     }
 
     // MARK: - Helpers
-
-    nonisolated static func runCodesignCheck(binary: URL) async -> CodesignResult {
-        await SteamCMDProductionBinaryTrustChecker().codesignResult(for: binary)
-    }
 
     /// Last SHA-256 verified as an intact Valve build. Transient — re-verified
     /// each launch and whenever the SHA changes.

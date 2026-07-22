@@ -1,11 +1,6 @@
 import Foundation
 
 /// Shared token pricing keyed by model-id prefix, in USD per 1M tokens.
-///
-/// Single source of truth for both per-session cost and the usage ledger's
-/// per-model / per-day cost. Unknown prefixes (including `claude-fable`, and
-/// every Codex/OpenAI model — no public per-token rate is assumed) return nil so
-/// cost is never fabricated.
 enum MonitorTokenPricing {
     struct Rate: Equatable {
         var input: Double
@@ -40,8 +35,6 @@ enum MonitorTokenPricing {
 }
 
 /// Per-file usage extracted from a transcript, bucketed by (localDay, model).
-/// Pure value type so it can be memoized against a file fingerprint and rolled up
-/// without re-reading the file.
 struct MonitorFileUsageBuckets: Equatable, Sendable {
     /// `[localDay("YYYY-MM-DD"): [model: tokens]]`.
     var byDayModel: [String: [String: MonitorTokenTotals]] = [:]
@@ -64,9 +57,7 @@ struct MonitorUsageFileFingerprint: Hashable, Sendable {
     var mtime: Double
 }
 
-/// Rolls per-file daily buckets into `MonitorUsageSnapshot.perModel` +
-/// `.dailyActivity`, restricted to the trailing `dayWindow` local-calendar days
-/// including today. Costs use `MonitorTokenPricing`.
+/// Rolls per-file daily buckets into `MonitorUsageSnapshot.perModel` + `.dailyActivity`, restricted to the trailing `dayWindow` local-calendar days including today.
 enum MonitorUsageRollup {
     static let dayWindow = 14
 
@@ -89,8 +80,6 @@ enum MonitorUsageRollup {
     }
 
     /// Compose the model + day breakdowns from already-extracted per-file buckets.
-    /// `perModel` is sorted by descending total tokens; `dailyActivity` covers
-    /// every day in the window (missing days present with zero totals) ascending.
     static func compose(
         files: [MonitorFileUsageBuckets],
         now: Double,
@@ -126,9 +115,6 @@ enum MonitorUsageRollup {
             }
 
         let orderedDays = windowDays(now: now, days: days, calendar: calendar)
-        // Cost per day is summed across that day's models (unknown-priced models
-        // contribute nil → the day cost stays nil only if NO model on that day was
-        // priced).
         var dayCost: [String: Double] = [:]
         for file in files {
             for (day, models) in file.byDayModel where windowSet.contains(day) {
@@ -161,10 +147,7 @@ enum MonitorUsageRollup {
     }
 }
 
-/// Windowed burn-rate estimator over scan cycles. Callers push cumulative
-/// observed totals (today's tokens / cost) each tick; the estimator keeps samples
-/// inside a trailing window and reports the delta-per-hour once it has enough
-/// spread. nil until the window spans at least `minSpan`.
+/// Windowed burn-rate estimator over scan cycles.
 struct MonitorBurnRateWindow {
     struct Sample: Equatable { var at: Double; var tokens: Double; var cost: Double? }
 
@@ -182,8 +165,6 @@ struct MonitorBurnRateWindow {
         samples.append(Sample(at: at, tokens: Double(cumulativeTokens), cost: cumulativeCost))
         let cutoff = at - window
         samples.removeAll { $0.at < cutoff }
-        // A cumulative counter that dropped (e.g. day rollover reset "today")
-        // invalidates earlier samples; keep only the tail from the drop.
         if let last = samples.last {
             if let dropIndex = samples.dropLast().lastIndex(where: { $0.tokens > last.tokens }) {
                 samples.removeSubrange(samples.startIndex...dropIndex)

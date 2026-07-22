@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Memory-pressure state driving the tank/band tints. The honest mapping from the
-/// mock: a full-but-calm tank reads sage; pressure — not fill level — drives the
-/// warm colours (memory-verdict ④).
 enum MonitorPressure {
     case normal, warn, critical
 
@@ -16,10 +13,7 @@ enum MonitorPressure {
     }
 }
 
-/// Vertical liquid-fill gauge (memory). The tank IS the reading: level = used%,
-/// but the fill *tint* follows pressure, not level. Graduation hairlines at the
-/// quartiles + a bright liquid-top line. Level changes animate via transaction,
-/// reduce-motion gated — no per-frame loop.
+/// Vertical liquid-fill gauge (memory).
 struct TankGauge: View {
     /// Fill level 0…1.
     var level: Double
@@ -41,7 +35,6 @@ struct TankGauge: View {
             let fillHeight = h * CGFloat(clamped)
 
             ZStack(alignment: .bottom) {
-                // vessel
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
@@ -54,7 +47,6 @@ struct TankGauge: View {
                             .strokeBorder(MonitorDesign.hairline.opacity(0.6), lineWidth: 1)
                     )
 
-                // graduation ticks at 25/50/75%
                 ForEach([0.25, 0.5, 0.75], id: \.self) { q in
                     Rectangle()
                         .fill(Color.white.opacity(0.07))
@@ -63,7 +55,6 @@ struct TankGauge: View {
                         .frame(maxHeight: .infinity, alignment: .bottom)
                 }
 
-                // fluid
                 ZStack(alignment: .top) {
                     LinearGradient(colors: pressure.fillColors, startPoint: .bottom, endPoint: .top)
                     Rectangle()   // bright liquid-top line

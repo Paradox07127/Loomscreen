@@ -15,7 +15,7 @@ import os
 /// like 3725117707 (60 BC3 source images, 4216×7248 each) lands at
 /// ~785 MB CPU + ~10 MB GPU instead of the ~7.3 GB GPU the eager
 /// transcoded path would demand.
-// Not `@MainActor` (M2c1b-3c): created and ticked inside the renderer's actor
+// Not `@MainActor`: created and ticked inside the renderer's actor
 // isolation. The off-thread LZ4 prefetch used to hop its completion back to the
 // main actor; now it writes each decode into a `Sendable` lock-box that the
 // render actor harvests on its next tick — so no non-Sendable `self` crosses a

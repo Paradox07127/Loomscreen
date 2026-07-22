@@ -1,22 +1,11 @@
 import SwiftUI
 
-/// Shared visual language for the Monitor v2 widget board — "Ambient Instrument":
-/// a matte warm-graphite panel with restrained OKLCH signal colours. Every token
-/// here is ported 1:1 from `.claude/plan/monitor-design/index.html` `:root`; the
-/// arc/gauge geometry and band thresholds come from that file's render JS.
-///
-/// Colours are produced from their source OKLCH values through the real
-/// OKLCH→OKLab→linear-sRGB(D65) transform, then handed to SwiftUI as a
-/// `.sRGBLinear` colour so SwiftUI applies the sRGB transfer curve itself. This
-/// keeps the palette anchored to the design source instead of hand-copied hex.
+/// Shared visual tokens for the monitor widget board.
 enum MonitorDesign {
 
     // MARK: - Colour space
 
-    /// OKLCH → sRGB (gamma-encoded 0…1 components). Matrices are Björn Ottosson's
-    /// reference OKLab constants (bottosson.github.io/posts/oklab). `clampGamut`
-    /// clips negative/over-range linear components before encoding — the design
-    /// palette stays inside sRGB, so clipping only guards rounding at the edges.
+    /// OKLCH → sRGB (gamma-encoded 0…1 components).
     static func oklch(_ l: Double, _ c: Double, _ h: Double, alpha: Double = 1) -> Color {
         let (r, g, b) = linearSRGB(l: l, c: c, h: h)
         return Color(.sRGBLinear, red: r, green: g, blue: b, opacity: alpha)
@@ -29,7 +18,6 @@ enum MonitorDesign {
         let a = c * cos(hr)
         let bb = c * sin(hr)
 
-        // OKLab → LMS' (nonlinear), cube → LMS
         let lp = l + 0.3963377774 * a + 0.2158037573 * bb
         let mp = l - 0.1055613458 * a - 0.0638541728 * bb
         let sp = l - 0.0894841775 * a - 1.2914855480 * bb
@@ -37,7 +25,6 @@ enum MonitorDesign {
         let mc = mp * mp * mp
         let sc = sp * sp * sp
 
-        // LMS → linear sRGB
         let r =  4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc
         let g = -1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc
         let b = -0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc
@@ -84,8 +71,6 @@ enum MonitorDesign {
     static let signalIdle = oklch(0.56, 0.010, 76)    // --idle : idle / neutral
     static let signalSteel = oklch(0.68, 0.05, 235)   // --cool : secondary metric
 
-    /// The steel used specifically as the *low* load band — a touch deeper/cooler
-    /// than `signalSteel` (from `loadBandColor` in the mock JS).
     static let loadSteel = oklch(0.62, 0.045, 250)
 
     // MARK: - Panel material
@@ -102,9 +87,6 @@ enum MonitorDesign {
 
     // MARK: - Load band mapping
 
-    /// Utilisation → colour band, the ONE shared mapping every gauge/sparkline
-    /// uses (mock JS `loadBandColor`): steel <0.4, amber 0.4…0.8, coral >0.8.
-    /// `pct` is a fraction 0…1.
     static func loadBandColor(_ pct: Double) -> Color {
         if pct > 0.8 { return signalCoral }
         if pct >= 0.4 { return signalAmber }
@@ -120,9 +102,6 @@ enum MonitorDesign {
         return .low
     }
 
-    /// Cool→warm temperature ramp (sage 158° → amber 78° → coral 30°), a scale
-    /// deliberately distinct from the load-amber so "hot" never reads as "busy".
-    /// `celsius` maps 34 °C (cool) … 70 °C (hot). Mirrors mock JS `tempColor`.
     static func temperatureColor(_ celsius: Double) -> Color {
         let t = min(1, max(0, (celsius - 34) / (70 - 34)))
         let l: Double, c: Double, h: Double
@@ -137,15 +116,6 @@ enum MonitorDesign {
     }
 
     // MARK: - Typography
-    //
-    // SPEC §3.0: at most three type sizes per widget, driven by a cell-height
-    // base. Hero numerals are SF Rounded, semibold, tabular. Callers compose the
-    // hero with `.monospacedDigit()` so readouts don't jitter.
-    //
-    //   hero  = clamp(24, cellH*0.36, 46)
-    //   sub   = 0.52 × hero
-    //   label = clamp(9,  cellH*0.10, 12)   (uppercase, tracked)
-    //   cap   = clamp(10, cellH*0.11, 13)
 
     static func heroFont(size: CGFloat) -> Font {
         .system(size: size, weight: .semibold, design: .rounded)
@@ -168,13 +138,10 @@ enum MonitorDesign {
         .system(size: size, weight: .semibold, design: .rounded)
     }
 
-    /// Tracking (letter-spacing) for the uppercase whisper labels — 0.12em in the
-    /// mock, expressed here in points relative to the label size.
     static func labelTracking(size: CGFloat) -> CGFloat { size * 0.12 }
 
     // MARK: - Type scale
 
-    /// Resolve the ≤3 type sizes from a cell height, matching the mock's clamps.
     struct TypeScale {
         let hero: CGFloat
         let sub: CGFloat
@@ -199,21 +166,14 @@ enum MonitorDesign {
 
     static let hairlineWidth: CGFloat = 1
 
-    /// Radius floor for the small inner elements inside a widget (Fleet's session
-    /// cards, chips). The OUTER panel radius is the board's fixed Apple
-    /// desktop-widget radius (`MonitorBoardGeometry.appleCornerRadius`), threaded
-    /// down per render.
+    /// Radius floor for the small inner elements inside a widget (Fleet's session cards, chips).
     static let cornerRadiusMin: CGFloat = 9
 }
 
 // MARK: - Annotation chip (shared board-wide aesthetic)
 
 extension View {
-    /// A faint capsule "chip" (matte fill + hairline) that contains a small
-    /// annotation — a peak tag, status pill, legend, sensor readout, or floating
-    /// micro-label. The board-wide convention (established on CPU): little
-    /// annotations read as contained tags rather than loose text. Padding is
-    /// deliberately tiny so applying it doesn't reflow the surrounding layout.
+    /// A faint capsule "chip" (matte fill + hairline) that contains a small annotation — a peak tag, status pill, legend, sensor readout, or floating micro-label.
     func monitorChip(_ scale: MonitorDesign.TypeScale) -> some View {
         self
             .padding(.horizontal, scale.label * 0.5)

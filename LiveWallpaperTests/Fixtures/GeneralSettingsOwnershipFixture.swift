@@ -1,8 +1,7 @@
 import LiveWallpaperCore
 
-/// Test-only decomposition map for UI-08. It names candidate ownership
-/// boundaries without introducing production abstractions before behavior is
-/// locked. Moving a field between domains is an explicit fixture review.
+/// Defines the expected ownership boundaries for general-settings state.
+/// Moving a field between domains requires an explicit fixture review.
 enum OwnershipFixture {
     enum Domain: String, CaseIterable {
         case behavior

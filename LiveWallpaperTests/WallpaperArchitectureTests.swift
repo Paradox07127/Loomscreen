@@ -302,8 +302,6 @@ struct ApplicationLifecycleControllerTests {
 @Suite("Menu bar playback controls")
 @MainActor
 struct MenuBarPlaybackControlTests {
-    /// Exercises the shipping toggle path (`ScreenManager.togglePlayback(for:)`,
-    /// the one the menu bar calls) rather than a standalone helper copy.
     private func makeManager() -> ScreenManager {
         ScreenManager(startupOptions: ScreenManagerStartupOptions(
             restoreSavedWallpapers: false,
@@ -355,9 +353,6 @@ struct MenuBarPlaybackControlTests {
 
     @Test("Toggle reads intent, not playback: a policy-suspended (intends-to-play) wallpaper pauses")
     func toggleReadsIntentNotPlaybackState() {
-        // Suppressed by a performance policy: not actually playing, but the
-        // user still intends to play. Toggling must pause (flip intent off),
-        // not "resume" by chasing the suppressed isPlaying state.
         let playback = FakePlaybackController(isPlaying: false, userIntendsToPlay: true)
         guard let screen = makeScreen(installing: playback) else {
             Issue.record("No NSScreen available for test")
@@ -551,7 +546,6 @@ struct HTMLFolderURLSchemeTests {
         #expect(task.receivedData.reduce(0) { $0 + $1.count } == payload.count)
     }
 
-    /// Carries the handler's current session nonce so subresource requests skip the top-level nonce gate.
     private func makeTopLevelURL(handler: FolderURLSchemeHandler) -> URL {
         let nonce = handler.currentSessionNonce ?? ""
         return URL(string: "livewallpaper://wallpaper/index.html?n=\(nonce)")!
@@ -812,15 +806,10 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         try RepositoryRoot.source(relativePath)
     }
 
-    /// The executor is split across `WPEMetalRenderExecutor+*.swift`, so these
-    /// assertions address the component instead of pinning to whichever part a
-    /// declaration currently lives in.
     private static func readExecutorSource() throws -> String {
         try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalRenderExecutor")
     }
 
-    /// Same reasoning as `readExecutorSource`: the scene renderer is split
-    /// across `WPEMetalSceneRenderer+*.swift`.
     private static func readSceneRendererSource() throws -> String {
         try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalSceneRenderer")
     }
@@ -984,8 +973,6 @@ struct WallpaperPolicyEngineTests {
 
     @Test("Every suspend condition independently maps to suspended; all-benign stays quality")
     func unifiedSuspendConditionMatrix() {
-        // Each row toggles exactly one condition true on an otherwise-benign
-        // baseline (external power, nominal thermal, nothing hidden).
         func profile(
             hidden: Bool = false,
             occluding: Bool = false,
@@ -1045,7 +1032,6 @@ struct WallpaperPolicyEngineTests {
             hasConfiguredWallpaperSessions: true,
             hasConfiguredSceneSessions: false
         ))
-        // pauseOnWindowOcclusion defaults on and alone keeps the poll alive.
         #expect(WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: false),
             hasConfiguredWallpaperSessions: true,
@@ -1061,9 +1047,6 @@ struct WallpaperPolicyEngineTests {
             hasConfiguredWallpaperSessions: false,
             hasConfiguredSceneSessions: false
         ))
-        // Adaptive frame rate reads the occlusion fraction, so it needs the
-        // fallback poll when both pause toggles are off — but only when a scene
-        // session is live (it never throttles video/HTML).
         #expect(WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
             globalSettings: GlobalSettings(pauseOnFullScreen: false, adaptiveFrameRateEnabled: true),
             hasConfiguredWallpaperSessions: true,
@@ -1668,30 +1651,16 @@ private final class TestWallpaperRuntimeSession: WallpaperRuntimeSession {
     }
 }
 
-// MARK: - Infrastructure ↔ Runtime boundary (ADR-002, step 1)
+// MARK: - Infrastructure ↔ Runtime boundary
 
-/// Fitness function standing in for the compile-time boundary the single app
-/// target cannot enforce: `Infrastructure/` must not reach into types declared
-/// under `Runtime/`. It freezes today's crossings as an explicit baseline and
-/// fails on any *new* one, so the coupling can only be paid down over time.
 @Suite("Infrastructure↔Runtime boundary")
 struct InfrastructureRuntimeBoundaryTests {
 
-    /// Known Infra→Runtime references, frozen at the ADR-002 baseline. This map
-    /// may only ever *shrink*: deleting entries as the coupling is paid down is
-    /// expected; adding one means a new boundary violation slipped in.
-    /// Five of the six original entries were paid down by putting the files on
-    /// the layer their dependencies already implied, rather than by relaxing the
-    /// rule: the render-graph/pipeline builders and the texture loader do GPU
-    /// work and moved to `Runtime/Metal/`, while `WPEResolutionDiagnostics`
-    /// (asset-resolution tracing, with no runtime behaviour) moved the other way
-    /// into `Infrastructure/Diagnostics/`, which dissolved every remaining
-    /// `WPEResolution*` crossing at once.
     private static let baseline: [String: Set<String>] = [
         "Workshop/WallpaperEngineImportService.swift": ["HTMLWallpaperCompatibilityPolicy"],
     ]
 
-    @Test("Infrastructure/ introduces no Runtime/ references beyond the ADR-002 baseline")
+    @Test("Infrastructure introduces no Runtime references beyond the approved baseline")
     func infrastructureDoesNotReferenceRuntimeTypesBeyondBaseline() throws {
         let runtimeTypes = try runtimeDeclaredTypeNames()
         #expect(!runtimeTypes.isEmpty, "Runtime type extraction found nothing — scan is misconfigured")
@@ -1717,7 +1686,7 @@ struct InfrastructureRuntimeBoundaryTests {
         #expect(
             newCrossings.isEmpty,
             Comment(rawValue: """
-            New Infrastructure→Runtime coupling (ADR-002 forbids growth):
+            New Infrastructure→Runtime coupling violates the architecture boundary:
             \(newCrossings.sorted().joined(separator: "\n"))
             """)
         )
@@ -1743,7 +1712,7 @@ struct InfrastructureRuntimeBoundaryTests {
         #expect(
             stale.isEmpty,
             Comment(rawValue: """
-            Baseline lists crossings that no longer exist — shrink the allow-list (ADR-002 lets it only shrink):
+            Baseline lists crossings that no longer exist — shrink the allow-list:
             \(stale.sorted().joined(separator: "\n"))
             """)
         )
@@ -1796,10 +1765,6 @@ struct InfrastructureRuntimeBoundaryTests {
         return crossings.sorted()
     }
 
-    /// `private`/`fileprivate` declarations are file-scoped, so no Infrastructure
-    /// file can reach them however the name matches — counting them turns a mere
-    /// name collision (e.g. the `#if LITE_BUILD` shadow of the package's public
-    /// `WPEPathSafety`) into a phantom boundary crossing.
     private func runtimeDeclaredTypeNames() throws -> Set<String> {
         let declaration = /^(?:public |internal |open )*(?:final )?(?:class|struct|enum|protocol|actor)\s+([A-Za-z_][A-Za-z0-9_]*)/
         var names: Set<String> = []
@@ -1813,8 +1778,6 @@ struct InfrastructureRuntimeBoundaryTests {
         return names
     }
 
-    /// Whole-word (`\b…\b`) identifier search — a substring hit inside a longer
-    /// identifier (e.g. `WPEPath` inside `WPEPathSafety`) must not count.
     private func containsIdentifier(_ identifier: String, in source: String) -> Bool {
         guard !identifier.isEmpty else { return false }
         func isIdentifierCharacter(_ character: Character) -> Bool {
@@ -1834,20 +1797,10 @@ struct InfrastructureRuntimeBoundaryTests {
 
     // MARK: - Non-code text stripping (so a type named only in prose never trips the scan)
 
-    /// Strips comments *and* string-literal contents. Both are prose: a type
-    /// name inside `"WPEMetalSceneRenderer-"` (a temp-directory prefix) is text,
-    /// not a reference, and the `\b`-boundary scan cannot tell them apart.
-    ///
-    /// Cost: a genuinely *dynamic* crossing (`NSClassFromString("WPEMetal…")`)
-    /// is hidden too. No such call exists in this codebase, and the one baseline
-    /// entry is a real type reference, so the trade buys away a whole class of
-    /// false positives for a risk that is currently zero.
     private func stripComments(_ source: String) -> String {
         stripLineComments(stripBlockComments(source))
     }
 
-    /// Newlines inside a literal survive so line structure — which
-    /// `stripLineComments` splits on — is preserved.
     private func stripBlockComments(_ source: String) -> String {
         var result = ""
         result.reserveCapacity(source.count)

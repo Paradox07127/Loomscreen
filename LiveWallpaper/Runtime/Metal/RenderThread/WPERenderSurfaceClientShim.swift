@@ -11,7 +11,7 @@ import os
 ///
 /// Why a shim (the renderer is not `WPERenderSurfaceClient` itself): `draw(in:)`
 /// is an AppKit callback that is *always* on the main thread, but the renderer
-/// lives inside `WPEDisplayRenderActor` (M2c1b-3c), which may be backed by a
+/// lives inside `WPEDisplayRenderActor`, which may be backed by a
 /// dedicated render thread. The shim absorbs the hop: each surface callback is
 /// delivered onto the render actor, where the renderer runs it.
 ///
@@ -20,7 +20,7 @@ import os
 /// - `.main` backing: `draw(in:)` already runs on the actor's isolation thread
 ///   (the main thread), so the shim enters isolation **synchronously** via
 ///   `assumeIsolatedOnRenderThread` and renders inline. This restores the
-///   pre-M2c invariant that `draw(in:)` returns only once the frame has been
+///   invariant that `draw(in:)` returns only once the frame has been
 ///   produced — an async hop would have let `draw` return before the render ran.
 ///
 /// - `.renderThread` backing: the render happens off the main actor, so the shim

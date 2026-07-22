@@ -42,14 +42,11 @@ struct WallpaperEngineProjectPropertiesTests {
             preferredLanguages: ["en-US"]
         )
         let labels = Dictionary(uniqueKeysWithValues: schema.properties.map { ($0.key, $0.displayText) })
-        // Known WPE key + `ui_browse_properties_*` prefix + snake_case all resolve.
         #expect(labels["pknown"] == "Scheme Color")
         #expect(labels["psnake"] == "Particle Density")
         #expect(labels["pbrowse"] == "Bloom Strength")
-        // Conservative: camelCase and author plain text pass through verbatim.
         #expect(labels["pcamel"] == "modelResolution")
         #expect(labels["pauthor"] == "Artist Label: Keep as Written")
-        // The raw key must never survive to the UI.
         #expect(schema.properties.allSatisfy { !$0.displayText.hasPrefix("ui_browse_properties_") })
         #expect(schema.properties.allSatisfy { !$0.displayText.contains("_") })
     }
@@ -116,16 +113,12 @@ struct WallpaperEngineProjectPropertiesTests {
         )
         let promo = Dictionary(uniqueKeysWithValues: schema.properties.map { ($0.key, $0.isPromotionalLink) })
 
-        // Real, render-affecting settings — keep, even with cosmetic <h2> markup.
         #expect(promo["windspeed"] == false)
         #expect(promo["clock"] == false)
         #expect(promo["schemecolor"] == false)
-        // A descriptive long key with no promo token must NOT be hidden.
         #expect(promo["enableparallaxdepthoffieldforbackgroundlayers"] == false)
-        // A combo whose option *value* is URL-like but label is clean — keep.
         #expect(promo["bgsource"] == false)
 
-        // Ads / donations / external links — hide.
         #expect(promo["koflink"] == true)
         #expect(promo["qr"] == true)
         #expect(promo["bbyy"] == true)
@@ -390,7 +383,6 @@ struct WallpaperEngineProjectPropertiesTests {
         let presentation = WPEProjectSettingsPresentation(schema: schema, overrides: [:])
 
         #expect(!presentation.sections.isEmpty)
-        // With no section pre-expanded, only the section headers render.
         #expect(presentation.rows(expandedSectionIDs: []).allSatisfy { row in
             if case .sectionHeader = row { return true }
             return false

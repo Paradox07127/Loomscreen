@@ -1,18 +1,10 @@
 import Foundation
 import WebKit
 
-/// Test-only `WKScriptMessageHandler` that receives violation events from the
-/// instrumented WKWebView and aggregates them into a per-project report.
-///
-/// Production code keeps the "no `WKScriptMessageHandler` on the HTML
-/// wallpaper path" invariant; this collector is wired only from the audit
-/// suite. It must stay in the test target.
+/// Collects CSP and JavaScript audit events without adding a script-message handler to production wallpaper views.
 @MainActor
 final class CSPViolationCollector: NSObject, WKScriptMessageHandler {
 
-    /// One observation from the page — either a CSP violation, a JS error,
-    /// or a runtime exception. Tagged so the report distinguishes "policy
-    /// violation" from "broken JS that the policy probably caused".
     struct Observation: Sendable {
         enum Kind: String, Sendable {
             case cspViolation
@@ -50,19 +42,11 @@ final class CSPViolationCollector: NSObject, WKScriptMessageHandler {
         observations.append(observation)
     }
 
-    /// `WKUserScript` source. Installed at `documentStart` so the listeners
-    /// are attached before any wallpaper script runs.
-    ///
-    /// The script also monkey-patches storage APIs (localStorage / IndexedDB
-    /// / `document.cookie`) — not to block them (Report-Only mode wouldn't
-    /// honor `script-src` blocks anyway), but to surface "did this corpus
-    /// member actually try to use storage?" alongside the CSP violations.
-    /// The plan's belt-and-suspenders storage stub is conditional on this
-    /// audit reporting ≥99 % storage-free.
+    /// Instruments CSP, JavaScript, and storage activity before page scripts execute.
     static let instrumentationSource: String = """
     (function() {
       const send = (payload) => {
-        try { window.webkit.messageHandlers.\(messageHandlerName).postMessage(payload); } catch (e) { /* swallow */ }
+        try { window.webkit.messageHandlers.\(messageHandlerName).postMessage(payload); } catch (e) {}
       };
 
       document.addEventListener('securitypolicyviolation', (e) => {
@@ -92,8 +76,6 @@ final class CSPViolationCollector: NSObject, WKScriptMessageHandler {
         send({ kind: 'unhandledRejection', message: msg });
       });
 
-      // Storage probes — call once at documentStart to fingerprint the
-      // page's intent. We don't block; we just witness.
       const reportStorage = (api) => send({ kind: 'storageAccess', directive: api, message: api });
       try {
         const origSetItem = Storage.prototype.setItem;

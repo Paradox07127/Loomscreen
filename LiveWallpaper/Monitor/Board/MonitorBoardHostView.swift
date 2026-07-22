@@ -3,21 +3,7 @@ import LiveWallpaperCore
 import SwiftUI
 import os
 
-/// Native host for the Monitor v2 widget board — the AppKit shell that embeds
-/// the SwiftUI board and bridges it to the runtime. `MonitorWallpaperView`
-/// wraps this host as the wallpaper's render layer (the v1 WKWebView dashboard
-/// is retired).
-///
-/// Responsibilities:
-///   • Own an `NSHostingView` of `MonitorBoardRootView`, layer-backed + transparent.
-///   • Data pump: `push(_:)` feeds the observable data model (externally driven —
-///     no self-polling; the runtime pushes at its cadence).
-///   • Live config: `apply(configuration:)` re-lays the board without a rebuild.
-///   • Editing: `setEditing(_:)` toggles edit mode (menu-bar / API drives it).
-///   • Click-through: when `mouseInteractionEnabled` is false the host intercepts
-///     nothing (`hitTest → nil`), mirroring `MonitorWallpaperView`.
-///   • Persistence-ready callback: `onConfigurationEdited` fires (debounced) on
-///     committing edits — drag-end, add, remove, resize — never per mouse-move.
+/// AppKit host that embeds the SwiftUI monitor board and connects it to the runtime.
 @MainActor
 final class MonitorBoardHostView: NSView {
 
@@ -28,31 +14,22 @@ final class MonitorBoardHostView: NSView {
     private let hostingView: NSHostingView<MonitorBoardRootContainer>
 
     /// Mirrors the config's click-through flag; when false the board never
-    /// intercepts events (same semantics as v1's `allowMouseInteraction`).
+    /// intercepts events.
     private var allowMouseInteraction: Bool
 
     /// Board-scoped reduce-motion (system setting + config override), re-derived
     /// on `apply` and re-published whenever the root view is rebuilt.
     private var reduceMotion: Bool
 
-    /// True while the performance policy has the wallpaper suspended. Published
-    /// into the board's environment so the widgets' self-driven animation loops
-    /// and the board clock stop — nothing else does that for them: they run off
-    /// CoreAnimation/TimelineView, not off the data pump.
+    /// True while the performance policy has the wallpaper suspended.
     private(set) var isSuspended = false
 
-    /// When true the board renders name-only placeholder tiles (icon + widget
-    /// name) instead of the live instruments — the inspector preview sets this so
-    /// arranging the board never pumps live data. The wallpaper host leaves it false.
+    /// When true the board renders name-only placeholder tiles (icon + widget name) instead of the live instruments — the inspector preview sets this so arranging the board never pumps live data.
     private let nameOnlyTiles: Bool
 
-    /// Debounce for persistence-ready configs. Committing edits (drag-end, add,
-    /// remove, resize) already fire discretely, but rapid resize/remove bursts
-    /// coalesce into one downstream write.
+    /// Debounce for persistence-ready configs.
     private var pendingPersistTask: Task<Void, Never>?
-    /// The config the debounced task is waiting to persist, retained alongside the
-    /// task so a teardown can flush it synchronously (`flushPendingEdits`) instead
-    /// of losing the user's final edit when the task is cancelled.
+    /// The config the debounced task is waiting to persist, retained alongside the task so a teardown can flush it synchronously (`flushPendingEdits`) instead of losing the user's final edit when the task is cancelled.
     private var pendingPersistConfig: MonitorBoardConfiguration?
     private static let persistDebounce: Duration = .milliseconds(250)
 
@@ -60,9 +37,7 @@ final class MonitorBoardHostView: NSView {
     /// Wave-3 integration wires this to the config store.
     var onConfigurationEdited: ((MonitorBoardConfiguration) -> Void)?
 
-    /// Relays board edit-mode transitions (menu-driven, the board's own Done, or
-    /// Esc) so the wallpaper host can force mouse interaction on while editing and
-    /// restore the persisted click-through state on exit.
+    /// Relays board edit-mode transitions (menu-driven, the board's own Done, or Esc) so the wallpaper host can force mouse interaction on while editing and restore the persisted click-through state on exit.
     var onEditingChanged: ((Bool) -> Void)? {
         get { interactionModel.onEditingChanged }
         set { interactionModel.onEditingChanged = newValue }
@@ -107,12 +82,10 @@ final class MonitorBoardHostView: NSView {
         if #available(macOS 13.0, *) {
             hostingView.sizingOptions = []
         }
-        // Keep the hosting layer transparent so the desktop picture shows behind.
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         addSubview(hostingView)
 
-        // Route committing edits out through the debounced persistence hook.
         interactionModel.onConfigurationEdited = { [weak self] config in
             self?.scheduleConfigPersist(config)
         }
@@ -134,9 +107,7 @@ final class MonitorBoardHostView: NSView {
         dataModel.update(snapshot)
     }
 
-    /// Reset rolling history — call when the data pump restarts for a NEW
-    /// session so stale series don't bleed across sessions (a suspend/resume of
-    /// the same session should NOT reset). Wave-3 integration invokes this.
+    /// Reset rolling history — call when the data pump restarts for a NEW session so stale series don't bleed across sessions (a suspend/resume of the same session should NOT reset).
     func resetHistory() {
         dataModel.resetHistory()
     }
@@ -144,15 +115,8 @@ final class MonitorBoardHostView: NSView {
     // MARK: - Live configuration
 
     /// Apply a new configuration to the live board without rebuilding the view.
-    /// Updates placements, click-through, and reduce-motion in place. A non-nil
-    /// `topInsetFraction` repoints the menu-bar forbidden zone (e.g. the overlay
-    /// moved to a display with a different menu-bar height) BEFORE the model
-    /// reflows, so the reflow honours it; nil keeps the current fraction.
     func apply(configuration: MonitorBoardConfiguration, topInsetFraction: CGFloat? = nil) {
-        // Drop any debounced persist still in flight: it carries an older board
-        // edit that would otherwise fire after — and clobber — this newer
-        // external configuration. (Unlike a teardown flush, here the pending edit
-        // is genuinely superseded, so it is discarded rather than flushed.)
+        // Drop any debounced persist still in flight: it carries an older board edit that would otherwise fire after — and clobber — this newer external configuration.
         pendingPersistTask?.cancel()
         pendingPersistTask = nil
         pendingPersistConfig = nil
@@ -165,10 +129,7 @@ final class MonitorBoardHostView: NSView {
 
     // MARK: - Suspend
 
-    /// Stop/restart the board's self-driven work (the 1 Hz clock, the widgets'
-    /// repeating dot animations) when the performance policy suspends the
-    /// wallpaper. Independent of reduce-motion: that is the user's accessibility
-    /// preference, this is "nobody can see this — stop spending".
+    /// Stop/restart the board's self-driven work (the 1 Hz clock, the widgets' repeating dot animations) when the performance policy suspends the wallpaper.
     func setSuspended(_ suspended: Bool) {
         guard isSuspended != suspended else { return }
         isSuspended = suspended
@@ -185,9 +146,7 @@ final class MonitorBoardHostView: NSView {
         )
     }
 
-    /// Repoint the real-display width the board's point scale derives from
-    /// (inspector preview after a screen switch). Reflows so Apple-size
-    /// footprints re-fit at the new scale.
+    /// Repoint the real-display width the board's point scale derives from (inspector preview after a screen switch).
     func setReferenceWidth(_ width: CGFloat) {
         guard interactionModel.referenceWidth != width else { return }
         interactionModel.referenceWidth = width
@@ -209,7 +168,6 @@ final class MonitorBoardHostView: NSView {
     // MARK: - Click-through
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Fully passive when click-through: intercept nothing, exactly like v1.
         guard allowMouseInteraction else { return nil }
         return super.hitTest(point)
     }
@@ -243,11 +201,7 @@ final class MonitorBoardHostView: NSView {
         }
     }
 
-    /// Synchronously flush any debounced-but-not-yet-persisted edit, firing
-    /// `onConfigurationEdited` immediately, then clear the pending state. Call this
-    /// on EVERY teardown path (resource cleanup / window close / preview detach)
-    /// BEFORE the host is released so the user's final edit is never dropped by the
-    /// pending task being cancelled. Safe to call when nothing is pending (no-op).
+    /// Synchronously flush any debounced-but-not-yet-persisted edit, firing `onConfigurationEdited` immediately, then clear the pending state.
     func flushPendingEdits() {
         pendingPersistTask?.cancel()
         pendingPersistTask = nil
@@ -264,9 +218,7 @@ final class MonitorBoardHostView: NSView {
     }
 }
 
-/// Wraps the board with the reduce-motion + suspend environment. A tiny container
-/// so the host can swap the whole root view (config change, suspend) while
-/// keeping the models — and with them the widgets' `@State`.
+/// Wraps the board with the reduce-motion + suspend environment.
 struct MonitorBoardRootContainer: View {
     @ObservedObject var model: MonitorBoardInteractionModel
     @ObservedObject var data: MonitorBoardDataModel
@@ -283,10 +235,7 @@ struct MonitorBoardRootContainer: View {
 
 // MARK: - Reduce-motion environment
 
-/// Board-scoped reduce-motion flag combining the system setting with the
-/// config's `reduceMotionOverride`. Widget bodies read this to still their
-/// animations. (`accessibilityReduceMotion` is read-only in SwiftUI, so we
-/// carry our own writable key.)
+/// Board-scoped reduce-motion flag combining the system setting with the config's `reduceMotionOverride`.
 private struct MonitorReduceMotionKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -300,12 +249,7 @@ extension EnvironmentValues {
 
 // MARK: - Suspend environment
 
-/// True while the performance policy has the wallpaper suspended (occluded,
-/// full-screen game, battery saver). Deliberately NOT folded into
-/// `monitorReduceMotion`: that one is the user's accessibility preference and is
-/// the wrong lever for an energy decision — conflating them is what made v2's
-/// `suspend()` a no-op. Read by anything that drives itself (the board clock, the
-/// breathing dot) rather than by the data pump.
+/// True while the performance policy has the wallpaper suspended (occluded, full-screen game, battery saver).
 private struct MonitorSuspendedKey: EnvironmentKey {
     static let defaultValue = false
 }

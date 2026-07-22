@@ -92,9 +92,6 @@ struct WPESoundRuntimeTests {
         #expect(runtime.currentSpectrum.count == WPESoundRuntime.binCount)
     }
 
-    // Master mute / volume seeded before start() take effect for the
-    // first frame — exercises the path the inspector relies on when the
-    // user has muted a scene that hasn't finished loading yet.
     @Test("Master mute set before start() seeds the runtime's initial state")
     func masterMuteBeforeStartIsHonored() throws {
         let resolver = WPEMultiRootResourceResolver(
@@ -106,9 +103,6 @@ struct WPESoundRuntimeTests {
         runtime.setMasterVolume(0.25)
         let attached = runtime.start(sounds: [])
         defer { runtime.stop() }
-        // No public observable; this is an ordering smoke test that start()
-        // doesn't crash or reset the cached mute/volume. Behavioural
-        // verification happens at the integration layer via WPEMetalSceneRenderer.
         #expect(attached == 0)
     }
 
@@ -121,8 +115,6 @@ struct WPESoundRuntimeTests {
         let runtime = WPESoundRuntime(resolver: resolver)
         runtime.setMasterVolume(-1.5)
         runtime.setMasterVolume(2.0)
-        // Cached value is consumed at next start; asserts the contract does
-        // not throw on out-of-range input.
     }
 
     @Test("prepare() attaches without playing; play() is a no-op when nothing prepared")
@@ -133,9 +125,6 @@ struct WPESoundRuntimeTests {
         )
         let runtime = WPESoundRuntime(resolver: resolver)
         defer { runtime.stop() }
-        // No resolvable sound files → nothing attaches. prepare must not throw,
-        // and play() returns false (no players) — the empty/guard path the
-        // deferred-audio fix relies on so nothing ever plays prematurely.
         let attached = runtime.prepare(sounds: [])
         #expect(attached == 0)
         #expect(runtime.play() == false)
@@ -148,9 +137,6 @@ struct WPESoundRuntimeTests {
             dependencyMounts: []
         )
         let runtime = WPESoundRuntime(resolver: resolver)
-        // Simulates the deferred-audio path bailing on reload/cleanup: prepared
-        // off-main, but the generation changed so play() never ran. stop() must
-        // release the engine cleanly without a prior play().
         _ = runtime.prepare(sounds: [])
         runtime.stop()
     }

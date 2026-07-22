@@ -4,16 +4,6 @@ import Foundation
 @testable import LiveWallpaper
 import Testing
 
-/// RR-13 characterization coverage for video-resolution policy.
-///
-/// Apple documents `AVPlayerItem.preferredMaximumResolution` as a desired maximum
-/// resolution for downloaded HLS video. Assigning it to a local-file item is legal,
-/// but the round trip below is intentionally not treated as evidence of a local
-/// decoder-size cap.
-///
-/// The source-sized local-composition and WPE buffer assertions are current
-/// characterization/measurement baselines. They are not a permanent policy against
-/// a future downsampling strategy backed by 4K/8K quality and energy measurements.
 @MainActor
 @Suite("Video resolution characterization baselines", .serialized)
 struct VideoResolutionContractCharacterizationTests {

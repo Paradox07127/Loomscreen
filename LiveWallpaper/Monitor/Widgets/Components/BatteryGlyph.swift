@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// A real battery cell filled to level, with a charging-bolt overlay and
-/// low-level tinting. Ported from the mock's `.batt` recipe: sage fill when
-/// healthy, amber→coral when low (<20) and not charging, an amber sweep while
-/// charging. `charging` overrides the low tint. Level is 0…1.
 struct BatteryGlyph: View {
     var level: Double
     var charging: Bool = false

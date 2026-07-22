@@ -1,54 +1,6 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// GPU instrument — a native port of the mock's `gpu_s` / `gpu_m`
-/// (`.claude/plan/monitor-design/index.html` §3 · GPU) laid out for Apple's
-/// fixed macOS widget frames (S 170×170, M 364×170, L 364×376). The hero is the
-/// shared utilisation arc (Device Utilization %); GPU is a low-frequency sample
-/// (2/6/10s, user-set), so freshness is first-class and nil never renders as
-/// 0% — it renders the arc's dashed "no sample" mode plus the mock's
-/// unavailable copy.
-///
-/// Data consumed (all from `MonitorSystemSnapshot`): `gpuUsage` (hero + Device
-/// line), `gpuRendererUtil` / `gpuTilerUtil` (breakdown's live numbers, either
-/// may be nil), `gpuDeviceName` / `gpuCoreCount` (identity), `gpuSampledAt`
-/// (freshness), `sensors.gpuTempC` / `sensors.gpuPowerW` (B-tier row, only when
-/// present), `gpuMemUsedBytes` (M/L identity-row MEM chip — GPU-owned system
-/// memory on Apple Silicon, hidden when nil). History comes from the sparse
-/// `history.gpuDevice` / `gpuRenderer` /
-/// `gpuTiler` on their shared `gpuSampleTimes` timeline plus `history.gpuPeak` —
-/// the breakdown chart's Renderer/Tiler curves are the real per-sample series
-/// (nil-compacted), never synthesized from the current scalar ratio.
-///
-/// L (§3 GPU-L is explicitly "cut" in the mock — no stable public field exists
-/// to fill it: no per-core / top-k GPU process on the public
-/// layer) consumes the exact same M-tier fields, re-composed for the 364×376
-/// frame: ring + stacked Device/Renderer/Tiler sub-metric rows up top, then a
-/// FULL-WIDTH Load chart taking the leftover height (a side-chart would come
-/// out taller than wide at this aspect).
-///
-/// Options (`placement.options`, §3.1 GPU Settings): the read side only — the
-/// popover UI itself is out of scope here.
-///   - `historyWindow` (.number seconds — 30 | 60 | 120, default 60) — the Load
-///     chart's trailing window on M/L, mirrors the settings' 30s/60s/120s
-///     segmented control. Off-catalog values fall back to 60.
-///   - `showLoadBreakdown` (.bool, default true) — the Device/Renderer/Tiler
-///     breakdown, the compute-gap chip and the honest note. Off degrades the
-///     Load chart to a solo Device curve (mock: "Optional 缺失降单线") rather
-///     than hiding the whole card.
-///   - `showSensors` (.bool, default true) — per-card visibility of ALREADY
-///     unlocked B-tier readings; this does NOT perform the Pro/helper unlock
-///     itself (that flow is global, §5.1) — off just hides the row/capsule on
-///     this card even when sensor data is present.
-///   - `showTrend` (.bool, default true) — S's history sparkline; off frees
-///     that height back to the arc (the peak still reads on the arc's marker).
-///   - `gpuSampleSeconds` (.number, 2|6|10, default 6) — the sampler's period,
-///     plumbed centrally; read here only to scale the staleness threshold
-///     (~2× period with the legacy 15s floor) so a 10s cadence can't flap.
-///   - `showRendererFootprint` — deferred/opt-in (`MTLDevice.
-///     currentAllocatedSize` self-diagnostics, shown disabled/"即将推出" in
-///     both settings variants). No backing data field exists yet, so this
-///     widget does not read it.
 struct MonitorGPUWidgetView: View {
     let context: MonitorWidgetContext
 
@@ -58,9 +10,6 @@ struct MonitorGPUWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // The board hands us the final Apple-exact frame. S/M are one board
-            // row tall, L two; cellH = frameH/(2·rowSpan) → S/M 85, L 94, so all
-            // sizes share ~one type scale and L buys layout room, not bigger text.
             let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
             GPUWidgetBody(context: context, cellHeight: geo.size.height / (2 * rowSpan))
         }
@@ -68,17 +17,11 @@ struct MonitorGPUWidgetView: View {
 
     // MARK: - Pure logic (tested)
 
-    /// Snaps a `historyWindow` option to the settings' supported {30, 60, 120}s
-    /// catalog, defaulting to 60s (the mock's segmented-control default) for
-    /// anything absent or off-catalog — a corrupt/future value can't produce a
-    /// nonsensical window.
     nonisolated static func resolvedHistoryWindowSeconds(_ raw: Double?) -> Double {
         guard let raw, [30.0, 60.0, 120.0].contains(raw) else { return 60 }
         return raw
     }
 
-    /// Load state dot: crit >0.85, warm >0.60, else none (transparent). Mirrors
-    /// the mock's `gpuStateDot` thresholds (shared with CPU).
     nonisolated static func stateDotColor(_ pct: Double) -> Color {
         if pct > 0.85 { return MonitorDesign.signalCoral }
         if pct > 0.60 { return MonitorDesign.signalAmber }
@@ -112,9 +55,7 @@ struct MonitorGPUWidgetView: View {
         return age > 15
     }
 
-    /// Period-aware stale threshold: 2× the configured sampling period with the
-    /// legacy 15s floor — the 6s default keeps the pinned 15s behaviour and a
-    /// 10s period gets 20s, so one late sample can't flap the freshness chip.
+    /// Uses twice the sampling period with a 15-second floor to prevent freshness flapping.
     nonisolated static func staleThresholdSeconds(samplePeriod: Double?) -> Double {
         guard let samplePeriod, samplePeriod > 0 else { return 15 }
         return max(15, samplePeriod * 2)
@@ -125,17 +66,13 @@ struct MonitorGPUWidgetView: View {
         return age > staleThresholdSeconds(samplePeriod: samplePeriod)
     }
 
-    /// Temperature word band (mock `tempLabel`): hot ≥58, warm ≥48, else cool.
     nonisolated static func tempLabel(_ celsius: Double) -> String {
         if celsius >= 58 { return "hot" }
         if celsius >= 48 { return "warm" }
         return "cool"
     }
 
-    /// Windows a sparse, aligned `[Double?]` series (one entry per `times`,
-    /// nil where that poll lacked the key) to the last `windowSeconds` and drops
-    /// the nils. Fewer than 2 real points surviving → nil (curve absent) rather
-    /// than a single dot or a fabricated line.
+    /// Windows a sparse, aligned `[Double?]` series (one entry per `times`, nil where that poll lacked the key) to the last `windowSeconds` and drops the nils.
     nonisolated static func compactedSeries(_ series: [Double?], times: [Double],
                                              windowSeconds: Double) -> [Double]? {
         guard series.count == times.count, let last = times.last else { return nil }
@@ -172,9 +109,7 @@ private struct GPUWidgetBody: View {
     }
 
     // MARK: - Header accessory
-    //
-    // S shows only a load state dot (warm >60 / crit >85). M/L show the freshness
-    // chip ("Ns ago" + hollow ring, dimmed when stale) — GPU's low-freq honesty.
+    // S shows only a load state dot (warm >60 / crit >85).
 
     @ViewBuilder
     private var statusAccessory: some View {
@@ -219,7 +154,6 @@ private struct GPUWidgetBody: View {
                               lineWidth: 1.5)
                 .frame(width: 6, height: 6)
                 .opacity(stale ? 0.85 : 0.7)
-            // "sampled" / "ago" are words (localized); the age between them is data.
             (Text("sampled") + Text(verbatim: " ")
              + Text(verbatim: MonitorGPUWidgetView.freshnessText(sampledAt: system?.gpuSampledAt, now: context.now))
                 .foregroundStyle(MonitorDesign.inkMuted)
@@ -231,9 +165,6 @@ private struct GPUWidgetBody: View {
     }
 
     // MARK: - S (170×170 → content ≈ 138×125)
-    //
-    // Budget: temp chip ~16 + trend ~20 + spacings ~10 leave the arc ~79pt with
-    // sensors (~104 without) — the ring is height-bound, never width-bound.
 
     @ViewBuilder
     private var smallBody: some View {
@@ -253,9 +184,6 @@ private struct GPUWidgetBody: View {
                     temperatureCapsule(t)
                 }
 
-                // Peak reads in the trend's top-right corner (a chip), not its own
-                // row. `showTrend` off drops the whole block and the flexible arc
-                // above recentres into the freed height.
                 if showTrend {
                     Sparkline(values: history30, domain: 0...1, bandColored: true)
                         .frame(height: max(cellHeight * 0.24, 20))
@@ -268,8 +196,6 @@ private struct GPUWidgetBody: View {
         }
     }
 
-    /// nil GPU → the honest unavailable state (mock `gpu_s_unavailable`): a dashed
-    /// hollow arc, an em-dash where the hero% sits, a "GPU" label, and a caption.
     private var unavailableBody: some View {
         VStack(spacing: scale.label * 0.6) {
             ArcGauge(value: nil, lineWidth: 9) {
@@ -296,11 +222,6 @@ private struct GPUWidgetBody: View {
     }
 
     // MARK: - M (364×170 → content ≈ 332×125)
-    //
-    // Fixed rows (identity ~18 + legend ~15 + sensors ~15 + spacings ~14) leave
-    // the ring/chart row ~63pt, so: the compute chip lives ON the legend row
-    // (not its own line above the chart), and the honest gap note only appears
-    // when the sensor row is absent — both can't fit a 125pt box.
 
     @ViewBuilder
     private var mediumBody: some View {
@@ -311,8 +232,6 @@ private struct GPUWidgetBody: View {
                 if hasIdentity || memUsedBytes != nil { identityRow }
 
                 HStack(alignment: .center, spacing: scale.label) {
-                    // Arc hugs the left edge; its side follows the row height
-                    // (min(width, rowH)) so the load chart takes the freed width.
                     ArcGauge(value: gpuUsage ?? 0, peak: peakFraction, lineWidth: 9) {
                         arcCenter(scale: 0.8)
                     }
@@ -336,11 +255,6 @@ private struct GPUWidgetBody: View {
     }
 
     // MARK: - L (364×376 → content ≈ 332×331)
-    //
-    // Same fields as M (see the type doc's "cut" note) re-composed for the tall
-    // frame: identity, then ring + stacked sub-metric rows (values right-aligned,
-    // single-line), then a full-width Load chart flexing into the leftover
-    // ~150pt, the honest note, and the sensor strip.
 
     @ViewBuilder
     private var largeBody: some View {
@@ -395,9 +309,6 @@ private struct GPUWidgetBody: View {
         (system?.gpuDeviceName?.isEmpty == false) || system?.gpuCoreCount != nil
     }
 
-    /// "<gpuDeviceName> · N-core GPU" — mirrors the mock's whispered identity
-    /// line — with the MEM chip (GPU-owned system memory, when known) whispered
-    /// on its trailing edge; utilization stays the hero.
     private var identityRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             if let name = system?.gpuDeviceName, !name.isEmpty {
@@ -408,7 +319,6 @@ private struct GPUWidgetBody: View {
                     .truncationMode(.tail)
             }
             if let cores = system?.gpuCoreCount {
-                // "N-core GPU" reads as language; the count is data (a placeholder).
                 Text(verbatim: String(localized: "· \(cores)-core GPU",
                                       comment: "GPU widget identity: GPU core count; %lld is the number of cores."))
                     .font(MonitorDesign.labelFont(size: scale.label))
@@ -437,9 +347,7 @@ private struct GPUWidgetBody: View {
         .lineLimit(1)
     }
 
-    /// The Load breakdown chart with the board's peak tag pinned in its top-right
-    /// corner. `Renderer`/`Tiler` drop out entirely (a solo Device curve) when
-    /// `showLoadBreakdown` is off.
+    /// The Load breakdown chart with the board's peak tag pinned in its top-right corner.
     private func loadChart(minHeight: CGFloat, peakScale: CGFloat) -> some View {
         GPUBreakdownChart(
             device: historyWindowed,
@@ -454,9 +362,6 @@ private struct GPUWidgetBody: View {
         }
     }
 
-    /// The compute-gap chip — reads Device − Renderer as an ≈ compute estimate.
-    /// Only shown when both Device and Renderer are known (the gap is undefined
-    /// otherwise — the mock only renders it in the full-data path).
     @ViewBuilder
     private var computeChip: some View {
         if let compute = MonitorGPUWidgetView.computePercent(device: gpuUsage,
@@ -483,9 +388,6 @@ private struct GPUWidgetBody: View {
         }
     }
 
-    /// M's one-line legend: Device / Renderer / Tiler swatches + live values with
-    /// the compute chip on the same row's trailing edge. A nil util omits that
-    /// line and the row compacts (mock: "Optional 缺失降单线").
     private var legendRow: some View {
         HStack(spacing: scale.label * 1.1) {
             legendItem(name: "Device", value: gpuUsage,
@@ -540,7 +442,6 @@ private struct GPUWidgetBody: View {
         .minimumScaleFactor(0.7)
     }
 
-    /// The honest gap annotation (mock's `.cap` line under the legend).
     private var computeGapNote: some View {
         Text("Device − Renderer gap ≈ compute (Metal / GPU ML) load")
             .font(MonitorDesign.captionFont(size: scale.caption))
@@ -549,10 +450,6 @@ private struct GPUWidgetBody: View {
             .minimumScaleFactor(0.8)
     }
 
-    /// B-tier sensor strip (M and L) — temp (cool→warm dot) + power (steel dot).
-    /// The frozen contract carries no GPU frequency, so unlike the mock this row
-    /// shows temp + power only. Absent when `showSensors` is off or neither
-    /// sensor is present.
     private var sensorRow: (some View)? {
         guard showSensorsPreference else { return Optional<AnyView>.none }
         let t = tempC
@@ -657,8 +554,6 @@ private struct GPUWidgetBody: View {
                 .font(MonitorDesign.subFont(size: scale.caption))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkPrimary)
-            // Temperature band word (cool/warm/hot), localized then uppercased for
-            // display (the case transform is a no-op for non-Latin scripts).
             Text(LocalizedStringKey(MonitorGPUWidgetView.tempLabel(t)))
                 .font(MonitorDesign.labelFont(size: scale.label * 0.94))
                 .tracking(scale.label * 0.12)
@@ -681,10 +576,6 @@ private struct GPUWidgetBody: View {
 
     private var peakPercent: Int { Int((max(context.history.gpuPeak, gpuUsage ?? 0) * 100).rounded()) }
 
-    /// Last ~30s of GPU device samples. GPU is sparse (~6s), so 30s ≈ the last 5
-    /// real samples on the GPU timeline; slice by `gpuSampleTimes`. Fixed at 30s
-    /// (the mock's S trend is not `historyWindow`-configurable — that setting
-    /// only governs the M/L Load chart).
     private var history30: [Double] { gpuHistory(windowSeconds: 30) }
     /// The M/L Load chart's device curve, windowed by `historyWindowSeconds`.
     private var historyWindowed: [Double] { gpuHistory(windowSeconds: historyWindowSeconds) }
@@ -699,11 +590,7 @@ private struct GPUWidgetBody: View {
         return sliced.isEmpty ? [device[device.count - 1]] : sliced
     }
 
-    /// Real Renderer/Tiler samples over the Load window, aligned with
-    /// `gpuSampleTimes` (nil where that poll lacked the key). Fewer than 2 real
-    /// points in the window → the curve is absent rather than drawn from
-    /// synthesized data; the legend still carries the exact live numbers
-    /// regardless.
+    /// Real Renderer/Tiler samples over the Load window, aligned with `gpuSampleTimes` (nil where that poll lacked the key).
     private var rendererHistory: [Double]? {
         MonitorGPUWidgetView.compactedSeries(context.history.gpuRenderer,
                                              times: context.history.gpuSampleTimes,
@@ -716,13 +603,11 @@ private struct GPUWidgetBody: View {
                                              windowSeconds: historyWindowSeconds)
     }
 
-    /// `nil` (dropping the compute-gap band + line) once `showLoadBreakdown` is
-    /// off, even when real Renderer/Tiler samples exist — the setting hides the
-    /// breakdown, not just the legend text.
+    /// `nil` (dropping the compute-gap band + line) once `showLoadBreakdown` is off, even when real Renderer/Tiler samples exist — the setting hides the breakdown, not just the legend text.
     private var effectiveRendererHistory: [Double]? { showLoadBreakdown ? rendererHistory : nil }
     private var effectiveTilerHistory: [Double]? { showLoadBreakdown ? tilerHistory : nil }
 
-    // MARK: - Settings read side (placement.options, §3.1 GPU Settings)
+    // MARK: - Settings
 
     private var historyWindowSeconds: Double {
         MonitorGPUWidgetView.resolvedHistoryWindowSeconds(context.placement.options["historyWindow"]?.numberValue)
@@ -740,20 +625,13 @@ private struct GPUWidgetBody: View {
         context.placement.options["showTrend"]?.boolValue ?? true
     }
 
-    /// The sampler's configured period (2/6/10s picker); nil = the 6s default
-    /// (the settings side drops the key at default). Only feeds the staleness
-    /// threshold — the sampling itself is plumbed centrally.
+    /// The sampler's configured period (2/6/10s picker); nil = the 6s default (the settings side drops the key at default).
     private var gpuSamplePeriodSeconds: Double? {
         context.placement.options["gpuSampleSeconds"]?.numberValue
     }
 }
 
 // MARK: - Breakdown chart
-//
-// Device (ink, filled envelope) over Renderer (steel) over Tiler (violet dashed),
-// with the Device→Renderer band faintly violet-tinted as the visible "compute"
-// region. Ports the mock's `gpuBreakdownChart`. Renderer/Tiler are optional: a
-// nil series drops that line (and the compute band if Renderer is gone).
 private struct GPUBreakdownChart: View {
     var device: [Double]
     var renderer: [Double]?
@@ -774,14 +652,12 @@ private struct GPUBreakdownChart: View {
                         .stroke(MonitorDesign.hairlineHi.opacity(0.26), lineWidth: 1)
                     }
 
-                    // Device area envelope (ink-tinted, down to baseline).
                     areaPath(device, w: w, h: h)
                         .fill(LinearGradient(
                             colors: [MonitorDesign.inkPrimary.opacity(0.16),
                                      MonitorDesign.inkPrimary.opacity(0.01)],
                             startPoint: .top, endPoint: .bottom))
 
-                    // Compute-gap band: between Device and Renderer.
                     if let renderer, renderer.count == device.count {
                         gapBand(device: device, renderer: renderer, w: w, h: h)
                             .fill(LinearGradient(
@@ -852,8 +728,6 @@ private struct GPUBreakdownChart: View {
     }
 }
 
-/// A tiny legend swatch — a solid or dashed top-border rule, matching the mock's
-/// `.glegend .sw`.
 private struct SwatchLine: View {
     var color: Color
     var dashed: Bool
@@ -871,9 +745,6 @@ private struct SwatchLine: View {
 }
 
 // MARK: - GPU-specific palette
-//
-// Extra tokens the shared MonitorDesign doesn't expose, ported 1:1 from the
-// mock's GPU section (`oklch(...)` literals in index.html).
 private extension MonitorDesign {
     /// `.naval` — the em-dash "no reading" numeral colour.
     static let naval = oklch(0.5, 0.012, 76)
@@ -924,8 +795,6 @@ private func gpuPreviewContext(
         history.gpuDevice = curve
         history.gpuSampleTimes = curve.indices.map { now.timeIntervalSince1970 - Double(curve.count - 1 - $0) * 6 }
         history.gpuPeak = 0.82
-        // Real per-sample Renderer/Tiler, mirroring the ~0.79/0.65 device ratio;
-        // one dropped poll (nil) to exercise the honest gap-compaction path.
         history.gpuRenderer = curve.enumerated().map { i, v in i == 3 ? nil : min(1, v * 0.79) }
         history.gpuTiler = curve.enumerated().map { i, v in i == 3 ? nil : min(1, v * 0.65) }
     }
@@ -951,7 +820,6 @@ private func gpuPreviewContext(
             .frame(width: 170, height: 170)
         MonitorGPUWidgetView(context: gpuPreviewContext(size: .small, gpuUsage: 0.52, withSensors: true))
             .frame(width: 170, height: 170)
-        // showTrend = false → sparkline gone, arc recentres in the freed height.
         MonitorGPUWidgetView(context: gpuPreviewContext(
             size: .small, gpuUsage: 0.52, withSensors: true,
             options: ["showTrend": .bool(false)]))
@@ -978,12 +846,10 @@ private func gpuPreviewContext(
             .frame(width: 364, height: 170)
         MonitorGPUWidgetView(context: gpuPreviewContext(size: .medium, gpuUsage: nil))
             .frame(width: 364, height: 170)
-        // showLoadBreakdown = false → solo Device curve, no legend/gap chip/note.
         MonitorGPUWidgetView(context: gpuPreviewContext(
             size: .medium, gpuUsage: 0.52,
             options: ["showLoadBreakdown": .bool(false)]))
             .frame(width: 364, height: 170)
-        // showSensors = false with real sensor data present → row stays hidden.
         MonitorGPUWidgetView(context: gpuPreviewContext(
             size: .medium, gpuUsage: 0.52, withSensors: true,
             options: ["showSensors": .bool(false)]))
@@ -999,7 +865,6 @@ private func gpuPreviewContext(
             .frame(width: 364, height: 376)
         MonitorGPUWidgetView(context: gpuPreviewContext(size: .large, gpuUsage: 0.52, withSensors: true))
             .frame(width: 364, height: 376)
-        // historyWindow = 120s → the settings' longest window on the taller chart.
         MonitorGPUWidgetView(context: gpuPreviewContext(
             size: .large, gpuUsage: 0.68, withSensors: true,
             options: ["historyWindow": .number(120)]))

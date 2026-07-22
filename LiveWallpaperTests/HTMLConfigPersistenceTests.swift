@@ -20,9 +20,6 @@ struct HTMLConfigPersistenceTests {
 
     @Test("Legacy config without cspEnforcementEnabled / aggressiveSuspend defaults to off")
     func legacyConfigDefaultsOff() throws {
-        // A persisted snapshot from an install that predates these fields.
-        // Decoding must keep working and pin both knobs to false so existing
-        // wallpapers retain their current behavior.
         let legacy = #"""
         {
             "allowJavaScript": true,
@@ -44,7 +41,6 @@ struct HTMLConfigPersistenceTests {
         let decoded = try JSONDecoder().decode(HTMLConfig.self, from: legacy)
         #expect(decoded.cspEnforcementEnabled == false)
         #expect(decoded.aggressiveSuspend == false)
-        // Pre-existing fields stay intact through the new decoder path.
         #expect(decoded.allowJavaScript == true)
         #expect(decoded.blockTrackers == true)
         #expect(decoded.maxRetries == 3)

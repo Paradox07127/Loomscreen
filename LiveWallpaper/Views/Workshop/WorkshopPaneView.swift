@@ -2,9 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Unified Workshop pane: one sidebar entry, two tabs. "Installed" embeds the
-/// local-library gallery (its own header suppressed — this pane owns the
-/// chrome); "Browse Online" embeds the online catalog.
+/// Unified Workshop pane: one sidebar entry, two tabs.
 struct WorkshopPaneView: View {
     @Environment(WorkshopServices.self) private var services
     @Environment(SteamCMDDoctorService.self) private var doctor
@@ -19,14 +17,9 @@ struct WorkshopPaneView: View {
     @State private var installedCount = 0
 
     var body: some View {
-        // No scaffold header: each tab hosts the shared `WorkshopPaneHeader`
-        // inside its split's main column so the detail panel runs full-height
-        // alongside the header. Scaffold still supplies background + min size.
         DetailPageScaffold(showsHeader: false, header: { EmptyView() }) {
             tabBody
         }
-        // Switcher lives in the toolbar's principal slot so it stays fixed
-        // while the detail panel opens/closes (the in-column header compresses).
         .toolbar {
             ToolbarItem(placement: .principal) {
                 tabSwitcher
@@ -36,10 +29,7 @@ struct WorkshopPaneView: View {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)
         }
-        // Re-confirm SteamCMD readiness (so the Download button isn't greyed out
-        // just because this launch hasn't re-run the probes), then reconcile the
-        // library with what's on disk. Readiness must run first: it binds the
-        // workdir the SteamCMD scan needs.
+        // Re-confirm SteamCMD readiness (so the Download button isn't greyed out just because this launch hasn't re-run the probes), then reconcile the library with what's on disk.
         .task {
             await doctor.autoConfirmDownloadReadinessIfNeeded()
             await folderImport.ingestExistingDownloads(using: doctor)
@@ -51,8 +41,6 @@ struct WorkshopPaneView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             refreshInstalledCount()
         }
-        // Fires when the pane is already mounted and a deep link arrives. On a
-        // cold switch the `.onAppear` above handles it instead.
         .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
             consumePendingDeepLink()
         }
@@ -122,8 +110,6 @@ struct WorkshopPaneView: View {
                 paneHeader: makePaneHeader
             )
         } else {
-            // Lazily build the view-model on first Browse activation so the
-            // Installed tab pays no online-browse cost.
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear { browseViewModel = WorkshopBrowseViewModel(services: services) }
@@ -144,9 +130,7 @@ struct WorkshopPaneView: View {
         Task { await viewModel.browseTag(tag) }
     }
 
-    /// Consumes a one-shot deep link: switch to Browse Online and search for the
-    /// target. Steam's catalog can't match a raw numeric Workshop ID, so the
-    /// caller seeds the item's title as the query — that's what surfaces it.
+    /// Consumes a one-shot deep link: switch to Browse Online and search for the target.
     private func consumePendingDeepLink() {
         guard let query = WorkshopDeepLink.takePendingSearch() else { return }
         let viewModel: WorkshopBrowseViewModel
@@ -188,10 +172,7 @@ enum WorkshopPaneTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// One-shot hand-off for "open Workshop scoped to this item" deep links. The
-/// scene detail card can't reach the (possibly not-yet-mounted) Workshop pane
-/// directly, so it parks a query here and posts `.openWorkshopPane`; the pane
-/// drains it on appear / receipt. MainActor-isolated navigation baton.
+/// One-shot hand-off for "open Workshop scoped to this item" deep links.
 @MainActor
 enum WorkshopDeepLink {
     private static var pendingSearch: String?

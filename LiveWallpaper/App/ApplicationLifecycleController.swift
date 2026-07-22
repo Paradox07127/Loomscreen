@@ -1,10 +1,6 @@
 import Foundation
 
-/// One-way application lifecycle gate plus ownership of work intentionally
-/// deferred past launch. Keeping delayed tasks in one registry makes quit
-/// synchronous from the producer side: cancellation happens before render and
-/// persistence teardown, and every queued UI/notification entry rechecks the
-/// same state after its suspension.
+/// One-way application lifecycle gate plus ownership of work intentionally deferred past launch.
 @MainActor
 final class ApplicationLifecycleController {
     enum State: Equatable {

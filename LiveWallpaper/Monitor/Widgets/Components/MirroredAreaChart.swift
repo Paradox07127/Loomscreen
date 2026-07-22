@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// Two series mirrored above/below a centre baseline on a shared scale — the
-/// network rx/tx and disk r/w idiom. Ported from the mock's `mirrorSpark`:
-/// the primary grows upward from the middle, the secondary downward, both scaled
-/// by the combined max so the two sides are directly comparable, with a now-dot
-/// at each head. Nil-safe for empty/short series.
 struct MirroredAreaChart: View {
     var up: [Double]
     var down: [Double]
@@ -67,8 +62,6 @@ struct MirroredAreaChart: View {
     private func area(_ pts: [CGPoint], mid: CGFloat) -> Path {
         var p = Path()
         guard let first = pts.first, let last = pts.last else { return p }
-        // Explicit lines, not `addLines` (whose implicit `move` would drop the
-        // mid-baseline start and fill a chord instead of the area to the axis).
         p.move(to: CGPoint(x: first.x, y: mid))
         for point in pts { p.addLine(to: point) }
         p.addLine(to: CGPoint(x: last.x, y: mid))

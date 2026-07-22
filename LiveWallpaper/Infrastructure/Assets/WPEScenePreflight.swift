@@ -29,7 +29,7 @@ enum WPEScenePreflight {
 
         for diagnostic in document.diagnostics {
             let lowered = diagnostic.message.lowercased()
-            if lowered.contains("particle") && lowered.contains("unsupported") {
+            if lowered.contains("particle object") {
                 flags.insert(.particleObject)
             } else if lowered.contains("text") && lowered.contains("unsupported") {
                 flags.insert(.textObject)
@@ -81,5 +81,4 @@ struct WPEScenePreflightResult: Equatable, Sendable {
     let featureFlags: Set<WPESceneFeatureFlag>
 }
 
-// WPEScenePreflightTier was moved to LiveWallpaperCore/Schema/WPEScenePreflightTier.swift.
 #endif

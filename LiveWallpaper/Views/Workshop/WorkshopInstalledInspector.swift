@@ -7,10 +7,7 @@ import SwiftUI
 /// Trailing detail inspector for an installed item. Apply happens here
 /// (per-display via the mini-map, or "All"); drag-onto-display is the quick path.
 struct WPEInstalledInspectorContent: View {
-    /// Derived boolean state for the item (bookmark + update availability),
-    /// grouped so the caller sets a labelled bundle rather than four loose
-    /// same-typed flags. (Named `ItemState`, not `State`, so it doesn't shadow
-    /// SwiftUI's `@State` property wrapper inside this view.)
+    /// Derived boolean state for the item (bookmark + update availability), grouped so the caller sets a labelled bundle rather than four loose same-typed flags.
     struct ItemState {
         let isBookmarked: Bool
         let canBookmark: Bool

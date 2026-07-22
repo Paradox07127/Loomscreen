@@ -1,23 +1,11 @@
 import SwiftUI
 import LiveWallpaperCore
 
-// MARK: - Monitor v2 board root view
-//
-// The SwiftUI board that IS the wallpaper's content layer. Transparent
-// background (the desktop picture shows behind); non-edit mode is completely
-// passive — no hover chrome, no gestures. Edit mode adds per-widget hover
-// controls, the magnetic ghost frame ("背影方框"), alignment guides, and an
-// add-widget catalog. Visuals are restrained plain SwiftUI shapes; a later wave
-// restyles with the shared component library.
+// MARK: - Monitor board root view
 
 // MARK: - Board clock
 
-/// The board's single clock: 1 Hz normally, STOPPED while the wallpaper is
-/// suspended. `.periodic` has no off switch — it keeps scheduling vsync work for
-/// a board nobody is looking at — so suspending ends the schedule after one
-/// entry instead. That one entry still fires, giving the final frame an accurate
-/// `now` rather than a frozen-at-suspend clock; TimelineView then requests
-/// nothing further until `suspended` flips back and a fresh schedule is built.
+/// The board's single clock: 1 Hz normally, STOPPED while the wallpaper is suspended.
 struct MonitorBoardClock: TimelineSchedule {
     let suspended: Bool
 
@@ -46,9 +34,7 @@ struct MonitorBoardRootView: View {
     /// catalog anchors beneath it. `.zero` until the toolbar first lays out.
     @State private var addButtonFrame: CGRect = .zero
 
-    /// When true, every tile renders as a name-only placeholder (icon + widget
-    /// name) instead of the live instrument. The inspector preview sets this so
-    /// arranging the board never pumps live data; the wallpaper leaves it false.
+    /// When true, every tile renders as a name-only placeholder (icon + widget name) instead of the live instrument.
     private let nameOnlyTiles: Bool
 
     init(model: MonitorBoardInteractionModel, data: MonitorBoardDataModel, nameOnlyTiles: Bool = false) {
@@ -59,11 +45,7 @@ struct MonitorBoardRootView: View {
     }
 
     var body: some View {
-        // ONE board-level 1 Hz clock drives `now` for every tile (time-based
-        // widgets read it via `context.now`); there is no per-tile or per-widget
-        // Timer, so a full board refreshes on a single tick instead of a dozen
-        // independent ones. The tick only changes `now` — view identity is stable,
-        // so charts don't re-animate. While suspended the clock stops entirely.
+        // A single board clock avoids independent timers for each widget.
         TimelineView(MonitorBoardClock(suspended: suspended)) { timeline in
             boardContent(now: timeline.date)
         }
@@ -91,21 +73,15 @@ struct MonitorBoardRootView: View {
             )
 
             ZStack(alignment: .topLeading) {
-                // Transparent hit surface: taps on empty space deselect / exit
-                // catalog in edit mode. Non-edit mode: nothing here reacts.
                 Color.clear
                     .contentShape(Rectangle())
                     .modifier(EmptyTapModifier(model: model))
 
                 if !geometry.isDegenerate {
-                    // Empty-board whisper (SPEC §3.3): a quiet centered hint that
-                    // teaches how to start, never a nag. Fades out once a tile lands.
                     if model.placements.isEmpty {
                         emptyBoardHint(boardSize: boardSize)
                     }
 
-                    // Alignment guides + ghost frame sit under the dragged tile
-                    // but over the resting tiles.
                     if model.isEditing, let drag = model.drag {
                         guideLayer(drag: drag, geometry: geometry)
                         ghostFrame(drag: drag, geometry: geometry)
@@ -164,9 +140,6 @@ struct MonitorBoardRootView: View {
         let liveRawRect = isDragging ? draggedRawRect(placement, geometry: geometry) : restRawRect
         let liveRenderRect = geometry.renderRect(forRawRect: liveRawRect)
 
-        // `now` is supplied by the single board-level TimelineView; time-based
-        // widgets read it via `context.now`, non-time widgets ignore it. No inner
-        // per-tile Timer.
         tileBody(placement: placement, cornerRadius: geometry.cornerRadius, renderHeight: liveRenderRect.height, now: now)
             .frame(width: liveRenderRect.width, height: liveRenderRect.height)
             .modifier(SelectionChrome(
@@ -205,9 +178,7 @@ struct MonitorBoardRootView: View {
         }
     }
 
-    /// The tile's inner content: the live instrument, or — in name-only preview
-    /// mode — an icon+name placeholder. All the placement chrome (frame, selection,
-    /// drag) is applied by the caller uniformly regardless of which body this is.
+    /// The tile's inner content: the live instrument, or — in name-only preview mode — an icon+name placeholder.
     @ViewBuilder
     private func tileBody(
         placement: MonitorWidgetPlacement,
@@ -238,9 +209,7 @@ struct MonitorBoardRootView: View {
             normalized: CGPoint(x: placement.x, y: placement.y), boardSize: geometry.boardSize
         )
         let footprint = geometry.pixelSize(for: placement.kind, size: placement.size)
-        // Render-side safety clamp: persisted coords normalized against another
-        // aspect's reference grid can overflow until `reflow` lands; drawing
-        // never leaves the board while the stored values stay untouched.
+        // Render-side safety clamp: persisted coords normalized against another aspect's reference grid can overflow until `reflow` lands; drawing never leaves the board while the stored values stay untouched.
         return CGRect(origin: geometry.clampOrigin(origin, footprint: footprint), size: footprint)
     }
 
@@ -249,7 +218,7 @@ struct MonitorBoardRootView: View {
         return CGRect(origin: drag.freeOrigin, size: drag.footprint)
     }
 
-    // MARK: Ghost frame ("背影方框") + guides
+    // MARK: Ghost frame and guides
 
     @ViewBuilder
     private func ghostFrame(drag: MonitorBoardDragState, geometry: MonitorBoardGeometry) -> some View {
@@ -302,19 +271,11 @@ struct MonitorBoardRootView: View {
 
     @ViewBuilder
     private func editControls(geometry: MonitorBoardGeometry, boardSize: CGSize) -> some View {
-        // Top-centre toolbar (Add Widget + Done): the exit affordance the
-        // menu-entered edit mode needs, plus the entry point to the add catalog
-        // (mock `.topbar`). Placed via a board-sized top-aligned frame + top inset
-        // rather than `.position`, so the Add button's reported frame stays
-        // accurate for anchoring the catalog. The inset clears the menu bar on the
-        // full-screen overlay yet stays light on small preview boards.
         MonitorBoardEditToolbar(model: model)
             .padding(.top, toolbarTopInset(boardHeight: boardSize.height))
             .frame(width: boardSize.width, height: boardSize.height, alignment: .top)
             .zIndex(70)
 
-        // Per-widget control bar (size + settings + remove), floating around the
-        // selected tile and always fully clamped into the board. Hidden mid-drag.
         if let selectedID = model.selectedID,
            let placement = model.placements.first(where: { $0.id == selectedID }),
            model.drag == nil {
@@ -329,8 +290,6 @@ struct MonitorBoardRootView: View {
                 .zIndex(60)
         }
 
-        // Settings card, anchored beside the widget whose gear is open, clamped
-        // into the board. Hidden mid-drag.
         if let settingsID = model.settingsOpenID,
            let placement = model.placements.first(where: { $0.id == settingsID }),
            model.drag == nil {
@@ -340,9 +299,6 @@ struct MonitorBoardRootView: View {
                 .zIndex(80)
         }
 
-        // Add-widget catalog: a KNOWN width directly beneath the Add Widget
-        // button; the grid's height is budgeted so the panel bottom stays inside
-        // the board. Placement is fully deterministic — visible frame 1.
         if model.isCatalogOpen {
             let catalogWidth = min(760, boardSize.width * 0.86)
             let anchor = catalogAnchorFrame(boardSize: boardSize)
@@ -360,25 +316,18 @@ struct MonitorBoardRootView: View {
         }
     }
 
-    /// Control-bar size estimate for its pre-measurement placement: gear + trash
-    /// (~68pt) plus ~30pt per size segment. Only the first frame's centring
-    /// depends on it — the measured size takes over immediately.
+    /// Control-bar size estimate for its pre-measurement placement: gear + trash (~68pt) plus ~30pt per size segment.
     private static func controlBarEstimate(for kind: MonitorWidgetKind) -> CGSize {
         let count = kind.allowedSizes.count
         return CGSize(width: 68 + (count > 1 ? CGFloat(count) * 30 + 16 : 0), height: 36)
     }
 
-    /// Height budget for the catalog's scrolling grid: ≤55% board height and
-    /// never past the board's bottom margin (64pt covers the panel's header +
-    /// padding). Floored so tiny preview boards still get a usable strip.
+    /// Height budget for the catalog's scrolling grid: ≤55% board height and never past the board's bottom margin (64pt covers the panel's header + padding).
     private func catalogScrollCap(anchorMaxY: CGFloat, boardHeight: CGFloat) -> CGFloat {
         max(min(boardHeight * 0.55, boardHeight - anchorMaxY - 16 - 64), 80)
     }
 
-    /// Top inset for the edit toolbar. A full-screen board (the wallpaper overlay
-    /// sits under the menu bar) needs a ≥44pt top edge to clear it; a small
-    /// inspector-preview board uses a light proportional inset so the toolbar
-    /// doesn't eat its limited height. Board height is the proxy for which case.
+    /// Top inset for the edit toolbar.
     private func toolbarTopInset(boardHeight: CGFloat) -> CGFloat {
         boardHeight >= 500 ? min(max(boardHeight * 0.035, 44), 60) : boardHeight * 0.055
     }
@@ -394,9 +343,6 @@ struct MonitorBoardRootView: View {
 
 // MARK: - Empty-space tap
 
-/// Double-click on empty board space toggles edit mode (mock: `dblclick →
-/// toggleEdit`); a single click in edit mode deselects + closes the catalog. The
-/// double-click handler is attached first so it wins the gesture arbitration.
 private struct EmptyTapModifier: ViewModifier {
     @ObservedObject var model: MonitorBoardInteractionModel
 
@@ -449,16 +395,6 @@ private struct SelectionChrome: ViewModifier {
 }
 
 // MARK: - Floating-panel placement
-//
-// All three edit-mode panels (control bar, settings card, catalog) place
-// deterministically: a top-leading `.offset` computed from the anchor plus a
-// KNOWN width (catalog, settings card) or a size estimate (control bar), both
-// axes clamped on-board. Panels are visible from their very first frame —
-// placement never waits on a measure→preference→state round-trip (the previous
-// hidden-until-measured design stayed at opacity 0 forever when that round
-// trip didn't complete). A background size reader refines the estimate once
-// real geometry lands; a missed refinement costs a few points of centring,
-// never visibility.
 
 /// Clamp a left edge so a panel of `width` stays `margin` inside a `span`-wide
 /// board. Panels wider than the board centre (never pushed negative).
@@ -475,9 +411,7 @@ private func clampPanelTop(_ top: CGFloat, height: CGFloat, span: CGFloat, margi
     return min(max(top, margin), maxTop)
 }
 
-/// The control bar: centred above the widget, flipping below when there's no
-/// room, then tucking just inside the widget's top edge as a last resort. Both
-/// axes are clamped so the whole bar stays on-board.
+/// The control bar: centred above the widget, flipping below when there's no room, then tucking just inside the widget's top edge as a last resort.
 private struct ControlBarPlacement: ViewModifier {
     let anchorRect: CGRect
     let boardSize: CGSize
@@ -500,9 +434,7 @@ private struct ControlBarPlacement: ViewModifier {
     }
 }
 
-/// The settings card: preferred to the right of the widget, flipping left when
-/// it would overflow, top-aligned with the widget. Width is the card's known
-/// constant; the measured height refines the bottom clamp.
+/// The settings card: preferred to the right of the widget, flipping left when it would overflow, top-aligned with the widget.
 private struct SettingsCardPlacement: ViewModifier {
     let anchorRect: CGRect
     let boardSize: CGSize
@@ -526,8 +458,6 @@ private struct SettingsCardPlacement: ViewModifier {
 }
 
 /// The catalog: ~8pt beneath the Add Widget button, horizontally centred on it.
-/// Width and height budget come from the caller, so placement is fully
-/// deterministic; the measured height only refines the bottom clamp.
 private struct CatalogBelowPlacement: ViewModifier {
     let anchorFrame: CGRect
     let boardSize: CGSize

@@ -25,11 +25,7 @@ extension ScreenManager {
 
         }
 
-        // A recycled/repurposed CGDirectDisplayID (same ID, different physical
-        // panel) reports a new displayFingerprint. That is an identity change:
-        // adopting the prior panel's session by ID alone would inherit the wrong
-        // wallpaper and bypass the fingerprint-aware config lookup, so treat it
-        // like a fresh display — release the stale session and reload below.
+        // A recycled/repurposed CGDirectDisplayID (same ID, different physical panel) reports a new displayFingerprint.
         let identityChangedIDs = Set(newScreens.compactMap { newScreen -> CGDirectDisplayID? in
             guard let oldFingerprint = oldFingerprintsByID[newScreen.id],
                   oldFingerprint != newScreen.displayFingerprint else { return nil }
@@ -74,10 +70,6 @@ extension ScreenManager {
         updatePlaybackState()
         updateFullScreenFallbackPolling()
 
-        // Enforce a persisted "off" master gate. With the build gate in
-        // `restoreWallpaperSession`, disabled screens never build a session
-        // above; this is the safety net that also tears down any session
-        // adopted/preserved across a screen refresh so nothing stays resident.
         if !wallpapersGloballyEnabled {
             applyGlobalRenderGate()
         }
@@ -92,12 +84,7 @@ extension ScreenManager {
         notifyWallpaperSessionChanged()
     }
 
-    /// Clear only one wallpaper type for this screen — drops that type's saved
-    /// state (saved video bookmark, saved HTML source, etc.). If the
-    /// currently-active wallpaper is the type being cleared, falls back to
-    /// the next saved type (video → html) so the screen doesn't blank out
-    /// while the user still has a usable picks from another tab; only when
-    /// no fallback exists does this collapse to a full `clearWallpaperForScreen`.
+    /// Clear only one wallpaper type for this screen — drops that type's saved state (saved video bookmark, saved HTML source, etc.).
     func clearWallpaperOfType(_ type: WallpaperType, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
@@ -162,27 +149,16 @@ extension ScreenManager {
         refreshAppNapAssertion()
     }
 
-    /// App-termination teardown: synchronously tears down every render session
-    /// (each `cleanup()` pauses its AVPlayer, releases its WKWebView / Metal
-    /// renderer, and closes its window) and stops lifecycle observers. Bounded — just
-    /// a loop of in-process releases, no I/O — so it stays inside the terminate
-    /// watchdog. Unlike `resetAllWallpaperSessions()` it skips config-cache
-    /// clearing and async UI notifications, which are pointless mid-exit.
+    /// App-termination teardown: synchronously tears down every render session (each `cleanup()` pauses its AVPlayer, releases its WKWebView / Metal renderer, and closes its window) and stops lifecycle observers.
     func tearDownForTermination() {
         guard !isTerminating else { return }
 
-        // The board debounces drag/resize edits. Flush that last user change
-        // while persistence is still admitted; this method is MainActor and
-        // does not suspend, so no other producer can enter before the latch is
-        // closed immediately below.
+        // The board debounces drag/resize edits.
         MonitorOverlayController.shared.teardownAll()
         isTerminating = true
         memoryPressureWatcher.stop()
 
-        // Close every producer of future ScreenManager work before releasing
-        // the current sessions. This invalidates queued Combine/Observation
-        // callbacks and the 60-second automation loop; in-flight video
-        // validations are invalidated below by each screen's transition bump.
+        // Close every producer of future ScreenManager work before releasing the current sessions.
         cleanupTasks.removeAll()
         fullScreenTrackingGeneration &+= 1
         fullScreenDetector.setFallbackPollingEnabled(false)
@@ -198,9 +174,6 @@ extension ScreenManager {
             lockScreenSnapshotCoordinator.stop()
         }
 
-        // The HUD owns a MonitorRuntime lease independently of wallpaper
-        // sessions. The terminating latch also makes any overlay reconcile task
-        // already queued for the next runloop a no-op.
         MonitorHUDController.shared.shutdown()
 
         for screen in screens {
@@ -254,18 +227,8 @@ extension ScreenManager {
         preservingState: Bool
     ) {
         guard !isTerminating else { return }
-        // Master gate: when wallpapers are globally disabled we keep the
-        // configuration persisted but do NOT build a live session. This avoids
-        // allocating the renderer / scene runtime / decoded assets only to
-        // suspend them — the session is (re)built by `applyGlobalRenderGate()`
-        // when the master switch is turned back on.
         guard wallpapersGloballyEnabled else {
             if screen.runtimeSession != nil { releaseRuntimeSession(screen) }
-            // No live session is built, but the caller has just persisted this
-            // configuration. Refresh the derived session state so a wallpaper
-            // assigned while the gate is off is reflected as configured-but-
-            // `.off` (keeping the master switch enabled) — mirrors the video
-            // path's refresh in `PlaybackCoordinator.setupVideoPlayback`.
             notifyWallpaperSessionChanged()
             return
         }
@@ -439,12 +402,7 @@ extension ScreenManager {
         Logger.info("Reset playback defaults for screen \(screen.id)", category: .screenManager)
     }
 
-    /// Restores per-display playback / effect / audio / layout settings to
-    /// their defaults while preserving the wallpaper content itself: video
-    /// bookmarks, HTML source, scene/WPE source, playlist bookmarks, and
-    /// WPE origin metadata are left intact. The HTML config that travels
-    /// with `activeWallpaper` and `savedHTMLConfig` is reset to defaults
-    /// since it represents settings, not source content.
+    /// Resets per-display controls while preserving wallpaper content and source metadata.
     func resetDisplaySettings(for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 

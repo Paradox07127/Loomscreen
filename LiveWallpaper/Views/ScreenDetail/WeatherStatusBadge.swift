@@ -6,10 +6,7 @@ struct WeatherStatusBadge: View {
     var weatherService: WeatherReactiveService
     var refresh: () -> Void
 
-    /// Accessory apps (LSUIElement) cannot show the system Location permission
-    /// dialog directly; we surface a one-tap shortcut to System Settings instead.
-    /// Also covers `.error` since `didFailWithError` collapses kCLErrorDenied into
-    /// generic `.error` — and Settings is still the right action for those.
+    /// Accessory apps (LSUIElement) cannot show the system Location permission dialog directly; we surface a one-tap shortcut to System Settings instead.
     private var needsLocationSettingsLink: Bool {
         switch weatherService.locationStatus {
         case .notDetermined, .denied, .error: return true

@@ -93,9 +93,7 @@ project_file="LiveWallpaper.xcodeproj/project.pbxproj"
 [[ "$(grep -c 'CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;' "$project_file")" == "2" ]]
 [[ "$(grep -c 'CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaperLite.entitlements;' "$project_file")" == "2" ]]
 
-# SceneScript hard isolation is a Pro-only embedded XPC release contract.
-# The helper receives App Sandbox and no file/network entitlement of its own;
-# Lite remains free of the target through the source-level contract suite.
+# The Pro-only SceneScript helper receives only the App Sandbox entitlement.
 xpc_entitlements="SceneScriptXPCService/SceneScriptXPCService.entitlements"
 grep -q '<key>com.apple.security.app-sandbox</key>' "$xpc_entitlements"
 [[ "$(grep -c '<key>' "$xpc_entitlements")" == "1" ]]
@@ -103,8 +101,7 @@ grep -Fq 'dstPath = "$(CONTENTS_FOLDER_PATH)/XPCServices";' "$project_file"
 grep -q 'SceneScriptXPCService.xpc' "$project_file"
 [[ "$(grep -c 'CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;' "$project_file")" == "1" ]]
 
-# Framework-subtraction leaves are release contracts, not one-time cleanup.
-# Fail a clean clone if their package/product/config surfaces are reintroduced.
+# Prevent removed dependencies from returning to release surfaces.
 if git grep -n -E \
   'Sparkle\.framework|sparkle-project|SPUStandardUpdaterController|SPUUpdater|SUFeedURL|SUPublicEDKey|XCRemoteSwiftPackageReference.*Sparkle' \
   -- "$project_file" LiveWallpaperInfo.plist LoomscreenInfo.plist \

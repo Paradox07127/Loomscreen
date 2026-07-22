@@ -4,11 +4,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// End-to-end coverage for `WPEShaderTranspiler` + `WPESwiftShaderCompiler`
-/// against representative WPE effect shader patterns. Each test exercises
-/// a real-world structure (single sampler + uniforms + main rewriting
-/// gl_FragColor) and verifies that the produced MSL compiles cleanly via
-/// `MTLDevice.makeLibrary(source:)`.
 struct WPEShaderTranspilerTests {
 
     @Test("Translates the canonical WPE scroll fragment to MSL that compiles")
@@ -41,10 +36,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Perspective + dual-wave varyings reconstruct to faithful MSL that compiles")
     func reconstructsPerspectiveAndDualWaveVaryings() throws {
-        // waterwaves.vert builds v_TexCoordPerspective via inverse(squareToQuad(g_Point0..3))
-        // and v_Direction2 via rotateVec2((0,1), g_Direction2). When PERSPECTIVE/DUALWAVES
-        // are on, the fragment declares these varyings; the transpiler must reconstruct them
-        // (we run the builtin object-quad vertex, not the custom .vert).
         let source = """
         // stage: fragment
         #version 410 core
@@ -72,16 +63,11 @@ struct WPEShaderTranspilerTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
-        // Compiling validates the wpe_square_to_quad / wpe_mat3_inverse / wpe_perspective_texcoord MSL.
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
     @Test("Array varying with a #define-sized dimension ([RESOLUTION]) emits compilable MSL")
     func reconstructsSymbolicArrayVarying() throws {
-        // Regression: audio oscilloscope (workshop 2799421411) declares `in vec4 audioValue[RESOLUTION];`
-        // where RESOLUTION is a #define. The parser's array regex only matched numeric dims, so the
-        // `[RESOLUTION]` leaked into the varying name and emitted an array with a scalar initializer —
-        // "array initializer must be an initializer list". The symbolic-dim path must zero-init instead.
         let source = """
         // stage: fragment
         #version 410 core
@@ -107,10 +93,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Audio oscilloscope perspective/view varyings keep valid homogeneous z")
     func reconstructsAudioOscilloscopePerspectiveAndViewVaryings() throws {
-        // Scene 3462491575 uses workshop/2799421411/effects/audio_responsive_oscilloscope.
-        // Its fragment gates transparency with step(0.0, v_PerspCoord.z); the old
-        // float3(in.uv, 0.0) fallback made a transparent solidlayer become an opaque
-        // black rectangle after the scroll pass.
         let source = """
         // stage: fragment
         #version 410 core
@@ -161,11 +143,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("waterflow v_Cycles / v_Blend varyings reconstruct from time uniforms (not screen UV)")
     func reconstructsWaterflowFlowVaryings() throws {
-        // waterflow.vert computes v_Cycles = frac(t·speed)−0.5 (bounded ±0.5) and
-        // v_Blend = smoothstep cross-fade weights. We run a generic vertex, so the
-        // transpiler must reconstruct them from g_Time/g_FlowSpeed/g_PhaseFeather.
-        // The old default float4(uv,uv)/uv made displacement grow across the screen
-        // (the 3554161528 sky distortion band).
         let source = """
         // stage: fragment
         #version 410 core
@@ -193,10 +170,7 @@ struct WPEShaderTranspilerTests {
         )
         #expect(result.mslSource.contains("wpe_waterflow_cycles(g_Time, g_FlowSpeed)"))
         #expect(result.mslSource.contains("wpe_waterflow_blend(g_Time, g_FlowSpeed, g_PhaseFeather)"))
-        // The buggy default must NOT be how v_Cycles is initialized.
         #expect(!result.mslSource.contains("v_Cycles = float4(in.uv, in.uv)"))
-        // v_TexCoord.zw (the flow-mask UV) must reconstruct from g_Texture1Resolution and
-        // keep sampling .zw — NOT be rewritten to .xy (waterflow joins the zw whitelist).
         #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
         #expect(result.mslSource.contains("v_TexCoord.zw"))
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -207,12 +181,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_AudioShift reconstructs the audio response (rest = 0), not the in.uv.x default")
     func reconstructsAudioShiftVarying() throws {
-        // chromatic_aberration.vert / hue_shift.vert compute v_AudioShift =
-        // CreateAudioResponse(spectrum...), which is 0 when silent. The fragment-only
-        // transpile has no vertex stage, so the float varying used to fall through to
-        // the `in.uv.x` default — a 0→1 horizontal ramp that smeared RGB / hue across
-        // the whole frame (scene 3265584934 "色彩异常红蓝偏移"). It must instead rebuild
-        // the response from the audio uniforms so it rests at 0 with no audio.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -240,11 +208,9 @@ struct WPEShaderTranspilerTests {
             preprocessedSource: source,
             comboValues: ["AUDIOPROCESSING": 2]
         )
-        // Reconstructed from the spectrum + audio uniforms with the right-channel mode (2).
         #expect(result.mslSource.contains(
             "wpe_audio_response16(g_AudioSpectrum16Left, g_AudioSpectrum16Right, 2,"
         ))
-        // The buggy screen-space default must NOT be how v_AudioShift is initialized.
         #expect(!result.mslSource.contains("v_AudioShift = in.uv.x"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -254,11 +220,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("filmgrain v_TexCoordNoise tiles by g_NoiseScale/time, not raw screen UV")
     func reconstructsFilmgrainNoiseVarying() throws {
-        // filmgrain.vert scrolls v_TexCoordNoise by frac(g_Time) and tiles it by
-        // g_NoiseScale (20×). It shares the varying NAME with foliage but has no
-        // g_Ratio/g_Direction, so it used to fall through to float4(uv,uv): the 256²
-        // noise stretched once over the whole frame, soft-light blended into a static
-        // "retro filter" overlay (scene 3265584934). It must tile via g_NoiseScale.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -285,7 +246,6 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains(
             "wpe_filmgrain_texcoord_noise(in.uv, g_Time, g_NoiseScale, g_Texture0Resolution)"
         ))
-        // The buggy raw-UV default must NOT be how v_TexCoordNoise is initialized.
         #expect(!result.mslSource.contains("v_TexCoordNoise = float4(in.uv, in.uv)"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -295,10 +255,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Each texture read emits its own per-slot sampler (wrap bound at runtime)")
     func noiseTextureUsesRepeatSampler() throws {
-        // filmgrain tiles util/noise at coords far beyond [0,1] (v_TexCoordNoise = uv·scale).
-        // The transpiler now emits a per-slot `wpeSampler<slot>` for every g_TextureN read;
-        // the actual repeat-vs-clamp address mode is bound at runtime from the texture's TEXI
-        // ClampUVs flag — WPEMetalRenderExecutorTests covers that the flag drives repeat/clamp.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0; // {"hidden":true}
@@ -331,8 +287,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Mask and framebuffer reads also map to their per-slot samplers")
     func nonNoiseTexturesKeepClampSampler() throws {
-        // Every texture read maps to its slot's runtime sampler; the clamp/repeat choice is
-        // the executor's (from TEXI flags), so the transpiler just wires wpeSampler<slot>.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -357,8 +311,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_equalScaleFactor reconstructs the aspect factor, not screen UV")
     func reconstructsEqualScaleFactorVarying() throws {
-        // multistage_wave.vert: v_equalScaleFactor = (max(1,resx/resy), max(1,resy/resx)),
-        // an aspect-correction constant. Defaulting to in.uv stretched the wave field.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -383,8 +335,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_Pulse reconstructs the time/audio pulse scalar, not in.uv.x")
     func reconstructsPulseVarying() throws {
-        // pulse.vert: non-audio v_Pulse is a time-driven smoothstep sine pulse; it used to
-        // fall through to in.uv.x (a horizontal ramp instead of a uniform full-screen pulse).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -414,8 +364,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_ParallaxOffset reconstructs from g_ParallaxPosition (neutral at rest), not screen UV")
     func reconstructsParallaxOffsetVarying() throws {
-        // depthparallax.vert: pointer-projected offset; the full form needs an excluded mat
-        // uniform, so we use the vert's own simplified `= g_ParallaxPosition` (0.5 at rest).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -440,8 +388,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("ivec/bvec uniforms unpack all components, not just .x")
     func unpacksIntAndBoolVectorUniforms() throws {
-        // ivec2/3/4 and bvec2/3/4 had no case in the unpack switch → fell to the scalar
-        // `= u.vals[i].x` default, which drops .yzw (or fails to compile int2 = float).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -463,7 +409,6 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("int2 g_Grid = int2(u.vals[0].xy)"))
         #expect(result.mslSource.contains("int3 g_Triple = int3(u.vals[1].xyz)"))
         #expect(result.mslSource.contains("bool2 g_Flags = u.vals[3].xy > float2(0.5)"))
-        // The scalar-broadcast default must NOT be used for these vector types.
         #expect(!result.mslSource.contains("int2 g_Grid = u.vals[0].x"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -473,9 +418,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("multistage_wave v_DirectionN reconstructs from g_SpinCenter deltas, not screen UV")
     func reconstructsMultistageWaveDirections() throws {
-        // multistage_wave.vert: v_DirectionN = normalize(g_SpinCenter(N+1) - g_SpinCenterN);
-        // vec4 variant (GLOBAL_ROTATION) also carries the g_DirectionOffset-rotated dir in .zw.
-        // These used to fall through to in.uv, warping the wave field across the screen.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -507,8 +449,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_DirectionN vec4 does not rotate .zw without the GLOBAL_ROTATION combo")
     func multistageDirectionVec4WithoutGlobalRotation() throws {
-        // The vec4 .zw rotation is gated on GLOBAL_ROTATION, not merely g_DirectionOffset's
-        // presence — without the combo, .zw mirrors the raw direction (no stray rotation).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -526,7 +466,6 @@ struct WPEShaderTranspilerTests {
             preprocessedSource: source
         )
         #expect(result.mslSource.contains("float4 v_Direction1 = float4(wpe_safe_normalize(g_SpinCenter2 - g_SpinCenter1), wpe_safe_normalize(g_SpinCenter2 - g_SpinCenter1))"))
-        // No rotation applied to the direction (the prelude still *defines* wpe_rotate_vec2).
         #expect(!result.mslSource.contains("wpe_rotate_vec2(wpe_safe_normalize"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -559,8 +498,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("v_AudioPulse reconstructs the audio response when spectrum uniforms exist")
     func reconstructsAudioPulseVarying() throws {
-        // v_AudioPulse was hard-coded to 0.0 (silent-correct but never audio-reactive).
-        // Reconstruct CreateAudioResponse when the spectrum uniforms are present.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -592,8 +529,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A used varying with no reconstruction rule emits a diagnostic marker (not silent)")
     func emitsDiagnosticForUnreconstructedVarying() throws {
-        // An unknown varying the fragment actually uses, falling to the screen-UV default,
-        // gets a WPE-DIAGNOSTIC comment so the gap is visible in scene-debug MSL dumps.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -609,7 +544,6 @@ struct WPEShaderTranspilerTests {
             preprocessedSource: source
         )
         #expect(result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_MysteryOffset'"))
-        // A declared-but-unused varying must NOT trigger the diagnostic.
         #expect(!result.mslSource.contains("v_UnusedThing'"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -619,10 +553,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("shake preserves v_TexCoord.zw (flow-map UV) instead of downgrading to .xy")
     func preservesShakeFlowTexCoordZW() throws {
-        // effects/shake samples its flow map (per-pixel displacement direction) at
-        // v_TexCoord.zw — a resolution-scaled UV that v_TexCoord reconstructs correctly via
-        // wpe_texcoord_with_resolution. The .zw→.xy downgrade read the flow field from the
-        // wrong coords, turning the glitch/body motion into a diagonal smear (3265584934).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -641,7 +571,6 @@ struct WPEShaderTranspilerTests {
             preprocessedSource: source
         )
         #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
-        // The flow map must still sample at .zw, not be downgraded to .xy.
         #expect(result.mslSource.contains("g_Texture2.sample(wpeSampler2, v_TexCoord.zw)"))
         #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1, v_TexCoord.zw)"))
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -652,8 +581,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("non-vouched effects still downgrade v_TexCoord.zw to .xy (historical)")
     func nonWhitelistedEffectDowngradesTexCoordZW() throws {
-        // The .zw preservation is scoped — an effect we haven't vouched for keeps the
-        // historical .xy downgrade so this fix doesn't silently change other shaders.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -678,10 +605,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("reflection MASK samples the opacity mask at v_TexCoord.zw (aspect-scaled), not .xy")
     func reflectionMaskSamplesAspectScaledZW() throws {
-        // reflection.vert (MASK): v_TexCoord.zw *= g_Texture1Resolution.zw/.xy — the
-        // POT-padding correction for the mask (3840×2176 texture holding a ×2160 image
-        // scales V by 0.9926). The historical .zw→.xy downgrade dropped that scale for
-        // every MASK-bearing effect (found on 3413921910's water reflection).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -712,9 +635,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("vhs MASK scales v_TexCoord.zw by g_Texture2Resolution (mask binds slot 2, not 1)")
     func vhsMaskUsesSlotTwoResolution() throws {
-        // vhs.vert (MASK): .zw = uv * g_Texture2Resolution.zw/.xy — slot 1 holds the
-        // VHS noise texture, the opacity mask binds slot 2. The generic MASK→T1 ladder
-        // must not win over the family table here.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -745,8 +665,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("lightshafts MASK scales v_TexCoord.zw by g_Texture3Resolution")
     func lightshaftsMaskUsesSlotThreeResolution() throws {
-        // lightshafts.vert (MASK): .zw = a_TexCoord * g_Texture3Resolution.zw/.xy —
-        // the opacity mask binds slot 3 (1 = rays, 2 = noise).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -775,10 +693,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("a recognized family with its exact resolution slot missing never scales by another slot")
     func missingExactSlotDoesNotFallBackToWrongResolution() throws {
-        // lightshafts' mask resolution is g_Texture3Resolution. If that exact uniform is
-        // absent (malformed input), the initializer must NOT fall through to the generic
-        // MASK→T1 ladder and scale .zw by a different texture's aspect — unscaled
-        // .zw (== uv == the historical .xy behavior) is the safe degradation.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -805,11 +719,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("swing rebuilds v_TexCoord.zw as aspect (res.x/.y) + sine phase, even under MASK")
     func swingRebuildsAspectAndSinePhase() throws {
-        // swing.vert: .z = g_Texture0Resolution.x / .y, .w = sin(g_Time·g_Speed +
-        // g_Phase·2π)·g_Amount. Not a resolution-scaled UV — the family table must
-        // not intercept, and MASK=1 must not route .zw through the MASK→T1 ladder
-        // (which would scale a UV into the aspect slot). g_Speed/g_Phase reach the
-        // fragment via the compiler's vert-uniform injection; declared here to match.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -839,7 +748,6 @@ struct WPEShaderTranspilerTests {
             comboValues: ["MASK": 1]
         )
         #expect(result.mslSource.contains("wpe_swing_texcoord(in.uv, g_Texture0Resolution.xy, g_Time, g_Speed, g_Phase, g_Amount)"))
-        // Call form, not the bare name: the inline helper definitions are always in the preamble.
         #expect(!result.mslSource.contains("wpe_texcoord_with_resolution(in.uv"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -849,7 +757,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("twirl rebuilds v_TexCoord.zw with the res.z/.w aspect (workshop path form)")
     func twirlRebuildsAspectFromZWComponents() throws {
-        // twirl.vert is identical to swing.vert except .z = g_Texture0Resolution.z / .w.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -883,9 +790,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("swing with the vert-only uniforms missing keeps the historical fallback")
     func swingWithoutVertUniformsFallsBack() throws {
-        // Malformed input (no injection ran, g_Speed/g_Phase absent): the dedicated
-        // case must not fire with dangling uniform names; the historical float4
-        // default keeps the shader compiling.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -909,9 +813,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("blend preserves v_TexCoord.zw only without TRANSFORMUV")
     func blendPreservesZWOnlyWithoutTransformUV() throws {
-        // blend.vert scales .zw by g_Texture1Resolution, but TRANSFORMUV == 1 then
-        // applies offset/rotate/scale steps the fragment-only synthesis can't
-        // reproduce — that combo must keep the historical .xy downgrade.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1008,7 +909,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
     func translatesTextureLodFragment() throws {
-        // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1024,7 +924,6 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("textureLod(") == false)
         #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
         #expect(result.mslSource.contains("level("))
-        // The 3-arg LOD sample must still get the v_TexCoord -> .xy narrowing.
         #expect(result.mslSource.contains("v_TexCoord.xy"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -1055,7 +954,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("ddx/ddy (GLSL dFdx/dFdy) translate to MSL dfdx/dfdy and compile")
     func translatesDerivativeFragment() throws {
-        // Mirrors prelude expansion: #define ddx dFdx / #define ddy dFdy.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1082,7 +980,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("CAST2X2/CAST4X4 matrix-cast macros translate to MSL float matrices and compile")
     func translatesMatrixCastMacros() throws {
-        // Mirrors the prelude's matrix CAST helpers (now incl. CAST2X2/CAST4X4).
         let source = """
         #version 410 core
         #define CAST2X2(x) (mat2(x))
@@ -1258,9 +1155,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A lone non-zero sampler slot aliases to its actual texture index")
     func sparseSamplerSlotBindsToActualSlot() throws {
-        // The custom-shader dispatcher binds textures by raw slot
-        // (setFragmentTexture(index: slot), slots 0..<customTextureSlotCount), so g_Texture2's texture
-        // lands at [[texture(2)]]. The MSL alias must read tex2, not tex0.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture2;
@@ -1279,9 +1173,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Non-contiguous sampler slots each alias to their actual texture index")
     func nonContiguousSamplersBindToActualSlots() throws {
-        // g_Texture0 + g_Texture2 (gap at slot 1). The dispatcher binds the
-        // slot-2 texture at [[texture(2)]], so g_Texture2 must read tex2 — under
-        // the old enumeration order it incorrectly read tex1.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1303,8 +1194,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Contiguous sampler slots keep their identity mapping (regression guard)")
     func contiguousSamplersKeepIdentityMapping() throws {
-        // Proves the actual-slot aliasing does NOT change the common contiguous
-        // case (enumeration index already equals the slot).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1326,9 +1215,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Sampler slot 7 (g_Texture0–g_Texture7) compiles and aliases tex7")
     func samplerSlot7CompilesAndAliasesTex7() throws {
-        // effects/blend binds g_Texture7; the transpiler must declare tex7 and
-        // alias g_Texture7 → tex7 (previously rejected at the old 0–3 cap, which
-        // aborted the whole scene).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -1354,8 +1240,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Sampler slots above the supported 0–7 range are rejected, not mis-emitted")
     func rejectsTextureSlotsAboveSupportedRange() throws {
-        // Slot 8 exceeds the tex0–tex7 binding range and must fail cleanly
-        // rather than alias to an undeclared texN.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture8;
@@ -1403,11 +1287,6 @@ struct WPEShaderTranspilerTests {
     func autoSwayV2VaryingsReconstructAndCompile() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let compiler = WPESwiftShaderCompiler(device: device)
-        // Mirrors workshop 3235948233 auto_sway under AA_VERSION == 2:
-        // the sway drivers (g_Speed/g_Inertia/g_SigmentCount/g_GlobalTimeOffset)
-        // exist in the FRAGMENT only inside the inactive AA_VERSION == 1 branch,
-        // so they must be adopted from the vertex stage — with their material
-        // annotations — for the reconstruction to bind the scene's values.
         let request = WPEShaderCompileRequest(
             shaderName: "workshop/3235948233/effects/auto_sway",
             processedVertexSource: """
@@ -1466,7 +1345,6 @@ struct WPEShaderTranspilerTests {
         #expect(msl.contains("v_MotionRadian1 = wpeAS_thisRad - wpeAS_prevRad"))
         #expect(msl.contains("v_TexCoord = float4(in.uv.x * v_aspect, in.uv.y, in.uv.x * v_aspect, in.uv.y)"))
         #expect(!msl.contains("WPE-DIAGNOSTIC: varying 'v_MotionRadian1'"))
-        // The vertex-only sway drivers were adopted into the fragment layout.
         #expect(result.uniformLayout.contains { $0.name == "g_Speed" })
         #expect(result.uniformLayout.contains { $0.name == "g_SigmentCount" })
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
@@ -1576,12 +1454,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Waterwaves TIMEOFFSET combo scales v_TexCoord.zw by g_Texture2Resolution")
     func waterwavesTimeOffsetUsesTexture2Resolution() throws {
-        // Real waterwaves.vert scales v_TexCoord.zw by the auxiliary texture's
-        // resolution following a `#if MASK / #elif TIMEOFFSET` ladder:
-        // MASK → g_Texture1Resolution, TIMEOFFSET → g_Texture2Resolution. The
-        // combo-blind heuristic always picked g_Texture1Resolution, mis-scaling
-        // the TIMEOFFSET case. With comboValues plumbed through, TIMEOFFSET=1
-        // must select g_Texture2Resolution.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let compiler = WPESwiftShaderCompiler(device: device)
         let request = WPEShaderCompileRequest(
@@ -1697,10 +1569,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("lightshafts v_TexCoordFx perspective varying reconstructs to faithful MSL that compiles")
     func reconstructsLightshaftsPerspectiveVarying() throws {
-        // lightshafts.vert builds v_TexCoordFx = mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3)))
-        // and the fragment does its own perspective divide (.xy/.z) + step(0, .z). Because we run
-        // the builtin object-quad vertex (not the custom .vert), the transpiler must reconstruct
-        // v_TexCoordFx in the fragment — identical to v_TexCoordPerspective.
         let source = """
         // stage: fragment
         #version 410 core
@@ -1725,15 +1593,11 @@ struct WPEShaderTranspilerTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
-        // Compiling validates the reconstructed perspective MSL is well-formed.
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
     @Test("ContrastSaturationBrightness (common_blending.h) translates to compilable MSL")
     func translatesContrastSaturationBrightness() throws {
-        // The color_grading effect calls ContrastSaturationBrightness, provided by
-        // the common_blending.h stub. Validate the GLSL body translates to MSL that
-        // compiles (vec3(dot(...)), mix, const vec3 all survive the conversion).
         let source = """
         // stage: fragment
         #version 410 core
@@ -1767,10 +1631,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Helper parameters shadowing global uniforms are not threaded again")
     func helperParameterShadowingGlobalUniform() throws {
-        // tech_circle_barcode declares `uniform float sectorCount/seed` AND a helper
-        // `sectors(... float sectorCount, float seed ...)` whose body references the
-        // locals. The transpiler must NOT append the globals as extra parameters —
-        // MSL rejects the duplicate parameter names ('redefinition of parameter').
         let source = """
         // stage: fragment
         #version 410 core
@@ -1794,7 +1654,6 @@ struct WPEShaderTranspilerTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
-        // Before the fix this threw: 'redefinition of parameter sectorCount/seed'.
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
@@ -2054,11 +1913,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A block-commented `void main` above the real entry point is ignored")
     func ignoresBlockCommentedMain() throws {
-        // Editing pattern: an old main is left as a /* */ block above the live one.
-        // Its braces and `void main` text must not be selected by locateMain. The
-        // commented body references an undeclared function, so if it were picked as
-        // main the emitted MSL would fail to compile — the compile gate proves the
-        // real main (whose distinct tint math survives) was chosen instead.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2083,8 +1937,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A line-commented `void main` above the real entry point is ignored")
     func ignoresLineCommentedMain() throws {
-        // The `{`/`}` on the commented line would also skew the brace match if
-        // comments weren't masked before locating main.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2109,8 +1961,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("`/*/` opens a block comment — the opener's `*` is not its own terminator")
     func slashStarSlashOpensBlockComment() throws {
-        // If `/*/` were treated as self-closing, the rest of the comment would
-        // leak back in as code and the stray `/*` would swallow the real main.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2135,10 +1985,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A `#if` on its own line inside a block comment is not treated as a live directive")
     func ignoresPreprocessorDirectiveInsideBlockComment() throws {
-        // A prose block comment mentioning a directive leaves an UNBALANCED `#if 0`
-        // (no matching `#endif` outside the comment). If it were read as live it would
-        // push a never-popped inactive frame and drop the real uniforms/main, so
-        // locateMain would fail — the compile gate proves the real code survived.
         let source = """
         #version 410 core
         /*
@@ -2167,10 +2013,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A `}` inside a helper-body comment does not truncate the parsed body")
     func helperBodyCommentBraceDoesNotTruncateResourceThreading() throws {
-        // A lone `}` in a line comment before the sampler use would close the helper
-        // early in the brace matcher, so g_Texture0/wpeSampler0 would not be threaded
-        // into the helper's signature and the emitted MSL would reference an undeclared
-        // identifier (or the truncated body would be malformed).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2197,10 +2039,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Arithmetic/bitwise `#if` conditions evaluate with correct precedence")
     func evaluatesArithmeticPreprocessorConditions() throws {
-        // Without an additive/multiplicative/bitwise grammar level, `#if A + B > 1`
-        // leaves `+` unconsumed, the condition parses as false, and the guarded
-        // `uniform g_Tint` is dropped — main then references an undeclared uniform
-        // and MSL compilation fails. The compile gate proves the branch was kept.
         let source = """
         #version 410 core
         #define A 1
@@ -2232,9 +2070,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Nested regular texture() is fully rewritten (no texture() survives) and compiles")
     func translatesNestedRegularTextureFragment() throws {
-        // The inner texture() lives inside the outer call's uv argument; without
-        // recursing on that argument it stays as GLSL `texture(...)`, which Metal
-        // (no free-function `texture`) rejects.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2248,9 +2083,6 @@ struct WPEShaderTranspilerTests {
             shaderName: "nested_texture",
             preprocessedSource: source
         )
-        // No GLSL free-function `texture(g_TextureN, …)` may survive (the `[[texture(N)]]`
-        // binding attribute legitimately contains the substring `texture(`, so match the
-        // call form specifically).
         #expect(result.mslSource.contains("texture(g_Texture") == false)
         #expect(result.mslSource.contains("g_Texture0.sample(wpeSampler0"))
         #expect(result.mslSource.contains("g_Texture1.sample(wpeSampler1"))
@@ -2262,9 +2094,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("A backslash-continued macro body threads its texture into helper scope")
     func helperMacroWithBackslashContinuationThreadsResources() throws {
-        // The dependency regex captures the macro body only up to the first newline,
-        // so a resource referenced on a continuation line is missed and never threaded
-        // into the helper — the expanded macro then references an undeclared g_Texture0.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2291,9 +2120,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Comma-separated uniform declarations become separate uniforms")
     func parsesCommaSeparatedUniformDeclarations() throws {
-        // `uniform float u_a, u_b;` must become two uniforms in distinct slots, not a
-        // single malformed `u_a,u_b`. If it stayed combined, u_b would be undeclared
-        // in main and the MSL would fail to compile.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2320,11 +2146,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("apply/up_sample v_StepSize reconstructs the box-blur step, not screen UV")
     func reconstructsStepSizeVarying() throws {
-        // workshop 2822917890 apply.vert:14 / up_sample.vert:13 both compute
-        // `v_StepSize = 1.0 / vec4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy)`.
-        // g_Texture0Resolution is declared in the .vert, never the .frag; only
-        // WPESwiftShaderCompiler's vertex-uniform union exposes it here (covered by
-        // the end-to-end test below). This unit test pins the formula itself.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2347,7 +2168,6 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains(
             "v_StepSize = 1.0 / float4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy);"
         ))
-        // The buggy screen-space default must NOT be how v_StepSize is initialized.
         #expect(!result.mslSource.contains("v_StepSize = float4(in.uv, in.uv)"))
         #expect(!result.mslSource.contains("WPE-DIAGNOSTIC: varying 'v_StepSize'"))
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -2358,14 +2178,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("blur_gaussian v_SizeMultiplier reconstructs the blur texel scale, not screen UV")
     func reconstructsSizeMultiplierVarying() throws {
-        // workshop 2822917890 blur_gaussian.vert:30:
-        // `v_SizeMultiplier = vec2(aRatio, 1.0) * (u_radius + u_radius) * iterations * g_TexelSize`
-        // with aRatio = u_ratio under ANAMORPHIC else 1.0, iterations = 0.675 under
-        // HIGH_QUALITY else 1.5. The in.uv default made the blur offset grow with
-        // screen position instead of staying a fixed texel scale (3554161528 bloom chain).
-        // g_TexelSize has no packing path (would read 0 → blur degenerates to a copy),
-        // so the rule emits the equivalent 1/g_Texture0Resolution.xy, which IS packed
-        // from the bound texture (same-size framebuffer input ⇒ equal by definition).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2386,7 +2198,6 @@ struct WPEShaderTranspilerTests {
             gl_FragColor = vec4(albedo / 5.0, 1.0);
         }
         """
-        // Default combos: aRatio folds to 1.0, iterations to 1.5.
         let result = try WPEShaderTranspiler.translateFragment(
             shaderName: "workshop/2822917890/effects/blur_gaussian",
             preprocessedSource: source
@@ -2401,7 +2212,6 @@ struct WPEShaderTranspilerTests {
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
 
-        // ANAMORPHIC + HIGH_QUALITY: aRatio folds to u_ratio, iterations to 0.675.
         let anamorphic = try WPEShaderTranspiler.translateFragment(
             shaderName: "workshop/2822917890/effects/blur_gaussian",
             preprocessedSource: source,
@@ -2415,12 +2225,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("down_sample/light_map v_TexCoord[4] reconstructs 4 distinct box-filter taps")
     func reconstructsTexCoordBoxFilterArrayVarying() throws {
-        // workshop 2822917890 down_sample.vert:12-15 / light_map.vert:15-18 both
-        // compute `offsets = 1.0 / g_Texture0Resolution.xy` then
-        // v_TexCoord[0..3] = a_TexCoord ± offsets (the 4 diagonal box-filter taps).
-        // The generic array path called varyingInitializer ONCE and repeated it
-        // across all 4 slots, collapsing the box filter to a single point sample
-        // (the 3554161528 sky). Each slot must now get its own distinct offset.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -2447,7 +2251,6 @@ struct WPEShaderTranspilerTests {
             "in.uv + float2(-1.0 / g_Texture0Resolution.x, 1.0 / g_Texture0Resolution.y), " +
             "in.uv + (1.0 / g_Texture0Resolution.xy) };"
         ))
-        // The buggy collapse-to-one-tap default must NOT survive.
         #expect(!result.mslSource.contains("v_TexCoord[4] = { in.uv, in.uv, in.uv, in.uv };"))
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -2457,10 +2260,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("apply.vert's v_StepSize compiles end-to-end when g_Texture0Resolution is vertex-only")
     func stepSizeReconstructsFromVertexOnlyResolutionUniformAndCompiles() throws {
-        // Faithful regression: apply.vert declares g_Texture0Resolution but
-        // apply.frag never does — only WPESwiftShaderCompiler's vertex-uniform
-        // union (fragmentSourceByAddingVertexUniformsIfNeeded) exposes it to the
-        // fragment-only transpile our reconstruction rule reads from.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let compiler = WPESwiftShaderCompiler(device: device)
         let request = WPEShaderCompileRequest(
@@ -2500,16 +2299,12 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains(
             "v_StepSize = 1.0 / float4(-g_Texture0Resolution.xy, g_Texture0Resolution.xy);"
         ))
-        // Adopted from the vertex stage into the fragment's uniform layout.
         #expect(result.uniformLayout.contains { $0.name == "g_Texture0Resolution" })
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
     }
 
     @Test("down_sample.vert's v_TexCoord[4] compiles end-to-end when g_Texture0Resolution is vertex-only")
     func texCoordArrayReconstructsFromVertexOnlyResolutionUniformAndCompiles() throws {
-        // Faithful regression: down_sample.vert declares g_Texture0Resolution but
-        // down_sample.frag never does — same vertex-uniform-union dependency as
-        // the v_StepSize case above, exercised for the array reconstruction path.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let compiler = WPESwiftShaderCompiler(device: device)
         let request = WPEShaderCompileRequest(

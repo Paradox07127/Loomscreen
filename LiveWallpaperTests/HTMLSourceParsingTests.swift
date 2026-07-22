@@ -113,8 +113,6 @@ struct HTMLSourceParsingTests {
         #expect(HTMLSource(userInput: "   ") == nil)
     }
 
-    // MARK: - YouTube normalization
-
     @Test("youtube.com/watch?v=ID rewrites to youtube-nocookie embed")
     func youtubeWatchToEmbed() {
         let parsed = HTMLSource(userInput: "https://www.youtube.com/watch?v=d56mG7DezGs")
@@ -177,7 +175,6 @@ struct HTMLSourceParsingTests {
 
     @Test("Malformed video ID does not trigger rewrite")
     func malformedIDFallback() {
-        // ID contains a slash — must not become embed
         let parsed = HTMLSource(userInput: "https://www.youtube.com/watch?v=bad/id")
         guard case .url(let url) = parsed else {
             Issue.record("Expected .url, got \(String(describing: parsed))")

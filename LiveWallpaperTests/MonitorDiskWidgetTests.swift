@@ -2,13 +2,7 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic tests for the Disk widget: history-window tailing, the
-/// `historyWindow` / `breakdown` settings resolution, and the L card's R/W
-/// session-split fractions. View composition is not exercised here (matches the
-/// Network/Memory sibling widget test files).
 struct MonitorDiskWidgetTests {
-
-    // MARK: - History tail window
 
     @Test("tail returns the last N samples, or the whole series when shorter")
     func tailWindow() {
@@ -30,13 +24,9 @@ struct MonitorDiskWidgetTests {
         #expect(last120.first == 80)
         #expect(last120.last == 199)
 
-        // History caps at 120 samples, so a full-but-not-overflowing series
-        // passes through unchanged at the L window size too.
         let atCapacity = (0..<120).map(Double.init)
         #expect(MonitorDiskWidgetView.tail(atCapacity, count: 120) == atCapacity)
     }
-
-    // MARK: - `historyWindow` option resolution
 
     @Test("absent/invalid historyWindow falls back to the caller's default")
     func historyWindowFallsBackWhenAbsent() {
@@ -54,8 +44,6 @@ struct MonitorDiskWidgetTests {
         #expect(MonitorDiskWidgetView.historyWindowSamples(optionSeconds: 0.4, fallbackSeconds: 120) == 2)
     }
 
-    // MARK: - `breakdown` option resolution
-
     @Test("only the literal 'compact' collapses the split legend")
     func breakdownCompactOnlyOnLiteral() {
         #expect(MonitorDiskWidgetView.breakdownIsCompact("compact"))
@@ -63,8 +51,6 @@ struct MonitorDiskWidgetTests {
         #expect(MonitorDiskWidgetView.breakdownIsCompact("full") == false)
         #expect(MonitorDiskWidgetView.breakdownIsCompact("Compact") == false)
     }
-
-    // MARK: - Session R/W split fractions
 
     @Test("split fractions divide read/write bytes proportionally")
     func splitFractionsNormal() {

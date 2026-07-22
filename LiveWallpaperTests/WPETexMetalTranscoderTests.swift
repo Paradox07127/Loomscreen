@@ -31,14 +31,8 @@ struct WPETexMetalTranscoderTests {
               device.supportsBCTextureCompression else {
             return
         }
-        // BC3 (DXT5) = 8-byte alpha block + 8-byte color block. The
-        // specific values don't matter for this round-trip shape check;
-        // the GPU just needs valid block layout to decompress into a
-        // 4×4 pixel tile.
         let block = Data([
-            // alpha: a0=0xFF, a1=0x00, 6 bytes of 3-bit indices
             0xFF, 0x00, 0x49, 0x92, 0x24, 0x49, 0x92, 0x24,
-            // color: c0=0xFFFF (white), c1=0x0000 (black), 4 bytes of 2-bit indices
             0xFF, 0xFF, 0x00, 0x00, 0x55, 0x55, 0x55, 0x55
         ])
         let decoded = try WPETexMetalTranscoder.transcode(

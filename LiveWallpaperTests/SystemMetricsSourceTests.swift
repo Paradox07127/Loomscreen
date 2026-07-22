@@ -30,8 +30,6 @@ struct SystemMetricsSourceTests {
 
         await source.start(sink: sink)
 
-        // Poll for up to ~3s; the first tick fires immediately but delta-based CPU
-        // needs a second sample, so wait for at least two updates when possible.
         let deadline = Date().addingTimeInterval(3.0)
         while Date() < deadline {
             if await sink.count() >= 2 { break }
@@ -92,7 +90,6 @@ struct SystemMetricsSourceTests {
         let source = SystemMetricsSource(includeTopProcesses: false, interval: 0.3)
 
         await source.start(sink: sink)
-        // Let at least one tick land.
         let deadline = Date().addingTimeInterval(2.0)
         while Date() < deadline {
             if await sink.count() >= 1 { break }

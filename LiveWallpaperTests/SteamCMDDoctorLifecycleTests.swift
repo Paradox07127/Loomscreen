@@ -72,7 +72,6 @@
                 _ = try await cancelled.value
                 Issue.record("cancelled operation unexpectedly entered")
             } catch is CancellationError {
-                // Expected.
             }
 
             await release.signal()

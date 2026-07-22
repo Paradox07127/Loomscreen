@@ -2,12 +2,7 @@ import Foundation
 import Network
 import os
 
-/// A single long-lived `NWPathMonitor` on its own queue. The Network framework is
-/// event-driven (a callback only fires when the path changes) and needs no
-/// entitlement beyond `network.client`, which is already present. The latest path
-/// snapshot is cached under a lock so the polling sampler thread can read it cheaply
-/// and thread-safely; `activeInterfaceName` lets the network sampler mark the
-/// system-chosen interface as active.
+/// A single long-lived `NWPathMonitor` on its own queue.
 final class MonitorNetworkPathObserver: Sendable {
     struct Snapshot: Sendable, Equatable {
         var path: MonitorNetworkPath

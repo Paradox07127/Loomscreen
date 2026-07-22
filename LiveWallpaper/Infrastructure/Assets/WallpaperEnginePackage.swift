@@ -44,10 +44,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         self.nameIndex = nameIndex
     }
 
-    /// Max bytes for an entry name (a full relative path in UTF-8). The old cap
-    /// of 255 wrongly rejected legitimate packages: a path with multi-byte CJK
-    /// components easily exceeds 255 *bytes* (e.g. a `sounds/<long Chinese name>`
-    /// path). Allow a generous bound while still rejecting wildly misaligned reads.
+    /// Full-path byte limit; individual multibyte components may legitimately exceed 255 bytes in aggregate.
     static let maxEntryNameBytes = IndexLimits.production.maxEntryNameBytes
     /// Per-component cap when writing to disk. APFS rejects a single path
     /// component over 255 UTF-8 bytes, so over-long components are shortened on
@@ -498,10 +495,8 @@ struct WallpaperEnginePackage: Sendable, Equatable {
             if component.isEmpty || component == "." {
                 continue
             }
-            // Only a component that *is* ".." navigates up (the traversal vector);
-            // a name that merely contains ".." (e.g. "image..png", "走过..mp3") is
-            // a valid filename. `contains("..")` wrongly rejected such packages.
-            // Extraction still re-checks the resolved path stays inside the root.
+            // Only a component equal to ".." traverses; filenames containing it remain valid.
+            // Extraction independently verifies that the resolved path stays inside the root.
             guard component != ".." else {
                 throw WPEPackageError.pathTraversal(name: name)
             }

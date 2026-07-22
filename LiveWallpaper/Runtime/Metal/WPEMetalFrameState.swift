@@ -45,7 +45,7 @@ struct WPEMetalFrameState {
     /// same name (a chain rendering into `_rt_HalfFrameBuffer` as an actual
     /// target) removes it so the snapshot logic never clobbers real content.
     var sceneAliasSnapshotGenerations: [String: Int] = [:]
-    /// Per-physical-texture init tracking. Phase 2C audit fix: ping-pong's
+    /// Per-physical-texture initialization tracking: ping-pong's
     /// secondary texture is allocated lazily and may contain garbage on
     /// first use. Tracking by texture identity (not target) lets us decide
     /// whether `.load` is safe or whether we need `.clear` (or a blit-copy
@@ -142,7 +142,7 @@ struct WPEMetalPipelineKey: Hashable {
     let fragmentName: String
     let blendMode: String
     let colorPixelFormat: MTLPixelFormat
-    /// Phase 2C audit fix: every PSO must declare the SAME depth attachment
+    /// Every pipeline state must declare the same depth attachment
     /// format as the render pass that drives it. We default to `.invalid`
     /// for non-depth passes so Metal's API validation does not fail when a
     /// fullscreen copy without depth meets a pipeline that thought it had

@@ -2,16 +2,6 @@ import LiveWallpaperCore
 import SwiftUI
 
 /// Modal sheet shown when the user clicks "Report a Bug…".
-///
-/// The sheet never sends anything on its own — the user must click "Continue
-/// in Browser" to submit, and the log file stays local until they manually
-/// attach it. Matches the privacy posture of indie macOS apps (Ice / Rectangle
-/// / Stats).
-///
-/// The attachable log is a *sanitized* copy: the whole runtime log is run
-/// through `PIISanitizer` and written next to the app's caches, so what the
-/// user drags into a public issue has the same redaction posture as the
-/// preview above it — not the raw file (which logs paths/hosts verbatim).
 struct ReportBugSheet: View {
     let report: BugReport
     var onDismiss: () -> Void
@@ -133,11 +123,7 @@ struct ReportBugSheet: View {
         }
     }
 
-    /// Scrubs the whole runtime log and writes it to a stable caches path the
-    /// user can drag after the sheet dismisses. Runs off the main actor because
-    /// it does file IO; the log is rotation-capped at ~1 MiB so a single
-    /// full-string `PIISanitizer.scrub` stays cheap. Returns `nil` (hiding the
-    /// affordance) rather than ever pointing the UI at the unsanitized source.
+    /// Scrubs the whole runtime log and writes it to a stable caches path the user can drag after the sheet dismisses.
     nonisolated private static func makeSanitizedLogCopy(from source: URL) async -> URL? {
         await Task.detached(priority: .userInitiated) {
             guard let raw = try? String(contentsOf: source, encoding: .utf8) else { return nil }

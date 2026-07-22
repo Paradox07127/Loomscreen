@@ -2,11 +2,6 @@ import SwiftUI
 import LiveWallpaperCore
 
 /// Popover anchored to a slot row's time-range label.
-///
-/// Draft state is held locally — the row only learns about the change
-/// when the user presses **Apply**, so a noisy in-progress selection
-/// can't repeatedly fight `SchedulePolicy.conflicts` and emit spurious
-/// banners on the parent.
 struct ScheduleTimeEditorPopover: View {
     let slotID: UUID
     let initialStart: Int

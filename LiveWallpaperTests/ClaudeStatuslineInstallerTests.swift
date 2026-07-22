@@ -10,7 +10,6 @@ struct ClaudeStatuslineInstallerTests {
         let script = ClaudeStatuslineInstaller.captureScript
         #expect(script.contains("mktemp"))
         #expect(script.contains("mv -f"))
-        // The temp file must be renamed onto the exact payload the reader reads.
         #expect(script.contains(ClaudeRateLimitReader.payloadFileName))
     }
 
@@ -18,8 +17,6 @@ struct ClaudeStatuslineInstallerTests {
     func chainThroughBranch() {
         let script = ClaudeStatuslineInstaller.captureScript
         #expect(script.contains("payload=\"$(cat)\""))
-        // Chain branch: the user's whole command travels as ONE quoted argument
-        // and is re-fed the payload via `sh -c`, so pipes/args survive.
         #expect(script.contains("exec /bin/sh -c \"$1\""))
         #expect(script.contains("[ \"$#\" -ge 1 ]"))
     }
@@ -27,7 +24,6 @@ struct ClaudeStatuslineInstallerTests {
     @Test("Capture script prints a minimal fallback statusline")
     func minimalFallbackLine() {
         let script = ClaudeStatuslineInstaller.captureScript
-        // Falls back to the model display name so the statusline still shows.
         #expect(script.contains("display_name"))
         #expect(script.contains("printf '%s' \"${model}\""))
     }
@@ -59,8 +55,6 @@ struct ClaudeStatuslineInstallerTests {
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let statusLine = try #require(object?["statusLine"] as? [String: Any])
         let command = try #require(statusLine["command"] as? String)
-        // Our script runs first; the user's command trails as ONE single-quoted
-        // argument (the capture script `sh -c`s it).
         #expect(command.contains(ClaudeStatuslineInstaller.scriptFileName))
         #expect(command.contains(existing))
         #expect(command.hasSuffix("'\(existing)'"))
@@ -89,16 +83,11 @@ struct ClaudeStatuslineInstallerTests {
         assertNoSettingsAutoEdit(ClaudeStatuslineInstaller.captureScript)
         assertNoSettingsAutoEdit(ClaudeStatuslineInstaller.installCommand)
         assertNoSettingsAutoEdit(ClaudeStatuslineInstaller.uninstallCommand)
-        // The fragment MENTIONS settings.json (it's the thing to merge) but must
-        // not be a shell write to it; guard on the write verbs only.
         assertNoSettingsWrite(ClaudeStatuslineInstaller.captureScript)
         assertNoSettingsWrite(ClaudeStatuslineInstaller.installCommand)
         assertNoSettingsWrite(ClaudeStatuslineInstaller.uninstallCommand)
     }
 
-    // MARK: - Helpers
-
-    /// Fails if a runnable snippet redirects/pipes into settings.json.
     private func assertNoSettingsWrite(_ snippet: String, sourceLocation: SourceLocation = #_sourceLocation) {
         let forbidden = ["> ~/.claude/settings.json", ">~/.claude/settings.json",
                          "> $HOME/.claude/settings.json", "tee ~/.claude/settings.json",
@@ -108,11 +97,8 @@ struct ClaudeStatuslineInstallerTests {
         }
     }
 
-    /// Stronger guard for snippets that shouldn't reference settings.json edits
-    /// at all beyond guidance text (install/uninstall echo guidance only).
     private func assertNoSettingsAutoEdit(_ snippet: String, sourceLocation: SourceLocation = #_sourceLocation) {
         assertNoSettingsWrite(snippet, sourceLocation: sourceLocation)
-        // No in-place editors pointed at settings.json either.
         for editor in ["sed -i", "jq"] where snippet.contains(editor) {
             #expect(!snippet.contains("settings.json"), "snippet uses \(editor) on settings.json", sourceLocation: sourceLocation)
         }

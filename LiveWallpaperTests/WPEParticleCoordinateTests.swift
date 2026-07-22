@@ -39,7 +39,6 @@ struct WPEParticleCoordinateTests {
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
-        // Author (0,0) bottom-left → centered (-W/2, -H/2).
         #expect(abs(transform.renderOrigin.x - (-1920)) < 0.0001)
         #expect(abs(transform.renderOrigin.y - (-1080)) < 0.0001)
     }
@@ -52,7 +51,6 @@ struct WPEParticleCoordinateTests {
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
-        // y = 440 - 1208 = -768 → NDC ≈ -0.636 → bottom 64% of screen.
         #expect(transform.renderOrigin.y < 0)
         #expect(abs(transform.renderOrigin.y - (-768)) < 0.01)
     }
@@ -61,13 +59,9 @@ struct WPEParticleCoordinateTests {
 
     @Test("angles.z rotates as authored (+angleZ), matching the image-layer quad")
     func angleZMatchesImageLayer() {
-        // The particle model matrix uses `Rz(+angleZ)` — same sign the image
-        // quad applies (WPEMetalRenderExecutor passes geometry.angles.z
-        // unnegated). A 90° turn swings (1, 0) → (0, +1). (An earlier
-        // `Rz(-angleZ)` sent 3462491575's 雪景 rightward where WPE blows it left.)
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
-            objectOrigin: SIMD3<Float>(960, 540, 0), // renderOrigin (0,0)
+            objectOrigin: SIMD3<Float>(960, 540, 0),
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: .pi * 0.5
         )
@@ -97,16 +91,7 @@ struct WPEParticleCoordinateTests {
             objectScale: SIMD3<Float>(3, 3, 1),
             objectAngleZ: 0
         )
-        // WPE's CParticle model matrix is T·R·S, so the object's 2D scale
-        // folds into the billboard size as (|x|+|y|)/2 (verified vs the
-        // 7.8×-scaled light-shaft in 3426865175). Additive saturation from
-        // hugely-scaled emitters is handled by the blend-aware sceneHeight
-        // cap at spawn (see WPEParticleSystemTests.additiveSpriteSizeCapped),
-        // not by decoupling sprite size from object scale.
         #expect(abs(transform.worldSizeMultiplier() - 3) < 0.0001)
-        // Object scale also spreads the emitter: a 10px dispersal offset
-        // scales to 30px at scale 3 (isolated via applyModelDirection, which
-        // applies scale+rotation without the origin translation).
         let spread = transform.applyModelDirection(SIMD3<Float>(10, 0, 0))
         #expect(abs(spread.x - 30) < 0.0001)
     }
@@ -114,12 +99,10 @@ struct WPEParticleCoordinateTests {
     @Test("Emitter origin is used as authored — Y-up, no flip")
     func emitterOriginIsNotYFlipped() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Author emitter origin (100, 200) is Y-up bottom-left like the
-        // rest of the author space — used as-is, NOT flipped to -200.
         let def = makeDefinition(originOffset: SIMD3(100, 200, 0))
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
-            objectOrigin: SIMD3<Float>(1000, 540, 0), // renderOrigin (40, 0)
+            objectOrigin: SIMD3<Float>(1000, 540, 0),
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
@@ -134,7 +117,6 @@ struct WPEParticleCoordinateTests {
         #expect(system.liveInstanceCount > 0)
         let inst = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
-        // renderOrigin (40, 0) + emitter origin as-authored (100, +200) = (140, +200).
         #expect(abs(inst.positionAndSize.x - 140) < 0.5)
         #expect(abs(inst.positionAndSize.y - 200) < 0.5)
     }
@@ -142,10 +124,6 @@ struct WPEParticleCoordinateTests {
     @Test("Velocity is used as authored — Y-up, no flip (negative vy drifts down)")
     func velocityIsNotYFlipped() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // sceneObject origin (960, 540) → renderOrigin (0, 0)
-        // emitter origin (0,0,0); velocity (0, -50) used as-is (Y-up):
-        // negative vy → particle drifts DOWN (negative Y) on screen.
-        // This is the un-rotated case (saber 3526278753): leaves fall.
         let def = makeDefinition(
             originOffset: SIMD3(0, 0, 0),
             velocityMin: SIMD3(0, -50, 0),
@@ -168,21 +146,12 @@ struct WPEParticleCoordinateTests {
         }
         let inst = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
-        // y < 0 confirms no Y-flip: the JSON's negative vy drifts the
-        // particle DOWN, not up (the P7 flip wrongly sent it up).
         #expect(inst.positionAndSize.y < -5)
     }
 
     @Test("Rotated emitter sends negative-vy leaves UP (3725117707 case)")
     func rotatedEmitterInvertsVerticalDrift() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Same preset as the saber (velocity (0,-50), would fall down
-        // un-rotated), but the scene object is rotated ~159° like
-        // 3725117707's leaf layer. The rotation flips the vertical
-        // component, so the SAME negative vy now drifts the leaves UP.
-        // This is why a single no-flip convention yields opposite
-        // on-screen directions for the two scenes — and why toggling a
-        // global Y-flip to "fix" one silently inverts the other.
         let def = makeDefinition(
             originOffset: SIMD3(0, 0, 0),
             velocityMin: SIMD3(0, -50, 0),
@@ -190,7 +159,7 @@ struct WPEParticleCoordinateTests {
         )
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(4216, 2416),
-            objectOrigin: SIMD3<Float>(2108, 1208, 0), // renderOrigin (0, 0)
+            objectOrigin: SIMD3<Float>(2108, 1208, 0),
             objectScale: SIMD3<Float>(3, 3, 1),
             objectAngleZ: 2.77231
         )
@@ -297,8 +266,6 @@ struct WPEParticleCoordinateTests {
 
         #expect(instance.positionAndSize.z < 0)
         #expect(instance.rotationAndLife.w > 0)
-        // Sprite rotation carries the object's `+angleZ` (matches the image quad;
-        // the horizontal mirror rides positionAndSize.z sign, not the angle).
         #expect(abs(instance.rotationAndLife.x - 0.75) < 0.001)
     }
 
@@ -319,10 +286,6 @@ struct WPEParticleCoordinateTests {
 
     @Test("Sphere surface direction matches WPE GenSphereSurfaceNormal: gaussian(0, directions.axis) per enabled axis, disabled axis forced to 0, result normalized")
     func sphereSurfaceDirectionMatchesGenSphereSurfaceNormal() {
-        // Algorism.h: `u = direct.x()>0 ? normal_random(0, direct.x()) : 0` (same for
-        // v/w), then `(u,v,w)/|(u,v,w)|`. Mock the sampler to return the requested
-        // stddev verbatim so the expected normalization is hand-verifiable, and to
-        // prove the disabled Z axis is never even queried.
         var requestedStddevs: [Double] = []
         let normal = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(3, 4, 0)) { mean, stddev in
             #expect(mean == 0)
@@ -330,7 +293,6 @@ struct WPEParticleCoordinateTests {
             return stddev
         }
         #expect(requestedStddevs == [3, 4], "the disabled Z axis must not be sampled")
-        // (3, 4, 0) normalizes to (0.6, 0.8, 0) — a 3-4-5 triangle.
         #expect(abs(normal.x - 0.6) < 0.0001)
         #expect(abs(normal.y - 0.8) < 0.0001)
         #expect(abs(normal.z) < 0.0001)
@@ -344,8 +306,6 @@ struct WPEParticleCoordinateTests {
 
     @Test("Sphere surface direction with a single enabled axis always lands on ±that axis")
     func sphereSurfaceDirectionSingleAxisIsAlwaysUnitOnThatAxis() {
-        // Only Z enabled: v = 0, w = gaussian sample (may be negative), normalized
-        // to exactly ±1 — the axis itself never collapses toward zero.
         let positive = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(0, 0, 5)) { _, _ in 2.5 }
         #expect(positive == SIMD3<Double>(0, 0, 1))
         let negative = WPEParticleSystem.sphereSurfaceDirection(directions: SIMD3<Double>(0, 0, 5)) { _, _ in -2.5 }
@@ -354,15 +314,10 @@ struct WPEParticleCoordinateTests {
 
     @Test("Sphere radius sampling is volume-uniform: lerp(pow(rand, 1/3), min, max), not naive lerp(rand, min, max)")
     func sphereRadiusIsVolumeUniform() {
-        // ParticleEmitter.cpp: `algorism::lerp(pow(Random::get(0,1), 1/3), min, max)`.
-        // At rand=0.5 that lands at 100·0.5^(1/3) ≈ 79.4% of the range — well past
-        // the 50% a naive uniform sampler would give, because a sphere's volume
-        // grows with r³ so most of its mass sits near the outer shell.
         let r = WPEParticleSystem.sphereRadius(min: 0, max: 100, uniform01: 0.5)
         #expect(abs(r - 100 * pow(0.5, 1.0 / 3.0)) < 0.0001)
         #expect(r > 75, "volumetric bias should skew well past the naive-uniform midpoint of 50 (got \(r))")
 
-        // Bounds are respected at the extremes, and shifted min/max still lerp correctly.
         #expect(abs(WPEParticleSystem.sphereRadius(min: 10, max: 90, uniform01: 0) - 10) < 0.0001)
         #expect(abs(WPEParticleSystem.sphereRadius(min: 10, max: 90, uniform01: 1) - 90) < 0.0001)
     }

@@ -2,9 +2,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// SettingsManager-backed `ScreenConfigurationPersisting` adapter. Stays in the
-/// main target; the Core store class lives in
-/// `LiveWallpaperCore/Persistence/WallpaperConfigurationStore.swift`.
+/// Connects the core wallpaper configuration store to app settings persistence.
 @MainActor
 struct SettingsManagerScreenConfigurationPersistence: ScreenConfigurationPersisting {
     func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {

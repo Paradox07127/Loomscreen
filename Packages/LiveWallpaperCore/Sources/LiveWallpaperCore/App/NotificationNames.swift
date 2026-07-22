@@ -9,23 +9,13 @@ extension Notification.Name {
 
     public static let openGeneralSettings = Notification.Name("OpenGeneralSettings")
 
-    /// Request the AppDelegate to (re-)open the onboarding flow. Posted by
-    /// the General Settings "Welcome Tour" tile. Decoupled via notification
-    /// because `@NSApplicationDelegateAdaptor` wraps the user delegate in
-    /// `SwiftUI.AppDelegate`, breaking `NSApplication.shared.delegate as?
-    /// AppDelegate` from inside a SwiftUI-hosted window.
+    /// Requests onboarding presentation without relying on the wrapped SwiftUI application delegate.
     public static let showOnboarding = Notification.Name("ShowOnboarding")
 
-    /// A screen's persisted wallpaper configuration changed (saved or removed).
-    /// `userInfo["screenID"]: CGDirectDisplayID` identifies which screen.
-    /// Inspectors / detail views should reload their @State from the manager
-    /// when the screenID matches the one they currently display.
+    /// Announces a persisted configuration change; `userInfo["screenID"]` identifies the display.
     public static let wallpaperConfigurationDidChange = Notification.Name("WallpaperConfigurationDidChange")
 
-    /// A Wallpaper Engine import finished (success or unsupported variant).
-    /// `userInfo["screenID"]: CGDirectDisplayID` identifies the target screen.
-    /// `userInfo["type"]: String` is the WPE original type rawValue
-    /// (`"video"` / `"web"` / `"scene"` / `"application"` / `"unknown"`).
+    /// Announces a WPE import result with `screenID` and original `type` in `userInfo`.
     public static let wpeImportDidComplete = Notification.Name("WPEImportDidComplete")
 
     /// The recent Wallpaper Engine import history (LRU) was mutated.
@@ -33,11 +23,7 @@ extension Notification.Name {
     /// `SettingsManager.shared.loadGlobalSettings().recentWPEImports`.
     public static let wpeHistoryDidChange = Notification.Name("WPEHistoryDidChange")
 
-    /// Status-bar requested the main window to launch the appropriate
-    /// "Add Wallpaper" picker. The status bar can no longer host a modal
-    /// `NSOpenPanel` reliably — focus loss puts the panel behind the menu
-    /// bar overlay. `userInfo["kind"]: String` is one of "video" / "html-file"
-    /// / "html-folder" / "html-url".
+    /// Requests an Add Wallpaper picker from the main window; `userInfo["kind"]` identifies the source type.
     public static let promptAddWallpaper = Notification.Name("PromptAddWallpaper")
 
     /// Workshop library root bookmark was set or cleared. Sidebar /
@@ -62,16 +48,10 @@ extension Notification.Name {
     /// `WeatherReactiveService` reacts by re-resolving its provider chain.
     public static let weatherLocationPreferenceDidChange = Notification.Name("WeatherLocationPreferenceDidChange")
 
-    /// User toggled `GlobalSettings.developerModeEnabled`. Live `HTMLWebView`
-    /// instances react by flipping `isInspectable` in place (no session
-    /// rebuild); `ContentView` refreshes the Developer Tools sidebar entry
-    /// visibility and falls back the selection if the entry disappears.
+    /// Announces a developer-mode change to live web views and app navigation.
     public static let developerModeDidChange = Notification.Name("DeveloperModeDidChange")
 
-    /// Request the main window to navigate to the Steam Workshop pane (e.g. the
-    /// scene detail's "Find in Workshop" link). `ContentView` switches the
-    /// sidebar selection; `WorkshopPaneView` picks up any pending search target
-    /// from `WorkshopDeepLink` on appear / receipt.
+    /// Requests navigation to the Workshop pane and any pending deep-link target.
     public static let openWorkshopPane = Notification.Name("OpenWorkshopPane")
 
     /// Request the main window to navigate to the Apple Aerials library (e.g.

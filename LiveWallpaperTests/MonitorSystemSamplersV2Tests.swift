@@ -3,18 +3,11 @@ import Foundation
 import Darwin
 @testable import LiveWallpaper
 
-/// Pure-logic coverage for the schema-v2 system sampler additions. Hardware-touching
-/// probes are exercised only for shape/leniency (never exact values) so the suite is
-/// deterministic on any Mac and in CI.
 @Suite("Monitor system samplers v2")
 struct MonitorSystemSamplersV2Tests {
 
-    // MARK: - Top-level PID resolution (app aggregation)
-
     @Test("A helper resolves up to its top-level app, stopping below launchd")
     func topLevelPIDWalksToApp() {
-        // 100 = Chrome (parent launchd), 200/201 = its helpers, 300 = a lone XPC
-        // service parented directly by launchd.
         let parents: [Int32: Int32] = [100: 1, 200: 100, 201: 200, 300: 1]
         #expect(SystemMetricsSamplers.topLevelPID(201, parents: parents) == 100)
         #expect(SystemMetricsSamplers.topLevelPID(200, parents: parents) == 100)
@@ -24,14 +17,11 @@ struct MonitorSystemSamplersV2Tests {
 
     @Test("Unknown parent or a cycle terminates instead of looping")
     func topLevelPIDGuardsCyclesAndGaps() {
-        // 500's parent 600 isn't in the map → stops at 500; 700<->800 cycle terminates.
         let parents: [Int32: Int32] = [500: 600, 700: 800, 800: 700]
         #expect(SystemMetricsSamplers.topLevelPID(500, parents: parents) == 600)
         let cyclic = SystemMetricsSamplers.topLevelPID(700, parents: parents)
         #expect(cyclic == 700 || cyclic == 800)
     }
-
-    // MARK: - Memory breakdown formula (synthetic vm_statistics64)
 
     private func makeVMStats(
         internalPages: UInt32,
@@ -55,8 +45,6 @@ struct MonitorSystemSamplersV2Tests {
         let stats = makeVMStats(internalPages: 100, purgeable: 10, wire: 20, compressor: 5, external: 30)
         let breakdown = SystemMetricsSamplers.memoryBreakdown(from: stats, pageSize: page)
 
-        // App = internal − purgeable = 90; Wired = 20; Compressed = 5;
-        // Cached Files = external + purgeable = 40.
         #expect(breakdown.appBytes == 90 * page)
         #expect(breakdown.wiredBytes == 20 * page)
         #expect(breakdown.compressedBytes == 5 * page)
@@ -69,9 +57,7 @@ struct MonitorSystemSamplersV2Tests {
         let stats = makeVMStats(internalPages: 200, purgeable: 50, wire: 40, compressor: 10, external: 60)
         let breakdown = SystemMetricsSamplers.memoryBreakdown(from: stats, pageSize: page)
         let used = breakdown.appBytes + breakdown.wiredBytes + breakdown.compressedBytes
-        // App = 150, Wired = 40, Compressed = 10 → 200 pages.
         #expect(used == 200 * page)
-        // Crucially it excludes cachedFiles (110 pages) — the old bug counted them.
         #expect(used != (breakdown.appBytes + breakdown.wiredBytes + breakdown.compressedBytes + breakdown.cachedFilesBytes))
     }
 
@@ -81,8 +67,6 @@ struct MonitorSystemSamplersV2Tests {
         let breakdown = SystemMetricsSamplers.memoryBreakdown(from: stats, pageSize: 4_096)
         #expect(breakdown.appBytes == 0)
     }
-
-    // MARK: - Per-interface delta / rate math
 
     private func iface(
         _ name: String,
@@ -117,10 +101,10 @@ struct MonitorSystemSamplersV2Tests {
         )
         #expect(rows.count == 1)
         let en0 = rows[0]
-        #expect(en0.rxBytesPerSec == 1_000)      // (3000-1000)/2
-        #expect(en0.txBytesPerSec == 500)        // (1500-500)/2
-        #expect(en0.rxPacketsPerSec == 10)       // (30-10)/2
-        #expect(en0.txPacketsPerSec == 5)        // (15-5)/2
+        #expect(en0.rxBytesPerSec == 1_000)
+        #expect(en0.txBytesPerSec == 500)
+        #expect(en0.rxPacketsPerSec == 10)
+        #expect(en0.txPacketsPerSec == 5)
         #expect(en0.addresses == ["192.168.1.5"])
         #expect(en0.isActive == true)
     }
@@ -162,7 +146,7 @@ struct MonitorSystemSamplersV2Tests {
     func interfaceDormantDropped() {
         let current = [
             iface("en0", ibytes: 1_000, addresses: ["10.0.0.2"]),
-            iface("utun9")  // no bytes, no address → dropped
+            iface("utun9")
         ]
         let rows = SystemMetricsSamplers.networkInterfaces(
             previous: [:], current: current, interval: 1.0, activeName: nil
@@ -186,8 +170,8 @@ struct MonitorSystemSamplersV2Tests {
             "en1": iface("en1", ibytes: 0)
         ]
         let current = [
-            iface("en0", ibytes: 1_000),   // +1000
-            iface("en1", ibytes: 9_000)    // +9000 → busiest
+            iface("en0", ibytes: 1_000),
+            iface("en1", ibytes: 9_000)
         ]
         let rows = SystemMetricsSamplers.networkInterfaces(
             previous: previous, current: current, interval: 1.0, activeName: nil
@@ -210,8 +194,6 @@ struct MonitorSystemSamplersV2Tests {
         #expect(rows.filter { $0.isActive == true }.count == 1)
     }
 
-    // MARK: - IOPS time mapping
-
     @Test("IOPS -1 (calculating) maps to nil; non-negative maps through")
     func iopsMinutesMapping() {
         #expect(SystemMetricsSamplers.mapIOPSMinutes(-1) == nil)
@@ -228,30 +210,21 @@ struct MonitorSystemSamplersV2Tests {
         #expect(SystemMetricsSamplers.mapPowerSourceType(nil) == nil)
     }
 
-    // MARK: - Accessory kind heuristic
-
     @Test("Accessory kind is inferred from the product name")
     func accessoryKindHeuristic() {
         #expect(SystemMetricsSamplers.accessoryKind(productName: "Magic Trackpad") == "trackpad")
         #expect(SystemMetricsSamplers.accessoryKind(productName: "Taijia's Magic Keyboard") == "keyboard")
         #expect(SystemMetricsSamplers.accessoryKind(productName: "Magic Mouse") == "mouse")
         #expect(SystemMetricsSamplers.accessoryKind(productName: "Some Widget") == "other")
-        // Trackpad is checked before mouse so "Magic Trackpad" never reads as mouse.
         #expect(SystemMetricsSamplers.accessoryKind(productName: "trackpad") == "trackpad")
     }
-
-    // MARK: - CPU info topology
 
     @Test("CPU info reports a device name, core count, and named core groups")
     func cpuInfoShape() {
         let info = SystemMetricsSamplers.sampleCPUInfo()
-        // Lenient: on this platform these are present, but only assert internal
-        // consistency, never exact strings/counts.
         if let groups = info.coreGroups {
             #expect(!groups.isEmpty)
             #expect(groups.allSatisfy { $0.physicalCount > 0 })
-            // Names are the real hw.perflevelN.name strings (or "CPU" fallback) —
-            // always non-empty, never a fabricated placeholder.
             #expect(groups.allSatisfy { !$0.name.isEmpty })
             if let count = info.coreCount {
                 let groupSum = groups.reduce(0) { $0 + $1.physicalCount }
@@ -268,21 +241,17 @@ struct MonitorSystemSamplersV2Tests {
         }
     }
 
-    // MARK: - Option gating
-
     @Test("Default options preserve pre-v2 behavior")
     func defaultOptions() {
         let options = SystemMetricsSource.Options.default
         #expect(options.gpu == true)
         #expect(options.accessories == true)
-        #expect(options.ane == false)          // priciest walk stays off by default
+        #expect(options.ane == false)
         #expect(options.topProcesses == false)
     }
 
     @Test("includeTopProcesses convenience init only flips the top-processes gate")
     func convenienceInitGating() {
-        // Verified structurally: the Options the source builds from
-        // includeTopProcesses:true differs from the default only in topProcesses.
         var expected = SystemMetricsSource.Options.default
         expected.topProcesses = true
         var built = SystemMetricsSource.Options.default
@@ -301,8 +270,6 @@ struct MonitorSystemSamplersV2Tests {
         #expect(disabled.gpu == false)
         #expect(disabled.accessories == false)
     }
-
-    // MARK: - Snapshot units discipline (missing hardware → nil, never 0-pretending)
 
     @Test("GPU sample scales percentages into 0…1 or leaves nil")
     func gpuSampleUnits() {
@@ -330,9 +297,7 @@ struct MonitorSystemSamplersV2Tests {
         let sample = SystemMetricsSamplers.sampleANE(limit: 5)
         #expect(sample.processes.count <= 5)
         #expect(sample.processes.allSatisfy { $0.footprintBytes > 0 })
-        // active must agree with whether any process was retained.
         #expect(sample.active == !sample.processes.isEmpty || sample.processes.isEmpty)
-        // Sorted descending by footprint.
         let footprints = sample.processes.map(\.footprintBytes)
         #expect(footprints == footprints.sorted(by: >))
     }

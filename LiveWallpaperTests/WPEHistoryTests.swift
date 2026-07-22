@@ -37,8 +37,6 @@ struct WPEHistoryTests {
     func capsAtMaxRecentImports() throws {
         withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
-            // Cap raised 20 → 200 in 84c1276 (Installed library is the
-            // primary managed store now). Overshoot by 5 to exercise it.
             let cap = SettingsManager.maxRecentWPEImports
             let total = cap + 5
             for index in 0..<total {
@@ -68,7 +66,6 @@ struct WPEHistoryTests {
         withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             manager.recordWPEImport(makeEntry("1", sizeBytes: 4096))
-            // Activation re-records with no size; it must not be lost.
             manager.recordWPEImport(makeEntry("1", title: "Reactivated"))
 
             let entry = manager.loadGlobalSettings().recentWPEImports.first
@@ -87,11 +84,9 @@ struct WPEHistoryTests {
             manager.updateWPEImportSize(workshopID: "1", sizeBytes: 2048)
             #expect(manager.loadGlobalSettings().recentWPEImports.first?.sizeBytes == 2048)
 
-            // Already measured → second call is a no-op (no clobber).
             manager.updateWPEImportSize(workshopID: "1", sizeBytes: 9999)
             #expect(manager.loadGlobalSettings().recentWPEImports.first?.sizeBytes == 2048)
 
-            // Unknown id → no-op.
             manager.updateWPEImportSize(workshopID: "missing", sizeBytes: 1)
             #expect(manager.loadGlobalSettings().recentWPEImports.count == 1)
         }
@@ -99,8 +94,6 @@ struct WPEHistoryTests {
 
     @Test("Legacy JSON without sizeBytes decodes to nil")
     func legacyDecodeWithoutSize() throws {
-        // A nil optional encodes with no key (encodeIfPresent), mirroring JSON
-        // written before the field existed — round-trips back to nil.
         let entry = makeEntry("7", title: "Legacy")
         let data = try JSONEncoder().encode(entry)
         #expect(!String(decoding: data, as: UTF8.self).contains("sizeBytes"))

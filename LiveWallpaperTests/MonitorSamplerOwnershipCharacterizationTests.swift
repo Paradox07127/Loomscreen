@@ -6,27 +6,19 @@
     import os
     import Testing
 
-    /// AF-14 E2: lock event-driven memory pressure and visible-only ownership of
-    /// the legacy telemetry sampler. No test manufactures a kernel pressure event
-    /// or claims an Energy-impact result.
     @Suite("AF-14: monitor sampler ownership characterization", .serialized)
     struct MonitorSamplerOwnershipCharacterizationTests {
         @Test("menu and settings references share one task and balance independently")
         func visibleReferenceLifecycle() {
             var counter = MonitoringReferenceCounter()
 
-            // #expect's expansion makes `counter` immutable, so every mutating call
-            // has to land in a local first.
             #expect(counter.count == 0)
-            // Menu becomes visible: first owner starts the sampler.
             let menuStarted = counter.start()
             #expect(menuStarted)
             #expect(counter.count == 1)
-            // Settings becomes visible: second owner shares the same task.
             let settingsStarted = counter.start()
             #expect(!settingsStarted)
             #expect(counter.count == 2)
-            // Either surface may disappear first without stopping the survivor.
             let firstStopped = counter.stop()
             #expect(!firstStopped)
             #expect(counter.count == 1)
@@ -36,8 +28,6 @@
             let extraStopped = counter.stop()
             #expect(!extraStopped)
 
-            // Final app shutdown consumes all outstanding UI references together;
-            // late SwiftUI disappear releases then remain harmless.
             let restarted = counter.start()
             #expect(restarted)
             let restartedAgain = counter.start()
@@ -70,8 +60,6 @@
             #expect(!observers.contains("systemMemoryWarning"))
             #expect(!observers.contains("systemMemoryNormal"))
 
-            // Monitor v2 has no implicit/global owner: no leases means no merged
-            // options and therefore no pipeline.
             #expect(MonitorRuntime.merged([]) == nil)
         }
 
@@ -128,9 +116,6 @@
             #expect(watcher.startCount == 1)
             #expect(watcher.stopCount == 1)
 
-            // `stop()` is intentionally not a callback barrier. Model a callback
-            // that was already dequeued before cancellation; the MainActor owner
-            // must reject it using its termination latch.
             watcher.emitLate(.critical)
             await settleMainActorTasks()
             #expect(!manager.isUnderMemoryPressure)

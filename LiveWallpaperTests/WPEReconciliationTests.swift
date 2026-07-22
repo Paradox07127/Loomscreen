@@ -4,13 +4,6 @@ import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 1.x test gap closure for plan §A4/A5/A11/A14.
-/// Day 1-6 acceptance verifies these via end-to-end flows; this suite locks
-/// the underlying contract on `WPEOriginReconciler` and `WPEOrigin.matchesBookmark`
-/// so future refactors stay honest. (Phase 0 of the Lite/Pro split moved the
-/// reconciliation logic from `ScreenConfiguration.reconcileWPEOrigin()` into
-/// the injectable `OriginReconciler` protocol; the underlying matching
-/// semantics here are unchanged.)
 @Suite("WPE reconcile + matchesBookmark contract") @MainActor
 struct WPEReconciliationTests {
 

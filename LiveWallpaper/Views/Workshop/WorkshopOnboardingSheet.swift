@@ -2,8 +2,6 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// First-time-only sheet shown before the paste sheet opens. Mirrors the
-/// onboarding mockup (`docs/mockups/workshop-ui.html`).
 struct WorkshopOnboardingSheet: View {
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var hasShown: Bool = false
     @Environment(\.dismiss) private var dismiss

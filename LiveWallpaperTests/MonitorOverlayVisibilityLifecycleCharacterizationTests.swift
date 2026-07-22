@@ -4,7 +4,6 @@ import Foundation
 import LiveWallpaperCore
 import Testing
 
-/// RR-15 E2 behavior and source contracts for Monitor-overlay visibility.
 @Suite("RR-15 Monitor overlay visibility lifecycle")
 struct MonitorOverlayVisibilityLifecycleCharacterizationTests {
     @Test("desktop uses detector occlusion while front remains paintable")
@@ -193,8 +192,6 @@ struct MonitorOverlayVisibilityLifecycleCharacterizationTests {
         #expect(hostState.contains("var isVisible = false"))
         #expect(hostState.contains("var isDeliveringSnapshots = false"))
 
-        // A new board is parked before its window is shown. Only the serialized
-        // delivery step can unsuspend and prime a currently visible host.
         #expect(hostCreation.contains("board.setSuspended(true)"))
         #expect(hostCreation.contains("reconcileVisibilityAndRuntime()"))
         #expect(visibilityUpdate.contains("guard self.isUserAbsent != isUserAbsent"))
@@ -259,8 +256,6 @@ struct MonitorOverlayVisibilityLifecycleCharacterizationTests {
             )
         )
 
-        // Runtime calls are confined to the single reconciliation task rather
-        // than launched as independent fire-and-forget operations.
         #expect(!controller.contains("Task { await MonitorRuntime.shared"))
     }
 
@@ -371,14 +366,10 @@ struct MonitorOverlayVisibilityLifecycleCharacterizationTests {
             )
         )
 
-        // The E2 bridge must not change the window's cross-Space contract.
         #expect(windowInitialization.contains(".canJoinAllSpaces"))
         #expect(windowInitialization.contains(".stationary"))
         #expect(windowInitialization.contains(".fullScreenAuxiliary"))
 
-        // REAL-DEVICE TODO (RR-15 P2): turn off "Displays have separate Spaces"
-        // and verify desktop/front visibility across full-screen Space changes.
-        // Keep the current strategy until that matrix has device evidence.
     }
 
     @Test("ordinary Finder windows participate in desktop occlusion")

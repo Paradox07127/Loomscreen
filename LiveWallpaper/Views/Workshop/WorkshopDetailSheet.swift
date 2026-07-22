@@ -261,7 +261,6 @@ struct WorkshopInspectorContent: View {
                 .disabled(true)
                 .help(Text("Open a display first, then apply"))
         } else if screens.count == 1, let only = screens.first {
-            // Name the single display in the label so the action is unambiguous; no picker needed.
             Button { apply(entry, to: only) } label: {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -333,9 +332,6 @@ struct WorkshopInspectorContent: View {
                     Spacer(minLength: 0)
                     cancelDownloadButton
                 }
-                // steamcmd usually streams no percentage for workshop items; an indeterminate
-                // linear bar (not a spinner) matches the determinate bar's shape so the control
-                // doesn't jump when a percentage does arrive.
                 ProgressView()
                     .progressViewStyle(.linear)
                     .accessibilityLabel(Text(title))
@@ -573,9 +569,7 @@ struct WorkshopApplyTargetPicker: View {
     }
 }
 
-/// Description block shared by the online + Installed inspectors. Collapsing animates a real
-/// height change with a bottom fade — the text is laid out full-size and cropped, so the
-/// height interpolates smoothly instead of snapping at a line boundary.
+/// Description block shared by the online + Installed inspectors.
 struct CollapsibleDescription: View {
     let text: String
     @Binding var isExpanded: Bool

@@ -1,9 +1,6 @@
 import SwiftUI
 
 /// 3-bar audio-style equalizer indicator for the currently-playing row.
-///
-/// 50 ms minimum interval (≈20 fps) keeps per-row CPU cost predictable. The
-/// timeline pauses when not playing; reduceMotion renders static mid-heights.
 struct EQPulseBar: View {
     let isPlaying: Bool
     var tint: Color = .accentColor

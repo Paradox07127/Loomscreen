@@ -15,10 +15,7 @@ struct CodexSessionScanner: Sendable {
     private static let scanWindow: TimeInterval = 48 * 60 * 60
     private static let liveFileWindow: TimeInterval = 10 * 60
     private static let maxFiles = 40
-    /// Compatibility budgets for layouts that do not use
-    /// `sessions/YYYY/MM/DD`. Top-level discovery is deliberately separate from
-    /// descendant traversal so neither phase can hide unbounded work in the
-    /// other's allowance.
+    /// Compatibility budgets for layouts that do not use `sessions/YYYY/MM/DD`.
     private static let fallbackTopLevelEntryLimit = 96
     private static let fallbackDescendantEntryLimit = 256
     private static let fallbackRootLimit = 32
@@ -88,10 +85,7 @@ struct CodexSessionScanner: Sendable {
             }
     }
 
-    /// Visits only the calendar-day leaves covered by the 48-hour window. A
-    /// 48-hour interval can touch three civil days (and DST can change their
-    /// duration), so derive the leaves with Calendar rather than subtracting a
-    /// fixed number of folder names.
+    /// Visits only the calendar-day leaves covered by the 48-hour window.
     private func candidateFiles(
         under sessionsURL: URL,
         cutoff: Date,
@@ -147,16 +141,7 @@ struct CodexSessionScanner: Sendable {
             }
         }
 
-        // Older Codex builds or hand-migrated stores may have a non-date
-        // layout. DirectoryEnumerator is lazy, and
-        // `skipsSubdirectoryDescendants` makes this a genuinely shallow scan;
-        // unlike `contentsOfDirectory`, it does not materialize and sort the
-        // entire directory before the budget can be enforced. Every raw entry
-        // pulled from the enumerator consumes the budget before filtering, so
-        // hidden, malformed, canonical-year, and symlink entries cannot make
-        // the work counter under-report the traversal. This is intentionally a
-        // best-effort compatibility sample: an unknown legacy root beyond the
-        // first 96 entries is traded for a strict resource ceiling.
+        // Older Codex builds or hand-migrated stores may have a non-date layout.
         guard let topLevelEnumerator = fileManager.enumerator(
             at: sessionsURL,
             includingPropertiesForKeys: Array(fileKeys),
@@ -206,12 +191,7 @@ struct CodexSessionScanner: Sendable {
             }
         }
 
-        // Round-robin across unexpected roots. A single huge legacy directory
-        // cannot consume the entire compatibility budget before a neighboring
-        // root containing the current active session is sampled. This still
-        // runs beside the date-shard scan because migrated stores can contain
-        // both layouts; the bounded legacy candidates participate in the same
-        // final top-40 ordering.
+        // Round-robin across unexpected roots.
         while fallbackDescendantEntries < Self.fallbackDescendantEntryLimit,
               walkers.contains(where: { !$0.exhausted }) {
             for index in walkers.indices

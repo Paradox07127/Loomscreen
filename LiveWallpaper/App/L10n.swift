@@ -1,10 +1,6 @@
 import Foundation
 
-/// Centralized localized strings for AppKit-bridged surfaces (NSOpenPanel, NSWindow, NSMenu)
-/// where SwiftUI's automatic LocalizedStringKey resolution is unavailable.
-///
-/// Naming convention: `<bucket>.<scope>.<descriptor>` (snake_case).
-/// Buckets in use: `panel.prompt.*`, `panel.message.*`, `window.title.*`.
+/// Centralized localized strings for AppKit-bridged surfaces (NSOpenPanel, NSWindow, NSMenu) where SwiftUI's automatic LocalizedStringKey resolution is unavailable.
 enum L10n {
     enum Panel {
         static let useAsWallpaper = String(

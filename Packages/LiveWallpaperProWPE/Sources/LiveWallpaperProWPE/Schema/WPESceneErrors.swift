@@ -87,8 +87,7 @@ public enum SceneLoadDiagnostic: Equatable, Sendable {
     }
 }
 
-/// Diagnostic emitted by the parser when a non-critical field is missing or
-/// uses a feature Phase 2.0 does not yet support.
+/// Diagnostic emitted when a non-critical field is missing or unsupported.
 public struct WPESceneDiagnostic: Equatable, Sendable {
     public enum Severity: String, Sendable, Equatable {
         case info

@@ -3,8 +3,6 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Used by Doctor probes and Phase 3 download failures. Offers a redacted
-/// command preview plus Copy and Open-Terminal actions; never auto-executes.
 struct TerminalCommandPanel: View {
     let command: String
     let redactedPreview: Bool

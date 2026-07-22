@@ -2,17 +2,9 @@ import XCTest
 @testable import LiveWallpaper
 import LiveWallpaperCore
 
-/// Pure-logic tests for the CPU widget — no UI. They pin the composition-bar
-/// arithmetic, the dynamic identity-line composition and the per-core → group
-/// slicing (the parts of `MonitorCPUWidgetView` that a mock 1:1 replica must get
-/// exactly right regardless of layout). Static helpers are `nonisolated` so these
-/// run off the main actor under Swift Testing/XCTest.
 final class MonitorCPUWidgetTests: XCTestCase {
 
-    // MARK: Composition percents
-
     func testCompositionPercentsMirrorMock() {
-        // Mock sample: cpuUser 0.26, cpuSystem 0.11 → user 26 / sys 11 / idle 63.
         let (u, s, idle) = MonitorCPUWidgetView.compositionPercents(user: 0.26, system: 0.11)
         XCTAssertEqual(u, 26)
         XCTAssertEqual(s, 11)
@@ -21,12 +13,9 @@ final class MonitorCPUWidgetTests: XCTestCase {
     }
 
     func testCompositionPercentsNeverNegativeIdle() {
-        // Over-unity user+system (shouldn't happen) still yields a floored idle.
         let (_, _, idle) = MonitorCPUWidgetView.compositionPercents(user: 0.7, system: 0.6)
         XCTAssertEqual(idle, 0)
     }
-
-    // MARK: Identity line
 
     func testIdentityLineComposesDynamicGroups() {
         let info = MonitorCPUInfo(
@@ -43,7 +32,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
     }
 
     func testIdentityLineUsesRealGroupNamesNotHardcodedPE() {
-        // An Intel-style topology must surface its actual perflevel names.
         let info = MonitorCPUInfo(
             deviceName: "Apple M1",
             coreCount: 8,
@@ -67,8 +55,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
         XCTAssertNil(identity?.coreSummary)
     }
 
-    // MARK: Per-core group slicing
-
     func testCoreGroupLoadsSlicesByPhysicalCount() {
         let perCore = (0..<18).map { Double($0) / 18.0 }
         let info = MonitorCPUInfo(
@@ -85,7 +71,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
         XCTAssertEqual(groups?[0].loads.count, 6)
         XCTAssertEqual(groups?[1].name, "Performance")
         XCTAssertEqual(groups?[1].loads.count, 12)
-        // Contiguous, in order: last of group 0 then first of group 1.
         XCTAssertEqual(groups?[0].loads.last, 5.0 / 18.0)
         XCTAssertEqual(groups?[1].loads.first, 6.0 / 18.0)
     }
@@ -105,7 +90,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
     }
 
     func testCoreGroupLoadsHandlesTopologyDrift() {
-        // More cores than the declared groups cover → surplus trails as "CPU".
         let perCore = [0.1, 0.2, 0.3, 0.4, 0.5]
         let info = MonitorCPUInfo(
             deviceName: nil, coreCount: 4,
@@ -118,16 +102,12 @@ final class MonitorCPUWidgetTests: XCTestCase {
         XCTAssertEqual(groups?[1].loads, [0.5])
     }
 
-    // MARK: Formatting helpers
-
     func testWholePercentRoundsAndClamps() {
         XCTAssertEqual(MonitorCPUWidgetView.wholePercent(0.374), "37%")
         XCTAssertEqual(MonitorCPUWidgetView.wholePercent(1.4), "100%")
         XCTAssertEqual(MonitorCPUWidgetView.wholePercent(-0.2), "0%")
     }
 
-    /// Regression for the hero readout's double "%" (heroReadout appends its own
-    /// "%" unit Text, so the numeral it wraps must NOT carry one too).
     func testWholeNumberRoundsAndClampsWithoutPercentSign() {
         XCTAssertEqual(MonitorCPUWidgetView.wholeNumber(0.374), "37")
         XCTAssertEqual(MonitorCPUWidgetView.wholeNumber(1.4), "100")
@@ -142,8 +122,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
     }
 
     func testCpuTextRoundsAndClamps() {
-        // ≥10 stays whole-number; <10 gains one decimal so light load never
-        // reads as a flat "0"; negatives/non-finite clamp to 0.0.
         XCTAssertEqual(MonitorCPUWidgetView.cpuText(52.4), "52")
         XCTAssertEqual(MonitorCPUWidgetView.cpuText(0.44), "0.4")
         XCTAssertEqual(MonitorCPUWidgetView.cpuText(3.24), "3.2")
@@ -153,11 +131,9 @@ final class MonitorCPUWidgetTests: XCTestCase {
 
     func testBarFractionRelativeToBusiest() {
         XCTAssertEqual(MonitorCPUWidgetView.barFraction(26, maxCPU: 52), 0.5, accuracy: 1e-9)
-        XCTAssertEqual(MonitorCPUWidgetView.barFraction(80, maxCPU: 52), 1)   // clamped
-        XCTAssertEqual(MonitorCPUWidgetView.barFraction(10, maxCPU: 0), 1)    // safe denom
+        XCTAssertEqual(MonitorCPUWidgetView.barFraction(80, maxCPU: 52), 1)
+        XCTAssertEqual(MonitorCPUWidgetView.barFraction(10, maxCPU: 0), 1)
     }
-
-    // MARK: Header load text
 
     func testLoadTextSingleUsesLoadAverage1() {
         var sys = MonitorSystemSnapshot()
@@ -182,8 +158,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
         XCTAssertNil(MonitorCPUWidgetView.loadText(system: nil, triple: true))
     }
 
-    // MARK: Top-by-CPU attribution
-
     func testTopCPUProcessesSortsDescendingStableAndCaps() {
         let procs = [
             MonitorProcessSample(name: "A", cpuPercent: 12, memBytes: 0),
@@ -192,15 +166,13 @@ final class MonitorCPUWidgetTests: XCTestCase {
             MonitorProcessSample(name: "D", cpuPercent: 23, memBytes: 0)
         ]
         let top = MonitorCPUWidgetView.topCPUProcesses(procs, limit: 3)
-        XCTAssertEqual(top?.map(\.name), ["B", "C", "D"])   // ties keep original order
+        XCTAssertEqual(top?.map(\.name), ["B", "C", "D"])
     }
 
     func testTopCPUProcessesNilWhenNoData() {
         XCTAssertNil(MonitorCPUWidgetView.topCPUProcesses(nil, limit: 4))
         XCTAssertNil(MonitorCPUWidgetView.topCPUProcesses([], limit: 4))
     }
-
-    // MARK: L heat header helpers
 
     func testCoreCountAndGroupSummary() {
         let groups = [
@@ -211,8 +183,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
         XCTAssertEqual(MonitorCPUWidgetView.groupSummary(groups), "Super·6 / Performance·12")
     }
 
-    // MARK: Options draft
-
     func testHistoryWindowDefaultsPerSize() {
         XCTAssertEqual(MonitorCPUDraft.historyWindow(place(.small)), 30)
         XCTAssertEqual(MonitorCPUDraft.historyWindow(place(.medium)), 60)
@@ -222,7 +192,6 @@ final class MonitorCPUWidgetTests: XCTestCase {
     func testHistoryWindowExplicitOverrideAndInvalidFallback() {
         let set = MonitorCPUDraft.settingHistoryWindow(120, on: place(.medium))
         XCTAssertEqual(MonitorCPUDraft.historyWindow(set), 120)
-        // An out-of-set value falls back to the size default (medium → 60).
         var bogus = place(.medium)
         bogus.options[MonitorCPUDraft.historyWindowKey] = .number(45)
         XCTAssertEqual(MonitorCPUDraft.historyWindow(bogus), 60)

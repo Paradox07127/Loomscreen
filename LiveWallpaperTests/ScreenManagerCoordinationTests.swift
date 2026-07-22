@@ -937,11 +937,6 @@ struct ScreenManagerCoordinationTests {
     }
 }
 
-/// Captures notifications synchronously on the posting thread. The
-/// PlaybackCoordinator's setters run on `@MainActor`, so posts arrive on the
-/// main thread; using a `nil` operation queue keeps the observer on that same
-/// thread and sidesteps Swift 6 cross-isolation `@Sendable` requirements on
-/// `Notification`.
 private final class ConfigurationNotificationCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [ScreenChangeRecord] = []

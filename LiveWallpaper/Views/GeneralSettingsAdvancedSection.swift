@@ -3,11 +3,7 @@ import LiveWallpaperCore
 import SwiftUI
 
 extension GeneralSettingsView {
-    /// The Developer Mode toggle (and the Developer Tools surface it reveals)
-    /// compiles into local Pro DEBUG builds only — never a Release binary — so
-    /// end users can't reach the diagnostic harness or the HTML Web Inspector.
-    /// "Log Files" stays in every Pro build so users can still grab logs for a
-    /// bug report.
+    /// Exposes developer tools only in local Pro debug builds.
     @ViewBuilder
     var advancedSection: some View {
         Section {

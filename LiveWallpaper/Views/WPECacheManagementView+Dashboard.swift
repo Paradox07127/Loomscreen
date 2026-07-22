@@ -6,9 +6,7 @@ import SwiftUI
 extension WPECacheManagementView {
     // MARK: - Summary (total + clear-all)
 
-    // Excludes `reclaimableArchiveBytes`: "Clear All Caches" must NOT trash the
-    // source archives (a legacy cache-backed item's archive can be its only
-    // re-extractable copy). Archives have their own dedicated reclaim section.
+    // Excludes `reclaimableArchiveBytes`: "Clear All Caches" must NOT trash the source archives (a legacy cache-backed item's archive can be its only re-extractable copy).
     var totalBytes: UInt64 {
         var total = UInt64(stats?.totalBytes ?? 0)
         total += videoStats?.totalBytes ?? 0

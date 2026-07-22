@@ -8,7 +8,7 @@ import LiveWallpaperProWPE
 /// bare renderer so consumers depend on the adapter, not the renderer's own
 /// conformance.
 ///
-/// M2c1b-3c: the renderer now lives inside `WPEDisplayRenderActor`, so every
+/// The renderer lives inside `WPEDisplayRenderActor`, so every
 /// forward is a fire-and-forget post onto that actor. The setters tolerate a
 /// one-frame apply latency (the renderer reads the new value on its next frame),
 /// so nothing here needs to await. Delivery goes through the actor's ordered
@@ -48,7 +48,7 @@ final class WPERendererConfigAdapter: WallpaperPerformanceConfigurable, Wallpape
 /// `ScreenManager` through the shared `WallpaperRuntimeSession` protocol so
 /// the rest of the runtime stack does not need a scene-specific code path.
 ///
-/// M2c1b-3c: owns the per-display render actor (which owns the renderer) rather
+/// Owns the per-display render actor (which owns the renderer) rather
 /// than the renderer directly. Frame-config setters fire-and-forget through the
 /// adapter; diagnostics/present state are polled into `hasPresentedFrame` /
 /// `rendererDiagnostics` caches so the SwiftUI inspector reads them synchronously.
@@ -57,7 +57,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     let wallpaperType: WallpaperType = .scene
 
     private var window: NSWindow?
-    /// Per-display render isolation domain (M2c1b-3c). Owns the renderer; the
+    /// Per-display render isolation domain. Owns the renderer; the
     /// session drives it entirely through this actor.
     private let renderActor: WPEDisplayRenderActor
     /// The main-thread surface, held strongly so it (and the delivery shim it
@@ -298,7 +298,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         lifecycleGeneration += 1
         hasRenderer = false
         hasPresentedFrame = nil
-        // M2c2: remove the display-link reconfiguration observer and invalidate the
+        // Remove the display-link reconfiguration observer and invalidate the
         // link on main now, before the async teardown — so no rebuild can install a
         // link into an actor that is being shut down. No-op in `.main` mode.
         surface.stopDisplayLinkDriver()

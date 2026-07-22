@@ -3,11 +3,7 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// UI-08 E1 behavior lock. These tests intentionally characterize the current
-/// General Settings ownership surface before any page-specific state owners are
-/// extracted. The mount counters are source-level call-site counts because the
-/// current view constructs ServiceManagement/CoreLocation/audio singletons
-/// directly and therefore has no runtime spy seam yet.
+/// Locks the current general-settings ownership surface before page-specific owners are extracted.
 @Suite("UI-08: General Settings ownership characterization", .serialized)
 @MainActor
 struct GeneralSettingsOwnershipCharacterizationTests {
@@ -149,8 +145,6 @@ struct GeneralSettingsOwnershipCharacterizationTests {
         #expect(restarted.audioResponseEnabled == expected.audioResponseEnabled)
         #expect(restarted.adaptiveFrameRateEnabled == expected.adaptiveFrameRateEnabled)
 
-        // Unrelated values are the read-modify-write canaries: a page owner may
-        // not rebuild GlobalSettings from only its own controls.
         #expect(restarted.globalShortcutsEnabled == false)
         #expect(restarted.recentWPEImports == [history])
         #expect(restarted.deletedWorkshopIDs == ["ui-08-deleted"])

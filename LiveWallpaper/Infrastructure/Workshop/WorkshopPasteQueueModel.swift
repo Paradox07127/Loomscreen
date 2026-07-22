@@ -4,9 +4,7 @@ import Combine
 import Foundation
 import Observation
 
-/// Drives [WorkshopPasteSheet]. Owns the parsed-row state machine described
-/// in `docs/2026-05-28-steam-workshop-integration-plan.md` ("State machine
-/// per `WorkshopPasteRowCard`").
+/// Owns Workshop paste parsing, metadata fetches, and row state.
 @MainActor
 @Observable
 final class WorkshopPasteQueueModel {
@@ -128,8 +126,7 @@ final class WorkshopPasteQueueModel {
         rows.removeAll()
     }
 
-    /// v1 batch action: kick off downloads in the real Steam client (no
-    /// in-app download yet).
+    /// Opens every valid row in the Steam client.
     func openAllInSteam() {
         for row in rows {
             guard let url = row.steamURL else { continue }

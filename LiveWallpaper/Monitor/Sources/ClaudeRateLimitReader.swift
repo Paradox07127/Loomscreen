@@ -1,9 +1,6 @@
 import Foundation
 
-/// Account-level rate-limit percentages, already normalized to plain fields the
-/// Usage widget understands. `resets_at` is always epoch seconds regardless of the
-/// on-disk representation. Weekly reset is whatever the payload reports — never
-/// computed here.
+/// Account-level rate-limit percentages, already normalized to plain fields the Usage widget understands.
 struct ClaudeRateLimits: Sendable, Equatable {
     var fiveHourUsedPercent: Double?
     var fiveHourResetsAt: Double?
@@ -20,21 +17,7 @@ struct ClaudeRateLimits: Sendable, Equatable {
     }
 }
 
-/// Reads the freshest Claude Code statusline payload the user's capture script
-/// tees to `<root>/livewallpaper-statusline.json`.
-///
-/// The app's `~/.claude` bookmark is READ-ONLY, so this type only ever reads —
-/// installing the capture script is a one-time copy-paste the user runs in their
-/// own terminal (see `ClaudeStatuslineInstaller`).
-///
-/// Parsing is deliberately tolerant (`JSONSerialization`, every key optional):
-/// a partial or unfamiliar payload yields whatever fields it recognizes rather
-/// than throwing. Expected shape:
-///
-///     { "rate_limits": {
-///         "five_hour": { "used_percentage": 42.0, "resets_at": <ISO8601|epoch> },
-///         "seven_day": { "used_percentage": 71.0, "resets_at": <ISO8601|epoch> } },
-///       "timestamp": <ISO8601|epoch> }
+/// Reads the freshest Claude Code statusline payload the user's capture script tees to `<root>/livewallpaper-statusline.json`.
 struct ClaudeRateLimitReader: Sendable {
     private let fileURL: URL
     private let staleAfter: TimeInterval

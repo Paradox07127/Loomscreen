@@ -1,28 +1,16 @@
 import Foundation
 
-/// Canonical static-resolvability gate for SceneScript transform origins.
-///
-/// The same rule is enforced in two independently-compiled places on purpose:
-/// the parser package (`WPETransformScriptStaticAnalysis`) admits candidates at
-/// bake/dispatch time, and the XPC worker re-validates every batch because it
-/// must never trust the client across the process boundary. Keeping the token
-/// and pattern lists here — compiled into both the app and the helper from one
-/// source — lets a test assert the two gates never drift; a drift would make the
-/// worker reject items the client already accepted, silently falling the whole
-/// batch back to baked values.
+/// Canonical static-resolvability gate shared by the parser and the independently compiled XPC worker.
+/// The worker revalidates each batch because the process boundary is untrusted.
 enum SceneScriptStaticExecutionPolicy {
-    /// Markers that make a transform time/audio/random-driven and thus not
-    /// statically resolvable. CASE-SENSITIVE on purpose — `update` contains a
-    /// lowercase "date", so a case-insensitive `Date` check would wrongly
-    /// classify every origin script as dynamic.
+    /// Dynamic markers are case-sensitive because a case-insensitive `Date` check also matches `update`.
     static let dynamicTokens = [
         "getTimeOfDay", "engine.runtime", "frametime", "frameTime", "getTime", "Date",
         "Math.random", "getFrequency", "getFrequencies", "audio", "elapsed",
         "input.cursorWorldPosition", "shared.", "shared["
     ]
 
-    /// Loop/eval forms are rejected conservatively: at parse time a hung
-    /// JSContext is worse than falling back to the baked value.
+    /// Loop and evaluation forms are rejected to keep static JavaScriptCore evaluation bounded.
     static let blocklistPatterns = [
         #"\bwhile\s*\("#,
         #"\bfor\s*\("#,

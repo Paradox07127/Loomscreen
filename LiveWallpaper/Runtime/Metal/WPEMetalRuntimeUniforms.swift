@@ -320,7 +320,7 @@ struct WPEMetalPointerSample: Equatable, Sendable {
 /// reads the non-blocking pointer mailbox the surface feeds; `fixed` is for
 /// fixtures that need a known active position regardless of the cursor. The
 /// closure is view-free — the surface, not the renderer, owns the `NSView`.
-// Not `@MainActor` (M2c1b-3c): sampled on the renderer's actor. The closure
+// Not `@MainActor`: sampled on the renderer's actor. The closure
 // reads the non-blocking pointer mailbox, which is safe off the main thread.
 struct WPEMetalPointerSampler {
     let sample: @Sendable () -> WPEMetalPointerSample

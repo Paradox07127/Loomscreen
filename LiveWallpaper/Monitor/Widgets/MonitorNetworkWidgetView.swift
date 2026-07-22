@@ -1,47 +1,12 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Network widget — ported from the mock's `net_s` / `net_m`
-/// (`.claude/plan/monitor-design/index.html`). A mirrored dual-area scope where
-/// ↓RX (amber) grows up from the midline and ↑TX (steel) grows down on a synced
-/// scale, framed by current rates, peak, session totals, and — on M — the folded
-/// interface / IP / connectivity / errors detail the design source folded in from
-/// the cut L. S diverges from the mock's RX-only micro bars after on-device
-/// review: two equal-size rate rows over the same shared-axis mirrored scope
-/// M runs, so both directions read at S too. Pure function of
-/// `MonitorWidgetContext`; charts read pre-accumulated history, never sample.
-///
-/// The mock marks Net-L `CUT` ("M's shrunk chart already holds the full detail;
-/// no L template needed") — but `MonitorWidgetKind.network.allowedSizes` still
-/// lets a user park Network at L on the board, so the same M content has to fill
-/// that taller cell on purpose rather than sit top-hugged over dead space. L
-/// reuses every M row verbatim and un-shrinks the scope back toward the window
-/// the pre-cut L used to show (mock's dormant `net120` — 120 samples, exactly
-/// `MonitorHistoryStore`'s default capacity), letting the chart grow to fill
-/// whatever height M's shrink step freed up.
-///
-/// Sized against Apple's fixed macOS widget frames (S 170×170, M 364×170,
-/// L 364×376 → content ≈ 125 pt tall on S/M, 331 on L): the scope is the one
-/// flexible row, absorbing whatever the fixed rows leave, and session Σ shares
-/// the bottom row with the errors/drops health line so M's five rows fit the
-/// 125 pt budget.
-///
-/// Small annotations (peak, session Σ, errors/drops, path-condition tags) use
-/// the board-wide `monitorChip` convention CPU established, diverging from the
-/// mock's plain-text originals; peak rides the chart's top-trailing corner
-/// (mirrors CPU M's `peakInlineTag`) instead of sharing a row with session Σ.
 struct MonitorNetworkWidgetView: View {
     let context: MonitorWidgetContext
 
-    // NET_UP = amber (RX, grows up) / NET_DN = steel (TX, grows down) — the mock's
-    // hue assignment, distinct from Disk's sage/violet so the two scopes never blur.
     private static let rxColor = MonitorDesign.signalAmber
     private static let txColor = MonitorDesign.signalSteel
 
-    // Mirrored-scope sample windows — S narrows to ~30s for its 138 pt width;
-    // M stays the "shrunk" 60s the network-verdict update chose; L un-shrinks
-    // toward the mock's dormant 120-sample `net120` window (== history capacity,
-    // so this is "show everything kept", not new data).
     private static let smallChartWindowSamples = 30
     private static let mediumChartWindowSamples = 60
     private static let largeChartWindowSamples = 120
@@ -52,10 +17,6 @@ struct MonitorNetworkWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Board convention (see CPU): the type scale derives from the mock's
-            // `cellH = cardHeight / rows`; S/M span one board row and L two, so
-            // dividing by 2·rowSpan yields one near-constant cell height (85/94)
-            // — hence one type scale — across all sizes.
             let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
             let cellHeight = geo.size.height / (2 * rowSpan)
             MonitorWidgetContainer(
@@ -146,22 +107,17 @@ struct MonitorNetworkWidgetView: View {
         scopeBody(cellHeight: cellHeight, isLarge: false)
     }
 
-    /// Same rows as M (mock: "no L template needed") but the scope un-shrinks —
-    /// a wider sample window, grown into the height L's extra board row frees up.
     @ViewBuilder
     private func largeBody(cellHeight: CGFloat) -> some View {
         scopeBody(cellHeight: cellHeight, isLarge: true)
     }
 
-    /// M budget (content ≈ 332×125): pair ~13 + detail ~34 + footer ~15 + gaps
-    /// ~16 leaves the scope its ~30 pt minimum plus the slack; only the scope
-    /// flexes, so font-metric drift can never push the fixed rows off the card.
+    /// Preserves a 30-point chart floor while allowing it to absorb font-metric changes.
     @ViewBuilder
     private func scopeBody(cellHeight: CGFloat, isLarge: Bool) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
         let rowSpacing = scale.label * (isLarge ? 0.8 : 0.6)
         VStack(alignment: .leading, spacing: rowSpacing) {
-            // current pair row
             HStack(alignment: .firstTextBaseline) {
                 currentPairLabel(scale: scale)
                 Spacer(minLength: 6)
@@ -177,14 +133,10 @@ struct MonitorNetworkWidgetView: View {
                 isLarge ? Self.largeChartWindowSamples : Self.mediumChartWindowSamples)
                 .overlay(alignment: .topTrailing) { peakTag(scale: scale) }
 
-            // interface / IP / connectivity detail (folded in from the cut L)
             if activeInterface != nil {
                 interfaceDetail(scale: scale)
             }
 
-            // footer: errors/drops health (whispered when clean, coral when
-            // non-zero) + session Σ share one row — peak already rides the
-            // chart corner, so Σ no longer warrants a row of its own.
             HStack(alignment: .firstTextBaseline) {
                 if let errN = errorCount {
                     healthCorner(errorCount: errN, scale: scale)
@@ -251,7 +203,6 @@ struct MonitorNetworkWidgetView: View {
     private func interfaceDetail(scale: MonitorDesign.TypeScale) -> some View {
         VStack(alignment: .leading, spacing: scale.caption * 0.34) {
             if let ip = privateIPv4 {
-                // "IPv4" is notation; the "Status" key is a localized word.
                 interfaceRow(key: "IPv4", value: ip, scale: scale)
             }
             interfaceRow(
@@ -320,7 +271,6 @@ struct MonitorNetworkWidgetView: View {
             if clean {
                 Text("no errors · no drops")
             } else {
-                // The count is data (verbatim); "errors/drops" is a phrase (localized).
                 (Text(verbatim: "\(errorCount)").font(MonitorDesign.subFont(size: scale.label))
                     .foregroundStyle(MonitorDesign.inkMuted)
                  + Text(verbatim: " ") + Text("errors/drops"))
@@ -334,11 +284,8 @@ struct MonitorNetworkWidgetView: View {
 
     // MARK: - Shared rate readout
 
-    /// Equal-size rows — direction is carried by the ↓/↑ arrow + hue, not size
-    /// (on-device review: the old hero/sub split made ↑TX read as an afterthought).
+    /// Uses equal-size rows with arrow and color cues for direction.
     private func dualRate(scale: MonitorDesign.TypeScale) -> some View {
-        // Slightly above sub so the pair stays THE S numeric read over the scope;
-        // both rows fit 138 pt at this size with the 0.7 scale-factor floor spare.
         let size = scale.sub * 1.12
         return VStack(alignment: .leading, spacing: scale.label * 0.35) {
             rateRow(label: "↓", labelColor: Self.rxColor,
@@ -352,7 +299,6 @@ struct MonitorNetworkWidgetView: View {
         }
     }
 
-    /// Splits "6.2 MB/s" into a bold numeral and a whispered unit, like `rateHero`.
     private func rateRow(
         label: String, labelColor: Color, text: String, font: Font, unitSize: CGFloat
     ) -> some View {
@@ -420,9 +366,7 @@ struct MonitorNetworkWidgetView: View {
         return chips
     }
 
-    /// Sum of the active interface's cumulative error/drop counters. `nil` when no
-    /// interface detail exists at all (block absent); the health line renders only
-    /// when this is non-nil, and whispers "no errors" when it is 0.
+    /// Sum of the active interface's cumulative error/drop counters.
     private var errorCount: Int? {
         guard let iface = activeInterface else { return nil }
         let rxErr = iface.rxErrors ?? 0
@@ -495,9 +439,6 @@ private func networkPreviewContext(size: MonitorWidgetSize) -> MonitorWidgetCont
     )
 
     var history = MonitorHistorySnapshot()
-    // 120 samples (history capacity) so the L preview's un-shrunk window has
-    // real variance to show, not just the 60s tail M already uses. Explicit
-    // closure types keep this under the type-check time budget.
     let rx: [Double] = (0..<120).map { (i: Int) -> Double in
         1_048_576.0 * (2.0 + 5.0 * abs(sin(Double(i) / 7.0)))
     }
@@ -522,8 +463,6 @@ private func networkPreviewContext(size: MonitorWidgetSize) -> MonitorWidgetCont
     )
 }
 
-// Preview frames are Apple's exact visible widget tiles (S 170×170, M 364×170,
-// L 364×376) — what `MonitorBoardGeometry.renderRect` hands this view.
 
 #Preview("Network S") {
     MonitorNetworkWidgetView(context: networkPreviewContext(size: .small))

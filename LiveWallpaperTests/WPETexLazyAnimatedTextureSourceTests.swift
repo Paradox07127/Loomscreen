@@ -166,10 +166,9 @@ struct WPETexLazyAnimatedTextureSourceTests {
         _ = try #require(source.texture(at: 0.0))
         #expect(source.debugSynchronousDecodedImageIDs == [0])
 
-        // image 1 (the upcoming frame's source) is decoded on the prefetch queue.
         #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(1) })
 
-        _ = try #require(source.texture(at: 0.21))   // cache hit, no extra sync decode
+        _ = try #require(source.texture(at: 0.21))
         #expect(source.debugSynchronousDecodedImageIDs == [0])
     }
 
@@ -184,7 +183,6 @@ struct WPETexLazyAnimatedTextureSourceTests {
 
         _ = try #require(source.texture(at: 0.31))
         #expect(source.debugSynchronousDecodedImageIDs == [1])
-        // Prefetch wraps past the end and warms frame 0's image before the seam.
         #expect(await waitUntil { source.debugDecodedImageCacheIDs.contains(0) })
     }
 
@@ -205,7 +203,6 @@ struct WPETexLazyAnimatedTextureSourceTests {
         #expect(source.debugDecodedImageCacheIDs.isEmpty)
         #expect(source.debugPrefetchInFlightImageIDs.isEmpty)
 
-        // The in-flight decode completes after invalidate; its result is dropped.
         try? await Task.sleep(nanoseconds: 300_000_000)
         #expect(source.debugDecodedImageCacheIDs.isEmpty)
         #expect(source.debugPrefetchInFlightImageIDs.isEmpty)
@@ -220,17 +217,13 @@ struct WPETexLazyAnimatedTextureSourceTests {
             label: "lazy-prefetch-fail"
         )
 
-        _ = try #require(source.texture(at: 0.0))   // image 0 ok; prefetches corrupt image 1
+        _ = try #require(source.texture(at: 0.0))
         #expect(await waitUntil { source.debugPrefetchFailedImageIDs.contains(1) })
 
-        // Advancing to a new frame re-runs scheduling; the failed image must NOT
-        // be put back in flight (no per-tick background respin on a corrupt image).
         _ = source.texture(at: 0.11)
         #expect(!source.debugPrefetchInFlightImageIDs.contains(1))
     }
 
-    /// Same 4-frame (image 0,0,1,1) looping layout as `makeStreamingPayload`, but
-    /// with LZ4-compressed source images so the prefetch exercises a real inflate.
     private func makeCompressedStreamingPayload() throws -> WPETexStreamingPayload {
         let image0 = makeImage(width: 4, height: 4, blue: 0)
         let image1 = makeImage(width: 4, height: 4, blue: 0x40)
@@ -263,10 +256,6 @@ struct WPETexLazyAnimatedTextureSourceTests {
         )
     }
 
-    /// Frames [0,0,1,1] but image 1 inflates to fewer bytes than its declared
-    /// `decompressedByteCount` (a valid LZ4 stream of 16 bytes claiming 64), so
-    /// the inflate THROWS — exercising the failure path without feeding the
-    /// system decoder malformed bytes (which can crash, not just error).
     private func makeCorruptSecondImagePayload() throws -> WPETexStreamingPayload {
         let image0 = makeImage(width: 4, height: 4, blue: 0)
         let mip0 = WPETexCompressedMipmap(
@@ -276,7 +265,7 @@ struct WPETexLazyAnimatedTextureSourceTests {
         let mipBad = WPETexCompressedMipmap(
             index: 0, width: 4, height: 4, isCompressed: true,
             compressedBytes: try lz4RawCompress(image0),
-            decompressedByteCount: 128   // inflates to 64; the mismatch throws
+            decompressedByteCount: 128
         )
         return WPETexStreamingPayload(
             info: WPETexInfo(

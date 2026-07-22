@@ -3,16 +3,8 @@ import AVFoundation
 import CoreGraphics
 import Foundation
 
-/// Measures the playback-phase offset between an intro overlay video and the
-/// free-running loop video it hands off to, so the renderer can keep the loop
-/// leading the intro and make the intro→loop crossfade seamless.
-///
-/// Why this exists: some WPE scenes (e.g. 3632513108) author the intro as the
-/// SAME character animation as the loop but with a camera move and a few seconds
-/// of phase shift (`intro@t ≈ loop@(t+offset)`). Nothing in the scene scripts
-/// wires the handoff — it relies purely on the two videos being time-aligned.
-/// We recover `offset` by cross-correlating a handful of downsampled grayscale
-/// frames, then the renderer slaves `loop.playhead = intro.playhead + offset`.
+/// Estimates the playback offset between an intro overlay and its free-running loop
+/// by cross-correlating downsampled frames, enabling a phase-aligned crossfade.
 enum WPEVideoPhaseOffset {
     private static let sampleWidth = 64
     private static let sampleHeight = 36

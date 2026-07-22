@@ -4,13 +4,6 @@ import LiveWallpaperCore
 import Observation
 @testable import LiveWallpaper
 
-/// Behavior tests for `BookmarkDisplayNameCache`. The cache is `@Observable`
-/// so SwiftUI views reading bookmark names through
-/// `ScreenManager.bookmarkDisplayName(for:)` re-render on record / resolve
-/// — the original dict lived on `@Observable ScreenManager` and we have to
-/// preserve that invalidation flow after extraction. These tests use
-/// `withObservationTracking` to assert that contract directly, plus the
-/// unresolved-set dedup that prevents redundant security-scoped URL walks.
 @Suite("BookmarkDisplayNameCache")
 @MainActor
 struct BookmarkDisplayNameCacheTests {
@@ -106,9 +99,6 @@ struct BookmarkDisplayNameCacheTests {
     }
 }
 
-/// Same Sendable counter pattern used by `WPEImportTrackerTests` — Swift 6
-/// strict concurrency won't let us mutate a captured `var` from the
-/// non-isolated Observation `onChange:` closure.
 private final class ChangeCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var _value = 0

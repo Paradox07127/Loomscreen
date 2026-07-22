@@ -4,19 +4,11 @@ import Testing
 @testable import LiveWallpaper
 import LiveWallpaperCore
 
-/// Regression coverage for the master render gate (the menu-bar global on/off
-/// switch). The gate must NOT build a live session while disabled — it keeps
-/// the configuration persisted and rebuilds on enable — so a screen with a
-/// saved wallpaper stays reported as configured-but-`.off` (keeping the switch
-/// enabled) rather than collapsing to `.notConfigured`, which would soft-lock
-/// the user out of ever turning wallpapers back on.
+/// Prevents the global render gate from collapsing configured screens to `notConfigured`, which would disable re-enabling.
 @Suite("Master render gate")
 @MainActor
 struct MasterRenderGateTests {
 
-    /// Mirrors `ScreenManager.globallyEnabledDefaultsKey` (private). Setting it
-    /// before constructing the manager makes the gate load in a known state
-    /// without building anything.
     private static let gateDefaultsKey = "loomscreen.wallpapers.globallyEnabled.v1"
 
     private static func withGate(_ enabled: Bool, _ body: () throws -> Void) rethrows {
@@ -70,8 +62,6 @@ struct MasterRenderGateTests {
 
             #expect(liveScreen.runtimeSession == nil, "Gate off must not build a live session")
 
-            // Soft-lock guard: the configured screen is reported as `.off`, so
-            // the overview is `.off` (switch enabled), NOT `.notConfigured`.
             let summary = manager.wallpaperSummary(for: liveScreen)
             #expect(summary.activity == .off)
             #expect(summary.isConfigured)
@@ -101,8 +91,6 @@ struct MasterRenderGateTests {
             }
 
             #expect(liveScreen.runtimeSession == nil)
-            // No wallpaper assigned: must NOT masquerade as `.off`; the switch
-            // is correctly disabled when there is nothing to enable.
             #expect(manager.wallpaperSummary(for: liveScreen).activity == .inactive)
             #expect(manager.wallpaperOverviewStatus == .notConfigured)
         }
@@ -117,7 +105,6 @@ struct MasterRenderGateTests {
         let originalConfigurations = SettingsManager.shared.loadConfigurations()
         defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
 
-        // Start with nothing configured anywhere.
         SettingsManager.shared.replaceAllConfigurations([])
 
         Self.withGate(false) {
@@ -129,13 +116,8 @@ struct MasterRenderGateTests {
                 return
             }
 
-            // Precondition: nothing configured, switch would be disabled.
             #expect(manager.wallpaperOverviewStatus == .notConfigured)
 
-            // Assign a shader wallpaper while the gate is off: it must persist
-            // without building a session, and the derived overview must refresh
-            // to `.off` so the menu-bar switch becomes usable again — otherwise
-            // a stale `.notConfigured` cache would soft-lock the switch.
             manager.setShaderWallpaper(source: .waves, for: liveScreen)
 
             #expect(liveScreen.runtimeSession == nil, "Gate off must not build a session")
@@ -168,9 +150,6 @@ struct MasterRenderGateTests {
 
             #expect(liveScreen.runtimeSession == nil, "Gate off must not build a session")
 
-            // Enable: the lifecycle axis rebuilds the missing session from
-            // persisted config; the performance policy (not a blind resume)
-            // then drives it live, so the overview leaves the `.off` state.
             manager.setWallpapersEnabled(true)
 
             #expect(manager.wallpapersGloballyEnabled)
@@ -178,7 +157,6 @@ struct MasterRenderGateTests {
             #expect(manager.wallpaperOverviewStatus != .off)
             #expect(manager.wallpaperOverviewStatus != .notConfigured)
 
-            // Round-trip back off must tear the rebuilt session down again.
             manager.setWallpapersEnabled(false)
             #expect(liveScreen.runtimeSession == nil, "Disabling must release the rebuilt session")
         }
@@ -206,13 +184,9 @@ struct MasterRenderGateTests {
                 return
             }
 
-            // Gate on + restore-on-refresh builds the session at launch.
             #expect(liveScreen.runtimeSession != nil, "Gate on must build the session")
             let builtIdentity = liveScreen.runtimeSession.map { ObjectIdentifier($0 as AnyObject) }
 
-            // Idempotent re-apply exercises the already-live `show()`-only
-            // branch: the session must be preserved (not rebuilt, not resumed
-            // blindly) and the performance policy left in charge.
             manager.applyGlobalRenderGate()
 
             #expect(liveScreen.runtimeSession != nil, "Re-enabling must not tear a live session down")

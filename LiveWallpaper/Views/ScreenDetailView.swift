@@ -103,14 +103,8 @@ struct ScreenDetailView: View {
             case .html:
                 return true
             case .scene:
-                // Mount once a real scene config loads so the WPE Project
-                // Custom Settings card can surface author-defined properties
-                // (schemecolor, sliders). Inspector rows gate video-only
-                // content internally.
                 return config?.wallpaperType == .scene
             case .monitor:
-                // Mount once a real monitor config loads so the inspector can
-                // surface module toggles + authorization rows.
                 return config?.wallpaperType == .monitor
             case .metalShader:
                 return false
@@ -196,14 +190,10 @@ struct ScreenDetailView: View {
         ResizableInspectorSplit(
             isMounted: inspectorApplicable,
             isVisible: showsInspector,
-            // Keyed on the user toggle, not `showsInspector`, so switching
-            // wallpaper type (which flips `inspectorApplicable`) stays instant.
             animationTrigger: AnyHashable(inspectorUserVisible),
             reduceMotion: reduceMotion,
             storedWidth: $inspectorWidth,
             liveWidth: $liveInspectorWidth,
-            // Dragging the handle past the panel's minimum collapses it — the
-            // direct-manipulation mirror of the toolbar toggle.
             onClose: { inspectorUserVisible = false },
             main: { mainColumn },
             inspector: { width in inspectorPanel(width: width) }
@@ -213,15 +203,9 @@ struct ScreenDetailView: View {
             ToolbarItem(placement: .principal) {
                 wallpaperTypePicker
             }
-            // Gated on `inspectorApplicable` (not visibility) so the button
-            // never moves when the user just flips the panel open/closed.
             if inspectorApplicable {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        // No withAnimation: a toolbar button lives in the
-                        // separate NSToolbar host, so its transaction doesn't
-                        // reach the GeometryReader content. The width glide is
-                        // driven by `.animation(value:)` on the layout instead.
                         inspectorUserVisible.toggle()
                     } label: {
                         Image(systemName: "sidebar.right")
@@ -489,11 +473,7 @@ struct ScreenDetailView: View {
             previewController.cleanup()
         }
 
-        // If the preview is currently playing a video and the active wallpaper
-        // bookmark has shifted (user hit Next/Prev/Play Now in the playlist,
-        // rotation timer fired, etc.), restart the preview player against the
-        // new URL. Without this `loadPreviewPosterIfNeeded()` early-exits on
-        // `player != nil` and the inspector keeps showing the previous clip.
+        // Restart an active preview when playlist rotation changes its bookmark.
         if previewController.player != nil,
            let config,
            config.wallpaperType == .video,
@@ -586,12 +566,7 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Full clear: the trash button removes the screen's WHOLE wallpaper
-    /// configuration and tears down the live session, whatever type is running.
-    /// The previous per-type clear only dropped the selected tab's saved state —
-    /// so with mixed types (e.g. a video tab open while a web wallpaper is
-    /// active) it left the running pipeline alive / fell back to the other saved
-    /// type instead of actually clearing the screen.
+    /// Full clear: the trash button removes the screen's WHOLE wallpaper configuration and tears down the live session, whatever type is running.
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
         screenManager.clearWallpaperForScreen(screen)

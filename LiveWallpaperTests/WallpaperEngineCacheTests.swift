@@ -2,10 +2,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Covers the cache's surviving read/enumerate/reclaim duties. Extraction is
-/// retired, so every fixture writes a legacy cache directory the way an old
-/// install left it on disk — payload plus the `manifest.json` no code writes
-/// any more but `readManifest` must still parse.
 @Suite("WallpaperEngineCache enumeration and reclaim")
 struct WallpaperEngineCacheTests {
     @Test("A legacy manifest still marks a cache complete")
@@ -15,8 +11,6 @@ struct WallpaperEngineCacheTests {
         try env.seed(workshopID: "with-manifest")
         try env.seed(workshopID: "no-manifest", manifest: false)
 
-        // Destructive source-archive cleanup keys off the completed set, so a
-        // half-extracted (manifest-less) cache must never qualify.
         #expect(await env.cache.listCompletedWorkshopIDs() == ["with-manifest"])
         #expect(await env.cache.listAvailableWorkshopIDs() == ["with-manifest", "no-manifest"])
     }
@@ -123,7 +117,6 @@ struct WallpaperEngineCacheTests {
             try fm.createDirectory(at: sidecar, withIntermediateDirectories: true)
             try Data([0x00, 0x01]).write(to: sidecar.appendingPathComponent("partial.bin"))
         }
-        // Age the stale sidecar well past the GC threshold; leave the other fresh.
         try fm.setAttributes([.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: staleSidecar.path)
 
         _ = await env.cache.collectOrphans(keepIDs: ["live"])
@@ -140,7 +133,6 @@ struct WallpaperEngineCacheTests {
         try env.seed(workshopID: "keep")
         try env.seed(workshopID: "drop")
 
-        // Future cutoff → both are "older than cutoff"; only the non-kept id goes.
         let freed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60), keepingIDs: ["keep"])
 
         #expect(freed > 0)
@@ -187,10 +179,6 @@ private struct TempCacheEnvironment {
         return TempCacheEnvironment(cache: WallpaperEngineCache(rootURL: cacheRoot), cacheRoot: cacheRoot)
     }
 
-    /// Writes a per-workshop cache directory byte-for-byte the way the retired
-    /// extractor left one. The manifest JSON is spelled out rather than encoded
-    /// through the app's type: it is an on-disk format the reader must keep
-    /// accepting, so the test must fail if that shape ever drifts.
     @discardableResult
     func seed(
         workshopID: String,

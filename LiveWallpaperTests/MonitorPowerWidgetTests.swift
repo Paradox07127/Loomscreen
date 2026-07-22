@@ -2,9 +2,6 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic coverage for the Power widget's view-model — the parts that decide
-/// wording, hiding rules, thresholds and icon mapping (the visual layout is
-/// exercised by the SwiftUI previews, not here).
 @Suite("Monitor power widget")
 struct MonitorPowerWidgetTests {
 
@@ -13,8 +10,6 @@ struct MonitorPowerWidgetTests {
         mutate(&s)
         return s
     }
-
-    // MARK: - hasBattery / hero honesty
 
     @Test("No battery level → plug/AC hero, never a fabricated percent")
     func desktopHasNoFakePercent() {
@@ -30,8 +25,6 @@ struct MonitorPowerWidgetTests {
         #expect(m.hasBattery)
         #expect(m.heroPercent == 63)
     }
-
-    // MARK: - Status wording (mock powStatus order)
 
     @Test("Status precedence: charged > charging > adapter > battery")
     func statusWording() {
@@ -56,8 +49,6 @@ struct MonitorPowerWidgetTests {
         #expect(onBattery.status == "Battery")
     }
 
-    // MARK: - Time line hiding rules
-
     @Test("Charging shows 'to full'; discharging shows 'remaining'")
     func timeLineWording() {
         let charging = MonitorPowerModel(system: system {
@@ -75,26 +66,21 @@ struct MonitorPowerWidgetTests {
 
     @Test("Unknown / non-positive time hides the whole line")
     func timeLineHidden() {
-        // nil (calculating) → hidden
         let calculating = MonitorPowerModel(system: system {
             $0.batteryLevel = 0.62; $0.batteryCharging = true; $0.batteryMinutesToFull = nil
         })
         #expect(calculating.timeLine == nil)
 
-        // charging but only a remaining figure present → still hidden (wrong axis)
         let mismatched = MonitorPowerModel(system: system {
             $0.batteryLevel = 0.62; $0.batteryCharging = true; $0.batteryMinutesRemaining = 90
         })
         #expect(mismatched.timeLine == nil)
 
-        // zero minutes → hidden
         let zero = MonitorPowerModel(system: system {
             $0.batteryLevel = 0.40; $0.batteryCharging = false; $0.batteryMinutesRemaining = 0
         })
         #expect(zero.timeLine == nil)
     }
-
-    // MARK: - Chips (LPM always; thermal only serious/critical)
 
     @Test("Thermal chip only appears at serious/critical, LPM whenever on")
     func chipThresholds() {
@@ -111,8 +97,6 @@ struct MonitorPowerWidgetTests {
         #expect(both.chips == [.lowPower, .thermal("critical")])
     }
 
-    // MARK: - Accessory icon mapping + tint thresholds
-
     @Test("Accessory kind maps to the right SF Symbol")
     func accessorySymbolMapping() {
         #expect(MonitorPowerModel.accessorySymbol("mouse") == "magicmouse")
@@ -124,8 +108,6 @@ struct MonitorPowerWidgetTests {
 
     @Test("Accessory tint: crit <10 (run→need ramp), low <20 (→run ramp), sage otherwise")
     func accessoryTintThresholds() {
-        // Mirrors mock `.accrow.crit/.low .abar i` gradients exactly (not just a
-        // single colour) — pin both stops plus the threshold boundaries.
         #expect(MonitorPowerModel.accessoryTint(7).barGradient == [MonitorDesign.signalAmber, MonitorDesign.signalCoral])
         #expect(MonitorPowerModel.accessoryTint(9.9).barGradient == [MonitorDesign.signalAmber, MonitorDesign.signalCoral])
         #expect(MonitorPowerModel.accessoryTint(14).barGradient == [MonitorDesign.oklch(0.62, 0.06, 78), MonitorDesign.signalAmber])
@@ -133,8 +115,6 @@ struct MonitorPowerWidgetTests {
         #expect(MonitorPowerModel.accessoryTint(20).barGradient == [MonitorDesign.signalSage])
         #expect(MonitorPowerModel.accessoryTint(96).barGradient == [MonitorDesign.signalSage])
     }
-
-    // MARK: - Accessory row cap (M's fixed 125pt content box)
 
     @Test("Over the cap, the LOWEST-percent accessories are kept, original order preserved")
     func displayAccessoriesKeepsNeediest() {
@@ -146,8 +126,6 @@ struct MonitorPowerWidgetTests {
             ]
         })
         let shown = m.displayAccessories(limit: 2)
-        // Keyboard (9%) and trackpad (41%) survive; healthy mouse hides. Order
-        // stays as reported, not sorted-by-percent.
         #expect(shown.map(\.name) == ["Magic Keyboard", "Magic Trackpad"])
     }
 

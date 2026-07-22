@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// A rows×cols grid of rounded cells whose intensity 0…1 maps onto a design-token
-/// colour ramp — the CPU per-core load heatmap and the usage daily-activity grid.
-/// Ported from the mock's `heatCell`: track base, fill = amber (or coral above
-/// 0.8), opacity ramps `0.12 + load*0.88` so idle cells stay legible.
 struct HeatmapGrid: View {
     /// Row-major intensities 0…1. Grid is `rows` × `columns`; short arrays leave
     /// trailing cells at zero, long arrays are clipped.
@@ -48,7 +44,6 @@ struct HeatmapGrid: View {
         value > 0.8 ? MonitorDesign.signalCoral : MonitorDesign.signalAmber
     }
 
-    /// Opacity floor keeps idle cells legible (mock: `0.12 + o*0.88`).
     nonisolated static func rampOpacity(_ value: Double) -> Double {
         0.12 + min(1, max(0, value)) * 0.88
     }

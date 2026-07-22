@@ -1,17 +1,6 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// The CPU instrument, a native port of the mock's `cpu_s` / `cpu_m` / `cpu_l`
-/// (`.claude/plan/monitor-design/index.html`). The shared arc gauge, peak tag,
-/// load-segmented sparkline, user/sys/idle composition bar and per-core heat
-/// strip all come from the shared component family so the board reads uniform.
-///
-/// Data honesty (SPEC §3.4): the B-tier temperature/power readouts render ONLY
-/// when `sensors.cpuTempC` / `cpuPowerW` are present AND the `showSensors` option
-/// is on; a missing sensor collapses the row entirely (no placeholder, no
-/// fabricated zero). `cpuInfo` nil drops the identity line; `perCore` nil drops
-/// the heat strip; `topProcesses` nil drops the L attribution list; the rest
-/// still works. Per-widget options are read through `MonitorCPUDraft`.
 struct MonitorCPUWidgetView: View {
     let context: MonitorWidgetContext
 
@@ -21,9 +10,6 @@ struct MonitorCPUWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // The board hands us the fixed Apple widget frame (S/M 170pt tall,
-            // L 376pt). Dividing by 2·rowSpan yields near-constant cell heights
-            // (S/M 85, L 94) and hence one type scale across sizes.
             let rowSpan: CGFloat = placement.size == .large ? 2 : 1
             let cellHeight = geo.size.height / (2 * rowSpan)
             content(cellHeight: cellHeight)
@@ -49,8 +35,6 @@ struct MonitorCPUWidgetView: View {
         Array(history.cpuTotal.suffix(max(seconds, 2)))
     }
 
-    /// Prefer the CPU-specific die reading, fall back to the SoC package temp
-    /// (the mock's S/M capsule reads `socTempC`); nil when neither is present.
     private var cpuTempC: Double? { system?.sensors?.cpuTempC ?? system?.sensors?.socTempC }
     private var cpuPowerW: Double? { system?.sensors?.cpuPowerW }
 
@@ -77,9 +61,6 @@ struct MonitorCPUWidgetView: View {
         ) {
             VStack(spacing: scale.label * 0.55) {
                 Spacer(minLength: 0)
-                // Hero arc — shrinks (0.9×) when the B-tier temp capsule joins.
-                // Width caps match the S 170pt frame's ~138pt content box (the
-                // arc is usually height-limited below them anyway).
                 let hasTemp = tempCapsuleTemp != nil
                 let heroSize = scale.hero * (hasTemp ? 0.9 : 1)
                 ArcGauge(value: cpuFraction, peak: peakFraction) {
@@ -93,8 +74,6 @@ struct MonitorCPUWidgetView: View {
 
                 Spacer(minLength: 0)
 
-                // Optional history strip; when off, the surrounding spacers
-                // recentre the arc/temp capsule in the freed space.
                 if showTrend {
                     Sparkline(values: trend(historyWindow), domain: 0...1, bandColored: true, guides: [0.4, 0.8])
                         .frame(maxWidth: .infinity)
@@ -117,8 +96,6 @@ struct MonitorCPUWidgetView: View {
             label: "CPU",
             systemImage: "cpu",
             cellHeight: cellHeight,
-            // No load number in the corner (it moved off the header); a load-band
-            // state dot stays for an at-a-glance read, matching the S size.
             status: { CPUStateDot(fraction: cpuFraction) }
         ) {
             VStack(alignment: .leading, spacing: scale.label * 0.5) {
@@ -127,12 +104,6 @@ struct MonitorCPUWidgetView: View {
                 }
 
                 HStack(alignment: .center, spacing: scale.label * 0.7) {
-                    // Left rail: a two-band arc whose lit wedges split user=amber /
-                    // system=steel — composition reads off the gauge itself (the old
-                    // horizontal comp bar is gone), a tight legend labels the split.
-                    // The column hugs the arc so the load curve gets the width; at
-                    // the fixed 364×170 frame the arc is height-limited to ~90pt,
-                    // so the caps track that instead of the old wide-cell 112/114.
                     VStack(alignment: .leading, spacing: scale.label * 0.45) {
                         ArcGauge(
                             value: cpuFraction,
@@ -150,8 +121,6 @@ struct MonitorCPUWidgetView: View {
                     }
                     .frame(maxWidth: 104, alignment: .leading)
 
-                    // Right column: heat strip, load curve (peak tag pinned in its
-                    // top-right corner), optional sensor row.
                     VStack(alignment: .leading, spacing: scale.label * 0.5) {
                         if showHeatmap { coreHeatStrip(scale: scale) }
                         Sparkline(values: trend(historyWindow), domain: 0...1, bandColored: true, guides: [0.4, 0.8])
@@ -177,7 +146,6 @@ struct MonitorCPUWidgetView: View {
             label: "CPU",
             systemImage: "cpu",
             cellHeight: cellHeight,
-            // Corner stays a state dot; the 1·5·15 load reads in the header row below.
             status: { CPUStateDot(fraction: cpuFraction) }
         ) {
             VStack(alignment: .leading, spacing: scale.label * 0.6) {
@@ -185,13 +153,7 @@ struct MonitorCPUWidgetView: View {
                     identityRow(identity, scale: scale)
                 }
 
-                // Header row: arc + composition + thermal / load chips, at the
-                // standard content inset like every other section (the arc used
-                // to negate the container's left inset; on device that read as a
-                // misalignment, not a feature). The right column's chip row keeps
-                // single-line via tight spacing + min-scale. The peak tag moved
-                // onto the chart (board convention) — the 1·5·15 load triple
-                // wouldn't share its row within the fixed 364pt frame.
+                // Keep the header aligned to the standard content inset.
                 HStack(alignment: .center, spacing: scale.label * 0.7) {
                     ArcGauge(value: cpuFraction, peak: peakFraction) {
                         heroReadout(fraction: cpuFraction,
@@ -214,8 +176,6 @@ struct MonitorCPUWidgetView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // Stacked user/sys history (labelled by the composition legend
-                // above — no separate swatch row here); peak tag pinned top-right.
                 CPUStackChart(
                     user: Array(history.cpuUser.suffix(historyWindow)),
                     system: Array(history.cpuSystem.suffix(historyWindow))
@@ -224,8 +184,6 @@ struct MonitorCPUWidgetView: View {
                 .frame(minHeight: max(cellHeight * 0.32, 32))
                 .overlay(alignment: .topTrailing) { peakInlineTag(scale: scale) }
 
-                // Cores heatmap and top-by-CPU share ONE two-column row so the
-                // fixed 376pt frame keeps real height for the history chart.
                 let groups = showHeatmap
                     ? Self.coreGroupLoads(perCore: system?.perCore, cpuInfo: system?.cpuInfo)
                     : nil
@@ -249,7 +207,6 @@ struct MonitorCPUWidgetView: View {
                     }
                 }
 
-                // B-tier SoC sensor strip.
                 if sensorsVisible { sensorStrip(scale: scale) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -258,10 +215,6 @@ struct MonitorCPUWidgetView: View {
 
     // MARK: - Shared subviews
 
-    /// Hero numeral + "%" unit, woven into the arc hub (mock `.hero`/`.u`).
-    /// The numeral itself must NOT include "%" — the unit is its own smaller-font
-    /// Text right after it, so `wholePercent` (which already appends "%") would
-    /// double it up; use the bare-digit `wholeNumber` here instead.
     @ViewBuilder
     private func heroReadout(fraction: Double, heroSize: CGFloat, unitSize: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -319,7 +272,6 @@ struct MonitorCPUWidgetView: View {
         )
     }
 
-    /// The user/sys/idle composition bar + legend (mock `cpuCompBar`).
     @ViewBuilder
     private func compositionBar(scale: MonitorDesign.TypeScale, centeredLegend: Bool, legendScale: CGFloat) -> some View {
         let user = system?.cpuUser ?? 0
@@ -343,8 +295,6 @@ struct MonitorCPUWidgetView: View {
             .background(MonitorDesign.track)
             .clipShape(Capsule(style: .continuous))
 
-            // USER / SYS / IDLE on one row under the bar (they also label the
-            // stacked history chart's amber/steel bands below).
             HStack(spacing: scale.label * 0.9) {
                 compLegendItem("USER", value: userPct, dot: MonitorDesign.signalAmber, scale: scale, sizeScale: legendScale)
                 compLegendItem("SYS", value: sysPct, dot: MonitorDesign.signalSteel, scale: scale, sizeScale: legendScale)
@@ -370,16 +320,13 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// Compact user/sys legend under the M arc (the arc's own two-tone wedges are
-    /// the primary encoding; this just labels the split with percentages). Idle is
-    /// implied by the unlit remainder, so it's omitted to keep the row short.
+    /// Compact user/sys legend under the M arc (the arc's own two-tone wedges are the primary encoding; this just labels the split with percentages).
     @ViewBuilder
     private func compositionLegend(userPct: Int, sysPct: Int, scale: MonitorDesign.TypeScale) -> some View {
         HStack(spacing: scale.label * 0.8) {
             legendValue("USER", value: userPct, color: MonitorDesign.signalAmber, scale: scale)
             legendValue("SYS", value: sysPct, color: MonitorDesign.signalSteel, scale: scale)
         }
-        // Three-digit percents can outgrow the 104pt arc column.
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .monitorChip(scale)
@@ -398,9 +345,7 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// "PEAK n%" tag pinned inside the top-right of the M load curve (was a
-    /// separate row under the arc). A translucent capsule keeps it legible over
-    /// the sparkline.
+    /// "PEAK n%" tag pinned inside the top-right of the M load curve (was a separate row under the arc).
     @ViewBuilder
     private func peakInlineTag(scale: MonitorDesign.TypeScale) -> some View {
         let size = scale.label * 0.9
@@ -418,10 +363,7 @@ struct MonitorCPUWidgetView: View {
         .padding(size * 0.3)
     }
 
-    /// Per-core heat strip (M, compact): clusters side by side. A cluster with more
-    /// than 8 cores (the efficiency/"small" cluster) wraps into 2 rows so its cells
-    /// aren't hair-thin, while occupying the SAME band height as the single-row
-    /// "big" cluster beside it (each of its two rows is half-height).
+    /// Per-core heat strip (M, compact): clusters side by side.
     @ViewBuilder
     private func coreHeatStrip(scale: MonitorDesign.TypeScale) -> some View {
         if let groups = Self.coreGroupLoads(perCore: system?.perCore, cpuInfo: system?.cpuInfo), !groups.isEmpty {
@@ -439,9 +381,7 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// Lay a cluster's cells into `rows` equal rows that together fill `bandHeight`
-    /// (so a 1-row and a 2-row cluster stand the same height). Columns = ⌈n/rows⌉;
-    /// a short final row is padded so columns line up.
+    /// Lay a cluster's cells into `rows` equal rows that together fill `bandHeight` (so a 1-row and a 2-row cluster stand the same height).
     @ViewBuilder
     private func heatCellGrid(_ loads: [Double], rows: Int, bandHeight: CGFloat) -> some View {
         let gap: CGFloat = 2
@@ -498,7 +438,6 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// B-tier temp + power micro-readout row (M, mock `cpuSensorRow`), right-aligned.
     @ViewBuilder
     private func sensorRow(scale: MonitorDesign.TypeScale) -> some View {
         HStack(spacing: scale.label * 0.7) {
@@ -510,7 +449,6 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// B-tier SoC sensor strip (L, mock `.sstrip`): hairline-topped "SoC 42°C · 18W".
     @ViewBuilder
     private func sensorStrip(scale: MonitorDesign.TypeScale) -> some View {
         HStack(spacing: scale.label * 0.9) {
@@ -556,7 +494,6 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// Thermal-state pill (L, mock `.pill`): amber dot + "thermal" + capitalized state.
     @ViewBuilder
     private func thermalPill(scale: MonitorDesign.TypeScale) -> some View {
         let state = system?.thermalState ?? "nominal"
@@ -575,11 +512,6 @@ struct MonitorCPUWidgetView: View {
         .monitorChip(scale)
     }
 
-    /// Top-by-CPU rows (L, mock `.proc`): name + bar (cpu/max) + cpu% + memory,
-    /// budgeted for the half-width column beside the cores heatmap. The numeric
-    /// columns are fixed-width and right-aligned (the Processes table's 2.1em /
-    /// 3.4em idiom) so the rightmost data never clips or jitters; only the name
-    /// truncates — numbers compress (min scale .7) before ever clipping.
     @ViewBuilder
     private func procRows(_ procs: [MonitorProcessSample], scale: MonitorDesign.TypeScale) -> some View {
         let maxCPU = procs.map(\.cpuPercent).max() ?? 1
@@ -630,7 +562,6 @@ struct MonitorCPUWidgetView: View {
         }
     }
 
-    /// Header right-side "load …" readout (mock `chd` right slot).
     @ViewBuilder
     private func loadStatus(scale: MonitorDesign.TypeScale, triple: Bool) -> some View {
         if let text = Self.loadText(system: system, triple: triple) {
@@ -668,9 +599,6 @@ struct MonitorCPUWidgetView: View {
 
 // MARK: - Small components
 
-/// The mock's per-core "heat cell": a track base with an amber (coral > 0.8) fill
-/// whose opacity ramps with load. Square by default (M), fixed-height when `height`
-/// is set (L "tall" variant).
 private struct HeatCell: View {
     var load: Double
     var height: CGFloat? = nil
@@ -689,19 +617,13 @@ private struct HeatCell: View {
         }
     }
 
-    /// Per-core UTILISATION ramp: green (idle) → amber → red (busy), by rotating
-    /// the OKLCH hue 150°→30° with load. (macOS exposes only cluster/SoC
-    /// temperature via SMC, never per-logical-core, so a per-core heatmap can
-    /// only encode load — not temperature.)
+    /// Per-core UTILISATION ramp: green (idle) → amber → red (busy), by rotating the OKLCH hue 150°→30° with load.
     static func loadColor(_ value: Double) -> Color {
         let x = min(1, max(0, value))
         return MonitorDesign.oklch(0.72, 0.15, 150 - 120 * x)
     }
 }
 
-/// Stacked user (amber) + system (steel) history bands to total; idle is the
-/// remaining headroom (mock `cpuStackChart`). No power overlay — the snapshot
-/// carries no per-sample power history (data gap, see report).
 private struct CPUStackChart: View {
     var user: [Double]
     var system: [Double]
@@ -746,9 +668,6 @@ private struct CPUStackChart: View {
 
         func area(_ tops: [CGPoint]) -> Path {
             var p = Path()
-            // Line the points explicitly: `addLines` implicitly `move`s to its first
-            // point, which would discard the baseline start and fill a chord to the
-            // first sample rather than the true area under the curve.
             p.move(to: CGPoint(x: 0, y: Y(0)))
             for point in tops { p.addLine(to: point) }
             p.addLine(to: CGPoint(x: W, y: Y(0)))
@@ -771,8 +690,6 @@ private struct CPUStackChart: View {
     }
 }
 
-/// Header status dot, coloured by the load band (>85% critical, >60% warm, else
-/// neutral) and breathing when busy (mock `cpuStateDot`).
 private struct CPUStateDot: View {
     var fraction: Double
 
@@ -786,13 +703,6 @@ private struct CPUStateDot: View {
 
 // MARK: - Per-widget options (read side + pure draft mutations, unit-tested)
 
-/// Pure encode/decode of the CPU widget's option bag, mirroring the style of
-/// `MonitorWidgetDraft`. The settings popover (owned by another file) writes
-/// through the `setting…` mutators; the widget reads through the accessors.
-/// Contract = `CPU{historyWindow, showHeatmap, showComposition, showSensors,
-/// showTrend}` (mock `#cpu-settings`). `showTrend` is written by the shared
-/// popover through `MonitorWidgetDraft.showTrendKey` (same raw key), so it
-/// only has a read accessor here.
 enum MonitorCPUDraft {
     static let historyWindowKey = "historyWindow"
     static let showHeatmapKey = "showHeatmap"
@@ -800,11 +710,8 @@ enum MonitorCPUDraft {
     static let showSensorsKey = "showSensors"
     static let showTrendKey = "showTrend"
 
-    /// Trend-window choices offered by the mock's seg control (seconds).
     static let historyWindowChoices = [30, 60, 120]
 
-    /// The mock uses a distinct natural window per size (S 30s / M 60s / L 120s);
-    /// an explicit option overrides it.
     static func defaultHistoryWindow(for size: MonitorWidgetSize) -> Int {
         switch size {
         case .small: return 30
@@ -877,7 +784,6 @@ extension MonitorCPUWidgetView {
         var loads: [Double]
     }
 
-    /// 0…1 → whole-percent string ("37%"); clamps + rounds like the mock.
     nonisolated static func wholePercent(_ fraction: Double) -> String {
         "\(wholeNumber(fraction))%"
     }
@@ -915,9 +821,7 @@ extension MonitorCPUWidgetView {
         return nil
     }
 
-    /// The cpu% readout for the L attribution rows: one decimal below 10
-    /// ("0.4", "3.2") so light loads don't flatten to "0", whole number from
-    /// 10 up (the `powerValue` idiom).
+    /// The cpu% readout for the L attribution rows: one decimal below 10 ("0.4", "3.2") so light loads don't flatten to "0", whole number from 10 up (the `powerValue` idiom).
     nonisolated static func cpuText(_ cpuPercent: Double) -> String {
         let v = cpuPercent.isFinite ? max(cpuPercent, 0) : 0
         return v < 10 ? String(format: "%.1f", v) : "\(Int(v.rounded()))"
@@ -928,15 +832,12 @@ extension MonitorCPUWidgetView {
         min(max(cpuPercent / max(maxCPU, .ulpOfOne), 0), 1)
     }
 
-    /// The mock's `tempLabel`: hot ≥58, warm ≥48, else cool.
     nonisolated static func temperatureWord(_ celsius: Double) -> String {
         if celsius >= 58 { return "hot" }
         if celsius >= 48 { return "warm" }
         return "cool"
     }
 
-    /// user / sys / idle whole-percents from 0…1 fractions (mock `cpuCompBar`:
-    /// `idle = 100 − round(user) − round(sys)`), each clamped ≥ 0.
     nonisolated static func compositionPercents(user: Double, system: Double) -> (user: Int, system: Int, idle: Int) {
         let u = Int((min(max(user, 0), 1) * 100).rounded())
         let s = Int((min(max(system, 0), 1) * 100).rounded())
@@ -961,17 +862,12 @@ extension MonitorCPUWidgetView {
         "\(groups.reduce(0) { $0 + $1.loads.count })"
     }
 
-    /// "Super·6 / Performance·12" cluster summary. No longer rendered since the
-    /// L heatmap moved to a half-width column (the per-cluster labels carry the
-    /// same info); kept because the contract is pinned by tests.
+    /// "Super·6 / Performance·12" cluster summary.
     nonisolated static func groupSummary(_ groups: [CoreGroupLoads]) -> String {
         groups.map { "\($0.name)·\($0.loads.count)" }.joined(separator: " / ")
     }
 
-    /// Compose the identity line from `cpuInfo` — device name plus a core-group
-    /// summary "18 cores (6 Super + 12 Performance)". Group names come straight
-    /// from `coreGroups` (real perflevel names), NEVER a hardcoded P/E. Returns
-    /// nil when there is nothing to show (cpuInfo absent/empty).
+    /// Compose the identity line from `cpuInfo` — device name plus a core-group summary "18 cores (6 Super + 12 Performance)".
     nonisolated static func identityLine(_ info: MonitorCPUInfo?) -> CPUIdentity? {
         guard let info else { return nil }
         let device = info.deviceName.flatMap { $0.isEmpty ? nil : $0 }
@@ -995,10 +891,7 @@ extension MonitorCPUWidgetView {
         return CPUIdentity(deviceName: device, coreSummary: summary)
     }
 
-    /// Slice a flat `perCore` array into the dynamic core groups declared by
-    /// `coreGroups` (each group takes `physicalCount` cores, in order). Falls back
-    /// to a single "CPU" group when there is no topology but per-core data exists.
-    /// Returns nil when there is no per-core data at all (→ strip absent).
+    /// Slice a flat `perCore` array into the dynamic core groups declared by `coreGroups` (each group takes `physicalCount` cores, in order).
     nonisolated static func coreGroupLoads(perCore: [Double]?, cpuInfo: MonitorCPUInfo?) -> [CoreGroupLoads]? {
         guard let perCore, !perCore.isEmpty else { return nil }
         let groups = (cpuInfo?.coreGroups ?? []).filter { $0.physicalCount > 0 }
@@ -1025,7 +918,6 @@ extension MonitorCPUWidgetView {
 
 #if DEBUG
 private extension MonitorWidgetContext {
-    /// Sample context mirroring the mock's CPU data (M5 Pro, 6 Super + 12 Perf).
     static func cpuSample(size: MonitorWidgetSize, withSensors: Bool, showTrend: Bool = true) -> MonitorWidgetContext {
         let superLoads: [Double] = [0.71, 0.58, 0.66, 0.34, 0.52, 0.19]
         let perfLoads: [Double] = [0.44, 0.29, 0.51, 0.12, 0.38, 0.22, 0.47, 0.09, 0.33, 0.18, 0.41, 0.15]
@@ -1087,7 +979,6 @@ private extension MonitorWidgetContext {
     }
 }
 
-// Preview frames = the official macOS widget sizes the board now uses.
 #Preview("CPU · S") {
     HStack(spacing: 20) {
         MonitorCPUWidgetView(context: .cpuSample(size: .small, withSensors: false))

@@ -156,7 +156,6 @@ private final class TestMemoryPressureSource: MemoryPressureSourceLifecycle {
         var cancellations: Int
     }
 
-    // MemoryPressureEvent isn't Sendable, so the lock stores its rawValue instead.
     private struct State {
         var dataRawValue = DispatchSource.MemoryPressureEvent.normal.rawValue
         var eventHandler: (@Sendable () -> Void)?

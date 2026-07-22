@@ -30,9 +30,6 @@ struct MonitorTailCursorStoreTests {
 
         let loaded = MonitorTailCursorStore(directory: dir, debounceInterval: 60)
         #expect(loaded.state(for: transcript) == cursor)
-        // Session identity metadata (sessionId/projectName/gitBranch/model) is
-        // deliberately NOT persisted — the on-disk cursor cache keeps only
-        // operational resume state. Everything else must round-trip.
         var expected = aggregate
         expected.sessionId = nil
         expected.projectName = nil
@@ -635,8 +632,6 @@ struct MonitorTailCursorStoreTests {
         store.set(oldCursor, for: transcript)
         #expect(oldTaskPassedCancellationCheck.wait(timeout: .now() + 2) == .success)
 
-        // Cancels task 1 after it has passed its cancellation check, then
-        // installs task 2 for the newer payload before task 1 resumes.
         store.flush()
         store.set(newCursor, for: transcript)
         releaseOldTask.signal()
@@ -676,8 +671,6 @@ struct MonitorTailCursorStoreTests {
         store.set(cursor, for: transcript)
         #expect(scheduledTaskClaimed.wait(timeout: .now() + 2) == .success)
 
-        // The scheduled task has cleared dirty/task state but is deliberately
-        // blocked before writerLock. flush() must commit the same revision now.
         store.flush()
         let reloaded = MonitorTailCursorStore(directory: dir, debounceInterval: 60)
         #expect(reloaded.state(for: transcript) == cursor)

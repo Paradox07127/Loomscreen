@@ -2,13 +2,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaperCore
 
-/// Covers the Monitor board config at the `WallpaperContent` / `ScreenConfiguration`
-/// persistence boundary: a board payload decodes straight through, an absent or
-/// corrupt config falls back to the default board (never crashes), unknown keys are
-/// ignored and never re-persisted, and encoding always writes the board shape. The
-/// board-config internals themselves are exercised in the Core package's
-/// `MonitorBoardConfigurationTests`; this suite pins the decode boundary the
-/// integration owns.
 @Suite("Monitor board config decode (WallpaperContent boundary)")
 struct MonitorBoardConfigDecodeTests {
 
@@ -19,8 +12,6 @@ struct MonitorBoardConfigDecodeTests {
     private func encodeString(_ content: WallpaperContent) throws -> String {
         String(data: try JSONEncoder().encode(content), encoding: .utf8) ?? ""
     }
-
-    // MARK: - Board shape decode
 
     @Test("A board payload decodes its widgets, sizes and board-level fields")
     func boardPayloadDecodes() throws {
@@ -61,8 +52,6 @@ struct MonitorBoardConfigDecodeTests {
         #expect(board.widgets.map(\.kind) == [.cpu])
     }
 
-    // MARK: - Graceful fallback
-
     @Test("An absent monitor config decodes to the default board")
     func absentConfigIsDefaultBoard() throws {
         guard case .monitor(let board) = try decodeContent(#"{"monitor":{}}"#) else {
@@ -74,9 +63,6 @@ struct MonitorBoardConfigDecodeTests {
 
     @Test("A corrupt config decodes to the default board, never a half-decoded one")
     func corruptConfigFallsToDefaultBoard() throws {
-        // `widgets` is present but is a string, so the board decode throws. The
-        // boundary treats the slot as absent (nil) and substitutes the default
-        // board rather than a partially-decoded one.
         let json = """
         {"monitor":{"config":{"schemaVersion":2,"widgets":"corrupt-not-an-array"}}}
         """
@@ -87,15 +73,8 @@ struct MonitorBoardConfigDecodeTests {
         #expect(board == MonitorBoardConfiguration.default)
     }
 
-    // MARK: - Unknown keys ignored + encode always writes the board shape
-
     @Test("Unknown config keys are ignored on decode and never re-persisted")
     func unknownKeysIgnoredAndNotPersisted() throws {
-        // A blob carrying keys the board doesn't know (e.g. a pre-board build's
-        // module toggles) decodes to the default system board — the strays are
-        // dropped, no widgets key present — and re-encoding writes only the board
-        // shape. (It is an equivalent default board, not the `.default` singleton:
-        // absent widgets are re-seeded with fresh placement ids, so compare kinds.)
         let json = """
         {"monitor":{"config":{"systemEnabled":true,"agentsEnabled":false,"showTopProcesses":true}}}
         """
@@ -131,8 +110,6 @@ struct MonitorBoardConfigDecodeTests {
         let decoded = try decodeContent(try encodeString(content))
         #expect(decoded == content)
     }
-
-    // MARK: - savedMonitorConfiguration slot
 
     @Test("A board payload in the savedMonitorConfiguration slot decodes on ScreenConfiguration")
     func savedSlotDecodes() throws {

@@ -57,8 +57,6 @@ struct WPESceneScriptXPCIntegrationTests {
         let client = WPESceneScriptXPCClient.shared
         let before = try Self.requireCompletion(Self.benignRequest(client))
 
-        // Comment trivia bypasses the conservative textual loop prefilter while
-        // remaining a real JavaScript loop. Only the XPC watchdog may execute it.
         let hostile = """
         export function update(value) {
             while/* hostile watchdog probe */(true) {}
@@ -75,9 +73,6 @@ struct WPESceneScriptXPCIntegrationTests {
         #expect(hostileResult == .transportFailure)
         #expect(started.duration(to: .now) < .seconds(2))
 
-        // launchd keeps the crashed embedded service stub semi-active for a
-        // short grace period before it can instantiate a fresh process. Probe
-        // with fail-fast requests so the host remains responsive throughout.
         let after = try Self.waitForRestart(client, timeout: .seconds(14))
         #expect(after.values == [SIMD3<Double>(5, 6, 7)])
         #expect(after.workerInstanceID != before.workerInstanceID)

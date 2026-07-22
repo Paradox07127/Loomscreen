@@ -67,11 +67,7 @@ enum SchedulePolicy {
         return [s..<24, 0..<e]
     }
 
-    /// Longest contiguous free range outside `slots`, at least `minHours` long.
-    ///
-    /// Returns `(start, end)` where `start` is in `0..<24` and `end` may exceed
-    /// 24 to encode a midnight-wrap gap (e.g. `(22, 28)` = 22:00 → 04:00).
-    /// Callers should compute the slot's `endHour` as `end % 24`.
+    /// Finds the longest free range; an end above 24 represents a midnight wrap.
     static func findFreeRange(in slots: [ScheduleSlot], minHours: Int = 2) -> (start: Int, end: Int)? {
         var occupied = Array(repeating: false, count: 24)
         for slot in slots {

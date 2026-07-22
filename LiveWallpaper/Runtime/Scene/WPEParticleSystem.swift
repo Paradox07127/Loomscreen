@@ -60,33 +60,8 @@ struct SplitMix64: RandomNumberGenerator {
     }
 }
 
-/// One-shot world-space placement applied to a `WPEParticleSystem` at load time.
-///
-/// **Coordinate convention: WPE author space is Y-up, bottom-left
-/// origin throughout — NO Y-flip anywhere.** Scene-object `origin`,
-/// emitter `origin`, per-particle `velocity`, `gravity`, and the
-/// object's `angles.z` rotation are all used as authored (`Rz(+angleZ)`),
-/// matching the image-layer path (`WPEMetalRenderExecutor` passes
-/// `geometry.angles.z` UNNEGATED into the quad rotation). An earlier
-/// `Rz(-angleZ)` was justified as "clockwise author → Y-up CCW", but the
-/// image quad — validated across many rotated layers — does NOT negate,
-/// so the two disagreed; and its "verification" leaned on saber (~0°) and
-/// 3725117707 (~159°), both sign-insensitive (0° trivial, 159°≈180°
-/// symmetric). Scene 3462491575's 雪景 (angleZ −57.6°, sign-sensitive)
-/// drifted right under `-angleZ` where WPE blows it left → align to the
-/// image-layer `+angleZ`. Flipping preserves the leaves' vertical fall/rise
-/// (that only depended on the ~180° symmetry) and mirrors their horizontal.
-///
-/// **Do NOT re-add an "emitter-internal Y-down" flip on
-/// `velocity.y`/`gravity.y`/`origin.y`.** P7 (`dfbccce`) did exactly
-/// that, believing it made leaves fall — it actually *inverted* every
-/// leaf scene. The trap: scenes 3526278753 (saber) and 3725117707 share
-/// ONE leaves preset but differ by a ~159° emitter rotation, so under
-/// the correct no-flip Y-up convention the saber's leaves fall (down)
-/// while 3725117707's rotated emitter sends them up. Whoever "fixes"
-/// one scene's direction by toggling the global flip silently inverts
-/// the other (this oscillated P4→P6→P7). The flip is the bug, not the
-/// fix.
+/// One-shot world-space placement applied when loading a particle system.
+/// WPE author space is consistently Y-up; origin, velocity, gravity, and rotation must not be flipped.
 struct WPEParticleSceneTransform {
     var renderOrigin: SIMD3<Float>
     var objectScale: SIMD3<Float>
@@ -515,11 +490,8 @@ final class WPEParticleSystem {
     }
 
     private func uniform(_ low: Double, _ high: Double) -> Double {
-        // WPE min/max are two corners of a range, NOT ordered: `velocityrandom`
-        // often authors max more-negative than min (e.g. snowperspective's
-        // "-10 -50 0" … "-37 -90 0"). Sample the span regardless of order — the
-        // old `high > low` guard returned `low`, pinning every such component to
-        // its min so 3462491575's 雪景 fell at the slow end of its speed range.
+        // WPE range endpoints are unordered; sorting avoids pinning reversed ranges
+        // to one endpoint.
         let lo = Swift.min(low, high)
         let hi = Swift.max(low, high)
         guard hi > lo else { return lo }

@@ -105,9 +105,6 @@ extension GeneralSettingsView {
                     systemImage: "sparkles",
                     accent: .purple,
                     action: {
-                        // Can't cast `NSApplication.shared.delegate` to our AppDelegate:
-                        // it's SwiftUI's internal wrapper around `@NSApplicationDelegateAdaptor`.
-                        // AppDelegate observes `.showOnboarding` instead.
                         NotificationCenter.default.post(name: .showOnboarding, object: nil)
                     }
                 )

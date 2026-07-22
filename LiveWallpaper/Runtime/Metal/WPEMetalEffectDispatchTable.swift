@@ -4,7 +4,7 @@ import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
 
-/// ADR-001 B2: data-driven dispatch for the 18 `effect_*` builtin cases.
+/// Data-driven dispatch for supported builtin `effect_*` shaders.
 ///
 /// Everything identical across the family — pipeline lookup, blend/pixel-format
 /// passthrough, and object-quad vertex-uniform plumbing — lives once in
@@ -36,10 +36,8 @@ struct WPEEffectDispatchDescriptor: Sendable {
     /// irregular future name fails the snapshot test loudly instead of
     /// silently mis-deriving at runtime.
     let fragmentName: String
-    /// Preserved verbatim from the legacy switch: colorbalance/blur/vignette/
-    /// water pre-date the Phase 2D-E shared helper and never route through the
-    /// object quad. Pixel-visible under parallax/perspective — flipping one of
-    /// these is a separate, oracle-gated decision, not part of the B2 port.
+    /// Color-balance, blur, vignette, and water effects intentionally bypass the
+    /// object quad; changing this is pixel-visible under parallax and perspective.
     let supportsObjectQuad: Bool
     /// waterwaves' legacy dispatch omitted `cameraParallax` from BOTH
     /// `usesObjectQuadGeometry` and `objectQuadUniforms` (defaulting them to
@@ -141,10 +139,7 @@ struct WPEEffectDispatchDescriptor: Sendable {
         )
     }
 
-    /// One entry per builtin `effect_*` kind — all 18 migrated (ADR-001 B2
-    /// complete). The dispatcher switch routes every effect kind here; the
-    /// snapshot test pins each entry's literals and that the key set equals
-    /// the full `effect_`-prefixed subset of `WPEBuiltinShaderKind`.
+    /// One entry per builtin `effect_*` kind; snapshot tests pin literals and key coverage.
     static let table: [WPEBuiltinShaderKind: WPEEffectDispatchDescriptor] = {
         let entries: [WPEEffectDispatchDescriptor] = [
             WPEEffectDispatchDescriptor(
@@ -508,7 +503,7 @@ struct WPEEffectDispatchDescriptor: Sendable {
 }
 
 extension WPEMetalShaderDispatcher {
-    /// Shared driver for every table-migrated effect case: PSO selection (with
+    /// Shared driver for every table-driven effect case: pipeline selection (with
     /// the object-quad vertex variant), descriptor bind, then the object-quad
     /// vertex uniforms — the exact statement order of the legacy per-case
     /// methods (PSO before texture resolution, so a missing texture still

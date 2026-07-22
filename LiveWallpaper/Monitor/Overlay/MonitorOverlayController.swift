@@ -28,9 +28,7 @@ struct MonitorOverlayVisibilityDecision: Equatable, Sendable {
     }
 }
 
-/// Pure visibility policy shared by the live controller and characterization
-/// tests. `isDesktopOccluded` is FullScreenDetector's union-window boolean (the
-/// existing 85% pause-on-occlusion signal), not its 95% single-window flag.
+/// Pure visibility policy shared by the live controller and characterization tests.
 enum MonitorOverlayVisibilityPolicy {
     static func resolve(
         hosts: [MonitorOverlayVisibilityInput],
@@ -69,17 +67,7 @@ enum MonitorOverlayVisibilityPolicy {
     }
 }
 
-/// App-wide owner of the Monitor widget board as an OVERLAY layer — one floating
-/// panel per display, hosting the same native `MonitorBoardHostView` the wallpaper
-/// uses, but layered over whatever wallpaper the display shows. Independent of the
-/// wallpaper type entirely.
-///
-/// Modeled on `MonitorHUDController`: it holds ONE shared `MonitorRuntime` lease
-/// while any overlay is visible (options = union of visible overlays' placed widget
-/// kinds) and pumps the newest snapshot to every visible board host at 1 Hz. `ScreenManager`
-/// drives it — calling `apply(...)` per screen when a config lands or displays
-/// change, and wiring `onOverlayEdited` to persist board edits back into
-/// `ScreenConfiguration.monitorOverlay`.
+/// Owns one monitor-widget overlay panel per display.
 @MainActor
 final class MonitorOverlayController: NSObject {
     static let shared = MonitorOverlayController()
@@ -157,9 +145,7 @@ final class MonitorOverlayController: NSObject {
 
     // MARK: - Per-screen reconcile
 
-    /// Create, update, or tear down the overlay for one display. `overlay == nil`
-    /// or `!overlay.enabled` removes it; otherwise the panel is created/updated at
-    /// the requested z-plane with the gated board.
+    /// Create, update, or tear down the overlay for one display.
     func apply(
         overlay: MonitorOverlayConfiguration?,
         screenID: CGDirectDisplayID,
@@ -172,9 +158,6 @@ final class MonitorOverlayController: NSObject {
         }
 
         let gated = MonitorWallpaperView.gatedConfiguration(overlay.board, agentFleetEnabled: agentFleetEnabled)
-        // The overlay window covers the full screen frame (menu-bar area
-        // included), so the board honours the same top forbidden zone the
-        // wallpaper host does — derived identically from the matching NSScreen.
         let topInsetFraction = MonitorWallpaperView.menuBarTopInsetFraction(forFrame: screenFrame)
 
         if let host = hosts[screenID] {
@@ -200,9 +183,7 @@ final class MonitorOverlayController: NSObject {
         )
         board.autoresizingMask = [.width, .height]
         board.resetHistory()
-        // Every new host starts parked. The serialized runtime reconciliation
-        // unsuspends and primes it only after a current visible decision has an
-        // active lease, so an initially occluded host never receives one frame.
+        // Every new host starts parked.
         board.setSuspended(true)
         window.contentView = board
 
@@ -220,7 +201,6 @@ final class MonitorOverlayController: NSObject {
             let regated = MonitorWallpaperView.gatedConfiguration(edited, agentFleetEnabled: host.agentFleetEnabled)
             host.config = regated
             onOverlayEdited?(screenID, edited)
-            // A widget add/remove changes the placed-kind set → repoint sampling.
             reconcileVisibilityAndRuntime()
         }
         board.onEditingChanged = { [weak self, weak host] _ in
@@ -259,9 +239,7 @@ final class MonitorOverlayController: NSObject {
         }
     }
 
-    /// Re-evaluate retained hosts from ScreenManager's current lifecycle and
-    /// detector snapshot. The detector has already applied its 85% union-area
-    /// threshold; this layer only maps that binary result through z-plane policy.
+    /// Re-evaluate retained hosts from ScreenManager's current lifecycle and detector snapshot.
     func updateVisibility(
         isUserAbsent: Bool,
         occludedScreenIDs: Set<CGDirectDisplayID>
@@ -275,9 +253,7 @@ final class MonitorOverlayController: NSObject {
 
     // MARK: - Editing
 
-    /// Enter/exit board edit mode on every active overlay (menu-bar driven). The
-    /// board's own Done control exits too; both funnel through `onEditingChanged`,
-    /// which restores click-through.
+    /// Enter/exit board edit mode on every active overlay (menu-bar driven).
     func setEditing(_ editing: Bool) {
         for host in hosts.values {
             host.board.setEditing(editing)
@@ -298,8 +274,6 @@ final class MonitorOverlayController: NSObject {
     }
 
     private func updateInteractive(_ host: Host) {
-        // Click-through unless the board is being edited or the user opted the
-        // overlay into receiving clicks.
         let interactive = host.board.isEditing || host.config.mouseInteractionEnabled
         host.window.setInteractive(interactive)
         host.board.setMouseInteractionEnabled(interactive)
@@ -321,9 +295,7 @@ final class MonitorOverlayController: NSObject {
         )
         visibilityDecision = decision
 
-        // Suspension is applied immediately on the MainActor so an occluded or
-        // absent board cannot animate or receive another pump tick while the
-        // actor-side lease transition is awaiting its turn.
+        // Suspension is applied immediately on the MainActor so an occluded or absent board cannot animate or receive another pump tick while the actor-side lease transition is awaiting its turn.
         for (screenID, host) in hosts {
             host.isVisible = decision.visibleHostIDs.contains(screenID)
             if !host.isVisible {
@@ -368,10 +340,7 @@ final class MonitorOverlayController: NSObject {
         }
     }
 
-    /// The only path that mutates this controller's MonitorRuntime lease. Every
-    /// desired-state change bumps a revision; changes that arrive during an await
-    /// are folded into the next loop iteration rather than launched as competing
-    /// acquire/update/pause/release tasks.
+    /// The only path that mutates this controller's MonitorRuntime lease.
     private func runRuntimeReconciliationLoop() async {
         while true {
             let revision = runtimeReconciliationRevision
@@ -404,8 +373,6 @@ final class MonitorOverlayController: NSObject {
             appliedRuntimeState = AppliedRuntimeState()
 
         case .paused:
-            // Initial hidden-only overlays stay parked without starting sources.
-            // The lease slot remains available for a later visible generation.
             guard let lease = appliedRuntimeState.lease,
                   !appliedRuntimeState.isPaused else { return }
             await lease.setPaused(true).value
@@ -423,8 +390,6 @@ final class MonitorOverlayController: NSObject {
 
             guard let lease = appliedRuntimeState.lease else { return }
 
-            // A paused lease keeps its old options. Refresh the visible-host
-            // union first so resuming cannot briefly restart hidden-only sources.
             if appliedRuntimeState.options != options {
                 await lease.updateOptions(options).value
                 appliedRuntimeState.options = options

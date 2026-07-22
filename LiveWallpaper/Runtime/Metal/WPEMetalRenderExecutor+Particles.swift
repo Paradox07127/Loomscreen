@@ -255,7 +255,7 @@ extension WPEMetalRenderExecutor {
         var tintAndMask: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 0)
     }
 
-    /// Phase 2D-D: per-particle uniform pack.
+    /// Packs per-particle uniforms.
     func genericParticleUniforms(for pass: WPEPreparedRenderPass) -> WPEGenericParticleUniforms {
         WPEGenericParticleUniforms(
             color: WPEMetalShaderInputs.colorVector(for: pass),

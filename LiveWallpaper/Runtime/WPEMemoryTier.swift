@@ -29,12 +29,8 @@ enum WPEMemoryTier: Equatable, Sendable {
         }
     }
 
-    /// Max scene-render pixel budget for perspective scenes rendered at native
-    /// resolution (crisp HUD text). Bounds the FBO-memory blow-up: native 4K is
-    /// 4× the 1080 baseline, and HDR scenes double bytes/pixel (rgba16Float) on
-    /// top — 8× combined would OOM this scene (already ~1.4 GB at 1080/8-bit).
-    /// The caller clamps the drawable size to this, never below the authored
-    /// size (so `constrained` HDR effectively stays at 1080).
+    /// Caps native-resolution perspective rendering to bound FBO memory growth.
+    /// HDR halves the pixel budget because `rgba16Float` doubles bytes per pixel.
     func perspectiveRenderPixelBudget(hdr: Bool) -> Double {
         let base = 1920.0 * 1080.0
         let multiplier: Double
@@ -47,11 +43,7 @@ enum WPEMemoryTier: Equatable, Sendable {
         return base * (hdr ? multiplier * 0.5 : multiplier)
     }
 
-    /// Raw-bytes cutoff routing multi-frame `.tex` to the lazy streaming source
-    /// instead of eager-resident upload (`lazyAnimationRawByteThreshold`).
-    /// Halved on 8 GB machines: a ~150 MB resident animation is 2% of the whole
-    /// machine there, and the streaming source's bounded prefetch already keeps
-    /// playback seamless.
+    /// Routes large animated textures to lazy streaming instead of eager upload.
     var lazyAnimationRawByteThreshold: Int {
         switch self {
         case .constrained: return 100_000_000

@@ -23,7 +23,7 @@ struct WPEMSDFTextDrawPayload {
     let shaderRequest: WPEShaderCompileRequest
 }
 
-// Not `@MainActor` (M2c1b-3c): lives inside the renderer's actor isolation.
+// Not `@MainActor`: lives inside the renderer's actor isolation.
 final class WPEMSDFTextRenderer {
     private let device: MTLDevice
     private let resolver: WPEMultiRootResourceResolver
@@ -76,18 +76,8 @@ final class WPEMSDFTextRenderer {
         self.generator = WPEMSDFGlyphGenerator(parameters: parameters)
     }
 
-    /// - Parameters:
-    ///   - originOverride: When non-nil, the text-box center in absolute top-left
-    ///     scene pixels WITH parallax already folded in, used instead of
-    ///     `object.origin + parallaxOffset`. The renderer supplies this for
-    ///     perspective scenes (world-unit origin camera-projected to pixels) AND
-    ///     for ortho objects whose origin was live-recomposed through a
-    ///     script-driven parent chain.
-    ///   - sizeScale: Extra uniform scale applied on top of `object.scale`
-    ///     (focal ÷ depth for perspective; 1 for ortho) so distant text shrinks.
-    ///   - rotation: Composed z rotation (radians, author-space CCW) inherited
-    ///     from the object's transform-host chain; the quad rotates around the
-    ///     text-box center (3470764447's -15° 总组件角度 tilts its clock stack).
+    /// Builds an MSDF draw payload using the supplied live placement, perspective scale,
+    /// and transform-chain rotation.
     func drawPayload(
         for object: WPESceneTextObject,
         sceneSize: CGSize,

@@ -29,11 +29,8 @@ enum SidebarDisplayOrder {
         (try? JSONEncoder().encode(entries)) ?? Data()
     }
 
-    /// Applies the stored order to the currently connected displays. Exact
-    /// fingerprint-and-ID matches win; a known fingerprint is then used as a
-    /// fallback when macOS has assigned the same physical display a new ID.
-    /// Displays without a saved entry retain the system-provided order at the
-    /// end of the sidebar.
+    /// Applies the saved sidebar order, using a unique fingerprint when macOS changes a display ID.
+    /// Unsaved displays retain system order at the end.
     static func orderedDisplayIDs(from available: [Entry], storedOrder: [Entry]) -> [CGDirectDisplayID] {
         var remaining = available
         var ordered = [Entry]()

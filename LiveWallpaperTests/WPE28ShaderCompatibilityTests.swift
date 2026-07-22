@@ -3,14 +3,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Compile gate for WPE 2.8 shader ABI additions. Mirrors the convention in
-/// `WPECorpusFailurePatternsTests`: minimal preprocessed-GLSL shaders that
-/// reproduce the exact 2.8 changes (rather than the user-specific install
-/// sources), translated to MSL and compiled with `makeLibrary`.
-///
-/// Faithful fixture-based gates for the full `font.frag` MSDF combos and the
-/// model-layer tangent path land with Milestone D / E, where the GPU MSDF
-/// pipeline and model boundary are built.
 @MainActor
 @Suite("WPE 2.8 shader compatibility")
 struct WPE28ShaderCompatibilityTests {
@@ -24,8 +16,6 @@ struct WPE28ShaderCompatibilityTests {
 
     @Test("combine_video_hdr translates with g_HDRParams and compiles")
     func combineVideoHDRCompiles() throws {
-        // Body mirrors 2.8 assets/shaders/combine_video_hdr.frag verbatim
-        // (texSample2D→texture, saturate is native MSL).
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -50,7 +40,6 @@ struct WPE28ShaderCompatibilityTests {
 
     @Test("passthroughsrgb uses the 2.8 piecewise sRGB linearization and compiles")
     func passthroughSRGBCompiles() throws {
-        // 2.8 replaced the approximate pow(2.2) path with proper piecewise sRGB.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -69,16 +58,12 @@ struct WPE28ShaderCompatibilityTests {
             shaderName: "passthroughsrgb",
             preprocessedSource: source
         )
-        // The new path is piecewise (`step`), not a single pow(2.2).
         #expect(result.mslSource.contains("step("))
         try makeLibrary(result.mslSource)
     }
 
     @Test("genericparticle REFRACT branch no longer requires NORMALMAP")
     func genericParticleRefractWithoutNormalMap() throws {
-        // 2.8 moved the refraction offset out of the `REFRACT && NORMALMAP`
-        // guard so REFRACT works alone. With NORMALMAP undefined the offset
-        // is zero but the shader must still translate + compile.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -99,17 +84,11 @@ struct WPE28ShaderCompatibilityTests {
 
     @Test("Fragment-only compiler keeps the built-in fullscreen vertex (no model-vertex path)")
     func fragmentOnlyVertexContract() {
-        // The Swift compiler never owns a vertex stage — model/vertex-domain
-        // shaders fall back rather than crash Metal, so this name is the only
-        // vertex function it ever reports.
         #expect(WPESwiftShaderCompiler.fixedVertexFunctionName == "wpe_fullscreen_vertex")
     }
 
     @Test("font.frag non-MSDF raster branch (ConvertSampleR8) translates and compiles")
     func fontRasterBranchCompiles() throws {
-        // The COLORFONT=0 raster path of font.frag. ConvertSampleR8 is supplied
-        // by the builtin common_fragment.h header (see the builder suite's
-        // expansion test); here it is inlined to gate the transpile + MSL build.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;

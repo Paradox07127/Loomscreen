@@ -4,10 +4,6 @@ import Testing
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-/// Locks the "never reclaim a live `scene.pkg`" rule that gates the download
-/// archive reclaimer. Every packaged type reads its assets in place from the
-/// source archive, so trashing it breaks the applied wallpaper — the reclaimer
-/// subtracts this set from its candidates.
 @Suite("WPE scene reachability: package-backed ids")
 @MainActor
 struct WPESceneReachabilityTests {
@@ -24,8 +20,6 @@ struct WPESceneReachabilityTests {
             cacheRelativePath: "wpe-cache/\(workshopID)",
             previewFileName: nil,
             entryFile: entryFile,
-            // Legacy imports persist `.cache`; those are exactly the ids that
-            // still have an extraction cache and so reach the reclaimer.
             resourceLocation: .cache
         )
     }
@@ -50,10 +44,6 @@ struct WPESceneReachabilityTests {
         )
     }
 
-    /// The user-data bug: a packaged video's content is a bookmark to
-    /// `scene.pkg` itself, but the id was only recoverable from the paired
-    /// origin — so a `sceneDescriptor`-only reachability scan missed it and the
-    /// reclaimer trashed the archive the wallpaper was playing from.
     @Test("An applied packaged video protects its source scene.pkg")
     func packagedVideoIsPackageBacked() {
         let ids = WPESceneReachability.packageBackedWorkshopIDs(
@@ -68,10 +58,6 @@ struct WPESceneReachabilityTests {
         #expect(ids == ["111"])
     }
 
-    /// The counterweight: a loose video really does read from the extracted
-    /// cache, so its archive stays reclaimable. Without this, "protect
-    /// everything with an origin" would pass the test above and silently kill
-    /// the feature.
     @Test("An applied loose video leaves its archive reclaimable")
     func looseVideoIsNotPackageBacked() {
         let ids = WPESceneReachability.packageBackedWorkshopIDs(
@@ -146,8 +132,6 @@ struct WPESceneReachabilityTests {
         #expect(ids == ["666"])
     }
 
-    /// A packaged video with no origin has no id to protect; it must not widen
-    /// the set with an empty string (which would match nothing and mask the gap).
     @Test("A packaged video without an origin contributes no id")
     func packagedVideoWithoutOriginContributesNothing() {
         let ids = WPESceneReachability.packageBackedWorkshopIDs(
@@ -162,7 +146,6 @@ struct WPESceneReachabilityTests {
         #expect(ids.isEmpty)
     }
 
-    /// Non-WPE content never contributes, even on a screen whose origin lingers.
     @Test("Shader and monitor wallpapers contribute no ids")
     func nonPackageContentContributesNothing() {
         let ids = WPESceneReachability.packageBackedWorkshopIDs(

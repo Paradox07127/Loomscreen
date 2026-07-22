@@ -265,7 +265,6 @@ private struct WorkshopRowErrorStrip: View {
         case .itemBanned, .itemNotFound, .responseParseFailure, .schemaMismatch:
             return DesignTokens.Colors.Status.danger
         case .rateLimited:
-            // Orange signals "auto-retrying", distinct from yellow ("user action recommended").
             return DesignTokens.Colors.Status.warning
         case .invalidInput, .itemPrivate, .timeout, .networkUnreachable,
              .unauthorized, .http:

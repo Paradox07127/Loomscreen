@@ -2,10 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Inspector-side preview for HTML wallpapers. The selected screen's live
-/// `WKWebView` is captured first so WPE web projects show the current rendered
-/// page, matching the scene preview's live-frame behavior. Static WPE preview
-/// assets and the shared offscreen thumbnail service are fallbacks.
+/// Inspector-side preview for HTML wallpapers.
 struct HTMLPreviewSection: View {
     let screen: Screen
     let source: HTMLSource?
@@ -173,9 +170,7 @@ struct HTMLPreviewSection: View {
     }
 }
 
-/// Resolves an `HTMLSource` into a `(URL, cacheKey)` pair that
-/// `WallpaperThumbnailService` can snapshot. File/folder bookmark resolution
-/// opens a security scope for the duration of the call.
+/// Resolves an `HTMLSource` into a `(URL, cacheKey)` pair that `WallpaperThumbnailService` can snapshot.
 enum HTMLPreviewKey {
     static func key(for source: HTMLSource) -> String {
         switch source {
@@ -246,9 +241,7 @@ enum HTMLPreviewKey {
     }
 }
 
-/// Floating capsule on the web preview: source kind, identifier, and the
-/// runtime-mode badges that meaningfully change how the page is drawn (insecure
-/// URL, physical-pixel layout, JavaScript off).
+/// Floating capsule on the web preview: source kind, identifier, and the runtime-mode badges that meaningfully change how the page is drawn (insecure URL, physical-pixel layout, JavaScript off).
 struct HTMLInformationOverlay: View {
     let source: HTMLSource?
     let config: HTMLConfig

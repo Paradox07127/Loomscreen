@@ -36,11 +36,7 @@ extension ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // Low Power Mode toggles flip `GameModeDetector.shared.isActive` without
-        // changing the frontmost app, so we need a dedicated subscription
-        // here — otherwise the policy refresh would wait for the next
-        // unrelated event. The notification name is the AppKit/Foundation
-        // Obj-C constant; Swift doesn't surface a typed alias on macOS.
+        // Low Power Mode can change without a frontmost-app event, so observe it separately.
         NotificationCenter.default.publisher(for: Notification.Name.NSProcessInfoPowerStateDidChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -53,9 +49,6 @@ extension ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // GameMode + per-app pause rules (frontmost trigger) piggyback on
-        // frontmost-app activations — flipping to / from Steam, a game, or a
-        // rule-listed app re-evaluates the policy.
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -64,9 +57,6 @@ extension ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // Per-app pause rules with the "while running" trigger need to react to
-        // launch / quit too (an app can start without becoming frontmost). These
-        // fire only on actual launch/quit, so there's no idle cost.
         Publishers.Merge(
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification),
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)
@@ -74,7 +64,6 @@ extension ScreenManager {
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
             guard let self else { return }
-            // Cheap no-op unless a "running"-trigger rule exists.
             guard SettingsManager.shared.loadGlobalSettings()
                 .applicationPerformanceRules.contains(where: { $0.trigger == .running }) else { return }
             self.refreshPerformancePolicyForAllScreens()
@@ -93,8 +82,6 @@ extension ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // Display sleep（仅显示器睡眠，整机仍在跑）。区别于上面的 willSleep/didWake
-        // （整机睡眠）和下面的 screenIsLocked（用户锁屏，显示器仍亮）。
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidSleepNotification)
             .sink { [weak self] _ in
                 self?.handleDisplaySleep()
@@ -140,10 +127,7 @@ extension ScreenManager {
         setUserAbsence(.screenLocked, present: false)
     }
 
-    /// Lock screen and display sleep both mean "user is not watching". They
-    /// fold into the effective performance profile via `isUserAbsent`, so a
-    /// single policy refresh suspends or restores every session (respecting
-    /// each video's `userIntendsToPlay`) — no separate pause/resume overlay.
+    /// Lock screen and display sleep both mean "user is not watching".
     private func setUserAbsence(_ reason: UserAbsenceReason, present: Bool) {
         let changed = present
             ? userAbsenceReasons.insert(reason).inserted
@@ -216,27 +200,18 @@ extension ScreenManager {
         }
     }
 
-    /// Full-screen / window-occlusion changes fold into the effective profile
-    /// like every other condition; a single policy refresh applies the unified
-    /// play/pause decision. The `hiddenScreens` snapshot is now informational —
-    /// the policy reads the detector live.
+    /// Full-screen / window-occlusion changes fold into the effective profile like every other condition; a single policy refresh applies the unified play/pause decision.
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
         refreshMonitorOverlayVisibility()
         refreshPerformancePolicyForAllScreens()
     }
 
-    /// Power changes no longer carry their own play/pause logic — they fold
-    /// into the effective performance profile like every other condition, so a
-    /// single refresh applies the unified decision (`userIntendsToPlay` for
-    /// video, profile for ambient) across all screens.
+    /// Routes power changes through the unified performance policy.
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         refreshPerformancePolicyForAllScreens()
     }
 
-    /// Single source of truth for resolving + applying the performance policy to
-    /// one screen. Every raw signal is gathered here (via `policyInputs`), so no
-    /// other type re-assembles the rule inputs — `PlaybackCoordinator` calls back
-    /// into this instead of duplicating the gathering.
+    /// Single source of truth for resolving + applying the performance policy to one screen.
     @discardableResult
     func applyPerformancePolicy(to screen: Screen) -> WallpaperPerformanceProfile {
         let settings = SettingsManager.shared.loadGlobalSettings()
@@ -250,11 +225,7 @@ extension ScreenManager {
         return profile
     }
 
-    /// Resolves the universal suspend/quality profile and applies it together
-    /// with the scene-only adaptive frame-rate throttle — the single place that
-    /// pairs the two so a future edit can't drift the all-screens and
-    /// single-screen paths apart. Context (`settings` and the rule flags) is
-    /// passed in so the all-screens loop computes it once.
+    /// Applies the unified suspend, quality, and scene frame-rate policy.
     @discardableResult
     private func resolveAndApplyPerformanceState(
         to screen: Screen,
@@ -280,11 +251,7 @@ extension ScreenManager {
         return profile
     }
 
-    /// Layers the adaptive background frame-rate throttle on top of the binary
-    /// play/pause profile. Pixel-identical; only the presented frame *rate*
-    /// changes, which on Apple Silicon is the dominant GPU-power driver. Scene
-    /// renderer only — the video path uses a separate composition cap. No-op in
-    /// Lite (no scene renderer).
+    /// Layers the adaptive background frame-rate throttle on top of the binary play/pause profile.
     private func applyAdaptiveFrameRate(to screen: Screen, settings: GlobalSettings) {
         #if !LITE_BUILD
         guard let scene = screen.runtimeSession as? SceneWallpaperSession,
@@ -314,9 +281,7 @@ extension ScreenManager {
         #endif
     }
 
-    /// Snapshots the current *raw* system state for `screen`. The `GlobalSettings`
-    /// gating lives in `WallpaperPolicyEngine`, so detector/state readings are
-    /// passed through ungated.
+    /// Snapshots the current *raw* system state for `screen`.
     private func policyInputs(
         for screen: Screen,
         applicationRuleActive: Bool,
@@ -351,24 +316,11 @@ extension ScreenManager {
                 frontmostExcluded: frontmostExcluded
             )
         }
-        // Suspend/resume transitions just changed which screens are actually
-        // drawing, so re-evaluate the App Nap exemption against the new profiles.
         refreshAppNapAssertion()
-        // A policy refresh always commits the derived session state, so observers
-        // can't leave the SwiftUI layer out of sync with the render loops by
-        // forgetting a trailing updatePlaybackState() call.
         commitWallpaperSessionState()
     }
 
-    /// Hold an activity assertion whenever ≥1 wallpaper session is actively
-    /// rendering, so macOS doesn't App-Nap our background render loop down to
-    /// ~1fps when the user focuses another window. The allowing-idle-sleep
-    /// variant deliberately avoids a `PreventUserIdleSystemSleep` assertion, so
-    /// the Mac can still sleep on its own schedule. A session that the
-    /// performance policy has suspended (`.suspended` — occlusion, full-screen,
-    /// game mode, battery, memory pressure, user absence) is excluded because it
-    /// is not drawing. The guard/if-let pair makes an unchanged desired state a
-    /// no-op, so policy refreshes do not churn begin/end activity calls.
+    /// Hold an activity assertion whenever ≥1 wallpaper session is actively rendering, so macOS doesn't App-Nap our background render loop down to ~1fps when the user focuses another window.
     func refreshAppNapAssertion() {
         let isRendering = screens.contains {
             $0.runtimeSession != nil

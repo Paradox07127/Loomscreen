@@ -154,8 +154,6 @@ struct AtomicFileStoreTests {
         #expect(store.read() == nil)
     }
 
-    // MARK: - Helpers
-
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default
             .temporaryDirectory

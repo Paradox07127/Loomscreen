@@ -9,7 +9,7 @@ extension WPEMetalSceneRenderer {
 
     /// Phase-level os_signpost intervals for the per-frame render. Always on;
     /// with no Instruments observer the emit cost is negligible. Read the stages
-    /// with the os_signpost template to size Phase 2's off-main move.
+    /// with the os_signpost template to measure off-main rendering.
     static let frameSignposter = OSSignposter(
         subsystem: Bundle.main.bundleIdentifier ?? "com.taijia.LiveWallpaper",
         category: "WPEFrame"
@@ -416,22 +416,14 @@ extension WPEMetalSceneRenderer {
         }
     }
 
-    /// WPE runs a text object's script regardless of its visibility. Several
-    /// scenes (e.g. 三体 3509243656) use a HIDDEN text object purely as a
-    /// COMPUTE script that writes shared state — civilisation stats, ranking,
-    /// temperature — which the VISIBLE data texts then read via `value =
-    /// shared.txtN`. Ticking only visible objects left that shared state unset,
-    /// so every derived readout rendered blank. Tick every script here (for its
-    /// side effects on `shared`), independent of whether it will be drawn.
+    /// Ticks all text scripts because hidden text objects may populate shared state
+    /// consumed by visible text objects.
     private func tickTextContentScripts(
         traversalEpoch: WPESceneScriptTraversalEpoch
     ) -> [String: String] {
         var liveTextByID: [String: String] = [:]
         liveTextByID.reserveCapacity(textScriptInstances.count)
-        // Sorted by objectID: hidden compute-scripts write `shared` state that the
-        // visible data texts then read (三体 3509243656), so tick order changes the
-        // rendered text. Dictionary order was arbitrary — a fixed order makes the
-        // oracle trace deterministic and the render reproducible.
+        // A stable object order makes shared-state dependencies and traces deterministic.
         for (id, instance) in textScriptInstances.sorted(by: { $0.key < $1.key }) {
             liveTextByID[id] = tickTextScript(
                 instance,

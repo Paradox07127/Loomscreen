@@ -9,11 +9,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Attachment on a pure group lowers onto its renderable children")
     func groupAttachmentLowersOntoChildren() throws {
-        // 3462491575's Kal'tsit rig: every head-hair layer hangs from a null
-        // GROUP that carries `attachment: "头发"` on the puppet body. The group
-        // is baked away at parse time, so the children must inherit the anchor
-        // and re-parent to the puppet — otherwise the whole hair subtree misses
-        // the anchor offset and renders on the torso.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
@@ -55,15 +50,12 @@ struct WPESceneDocumentParserTests {
         let hair = try #require(byID["300"])
         #expect(hair.attachment == "头发")
         #expect(hair.parentObjectID == "100")
-        // The group's origin still contributes to the baked transform chain.
         #expect(abs(hair.origin.x - (500 - 1 + 89)) < 0.001)
 
-        // A directly-attached layer keeps its own attachment untouched.
         let eye = try #require(byID["400"])
         #expect(eye.attachment == "头发")
         #expect(eye.parentObjectID == "100")
 
-        // The puppet body itself is unaffected.
         let body = try #require(byID["100"])
         #expect(body.attachment == nil)
     }
@@ -99,7 +91,6 @@ struct WPESceneDocumentParserTests {
         #expect(!patch.requiresReload)
         #expect(patch.incrementalBindings == [visibleBinding])
 
-        // No override for xme → envelope's own default value (true) is kept.
         let shownDefault = try WPESceneDocumentParser.parse(data: data, userValues: [:])
         #expect(shownDefault.imageObjects.first?.visible == true)
 
@@ -244,9 +235,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Camera object overrides the top-level editor camera")
     func cameraObjectOverridesTopLevelCamera() throws {
-        // 3509243656: the RenderDoc capture's g_EyePosition is the camera
-        // OBJECT's origin (0,0,6); the top-level eye (10.07 away, outside the
-        // radius-8 skybox shell) is only the editor viewport bookmark.
         let payload: [String: Any] = [
             "camera": [
                 "center": "-1.83970 0.51670 9.15603",
@@ -275,9 +263,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Text object records parent id and pre-composition local origin")
     func textObjectRecordsParentAndLocalOrigin() throws {
-        // 3509243656's menu panels: text hangs under a script-driven transform
-        // host — the renderer re-composes localOrigin through the live chain,
-        // so both fields must survive parsing.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
@@ -297,15 +282,11 @@ struct WPESceneDocumentParserTests {
         let text = try #require(document.textObjects.first { $0.id == "1230" })
         #expect(text.parentObjectID == "2051")
         #expect(text.localOrigin == SIMD3<Double>(5, -3, 0))
-        // Parse-time world origin still carries the composed chain.
         #expect(text.origin == SIMD3<Double>(15, 17, 0))
     }
 
     @Test("Text object static angles parse (standalone z tilt, no parent chain)")
     func textObjectStaticAnglesParse() throws {
-        // 2986828130's Clock: a top-level text object carrying `angles`
-        // "0 0 0.5236" (30° z tilt) with no parent. The angle was dropped at
-        // parse time, so the clock rendered unrotated on both text paths.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160]],
@@ -340,8 +321,6 @@ struct WPESceneDocumentParserTests {
         let clock = try #require(document.textObjects.first { $0.id == "130" })
         #expect(abs(clock.angles.z - 0.5236) < 0.0001)
         #expect(clock.parentObjectID == nil)
-        // Parented text composes the parse-time world angle through the chain
-        // (SceneObjectTransform.combining adds angles).
         let child = try #require(document.textObjects.first { $0.id == "201" })
         #expect(abs(child.angles.z - 0.75) < 0.0001)
     }
@@ -370,7 +349,6 @@ struct WPESceneDocumentParserTests {
         #expect(bloom.feather == 0.88)
         #expect(bloom.scatter == 2.0)
         #expect(bloom.iterations == 6)
-        // SDR-only bloom stays off (v1 implements the HDR pipeline only).
         let sdrPayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": NSNull(), "bloom": true]
@@ -383,8 +361,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Text object dynamic origin script is captured for runtime ticking")
     func textDynamicOriginScriptCaptured() throws {
-        // 3509243656's star tooltip labels track their body via a `shared.xxN`
-        // origin script — it must be captured (not resolved to the stale seed).
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": NSNull()],
@@ -403,7 +379,6 @@ struct WPESceneDocumentParserTests {
         let label = try #require(document.textObjects.first { $0.id == "408" })
         #expect(label.originScript != nil)
         #expect(label.originScript?.script.contains("shared.xx1") == true)
-        // A static origin (no live tokens) stays nil — resolved at parse.
         let staticPayload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": NSNull()],
@@ -421,8 +396,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Text object alpha script is retained for runtime ticking")
     func textAlphaScriptRetained() throws {
-        // 3509243656's login-intro texts hide themselves via alpha scripts —
-        // dropping the script left them stuck at the baked alpha ("漏出来").
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 1920, "height": 1080]],
@@ -519,10 +492,6 @@ struct WPESceneDocumentParserTests {
         #expect(layer.blendMode == .additive)
     }
 
-    /// 3448877775's 昼夜变化: a full-screen `solidlayer` tint with WPE BLENDMODE 11
-    /// (Overlay). Overlay reads the destination, so it has no fixed-function
-    /// equivalent — resolving it to `.normal` painted an opaque rectangle over the
-    /// whole wallpaper (frame went from 204,974 colours to exactly 1).
     @Test("Destination-reading colorBlendMode routes to the programmable path, not opaque normal")
     func imageOverlayBlendModeUsesProgrammablePath() throws {
         let payload: [String: Any] = [
@@ -564,12 +533,6 @@ struct WPESceneDocumentParserTests {
         }
     }
 
-    /// The same layer authors `color` as `{animation, script, scriptproperties,
-    /// value}`. `value` is only the seed — reading it and dropping `animation`
-    /// froze the day/night gradient on its night-blue endpoint while WPE cycled.
-    /// 3448877775's star field ramps in via a KEYFRAMED `instanceoverride.alpha`
-    /// (0.01 → 1.0 across a 90s loop). Reading the static `value: 1.0` and baking
-    /// it into the spawn alpha pinned the stars at full brightness.
     @Test("instanceoverride alpha keyframes survive parsing and are not baked")
     func instanceOverrideAnimatedAlphaIsParsed() throws {
         let payload: [String: Any] = [
@@ -599,16 +562,10 @@ struct WPESceneDocumentParserTests {
         let object = try #require(document.particleObjects.first { $0.id == "4424" })
         let override = try #require(object.instanceOverride)
         let animation = try #require(override.alphaAnimation, "override alpha keyframes must survive")
-        // t=0 → nearly invisible; 1794/30 = 59.8s → fully in.
         #expect(abs((animation.scalar(at: 0) ?? -1) - 0.01) < 0.001)
         #expect((animation.scalar(at: 1794.0 / 30.0) ?? 0) > 1.0)
     }
 
-    /// 3448877775's meteor emitter is a bare transform host whose `origin` is a
-    /// keyframed sweep: parked off-screen for most of a 90s loop and back at
-    /// (0,0) for ~18s. Reading only the static `value` ("0 0 0") pinned it
-    /// on-screen forever, so the shooting stars fell permanently instead of in
-    /// periodic showers.
     @Test("Transform-host origin keyframes are parsed, not collapsed to the static value seed")
     func transformHostAnimatedOriginIsParsed() throws {
         let payload: [String: Any] = [
@@ -634,9 +591,7 @@ struct WPESceneDocumentParserTests {
 
         let host = try #require(document.transformHostObjects.first { $0.id == "15705" })
         let animation = try #require(host.originAnimation, "origin keyframes must survive parsing")
-        // Seeded from the authored static `value`.
         #expect(host.origin == SIMD3<Double>(0, 0, 0))
-        // t=0 → parked off-screen; halfway (frame 1503 = 50.1s) → back at centre.
         let start = try #require(animation.vector(at: 0))
         #expect(abs(start[0] - 2869.73) < 0.01, "got \(start[0])")
         let arrived = try #require(animation.vector(at: 1503.0 / 30.0))
@@ -669,9 +624,7 @@ struct WPESceneDocumentParserTests {
         let layer = try #require(try WPESceneDocumentParser.parse(data: data).imageObjects.first)
 
         let animation = try #require(layer.colorAnimation, "color animation must survive parsing")
-        // Seeded from the authored `value` so an untick'd first frame matches WPE.
         #expect(abs(layer.color.x - 0.28627) < 0.0001)
-        // 6s * 30fps = frame 180 of a 0->600 ramp: 0.5 + 0.3*(1.0-0.5).
         let at6s = try #require(animation.vector(at: 6))
         #expect(abs(at6s[0] - 0.65) < 0.01, "got \(at6s[0])")
     }
@@ -942,8 +895,6 @@ struct WPESceneDocumentParserTests {
         #expect(effect.shadowOffset == SIMD2<Double>(5, -6))
         #expect(effect.letterSpacing == 1.5)
 
-        // A 2.7-style text object without effect keys stays neutral, so the
-        // CoreText fallback and existing scenes are unaffected.
         let plain = try #require(document.textObjects.first { $0.id == "plain-text" })
         #expect(plain.outlineSize == 0)
         #expect(plain.blurSize == 0)
@@ -1026,10 +977,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Property-bound {user,value} scale resolves (not default 1.0) through parent composition")
     func propertyBoundScaleResolvesThroughParentComposition() throws {
-        // Mirrors scene 3460973721's audio-bar layer: a child composelayer whose
-        // scale is bound to a user property as {"user":…,"value":"0.5 0.5 0.5"}.
-        // Before the WPEValueParser.vector3 `value`-unwrap, this parsed as the 1.0
-        // default, doubling the rendered box. The parent group has no own scale.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -1054,10 +1001,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Uniform scalar scale (a lone number) resolves to all axes, not the 1.0 default")
     func uniformScalarScaleResolvesToAllAxes() throws {
-        // The real on-device shape (scene 3460973721): once WPE/the app resolves the
-        // "Scale Size" slider, the object's scale is written as a SINGLE scalar (0.5),
-        // not a vector. parseVector3 returns nil for a scalar → scale silently fell
-        // back to 1.0 and doubled the box. parseScale must coerce it to (0.5,0.5,0.5).
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -1083,9 +1026,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Property-bound visibility {user,value:false} hides the layer (style-combo selection)")
     func propertyBoundVisibilityHidesLayer() throws {
-        // Scene 3461168300: a "style" combo (newproperty14) shows the diagonal OR the
-        // bottom audio bar. The hidden one carries visible={user:{...}, value:false}.
-        // parseBool must read `value` (false) instead of defaulting to true.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -1130,9 +1070,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("Solidlayer with a visible effect and no authored alpha defaults to a transparent base")
     func solidlayerEffectBaseDefaultsTransparent() throws {
-        // Scene 3462491575 layer 704 uses a black solidlayer only as the input
-        // surface for audio_responsive_oscilloscope. WPE keeps that base
-        // transparent; otherwise the effect pass composites a black rectangle.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -1234,8 +1171,6 @@ struct WPESceneDocumentParserTests {
         #expect(host.anglesScript?.script == angleScript)
     }
 
-    /// Builds scene 3461168300's two-layer style selector: `newproperty14`
-    /// picks the diagonal (condition "1") or the bottom bar (condition "2").
     private func styleSelectorSceneData() throws -> Data {
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
@@ -1260,18 +1195,15 @@ struct WPESceneDocumentParserTests {
     func styleSelectorResolvesLiveSelection() throws {
         let data = try styleSelectorSceneData()
 
-        // newproperty14 = 2 → only the bottom bar (condition "2") shows.
         let pickBottom = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(2)])
         let bottomByID = Dictionary(uniqueKeysWithValues: pickBottom.imageObjects.map { ($0.id, $0) })
         #expect(bottomByID["269"]?.visible == false)
         #expect(bottomByID["488"]?.visible == true)
 
-        // String "2" must match the same way as the numeric value.
         let pickBottomString = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .string("2")])
         let bottomStringByID = Dictionary(uniqueKeysWithValues: pickBottomString.imageObjects.map { ($0.id, $0) })
         #expect(bottomStringByID["488"]?.visible == true)
 
-        // newproperty14 = 1 → only the diagonal (condition "1") shows.
         let pickDiagonal = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(1)])
         let diagonalByID = Dictionary(uniqueKeysWithValues: pickDiagonal.imageObjects.map { ($0.id, $0) })
         #expect(diagonalByID["269"]?.visible == true)
@@ -1281,7 +1213,6 @@ struct WPESceneDocumentParserTests {
     @Test("Style selector 'off' value hides every conditional layer")
     func styleSelectorOffHidesAll() throws {
         let data = try styleSelectorSceneData()
-        // newproperty14 = 3 (off) matches neither condition → both hidden.
         let off = try WPESceneDocumentParser.parse(data: data, userValues: ["newproperty14": .number(3)])
         let byID = Dictionary(uniqueKeysWithValues: off.imageObjects.map { ($0.id, $0) })
         #expect(byID["269"]?.visible == false)
@@ -1329,7 +1260,6 @@ struct WPESceneDocumentParserTests {
             ]]
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [])
-        // No condition → the property drives the bool directly: toggle=false hides it.
         let hidden = try WPESceneDocumentParser.parse(data: data, userValues: ["toggle": .bool(false)])
         #expect(hidden.imageObjects.first?.visible == false)
         #expect(hidden.propertyBindings["toggle"]?.first?.target == .imageObject(id: "7"))
@@ -1337,9 +1267,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("sceneConditionMatches maps live combo values to a condition literal")
     func sceneConditionMatchesCoversTypes() {
-        // The shared helper used by both the parser (full-reload path) and the
-        // renderer's resolvedVisible (incremental path). This is the core
-        // live-value → visibility mapping for the style selector.
         typealias Schema = WallpaperEngineProjectPropertySchema
         #expect(Schema.sceneConditionMatches(value: .number(2), condition: "2"))
         #expect(Schema.sceneConditionMatches(value: .string("2"), condition: "2"))
@@ -1426,10 +1353,6 @@ struct WPESceneDocumentParserTests {
 
     @Test("shape:quad DIRECTDRAW layer parses as a transparent-base image layer with perspective points")
     func shapeQuadLayerParsesAsImageWithPoints() throws {
-        // Scene 3521337568 layer 96 (光束 - 线性): a bare quad with no image that
-        // draws a DIRECTDRAW lightshafts beam. The layer must become a renderable
-        // image layer (transparent solid base), carry the effect's point0..3, and
-        // composite additively — WPE's RenderDoc pass 65 is SRC_ALPHA/ONE.
         let payload: [String: Any] = [
             "camera": ["center": "0 0 0"],
             "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
@@ -1489,8 +1412,6 @@ struct WPESceneDocumentParserTests {
         #expect(layer.imageRelativePath == "models/util/solidlayer.json")
         #expect(layer.shapePoints == nil)
         #expect(layer.blendMode == .normal)
-        // A bare shape quad (no effect/points) must stay transparent — never an
-        // opaque white solid rectangle.
         #expect(layer.alpha == 0)
     }
 
@@ -1716,14 +1637,12 @@ struct WPESceneDocumentParserTests {
         #expect(document.particleObjects.count == 2)
         let embers = try #require(document.particleObjects.first { $0.id == "46" })
         #expect(embers.brightness == 2.0)
-        // Absent field must stay exactly 1 — zero visual change for the corpus.
         let dust = try #require(document.particleObjects.first { $0.id == "47" })
         #expect(dust.brightness == 1.0)
     }
 
     @Test("Text object parses generic brightness (wildfire sample) and preserves it through withLiveText")
     func textObjectParsesBrightness() throws {
-        // Mirrors 3460973721's Clock (brightness 2.39) / plain text (absent → 1).
         let json = """
         {
           "camera": { "center": "0 0 0" },
@@ -1753,8 +1672,6 @@ struct WPESceneDocumentParserTests {
         #expect(abs(clock.brightness - 2.39) < 0.0001)
         let label = try #require(document.textObjects.first { $0.id == "102" })
         #expect(label.brightness == 1.0)
-        // The per-frame live-text copy must not drop the field (ticking clocks
-        // would silently lose their authored brightness after the first tick).
         let live = clock.withLiveText("12:35", alpha: 0.5)
         #expect(abs(live.brightness - 2.39) < 0.0001)
     }

@@ -3,13 +3,8 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Pure-logic coverage for `MonitorFocusRouter`: session-id parsing, the
-/// parent-process walker (exercised against the running test process), and
-/// descriptor→PID matching. No window activation is triggered here.
 @Suite("MonitorFocusRouter: parsing + pid walk")
 struct MonitorFocusRouterTests {
-
-    // MARK: - parseProvider
 
     @Test("parses a claude session id")
     func parsesClaude() {
@@ -43,13 +38,10 @@ struct MonitorFocusRouterTests {
         #expect(MonitorFocusRouter.parseProvider("") == nil)
     }
 
-    // MARK: - Parent-chain walker
-
     @Test("parentPID of the test process returns a real ancestor")
     func parentPIDResolves() {
         let me = getpid()
         let parent = MonitorFocusRouter.parentPID(of: me)
-        // Every process except launchd (pid 1) has a parent the kernel can report.
         #expect(parent != nil)
         if let parent {
             #expect(parent > 0)
@@ -59,23 +51,16 @@ struct MonitorFocusRouterTests {
 
     @Test("parentPID of an impossible pid fails gracefully")
     func parentPIDMissing() {
-        // INT32_MAX is far above any real pid; sysctl returns no record.
         #expect(MonitorFocusRouter.parentPID(of: pid_t.max) == nil)
     }
 
     @Test("regularAncestor walk from the test process terminates without crashing")
     func regularAncestorTerminates() {
-        // The xctest host is not itself `.regular`; whether a regular ancestor
-        // exists depends on how the suite was launched (Xcode vs bare CLI). The
-        // contract is only that the bounded walk RETURNS — a pid or nil — and
-        // never loops or traps.
         let result = MonitorFocusRouter.regularAncestorPID(from: getpid())
         if let result {
             #expect(result > 0)
         }
     }
-
-    // MARK: - Descriptor matching
 
     @Test("matches the live descriptor for a session id")
     func matchesLiveDescriptor() {
@@ -96,7 +81,6 @@ struct MonitorFocusRouterTests {
 
     @Test("skips a dead descriptor and reports no pid")
     func deadDescriptorReturnsNil() {
-        // A pid the kernel can't find is treated as dead → no focus target.
         let descriptors = [
             ClaudePIDDescriptor(pid: pid_t.max, sessionId: "ghost", cwd: nil, kind: nil, name: nil, startedAt: nil)
         ]

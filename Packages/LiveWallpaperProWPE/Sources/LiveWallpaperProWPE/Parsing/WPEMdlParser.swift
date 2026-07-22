@@ -7,7 +7,7 @@ public struct WPEPuppetModel: Equatable, Sendable {
     public let meshes: [WPEPuppetMesh]
     public let bones: [WPEPuppetBone]
     public let animations: [WPEPuppetAnimation]
-    /// MDAT anchors mapping a named scene attachment (e.g. 头部/脖颈/胸部) to a bone + bind transform.
+    /// MDAT anchors mapping a named scene attachment to a bone and bind transform.
     public let attachments: [WPEPuppetAttachment]
 
     public init(
@@ -876,13 +876,7 @@ public enum WPEMdlParser {
             ))
         }
 
-        // MDLV positions are already the static target geometry. The MDLS skeleton and
-        // MDLA animation sections are OPTIONAL metadata the current static draw path does
-        // not consume (reserved for future bone skinning). A malformed or edge-case section
-        // must never discard the already-parsed, renderable mesh geometry — otherwise the
-        // whole puppet collapses to nil and the object degrades to a flat, scattered atlas
-        // (observed on MDLV0023 scene 3479521040 "人物"). Parse each defensively on its own
-        // cursor and recover the meshes, dropping only the failed section's metadata.
+        // Optional skeleton or animation metadata must not invalidate already parsed static mesh geometry.
         var metadataReader = reader
         let bones: [WPEPuppetBone]
         let skeletonAuditCheckpoint = auditRecorder?.checkpoint()
@@ -1317,12 +1311,7 @@ public enum WPEMdlParser {
         )
     }
 
-    /// MDAT0001 attachment anchors (between MDLS and MDLA). Layout validated against the on-disk
-    /// corpus (Kal'tsit 主体: 头部→5/脖颈→3/胸部→1; 长发3: 头发附件→0):
-    ///
-    /// - Section: tag(8) + flag u8 + sectionEnd u32 + anchorCount **u16**.
-    /// - Per anchor: boneIndex **u16**, name cstring (UTF-8), 16 little-endian f32 column-major
-    ///   bind matrix (bone-local anchor offset).
+    /// Parses MDAT0001 anchors: a section header followed by a UTF-8 name, bone index, and column-major bind matrix per anchor.
     private static func parseAttachmentsIfPresent(
         reader: inout WPEMdlBinaryReader,
         auditRecorder: WPEMdlParseAuditRecorder?
@@ -1377,17 +1366,8 @@ public enum WPEMdlParser {
     /// One keyframe = 9 little-endian f32: [Tx,Ty,Tz, Rx,Ry,Rz, Sx,Sy,Sz].
     private static let animationKeyByteCount = 9 * MemoryLayout<Float>.size
 
-    /// MDLA0005 (v19) / MDLA0006 (v21/v23) baked skeletal animation. Layout (read-only
-    /// validated against the on-disk corpus: 3479521040/人物 55ch anim 267/777, 3554161528/人物,
-    /// 3351072238/伊蕾娜 MDLS0003, 3704273480/身体拆分 89 bones, 2955378002/rennee MDLA0005):
-    ///
-    /// - Section: tag(8) + flag u8 + sectionEnd u32 + animationCount u32.
-    /// - Per animation: id u32, reserved u32(0), name cstring, mode cstring, fps f32,
-    ///   frameCount u32, reserved u32(0), channelCount u32, reserved u32(0), channelByteCount u32.
-    /// - channelByteCount == (frameCount + 1) * 36. Channel-major; each channel stores frames
-    ///   0...frameCount as `animationKeyByteCount` records, then an 8-byte delimiter
-    ///   (u32 0 + u32 channelByteCount) before the next channel. Channels map to MDLS bone order.
-    /// - A short zero-padding tail separates animations; scan to the next plausible header.
+    /// Parses corpus-validated MDLA0005/0006 channel-major skeletal animation records.
+    /// Each channel contains `frameCount + 1` nine-float keyframes and maps to MDLS bone order.
     private static func parseAnimationsIfPresent(
         reader: inout WPEMdlBinaryReader,
         auditRecorder: WPEMdlParseAuditRecorder?
@@ -1667,12 +1647,8 @@ private struct WPEMdlBinaryReader {
         offset = newOffset
     }
 
-    /// Some MDLS records carry a short padding run between the bone's trailing JSON
-    /// cstring and the next binary record. In MDLS0004 this is a 1–3 byte UTF-8 label
-    /// (e.g. `主`, `右眼`, `左眼`), so the old single-marker-byte heuristic failed on
-    /// multi-byte CJK labels and dropped the whole skeleton (observed at offset 79286,
-    /// value 0xE4 — a CJK lead byte). Scan a bounded window for the next plausible bone
-    /// record instead, and fail loud only if none is found.
+    /// Scans past a bounded UTF-8 padding label to the next plausible MDLS bone record.
+    /// Padding may contain multibyte text, so it cannot be treated as a single marker byte.
     mutating func consumeOptionalSkeletonTrailingMarker(
         boneCount: Int,
         sectionEnd: Int
@@ -1713,10 +1689,7 @@ private struct WPEMdlBinaryReader {
         return nil
     }
 
-    /// A bone record begins with `id u32, u8, parent i32, matrixByteCount u32`. The parent
-    /// may be any valid bone index or -1 — MDLS0004 skeletons contain forward parent
-    /// references (e.g. 人物 bone 24's parent is bone 39), so the upper bound is the total
-    /// bone count, not the next bone index.
+    /// Recognizes a bone record header, allowing forward parent references up to the total bone count.
     private func isLikelySkeletonBoneRecord(
         at candidateOffset: Int,
         boneCount: Int,

@@ -1,20 +1,7 @@
 import Foundation
 import LiveWallpaperCore
 
-/// Lightweight launch-time update checker for the Loomscreen Lite SKU.
-///
-/// **Cadence**: once per launch, throttled by a persisted "next eligible"
-/// instant — 12 h after a successful check, but only 1 h after a failed one so
-/// a transient GitHub blip doesn't suppress the next check for the full window.
-/// No background timer. Manual "Check for Updates" from the About panel
-/// bypasses the throttle.
-///
-/// **Network**: single unauthenticated GET to GitHub's
-/// `/repos/<owner>/<repo>/releases?per_page=10` with `Accept: application/vnd.github+json`.
-/// No polling, no telemetry, no client identifier beyond `User-Agent`.
-///
-/// Compiles in both SKUs (Pro test runner covers it), but only Lite calls
-/// `checkNow(force:)` from `applicationDidFinishLaunching` (`#if LITE_BUILD`).
+/// Throttled GitHub release checker used by Loomscreen Lite.
 @MainActor
 @Observable
 final class UpdateChecker {
@@ -37,19 +24,13 @@ final class UpdateChecker {
     }
 
     private(set) var status: Status = .idle
-    /// Truthful time of the last check attempt — surfaced in the UI as
-    /// "Last checked …", so it always reflects when we actually reached out,
-    /// regardless of outcome.
+    /// Time of the latest network attempt, regardless of outcome.
     private(set) var lastCheckedAt: Date?
 
-    /// Earliest instant an automatic check may run again. Advanced by
-    /// `throttleInterval` on success and `failureRetryInterval` on failure.
-    /// Kept separate from `lastCheckedAt` so the shorter failure backoff
-    /// never corrupts the user-visible timestamp.
+    /// Earliest instant an automatic check may run again.
     private var nextEligibleAt: Date?
 
-    /// Tag the user pressed "Skip this version" against. Suppresses the
-    /// banner for that exact tag; a newer tag still triggers as normal.
+    /// Suppresses only the selected tag; newer releases remain eligible.
     var skippedVersionTag: String? {
         get { Self.defaults.string(forKey: Self.skippedVersionKey) }
         set { Self.defaults.set(newValue, forKey: Self.skippedVersionKey) }
@@ -64,10 +45,7 @@ final class UpdateChecker {
 
     static let tagPrefix = "loomscreen-v"
     static let throttleInterval: TimeInterval = 60 * 60 * 12
-    /// Backoff after a failed check (network error, rate limit, bad payload).
-    /// Far shorter than `throttleInterval` so a transient GitHub blip doesn't
-    /// suppress the next automatic check for the full 12 h, while still keeping
-    /// a floor that prevents a retry storm on every relaunch.
+    /// Failure backoff is shorter than the success interval but prevents relaunch retry storms.
     static let failureRetryInterval: TimeInterval = 60 * 60
     static let maximumReleaseBodyCharacters = 4_000
     static let trustedGitHubHost = "github.com"
@@ -105,12 +83,7 @@ final class UpdateChecker {
         }
     }
 
-    /// Run a check. `force = false` honors the throttle window; `force = true`
-    /// (manual "Check for Updates" button) ignores it. A successful check pushes
-    /// the next eligible time out 12 h; a failure (no network, rate-limited,
-    /// malformed payload) pushes it only 1 h, so a transient error doesn't
-    /// suppress automatic checks for the full window yet still can't trigger a
-    /// retry storm on every relaunch.
+    /// Checks for a release, optionally bypassing the automatic-check throttle.
     func checkNow(force: Bool) async {
         guard status != .checking else { return }
         let attemptedAt = now()
@@ -140,8 +113,7 @@ final class UpdateChecker {
         }
     }
 
-    /// Mark the currently-available release as "skip this version" — the
-    /// banner stays dismissed until a strictly newer tag appears.
+    /// Dismisses the currently available release until a newer tag appears.
     func skipCurrentAvailable() {
         if case .available(let release) = status {
             skippedVersionTag = release.tagName
@@ -207,17 +179,12 @@ final class UpdateChecker {
     }
 }
 
-/// Pluggable network seam so unit tests can replay canned GitHub responses
-/// without touching the real network.
+/// Transport seam for release checks.
 protocol UpdateCheckerTransport: Sendable {
     func fetchReleases(from url: URL) async throws -> [GitHubRelease]
 }
 
-/// Subset of the GitHub Releases API we care about. Conforms to `Decodable`
-/// so we can deserialize the response directly. Explicit `CodingKeys` carry
-/// the snake-case GitHub keys instead of relying on `convertFromSnakeCase`,
-/// which mangles acronym-cased properties (`html_url` → `htmlUrl`, not
-/// `htmlURL`, so the optional silently decodes to `nil`).
+/// GitHub release fields required by the update UI.
 struct GitHubRelease: Decodable, Sendable, Equatable {
     let tagName: String
     let body: String?
@@ -248,11 +215,7 @@ struct GitHubRelease: Decodable, Sendable, Equatable {
     }
 }
 
-/// Default transport: a vanilla `URLSession` GET with a `User-Agent`
-/// (GitHub rejects requests with no UA), `Accept: application/vnd.github+json`,
-/// and ISO 8601 date decoding. Refuses any response that does not arrive
-/// from the canonical GitHub host or that exceeds the size cap — both
-/// defenses against a hostile or compromised origin.
+/// Ephemeral GitHub transport with strict origin and response-size validation.
 struct URLSessionUpdateCheckerTransport: UpdateCheckerTransport {
     private let session: URLSession
 
@@ -312,11 +275,7 @@ struct URLSessionUpdateCheckerTransport: UpdateCheckerTransport {
     }
 }
 
-/// Decodes a JSON array while salvaging every element that parses, instead of
-/// `Array`'s all-or-nothing behavior: one malformed/draft-shaped release
-/// object elsewhere in GitHub's response must not fail the whole batch and
-/// hide a real update from every other (valid) release in the same payload.
-/// Not `private` so `UpdateCheckerTests` can exercise it directly.
+/// Decodes valid array elements while counting malformed entries.
 struct LossyArray<Element: Decodable>: Decodable {
     let elements: [Element]
     let droppedCount: Int
@@ -344,8 +303,7 @@ struct LossyArray<Element: Decodable>: Decodable {
     }
 }
 
-/// Consumes one arbitrary JSON value so a failed element decode can advance
-/// past it; without this the unkeyed container's cursor would stall and loop.
+/// Advances an unkeyed container past one malformed JSON value.
 struct AnyDecodableSkip: Decodable {
     init(from decoder: Decoder) throws {
         _ = try? decoder.singleValueContainer()

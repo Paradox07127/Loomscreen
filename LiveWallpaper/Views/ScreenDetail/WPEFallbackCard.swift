@@ -3,9 +3,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Why a Wallpaper Engine workshop project couldn't be activated. Surfaced
-/// to the inspector so the user gets a specific reason instead of a generic
-/// "unsupported" message.
+/// Why a Wallpaper Engine workshop project couldn't be activated.
 enum FallbackReason: Equatable, Sendable {
     case unsupportedType
     case sceneParseFailed(String)
@@ -16,8 +14,6 @@ enum FallbackReason: Equatable, Sendable {
     /// Windows `.dll` plugin under `bin/`. Permanent on macOS — subscribing
     /// more workshop items will not help.
     case requiresWindowsPlugin
-    // Precise codes so the user sees "Format 8 (RGBA1010102) not yet
-    // supported" instead of a vague "scene unsupported".
     case texContainerUnsupported(magic: String)
     case texUnsupportedFormat(code: Int)
     case texDecodeFailed(detail: String)
@@ -176,7 +172,7 @@ struct WPEFallbackCard: View {
         case .unsupportedType:
             switch origin.originalType {
             case .scene:
-                return String(localized: "Scene format coming later", defaultValue: "Scene format coming later", comment: "Wallpaper Engine fallback warning title.")
+                return String(localized: "Unsupported scene format", defaultValue: "Unsupported scene format", comment: "Wallpaper Engine fallback warning title.")
             case .application:
                 return String(localized: "Executable wallpapers can't be imported", defaultValue: "Executable wallpapers can't be imported", comment: "Wallpaper Engine fallback warning title.")
             default:
@@ -196,9 +192,9 @@ struct WPEFallbackCard: View {
         case .requiresWindowsPlugin:
             return String(localized: "Windows plugin required", defaultValue: "Windows plugin required", comment: "Wallpaper Engine fallback warning title.")
         case .texContainerUnsupported:
-            return String(localized: "Texture container not supported yet", defaultValue: "Texture container not supported yet", comment: "Wallpaper Engine fallback warning title.")
+            return String(localized: "Unsupported texture container", defaultValue: "Unsupported texture container", comment: "Wallpaper Engine fallback warning title.")
         case .texUnsupportedFormat:
-            return String(localized: "Image format not supported yet", defaultValue: "Image format not supported yet", comment: "Wallpaper Engine fallback warning title.")
+            return String(localized: "Unsupported image format", defaultValue: "Unsupported image format", comment: "Wallpaper Engine fallback warning title.")
         case .texDecodeFailed:
             return String(localized: "Couldn't read texture file", defaultValue: "Couldn't read texture file", comment: "Wallpaper Engine fallback warning title.")
         }
@@ -209,7 +205,7 @@ struct WPEFallbackCard: View {
         case .unsupportedType:
             switch origin.originalType {
             case .scene:
-                return String(localized: "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", defaultValue: "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", comment: "Scene fallback warning body.")
+                return String(localized: "This scene requires rendering features that Loomscreen does not support. Other wallpapers continue playing.", defaultValue: "This scene requires rendering features that Loomscreen does not support. Other wallpapers continue playing.", comment: "Scene fallback warning body.")
             case .application:
                 return String(localized: "For your security, LiveWallpaper does not run executable workshop projects.", defaultValue: "For your security, LiveWallpaper does not run executable workshop projects.", comment: "Wallpaper Engine fallback warning body.")
             default:
@@ -226,15 +222,15 @@ struct WPEFallbackCard: View {
         case .requiresWindowsPlugin:
             return String(localized: "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here.", defaultValue: "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here.", comment: "Wallpaper Engine fallback warning body.")
         case .texContainerUnsupported(let magic):
-            return String(localized: "This wallpaper uses a `.tex` container we don't decode yet (\(magic)). Phase 2.x will keep widening coverage as new versions appear.", comment: "Wallpaper Engine fallback warning body. The placeholder is a texture container magic value.")
+            return String(localized: "This wallpaper uses an unsupported `.tex` container (\(magic)).", comment: "Wallpaper Engine fallback warning body. The placeholder is a texture container magic value.")
         case .texUnsupportedFormat(let code):
             switch code {
             case 8:
-                return String(localized: "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", defaultValue: "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", comment: "Texture fallback warning body.")
+                return String(localized: "Texture format 8 (RGBA1010102) is unsupported. The renderer skips this layer and continues rendering the rest of the scene.", defaultValue: "Texture format 8 (RGBA1010102) is unsupported. The renderer skips this layer and continues rendering the rest of the scene.", comment: "Texture fallback warning body.")
             case -1:
                 return String(localized: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", defaultValue: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", comment: "Wallpaper Engine fallback warning body.")
             default:
-                return String(localized: "Texture format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues.", comment: "Texture fallback warning body. The placeholder is a texture format code.")
+                return String(localized: "Texture format \(code) is unsupported. The renderer skips this layer and continues rendering the rest of the scene.", comment: "Texture fallback warning body. The placeholder is a texture format code.")
             }
         case .texDecodeFailed(let detail):
             return String(localized: "A texture failed to decode (\(detail)). Re-downloading the wallpaper in Steam usually fixes it.", comment: "Wallpaper Engine fallback warning body. The placeholder is decode detail.")

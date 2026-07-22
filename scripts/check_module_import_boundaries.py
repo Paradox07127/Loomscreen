@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Keep the app target free of blanket package re-exports.
+"""Reject blanket package re-exports and preserve required explicit imports.
 
-AF-01 retired the legacy umbrella after both SKUs compiled with explicit
-imports. This offline gate rejects every new ``@_exported import``, checks the
-files already migrated, and reports reproducible repository-wide import
-statistics. It deliberately does not infer module ownership from symbol
-spelling; the Swift compiler remains the authority.
+The inventory stays syntax-based because the Swift compiler owns symbol
+resolution.
 """
 
 from __future__ import annotations

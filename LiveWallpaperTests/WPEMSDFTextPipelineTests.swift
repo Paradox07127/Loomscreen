@@ -5,9 +5,6 @@ import Metal
 import Testing
 @testable import LiveWallpaper
 
-/// Standalone gate for the GPU MSDF text pipeline (Milestone D) — exercises the
-/// font-material packing and CoreText→atlas layout without the live scene-render
-/// wiring, so the math is locked in before any on-device draw integration.
 @MainActor
 struct WPEMSDFTextPipelineTests {
 
@@ -42,15 +39,10 @@ struct WPEMSDFTextPipelineTests {
         #expect(material.combos["BLUR_ENABLED"] == 1)
         #expect(material.combos["DROP_SHADOW_ENABLED"] == 1)
 
-        // g_RenderVar0 = (MSDF_RANGE, OUTLINE_WIDTH, BLUR_RADIUS, DROP_SHADOW_RADIUS)
         #expect(material.uniforms["g_RenderVar0"]?.vectorValue == [4, 3, 2, 4])
-        // g_RenderVar1 = (OUTLINE_COLOR.rgb, DROP_SHADOW_OFFSET.x)
         #expect(material.uniforms["g_RenderVar1"]?.vectorValue == [0, 1, 0, 5])
-        // g_RenderVar2 = (DROP_SHADOW_COLOR.rgb, DROP_SHADOW_OFFSET.y)
         #expect(material.uniforms["g_RenderVar2"]?.vectorValue == [0, 0, 1, -6])
-        // g_RenderVar3 = (DROP_SHADOW_OPACITY, 0, 0, 0)
         #expect(material.uniforms["g_RenderVar3"]?.vectorValue == [1, 0, 0, 0])
-        // Fill color = g_Color4 (rgb + alpha).
         #expect(material.uniforms["g_Color4"]?.vectorValue == [1, 0.5, 0.25, 0.8])
     }
 
@@ -77,9 +69,7 @@ struct WPEMSDFTextPipelineTests {
             shadowOffset: SIMD2<Double>(5, -6), letterSpacing: 1
         )
         let material = WPEMSDFFontMaterial.make(object: object, parameters: WPEMSDFParameters())
-        // rgb × 2 with >1 headroom preserved; alpha untouched.
         #expect(material.uniforms["g_Color4"]?.vectorValue == [2, 1, 0.5, 0.8])
-        // Outline/shadow colours scale too; the packed offsets in .w must not.
         #expect(material.uniforms["g_RenderVar1"]?.vectorValue == [0, 2, 0, 5])
         #expect(material.uniforms["g_RenderVar2"]?.vectorValue == [0, 0, 2, -6])
     }
@@ -93,8 +83,6 @@ struct WPEMSDFTextPipelineTests {
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
         let object = makeTextObject(text: "Hi")
 
-        // Glyph generation is async (off-main): the first layout returns nil while
-        // glyphs are scheduled; poll until the background fill completes.
         var mesh: WPEMSDFTextMesh?
         for _ in 0..<200 where mesh == nil {
             mesh = layout.layout(
@@ -109,7 +97,6 @@ struct WPEMSDFTextPipelineTests {
 
         #expect(!resolved.perPage.isEmpty)
         let totalVertices = resolved.perPage.values.reduce(0) { $0 + $1.count }
-        // Two glyphs ("Hi") × 6 vertices per quad.
         #expect(totalVertices == 12)
         #expect(totalVertices % 6 == 0)
     }
@@ -142,7 +129,6 @@ struct WPEMSDFTextPipelineTests {
         let mesh = await awaitMesh(makeTextObject(text: "A B"), font: font, atlas: atlas, generator: generator, layout: layout)
         let resolved = try #require(mesh)
         let totalVertices = resolved.perPage.values.reduce(0) { $0 + $1.count }
-        // "A" + "B" drawn (2 quads × 6), the space contributes no quad.
         #expect(totalVertices == 12)
     }
 
@@ -154,9 +140,6 @@ struct WPEMSDFTextPipelineTests {
         let layout = WPEMSDFTextLayout()
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
 
-        // A color emoji has no monochrome outline → generation yields nil → the
-        // glyph is .skip and, being non-whitespace, the layout must keep returning
-        // nil (object renders via CoreText) rather than dropping the emoji.
         let mesh = await awaitMesh(makeTextObject(text: "😀"), font: font, atlas: atlas, generator: generator, layout: layout, attempts: 40)
         #expect(mesh == nil)
     }

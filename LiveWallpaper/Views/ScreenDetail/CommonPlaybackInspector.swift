@@ -2,11 +2,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Playback controls kept in a positionally stable spot regardless of
-/// `wallpaperType`, so users don't hunt for the same toggle after a
-/// content-type switch. Changes commit to `ScreenManager` here so persistence
-/// happens at the source of the gesture instead of leaking through every
-/// parent `onChange`.
+/// Playback controls kept in a positionally stable spot regardless of `wallpaperType`, so users don't hunt for the same toggle after a content-type switch.
 struct CommonPlaybackInspector: View {
     var screen: Screen
     var wallpaperType: WallpaperType
@@ -113,9 +109,7 @@ struct CommonPlaybackInspector: View {
         }
     }
 
-    /// Stays visible for video regardless of display count so the persisted
-    /// `.spanAllDisplays` state never silently hides itself when the second
-    /// display unplugs — the row goes disabled with a subtitle instead.
+    /// Stays visible for video regardless of display count so the persisted `.spanAllDisplays` state never silently hides itself when the second display unplugs — the row goes disabled with a subtitle instead.
     private var showsVideoDisplayModeRow: Bool {
         wallpaperType == .video
     }
@@ -141,9 +135,7 @@ struct CommonPlaybackInspector: View {
 
     // MARK: - Rows
 
-    /// First N% of the slider is a mute "dead zone" — prevents a stray drag
-    /// from leaking a 1-2% audio level. Past this threshold the slider's
-    /// position maps linearly to the [0,1] internal volume.
+    /// First N% of the slider is a mute "dead zone" — prevents a stray drag from leaking a 1-2% audio level.
     private static let audioDeadZone: Double = 0.04
 
     private var audioRow: some View {
@@ -175,7 +167,6 @@ struct CommonPlaybackInspector: View {
         if isMuted {
             Text("Muted", comment: "Audio level display when the wallpaper is muted")
         } else {
-            // Digit % is universal; ASCII renders identically across locales.
             Text(verbatim: "\(percent)%")
         }
     }
@@ -363,9 +354,7 @@ struct CommonPlaybackInspector: View {
 
     // MARK: - Bindings
 
-    /// Routes the audio toggle to the correct store: video uses `AVPlayer.muted`,
-    /// HTML flips `HTMLConfig.muteAudio`. Without this split the HTML mute toggle
-    /// was a visual no-op.
+    /// Routes the audio toggle to the correct store: video uses `AVPlayer.muted`, HTML flips `HTMLConfig.muteAudio`.
     private var audioMutedBinding: Binding<Bool> {
         if let htmlConfig {
             return htmlConfigBinding(htmlConfig, keyPath: \.muteAudio)
@@ -380,12 +369,7 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    /// Single binding driving the audio slider. Slider position [0, 1] maps to:
-    ///   - [0, deadZone]  → muted (volume 0 displayed)
-    ///   - (deadZone, 1]  → unmuted; internal volume = (pos - deadZone) / (1 - deadZone)
-    ///
-    /// `<=` on the dead-zone boundary closes the previous `muted: false,
-    /// volume: 0` edge state where the slider sat at exactly `deadZone`.
+    /// Single binding driving the audio slider.
     private var unifiedAudioBinding: Binding<Double> {
         Binding(
             get: {
@@ -470,8 +454,6 @@ struct CommonPlaybackInspector: View {
                     lockScreenExtracted = false
                     return
                 }
-                // Only show ✓ if a frame was actually queued — guards against
-                // showing success when the player isn't ready yet.
                 guard screenManager.extractLockScreenFrame(for: screen) else { return }
                 lockScreenFeedbackGeneration += 1
                 let generation = lockScreenFeedbackGeneration
@@ -517,9 +499,7 @@ struct ContentSecurityInspector: View {
 
     @Environment(ScreenManager.self) private var screenManager
     @State private var trustStore = TrustedHostStore.shared
-    /// Holds the origin the user clicked "Trust…" for. Tracking the origin
-    /// (not a bare Bool) prevents a source change while the dialog is open
-    /// from re-targeting the confirmation at a different host.
+    /// Holds the origin the user clicked "Trust…" for.
     @State private var pendingTrustOrigin: TrustedHTMLOrigin?
     @AppStorage("Inspector.ContentSecurityExpanded") private var isExpanded = true
 
@@ -616,9 +596,6 @@ struct ContentSecurityInspector: View {
     @ViewBuilder
     private func originTrustRow(for origin: TrustedHTMLOrigin) -> some View {
         let isTrusted = trustStore.originSet.contains(origin)
-        // `LocalizedStringKey(origin.displayName)` subtitle is intentional: with
-        // no translation it falls back to the raw host string (the literal user
-        // data we want); the xcstrings extractor skips it.
         SettingRow(
             icon: isTrusted ? "checkmark.shield.fill" : "exclamationmark.shield",
             iconColor: isTrusted ? DesignTokens.Colors.Status.active : DesignTokens.Colors.Status.warning,
@@ -646,7 +623,6 @@ struct ContentSecurityInspector: View {
     @ViewBuilder
     private func trustRowAction(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> some View {
         if trustStore.isBuiltInTrusted(origin) {
-            // Built-in trust (e.g. youtube-nocookie.com) can't be revoked — static badge, no Revoke button.
             Text("Built-in")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -685,8 +661,6 @@ struct ContentSecurityInspector: View {
             ) {
                 Button("Trust Origin") {
                     defer { pendingTrustOrigin = nil }
-                    // Source may have changed while the dialog was open; only
-                    // grant trust if the current row's origin still matches.
                     guard let source, remoteOrigin == origin else { return }
                     _ = trustStore.trust(origin)
                     screenManager.setHTMLWallpaper(

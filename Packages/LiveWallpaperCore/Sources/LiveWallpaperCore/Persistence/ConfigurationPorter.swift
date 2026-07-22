@@ -1,19 +1,7 @@
 import Foundation
 
-/// Stateless encode / decode helpers for the `.lwconfig` JSON bundle format.
-///
-/// The main target supplies thin wrappers in
-/// `LiveWallpaper/Infrastructure/ConfigurationPorter+SettingsBridge.swift`
-/// that read SettingsManager into a bundle (`currentBundle()`) and apply a
-/// decoded bundle back through SettingsManager + BookmarkStore.shared
-/// (`apply(_:)`). The Core surface stays free of either.
-///
-/// Limitations the UI must communicate:
-/// - Security-scoped bookmarks (video files, HTML folders, the Workshop
-///   library root) are tied to this device's data-protection keychain.
-///   Importing on another Mac will keep the metadata but the user has to
-///   reselect the actual files. This is a macOS-level constraint, not a
-///   bug in the porter.
+/// Stateless codec for `.lwconfig` bundles, independent of app-level settings stores.
+/// Security-scoped bookmarks are device-bound, so imported bundles may require users to reselect files.
 @MainActor
 public enum ConfigurationPorter {
     public enum ImportError: Error, LocalizedError {
@@ -48,10 +36,7 @@ public enum ConfigurationPorter {
         }
     }
 
-    /// Hard import cap. Real configs top out around a few hundred KB even
-    /// with large playlists; anything bigger is either malicious or not
-    /// actually a config bundle. Keeps `decode` from blocking MainActor for
-    /// seconds on a hostile file.
+    /// Rejects oversized input before decoding to bound work on untrusted files.
     public static let maxImportFileSize: Int = 16 * 1024 * 1024
 
     /// Pretty-printed so the file is readable if a user opens it in a text editor.
@@ -119,10 +104,7 @@ public enum ConfigurationPorter {
         return bundle
     }
 
-    /// Result of an `apply` call. The view layer renders each restored
-    /// section through its own localized format string so we never have to
-    /// build a sentence with manual `joined(separator:)` (which would break
-    /// RTL languages and prevent translators from reordering phrases).
+    /// Structured import summary rendered through localized section-specific strings.
     public struct ApplySummary: Sendable {
         public var displayCount: Int?
         public var bookmarkCount: Int?

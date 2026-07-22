@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """Build a deterministic, path-redacted inventory for a local WPE corpus.
 
-The scanner only enumerates immediate child directories, reads the small loose
-``project.json`` manifest, and checks whether the declared entry/``scene.pkg``
-exists. It never reads or copies ``scene.pkg`` or other wallpaper assets.
-
-The corpus root is deliberately absent from the JSON output. This makes the
-result suitable for review/version control while the source remains in an app
-container or any user-authorized external directory.
+Only immediate manifests and asset presence are inspected; asset contents and
+the corpus path stay private.
 """
 
 from __future__ import annotations
@@ -113,9 +108,7 @@ def _scan_project(folder: Path, folder_id: str, max_bytes: int) -> dict[str, Any
                     if not stat.S_ISREG(opened_stat.st_mode):
                         raise CorpusManifestError("project.json changed to a non-regular file during scan")
                     raw = handle.read(max_bytes + 1)
-            except OSError:
-                manifest_state = "unreadable"
-            except CorpusManifestError:
+            except (OSError, CorpusManifestError):
                 manifest_state = "unreadable"
             else:
                 if len(raw) > max_bytes:

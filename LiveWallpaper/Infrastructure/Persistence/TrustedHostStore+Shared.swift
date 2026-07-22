@@ -1,9 +1,7 @@
 import Foundation
 import LiveWallpaperCore
 
-/// Main-app singletons that reach into `SettingsManager`. The Core type
-/// (TrustedHostStore + TrustedHostPersisting) lives in LiveWallpaperCore;
-/// this file wires it to the legacy `SettingsManager.shared` bridge.
+/// Wires the shared trusted-host store to app settings persistence.
 @MainActor
 struct SettingsManagerTrustedHostPersistence: TrustedHostPersisting {
     func load() -> [String] { SettingsManager.shared.loadTrustedHosts() }
@@ -11,7 +9,6 @@ struct SettingsManagerTrustedHostPersistence: TrustedHostPersisting {
 }
 
 extension TrustedHostStore {
-    /// Shared, app-wide instance backed by the SettingsManager persistence
-    /// adapter. Lite will replace this with a SKU-specific singleton.
+    /// Shared app-wide trusted-host store.
     static let shared = TrustedHostStore(persistence: SettingsManagerTrustedHostPersistence())
 }

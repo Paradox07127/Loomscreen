@@ -1,10 +1,6 @@
 import Foundation
 
 /// One decoded transcript line, tolerant of unknown shapes.
-///
-/// Decoded via `JSONSerialization` (not `Decodable`) so that unrecognized line
-/// types — `queue-operation`, `attachment`, `last-prompt`, `custom-title`, and
-/// anything future — never throw; they simply carry whatever fields they have.
 struct ClaudeTranscriptLine {
     enum Role: Equatable {
         case user
@@ -20,7 +16,6 @@ struct ClaudeTranscriptLine {
     var gitBranch: String?
     var sessionId: String?
 
-    // assistant specifics
     var model: String?
     var stopReason: String?
     var toolNames: [String]          // names of tool_use content blocks, in order
@@ -43,11 +38,9 @@ struct ClaudeTranscriptLine {
         var cacheWrite: Int
     }
 
-    // user specifics
     var isToolResult: Bool           // content is a tool_result array (not a real prompt)
     var isRealUserPrompt: Bool       // content is a plain string or text block(s)
 
-    // system specifics
     var rawLineForHeuristics: String // only retained for the permission-substring probe
 
     /// Parse a single JSONL line. Returns nil only when the bytes are not an
@@ -99,8 +92,6 @@ struct ClaudeTranscriptLine {
                     sawTextContentBlock = true
                 case "tool_result":
                     sawToolResult = true
-                    // `is_error` is the only field read; the result content itself
-                    // (which may contain output) is never touched.
                     let isError = (block["is_error"] as? Bool) ?? false
                     toolResults.append(ToolResult(toolUseID: block["tool_use_id"] as? String, isError: isError))
                 default:
@@ -124,9 +115,6 @@ struct ClaudeTranscriptLine {
             self.usage = nil
         }
 
-        // Real user prompts arrive either as a bare string or as text blocks;
-        // tool results arrive as a tool_result array. Only the former counts as
-        // a turn.
         let contentIsString = message?["content"] is String
         self.isToolResult = (self.type == .user) && sawToolResult && !contentIsString
         self.isRealUserPrompt = (self.type == .user) && (contentIsString || (sawTextContentBlock && !sawToolResult))
@@ -135,19 +123,11 @@ struct ClaudeTranscriptLine {
     }
 
     static func parseTimestamp(_ string: String) -> Date? {
-        // `ISO8601FormatStyle` is a Sendable value type — no shared mutable
-        // formatter to trip Swift 6 concurrency checks. The default style parses
-        // both fractional ("…:05.444Z") and whole-second transcript stamps.
         try? Date(string, strategy: .iso8601)
     }
 }
 
 /// Pure, I/O-free accumulator + classifier for one Claude Code session.
-///
-/// Fed parsed lines in file order via `ingest(_:)`, it derives display fields,
-/// token totals, and a privacy-safe status. All decisions are deterministic
-/// functions of the ingested lines plus `(now, processAlive)`, so the whole
-/// thing is unit-testable without touching the filesystem.
 struct ClaudeSessionModel {
     private(set) var sessionId: String
     private(set) var projectName: String?
@@ -165,8 +145,6 @@ struct ClaudeSessionModel {
     private(set) var lastAssistantStopReason: String?
     private(set) var sawPermissionRequest: Bool = false
 
-    // v2 Fleet raw material.
-    /// input + cacheRead of the LAST usage-bearing assistant event (context load).
     private(set) var lastUsageInput: Int?
     private(set) var lastUsageCacheRead: Int?
     /// Recent event timestamps (epoch seconds), capped + ascending on read.
@@ -174,8 +152,6 @@ struct ClaudeSessionModel {
     /// Recent tool_use events with ok resolved from the paired tool_result.
     private(set) var recentTools: [MonitorAgentToolEvent] = []
 
-    // Whether the most recent main-session line was a tool_result or a real user
-    // prompt (i.e. the model is expected to act next) — a "running" signal per spec.
     private(set) var lastInboundAwaitsModel: Bool = false
 
     init(sessionId: String) {
@@ -183,8 +159,6 @@ struct ClaudeSessionModel {
     }
 
     mutating func ingest(_ line: ClaudeTranscriptLine) {
-        // Every timestamped line advances freshness, even sidechain and unknown
-        // types — the process is demonstrably alive and writing.
         if let ts = line.timestamp {
             if lastEventAt == nil || ts > lastEventAt! { lastEventAt = ts }
             if startedAt == nil || ts < startedAt! { startedAt = ts }
@@ -196,7 +170,6 @@ struct ClaudeSessionModel {
         }
         if let branch = line.gitBranch, !branch.isEmpty { gitBranch = branch }
 
-        // Any timestamped main-or-side line contributes a tick to the event track.
         if let ts = line.timestamp?.timeIntervalSince1970 {
             recentEventTimes.append(ts)
             if recentEventTimes.count > MonitorFleetSignalDeriver.recentEventCap * 2 {
@@ -204,8 +177,6 @@ struct ClaudeSessionModel {
             }
         }
 
-        // Sidechain (subagent) lines update freshness but never the main
-        // session's turns, status inputs, or token/model attribution.
         guard !line.isSidechain else { return }
 
         switch line.type {
@@ -216,17 +187,10 @@ struct ClaudeSessionModel {
             recordToolUses(from: line)
             if let stop = line.stopReason { lastAssistantStopReason = stop }
             if let tool = line.toolNames.last {
-                // A tool_use with no following tool_result yet: the model is
-                // waiting on a tool, not on us. The name is rendered verbatim as a
-                // "tool name" chip, so sanitize it before storing — a malformed
-                // transcript could otherwise smuggle prompt-like text here. If the
-                // name fails the allowlist we still know a tool is pending; we just
-                // don't surface a garbage detail (lastToolName stays nil).
+                // A tool_use with no following tool_result yet: the model is waiting on a tool, not on us.
                 lastToolName = MonitorFleetSignalDeriver.sanitizedToolName(tool)
                 pendingToolUse = true
             } else {
-                // An assistant text turn with no tool call ends the exchange; the
-                // model is no longer mid-action.
                 pendingToolUse = false
             }
             // The assistant just spoke — nothing is awaiting the model, and any
@@ -236,8 +200,6 @@ struct ClaudeSessionModel {
 
         case .user:
             if line.isToolResult {
-                // Tool result closes the loop opened by the matching tool_use and
-                // hands control back to the model.
                 applyToolResults(from: line)
                 pendingToolUse = false
                 lastInboundAwaitsModel = true
@@ -246,13 +208,10 @@ struct ClaudeSessionModel {
                 pendingToolUse = false
                 lastInboundAwaitsModel = true
             }
-            // A newer user line supersedes any pending approval request.
             sawPermissionRequest = false
 
         case .system:
-            // Conservative approval probe: only a system line literally mentioning
-            // permission/approval flips the flag. Cleared by any newer user or
-            // assistant line (handled in those branches).
+            // Conservative approval probe: only a system line literally mentioning permission/approval flips the flag.
             let lowered = line.rawLineForHeuristics.lowercased()
             if lowered.contains("permission") || lowered.contains("approval") {
                 sawPermissionRequest = true
@@ -278,12 +237,7 @@ struct ClaudeSessionModel {
         lastUsageCacheRead = usage.cacheRead
     }
 
-    /// Append each tool_use as an unresolved event (ok = nil) and keep the tail
-    /// bounded. Names only — arguments are never read, and each name is sanitized
-    /// (allowlist + length cap) before storing so nothing attacker-controlled ever
-    /// reaches the tool-name UI. A name that fails sanitization is dropped; the
-    /// paired tool_result then resolves the next remaining event (still positional
-    /// among the events we kept).
+    /// Append each tool_use as an unresolved event (ok = nil) and keep the tail bounded.
     private mutating func recordToolUses(from line: ClaudeTranscriptLine) {
         let at = line.timestamp?.timeIntervalSince1970 ?? lastEventAt?.timeIntervalSince1970 ?? 0
         for use in line.toolUses {
@@ -295,10 +249,7 @@ struct ClaudeSessionModel {
         }
     }
 
-    /// Resolve `ok` on the tool events this user line's tool_results answer. The
-    /// wire event carries no id, so pairing is positional: each result resolves the
-    /// oldest still-unresolved event (Claude Code delivers results in call order).
-    /// Only `is_error` is read — result content is never inspected.
+    /// Resolve `ok` on the tool events this user line's tool_results answer.
     private mutating func applyToolResults(from line: ClaudeTranscriptLine) {
         for result in line.toolResults {
             guard let index = recentTools.firstIndex(where: { $0.ok == nil }) else { break }
@@ -308,14 +259,12 @@ struct ClaudeSessionModel {
 
     // MARK: - Classification
 
-    /// Derive the current status. Ladder order matters — the first matching rule
-    /// wins, mirroring the worker spec exactly.
+    /// Derives status using the first matching rule.
     func status(now: Date, processAlive: Bool, freshnessTimeout: TimeInterval = 180) -> MonitorAgentStatus {
         let age = lastEventAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         let isFresh = age < 15
         let isVeryStale = age >= freshnessTimeout
 
-        // 1. Blocked on human approval (only meaningful while the process lives).
         if sawPermissionRequest && processAlive {
             return .needsInput
         }
@@ -324,7 +273,6 @@ struct ClaudeSessionModel {
         if isFresh && (pendingToolUse || lastInboundAwaitsModel) {
             return .running
         }
-        // 3. Cleanly finished its turn and the process is still up: idle, ready.
         if lastAssistantStopReason == "end_turn" && processAlive {
             return .idle
         }
@@ -332,7 +280,6 @@ struct ClaudeSessionModel {
         if isVeryStale {
             return processAlive ? .idle : .ended
         }
-        // 5. Process gone and not fresh: the session has ended.
         if !processAlive {
             return .ended
         }
@@ -418,8 +365,6 @@ struct ClaudeSessionModel {
     }
 
     /// Session identity is intentionally absent from the durable aggregate.
-    /// The scanner is the authority for the current file-to-session mapping and
-    /// injects that identity when it reconnects a cursor to this model.
     static func restore(from state: SessionAggregateState, sessionId: String) -> ClaudeSessionModel? {
         guard state.provider == .claude else { return nil }
         var model = ClaudeSessionModel(sessionId: sessionId)
@@ -447,8 +392,6 @@ struct ClaudeSessionModel {
         var cacheWrite: Double
     }
 
-    // Deliberately tiny table keyed by model-family prefix. Unknown prefixes
-    // (including claude-fable) return nil so cost is never fabricated.
     private static func pricing(for model: String) -> Rate? {
         // Order matters: match the more specific "sonnet-5" before "sonnet-4".
         if model.hasPrefix("claude-opus-4") {

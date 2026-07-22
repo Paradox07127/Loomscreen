@@ -12,12 +12,8 @@ private func isImplicitFBOTextureName(_ name: String) -> Bool {
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
-    /// Default-ON fix for body-split attachment placement: anchor attached children to the
-    /// MDAT bind point on the bone's hierarchy-composed bind-world transform instead of the bone's
-    /// skin-weighted vertex centroid. The centroid sat above the true joint, pushing 头部/胸部/脖颈
-    /// children up and left relative to the body. Opt out with
-    /// `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool NO`.
-    /// When OFF, the legacy centroid path is unchanged.
+    /// Uses hierarchy-composed MDAT bind points for split-puppet attachments.
+    /// Disable with `defaults write Taijia.LiveWallpaper WPEPuppetAttachmentBindAnchor -bool NO`.
     private static var useAttachmentBindAnchor: Bool {
         WPEMetalRenderExecutor.puppetDefaultsFlagOptional("WPEPuppetAttachmentBindAnchor") ?? true
     }
@@ -384,19 +380,8 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    /// Camera parallax in WPE propagates DOWN the parent transform: a child layer
-    /// is placed relative to its parent, so it inherits the parent's cursor shift.
-    /// Scenes therefore put the depth on a ROOT object and parent the rest of a
-    /// character to it with no depth of its own — e.g. 3719111841's body (主体) is
-    /// parented to the hair root (长发3, depth "0.41 -0.36"), and the head/chest/
-    /// hair parts attach under the body, all at depth 0. Our executor applies
-    /// parallax per layer from each layer's OWN depth, so without propagation the
-    /// depth-0 body and its parts stay still while the root shifts — the character
-    /// shears apart ("散架"). Pin every parented layer to its ROOT ancestor's depth
-    /// so the whole tree moves as one unit. (Independent parallax is authored as a
-    /// SEPARATE root with its own depth — 背景/光束 here — not as a parented child,
-    /// so this never suppresses intended motion.) Parallax-off scenes are
-    /// unaffected: the per-frame offset is zero regardless of depth.
+    /// Propagates each root layer's parallax depth through its transform subtree so
+    /// parented artwork moves as one unit while independently rooted layers remain separate.
     static func propagatingParallaxDepthThroughParents(
         _ layers: [WPERenderLayer]
     ) -> [WPERenderLayer] {
@@ -428,13 +413,8 @@ struct WPERenderGraphBuilder: Sendable {
         }
     }
 
-    /// Body-split rigs attach face/hair/clothing child layers to a parent puppet's named MDAT anchor
-    /// (头部/胸部/脖颈). Parse-time parent composition (`SceneObjectTransform.combining`) places those
-    /// children relative to the parent's ORIGIN, ignoring the anchor bone — so the children tear away
-    /// from the parent mesh. This second pass adds the missing static anchor-bind offset (in scene
-    /// space) to each attached child's origin. Layers without a resolvable attachment are untouched,
-    /// so non-attached layers and other scenes are unaffected. The executor's animated attachment
-    /// follow adds only the per-frame `currentAnchor - bindAnchor` delta on top of this static bind.
+    /// Adds the static MDAT anchor offset that parse-time parent-origin composition omits.
+    /// Animated attachment following later applies only the delta from this bind pose.
     private func applyAttachmentAnchorOffsets(to layers: [WPERenderLayer]) -> [WPERenderLayer] {
         guard layers.contains(where: { $0.attachment != nil && $0.parentObjectID != nil }) else {
             return layers
@@ -476,12 +456,8 @@ struct WPERenderGraphBuilder: Sendable {
         guard let attachment = parentModel.attachments.first(where: { $0.name == attachmentName }) else {
             return nil
         }
-        // Anchor point in the parent's MDLV mesh frame (model y is UP). The data-grounded anchor is the
-        // bone's hierarchy-composed bind-world transform with the MDAT bind matrix applied —
-        // `translation(bindWorld[bone] · attachment.matrix)`. The legacy skin-weighted vertex centroid
-        // is a mesh-region statistic that sits ABOVE the true joint for a head bone, so it shifted every
-        // 头部/胸部/脖颈 child up and left relative to the body (Windows-trace residual ~−90px x / ~−210px y).
-        // Gated while validating; the centroid stays as the fallback when bind data is unavailable.
+        // The hierarchy-composed bind-world transform plus MDAT matrix locates the joint;
+        // the skin-weighted centroid is only a fallback when bind data is unavailable.
         let anchorPoint: SIMD2<Double>
         // Character-sheet puppets (MDLV0019/0020) MUST use the bind-anchor pivot: their mesh vertices
         // are the exploded source sheet, so the skin-weighted centroid fallback is meaningless. The
@@ -585,13 +561,8 @@ struct WPERenderGraphBuilder: Sendable {
             || normalizedFile.contains("/effects/scroll/effect.json")
     }
 
-    /// True when any ancestor up the `parentObjectID` chain is explicitly hidden
-    /// (`visible == false`). WPE propagates a parent's visibility to its children, so a
-    /// body-split rig's face/mask/body child layers (authored `visible: true`) must inherit
-    /// the hidden state of a conditionally-hidden variant parent. Without this, the visible
-    /// children of a hidden style variant still composited — 3226487183 drew its 默认/面具/抬头
-    /// poses (and their masks) all at once. A container that is merely alpha-0 keeps
-    /// `visible == true`, so a transparent grouping layer never suppresses its own subtree.
+    /// Returns whether an explicitly hidden, non-toggleable ancestor suppresses this object.
+    /// Alpha-only transparency does not suppress descendants.
     static func hasHiddenAncestor(
         _ object: WPESceneImageObject,
         objectByID: [String: WPESceneImageObject],
@@ -634,11 +605,8 @@ struct WPERenderGraphBuilder: Sendable {
     private static func userToggleableVisibilityIDs(in document: WPESceneDocument) -> Set<String> {
         var ids = Set<String>()
         for bindings in document.propertyBindings.values {
-            // Condition-form (style-selector / combo) visibility is resolved from the combo
-            // value at build time, not a live boolean toggle. Treating it as live-toggleable
-            // put conditionally-hidden variant layers into the always-composite set, so every
-            // style variant (默认/面具/抬头) rendered at once (3226487183). Only simple,
-            // condition-less `visible` bindings are genuine live toggles.
+            // Combo visibility is resolved at build time; only condition-free incremental
+            // bindings can change visibility without rebuilding the graph.
             for binding in bindings
             where binding.kind == .visible && binding.action == .incremental && binding.condition == nil {
                 if case .imageObject(let id) = binding.target {
@@ -1310,8 +1278,8 @@ struct WPERenderGraphBuilder: Sendable {
             context.localFBOs.append(WPERenderFBO(name: clipTargetName, scale: 2, format: "rgba8888"))
         }
         var textures = pass.textures
-        // The clip-mask name (e.g. `masks/clipping_mask_39cb32c5`) uses the SAME bare-name convention
-        // as a material texture ("眼睛组合"); textureReference + the resolver add `materials/` + `.tex`.
+        // Clip masks use the same bare-name convention as material textures; the
+        // resolver supplies the `materials/` root and `.tex` extension.
         textures[1] = textures[1] ?? textureReference(clipMaskName, ownerPath: context.object.imageRelativePath)
         textures[8] = .fbo(clipTargetName)
         #if DEBUG
@@ -1527,11 +1495,8 @@ struct WPERenderGraphBuilder: Sendable {
     /// (`{"name": "masks/…"}`, how per-instance effect masks are declared).
     static func parseTexturePath(_ raw: Any?) -> String? {
         if let string = raw as? String {
-            // Preserve the name verbatim: WPE matches asset names literally, and
-            // a real filename can legitimately end in a space (e.g.
-            // `materials/妃咲 60帧 .tex`) — Windows hides the trailing space but
-            // the .pkg TOC + every JSON reference keep it. Trimming it mismatched
-            // the packaged file (scene 3351072238). Only reject blank entries.
+            // Preserve nonblank names verbatim because package entries can legitimately
+            // end in whitespace and asset lookup is byte-sensitive.
             return string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : string
         }
         guard let dict = raw as? [String: Any] else { return nil }
@@ -1695,12 +1660,8 @@ private struct LayerBuildContext {
             )
         }
 
-        // Workshop custom effects must NOT be fused into the scene-size pass:
-        // WPE renders them at LAYER size and composites separately (oracle:
-        // 3554161528 pulse_ eid854@1436×456 + composite eid876; our fused
-        // 3840×2160 pass clamp-streaked the small layer across the sky — the
-        // "色块" bug). Builtin effects (waterflow/waterwaves) fuse fine and
-        // match WPE's own fused passes, so they keep the fast path.
+        // Custom effects render at layer resolution and must composite separately;
+        // fusing them into the scene-sized pass stretches edge pixels across the frame.
         let lastPassIsWorkshopEffect = lastPass.shader.contains("workshop/")
         if preserveFinalCompositeForScene || lastPassIsWorkshopEffect,
            let lastSource = lastPass.target.textureReference {

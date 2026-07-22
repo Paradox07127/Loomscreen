@@ -537,7 +537,7 @@ fragment half4 wpe_copy_fragment(
     return texture0.sample(linearSampler, in.uv);
 }
 
-// Phase 2C util built-ins. `solidlayer` writes color * alpha into the
+// Utility built-ins. `solidlayer` writes color * alpha into the
 // per-layer FBO. `util_copy` is the parallax-free copy used when chaining
 // `materials/util/copy.json` between FBOs. `compose` blends two layer
 // composites into the scene under a tint color.
@@ -678,9 +678,9 @@ fragment half4 wpe_compose_fragment(
     ));
 }
 
-// Phase 2D-C: pre-compiled WPE effect set. Each fragment ships hand-written
+// Precompiled WPE effect set. Each fragment ships hand-written
 // MSL approximating a popular WPE Workshop effect; auto GLSL→MSL
-// translation (Phase 2D route A/B) is a separate, larger project.
+// translation is handled by the runtime shader path.
 
 struct WPEColorBalanceUniforms {
     float brightness;
@@ -791,7 +791,7 @@ struct WPEShakeUniforms {
     float padding;
 };
 
-// Phase 2D-D: native MSL implementations of WPE's most-used material
+// Native MSL implementations of WPE's most-used material
 // shaders. Together they cover ~858 of the top shader uses across the
 // 431960 corpus (562 genericimage4 + 103 genericimage2 + 193 genericparticle),
 // so any scene built only on these + the existing built-ins now renders
@@ -1013,7 +1013,7 @@ struct WPEGenericParticleUniforms {
     float4 sizeAndAge;   // x=alpha, y=brightness, z=padding, w=padding
 };
 
-// Phase 2D-L: instanced particle render. Vertex stage reads a per-
+// Instanced particle render. Vertex stage reads a per-
 // instance attribute (position+size, color+alpha) from `buffer(1)` and
 // fans out a quad sized to that instance. Coordinates are in pixel
 // space; the scene's orthogonal projection is supplied via buffer(2)
@@ -1306,7 +1306,7 @@ vertex WPEParticleVertexOut wpe_particle_rope_vertex(
     return out;
 }
 
-// Phase 2D-N: text overlay quad. Vertex stage takes per-overlay center
+// Text overlay quad. Vertex stage takes per-overlay center
 // + size + color from a uniform buffer; fragment samples the rasterized
 // CoreText output.
 
@@ -1393,7 +1393,7 @@ fragment half4 wpe_genericparticle_fragment(
     return half4(float4(rgb * alpha, alpha));
 }
 
-// Phase 2D-E: native MSL implementations of the most-common WPE effect
+// Native MSL implementations of the most-common WPE effect
 // shaders (per-corpus frequency: opacity 7, scroll 10, pulse 9, iris 6,
 // shine_gaussian 6). All take a single source texture and emit an
 // effect-modulated copy. These cover the simple 1-pass effects that
@@ -1559,7 +1559,7 @@ fragment half4 wpe_effect_waterwaves_fragment(
     return texture0.sample(linearSampler, uv);
 }
 
-// Phase 2D-F: more single-pass effect approximations that show up across
+// Single-pass effect approximations used across
 // the corpus. These are visually plausible drop-ins; the shader translator
 // will replace them with the WPE-original output when it ships.
 
@@ -1666,7 +1666,7 @@ fragment half4 wpe_effect_blend_fragment(
     return half4(float4(rgb, sampled.a));
 }
 
-// Phase 2D-G: more single-pass effects.
+// Additional single-pass effects.
 
 struct WPEWaterFlowUniforms {
     float2 direction;    // unit-vector flow direction in UV space

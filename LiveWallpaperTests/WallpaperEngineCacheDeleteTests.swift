@@ -2,10 +2,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// `deleteFiles` permanently removes a per-workshop cache dir to reclaim disk
-/// space — it must NOT use the Trash, because under App Sandbox `trashItem` on
-/// a container-internal path only reaches the invisible per-container `.Trash`
-/// and never frees space (the "delete leaves nothing in the Trash" bug).
 @Suite("WallpaperEngineCache.deleteFiles")
 struct WallpaperEngineCacheDeleteTests {
 

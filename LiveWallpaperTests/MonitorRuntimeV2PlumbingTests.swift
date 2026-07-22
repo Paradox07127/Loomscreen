@@ -3,25 +3,14 @@ import Foundation
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-/// Wave-1+2 integration seams inside `MonitorRuntime`: the usage-ledger merge
-/// (`MonitorUsageLedgerProviding` fragments → published `MonitorUsageSnapshot`)
-/// and demand-gated sampling (`activeWidgetKinds` union → `SystemMetricsSource
-/// .Options`). Uses the runtime's nonisolated static seams so no real pipeline,
-/// timers, or file I/O spin up — mirroring `MonitorRuntimeTests`.
 @Suite("Monitor runtime v2 plumbing")
 struct MonitorRuntimeV2PlumbingTests {
 
-    // MARK: - Demand-gated sampling: kinds → Options
-
     @Test("Each widget kind flips exactly its sampler gate")
     func kindMapsToItsGate() {
-        // cpu/gpu/power all light the SMC sensor read (each shows a
-        // temperature readout); .gpu/.power also flip their own gated walk; .cpu
-        // additionally demands top-processes for its L "Top by CPU" list.
         #expect(MonitorRuntime.systemOptions(for: [.gpu]) == options(gpu: true, sensors: true))
         #expect(MonitorRuntime.systemOptions(for: [.cpu]) == options(topProcesses: true, sensors: true))
         #expect(MonitorRuntime.systemOptions(for: [.processes]) == options(topProcesses: true))
-        // Memory's L "Top by memory" list rides the same top-process walk.
         #expect(MonitorRuntime.systemOptions(for: [.memory]) == options(topProcesses: true))
         #expect(MonitorRuntime.systemOptions(for: [.disk]) == options(processIO: true))
         #expect(MonitorRuntime.systemOptions(for: [.aiEngine]) == options(ane: true))
@@ -30,9 +19,6 @@ struct MonitorRuntimeV2PlumbingTests {
 
     @Test("A kind with no expensive sampler leaves every gate off")
     func inertKindKeepsAllGatesOff() {
-        // network needs no gated walk → all flags stay false (cpu/gpu differ:
-        // they light the SMC sensor gate, and cpu/memory also top-processes),
-        // unlike the pre-v2 default which leaves GPU + accessories on.
         #expect(MonitorRuntime.systemOptions(for: [.network]) == SystemMetricsSource.Options(
             gpu: false, topProcesses: false, ane: false, accessories: false
         ))
@@ -53,9 +39,9 @@ struct MonitorRuntimeV2PlumbingTests {
         let opts = MonitorRuntime.systemOptions(for: [.gpu, .power, .cpu])
         #expect(opts.gpu == true)
         #expect(opts.accessories == true)
-        #expect(opts.topProcesses == true)     // .cpu wants the Top-by-CPU list
-        #expect(opts.ane == false)             // no .aiEngine widget
-        #expect(opts.sensors == true)          // cpu + gpu both want the SMC row
+        #expect(opts.topProcesses == true)
+        #expect(opts.ane == false)
+        #expect(opts.sensors == true)
     }
 
     @Test("Every kind placed turns every gate on")
@@ -73,8 +59,6 @@ struct MonitorRuntimeV2PlumbingTests {
         #expect(MonitorRuntime.systemOptions(for: [.cpu, .processes]).processIO == false)
     }
 
-    // MARK: - Demand-gated sampling: multi-lease union of activeWidgetKinds
-
     @Test("activeWidgetKinds unions across leases")
     func kindsUnionAcrossLeases() {
         var a = MonitorRuntimeOptions(system: true)
@@ -84,7 +68,6 @@ struct MonitorRuntimeV2PlumbingTests {
 
         let merged = MonitorRuntime.merged([a, b])
         #expect(merged?.activeWidgetKinds == [.gpu, .cpu, .power])
-        // …and that union drives the combined gates.
         #expect(MonitorRuntime.systemOptions(for: merged?.activeWidgetKinds ?? []) == SystemMetricsSource.Options(
             gpu: true, topProcesses: true, ane: false, accessories: true, sensors: true
         ))
@@ -101,19 +84,14 @@ struct MonitorRuntimeV2PlumbingTests {
     func absentKindsDoesNotClearUnion() {
         var withKinds = MonitorRuntimeOptions(system: true)
         withKinds.activeWidgetKinds = [.gpu]
-        let plain = MonitorRuntimeOptions(system: true)   // activeWidgetKinds nil
+        let plain = MonitorRuntimeOptions(system: true)
 
         #expect(MonitorRuntime.merged([withKinds, plain])?.activeWidgetKinds == [.gpu])
         #expect(MonitorRuntime.merged([plain, withKinds])?.activeWidgetKinds == [.gpu])
     }
 
-    // MARK: - v1 path: no kinds preserves defaults
-
     @Test("v1 leases (no activeWidgetKinds) leave the union set nil")
     func v1LeasesLeaveUnionNil() {
-        // The default MonitorRuntimeOptions used across v1 call sites never sets
-        // activeWidgetKinds, so the merged pipeline stays on the includeTopProcesses
-        // branch (default demand gates) rather than the demand-gated one.
         let systemOnly = MonitorRuntimeOptions(system: true, topProcesses: true)
         let quiet = MonitorRuntimeOptions(system: false)
         #expect(MonitorRuntime.merged([systemOnly, quiet])?.activeWidgetKinds == nil)
@@ -121,8 +99,6 @@ struct MonitorRuntimeV2PlumbingTests {
 
     @Test("v1 default Options keeps GPU + accessories on, ANE off")
     func v1DefaultOptionsPreserved() {
-        // The branch v1 callers hit (SystemMetricsSource(includeTopProcesses:))
-        // must preserve the pre-v2 gate profile.
         let defaults = SystemMetricsSource.Options.default
         #expect(defaults.gpu == true)
         #expect(defaults.accessories == true)
@@ -130,14 +106,11 @@ struct MonitorRuntimeV2PlumbingTests {
         #expect(defaults.topProcesses == false)
     }
 
-    // MARK: - Usage-ledger merge into published snapshot
-
     @Test("Ledger fragments roll into perModel + dailyActivity on the published snapshot")
     func ledgerFragmentsPopulateRollup() async {
         let now = Date()
         let today = MonitorUsageRollup.dayKey(now.timeIntervalSince1970)
 
-        // Two providers, each contributing today's usage + a ledger fragment.
         let claude = SyntheticUsageSource(
             id: "claude",
             usage: MonitorProviderUsage(costTodayUSD: 2.0, tokensToday: MonitorTokenTotals(input: 100, output: 50)),
@@ -164,23 +137,19 @@ struct MonitorRuntimeV2PlumbingTests {
             now: now
         )
 
-        // Today/quota still composed from the usage seam.
         #expect(snapshot.costTodayUSD == 2.0)
         #expect(snapshot.tokensToday == MonitorTokenTotals(input: 140, output: 60))
         #expect(snapshot.perProvider?.count == 2)
 
-        // perModel carries both models from the merged buckets.
         let models = Set((snapshot.perModel ?? []).map(\.model))
         #expect(models == ["claude-opus-4", "claude-sonnet-5"])
 
-        // dailyActivity spans the rollup window and today carries the pooled totals.
         #expect(snapshot.dailyActivity?.count == MonitorUsageRollup.dayWindow)
         let todayBucket = snapshot.dailyActivity?.first { $0.day == today }
         #expect(todayBucket?.tokens == MonitorTokenTotals(input: 140, output: 60))
 
-        // Burn rates sum nil-aware across providers.
-        #expect(snapshot.tokenBurnRatePerHour == 1500)     // 1200 + 300
-        #expect(snapshot.costBurnRatePerHour == 0.9)        // 0.9 + nil
+        #expect(snapshot.tokenBurnRatePerHour == 1500)
+        #expect(snapshot.costBurnRatePerHour == 0.9)
     }
 
     @Test("No ledger providers ⇒ ledger fields stay nil, today/quota still compose")
@@ -192,7 +161,7 @@ struct MonitorRuntimeV2PlumbingTests {
         )
         let snapshot = await MonitorRuntime.composeUsageSnapshot(
             providers: [(id: "claude", provider: usageOnly)],
-            ledgerProviders: [],                    // no ledger seam wired
+            ledgerProviders: [],
             limits: nil,
             now: Date()
         )
@@ -209,7 +178,7 @@ struct MonitorRuntimeV2PlumbingTests {
         let source = SyntheticUsageSource(
             id: "claude",
             usage: MonitorProviderUsage(costTodayUSD: nil, tokensToday: nil),
-            ledger: MonitorUsageLedgerFragment()   // empty buckets, nil rates
+            ledger: MonitorUsageLedgerFragment()
         )
         let snapshot = await MonitorRuntime.composeUsageSnapshot(
             providers: [(id: "claude", provider: source)],
@@ -242,13 +211,10 @@ struct MonitorRuntimeV2PlumbingTests {
             limits: limits,
             now: Date()
         )
-        // Reader carries raw 0…100 percentages; the snapshot contract is 0…1.
         #expect(snapshot.fiveHourUsedPercent == 0.42)
         #expect(snapshot.weekUsedPercent == 0.71)
         #expect(snapshot.limitsStale == true)
     }
-
-    // MARK: - Helpers
 
     private func options(
         gpu: Bool = false, topProcesses: Bool = false, ane: Bool = false,
@@ -267,8 +233,6 @@ struct MonitorRuntimeV2PlumbingTests {
     }
 }
 
-/// Immutable synthetic source that satisfies both usage seams from fixed values,
-/// so the composer can be exercised without a real file-tailing pipeline.
 private final class SyntheticUsageSource: MonitorUsageProviding, MonitorUsageLedgerProviding {
     private let usageValue: MonitorProviderUsage
     private let ledgerValue: MonitorUsageLedgerFragment

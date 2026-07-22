@@ -112,11 +112,6 @@ struct WPEResolutionDiagnosticsTests {
 
     @Test("Speculative streaming decline is not a miss once the ref resolves eagerly")
     func speculativeStreamingDeclineDoesNotCountAsMiss() {
-        // The renderer probes the lazy-streaming path before the eager static
-        // path. Single-frame static `.tex` decline streaming with
-        // `unsupportedAnimation` (lazy = animation-only) and then resolve
-        // eagerly — they must not be reported missing. (saber 3526278753:
-        // 9 such textures were spuriously counted as `missing`.)
         let ref = "materials/util/clouds_256.tex"
         let tracer = WPEResolutionTracer()
         tracer.record(WPEResolutionEvent(
@@ -152,12 +147,6 @@ struct WPEResolutionDiagnosticsTests {
         #expect(snapshot.missedRefs.map(\.ref) == ["materials/ghost.tex"])
     }
 
-    // Integration: mirror the renderer's two-step texture load
-    // (`resolveStreamingPayloadIfHeavy` speculative probe → eager
-    // `resolveTexturePayload`) over a real single-frame static `.tex` and
-    // confirm the tracer reports it resolved, not missing. This is the
-    // hermetic stand-in for saber 3526278753's resolution-summary going
-    // missing=9 → 0.
     @Test("Single-frame static .tex resolves through the real resolver without a spurious miss")
     func singleFrameStaticTexResolvesWithoutSpuriousMiss() throws {
         let primary = try makeTempRoot()
@@ -181,8 +170,6 @@ struct WPEResolutionDiagnosticsTests {
             builtinRootURL: builtins
         )
 
-        // Speculative lazy-streaming probe declines single-frame static with
-        // `unsupportedAnimation` (the renderer swallows this); eager path resolves it.
         #expect(throws: SceneResourceResolver.ResolveError.texture(.unsupportedAnimation)) {
             _ = try resolver.resolveStreamingTexturePayload(relativePath: texPath)
         }
@@ -302,8 +289,6 @@ struct WPEResolutionDiagnosticsTests {
         try data.write(to: url)
     }
 
-    /// One RGBA8888 image, one mipmap, no TEXS schedule — the shape of
-    /// util/black, util/clouds_256 and the saber mask textures.
     private static func singleFrameStaticTex(width: Int, height: Int) -> Data {
         var buffer = Data()
         func magic(_ value: String) {
@@ -330,13 +315,13 @@ struct WPEResolutionDiagnosticsTests {
         int32(0)
 
         magic("TEXB0003")
-        int32(1)            // imageCount
-        int32(-1)           // sourceImageFormat (-1 = raw, not a FreeImage payload)
-        int32(1)            // mipmapCount
+        int32(1)
+        int32(-1)
+        int32(1)
         int32(Int32(width))
         int32(Int32(height))
         let pixels = width * height * 4
-        uint32(0)           // not compressed
+        uint32(0)
         uint32(UInt32(pixels))
         uint32(UInt32(pixels))
         buffer.append(Data(repeating: 0x00, count: pixels))

@@ -1,15 +1,6 @@
 import Foundation
 
-/// Resolves the on-disk location for app configuration files. Centralized so
-/// every typed store (and tests via `init(root:)`) shares the same path.
-///
-/// Layout: `~/Library/Application Support/<bundle-id>/Configuration/{screen-configurations,global-settings,wallpaper-bookmarks}.json`
-/// Created lazily on first write — read paths return `nil` for unmigrated installs
-/// and `SettingsManager` handles the seed-from-`UserDefaults` step.
-///
-/// If sandboxing is ever enabled, `applicationSupportDirectory` is auto-rewritten
-/// by macOS to the container path; a future sandboxed release would still need a
-/// legacy-data migration step + `user-selected.read-write` entitlement for Export.
+/// Resolves the sandbox-aware configuration directory shared by typed stores and migrations.
 struct ConfigurationDirectory {
     enum File: String {
         case screenConfigurations = "screen-configurations.json"
@@ -19,7 +10,7 @@ struct ConfigurationDirectory {
 
     let root: URL
 
-    /// Standard production location.
+    /// Standard container-aware production location.
     init(fileManager: FileManager = .default) {
         let bundleID = Bundle.main.bundleIdentifier ?? "Taijia.LiveWallpaper"
         let appSupport = (try? fileManager.url(

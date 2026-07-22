@@ -3,9 +3,6 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Workshop Doctor — vertical probe checklist matching the mockup at
-/// `docs/mockups/workshop-ui.html` section 7. Presented as a modal sheet
-/// from `WorkshopSettingsView`.
 struct WorkshopDoctorView: View {
     @Environment(SteamCMDDoctorService.self) private var service
     @Environment(\.dismiss) private var dismiss
@@ -34,8 +31,6 @@ struct WorkshopDoctorView: View {
                 .padding(.bottom, DesignTokens.Spacing.xl)
                 .allowsHitTesting(false)
         }
-        // Auto-detect SteamCMD + default the working directory on open, so a
-        // first-time user usually lands on an already-configured Doctor.
         .task { await service.autoConfigureIfNeeded() }
     }
 
@@ -145,9 +140,7 @@ struct WorkshopDoctorView: View {
         }
     }
 
-    /// Reveals the real on-disk location where SteamCMD saves Workshop items —
-    /// the sandbox-redirected container Steam tree, which is otherwise buried in
-    /// `~/Library/Containers/…` and hard to reach by hand.
+    /// Reveals the real on-disk location where SteamCMD saves Workshop items — the sandbox-redirected container Steam tree, which is otherwise buried in `~/Library/Containers/…` and hard to reach by hand.
     private var downloadsRow: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
@@ -164,9 +157,7 @@ struct WorkshopDoctorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Opens the SteamCMD download folder in Finder, falling back to its deepest
-    /// existing ancestor when nothing has been downloaded yet (the
-    /// `content/431960` folder only appears after the first download).
+    /// Opens the SteamCMD download folder in Finder, falling back to its deepest existing ancestor when nothing has been downloaded yet (the `content/431960` folder only appears after the first download).
     private func revealDownloadsFolder() {
         let fileManager = FileManager.default
         guard let contentRoot = WPEDownloadArchiveReclaimer.containerSteamContentRoot(fileManager: fileManager) else {
@@ -403,7 +394,6 @@ private struct BinaryPickerRow: View {
         Task {
             let found = await onAutoDetect()
             isDetecting = false
-            // Fall back to the manual picker when nothing was found.
             if !found { pickFile() }
         }
     }
@@ -429,9 +419,6 @@ private struct BinaryPickerRow: View {
         panel.treatsFilePackagesAsDirectories = false
         panel.message = String(localized: "Pick the SteamCMD executable or its steamcmd.sh wrapper.", comment: "Open-panel message when choosing the SteamCMD binary in the Workshop diagnostics sheet.")
         panel.prompt = String(localized: "Use Binary", comment: "Open-panel confirm button when choosing the SteamCMD binary.")
-        // Pre-position the panel at the most plausible install location so
-        // users don't have to navigate the filesystem when SteamCMD is in
-        // its canonical Homebrew / Valve-tarball spot.
         if let candidate = SteamCMDBinaryResolver.autoDetectCandidates().first {
             panel.directoryURL = candidate.deletingLastPathComponent()
         }
@@ -460,8 +447,6 @@ private struct WorkdirRadioRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            // Default is auto-picked (shared if the Steam GUI is set up, else an
-            // app-managed folder); the two choices live under "Change location".
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Label("Working directory", systemImage: "folder")
                     .font(DesignTokens.Typography.bodyEmphasized)
@@ -691,8 +676,6 @@ private struct ProbeRow: View {
     }
 
     private var inlineValue: String? {
-        // Surface the signed-in account on the cached-login row (the redacted
-        // probe detail never carries the username).
         if report.id == .cachedLogin, case .green = report.status, let user = service.username {
             return user
         }
@@ -792,8 +775,6 @@ private struct ProbeRow: View {
             }
 
         case (.codeSignature, .yellow):
-            // Informational; only show the codesign command if the user wants
-            // to inspect manually.
             if commandFromStatus != nil {
                 showCommandButton(label: "Show codesign command")
             }
@@ -823,9 +804,7 @@ private struct ProbeRow: View {
         .help(Text("Re-run this probe"))
     }
 
-    /// Reassures the user before they run the Terminal sign-in command that the
-    /// app never touches their credentials — the whole point of the out-of-app
-    /// login.
+    /// Reassures the user before they run the Terminal sign-in command that the app never touches their credentials — the whole point of the out-of-app login.
     private var securityGuaranteeCard: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.xs) {
             Image(systemName: "lock.shield.fill")

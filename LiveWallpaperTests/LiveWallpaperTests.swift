@@ -156,8 +156,6 @@ struct SettingsWindowLayoutTests {
     }
 }
 
-// MARK: - ResourceUtilities Tests
-
 @Suite("ResourceUtilities") @MainActor
 struct ResourceUtilitiesTests {
 
@@ -177,9 +175,6 @@ struct ResourceUtilitiesTests {
         )
 
         #expect(plist["com.apple.security.files.bookmarks.app-scope"] as? Bool == true)
-        // read-write is required so `.fileExporter` (configuration backup) can
-        // write to a user-chosen destination; individual wallpaper bookmarks
-        // still narrow themselves to read via `securityScopeAllowOnlyReadAccess`.
         #expect(plist["com.apple.security.files.user-selected.read-write"] as? Bool == true)
         #expect(plist["com.apple.security.files.user-selected.read-only"] == nil)
     }
@@ -332,8 +327,6 @@ struct ResourceUtilitiesTests {
     }
 }
 
-// MARK: - SettingsManager Tests
-
 @Suite("SettingsManager") @MainActor
 struct SettingsManagerTests {
     private let screenConfigurationsKey = "screenConfigurations"
@@ -417,8 +410,6 @@ struct SettingsManagerTests {
     }
 }
 
-// MARK: - FrameRateLimit Tests
-
 @Suite("FrameRateLimit.getEffectiveLimit")
 struct FrameRateLimitTests {
 
@@ -486,9 +477,6 @@ struct FrameRateLimitTests {
         #expect(decoded == .fps60)
     }
 
-    // naturalDefault: the picker and the runtime agree on the type-
-    // appropriate baseline. Scene defaults to 30 (WPE parity); video /
-    // html / metalShader keep 60 (native pass-through, no extra cost).
     @Test("naturalDefault returns fps30 for scene wallpapers (WPE parity)")
     func naturalDefaultForScene() {
         #expect(FrameRateLimit.naturalDefault(for: .scene) == .fps30)
@@ -628,8 +616,6 @@ struct FrameRateLimitEnforcesCompositionCapTests {
     }
 }
 
-// MARK: - ScheduleSlot Tests
-
 @Suite("ScheduleSlot.containsHour")
 struct ScheduleSlotTests {
 
@@ -691,8 +677,6 @@ struct ScheduleSlotTests {
     }
 }
 
-// MARK: - VideoEffectConfig Tests
-
 @Suite("VideoEffectConfig")
 struct VideoEffectConfigTests {
 
@@ -740,8 +724,6 @@ struct VideoEffectConfigTests {
         #expect(decoded == config)
     }
 
-    // MARK: particleDensity (regression: previously a dead UI control)
-
     @Test("Default particleDensity is 1.0")
     func defaultParticleDensity() {
         let config = VideoEffectConfig.default
@@ -784,11 +766,6 @@ struct VideoEffectConfigTests {
         #expect(decoded.particleDensity == 0.3)
     }
 }
-
-// MARK: - ScreenConfiguration Custom Decoder Tests
-//
-// These tests pin down the backward-compat decoder added during the
-// "HTML/shader wallpapers don't survive relaunch" Critical fix.
 
 @Suite("ScreenConfiguration custom decoder")
 struct ScreenConfigurationDecoderTests {
@@ -965,8 +942,6 @@ struct ScreenConfigurationDecoderTests {
         #expect(decoded.playlistRotationMinutes == 15)
     }
 
-    // MARK: - WallpaperMode Codable migration
-
     @Test("Legacy JSON without wallpaperMode + scheduleSlots → infers .schedule")
     func legacyInferScheduleMode() throws {
         let config = ScreenConfiguration(
@@ -1027,8 +1002,6 @@ struct ScreenConfigurationDecoderTests {
         #expect(decoded.wallpaperMode == .playlist)
     }
 }
-
-// MARK: - GlobalSettings Custom Decoder Tests
 
 @Suite("GlobalSettings custom decoder")
 struct GlobalSettingsDecoderTests {
@@ -1092,8 +1065,6 @@ struct GlobalSettingsDecoderTests {
 
     @Test("Legacy JSON carrying retired defaultFrameRateLimit decodes without error")
     func legacyDefaultFrameRateLimitIgnored() throws {
-        // Older builds persisted this field; ensure existing settings files
-        // still load after the field was removed.
         let legacyJSON = """
         {
             "defaultFrameRateLimit": 60,
@@ -1105,11 +1076,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.pauseOnFullScreen == true)
     }
 }
-
-// MARK: - ScheduleSlot.timelineSegments Tests
-//
-// Regression coverage for the bug where slots wrapping midnight (e.g. 22→6)
-// produced negative segment widths and disappeared from the visualization.
 
 @Suite("ScheduleSlot.timelineSegments()")
 struct ScheduleSlotTimelineSegmentsTests {
@@ -1156,9 +1122,6 @@ struct ScheduleSlotTimelineSegmentsTests {
 
     @Test("Slot ending at next-day midnight (1→0) collapses to a single segment")
     func slotEndingAtNextDayMidnight() {
-        // `endHour == 0` with `startHour > 0` semantically wraps to the next
-        // day's midnight — the [0, 0) second half has zero width and is
-        // dropped so the editor never has to filter empty segments.
         let slot = ScheduleSlot(startHour: 1, endHour: 0, label: "Almost full day")
         let segments = slot.timelineSegments()
 
@@ -1173,12 +1136,9 @@ struct ScheduleSlotTimelineSegmentsTests {
         #expect(ScheduleSlot(startHour: 6, endHour: 12, label: "x").wraps == false)
         #expect(ScheduleSlot(startHour: 12, endHour: 6, label: "x").wraps == true)
         #expect(ScheduleSlot(startHour: 22, endHour: 0, label: "x").wraps == true)
-        // Zero-length is non-wrapping by the start > end definition.
         #expect(ScheduleSlot(startHour: 12, endHour: 12, label: "x").wraps == false)
     }
 }
-
-// MARK: - FrameRateLimit.resolveCompositionFPS Tests
 
 @Suite("FrameRateLimit.resolveCompositionFPS")
 struct ResolveCompositionFPSTests {
@@ -1294,8 +1254,6 @@ struct ResolveCompositionFPSTests {
         #expect(decoded24 == .fps24)
     }
 }
-
-// MARK: - FilterParameters Tests
 
 @Suite("FilterParameters")
 struct FilterParametersTests {

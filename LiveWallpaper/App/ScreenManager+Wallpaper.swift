@@ -55,12 +55,7 @@ extension ScreenManager {
         wallpaperSessionSummaryCache.summary(for: screen.id, fallback: effectiveSummary(for: screen))
     }
 
-    /// Per-screen summary that accounts for the master render gate. With a live
-    /// session we use its own summary. Without one we still report
-    /// configured-but-`.off` when the master switch is off and a wallpaper is
-    /// persisted — so the overview stays `.off` (and the menu-bar master switch
-    /// stays enabled to turn rendering back on) instead of collapsing to
-    /// `.notConfigured` now that the gate tears sessions down to free memory.
+    /// Per-screen summary that accounts for the master render gate.
     private func effectiveSummary(for screen: Screen) -> WallpaperSessionSummary {
         if screen.runtimeSession != nil {
             return screen.wallpaperSessionSummary
@@ -76,10 +71,7 @@ extension ScreenManager {
         return screen.wallpaperSessionSummary
     }
 
-    /// The wallpaper type a screen would render from its persisted
-    /// configuration, or `nil` when nothing valid is assigned. Uses the same
-    /// validity gate as `restoreWallpaperSession` so an empty/malformed config
-    /// reads as "not configured".
+    /// The wallpaper type a screen would render from its persisted configuration, or `nil` when nothing valid is assigned.
     private func persistedWallpaperType(for screen: Screen) -> WallpaperType? {
         guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               WallpaperSessionDefinition(configuration: config) != nil else { return nil }
@@ -203,9 +195,7 @@ extension ScreenManager {
     func togglePlayback() {
         guard hasControllableWallpaperSessions else { return }
 
-        // Decide from user INTENT, not actual playback: a policy-suspended
-        // video reads `isPlaying == false` but the user still "intends" to
-        // play, so toggling must flip intent, not chase the suppressed state.
+        // Decide from user INTENT, not actual playback: a policy-suspended video reads `isPlaying == false` but the user still "intends" to play, so toggling must flip intent, not chase the suppressed state.
         let anyIntendsToPlay = screens.contains { $0.playbackController?.userIntendsToPlay ?? false }
 
         Logger.info("Toggling global playback: \(anyIntendsToPlay ? "pausing" : "playing") all videos", category: .videoPlayer)
@@ -222,10 +212,7 @@ extension ScreenManager {
         updatePlaybackState()
     }
 
-    /// Per-screen play/pause toggle. Video sessions also post a playback-state
-    /// notification that triggers a commit, but scene/HTML sessions only mutate
-    /// `userIntendsToPlay`, so this commits the derived session state itself to
-    /// refresh the menu-bar / inspector UI immediately.
+    /// Per-screen play/pause toggle.
     func togglePlayback(for screen: Screen) {
         guard let playback = screen.playbackController else { return }
         if playback.userIntendsToPlay {
@@ -237,14 +224,7 @@ extension ScreenManager {
         refreshAppNapAssertion()
     }
 
-    /// Master render gate. Toggles whether wallpaper pipelines exist at all:
-    /// disabling tears every session down to free its memory, enabling rebuilds
-    /// them from persisted configuration (see `applyGlobalRenderGate`). The flag
-    /// is persisted and is the single source of truth for the menu-bar master
-    /// switch. Note: because sessions are destroyed rather than suspended,
-    /// transient per-screen playback state (a manual pause is not persisted
-    /// anywhere) is not carried across an off→on cycle — rebuilt screens follow
-    /// the normal startup playback policy, exactly as on app relaunch.
+    /// Master render gate.
     func setWallpapersEnabled(_ enabled: Bool) {
         guard !isTerminating else { return }
         wallpapersGloballyEnabled = enabled
@@ -255,29 +235,15 @@ extension ScreenManager {
         markWallpaperSessionStateChanged()
     }
 
-    /// Apply the master gate to every screen. When enabled, builds any session
-    /// that is missing (from its persisted configuration) and makes any
-    /// already-live one visible, then re-runs the performance policy so the
-    /// gate never decides quality/suspended itself. When disabled, fully tears
-    /// each session down so its GPU textures, scene runtime, and decoded assets
-    /// are released — rather than leaving a suspended-but-resident renderer
-    /// holding memory. Idempotent and safe to call across launches and after
-    /// new wallpapers are assigned.
+    /// Apply the master gate to every screen.
     func applyGlobalRenderGate() {
         guard !isTerminating else { return }
         for screen in screens {
             if wallpapersGloballyEnabled {
                 if screen.runtimeSession == nil {
-                    // Rendering is permitted again — rebuild from the persisted
-                    // configuration. No-op for screens without a saved wallpaper.
-                    // The build path applies the current performance policy itself.
                     loadConfigurationForScreen(screen)
                 } else {
-                    // Already-live session (idempotent re-enable): only ensure
-                    // the window is visible. Whether it runs or stays suspended
-                    // is decided by the performance policy below — never a blind
-                    // resume() that would override power / thermal / full-screen
-                    // / app-rule state.
+                    // Already-live session (idempotent re-enable): only ensure the window is visible.
                     screen.runtimeSession?.show()
                 }
             } else if screen.runtimeSession != nil {
@@ -285,10 +251,7 @@ extension ScreenManager {
             }
         }
 
-        // Single source of truth for "how hard a live session works". Re-running
-        // the policy after enabling keeps the master gate (a lifecycle axis)
-        // from bypassing the performance-profile axis. Skipped while disabled —
-        // there are no live sessions to target.
+        // Single source of truth for "how hard a live session works".
         if wallpapersGloballyEnabled {
             refreshPerformancePolicyForAllScreens()
         }
@@ -304,9 +267,7 @@ extension ScreenManager {
         saveConfiguration(config)
     }
 
-    /// Returns `true` when a frame extraction request was actually issued
-    /// (player exists with a `currentItem`). Callers use the result to gate
-    /// UI feedback so a silent no-op can't show a false success indicator.
+    /// Returns `true` when a frame extraction request was actually issued (player exists with a `currentItem`).
     @discardableResult
     func extractLockScreenFrame(for screen: Screen) -> Bool {
         guard !isTerminating else { return false }
@@ -355,9 +316,7 @@ extension ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
-    /// Activate (or restore) the Monitor wallpaper for a screen when the user
-    /// toggles the type picker to Monitor. Seeds a default configuration on a
-    /// screen that has never had one, mirroring `switchToHTMLWallpaper`.
+    /// Activate (or restore) the Monitor wallpaper for a screen when the user toggles the type picker to Monitor.
     func switchToMonitorWallpaper(for screen: Screen) {
         guard !isTerminating else { return }
         var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
@@ -378,15 +337,7 @@ extension ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
-    /// Persist a board configuration WITHOUT restarting the session — used both for
-    /// edits made on the LIVE wallpaper (drag / add / remove / resize; the board
-    /// already reflects them) and for inspector-side edits (refresh rate, mouse,
-    /// reduce-motion, per-widget options). A full session rebuild would tear down
-    /// the board the user is editing and churn the wallpaper lease/window for
-    /// changes that all apply in place, so instead we persist and push the config
-    /// into every live monitor view for this screen via its non-restarting
-    /// `apply(configuration:)` (which no-ops when nothing changed, so a
-    /// live-board-originated edit round-tripping back here doesn't rebuild).
+    /// Persists board edits without restarting the active session.
     func persistMonitorConfigurationFromBoard(_ config: MonitorBoardConfiguration, for screen: Screen) {
         guard !isTerminating else { return }
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
@@ -394,8 +345,6 @@ extension ScreenManager {
         guard current != config else { return }
         configuration.updateMonitorConfiguration(config)
         saveConfiguration(configuration)
-        // Push into the live wallpaper so an inspector-originated edit takes effect
-        // immediately (the live view doesn't observe the persistence notification).
         for view in liveMonitorBoardViews(for: screen) {
             view.apply(configuration: config)
         }
@@ -442,11 +391,7 @@ extension ScreenManager {
         htmlCoordinator.updateConfig(config, for: screen)
     }
 
-    /// Replace the active scene's `SceneDescriptor` (currently used by the
-    /// Pro inspector to push user-edited `project.json` properties down).
-    /// Restarts the wallpaper session so the renderer picks up the new
-    /// overrides — there's no in-place apply seam on the WPE runtimes yet,
-    /// the way HTML has `applyHTMLConfig`.
+    /// Replace the active scene's `SceneDescriptor` (currently used by the Pro inspector to push user-edited `project.json` properties down).
     func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) async {
         guard !isTerminating else { return }
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
@@ -457,10 +402,7 @@ extension ScreenManager {
         guard current != descriptor else { return }
 
         #if !LITE_BUILD
-        // Fast path: if every changed property is incrementally applicable
-        // (e.g. a visibility toggle), patch the live renderer instead of a full
-        // reload. Falls through to the reload path when the renderer can't. The
-        // bindings read and patch both hop to the render actor (M2c1b-3c).
+        // Fast path: if every changed property is incrementally applicable (e.g.
         if let sceneSession = screen.runtimeSession as? SceneWallpaperSession {
             let bindings = await sceneSession.scenePropertyBindings()
             if !bindings.isEmpty {
@@ -487,10 +429,7 @@ extension ScreenManager {
     }
 
     #if !LITE_BUILD
-    /// Effective property values (schema defaults merged with the descriptor's
-    /// overrides) used to diff old vs new settings for incremental apply.
-    /// Package-/source-backed scenes read `project.json` in place from the source
-    /// folder (zero-cache); legacy `.cache` scenes read the extracted directory.
+    /// Effective property values (schema defaults merged with the descriptor's overrides) used to diff old vs new settings for incremental apply.
     private func effectiveSceneValues(
         for descriptor: SceneDescriptor,
         origin: WPEOrigin?
@@ -513,9 +452,7 @@ extension ScreenManager {
                     cacheRootURL: cacheRoot
                 )
             }
-            // Cache purged but the import source may still be resolvable — read
-            // `project.json` in place so property diffing matches the render
-            // path's lazy fallback. Falls back to bare overrides otherwise.
+            // Cache purged but the import source may still be resolvable — read `project.json` in place so property diffing matches the render path's lazy fallback.
             guard let origin,
                   case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
                     origin.sourceFolderBookmark, target: .transient
@@ -547,11 +484,7 @@ extension ScreenManager {
 
     // MARK: - Metal Shader Wallpaper
 
-    /// Matches `setSceneWallpaper` — the body only touches Core schema +
-    /// session restore. The Pro-only `makeShaderSession` call is reached
-    /// indirectly through `restoreWallpaperSession → activateAmbientWallpaper`
-    /// where the `.metalShader` case is gated with `#if !LITE_BUILD`, so this
-    /// stays ungated for Lite-side bookmark restore / decode compatibility.
+    /// Matches `setSceneWallpaper` — the body only touches Core schema + session restore.
     func setShaderWallpaper(source: ShaderSource, for screen: Screen) {
         guard !isTerminating else { return }
         let previousContent = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.activeWallpaper
@@ -568,18 +501,10 @@ extension ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
-    /// Counterpart to `switchToVideoWallpaper` / `switchToHTMLWallpaper` for
-    /// the shader tab. Never auto-activates a shader the user didn't pick:
-    /// if a shader is already running this is a no-op (idempotent re-entry);
-    /// if the active wallpaper is something else (video / html / scene) the
-    /// tab swap is honored visually — the shader gallery shows in the
-    /// preview area — but no shader runtime spins up until the user clicks
-    /// a preset card. Matches the "saved restore" pattern the other tabs
-    /// use: silent when there's nothing to restore.
+    /// Counterpart to `switchToVideoWallpaper` / `switchToHTMLWallpaper` for the shader tab.
     func switchToShaderWallpaper(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         if case .metalShader = config.activeWallpaper { return }
-        // Intentional no-op when active wallpaper is video / html / scene.
     }
 
 

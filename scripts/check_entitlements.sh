@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 #
-# Entitlement drift guard. Fingerprints each entitlement with its key, value
-# type and value, then fails on any difference from the reviewed baseline.
-# Keeping the association matters: a flat key/string multiset can report green
-# after a value moves under a wider key or a required boolean disappears.
+# Reject entitlement changes from the reviewed, typed structural baseline.
 #
 # Usage:
 #   scripts/check_entitlements.sh --sku pro  --source
@@ -16,9 +13,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIFF_FILE="$(mktemp -t lw-entitlements-diff.XXXXXX)"
 trap 'rm -f "$DIFF_FILE"' EXIT
 
-# Sorted, key-associated typed lines produced by a structural plist parser.
-# XML is deliberately not parsed with awk: SBPL strings can contain newlines,
-# and truncating a continued value can hide a sandbox expansion.
+# Use a structural parser because multiline SBPL values are unsafe to parse
+# line by line.
 fingerprint_plist() {
   python3 "$ROOT/scripts/entitlement_fingerprint.py" fingerprint "$1"
 }
@@ -45,10 +41,8 @@ fingerprint_app() {
   if [[ "$team_id" == "not set" ]]; then
     team_id=""
   fi
-  # Xcode may synthesize identity metadata for Developer-signed/profiled apps.
-  # The helper removes a field only after proving it is exactly derived from the
-  # real code-signature TeamIdentifier and CFBundleIdentifier. Unknown fields
-  # remain in the fingerprint and therefore make the exact baseline diff red.
+  # Normalize only identity metadata derived from the signature and bundle ID.
+  # Unknown fields remain visible to the exact baseline comparison.
   if [[ -n "$team_id" ]]; then
     if ! fingerprint="$(python3 "$ROOT/scripts/entitlement_fingerprint.py" app-fingerprint "$tmp" \
       --bundle-id "$bundle_id" \
@@ -78,7 +72,7 @@ while [[ $# -gt 0 ]]; do
     --source)          MODE="source"; shift ;;
     --app)             MODE="app"; APP_PATH="${2:?--app needs a .app path}"; shift 2 ;;
     --update-baseline) MODE="update"; shift ;;
-    -h|--help)         sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help)         sed -n '2,9p' "$0"; exit 0 ;;
     *) echo "ERROR: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done

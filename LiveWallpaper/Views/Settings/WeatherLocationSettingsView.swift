@@ -31,7 +31,6 @@ struct ManualLocationPicker: View {
                 }
             }
 
-            // Placeholder doubles as the prompt; a separate labelled row would squash the field.
             TextField(text: $query) {
                 Text("City, region, or place")
             }
@@ -138,10 +137,7 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
         debounceTask?.cancel()
     }
 
-    /// Coalesces typing bursts so the city search fires at most every
-    /// 300 ms. Without this each keystroke pushes a fresh
-    /// `queryFragment` and MapKit dispatches a network request — common
-    /// editing patterns yielded 4-5 round-trips per word.
+    /// Coalesces typing bursts so the city search fires at most every 300 ms.
     func update(query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         debounceTask?.cancel()

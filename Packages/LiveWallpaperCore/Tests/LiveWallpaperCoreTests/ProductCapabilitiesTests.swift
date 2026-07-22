@@ -3,10 +3,7 @@ import SwiftUI
 import Testing
 @testable import LiveWallpaperCore
 
-/// Phase 1a smoke tests — verify the Core SPM package builds standalone
-/// and the public surface for ProductCapabilities matches the main-app
-/// version. The main app still uses its own internal copy until Phase 1b
-/// switches over; both must agree on the SKU surface area.
+/// Verifies the standalone Core package's SKU capability surface.
 @Suite("ProductCapabilities (Core SPM)")
 struct ProductCapabilitiesTests {
 

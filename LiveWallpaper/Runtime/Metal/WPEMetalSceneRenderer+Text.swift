@@ -37,9 +37,7 @@ extension WPEMetalSceneRenderer {
         // pay a redundant CoreText rasterize.
         var deferredMSDFObjects: [(object: WPESceneTextObject, geometry: WPETextOverlayGeometry)] = []
         draws.reserveCapacity(textObjects.count)
-        // Own live visibility AND the live ancestor chain: a script hiding a
-        // parent GROUP (489 加载信息) must take its text children along —
-        // parse-time folding only covered the static state.
+        // Live ancestor visibility must suppress text children just as static folding does.
         for object in textObjects
         where (liveTextVisibility[object.id] ?? object.visible) && ancestorChainVisible(object.id) {
             let resolvedAlpha = liveTextAlpha[object.id] ?? object.resolvedAlpha(at: uniforms.time)
@@ -179,19 +177,8 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Placement
 
-    /// Live world placement for a text object. When its ancestors are transform
-    /// hosts (null groups) carrying script-driven transforms this frame, the
-    /// text's LOCAL origin is re-composed through the live chain — otherwise
-    /// (no live overrides, non-host parent, or no local data) the parse-time
-    /// world origin stands. Mirrors `applyingLayerTransforms` composition so
-    /// panel text tracks its panel background exactly.
-    ///
-    /// `zRotation` is the chain's composed z angle (radians, author-space CCW):
-    /// WPE rotates text with its host (3470764447's 总组件角度 = -15° tilts the
-    /// whole clock stack). When the live chain composes, it is the chain's
-    /// composed angle; otherwise the parse-time WORLD angle stands — text
-    /// objects rotate like image layers, so a static `angles` in scene.json
-    /// (2986828130's Clock/Date 30° tilt) must not collapse to 0.
+    /// Composes a text object's live local placement through transform-host ancestors.
+    /// Falls back to its parse-time world origin and rotation when no live chain applies.
     func liveTextWorldPlacement(
         _ object: WPESceneTextObject,
         scriptOrigins: [String: SIMD3<Double>],
@@ -381,8 +368,7 @@ extension WPEMetalSceneRenderer {
 
     // MARK: - Loading
 
-    /// Phase 2D-O: spin up the audio runtime and start playback if the scene declared sound objects.
-    /// Phase 2D-N: build the WPETextRenderer + cache the parsed text object list.
+    /// Starts declared scene audio and builds the cached text-rendering state.
     func loadTextOverlays(
         from document: WPESceneDocument,
         scriptLoadToken: WPESceneScriptInstanceLimitToken

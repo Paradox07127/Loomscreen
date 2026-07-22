@@ -2,13 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// App-wide owner of the floating fleet HUD capsule. Independent of whether the
-/// Monitor *wallpaper* is active: it acquires its OWN `MonitorRuntime` lease
-/// (agents-only) while shown and releases it when hidden, and polls the shared
-/// broker at 1 Hz to keep the capsule live.
-///
-/// Pro-only surface — callers must gate on `FeatureCatalog.isEnabled(.agentFleet)`
-/// before showing; this controller does not know the catalog itself.
+/// App-wide owner of the floating fleet HUD capsule.
 @MainActor
 @Observable
 final class MonitorHUDController: NSObject {
@@ -16,9 +10,7 @@ final class MonitorHUDController: NSObject {
 
     private static let enabledKey = "monitor.hud.enabled"
 
-    /// Filled by the session router at integration so "Focus" can jump to the
-    /// blocked session. Default nil = the button hides (no-op). Setting it while
-    /// the HUD is shown reveals the button on the next refresh.
+    /// Filled by the session router at integration so "Focus" can jump to the blocked session.
     @ObservationIgnored var focusHandler: (@MainActor (String) -> Void)? {
         didSet { store.focusAvailable = focusHandler != nil }
     }
@@ -177,8 +169,6 @@ final class MonitorHUDController: NSObject {
     }
 
     /// Pulls the newest snapshot from the broker and recomputes the model.
-    /// Recomputes on every tick even without a new generation so staleness
-    /// crosses its threshold on wall-clock time, not on publish cadence.
     private func pullLatest(force: Bool) {
         let broker = runtime.broker
         let now = Date().timeIntervalSince1970
@@ -190,7 +180,6 @@ final class MonitorHUDController: NSObject {
             }
             model = MonitorHUDModel.make(from: update.snapshot, now: now, lastPublishAt: lastPublishAt)
         } else {
-            // No snapshot yet (or broker cleared) — recompute staleness only.
             model = MonitorHUDModel.make(from: nil, now: now, lastPublishAt: lastPublishAt)
         }
 

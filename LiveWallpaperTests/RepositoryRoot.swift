@@ -1,15 +1,6 @@
 import Foundation
 import Testing
 
-/// Single anchor for every source-scanning test.
-///
-/// Two idioms preceded this and both fail silently under a file-tree reshuffle:
-/// walking up until `lastPathComponent == "LiveWallpaperTests"` *hangs* if that
-/// directory is renamed (`/` is a fixed point of `deleteLastPathComponent`), and
-/// two blind `deletingLastPathComponent()` calls resolve to the wrong root the
-/// moment a test file moves into a subdirectory. Probing upward for the
-/// `.xcodeproj` bundle terminates on both the found and not-found paths and does
-/// not care what any directory is named.
 enum RepositoryRoot {
     static let projectFileName = "LiveWallpaper.xcodeproj"
 
@@ -33,14 +24,6 @@ enum RepositoryRoot {
         try Data(contentsOf: url(relativePath))
     }
 
-    /// Concatenates one type's sources across the files it was split into —
-    /// `Foo.swift` plus `Foo+Part.swift` / `FooTypes.swift` siblings.
-    ///
-    /// A `contains` assertion anchored to a single path stops enforcing the
-    /// moment the declaration it targets moves to a sibling file, and a pure
-    /// move is exactly the refactor that moves it. Addressing the component
-    /// rather than the file keeps the assertion meaningful across splits;
-    /// `noSourcesMatch` keeps a typo'd prefix loud instead of vacuously true.
     static func componentSource(under directory: String, namePrefix: String) throws -> String {
         let files = swiftFiles(under: directory)
             .filter { $0.deletingPathExtension().lastPathComponent.hasPrefix(namePrefix) }
@@ -59,9 +42,6 @@ enum RepositoryRoot {
         }
     }
 
-    /// Recursively collects `.swift` files under a repo-relative directory.
-    /// Callers must assert the result is non-empty — an empty sweep is how a
-    /// scanning test silently stops enforcing anything.
     static func swiftFiles(under relativePath: String) -> [URL] {
         swiftFiles(underURL: url(relativePath))
     }
@@ -120,7 +100,6 @@ struct RepositoryRootTests {
     @Test("A component sweep spans the files its type was split into")
     func componentSourceSpansSplitParts() throws {
         let executor = try RepositoryRoot.componentSource(under: "LiveWallpaper/Runtime", namePrefix: "WPEMetalRenderExecutor")
-        // One declaration from the class body and one from an extension file.
         #expect(executor.contains("final class WPEMetalRenderExecutor"))
         #expect(executor.contains("func present("))
     }

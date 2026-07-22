@@ -21,7 +21,7 @@ import QuartzCore
 /// Lifecycle: the player stays paused after `init`; the renderer's
 /// `applyPerformanceProfile(currentProfile)` (called once textures finish
 /// loading) decides whether to start it, respecting a pre-load `.suspended`.
-// Not `@MainActor` (M2c1b-3c): created and pulled inside the renderer's actor
+// Not `@MainActor`: created and pulled inside the renderer's actor
 // isolation. Frame delivery is pull-based (`texture(at:)` copies the newest
 // pixel buffer synchronously), so there is no cross-thread completion to re-home.
 final class WPEVideoTextureSource {

@@ -9,7 +9,7 @@ import os
 import QuartzCore
 import simd
 extension WPEMetalRenderExecutor {
-    // Not `@MainActor` (M2c1b-3c): the present path runs on the renderer's
+    // Not `@MainActor`: the present path runs on the renderer's
     // `WPEDisplayRenderActor`. `CAMetalLayer.nextDrawable()` is safe off-main.
     func present(
         texture source: MTLTexture,

@@ -462,13 +462,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let velocityMax: SIMD3<Double>
     public let colorMin: SIMD3<Double>
     public let colorMax: SIMD3<Double>
-    /// Whether the particle authored an explicit `color`/`colorrandom`
-    /// initializer. When false, the particle has no authored base colour, so the
-    /// `colorchange` operator must NOT recolour it. (The `colorn` instance
-    /// override still applies — it sets the colour directly, and for wildfire its
-    /// `0.24,0.16,0.27` is exactly what dims the smoke to a faint haze.)
-    /// Regression guard: 3460973721's wildfire is a white `r8` smoke with no colour
-    /// initializer; applying its `colorchange`(橙→纯红) ramped the faint smoke to red.
+    /// Tracks explicit `color`/`colorrandom` initialization because `colorchange` must not recolor an unauthored base.
+    /// Instance-level `colorn` remains applicable independently.
     public let hasColorInitializer: Bool
     /// Whether the particle JSON explicitly opted into sprite-sheet sequence
     /// animation (`"animationmode": "sequence"` or a non-null
@@ -477,10 +472,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// distinction gates the derived-grid atlas fallback, which must not
     /// slice single-image sprites that merely inherited the default.
     public let declaresSequenceAnimation: Bool
-    /// True when the particle JSON's top-level `flags` sets the perspective bit
-    /// (`flags & 4`, WPE's "…perspective" presets). Particles then carry a depth
-    /// (Z) and are drawn with a perspective divide — near ones larger + faster,
-    /// far ones smaller + slower (3462491575's 雪景远景 snow).
+    /// True when `flags & 4` enables depth-aware perspective sizing and motion.
     public let isPerspective: Bool
     /// `turbulentvelocityrandom` initializer, or nil when absent. Seeds each
     /// particle's spawn velocity along a curl-noise stream (rising embers, falling

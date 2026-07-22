@@ -1,32 +1,17 @@
 import Foundation
 import Testing
 
-/// Source-scan guard for the `renderFlagKeys` bug-report registry in
-/// `WPESceneDetailView`: every `defaults` key the renderer stack reads must
-/// either appear in `renderFlagKeys` or carry an exclusion reason below, so a
-/// new flag (e.g. a kill-switch added with a feature) cannot silently drift
-/// out of the "Flags:" line in bug reports.
-///
-/// The scan covers the three idioms renderer code uses to reach UserDefaults:
-/// a literal key at the call site (`…(forKey: "WPE…")`), a `…DefaultsKey`
-/// constant read via `forKey: Self.…`, and the suite-aware
-/// `puppetDefaultsFlagOptional("WPE…")` helper. A flag read through a new
-/// idiom needs a matching pattern in `defaultsKeyPatterns`.
 @Suite("WPE render flag registry")
 struct WPERenderFlagRegistryTests {
 
     private static let registryPath = "LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift"
 
-    /// Directories that make up the scene renderer stack.
     private static let rendererRoots = [
         "LiveWallpaper/Runtime",
         "LiveWallpaper/Infrastructure",
         "Packages/LiveWallpaperProWPE/Sources",
     ]
 
-    /// Renderer-read keys deliberately absent from `renderFlagKeys`, each with
-    /// its reason. New keys belong in `renderFlagKeys` unless they clearly
-    /// never change what renders.
     private static let excludedKeys: [String: String] = [
         "WPEAudioDebugLog": "log-only toggle; never changes what renders",
         "WPEDumpLayerPasses": "dump/trace toggle; prints per-layer pass dumps only",
@@ -42,6 +27,8 @@ struct WPERenderFlagRegistryTests {
         "WPEOracleReplayDaytime": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
         "WPEOracleReplayPointerX": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
         "WPEOracleReplayPointerY": "DEBUG-only oracle fidelity-replay frame global; inert in Release",
+        "WPEPassGPUProfileReportEvery": "profiling report cadence; diagnostics only",
+        "WPEPuppetSkinDebugLog": "breadcrumb logging only; never changes rendering",
         "WPESceneDebugArtifactsEnabled": "dump/trace toggle; writes debug artifacts and extra logs only",
     ]
 
@@ -86,7 +73,6 @@ struct WPERenderFlagRegistryTests {
     // MARK: - Renderer source scanning
 
     private static func rendererDefaultsKeys() throws -> Set<String> {
-        // The key charset includes "." for versioned keys (WPELibrary.RootBookmark.v1).
         let defaultsKeyPatterns = [
             /forKey:\s*"(WPE[A-Za-z0-9.]+)"/,
             /[Dd]efaultsKey\s*=\s*"(WPE[A-Za-z0-9.]+)"/,
@@ -100,7 +86,6 @@ struct WPERenderFlagRegistryTests {
             for file in files {
                 let source = try String(contentsOf: file, encoding: .utf8)
                 for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
-                    // A comment naming a removed key must not count as a live read.
                     guard !line.drop(while: \.isWhitespace).hasPrefix("//") else { continue }
                     for pattern in defaultsKeyPatterns {
                         for match in line.matches(of: pattern) {

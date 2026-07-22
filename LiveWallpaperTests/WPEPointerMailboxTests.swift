@@ -23,7 +23,6 @@ struct WPEPointerMailboxTests {
     func mapInside() {
         let geo = WPEPointerMailbox.Geometry(viewFrameInScreen: Self.frame)
 
-        // Center of the frame → UV (0.5, 0.5).
         let center = WPEPointerMailbox.pointerSample(
             forScreenLocation: CGPoint(x: 500, y: 500), geometry: geo
         )
@@ -31,7 +30,6 @@ struct WPEPointerMailboxTests {
         #expect(center.position.x == 0.5)
         #expect(center.position.y == 0.5)
 
-        // Near bottom-left of the screen frame → UV x≈0, y≈1 (Y is flipped).
         let bottomLeft = WPEPointerMailbox.pointerSample(
             forScreenLocation: CGPoint(x: 100, y: 200), geometry: geo
         )
@@ -57,9 +55,6 @@ struct WPEPointerMailboxTests {
         #expect(outside == .inactive)
     }
 
-    /// Proves M2c can substitute the mailbox for the live main-thread sampler:
-    /// the mailbox's NSView-free mapping is bit-equal to `sampleSceneUV` on a real
-    /// window at a known screen frame.
     @Test("Mailbox mapping equals WPEMetalPointerSampler.sampleSceneUV")
     @MainActor
     func matchesLiveSampler() {
@@ -74,11 +69,11 @@ struct WPEPointerMailboxTests {
 
         let geo = WPEPointerPublisher.geometry(of: view)
         let probes = [
-            CGPoint(x: 500, y: 500),   // center
-            CGPoint(x: 120, y: 780),   // near a corner, inside
-            CGPoint(x: 899, y: 200),   // right edge, inside
-            CGPoint(x: 50, y: 50),     // outside
-            CGPoint(x: 1000, y: 900)   // outside
+            CGPoint(x: 500, y: 500),
+            CGPoint(x: 120, y: 780),
+            CGPoint(x: 899, y: 200),
+            CGPoint(x: 50, y: 50),
+            CGPoint(x: 1000, y: 900)
         ]
         for probe in probes {
             let live = WPEMetalPointerSampler.sampleSceneUV(mouseLocation: probe, in: view)
@@ -106,11 +101,9 @@ struct WPEPointerMailboxTests {
         let mailbox = WPEPointerMailbox()
         mailbox.publishMouseLocation(CGPoint(x: 500, y: 500), timestampNanos: 1)
 
-        // Same cursor, geometry that contains it → inside.
         mailbox.publishGeometry(WPEPointerMailbox.Geometry(viewFrameInScreen: Self.frame))
         #expect(mailbox.read().pointerSample.isInsideView)
 
-        // Move the surface away from the cursor → inactive, no new mouse write.
         mailbox.publishGeometry(
             WPEPointerMailbox.Geometry(
                 viewFrameInScreen: CGRect(x: 2000, y: 2000, width: 100, height: 100)
@@ -143,10 +136,6 @@ struct WPEPointerMailboxTests {
         #expect(reading.clickCaptureEnabled == false)
     }
 
-    /// Concurrent writers on every slot + a reader loop: each read must be a
-    /// whole, self-consistent snapshot (no field torn across two writes). We
-    /// cycle `pointerFrame` and `clickCaptureEnabled` between two known whole
-    /// values and assert the reader only ever observes those whole values.
     @Test("Concurrent read/write stays torn-free")
     func concurrentTornFree() async {
         let mailbox = WPEPointerMailbox()
@@ -185,10 +174,7 @@ struct WPEPointerMailboxTests {
                 var ok = true
                 for _ in 0..<5000 {
                     let reading = mailbox.read()
-                    // pointerFrame is only ever written whole as `down` or neutral.
                     let frameOK = reading.pointerFrame == down || reading.pointerFrame == .neutral
-                    // sample is derived from a single locked state; it must be a
-                    // valid sample (inside with in-range UV, or inactive).
                     let sampleOK: Bool
                     if reading.pointerSample.isInsideView {
                         let p = reading.pointerSample.position
@@ -214,15 +200,10 @@ struct WPEPointerPublisherTests {
     @Test("geometry(of:) is none without a window")
     func geometryWithoutWindow() {
         #expect(WPEPointerPublisher.geometry(of: nil) == .none)
-        // A view not in any window has no screen frame.
         let orphan = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
         #expect(WPEPointerPublisher.geometry(of: orphan) == .none)
     }
 
-    /// start/stop lifecycle is idempotent regardless of whether the test host can
-    /// actually install NSEvent monitors (headless CI may not deliver events, but
-    /// `addMonitorForEvents` still returns a token). We assert the state machine:
-    /// double start / double stop never crash and `isRunning` settles to false.
     @Test("start/stop is idempotent")
     func startStopIdempotent() {
         let publisher = WPEPointerPublisher(mailbox: WPEPointerMailbox(), view: nil)
@@ -230,12 +211,12 @@ struct WPEPointerPublisherTests {
         #expect(publisher.isRunning == false)
         publisher.start()
         let runningAfterFirstStart = publisher.isRunning
-        publisher.start() // no-op
+        publisher.start()
         #expect(publisher.isRunning == runningAfterFirstStart)
 
         publisher.stop()
         #expect(publisher.isRunning == false)
-        publisher.stop() // no-op, no crash
+        publisher.stop()
         #expect(publisher.isRunning == false)
     }
 
@@ -255,7 +236,6 @@ struct WPEPointerPublisherTests {
         publisher.start()
         defer { publisher.stop() }
 
-        // With geometry seeded, a cursor inside the window frame resolves inside.
         mailbox.publishMouseLocation(CGPoint(x: 500, y: 500), timestampNanos: 1)
         #expect(mailbox.read().pointerSample.isInsideView)
     }

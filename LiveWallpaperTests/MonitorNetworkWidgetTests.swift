@@ -2,9 +2,6 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic tests for the Network widget: active-interface selection, the
-/// private-IPv4 vs IPv6 discriminator, rate value/unit splitting, and history
-/// tail windowing. View composition is not exercised here.
 struct MonitorNetworkWidgetTests {
 
     private func iface(
@@ -18,8 +15,6 @@ struct MonitorNetworkWidgetTests {
             addresses: addresses, isActive: active
         )
     }
-
-    // MARK: - Active-interface selection
 
     @Test("nil / empty interface list yields no active interface")
     func activeNilForEmpty() {
@@ -46,8 +41,6 @@ struct MonitorNetworkWidgetTests {
         #expect(picked?.name == "en0")
     }
 
-    // MARK: - Private IPv4 discriminator
-
     @Test("IPv4 is dotted with no colon; IPv6 (with colons) is rejected")
     func ipv4Discriminator() {
         #expect(MonitorNetworkWidgetView.isIPv4("192.168.1.24"))
@@ -55,20 +48,15 @@ struct MonitorNetworkWidgetTests {
         #expect(MonitorNetworkWidgetView.isIPv4("::1") == false)
     }
 
-    // MARK: - Rate value/unit split
-
     @Test("rate splits into numeral and unit at the first space")
     func rateSplit() {
         let mb = MonitorNetworkWidgetView.splitRate("6.2 MB/s")
         #expect(mb.value == "6.2")
         #expect(mb.unit == "MB/s")
-        // "0 B/s" and a unit-less string both stay whole.
         #expect(MonitorNetworkWidgetView.splitRate("0 B/s").unit == "B/s")
         #expect(MonitorNetworkWidgetView.splitRate("—").value == "—")
         #expect(MonitorNetworkWidgetView.splitRate("—").unit.isEmpty)
     }
-
-    // MARK: - History tail window
 
     @Test("tail returns the last N samples, or the whole series when shorter")
     func tailWindow() {
@@ -90,8 +78,6 @@ struct MonitorNetworkWidgetTests {
         #expect(last120.first == 80)
         #expect(last120.last == 199)
 
-        // History caps at 120 samples, so a full-but-not-overflowing series
-        // (M's own window) passes through unchanged at the L window size too.
         let atCapacity = (0..<120).map(Double.init)
         #expect(MonitorNetworkWidgetView.tail(atCapacity, count: 120) == atCapacity)
     }

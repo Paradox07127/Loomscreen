@@ -9,9 +9,7 @@ struct WPESceneSection: View {
     @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The per-display grid is a quick-apply surface, not the full library —
-    /// the Workshop tab owns search / filter / management. Cap the inline grid
-    /// so a large library never turns this into an unsearchable long scroll.
+    /// The per-display grid is a quick-apply surface, not the full library — the Workshop tab owns search / filter / management.
     private let recentGridCap = 18
 
     @State private var recentImports: [WPEHistoryEntry] = []
@@ -174,9 +172,7 @@ struct WPESceneSection: View {
            case .scene(let descriptor) = configuration.activeWallpaper,
            let origin = configuration.wpeOrigin {
             let session = screen.runtimeSession as? SceneWallpaperSession
-            // Chrome-free, and NOT scrolled: like the video preview area the
-            // 16:9 hero must stay height-bounded by the viewport, otherwise a
-            // wide window grows it unboundedly tall and introduces vertical scroll.
+            // Chrome-free, and NOT scrolled: like the video preview area the 16:9 hero must stay height-bounded by the viewport, otherwise a wide window grows it unboundedly tall and introduces vertical scroll.
             WPESceneDetailView(
                 origin: origin,
                 descriptor: descriptor,

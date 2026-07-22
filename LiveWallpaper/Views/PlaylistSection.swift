@@ -2,20 +2,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks
-/// each row's frame. We deliberately avoid SwiftUI's `.draggable` /
-/// `.dropDestination` / `.onDrag` modifiers — every variant we tried on
-/// macOS 14/15 had the drop event silently swallowed when source and target
-/// were siblings of the same VStack. Hand-rolled gesture has no dependency
-/// on AppKit's dragging-session machinery, so the reorder is deterministic.
-///
-/// The gesture is attached **only** to the leading-handle hit area on each
-/// row so the row body can still receive double-tap to play and right-click
-/// without those gestures racing.
-///
-/// Reorder is intentionally side-effect-free: only the visible list order
-/// changes — star stays at its new position, playing video keeps playing,
-/// no reload.
+/// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks each row's frame.
 struct PlaylistSection: View {
     @Binding var playlistBookmarks: [Data]
     @Binding var shufflePlaylist: Bool
@@ -28,10 +15,7 @@ struct PlaylistSection: View {
 
     // MARK: Drag-reorder state
     @State private var rowFrames: [PlaylistRowFrame] = []
-    /// Snapshot of `rowFrames` taken at drag start; used in
-    /// `computeInsertionIndex` instead of live `rowFrames` so the dragged
-    /// row's own `.offset` can't create a feedback loop where its shifting
-    /// frame perturbs the index used to decide where it should drop.
+    /// Freezes row geometry during a drag to prevent insertion-index feedback.
     @State private var dragSnapshotFrames: [PlaylistRowFrame]?
     @State private var draggingID: PlaylistEntry.ID?
     @State private var dragOffsetY: CGFloat = 0
@@ -63,10 +47,6 @@ struct PlaylistSection: View {
             scheduleEntriesLoad()
         }
         .onChange(of: entries.count) { _, newCount in
-            // If the user trims the playlist back below two entries while
-            // the rotate popover is open, drop the popover state so it
-            // can't be revived by SwiftUI re-presenting against a now-
-            // hidden anchor button.
             if newCount < 2, rotatePopoverShown {
                 rotatePopoverShown = false
             }
@@ -94,10 +74,6 @@ struct PlaylistSection: View {
 
     @ViewBuilder
     private var actionBar: some View {
-        // count <= 1: shuffle / prev / next / rotate are all functionally
-        // disabled, so collapse the bar to just a centred `+` button.
-        // Avoids showing four greyed-out controls to users who haven't yet
-        // built up a multi-video playlist.
         if entries.count < 2 {
             HStack {
                 Spacer()
@@ -294,9 +270,6 @@ struct PlaylistSection: View {
                 insertionMarker(showAt: index)
                 rowView(for: entry, index: index)
                 if index < entries.count - 1 {
-                    // Aligns the divider's left edge with the thumbnail's
-                    // right edge: row padding 8 + handle 28 + spacing 10
-                    // + thumbnail 36 = 82.
                     Divider()
                         .opacity(0.08)
                         .padding(.leading, 82)
@@ -413,13 +386,8 @@ struct PlaylistSection: View {
         }
         let combined = config.combinedPlaylist
         let storedCursor = config.playlistCursorIndex ?? 0
-        // `indices.contains(_:)` defends against negative or out-of-bounds
-        // values that could slip through a corrupted persisted config.
         let cursor = combined.indices.contains(storedCursor) ? storedCursor : 0
-        // Identity by index so duplicate bookmark Data within the same
-        // playlist still produce distinct rows (ForEach IDs, primary /
-        // playing flags). Comparing by Data alone would collapse the
-        // duplicates into a single SwiftUI identity.
+        // Identity by index so duplicate bookmark Data within the same playlist still produce distinct rows (ForEach IDs, primary / playing flags).
         let primaryIndex = combined.firstIndex(of: primary)
         let nextEntries = combined.enumerated().map { index, bookmark in
             PlaylistEntry(
@@ -447,10 +415,6 @@ struct PlaylistSection: View {
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
 
-            // Seed with the current playlist's canonical paths, then add
-            // each newly-accepted path so a single panel selection
-            // containing the original file + a symlink (or the same file
-            // twice) collapses to one entry.
             var existingPaths = currentPlaylistResolvedPaths()
             var skipped = 0
 
@@ -516,10 +480,7 @@ struct PlaylistSection: View {
         applyEntriesAfterRemove(newEntries, removedPrimary: entry.isPrimary)
     }
 
-    /// Free the metadata + thumbnail caches the row was holding. The
-    /// caches are bounded so this isn't a leak fix, but proactively
-    /// dropping entries means bulk-removing a playlist returns the
-    /// memory now rather than waiting for natural eviction.
+    /// Free the metadata + thumbnail caches the row was holding.
     private static func invalidateCaches(for bookmark: Data) {
         WallpaperThumbnailService.shared.invalidate(
             cacheKey: AsyncRowThumbnail.cacheKey(for: bookmark)
@@ -565,10 +526,7 @@ struct PlaylistSection: View {
 // MARK: - PlaylistEntry View Model
 
 struct PlaylistEntry: Identifiable, Equatable {
-    /// Identity is `<bookmark>::<index>` rather than the bookmark alone so
-    /// duplicate bookmark Data within the same playlist still produces
-    /// distinct rows. `isPrimary` is excluded from identity so a row whose
-    /// star flips animates as an update rather than delete + insert.
+    /// Identity is `<bookmark>::<index>` rather than the bookmark alone so duplicate bookmark Data within the same playlist still produces distinct rows.
     let id: String
     let bookmark: Data
     var isPrimary: Bool

@@ -2,9 +2,7 @@ import Foundation
 import SwiftUI
 import LiveWallpaperCore
 
-/// Time-of-day preset users can apply from the Add Slot menu. The label is
-/// stored verbatim in `ScheduleSlot.label` so it round-trips through
-/// `localizedLabel` and renders in the user's locale.
+/// Time-of-day preset users can apply from the Add Slot menu.
 enum SchedulePreset: String, Identifiable, CaseIterable {
     case morning
     case midday
@@ -88,17 +86,8 @@ enum SchedulePreset: String, Identifiable, CaseIterable {
 }
 
 /// Locale-aware hour formatting shared across the schedule UI.
-///
-/// Uses `Date.FormatStyle.dateTime.hour()` — a `Sendable` format style —
-/// rather than a long-lived `DateFormatter` static. `DateFormatter` is
-/// thread-safe for `.string(from:)` after configuration but is not
-/// `Sendable`; a static reference of one tripwires Swift 6 strict
-/// concurrency the moment another call site reaches it off the main
-/// actor.
 enum ScheduleTimeFormatter {
-    /// Locale-aware label for an hour cursor in `[0, 24]`. `24` is rendered
-    /// the same as `0` ("12 AM") — the "(next day)" suffix is added by
-    /// `rangeLabel` when wrap context matters.
+    /// Locale-aware label for an hour cursor in `[0, 24]`.
     static func hourLabel(_ hour: Int) -> String {
         let calendar = Calendar.autoupdatingCurrent
         var components = calendar.dateComponents([.year, .month, .day], from: Date())

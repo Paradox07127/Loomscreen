@@ -2,14 +2,7 @@
 import AppKit
 import Foundation
 
-/// JSON shape copied to clipboard when the user clicks "Copy diagnostic"
-/// on a Workshop error state.
-///
-/// Contract: documented in
-/// `docs/2026-05-28-steam-workshop-integration-plan.md` ("Diagnostic
-/// export"). Every red / yellow UI state must produce a non-empty payload;
-/// missing fields are emitted as `null` so the user can paste it into a
-/// GitHub issue without further editing.
+/// Redacted Workshop diagnostic payload suitable for copying into an issue.
 struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
     let phase: Phase
     let ts: String
@@ -57,8 +50,7 @@ struct WorkshopDiagnosticPayload: Codable, Equatable, Sendable {
         case arch
     }
 
-    /// Pretty-printed because the user pastes this into a GitHub issue —
-    /// readability beats minimum bytes.
+    /// Encodes readable, stable JSON for user-submitted diagnostics.
     func encodedJSON() -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

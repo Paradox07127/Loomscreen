@@ -2,8 +2,6 @@ import Foundation
 @testable import LiveWallpaper
 import Testing
 
-/// RR-10 containment specification. Hostile infinite loops are never executed;
-/// deadline/quarantine wiring is verified through deterministic owner oracles.
 struct WPESceneScriptContainmentCharacterizationTests {
     // MARK: - Current production boundaries (source only, zero JS execution)
 
@@ -13,8 +11,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
             "LiveWallpaper/Runtime/Scene/WPESceneScriptRuntime.swift"
         )
 
-        // Admission wraps, rather than replaces, each evaluator's established
-        // queue. Every family shares the B2b scene token and quarantine owner.
         for queueLabel in [
             "com.livewallpaper.wpe-scenescript",
             "com.livewallpaper.wpe-layerscript",
@@ -98,8 +94,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
             "LiveWallpaper/Runtime/Scene/WPESceneScriptRuntime.swift"
         )
 
-        // Cursor dispatch is fail-fast but unreserved. Setup, static transform,
-        // and property application retain their caller-owned blocking deadline.
         #expect(runtime.contains("admission: .failFast(traversalEpoch: nil)"))
         #expect(runtime.contains("guard let permit = governor.tryAcquireUnreserved(for: participant)"))
         #expect(RR10ProductionSource.occurrences(
@@ -140,7 +134,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
 
         for seam in [
             "sceneScriptLoadState.begin(generation: generation)",
-            // M2c1b-3c: performLoad carries the render-actor isolation parameter.
             "performLoad(scriptLoadToken: scriptLoadToken, on: actor)",
             "WPESceneScriptInstanceInventory(document: document)",
             "scriptLoadToken.prepare(scriptInventory)",
@@ -364,12 +357,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
         let containment = try RR10ProductionSource.read(
             "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+ScriptContainment.swift"
         )
-        // M2c1b-3c: the measurement's publication gate moved into the render
-        // actor's `applyIntroLoopOffset` — same identity intent, one funnel: a
-        // reload/invalidate bumps `introPhaseToken` (and sources are only ever
-        // (re)assigned alongside a token that was captured after them), so a
-        // stale measurement can never publish. The script-load token is checked
-        // there too, covering the failed/retired-setup half.
         let renderActorSource = try RR10ProductionSource.read(
             "LiveWallpaper/Runtime/Metal/RenderThread/WPEDisplayRenderActor.swift"
         )
@@ -534,7 +521,7 @@ struct WPESceneScriptContainmentCharacterizationTests {
         #expect(slot.takeLatest() == nil)
         #expect(fresh.prepare(.init(text: 0, layer: 0, transform: 1)))
         #expect(state.isCurrent(fresh))
-        state.retire(fresh) // mirrors load catch
+        state.retire(fresh)
         #expect(!state.isCurrent(fresh))
         #expect(!fresh.acceptsCompletion())
     }
@@ -707,7 +694,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
         let heldPermit = try #require(governor.tryAcquireUnreserved(for: holder))
         let saturatedEpoch = WPESceneScriptTraversalEpoch.next(domainID: 10_001)
 
-        // Tail reserves while full. No timestamp/FPS is consulted.
         #expect(governor.tryAcquire(for: rejectedTail, in: saturatedEpoch) == nil)
         heldPermit.release()
 
@@ -789,12 +775,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
         hotPermit.release()
     }
 
-    /// Regression for the multi-display starvation: a heavy scene's dozens of live
-    /// scripts flood the shared pool's queue first every frame, so under the old
-    /// global-FIFO admission a lightly-scripted display's tick sat permanently
-    /// behind them and its scripted content stuck at a few FPS. Max-min fair
-    /// admission must let the light renderer's tick through within a frame or two,
-    /// regardless of the heavy renderer reserving first each frame.
     @Test("Heavy renderer flooding the queue first cannot starve a light renderer")
     func heavyDomainCannotStarveLightDomainAcrossFrames() throws {
         let governor = WPESceneScriptExecutionGovernor(limit: 4)
@@ -808,20 +788,17 @@ struct WPESceneScriptContainmentCharacterizationTests {
             let heavyEpoch = WPESceneScriptTraversalEpoch.next(domainID: heavyDomain)
             let lightEpoch = WPESceneScriptTraversalEpoch.next(domainID: lightDomain)
             var held: [WPESceneScriptExecutionGovernor.Permit] = []
-            // Heavy renderer floods the queue first every frame.
             for participant in heavy {
                 if let permit = governor.tryAcquire(for: participant, in: heavyEpoch) {
                     held.append(permit)
                 }
             }
-            // Light renderer's single tick probes after the flood.
             if let permit = governor.tryAcquire(for: light, in: lightEpoch) {
                 if lightServedFrame == nil { lightServedFrame = frame }
                 permit.release()
             }
             governor.completeTraversal(heavyEpoch)
             governor.completeTraversal(lightEpoch)
-            // Frame end: the in-flight evaluations return their permits.
             for permit in held { permit.release() }
         }
         let served = try #require(lightServedFrame, "light renderer was starved for 8 frames")
@@ -1130,9 +1107,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
 
         started = harness.trySchedule({
             blocker.run()
-            // Simulates an evaluation that finishes after the main thread has
-            // already failed the scene closed. The locked app primitive must
-            // reject this late result rather than replacing the stable value.
             latePublishAccepted.set(scene.publishCompleted("late-worker-result"))
         }, participant: workerParticipant, onFinish: blocker.markFinished)
         #expect(started)
@@ -1217,8 +1191,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
         }, participant: rejectedParticipant, onFinish: {})
         #expect(!scheduled)
         #expect(slot.reject(rejectedClaim))
-        // A completion racing after rejection carries the old generation. It
-        // must be ignored and must not clear or overwrite a newer claim.
         #expect(!slot.publish("late-rejected-result", for: rejectedClaim))
 
         #expect(!slot.isInFlight)
@@ -1242,9 +1214,6 @@ struct WPESceneScriptContainmentCharacterizationTests {
     }
 }
 
-/// Test-side caller for the permit-only governor. The queue lives here, never in
-/// the app primitive, mirroring the future evaluator contract: acquire first,
-/// dispatch on the engine's existing serial queue, then release in `defer`.
 private final class RR10PermitWorkerHarness: @unchecked Sendable {
     private let governor: WPESceneScriptExecutionGovernor
     private let queue: DispatchQueue
@@ -1283,9 +1252,6 @@ private final class RR10PermitWorkerHarness: @unchecked Sendable {
     }
 }
 
-/// A reusable completion group makes cleanup safe even when an earlier
-/// `#require` aborts the test. The two-second wait is only a broken-test fuse;
-/// normal teardown always releases the semaphore explicitly in `defer`.
 private final class RR10ControlledBlocker: @unchecked Sendable {
     private let entered = DispatchSemaphore(value: 0)
     private let releaseSemaphore = DispatchSemaphore(value: 0)

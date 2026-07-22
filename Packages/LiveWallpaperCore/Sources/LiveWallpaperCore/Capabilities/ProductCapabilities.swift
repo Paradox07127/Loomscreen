@@ -18,23 +18,16 @@ public enum ProductFeature: String, Sendable, Hashable, Codable, CaseIterable {
     case metalShader
     case scene
 
-    /// The system-metrics dashboard wallpaper (`WallpaperType.monitor`).
-    /// Available in BOTH Lite and Pro — system monitoring serves the broad
-    /// user base. Gates only the wallpaper surface; the AI-agent modules
-    /// inside it are gated separately by `.agentFleet`.
+    /// System-metrics dashboard wallpaper available in both SKUs; AI-agent modules use `.agentFleet` separately.
     case monitorWallpaper
-    /// Pro-only: unlocks the AI-agent sessions + AI-usage modules INSIDE the
-    /// monitor wallpaper. Lite users get a full system-metrics dashboard with
-    /// no AI rows.
+    /// Pro-only AI-agent sessions and usage modules within the monitor wallpaper.
     case agentFleet
 
     case wpeImport
     case videoEffects
     case weatherReactive
 
-    /// Steam Workshop online surfaces (paste URL → fetch metadata → optional
-    /// download via SteamCMD). Added to the Pro catalog by the app target via
-    /// `withWorkshopOnline()`; Lite never gets it, so its UI stays unreachable.
+    /// Pro-only Steam Workshop metadata and SteamCMD download surfaces.
     case workshopOnline
 
     case scheduleAutomation
@@ -43,21 +36,15 @@ public enum ProductFeature: String, Sendable, Hashable, Codable, CaseIterable {
     case systemMonitor
     case globalShortcuts
 
-    /// Local Pro DEBUG diagnostics only. Shipping SKU catalogs deliberately
-    /// exclude this feature; the app target may layer it onto `.pro` while
-    /// compiling a local DEBUG build.
+    /// Local Pro debug diagnostics excluded from shipping catalogs.
     case developerTools
 
     case lockScreenSnapshots
 
-    /// Apple Aerials are bundled in both Lite and Pro but the disk-scan
-    /// pipeline is lazy-loaded (Lite-only consumers must not pay the cost
-    /// until the user opens the Aerials surface).
+    /// Apple Aerials surface, with its disk scan loaded lazily in both SKUs.
     case appleAerials
 
-    /// Inline preview window inside the inspector. Enabled in BOTH SKUs —
-    /// gates only the UI surfacing; `InspectorPreviewController` itself is
-    /// constructed unconditionally for Lite and Pro alike.
+    /// Inline inspector preview surface available in both SKUs.
     case inspectorPreview
 }
 
@@ -79,12 +66,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         enabledFeatures: []
     )
 
-    /// Lite removes only the heavy GPU pipelines (Wallpaper Engine scene
-    /// rendering + custom metal shaders) and the developer-tools harness.
-    /// Everything else — playlists, schedules, video effects, weather, global
-    /// shortcuts, lock-screen snapshots, inspector preview, system monitor —
-    /// keeps the same surface area as Pro so the video / HTML / Aerials
-    /// experience is feature-complete.
+    /// Lite capability baseline excluding Pro rendering, AI-agent, Workshop, and diagnostic surfaces.
     public static let lite = ProductCapabilities(
         sku: .lite,
         enabledFeatures: [
@@ -111,13 +93,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         ]
     )
 
-    /// Returns a copy of this catalog with `.workshopOnline` inserted into
-    /// the feature set. The SKU gate lives in the **main app target**, not in
-    /// this SwiftPM package, because Xcode does not propagate
-    /// `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target down into
-    /// local packages — a `#if LITE_BUILD` here would always be `false`. The
-    /// app target is the authority on which SKU it is, and adds the
-    /// capability at injection time.
+    /// Adds Workshop access to Pro only; the app target owns this gate because its compilation conditions do not propagate to SwiftPM dependencies.
     public func withWorkshopOnline() -> ProductCapabilities {
         guard sku == .pro else { return self }
         return ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
@@ -146,12 +122,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         WallpaperType.allCases.filter { canRender($0) }
     }
 
-    /// Filtered list of automation modes exposed to the WallpaperMode picker.
-    /// `.playlist` is the universal default (a single-video setup is just a
-    /// one-entry playlist) and is always available. `.schedule` requires
-    /// the schedule-automation feature. SKUs with neither still get
-    /// `.playlist` so the picker collapses to a single non-selectable
-    /// option rather than disappearing entirely.
+    /// Automation modes enabled by the current catalog; schedule additionally requires `.scheduleAutomation`.
     public var selectableWallpaperModes: [WallpaperMode] {
         guard enabledFeatures.contains(.playlists) else { return [] }
         return WallpaperMode.allCases.filter { mode in
@@ -163,9 +134,7 @@ public struct ProductCapabilities: Sendable, Equatable {
     }
 }
 
-/// Lightweight wrapper distributed through SwiftUI environment so any view
-/// can short-circuit Pro-only branches with a single `catalog.isEnabled(…)`
-/// check. Held by value (Sendable struct) so it can cross actor boundaries.
+/// Value-semantic capability catalog distributed through the SwiftUI environment.
 public struct FeatureCatalog: Sendable, Equatable {
     public let capabilities: ProductCapabilities
 

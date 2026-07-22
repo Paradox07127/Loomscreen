@@ -8,13 +8,6 @@ struct TailPollOutcome {
 }
 
 /// Incremental line-oriented tail reader for append-mostly JSONL transcripts.
-///
-/// Tracks inode + last known size + byte offset so successive polls emit only
-/// the bytes appended since the previous call. Only newline-terminated lines are
-/// surfaced; a partial trailing line is buffered until its newline arrives.
-///
-/// The public surface (`init(url:)`, `poll()`, `TailPollOutcome`) is FROZEN —
-/// the Codex transcript adapter reuses this verbatim.
 final class JSONLTailReader {
     /// True when the first poll of an oversized file skipped the head and began
     /// mid-stream; callers should treat any derived aggregates as estimates.
@@ -23,14 +16,10 @@ final class JSONLTailReader {
     private let url: URL
     private let resumeState: TailCursorState?
 
-    // Read no more than this many bytes per poll so a burst of appends can't
-    // stall the caller's poll loop; remaining bytes are drained on later polls.
     private static let maxBytesPerPoll = 1 << 20            // ~1 MB
     // Full-scan threshold: files at or below this start from offset 0.
     private static let fullReadCeiling: UInt64 = 20 << 20   // 20 MB
-    // When starting mid-file, rewind this far from EOF then skip to a newline.
     private static let midFileTailWindow: UInt64 = 5 << 20  // 5 MB
-    // Guard against an unbounded partial line (e.g. a truncated writer).
     private static let maxPendingBytes = 2 << 20            // 2 MB
 
     private var offset: UInt64 = 0
@@ -71,8 +60,6 @@ final class JSONLTailReader {
         }
         didStat = true
 
-        // First observation: choose a starting offset. Small files replay in
-        // full; large files skip to a tail window so we never buffer gigabytes.
         if !didPrime {
             didPrime = true
             lastInode = stat.inode
@@ -98,8 +85,6 @@ final class JSONLTailReader {
                 committedOffset = 0
             }
         } else if stat.inode != lastInode || stat.size < lastSize {
-            // Inode change (logrotate-style replace) or a shrink (truncate +
-            // rewrite) both mean the byte stream restarted: replay from zero.
             outcome.didRotate = true
             offset = 0
             committedOffset = 0
@@ -115,7 +100,6 @@ final class JSONLTailReader {
         defer { try? handle.close() }
         try handle.seek(toOffset: offset)
 
-        // Drain in bounded chunks; a single poll caps total work at maxBytesPerPoll.
         var budget = Self.maxBytesPerPoll
         while budget > 0, offset < stat.size {
             let want = min(UInt64(budget), stat.size - offset)
@@ -154,7 +138,6 @@ final class JSONLTailReader {
         }
 
         if pending.count > Self.maxPendingBytes {
-            // Runaway partial line: drop it and resync at the next newline.
             pending.removeAll(keepingCapacity: true)
         }
     }
@@ -191,8 +174,6 @@ final class JSONLTailReader {
     }
 
     private static func statFile(_ url: URL) throws -> FileStat {
-        // `stat` names both the C struct and the syscall; bind the function to a
-        // typed local so the compiler resolves the call to the function overload.
         let statSyscall: (UnsafePointer<CChar>?, UnsafeMutablePointer<stat>?) -> Int32 = stat
         var info = stat()
         let result = url.withUnsafeFileSystemRepresentation { rep -> Int32 in

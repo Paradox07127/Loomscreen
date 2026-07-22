@@ -5,10 +5,6 @@ import LiveWallpaperCore
 @testable import LiveWallpaper
 
 // MARK: - Task 5.2 (Dock toggle) + 5.3 (Weather location) + 5.1 (Shortcuts)
-//
-// Each suite snapshots `GlobalSettings`/`Configurations` before mutating and
-// restores them after — same pattern as `ScreenManagerCoordinationTests`,
-// so the developer's actual app data isn't clobbered when this runs locally.
 
 @Suite("GlobalSettings: Week 5 fields") @MainActor
 struct GlobalSettingsWeek5Tests {

@@ -58,10 +58,7 @@ struct ScreenDetailPreviewArea: View {
                 monitorContent
             }
         }
-        // No hard minWidth: the parent assigns this area an explicit width
-        // (container width minus the inspector slice), so the content must
-        // compress to fit rather than demand a floor that would overflow the
-        // window or steal width from the sidebar.
+        // Allow the preview to compress within the width assigned beside the inspector.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
         .overlay {
@@ -146,12 +143,6 @@ struct ScreenDetailPreviewArea: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The Monitor wallpaper's live board — the preview area IS the editor
-    /// (SPEC §4): the same `MonitorBoardHostView` the wallpaper renders, in edit
-    /// mode, fed from its own runtime lease. Drag / add / remove / resize persist
-    /// via the non-restarting board path (`persistMonitorConfigurationFromBoard`).
-    /// The inspector to the side keeps board controls, the instruments list, and
-    /// authorization.
     private var monitorContent: some View {
         MonitorBoardPreviewArea(
             screen: screen,
@@ -171,9 +162,7 @@ struct ScreenDetailPreviewArea: View {
         return max(0, available)
     }
 
-    /// A Wallpaper Engine web project's shipped preview asset, when the selected
-    /// HTML wallpaper came from one. `nil` for plain HTML and in Lite builds
-    /// (WPE is Pro-only), so those keep capturing a first-frame snapshot.
+    /// A Wallpaper Engine web project's shipped preview asset, when the selected HTML wallpaper came from one.
     private var wpeWebPreviewURL: URL? {
         #if !LITE_BUILD
         return draft.wpeOrigin?.sourcePreviewURL

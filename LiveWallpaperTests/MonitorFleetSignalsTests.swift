@@ -2,13 +2,8 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Fleet-signal derivations: context pressure, tool-loop/stale warnings, the
-/// wait clock, recent tools/events caps, and worktree extraction. All fixtures
-/// are synthetic JSONL exercised through the real parsers.
 @Suite("Monitor fleet signals")
 struct MonitorFleetSignalsTests {
-
-    // MARK: - Context window catalog + contextUsedPercent
 
     @Test("context window resolves per family prefix and gpt-5 window")
     func contextWindowTable() {
@@ -29,19 +24,16 @@ struct MonitorFleetSignalsTests {
 
     @Test("contextUsedPercent = (input + cacheRead) ÷ window, clamped")
     func contextPercentMath() {
-        // 40_000 + 60_000 = 100_000 over a 200_000 window = 0.5.
         let half = MonitorFleetSignalDeriver.contextUsedPercent(
             lastInputTokens: 40_000, lastCacheReadTokens: 60_000, model: "claude-opus-4-8"
         )
         #expect(half == 0.5)
 
-        // Overfull clamps to 1.
         let clamped = MonitorFleetSignalDeriver.contextUsedPercent(
             lastInputTokens: 500_000, lastCacheReadTokens: 0, model: "claude-opus-4-8"
         )
         #expect(clamped == 1)
 
-        // gpt-5 uses the 272_000 denominator.
         let codex = MonitorFleetSignalDeriver.contextUsedPercent(
             lastInputTokens: 136_000, lastCacheReadTokens: 0, model: "gpt-5.5"
         )
@@ -62,14 +54,10 @@ struct MonitorFleetSignalsTests {
     func claudeContextFromTranscript() {
         var model = ClaudeSessionModel(sessionId: "s1")
         let base = Date(timeIntervalSince1970: 1_783_000_000)
-        // First event: big context. Last event: smaller — the LAST one wins.
         model.ingest(assistant(tool: "Bash", at: base, input: 190_000, cacheRead: 0, model: "claude-opus-4-8"))
         model.ingest(assistant(tool: "Read", at: base.addingTimeInterval(1), input: 20_000, cacheRead: 30_000, model: "claude-opus-4-8"))
-        // (20_000 + 30_000) / 200_000 = 0.25.
         #expect(model.contextUsedPercent() == 0.25)
     }
-
-    // MARK: - Tool loop + stale warnings
 
     @Test("toolLoop fires on 8 consecutive same-name tools within 10 min")
     func toolLoopDetected() {
@@ -86,13 +74,10 @@ struct MonitorFleetSignalsTests {
     @Test("no loop when names differ or run is short or window too wide")
     func toolLoopNegatives() {
         let base = 1_000.0
-        // Mixed names.
         let mixed = (0..<8).map { MonitorAgentToolEvent(name: $0 % 2 == 0 ? "Bash" : "Read", at: base + Double($0), ok: true) }
         #expect(!MonitorFleetSignalDeriver.isToolLoop(mixed))
-        // Only 7 same-name.
         let short = (0..<7).map { MonitorAgentToolEvent(name: "Bash", at: base + Double($0), ok: true) }
         #expect(!MonitorFleetSignalDeriver.isToolLoop(short))
-        // 8 same-name but spanning > 10 min.
         let wide = (0..<8).map { MonitorAgentToolEvent(name: "Bash", at: base + Double($0) * 120, ok: true) }
         #expect(!MonitorFleetSignalDeriver.isToolLoop(wide))
     }
@@ -110,39 +95,28 @@ struct MonitorFleetSignalsTests {
     @Test("no stale when idle, dead, or recently active; loop precedes stale")
     func staleNegativesAndPrecedence() {
         let now = 10_000.0
-        // Idle → no stale.
         #expect(MonitorFleetSignalDeriver.warning(
             recentTools: [], status: .idle, processAlive: true, lastEventAt: now - 400, now: now
         ) == nil)
-        // Running but recent → no stale.
         #expect(MonitorFleetSignalDeriver.warning(
             recentTools: [], status: .running, processAlive: true, lastEventAt: now - 60, now: now
         ) == nil)
-        // Running + dead → no stale (process not alive).
         #expect(MonitorFleetSignalDeriver.warning(
             recentTools: [], status: .running, processAlive: false, lastEventAt: now - 400, now: now
         ) == nil)
-        // Loop wins over stale.
         let loop = (0..<8).map { MonitorAgentToolEvent(name: "Bash", at: now - 300 + Double($0), ok: true) }
         #expect(MonitorFleetSignalDeriver.warning(
             recentTools: loop, status: .running, processAlive: true, lastEventAt: now - 400, now: now
         ) == "toolLoop")
     }
 
-    // MARK: - waitSince set / carry / clear
-
     @Test("waitSince stamps flip into needsInput, carries, then clears")
     func waitSinceLifecycle() {
         var tracker = MonitorFleetWaitTracker()
-        // Not blocked yet.
         #expect(tracker.waitSince(sessionID: "s", status: .running, eventTime: 100) == nil)
-        // Flip into needsInput stamps the event time.
         #expect(tracker.waitSince(sessionID: "s", status: .needsInput, eventTime: 200) == 200)
-        // Still blocked at a later event: original stamp carried (not updated).
         #expect(tracker.waitSince(sessionID: "s", status: .needsInput, eventTime: 260) == 200)
-        // Leaves needsInput → cleared.
         #expect(tracker.waitSince(sessionID: "s", status: .running, eventTime: 300) == nil)
-        // Re-enters → new stamp.
         #expect(tracker.waitSince(sessionID: "s", status: .needsInput, eventTime: 400) == 400)
     }
 
@@ -152,13 +126,9 @@ struct MonitorFleetSignalsTests {
         _ = tracker.waitSince(sessionID: "a", status: .needsInput, eventTime: 100)
         _ = tracker.waitSince(sessionID: "b", status: .needsInput, eventTime: 100)
         tracker.retainOnly(["a"])
-        // "b" was dropped → a fresh flip stamps the *new* time, proving no carry.
         #expect(tracker.waitSince(sessionID: "b", status: .needsInput, eventTime: 999) == 999)
-        // "a" retained → still carries its original stamp.
         #expect(tracker.waitSince(sessionID: "a", status: .needsInput, eventTime: 999) == 100)
     }
-
-    // MARK: - recentTools ok pairing + caps
 
     @Test("recentTools marks ok=false on the paired tool_result is_error")
     func recentToolsErrorPairing() {
@@ -189,7 +159,6 @@ struct MonitorFleetSignalsTests {
         let times = snap.recentEventTimes ?? []
         #expect(times.count == 60)
         #expect(times == times.sorted())
-        // The retained window is the most-recent 60 (ends at event 99).
         #expect(times.last == base.addingTimeInterval(99).timeIntervalSince1970)
     }
 
@@ -204,16 +173,11 @@ struct MonitorFleetSignalsTests {
         #expect((snap.recentTools?.count ?? 0) == 8)
     }
 
-    // MARK: - worktreeName
-
     @Test("worktreeName extracts the segment after .claude/worktrees, else nil")
     func worktreeExtraction() {
         #expect(MonitorWorktree.name(fromCwd: "/Users/me/proj/.claude/worktrees/feature-x") == "feature-x")
-        // Nested cwd inside the worktree still resolves to the worktree root.
         #expect(MonitorWorktree.name(fromCwd: "/Users/me/proj/.claude/worktrees/feature-x/src/deep") == "feature-x")
-        // Outside a worktree → nil.
         #expect(MonitorWorktree.name(fromCwd: "/Users/me/proj/src") == nil)
-        // "worktrees" not under ".claude" → nil.
         #expect(MonitorWorktree.name(fromCwd: "/Users/me/worktrees/x") == nil)
         #expect(MonitorWorktree.name(fromCwd: nil) == nil)
     }
@@ -234,8 +198,6 @@ struct MonitorFleetSignalsTests {
         let snap = model.snapshot(now: base.addingTimeInterval(1), processAlive: true)
         #expect(snap.worktreeName == "monitor-v2")
     }
-
-    // MARK: - Fixtures
 
     private func line(_ dict: [String: Any]) -> ClaudeTranscriptLine {
         ClaudeTranscriptLine(data: try! JSONSerialization.data(withJSONObject: dict))!

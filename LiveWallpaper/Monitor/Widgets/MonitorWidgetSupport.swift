@@ -3,10 +3,6 @@ import Combine
 import LiveWallpaperCore
 
 // MARK: - Widget-facing contract (orchestrator-owned)
-// Widget views are pure functions of `MonitorWidgetContext`. Rolling history,
-// peaks and session totals are client-side accumulation (SPEC §8: charts must
-// not add sampling cost) — `MonitorHistoryStore` remembers what the pipeline
-// already pushed, nothing more.
 
 struct MonitorWidgetContext {
     var snapshot: MonitorSnapshot
@@ -20,9 +16,7 @@ struct MonitorWidgetContext {
 
 #if DEBUG
 extension MonitorWidgetContext {
-    /// A copy with `now` replaced — lets an isolated `#Preview` wrap a widget in its
-    /// own TimelineView and feed the ticking date through the normal `context.now`
-    /// channel (the board does this in production).
+    /// A copy with `now` replaced — lets an isolated `#Preview` wrap a widget in its own TimelineView and feed the ticking date through the normal `context.now` channel (the board does this in production).
     func at(_ date: Date) -> MonitorWidgetContext {
         var copy = self
         copy.now = date
@@ -40,9 +34,7 @@ struct MonitorHistorySnapshot: Sendable, Equatable {
     /// Pressure level aligned with `memUsedFraction` — the memory curve is
     /// colored by discrete pressure segments, not by used%.
     var memPressure: [String] = []
-    /// Per-category fractions (of total RAM) aligned with `memUsedFraction`, so
-    /// the Memory history can stack app/wired/compressed as colored bands. 0
-    /// where a tick carried no breakdown.
+    /// Per-category fractions (of total RAM) aligned with `memUsedFraction`, so the Memory history can stack app/wired/compressed as colored bands.
     var memAppFraction: [Double] = []
     var memWiredFraction: [Double] = []
     var memCompressedFraction: [Double] = []
@@ -114,7 +106,6 @@ final class MonitorHistoryStore: ObservableObject {
             if quotaChanged { current = next }
             return
         }
-        // Clamp dt so a wake-from-idle gap doesn't inflate session integrals.
         let dt = lastSampleAt.map { min(max(t - $0, 0), 10) } ?? 0
         lastSampleAt = t
         next.sampleTimes.append(t)

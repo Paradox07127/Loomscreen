@@ -2,19 +2,7 @@ import Foundation
 import IOKit
 import os
 
-/// In-process Apple SMC reader for CPU / GPU / SoC temperature and CPU package
-/// power — the "B-tier" sensor readings the CPU/GPU widgets show when present.
-///
-/// Everything here is read-only IOKit against the `AppleSMC` service. Under the
-/// App Sandbox opening that service MAY be denied (`IOServiceOpen` returns a
-/// non-zero result); when it is, `available` stays false and every `sample()`
-/// returns `nil`, so the widgets simply hide their sensor rows — identical to the
-/// pre-sensor behaviour, no fabricated zeros. Whether the open succeeds is the
-/// on-device signal for whether a privileged helper is required instead.
-///
-/// The SMC key-data struct layout + selector match the long-standing community
-/// readers (beltex/SMCKit, the `stats` menu bar app); temperature/power keys are
-/// read as `flt ` (Float32 °C / W) with an `sp78` fallback for Intel.
+/// In-process Apple SMC reader for CPU / GPU / SoC temperature and CPU package power — the "B-tier" sensor readings the CPU/GPU widgets show when present.
 final class MonitorSensorSampler {
     private static let log = Logger(subsystem: "LiveWallpaper.Monitor", category: "sensors")
 
@@ -22,13 +10,8 @@ final class MonitorSensorSampler {
     private var didAttemptOpen = false
     private(set) var available = false
 
-    // Averaged over whichever keys read successfully — Apple Silicon exposes many
-    // per-cluster sensors whose exact codes vary by chip, so we probe a broad set
-    // and average the finite hits rather than hard-coding one key.
     private static let cpuTempKeys = [
-        // Intel
         "TC0P", "TC0D", "TC0E", "TC0F", "TCXC", "TCXR",
-        // Apple Silicon P/E-core clusters (M1…M4 spellings)
         "Tp01", "Tp05", "Tp09", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0T", "Tp0X",
         "Tp0b", "Tp0f", "Tp0j", "Tp0n", "Tp0r", "Tp0v",
         "Te05", "Te0L", "Te0P", "Te0S",
@@ -76,10 +59,7 @@ final class MonitorSensorSampler {
             available = true
         } else {
             connection = 0
-            // 0xe00002e2 = kIOReturnNotPermitted: the sandbox blocked the open. The
-            // `iokit-user-client-class` entitlement (AppleSMCClient) is the relaxed
-            // path that keeps the in-process read working without a helper. Kept as a
-            // one-shot error diagnostic for hardware/OS where the open still fails.
+            // 0xe00002e2 = kIOReturnNotPermitted: the sandbox blocked the open.
             let code = String(UInt32(bitPattern: result), radix: 16)
             Self.log.notice("🌡️ AppleSMC open denied (0x\(code)) — sensor rows will stay hidden")
         }
@@ -91,7 +71,6 @@ final class MonitorSensorSampler {
         var sum = 0.0
         var count = 0
         for key in keys {
-            // Plausible temperature band, so a spurious 0 / garbage key is ignored.
             if let value = readValue(key), value > 1, value < 130 {
                 sum += value
                 count += 1
@@ -171,9 +150,7 @@ final class MonitorSensorSampler {
 
 // MARK: - SMC parameter struct (kernel ABI)
 
-/// Mirrors `SMCKeyData_t` — the fixed struct `AppleSMC`'s user client expects for
-/// `IOConnectCallStructMethod(selector 2)`. Field order/size must match the kernel
-/// exactly; this is the layout the community SMC readers have used for years.
+/// Mirrors `SMCKeyData_t` — the fixed struct `AppleSMC`'s user client expects for `IOConnectCallStructMethod(selector 2)`.
 private struct SMCKeyData {
     struct Vers {
         var major: UInt8 = 0
@@ -204,7 +181,6 @@ private struct SMCKeyData {
     var status: UInt8 = 0
     var data8: UInt8 = 0
     var data32: UInt32 = 0
-    // 32-byte payload.
     var bytes: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
                 UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
                 UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,

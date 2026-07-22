@@ -4,12 +4,7 @@ import Foundation
 @testable import LiveWallpaperCore
 import Testing
 
-/// UX-01 E2 behavior lock for Monitor-board placement editing.
-///
-/// These tests deliberately exercise the interaction model and source seams,
-/// not a hidden-window accessibility hierarchy. That keeps the suite stable on
-/// headless runners while pinning the semantics keyboard and VoiceOver entry
-/// points share with pointer editing.
+/// Pins shared pointer, keyboard, and accessibility semantics without requiring a hidden-window AX hierarchy.
 @Suite("Monitor board placement and accessibility characterization")
 struct MonitorBoardPlacementAccessibilityCharacterizationTests {
     private let boardSize = CGSize(width: 1600, height: 1000)
@@ -147,7 +142,6 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
         #expect(emissions.count == 1)
         #expect(emissions.first?.widgets == [placements[0], placements[2]])
 
-        // Removing an identity that is no longer present is a true no-op.
         #expect(!model.perform(.delete(id: removedID)))
         #expect(model.placements == [placements[0], placements[2]])
         #expect(emissions.count == 1)

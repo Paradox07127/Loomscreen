@@ -4,14 +4,6 @@
     import Metal
     import Testing
 
-    /// AF-06 E1 inventory and extraction requirements for the current WPE runtime.
-    ///
-    /// These tests deliberately do not construct a Metal device, MTKView, window, or
-    /// corpus renderer. Source contracts describe the production owners that exist
-    /// today; the small pure matrices describe the boundary an eventual extraction
-    /// must preserve. They are not evidence that assets are already shared, or that
-    /// sharing will reduce memory. AF-06 remains gated on the RR-03/RR-14 oracles and
-    /// signed-host 1/2/4-screen same/different-scene measurements.
     @Suite("AF-06 WPE renderer ownership inventory")
     struct WPERendererOwnershipCharacterizationTests {
         @Test("production declarations inventory mutable, immutable, and process-shared owners")
@@ -53,22 +45,16 @@
             )
 
             let evidence: [SourceEvidence] = [
-                // One renderer is constructed for every scene session today. These
-                // roots own mutable display/session state and remain per session.
                 SourceEvidence(
                     owner: "per-session mutable renderer roots",
                     source: renderer,
                     needles: [
-                        // M2c1b-3c: the renderer holds the surface's Sendable seams
-                        // (control handle + present layer), not the surface itself.
                         "let surfaceControl: any WPESurfaceControl",
                         "let metalLayer: WPEPresentLayer",
                         "let executor: WPEMetalRenderExecutor",
                         "var outputTexture: MTLTexture?",
                     ]
                 ),
-                // Current placement is per renderer, but that alone does not make
-                // immutable content inputs/helpers ineligible for later extraction.
                 SourceEvidence(
                     owner: "currently per-renderer immutable inputs and helpers",
                     source: renderer,
@@ -125,8 +111,6 @@
                         "var pendingAudioStartupDocument: WPESceneDocument?",
                     ]
                 ),
-                // The executor is currently created inside each renderer. Its Metal
-                // device is therefore an implicit cache-identity component.
                 SourceEvidence(
                     owner: "per-renderer executor and device scope",
                     source: executor,
@@ -159,8 +143,6 @@
                         "var sceneReadHazardSnapshotCache: [BootstrapPreviousKey: MTLTexture] = [:]",
                     ]
                 ),
-                // These caches are not cleared by releaseTransientResources;
-                // they live until their executor/session is destroyed today.
                 SourceEvidence(
                     owner: "executor-lifetime reload survivors",
                     source: executor,
@@ -178,8 +160,6 @@
                         "var refractionBackground: MTLTexture?",
                     ]
                 ),
-                // Prepared graph/pipeline values are immutable plans, but their
-                // renderer slots and GPU outputs remain instance-owned above.
                 SourceEvidence(
                     owner: "immutable prepared pipeline values",
                     source: preparedPipeline,
@@ -205,8 +185,6 @@
                         "let libraryID: ObjectIdentifier",
                     ]
                 ),
-                // These are the actual process-wide mutable owners. They coordinate
-                // work/metadata; none is a scene GPU-asset registry.
                 SourceEvidence(
                     owner: "process-shared bounded upload admission",
                     source: uploadQueue + textureLoader,
@@ -244,11 +222,7 @@
                     needles: [
                         "func makeSceneSession(",
                         "renderer = try WPEMetalSceneRenderer(",
-                        // M2c1b-3c: the session owns the render actor + surface; the
-                        // renderer is adopted into the actor, not held by the session.
                         "let session = SceneWallpaperSession(window: window, renderActor: renderActor, surface: surface)",
-                        // Adopt+load now runs inside a session-owned startup task so
-                        // cleanup can cancel/drain it before teardown (was a detached task).
                         "session.startAdoptingRenderer(",
                     ]
                 ),
@@ -309,7 +283,6 @@
                 "LiveWallpaper/Runtime/Session/SceneWallpaperSession.swift"
             )
 
-            // M2c1b-3c: the async surfaces carry the render-actor isolation.
             let load = try sourceBlock(loadSource, from: "func load(on actor: isolated WPEDisplayRenderActor) async throws")
             let performLoad = try sourceBlock(loadSource, from: "private func performLoad(")
             let reload = try sourceBlock(lifecycleSource, from: "func reload(on actor: isolated WPEDisplayRenderActor) async throws")
@@ -401,13 +374,8 @@
                 owner: "scene-script runtime teardown",
                 ["sceneScriptSharedState = nil", "lastStableScriptTransforms = LiveScriptTransforms()"]
             )
-            // Pointer/uniform state-persistence writes live in `sampleFrameContext`,
-            // which sits in the +FrameContext.swift split-off.
             #expect(frameContextSource.contains("previousPointer = pointer"))
             #expect(frameContextSource.contains("lastRuntimeUniforms = uniforms"))
-            // M2c1b-3c: the rebuild's generation gating and loading-set cleanup
-            // moved into the render actor's named entry; the schedule site only
-            // admits + dispatches. Same intent, split across the two sources.
             let renderActorSource = try RepositoryRoot.source(
                 "LiveWallpaper/Runtime/Metal/RenderThread/WPEDisplayRenderActor.swift"
             )
@@ -442,9 +410,6 @@
                     "compiledShaderResultByPassID.removeAll()",
                 ]
             )
-            // Per-pass IDs and frame/target history are cleared. The declarations
-            // below all survive current scene reloads until executor destruction;
-            // inventorying that lifetime does not imply they are safe to share.
             #expect(releaseTransient.contains("content-keyed translatedShaderCache is safe to persist"))
             let reloadPersistentExecutorOwners = [
                 "translatedShaderCache",
@@ -455,7 +420,6 @@
                 "textOverlayPipelineCache",
                 "particlePipelineCache",
                 "sceneReadHazardSnapshotCache",
-                // Mutable per-executor scratch, never an immutable share candidate.
                 "refractionBackground",
                 "pipelineCache",
                 "depthCache",
@@ -466,13 +430,6 @@
                 #expect(!releaseTransient.contains("\(owner) ="))
             }
 
-            // SceneWallpaperSession owns the retained load task and a generation
-            // independent of the renderer generation. Reload cancels and drains the
-            // old task before mutating the renderer, then only the newest task may
-            // publish errors or clear the retained task handle.
-            // Terminal cleanup cancels then DRAINS the startup + load tasks before
-            // tearing the renderer down, so teardown never runs ahead of an in-flight
-            // adopt/load (which would touch an already-stopped actor).
             expectOrder(
                 [
                     "window?.close()",
@@ -562,9 +519,6 @@
                 "LiveWallpaper/Runtime/Metal/WPEStaticTextureReloadTaskOwner.swift"
             )
 
-            // M2c1b-3c: loadTextures gained the render-actor isolation parameter
-            // (multi-line signature), and the reload body moved into the actor-run
-            // `performStaticTextureReload` — the schedule site only admits/dispatches.
             let loadTextures = try sourceBlock(textureSource, from: "func loadTextures(")
             let staticReload = try sourceBlock(staticReloadSource, from: "func scheduleStaticTextureReload(for path:")
             let staticReloadBody = try sourceBlock(staticReloadSource, from: "func performStaticTextureReload(")
@@ -654,8 +608,6 @@
                 in: rendererReload,
                 owner: "renderer reload task drain"
             )
-            // Cleanup is synchronous on the render actor; the @MainActor owner is
-            // quiesced through a fire-and-forget hop (Drain intentionally dropped).
             expectOrder(
                 [
                     "didLoad = false",
@@ -817,8 +769,6 @@
             #expect(sameSceneA != differentDevice)
             #expect(sameSceneA != differentOptions)
 
-            // Candidate equality is not sharing. Current production constructs one
-            // renderer/executor per session and has no immutable asset registry.
             #expect(Set([sameSceneA, sameSceneB, differentScene, differentDevice, differentOptions]).count == 4)
         }
 
@@ -912,11 +862,6 @@
         let stage: RequirementWorkStage
     }
 
-    /// A future extraction requirement, not a model of production implementation.
-    /// The source/order assertions above lock the two real generation owners. This
-    /// pure matrix says an extracted publisher must reject either stale epoch and a
-    /// cancelled final publication. It does not claim cancellation prevents partial
-    /// renderer state writes, upload work from starting, or resource retention.
     private struct SceneLoadExtractionRequirement {
         let sessionID: String
         private(set) var sessionGeneration = 0
@@ -931,8 +876,6 @@
         }
 
         mutating func beginReload(sceneID: String, stage: RequirementWorkStage) -> SceneLoadRequirementTicket {
-            // Session reload advances once; renderer reload invalidates its prior
-            // epoch, and renderer.load() advances again for the replacement load.
             sessionGeneration &+= 1
             rendererGeneration &+= 2
             activeSceneID = nil
@@ -971,12 +914,6 @@
         let expectedPublish: Bool
     }
 
-    /// Deliberately minimum—and explicitly incomplete—candidate identity for a
-    /// future immutable extraction. A production registry key must be derived from
-    /// full production identities: Metal device/library/source, vertex + fragment,
-    /// blend + pixel formats, shader combos/transpiler ABI, and texture decode,
-    /// sampling, clamp, interpolation, color-space, and resolution metadata.
-    /// Production has no owner keyed by this type today.
     private struct MinimumImmutableAssetCandidateIdentity: Hashable {
         let deviceRegistryID: UInt64
         let contentHash: String
@@ -993,8 +930,6 @@
         let hdr: Bool
     }
 
-    /// Mutable frame history, video clocks, scripts, interaction, targets, and
-    /// cancellation generation stay per renderer/display even for the same scene.
     private struct MutableSceneOwnerIdentity: Hashable {
         let screenID: UInt32
         let sceneID: String

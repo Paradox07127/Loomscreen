@@ -9,9 +9,7 @@ struct TailCursorState: Codable, Sendable, Equatable {
 }
 
 struct SessionAggregateState: Codable, Sendable, Equatable {
-    /// The persistence format is count-bounded rather than byte-bounded. Keep
-    /// the only transcript-controlled strings small so one malformed record
-    /// cannot defeat that count bound or amplify every atomic rewrite.
+    /// The persistence format is count-bounded rather than byte-bounded.
     static let maximumPersistedMetadataUTF8Bytes = 128
 
     var provider: MonitorAgentProvider
@@ -34,11 +32,6 @@ struct SessionAggregateState: Codable, Sendable, Equatable {
     var lastTerminalEventIsTaskComplete: Bool?
     fileprivate var requiresPersistenceNormalization = false
 
-    // Identifying session metadata (repo/branch/model/session id) is deliberately
-    // NOT persisted: the on-disk cursor cache keeps only the resume status needed
-    // to fold new transcript lines, and injects identity from live discovery on
-    // the next poll. This keeps `MonitorTailCursors.json` free of the user's
-    // project names, branches, and account/session identifiers.
     private enum CodingKeys: String, CodingKey {
         case provider
         case turnCount
@@ -163,9 +156,7 @@ struct SessionAggregateState: Codable, Sendable, Equatable {
             && lastTerminalEventIsTaskComplete == other.lastTerminalEventIsTaskComplete
     }
 
-    /// Keep the process-local cache under the same metadata bound as the JSON
-    /// representation. Encoding-only truncation would still retain an
-    /// arbitrarily large transcript-controlled string until eviction/restart.
+    /// Keep the process-local cache under the same metadata bound as the JSON representation.
     fileprivate func normalizedForPersistence() -> Self {
         var copy = self
         copy.lastToolName = Self.boundedPersistedString(lastToolName)
@@ -194,9 +185,7 @@ struct SessionAggregateState: Codable, Sendable, Equatable {
 
 final class MonitorTailCursorStore: Sendable {
     private static let currentSchemaVersion = 2
-    /// The durable size contract is an entry-count bound. Metadata strings are
-    /// independently bounded by `SessionAggregateState`; the JSON file does not
-    /// claim a hard byte ceiling because encoded integer widths still vary.
+    /// The durable size contract is an entry-count bound.
     static let defaultMaxEntryCount = 2_048
     private static let defaultRetentionAge: TimeInterval = 90 * 24 * 60 * 60
     private static let defaultTouchPersistInterval: TimeInterval = 7 * 24 * 60 * 60
@@ -206,9 +195,7 @@ final class MonitorTailCursorStore: Sendable {
         var schemaVersion: Int
         var cursors: [String: TailCursorState]
         var aggregates: [String: SessionAggregateState]
-        /// Last durable use of each path hash. No source path or session
-        /// identity is stored; this timestamp exists only to bound stale cache
-        /// entries without breaking recently resumed transcripts.
+        /// Last durable use of each path hash.
         var lastAccessedAt: [String: Double]
 
         init(
@@ -256,9 +243,7 @@ final class MonitorTailCursorStore: Sendable {
 
     private struct State: Sendable {
         var payload: FilePayload
-        /// Exact process-local LRU signal. Durable timestamps are deliberately
-        /// throttled, but retention inside this process must still honor every
-        /// read and no-op poll.
+        /// Exact process-local LRU signal.
         var recentAccessedAt: [String: Double]
         var liveKeys: Set<String>
         var nextRetentionSweepAt: Double
@@ -369,9 +354,7 @@ final class MonitorTailCursorStore: Sendable {
         }
     }
 
-    /// Commits the byte cursor and the model state derived through that cursor
-    /// as one persistence generation. Restoring either side without the other
-    /// can permanently skip transcript events after a termination-time flush.
+    /// Commits the byte cursor and the model state derived through that cursor as one persistence generation.
     func set(_ cursorState: TailCursorState, aggregate: SessionAggregateState, for url: URL) {
         let key = Self.key(for: url)
         let normalizedAggregate = aggregate.normalizedForPersistence()
@@ -508,10 +491,7 @@ final class MonitorTailCursorStore: Sendable {
             let task = state.saveTask
             state.scheduledSaveID = nil
             state.saveTask = nil
-            // A scheduled task may already have claimed this revision and
-            // cleared `dirty` without reaching the writer yet. Explicit flush
-            // must still enter the revision-serialized writer so termination
-            // cannot return before that snapshot is durable.
+            // A scheduled task may already have claimed this revision and cleared `dirty` without reaching the writer yet.
             guard state.dirty || state.revision > 0 else { return (task, nil, state.revision) }
             state.dirty = false
             return (task, state.payload, state.revision)
@@ -556,9 +536,7 @@ final class MonitorTailCursorStore: Sendable {
     private func write(_ payload: FilePayload, revision: UInt64) {
         writeWillBegin?(revision)
         let failed = writerLock.withLock { writer -> Bool in
-            // Flush callers may arrive out of order. Serializing the file I/O
-            // and rejecting an older revision prevents a stale snapshot from
-            // overwriting a newer cursor that has already committed.
+            // Flush callers may arrive out of order.
             guard revision > writer.lastCommittedRevision else { return false }
             do {
                 try FileManager.default.createDirectory(
@@ -611,9 +589,6 @@ final class MonitorTailCursorStore: Sendable {
         if let header = try? decoder.decode(SchemaHeader.self, from: data),
            header.schemaVersion != 1,
            header.schemaVersion != currentSchemaVersion {
-            // A newer app may own this file. Starting with an empty in-memory
-            // cache is safe; overwriting an unknown schema on the first poll is
-            // not. The next compatible app can still recover the original file.
             return LoadedPayload(payload: FilePayload(), requiresRewrite: false, permitsWrites: false)
         }
 
@@ -657,10 +632,7 @@ final class MonitorTailCursorStore: Sendable {
         )
     }
 
-    /// Applies both age and count budgets to the union of cursor/aggregate
-    /// keys. The key being read or updated is protected for this transaction;
-    /// everything else is evicted oldest-first with a deterministic hash tie
-    /// break so identical payloads produce identical files.
+    /// Applies both age and count budgets to the union of cursor/aggregate keys.
     private static func enforceRetention(
         in payload: inout FilePayload,
         recentAccessedAt: inout [String: Double],

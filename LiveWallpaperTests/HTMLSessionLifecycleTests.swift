@@ -4,10 +4,6 @@ import WebKit
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-/// Validates the FolderURLSchemeHandler runtime contract: byte-range responses,
-/// stop-after-start cancellation, and folder-swap teardown. Complements the
-/// existing isolation/nonce tests by exercising the response side of the loop
-/// instead of just the validation side.
 @Suite("FolderURLSchemeHandler session lifecycle")
 @MainActor
 struct FolderURLSchemeHandlerLifecycleTests {
@@ -128,8 +124,6 @@ struct FolderURLSchemeHandlerLifecycleTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         try Data("body {}".utf8).write(to: folder.appendingPathComponent("style.css"))
 
-        // Untouched handler: `cspEnforcementEnabled` must default to off,
-        // matching `HTMLConfig.cspEnforcementEnabled`'s default.
         let handler = FolderURLSchemeHandler()
         handler.folderURL = folder
 
@@ -224,8 +218,6 @@ struct FolderURLSchemeHandlerLifecycleTests {
         #expect(task.didFinishCalled == false)
     }
 
-    // MARK: - Helpers
-
     private func makeTemporaryFolder() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("LWLifecycle-\(UUID().uuidString)", isDirectory: true)
@@ -287,9 +279,6 @@ struct HTMLWallpaperRuntimeScriptTests {
 
         #expect(enabled.contains("__liveWallpaperNativeDevicePixelRatio = 2"))
         #expect(enabled.contains("__liveWallpaperPhysicalPixelLayout = true"))
-        // The DPR-override path was removed: the canvas backing-store upgrader
-        // now does the work, and forging devicePixelRatio = 1 broke DPR-aware
-        // renderers like spine-player. The script must NOT touch devicePixelRatio.
         #expect(!enabled.contains("Object.defineProperty(window, 'devicePixelRatio'"))
         #expect(!enabled.contains("dispatchEvent(new Event('resize'))"))
 
@@ -385,8 +374,6 @@ struct HTMLWallpaperCompatibilityPolicyTests {
     }
 }
 
-/// Local fake — duplicating the type from `HTMLSchemeIsolationTests` keeps each
-/// suite self-contained and avoids cross-file coupling between unrelated tests.
 private final class FakeURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sendable {
     let request: URLRequest
     private let lock = NSLock()

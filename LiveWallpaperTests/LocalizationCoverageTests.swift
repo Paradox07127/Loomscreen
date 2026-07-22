@@ -149,8 +149,6 @@ struct LocalizationCoverageTests {
 
     @Test("Workshop import copy describes local copied projects, not online Workshop connection")
     func workshopImportCopyAvoidsOnlineConnectionLanguage() throws {
-        // Swept, not listed: a hardcoded file list keeps passing after a monolith
-        // is split, because the banned copy simply moves to a file nobody scans.
         var scanned = RepositoryRoot.swiftFiles(under: "LiveWallpaper")
         scanned.append(RepositoryRoot.url("LiveWallpaper/Resources/Localizable.xcstrings"))
         #expect(scanned.count > 100, "App source sweep collapsed to \(scanned.count) files — the copy scan is unenforced")

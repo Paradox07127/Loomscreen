@@ -4,8 +4,6 @@ import WebKit
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-/// Verifies the C1 (HTML local-file isolation) and H2 (async/range scheme
-/// handler) hardening from Week 1 of the product-pivot plan.
 @Suite("FolderURLSchemeHandler isolation regressions")
 @MainActor
 struct FolderURLSchemeHandlerIsolationTests {
@@ -189,8 +187,6 @@ struct FolderURLSchemeHandlerIsolationTests {
         let folder = makeTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
 
-        // Both a loose index.html and a package index.html exist; the loose one
-        // must win so an ordinary HTML folder next to a scene.pkg is unaffected.
         let looseBytes = Data("<html>loose-wins</html>".utf8)
         try looseBytes.write(to: folder.appendingPathComponent("index.html"))
         let pkgURL = folder.appendingPathComponent("scene.pkg")
@@ -236,8 +232,6 @@ struct FolderURLSchemeHandlerIsolationTests {
         #expect(task.receivedData.reduce(Data(), +) == looseBytes)
     }
 
-    // MARK: - helpers
-
     private static func packageBacking(at pkgURL: URL) throws -> FolderURLSchemeHandler.PackageBacking {
         let handle = try FileHandle(forReadingFrom: pkgURL)
         defer { try? handle.close() }
@@ -245,8 +239,6 @@ struct FolderURLSchemeHandlerIsolationTests {
         return FolderURLSchemeHandler.PackageBacking(url: pkgURL, package: package)
     }
 
-    /// Builds a minimal `scene.pkg` blob (`PKGV0022` header) in the same layout
-    /// the real parser reads: `[magicLen|magic][count]({nameLen|name|off|size})*[payload]`.
     static func makePackageData(entries: [(name: String, bytes: Data)]) -> Data {
         var payload = Data()
         var resolved: [(name: String, offset: UInt32, size: UInt32)] = []
@@ -528,8 +520,6 @@ struct HTMLWallpaperNavigationPolicyTests {
     }
 }
 
-// MARK: - Test helpers
-
 private final class FakeURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sendable {
     let request: URLRequest
     private(set) var receivedResponse: URLResponse?
@@ -559,8 +549,6 @@ private final class FakeURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sen
 }
 
 extension HTMLWallpaperView {
-    /// Test-only window into the scheme handler so the isolation contract is
-    /// observable without relying on private state.
     @MainActor
     var folderHandlerSnapshot: (folderURL: URL?, currentSessionNonce: String?) {
         let mirror = Mirror(reflecting: self)

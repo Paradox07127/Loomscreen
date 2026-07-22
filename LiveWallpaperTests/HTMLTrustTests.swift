@@ -3,8 +3,6 @@ import Foundation
 import LiveWallpaperCore
 @testable import LiveWallpaper
 
-// MARK: - HTMLTrust pure verdict
-
 @Suite("HTMLTrust verdict")
 struct HTMLTrustVerdictTests {
 
@@ -152,8 +150,6 @@ struct HTMLTrustVerdictTests {
         #expect(explicitHTTPS.displayName == "https://example.com:8443")
     }
 }
-
-// MARK: - TrustedHostStore
 
 @MainActor
 private final class InMemoryTrustedHostPersistence: TrustedHostPersisting {

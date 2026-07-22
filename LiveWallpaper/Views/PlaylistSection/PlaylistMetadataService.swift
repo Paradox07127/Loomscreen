@@ -3,9 +3,6 @@ import Foundation
 import LiveWallpaperCore
 
 /// Resolves bookmark → URL → AVURLAsset metadata (resolution + duration + folder).
-///
-/// `actor`-owned in-flight table + cache: identical bookmarks fanned in from
-/// many rows reuse the same in-flight task and never hit AVFoundation twice.
 actor PlaylistMetadataService {
     static let shared = PlaylistMetadataService()
 
@@ -28,8 +25,6 @@ actor PlaylistMetadataService {
         inFlight[key] = task
         let result = await task.value
         inFlight.removeValue(forKey: key)
-        // Don't cache transient resolve failures (.empty) so the next call
-        // retries instead of locking in a blank subtitle.
         if result != .empty {
             storeInCache(result, for: key)
         }
@@ -42,8 +37,6 @@ actor PlaylistMetadataService {
 
     private func storeInCache(_ value: PlaylistRowMetadata, for key: String) {
         if cache.count >= cacheLimit {
-            // Random eviction: cache is read-mostly and bounded to row count,
-            // so full LRU machinery would dwarf the value.
             if let victim = cache.keys.randomElement() {
                 cache.removeValue(forKey: victim)
             }

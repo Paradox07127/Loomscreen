@@ -1,20 +1,7 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Parses the URL/ID forms accepted by the Workshop paste sheet. Accepted
-/// inputs are documented in
-/// `docs/2026-05-28-steam-workshop-integration-plan.md` ("Workshop URL
-/// formats accepted by parser"):
-///
-/// * `https://steamcommunity.com/sharedfiles/filedetails/?id=<id>`
-/// * `https://steamcommunity.com/sharedfiles/filedetails?id=<id>`
-/// * `https://steamcommunity.com/workshop/filedetails/?id=<id>`
-/// * `https://steamcommunity.com/workshop/filedetails?id=<id>`
-/// * `steam://url/CommunityFilePage/<id>`
-/// * Bare `publishedfileid` integers (1–20 digits).
-///
-/// IDs are validated as `UInt64`, reject leading zeros longer than one digit
-/// (Steam ids are always canonical decimal).
+/// Parses canonical Steam Community URLs, Steam deep links, and numeric Workshop IDs.
 enum WorkshopURLParser {
 
     /// Result of parsing a single token.

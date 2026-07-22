@@ -334,12 +334,8 @@ extension WPEPreparedRenderPipeline {
                             $0.resolved(at: runtimeUniforms.time)
                         }
                         values.reserveCapacity(values.count + mergedExtraCount)
-                        // Solid-layer tints bake `g_Color` from the authored static
-                        // color at graph-build time, so a keyframed tint would freeze
-                        // on that seed (3448877775's 昼夜变化 stuck at its night-blue
-                        // `value` while WPE cycled the whole day/night gradient).
-                        // `colorVector(for:)` prefers uniformValues over the baked
-                        // constant — re-resolve into it.
+                        // Resolve animated tints each frame; otherwise the graph-build seed
+                        // freezes the layer while Wallpaper Engine advances its color animation.
                         if geometry.colorAnimation != nil,
                            pass.pass.constants["g_Color"] != nil,
                            Self.consumesLayerColor(pass.pass.shader) {

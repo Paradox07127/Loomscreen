@@ -2,14 +2,8 @@
 import AppKit
 import QuartzCore
 
-/// M2c2 — moves the wallpaper's frame pacing off the main-thread MTKView onto a
-/// per-display `CADisplayLink` that fires on the render thread. Three small pieces
-/// live here: the link's target (`step` runs on the render thread), the one-shot
-/// carrier that hands the main-created link to the render actor, and the pacing
-/// decorator the renderer talks to instead of the MTKView.
-///
-/// Only `.renderThread` backing uses any of this. `.main` keeps pacing the MTKView
-/// through the bare surface, byte-for-byte the pre-M2c2 path.
+/// Drives per-display frame pacing through a display link on the render thread.
+/// Main-thread backing continues to use the MTKView surface directly.
 
 /// Target of the AppKit-vended `CADisplayLink`. Because the link is added to the
 /// render thread's run loop, `step(_:)` fires there — it enters the actor's

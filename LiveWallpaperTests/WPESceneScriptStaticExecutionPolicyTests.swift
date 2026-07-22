@@ -5,10 +5,6 @@ import Testing
 
 @Suite(.serialized)
 struct WPESceneScriptStaticExecutionPolicyTests {
-    /// The XPC worker re-validates every batch independently of the client. If its
-    /// gate drifts from the bake-time eligibility gate, the worker rejects items
-    /// the client already accepted and the whole batch silently falls back to
-    /// baked values. Pin the two lists together so a one-sided edit fails the build.
     @Test("Worker re-validation gate matches the bake-time eligibility gate")
     func gatesShareOneList() {
         #expect(
@@ -41,8 +37,6 @@ struct WPESceneScriptStaticExecutionPolicyTests {
         }
     }
 
-    /// A real `.app` with no embedded helper is a tampered/incomplete bundle. It
-    /// must keep baked origins, never re-run untrusted community JS in-process.
     @Test("Application host without helper fails closed instead of running JS in-process")
     func applicationHostFailsClosed() {
         #expect(

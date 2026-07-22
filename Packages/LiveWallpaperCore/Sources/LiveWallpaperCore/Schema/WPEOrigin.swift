@@ -1,13 +1,6 @@
 import Foundation
 
-/// Persisted Wallpaper Engine workshop origin metadata, attached to a
-/// `ScreenConfiguration` to mark that the active wallpaper was imported
-/// from a Steam Workshop project rather than picked directly by the user.
-///
-/// Pure schema — all bookmark-resolution and path-matching behaviour lives
-/// in `WPEOrigin+Behavior.swift` (Phase 4 target: ProWPE package). Keeping
-/// the struct itself dependency-free lets Lite carry the persisted record
-/// round-trip without linking `WPEPathSafety`.
+/// Persisted Wallpaper Engine Workshop provenance kept dependency-free so Lite can round-trip Pro records.
 public struct WPEOrigin: Codable, Equatable, Sendable {
     public let workshopID: String
     public let title: String
@@ -27,23 +20,14 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
     /// Workshop IDs declared by `project.json`; runtime uses these to mount
     /// dependency roots for safe cross-package asset references.
     public var dependencyWorkshopIDs: [String]
-    /// Workshop IDs the project declares as dependencies that are NOT
-    /// currently available in our cache. Empty unless we successfully
-    /// classified the project as unsupported because of missing deps.
-    /// Persisted so the fallback card can reproduce the same hint after
-    /// app relaunch without re-parsing `project.json`.
+    /// Declared dependencies unavailable at import time, persisted for relaunch diagnostics.
     public var missingDependencyIDs: [String]
     /// True when the source folder ships a Windows `.dll` plugin under
     /// `bin/`. Such projects can never run on macOS; the inspector shows
     /// a permanent "won't run" badge instead of a generic error.
     public var requiresWindowsPlugin: Bool
 
-    /// Provenance of the imported folder. Used by the HTML wallpaper pipeline
-    /// to force `WKWebsiteDataStore.nonPersistent()` for Steam Workshop
-    /// content even when the user did not explicitly tick the ephemeral
-    /// storage toggle. Optional so older persisted records decode unchanged
-    /// (decoder defaults to `.userLocal`, which preserves the legacy
-    /// "respect the user toggle" semantics for previously imported items).
+    /// Import provenance used to enforce nonpersistent web storage for Workshop content.
     public var originKind: HTMLOriginKind
 
     public init(

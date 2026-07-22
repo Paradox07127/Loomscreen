@@ -2,9 +2,7 @@ import SwiftUI
 import AppKit
 import LiveWallpaperCore
 
-/// Schedule row mirroring `PlaylistRow`'s 50pt cadence. The active slot
-/// shows an `EQPulseBar` for visual parity with the playlist's
-/// now-playing indicator.
+/// Schedule row mirroring `PlaylistRow`'s 50pt cadence.
 struct ScheduleSlotRow: View {
     @Binding var slot: ScheduleSlot
     let accent: Color

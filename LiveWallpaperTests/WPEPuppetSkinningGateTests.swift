@@ -5,11 +5,6 @@ import Testing
 import simd
 @testable import LiveWallpaper
 
-/// Integration coverage for the puppet skinning gate now that skinning is permanently on (the
-/// `WPEPuppetEnableSkinning` kill-switch was removed 2026-07-05): a valid pre-assembled puppet must
-/// skin, every validation-gate disable reason must fall back to the identity palette (the static
-/// assembled rest mesh), and the v19/v20 character-sheet path must skin unconditionally (its bind
-/// pose is the exploded split-source).
 @Suite("WPE puppet skinning gate")
 struct WPEPuppetSkinningGateTests {
     private let identityMatrixFloats: [Float] = [
@@ -32,8 +27,6 @@ struct WPEPuppetSkinningGateTests {
         WPEPuppetAnimKey(frame: frame, translation: translation, euler: .zero, scale: SIMD3<Float>(1, 1, 1))
     }
 
-    /// Frame 0 is the bind pose (identity TRS matching the identity raw bone matrices) so the
-    /// pre-assembled identity fast path stays exact; frame 1 carries the motion under test.
     private func channel(bone: Int, frame1Translation: SIMD3<Float> = .zero) -> WPEPuppetAnimChannel {
         WPEPuppetAnimChannel(boneIndex: bone, keyframes: [
             key(frame: 0),
@@ -55,8 +48,6 @@ struct WPEPuppetSkinningGateTests {
         )
     }
 
-    /// Pre-assembled puppet that passes every gate: 2-bone hierarchy, both bones animated, frame-1
-    /// motion far below the displacement bound (`max(256, 1.5×extent)`).
     private func validModel(
         version: Int = 23,
         frame1Translation: SIMD3<Float> = SIMD3<Float>(4, 0, 0),
@@ -82,9 +73,6 @@ struct WPEPuppetSkinningGateTests {
         )
     }
 
-    /// MDLV0019 character sheet: the raw MDLS bind is the exploded layout (bone 1 shifted +100) and
-    /// the animation's frame-0 pose is the assembled character, so `baseFrameMatchesRawBind` is false
-    /// and the frame-0 palette is what unfolds the sheet — skinning is mandatory.
     private func characterSheetModel(version: Int = 19) -> WPEPuppetModel {
         let bones = [
             WPEPuppetBone(index: 0, parentIndex: nil, rawMatrix: identityMatrixFloats),
@@ -94,7 +82,6 @@ struct WPEPuppetSkinningGateTests {
             id: 7, name: "assemble", mode: "loop", fps: 30, frameCount: 2,
             channels: [
                 channel(bone: 0),
-                // Frame 0 = assembled pose (origin), NOT the exploded raw bind at +100.
                 WPEPuppetAnimChannel(boneIndex: 1, keyframes: [
                     key(frame: 0),
                     key(frame: 1, translation: SIMD3<Float>(2, 0, 0))
@@ -109,8 +96,6 @@ struct WPEPuppetSkinningGateTests {
         )
     }
 
-    /// Character sheet whose only channel's parent bone has no channel: the hierarchy cannot compose,
-    /// the evaluator fails closed with an empty palette, and the mandatory path reports it.
     private func unresolvablePaletteSheetModel() -> WPEPuppetModel {
         let bones = [
             WPEPuppetBone(index: 0, parentIndex: nil, rawMatrix: identityMatrixFloats),
@@ -216,8 +201,6 @@ struct WPEPuppetSkinningGateTests {
     @Test("palette-unresolved gates skinning off with the identity palette")
     func paletteUnresolvedFallsBackToIdentity() throws {
         let executor = try makeExecutor()
-        // Sampled off frame 0 so the identity fast path (which would mask the broken hierarchy with
-        // a non-empty identity palette) does not run.
         let gate = executor.puppetSkinningGateForTesting(
             layer: puppetLayer(objectID: "palette-unresolved"),
             model: unresolvablePaletteSheetModel(),
@@ -241,7 +224,6 @@ struct WPEPuppetSkinningGateTests {
     @Test("palette-unbounded gates skinning off with the identity palette")
     func paletteUnboundedFallsBackToIdentity() throws {
         let executor = try makeExecutor()
-        // Frame-1 excursion of 10000 dwarfs max(256, 1.5×extent) for the tiny triangle mesh.
         let gate = executor.puppetSkinningGateForTesting(
             layer: puppetLayer(objectID: "palette-unbounded"),
             model: validModel(frame1Translation: SIMD3<Float>(10_000, 0, 0))
@@ -261,8 +243,6 @@ struct WPEPuppetSkinningGateTests {
             #expect(sheet.enabled, "MDLV\(version) character sheet must skin")
             #expect(sheet.reason.hasPrefix("character-sheet"))
             #expect(sheet.skinningEnabledUniform == 1)
-            // The frame-0 palette unfolds the exploded sheet (bone 1: assembled − raw = −100), so it
-            // must NOT be identity — identity would leave the sheet exploded.
             #expect(!sheet.bonePalette.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
         }
     }
@@ -276,9 +256,6 @@ struct WPEPuppetSkinningGateTests {
             WPEPuppetAnimationLayer(animation: model.animations[0], rate: 1, additive: false, blend: 1)
         ]
 
-        // Two times inside the same sampled frame (30fps → frame 1 spans [1/30, 2/30)): the second
-        // call is served by the cache — a genuine hit, not a recompute — and must equal a fresh
-        // evaluator run at its own time.
         let first = executor.puppetSkinningGateForTesting(layer: layer, model: model, time: 0.034)
         #expect(executor.puppetPaletteCacheHitsForTesting == 0)
         let second = executor.puppetSkinningGateForTesting(layer: layer, model: model, time: 0.049)
@@ -290,7 +267,6 @@ struct WPEPuppetSkinningGateTests {
         )
         #expect(second.bonePalette == oracleSameFrame.palette)
 
-        // Crossing a frame boundary (loop wraps to frame 0) must invalidate the cached palette.
         let wrapped = executor.puppetSkinningGateForTesting(layer: layer, model: model, time: 0.067)
         #expect(executor.puppetPaletteCacheHitsForTesting == 1)
         #expect(wrapped.bonePalette != second.bonePalette)
@@ -308,7 +284,6 @@ struct WPEPuppetSkinningGateTests {
 
         _ = executor.puppetSkinningGateForTesting(layer: layer, model: model, time: 0)
         #expect(executor.puppetBoundScanCacheHitsForTesting == 0)
-        // The scan is time-independent given the animation-layer stack: a later frame must reuse it.
         _ = executor.puppetSkinningGateForTesting(layer: layer, model: model, time: 0.5)
         #expect(executor.puppetBoundScanCacheHitsForTesting == 1)
     }

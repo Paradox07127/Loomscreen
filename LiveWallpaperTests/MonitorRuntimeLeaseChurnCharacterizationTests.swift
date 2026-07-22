@@ -4,9 +4,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// MON-01 E2/E3 exercises the production generation/sequence handles directly.
-/// The runtime is injected with no sources or grants, so every assertion is
-/// deterministic and hardware-independent.
 @Suite("MON-01 MonitorRuntime sequenced lease churn", .serialized)
 struct MonitorRuntimeLeaseChurnCharacterizationTests {
     @Test("10,000 generations leave no retired bookkeeping", .timeLimit(.minutes(1)))
@@ -16,8 +13,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
 
         for index in 0 ..< 10000 {
             let lease = slot.acquire(options: Self.options(UInt64(index)))
-            // Release is intentionally queued without awaiting acquire. The
-            // slot must serialize both commands and drain the generation.
             await lease.release().value
         }
 
@@ -146,9 +141,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         let initialRevision = await runtime.debugRebuildRevision
         let launchesBeforeBlock = await runtime.debugRebuildWorkerLaunchCount
 
-        // Changing the merged options enters the production stop/rebuild seam.
-        // source.stop() suspends the one actor rebuild worker while the actor
-        // remains reentrant and accepts one mutation from every active slot.
         leases[0].updateOptions(Self.options(0))
         await probe.waitUntilStopEntered()
         #expect(await runtime.debugRebuildWorkerCount == 1)
@@ -168,9 +160,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         let blockedLaunchCount = await runtime.debugRebuildWorkerLaunchCount
         let drainLaunchCounts = slots.map(\.debugDrainLaunchCount)
 
-        // Every slot now has one worker suspended behind the same actor worker.
-        // The round-robin burst must only replace each slot's pending snapshot;
-        // it must not create per-command Tasks or actor rebuild revisions.
         for event in 0 ..< 10000 {
             let index = event % slots.count
             if event.isMultiple(of: 2) {
@@ -232,8 +221,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         #expect(editedOptions?.agents == true)
         #expect(editedOptions?.system == false)
 
-        // Re-applying the same persisted value takes the equality fast path; the
-        // lease must already be correct before this no-op.
         view.apply(configuration: fleet)
         #expect(await runtime.debugActiveOptions == editedOptions)
 
@@ -426,9 +413,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         return await runtime.debugRebuildRevision >= target
     }
 
-    /// Give an unblocked waiter many scheduling opportunities. With the old HUD
-    /// bug, repeated hide cleared `lastRuntimeTask`, so the waiter completes well
-    /// inside this bound; with the release barrier retained it stays suspended.
     private static func allowCompletionOpportunity(
         _ probe: MonitorRuntimeWaitProbe
     ) async {

@@ -4,7 +4,7 @@ import WebKit
 extension HTMLWallpaperView {
     // MARK: - Tracker Blocking
 
-    /// App 启动时调用一次：把 tracker 规则编译进 `WKContentRuleListStore`， 后续每个实例直接 `lookUp`，省去 50–200ms 的同步编译。
+    /// Precompiles tracker rules once so wallpaper instances can reuse the stored rule list.
     static func precompileTrackerRules() {
         WKContentRuleListStore.default()?.compileContentRuleList(
             forIdentifier: trackerRuleListIdentifier,

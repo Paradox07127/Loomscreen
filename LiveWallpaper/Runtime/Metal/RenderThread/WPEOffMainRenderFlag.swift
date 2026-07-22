@@ -9,8 +9,8 @@ import Foundation
 /// uses. The only variable between the two modes is the backing thread; nothing
 /// else in the frame path branches on it.
 ///
-/// Default-on (migration proven). The "Multithreaded rendering" setting toggle
-/// writes this key; writing `false` is the rollback to main-thread rendering:
+/// The "Multithreaded rendering" setting writes this default-on key; `false`
+/// selects main-thread rendering:
 ///   defaults write com.livewallpaper loomscreen.wallpapers.offMainRender.v1 -bool false
 enum WPEOffMainRenderFlag {
     static let defaultsKey = "loomscreen.wallpapers.offMainRender.v1"
@@ -20,16 +20,7 @@ enum WPEOffMainRenderFlag {
         UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
     }
 
-    /// The backing the flag selects. Kept here so construction sites read the
-    /// flag through one funnel instead of re-deriving the mapping.
-    ///
-    /// M2c1b-3c: the capability gate is lifted. The renderer now lives entirely
-    /// inside `WPEDisplayRenderActor`'s isolation — the frame path, the async
-    /// surfaces (load / reload / property-patch / static-texture reload) and the
-    /// deferred audio/video tails all execute on the actor, so a background
-    /// backing no longer races on-main state. `isEnabled` therefore reaches the
-    /// backing directly. Default-on ⇒ `.renderThread`: each display owns a
-    /// dedicated render thread. Writing the key `false` rolls back to `.main`.
+    /// Maps the preference through one fail-consistent construction path.
     static var backing: WPEDisplayRenderActor.Backing {
         isEnabled ? .renderThread : .main
     }

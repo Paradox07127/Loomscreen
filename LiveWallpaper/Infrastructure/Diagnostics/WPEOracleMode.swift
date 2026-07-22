@@ -74,14 +74,7 @@ enum WPEOracleMode {
         return 6.0
     }
 
-    /// Wall-clock instant the oracle freezes the SCRIPT runtime + text-content
-    /// pipeline to. `loadFrameOverride` already freezes the engine's *scene* clock
-    /// and time-of-day, but Clock/Date TEXT scripts read the real *wall* clock via
-    /// JS `new Date()` / `Date.now()` (e.g. 三体 3509243656, 野火 3460973721, 凯尔希
-    /// 3462491575) — a capture straddling a minute boundary hashed differently.
-    /// Built in the local calendar so the rendered clock reads 10:09:08 on any
-    /// machine; the absolute instant is stable per process ⇒ two runs hash
-    /// identically. Inert in Release/Lite (every reader is gated on `isEnabled`).
+    /// Fixed wall-clock input for scripts whose `Date` reads would otherwise make traces nondeterministic.
     static let frozenWallClock: Date = {
         var comps = DateComponents()
         comps.year = 2026; comps.month = 1; comps.day = 6
@@ -89,8 +82,7 @@ enum WPEOracleMode {
         return Calendar.current.date(from: comps) ?? Date(timeIntervalSince1970: 1_767_694_148)
     }()
 
-    /// `frozenWallClock` as JS epoch milliseconds, for freezing `Date.now()` /
-    /// `new Date()` inside script contexts.
+    /// JavaScript epoch milliseconds corresponding to `frozenWallClock`.
     static var frozenWallClockMillis: Double { frozenWallClock.timeIntervalSince1970 * 1000 }
 
     /// The frozen per-frame inputs an oracle run substitutes for wall-clock time,

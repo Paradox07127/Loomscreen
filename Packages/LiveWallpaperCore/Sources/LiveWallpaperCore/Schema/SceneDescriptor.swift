@@ -169,9 +169,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
     }
 }
 
-/// Phase 2.0 capability gate. Computed by the import service after parsing
-/// `scene.json`; persisted so the runtime can short-circuit obviously
-/// degraded scenes without re-walking the JSON.
+/// Persisted import-time capability tier used to avoid reparsing a scene before runtime fallback decisions.
 public enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
     /// All declared objects render via the image-only pipeline.
     case imageOnly

@@ -1,9 +1,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Card grid for a display with no saved configuration. Shader/Scene cards
-/// are gated by `featureCatalog` so Lite users see only types their SKU can
-/// render. Video opens the file picker; the others flip `selectedWallpaperType`.
+/// Card grid for a display with no saved configuration.
 struct EmptyStateGuideView: View {
     let onChooseVideo: () -> Void
     let onChooseHTML: () -> Void

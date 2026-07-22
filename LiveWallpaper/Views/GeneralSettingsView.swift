@@ -53,9 +53,7 @@ struct GeneralSettingsView: View {
     /// Default off — Pro-only scene power saving (adaptive frame rate).
     @State var adaptiveFrameRateEnabled: Bool
     #if !LITE_BUILD
-    /// Bound straight to the defaults key the runtime reads at session build
-    /// (`WPEOffMainRenderFlag`). Default `true` mirrors "absent ⇒ on"; toggling
-    /// rebuilds sessions so the freeze-at-construction flag re-reads immediately.
+    /// Bound straight to the defaults key the runtime reads at session build (`WPEOffMainRenderFlag`).
     @AppStorage(WPEOffMainRenderFlag.defaultsKey) var offMainRenderEnabled = true
     #endif
     @State var weatherLocation: WeatherLocationPreference
@@ -75,9 +73,7 @@ struct GeneralSettingsView: View {
     @State var exportErrorMessage: String?
     @State private var diagnosticsExportErrorMessage: String?
 
-    /// Drives SwiftUI's native `.fileExporter` / `.fileImporter` sheets —
-    /// these handle UTType filtering, sandbox extensions, and sheet
-    /// modality automatically, which `NSSavePanel.runModal()` does not.
+    /// Drives SwiftUI's native `.fileExporter` / `.fileImporter` sheets — these handle UTType filtering, sandbox extensions, and sheet modality automatically, which `NSSavePanel.runModal()` does not.
     @State var isPresentingExporter = false
     @State var isPresentingImporter = false
     @State var isPresentingDiagnosticsExporter = false
@@ -261,9 +257,7 @@ struct GeneralSettingsView: View {
 
     // MARK: - System Status Refresh
 
-    /// System privacy/capability probes belong to the page that presents their
-    /// state. Opening Backup, About, or another unrelated settings page must
-    /// not touch Login Items, Core Audio, or Location Services.
+    /// System privacy/capability probes belong to the page that presents their state.
     private func refreshSystemStatusIndicators() {
         for scope in systemStatusScopes {
             refreshSystemStatus(for: scope)
@@ -389,9 +383,7 @@ struct GeneralSettingsView: View {
 
     // MARK: - Settings Persistence
 
-    /// Persists every `@State` field this view mirrors (the full list loaded
-    /// in `init`) via read-modify-write, so unrelated `GlobalSettings` fields
-    /// (schedule, shortcuts, display defaults, WPE history…) survive.
+    /// Persists every `@State` field this view mirrors (the full list loaded in `init`) via read-modify-write, so unrelated `GlobalSettings` fields (schedule, shortcuts, display defaults, WPE history…) survive.
     func updateGlobalSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock

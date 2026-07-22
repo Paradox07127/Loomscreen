@@ -18,7 +18,7 @@ extension WPEMetalSceneRenderer {
     /// Advances the frame clock/parallax smoothing, folds in live audio spectra,
     /// and derives the pointer frame layer scripts see from the main-thread
     /// `inputs` snapshot. Touches no AppKit/UI state directly — that is the seam
-    /// that lets Phase 2 run this off `@MainActor`.
+    /// that lets frame rendering run off `@MainActor`.
     func sampleFrameContext(inputs: WPEFrameInputs) -> FrameContext {
         // Pin follow-cursor effects to center when disabled, or when the
         // global cursor belongs to another display. Click capture stays

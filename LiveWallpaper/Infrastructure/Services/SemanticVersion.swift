@@ -1,11 +1,7 @@
 import Foundation
 
-/// Minimal three-part semantic version (`major.minor.patch`) with `Comparable`.
-/// Accepts the tag forms we publish on GitHub Releases (e.g. `loomscreen-v1.0.1`,
-/// `v1.0.1`, `1.0.1`) plus optional `-pre` / `+build` metadata that gets stripped
-/// from the patch component. Pre-release ordering (`1.0.0-beta < 1.0.0`) is NOT
-/// modeled — Loomscreen ships final tags only, and the update prompt should
-/// always treat any newer `major.minor.patch` as the upgrade target.
+/// Three-part semantic version used for Loomscreen release tags.
+/// Pre-release ordering is intentionally unsupported because update candidates are final releases.
 struct SemanticVersion: Comparable, Equatable, Hashable, Sendable {
     let major: Int
     let minor: Int

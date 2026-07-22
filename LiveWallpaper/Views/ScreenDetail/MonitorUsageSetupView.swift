@@ -2,13 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Standalone sheet explaining how to feed Claude Code account rate limits into
-/// the Monitor. The app can't install anything (its `~/.claude` grant is
-/// read-only), so it shows copy-paste snippets the user runs once in their own
-/// terminal. Nothing here executes — every snippet is a string with a Copy button.
-///
-/// The lead wires a button in `MonitorDetailView` to present this; this file
-/// deliberately owns no pipeline state.
+/// Standalone sheet explaining how to feed Claude Code account rate limits into the Monitor.
 struct MonitorUsageSetupView: View {
     /// The user's existing `statusLine.command`, if the caller detected one, so
     /// the generated settings fragment chains through to it.
@@ -17,9 +11,7 @@ struct MonitorUsageSetupView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        // The install snippet alone is ~40 lines: the content MUST scroll and
-        // the Done button MUST live in a fixed footer, or the sheet overflows
-        // with no visible way to close it.
+        // The install snippet alone is ~40 lines: the content MUST scroll and the Done button MUST live in a fixed footer, or the sheet overflows with no visible way to close it.
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
@@ -77,7 +69,6 @@ struct MonitorUsageSetupView: View {
             .padding(.vertical, DesignTokens.Spacing.sm)
         }
         .background {
-            // Esc closes the sheet even though the footer button is Return.
             Button("") { dismiss() }
                 .keyboardShortcut(.cancelAction)
                 .opacity(0)

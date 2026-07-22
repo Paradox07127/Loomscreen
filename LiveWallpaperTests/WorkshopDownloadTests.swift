@@ -152,10 +152,6 @@ struct WorkshopDownloadTests {
 @Suite("SteamCMD binary resolution")
 struct SteamCMDBinaryResolutionTests {
 
-    /// Builds a Homebrew-cask-style layout in a temp dir:
-    ///   root/steamcmd.wrapper.sh  (shell wrapper that exec's MacOS/steamcmd.sh)
-    ///   root/MacOS/steamcmd       (Mach-O, like the cask ships)
-    ///   root/bin/steamcmd         (symlink → wrapper, like /opt/homebrew/bin)
     private func makeHomebrewLayout() throws -> (root: URL, wrapper: URL, binSymlink: URL) {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("lw-steamcmd-\(UUID().uuidString)", isDirectory: true)
@@ -164,7 +160,6 @@ struct SteamCMDBinaryResolutionTests {
         try fm.createDirectory(at: macOSDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
 
-        // Mach-O magic for a 64-bit little-endian executable (0xcffaedfe).
         let machO = macOSDir.appendingPathComponent("steamcmd", isDirectory: false)
         try Data([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]).write(to: machO)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: machO.path)

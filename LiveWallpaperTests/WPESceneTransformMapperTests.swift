@@ -16,7 +16,7 @@ struct WPESceneTransformMapperTests {
         #expect(abs(result.zRotation - CGFloat(Double.pi / 2)) < 0.0001)
     }
 
-    @Test("Existing normalized center origin heuristic is preserved in Phase 1")
+    @Test("Normalized center origins map to the scene center")
     func normalizedOriginHeuristicIsPreserved() {
         let result = WPESceneTransformMapper.spriteTransform(
             origin: SIMD3<Double>(0.5, 0.5, 0),
@@ -28,7 +28,7 @@ struct WPESceneTransformMapperTests {
         #expect(result.position == CGPoint(x: 960, y: 540))
     }
 
-    @Test("Existing top-left alignment heuristic is preserved in Phase 1")
+    @Test("Top-left alignment preserves authored scene coordinates")
     func topLeftAlignmentHeuristicIsPreserved() {
         let result = WPESceneTransformMapper.spriteTransform(
             origin: SIMD3<Double>(100, 200, 0),

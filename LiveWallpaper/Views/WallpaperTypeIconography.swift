@@ -1,9 +1,6 @@
 import LiveWallpaperCore
 
-/// Single source of truth for the WallpaperType → SF Symbol mapping used by
-/// display rows (sidebar `ScreenRow`, menu-bar `MenuBarDisplayRow`). Keep in
-/// agreement with `WallpaperBookmark.iconName`, which carries the same glyphs
-/// for bookmark tiles.
+/// Single source of truth for the WallpaperType → SF Symbol mapping used by display rows (sidebar `ScreenRow`, menu-bar `MenuBarDisplayRow`).
 extension WallpaperType {
     var displaySymbolName: String {
         switch self {

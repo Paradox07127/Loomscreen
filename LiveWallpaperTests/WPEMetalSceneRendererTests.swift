@@ -40,9 +40,6 @@ struct WPEMetalSceneRendererTests {
             pointerSampler: .fixed(SIMD2<Double>(0.25, 0.75))
         )
         defer { renderer.cleanup() }
-        // click capture + pointer frame now flow through the mailbox the surface
-        // feeds; frame rate is the renderer's own effectiveFPS (mailbox carries no
-        // FPS). Only the pointer *sample* still comes from the injected sampler.
         renderer.setClickCaptureEnabled(true)
         let published = WPEPointerFrame(
             position: SIMD2<Double>(0.1, 0.2),
@@ -122,9 +119,6 @@ struct WPEMetalSceneRendererTests {
 
         try await renderer.load()
 
-        // `load()` encodes the first texture, but this unhosted test MTKView has
-        // no drawable. The renderer may call itself presented only after
-        // `draw(in:)` successfully submits that texture to a drawable.
         #expect(renderer.hasPresentedFrame == false)
         #expect(renderer.renderGraph?.layers.count == 1)
         #expect(renderer.renderPipeline?.layers.first?.passes.first?.pass.shader == "solidlayer")
@@ -137,8 +131,6 @@ struct WPEMetalSceneRendererTests {
         defer { fixture.cleanup() }
         try Data("{ not valid json".utf8).write(to: fixture.root.appendingPathComponent("scene.json"))
 
-        // Construct the session the way the builder does (M2c1b-3c): surface +
-        // render actor, adopt the renderer, then drive the load through the actor.
         let surface = WPERenderSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64), device: device)
         let renderActor = WPEDisplayRenderActor(backing: .main)
         let renderer = try WPEMetalSceneRenderer(
@@ -157,8 +149,6 @@ struct WPEMetalSceneRendererTests {
             backing: .buffered,
             defer: false
         )
-        // cleanup() closes the window; without this the close() release plus
-        // ARC's own release over-releases it (production windows set the same).
         window.isReleasedWhenClosed = false
         let session = SceneWallpaperSession(window: window, renderActor: renderActor, surface: surface)
         defer { session.cleanup() }
@@ -200,10 +190,6 @@ struct WPEMetalSceneRendererTests {
         )
         await renderActor.adopt(WPERendererHandoff(renderer: renderer).renderer)
 
-        // Submit a scrambled sequence whose LAST value (0.37) is distinct from the
-        // renderer's default volume (1.0) and from every earlier value. FIFO channel
-        // delivery means the renderer must end exactly on 0.37: a dead channel would
-        // leave the 1.0 default, and any reorder would end on a different value.
         let volumes = [0.11, 0.94, 0.29, 0.53, 0.06, 0.72, 0.48, 0.83, 0.15, 0.37]
         for volume in volumes {
             renderActor.submitConfig(.audioVolume(volume))
@@ -335,9 +321,6 @@ struct WPEMetalSceneRendererTests {
 
         try await renderer.load()
 
-        // The compute text is visible:false — WPE still runs its script, which
-        // writes shared.answer. Skipping hidden scripts (the bug) left it unset,
-        // so 三体's civilisation/ranking read-outs rendered blank.
         let answer = renderer.sharedScriptValueForTesting("answer") as? Double
         #expect(answer == 42)
     }
@@ -345,9 +328,6 @@ struct WPEMetalSceneRendererTests {
     @Test("Text content scripts keep an otherwise static scene on the continuous render loop")
     func textContentScriptsKeepRendererLive() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Backdrop is a static solidcolor; the only per-frame liveness is the two
-        // text content scripts. Before they were counted, needsContinuousFrames
-        // was false and the scene froze at frame 0 (text stopped ticking).
         let fixture = try MetalSceneFixture.hiddenComputeTextScene()
         defer { fixture.cleanup() }
         let renderer = try WPEMetalSceneRenderer(
@@ -404,8 +384,6 @@ struct WPEMetalSceneRendererTests {
 
         try await renderer.load()
 
-        // 48×10 bar at scene center, rotated to vertical. Treating the script's
-        // 90 as radians (≡116.6°) leaves (32,12)/(32,52) uncovered.
         let texture = try #require(renderer.renderedTexture)
         #expect(try #require(texture.readPixel(x: 32, y: 12)).r >= 200)
         #expect(try #require(texture.readPixel(x: 32, y: 52)).r >= 200)
@@ -416,9 +394,6 @@ struct WPEMetalSceneRendererTests {
     @Test("Angles script seeds convert from scene radians to script degrees")
     func anglesScriptSeedConvertsRadiansToDegrees() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Seed π/2 rad must reach the script as 90 (degrees): the threshold picks
-        // the vertical branch. An unconverted seed (1.57 < 45) leaves the bar
-        // horizontal. Idempotent on purpose — immune to how many frames load renders.
         let fixture = try MetalSceneFixture.anglesScriptScene(
             anglesValue: "0 0 1.5707963",
             anglesScript: "'use strict';\nexport function update(value) { value.z = (value.z > 45) ? 90 : 0; return value; }"
@@ -516,8 +491,6 @@ struct WPEMetalSceneRendererTests {
 
     @Test("Computes runtime uniforms from clock pointer and performance profile during load render")
     func computesRuntimeUniformsDuringLoadRender() async throws {
-        // This test verifies the NORMAL frame-clock/pointer path; force the render oracle
-        // off so a developer's persisted `WPEOracleEnabled` can't freeze the clock/pointer.
         WPEOracleMode.testingOverride = false
         defer { WPEOracleMode.testingOverride = nil }
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -558,9 +531,6 @@ struct WPEMetalSceneRendererTests {
         let uniforms = try #require(renderer.lastRuntimeUniforms)
         #expect(abs(uniforms.time - 1.25) < 0.0001)
         #expect(abs(uniforms.daytime - 0.5) < 0.0001)
-        // Suspended renders at full brightness: g_Brightness multiplies image
-        // albedo, so 0 here would render every genericimage layer as a black
-        // silhouette. Suspension pauses via isPaused, not by dimming to black.
         #expect(uniforms.brightness == 1)
         #expect(uniforms.pointerPosition == SIMD2<Double>(0.25, 0.75))
     }
@@ -571,10 +541,6 @@ struct WPEMetalSceneRendererTests {
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }
 
-        // The first-frame snapshot is now a scene-debug artifact: the renderer
-        // only pays for the GPU read-back when artifacts are enabled (the
-        // inspector otherwise shows the project's preview GIF). Force it on so
-        // this test exercises the snapshot path deterministically.
         let key = WPESceneDebugArtifacts.defaultsKey
         let previous = UserDefaults.standard.object(forKey: key)
         UserDefaults.standard.set(true, forKey: key)
@@ -681,14 +647,10 @@ struct WPEMetalSceneRendererTests {
         #expect(generated.contains("materials/__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70.tex"))
         #expect(generated.contains("__yuuki_shibou_yuugi_de_meshi_wo_kuu_drawn_by_nekometaru__ae12f81d42ef9a8b610029375bac6b70"))
 
-        // A raw-image ref also probes its converted `.tex` form and the
-        // `materials/` root — WPE stores `foo.png` source images as
-        // `materials/foo.png.tex` (see WPEMetalSceneRenderer.textureCandidates).
         #expect(
             renderer.textureCandidates(for: "logo.png")
                 == ["logo.png", "logo.png.tex", "materials/logo.png", "materials/logo.png.tex"]
         )
-        // `.tex` is taken at face value — no fallback chain.
         #expect(renderer.textureCandidates(for: "atlas.tex") == ["atlas.tex"])
 
         let bare = renderer.textureCandidates(for: "halo")
@@ -735,8 +697,6 @@ struct WPEMetalSceneRendererTests {
         renderer.setFrameRateLimit(.fps15)
         #expect(mtkView.preferredFramesPerSecond == 15)
 
-        // .unlimited falls back to vsync ceiling, not 0 (which would
-        // free-run on some macOS versions).
         renderer.setFrameRateLimit(.unlimited)
         #expect(mtkView.preferredFramesPerSecond == WPEMetalSceneRenderer.unlimitedPreferredFPS)
     }
@@ -754,8 +714,6 @@ struct WPEMetalSceneRendererTests {
             device: device
         )
 
-        // Before load soundRuntime is nil: calls must not crash, and state is
-        // cached for the deferred audio startup to apply later.
         renderer.setAudioMuted(true)
         renderer.setAudioVolume(0.4)
         #expect(true)
@@ -776,15 +734,9 @@ struct WPEMetalSceneRendererTests {
 
         try await renderer.load()
 
-        // load() rendered the first frame, but audio must NOT have started
-        // synchronously — it is deferred to the first present, which a headless
-        // test never triggers. The scene's sound objects leave it pending.
         #expect(renderer.debugSoundRuntimeActive == false)
         #expect(renderer.debugAudioStartupPending == true)
 
-        // Tearing down (cleanup) clears the pending startup + cancels the task so
-        // a late present can't boot a stale scene's audio. (reload(), by contrast,
-        // re-loads and legitimately re-defers, so it is not the invalidation case.)
         renderer.cleanup()
         #expect(renderer.debugAudioStartupPending == false)
     }
@@ -822,8 +774,6 @@ struct WPEMetalSceneRendererTests {
             )
         }
 
-        // Two plain objects (identical combo) + one outlined object (distinct
-        // combo): the warm must collapse to exactly the two distinct compiles.
         let plainA = textObject(id: "plainA", outlineSize: 0)
         let plainB = textObject(id: "plainB", outlineSize: 0)
         let outlined = textObject(id: "outlined", outlineSize: 4)
@@ -836,8 +786,6 @@ struct WPEMetalSceneRendererTests {
         let warmKeys = Set(warmRequests.map(\.translationCacheKey))
         #expect(warmKeys.count == 2)
 
-        // Each warmed key must equal the key the draw path (compileMSDFFontShader)
-        // would look up for that object's combo — otherwise the warm never hits.
         for object in [plainA, outlined] {
             let combos = WPEMSDFFontMaterial.make(object: object, parameters: WPEMSDFParameters()).combos
             let drawKey = try WPEMSDFTextRenderer.makeShaderRequest(
@@ -1043,8 +991,6 @@ private struct MetalSceneFixture {
         )
     }
 
-    /// 48×10 red bar centered in a 64×64 ortho scene with a scripted `angles`
-    /// field — pixel-verifies the WPE degrees ↔ renderer radians boundary.
     static func anglesScriptScene(anglesValue: String, anglesScript: String) throws -> MetalSceneFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
@@ -1094,9 +1040,6 @@ private struct MetalSceneFixture {
         )
     }
 
-    /// A HIDDEN text object whose script writes `shared.answer`, plus a visible
-    /// text object — mirrors 三体 3509243656, where a `visible:false` 日志 text
-    /// computes all the civilisation/ranking data the visible read-outs display.
     static func hiddenComputeTextScene() throws -> MetalSceneFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
@@ -1208,9 +1151,6 @@ private struct MetalSceneFixture {
         )
     }
 
-    /// An image layer plus a sound object. The sound file need not exist: audio
-    /// startup is deferred to the first present (never triggered in a headless
-    /// test), so `start()` — the only thing that reads the file — is never called.
     static func soundScene() throws -> MetalSceneFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
@@ -1354,7 +1294,6 @@ struct WPEMetalTextureSnapshotterFormatTests {
     @Test("RGBA16Float HDR sources clamp and sRGB-encode (the 'hdr': true poster fix)")
     func rgba16FloatConverts() throws {
         let texture = try makeTexture(format: .rgba16Float, width: 2, height: 1)
-        // Half bits: 2.0=0x4000, 1.0=0x3C00, 0.0=0x0000, 0.5=0x3800.
         var halves: [UInt16] = [
             0x4000, 0x3C00, 0x0000, 0x3C00,
             0x3800, 0x3800, 0x3800, 0x3C00
@@ -1363,7 +1302,6 @@ struct WPEMetalTextureSnapshotterFormatTests {
         let image = try #require(WPEMetalTextureSnapshotter.shared.snapshot(from: texture))
         let hot = try pixel(of: image, x: 0)
         #expect(hot.r == 255 && hot.g == 255 && hot.b == 0 && hot.a == 255)
-        // 0.5 linear → sRGB ≈ 0.7354 → ~188.
         let mid = try pixel(of: image, x: 1)
         #expect(abs(Int(mid.r) - 188) <= 2 && abs(Int(mid.g) - 188) <= 2 && abs(Int(mid.b) - 188) <= 2)
     }

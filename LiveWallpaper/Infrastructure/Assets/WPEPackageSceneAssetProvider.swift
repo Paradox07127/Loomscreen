@@ -2,25 +2,10 @@
 import Foundation
 import LiveWallpaperCore
 
-/// Reads scene assets in place from a packed `scene.pkg`, the way Wallpaper
-/// Engine treats its mounted pak archives: parse the TOC once, then seek + read
-/// individual entries on demand. No extraction, so a packed project never spawns
-/// a second on-disk copy.
-///
-/// Holds one `FileHandle` for the provider's lifetime; `NSLock` serializes the
-/// seek/read pair so concurrent asset loads can't interleave the file offset.
-///
-/// Memory: small/medium entries are read straight into RAM, but a large entry
-/// (the 200–700 MB animated `.tex` containers) is streamed to a per-provider
-/// temp file and returned memory-mapped (`.mappedIfSafe`), preserving the low-RSS
-/// paging profile of the old extracted-cache path. The same staged file backs
-/// `stagedURL` consumers (AVFoundation video/audio, fonts). The staging directory
-/// is removed on `deinit`, but `deinit` does not run on crash / force-quit /
-/// agent kill, so a launch-time sweep (`sweepStaleStagingDirectoriesAtLaunch`)
-/// reclaims any per-session directory a prior session orphaned.
+/// Reads packed scene assets in place with serialized seeks and mapped staging for large entries.
+/// A launch-time sweep reclaims staging directories left by abnormal termination.
 final class WPEPackageSceneAssetProvider: WPESceneAssetProvider, @unchecked Sendable {
-    /// Entries larger than this are staged + memory-mapped instead of read into
-    /// RAM, matching the historical `.mappedIfSafe` behavior for big `.tex`.
+    /// Entries above 64 MiB are staged and mapped to bound resident memory.
     private static let mmapThreshold: UInt64 = 64 * 1024 * 1024
     private static let copyChunkSize = 1 << 20
     /// Name prefix shared by every per-session staging directory under

@@ -82,10 +82,7 @@ struct OnboardingStepDone: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Pro leads with Steam Workshop (its signature surface); Lite leads with
-    /// the everyday playlist/effects tips. Gated on `.workshopOnline` rather
-    /// than `.scene` so a catalog with scenes but no Workshop would not
-    /// advertise a surface it can't reach.
+    /// Pro leads with Steam Workshop (its signature surface); Lite leads with the everyday playlist/effects tips.
     private var tips: [DoneStepTip] {
         if featureCatalog.isEnabled(.workshopOnline) {
             return [

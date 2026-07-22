@@ -3,10 +3,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Locks the Phase 1.x regression fix: GeneralSettingsView previously rebuilt
-/// `GlobalSettings(...)` from scratch on every toggle, which silently wiped
-/// `recentWPEImports`. The fix is to read-modify-write so unrelated fields
-/// survive. This test reproduces the regression contract via SettingsManager.
 @Suite("GlobalSettings partial update preserves WPE history", .serialized) @MainActor
 struct GeneralSettingsRegressionTests {
     @Test("Saving with only pause/login flags preserved must keep recentWPEImports")

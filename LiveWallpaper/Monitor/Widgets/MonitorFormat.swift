@@ -1,10 +1,6 @@
 import Foundation
 
 /// User-facing temperature unit for the monitor widgets' sensor readouts.
-/// DISPLAY-only: every internal threshold (temperature colour ramp, hot/warm
-/// bands) stays in Celsius; only the printed value + symbol convert. The
-/// inspector's unit picker writes the defaults key; widgets re-read it on
-/// every 1 Hz render, so a flip shows on the next tick.
 enum MonitorTemperature {
     static let fahrenheitDefaultsKey = "MonitorTemperatureFahrenheit"
 
@@ -22,10 +18,6 @@ enum MonitorTemperature {
     }
 }
 
-/// Shared display formatters for monitor widgets — 1:1 ports of the mock's
-/// JS formatters (index.html) so native output matches the approved design
-/// pixel-for-pixel. Thresholds and precision rules are load-bearing; change
-/// only in lockstep with the design reference.
 enum MonitorFormat {
     static func rate(_ bytesPerSec: Double) -> String {
         let bps = bytesPerSec.isFinite ? max(bytesPerSec, 0) : 0

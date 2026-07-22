@@ -3,9 +3,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Steam does not return remaining quota, so we can only truthfully show an
-/// "issued from this Mac today" count — never a "remaining" figure. Backed by
-/// `UserDefaults` so the ribbon (display) and the pane (increment) share one source.
+/// Steam does not return remaining quota, so we can only truthfully show an "issued from this Mac today" count — never a "remaining" figure.
 enum WorkshopRequestCounter {
     private static let countKey = "loomscreen.workshop.requestsToday.count"
     private static let dateKey = "loomscreen.workshop.requestsToday.date"
@@ -35,9 +33,7 @@ enum WorkshopRequestCounter {
     }
 }
 
-/// Filter ribbon for the Workshop (online) tab. Search and filter edits
-/// auto-apply through the view-model's shared debounce — there is no explicit
-/// Search/Apply button.
+/// Filter ribbon for the Workshop (online) tab.
 struct WorkshopBrowseFilterRibbon: View {
     let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
@@ -46,14 +42,10 @@ struct WorkshopBrowseFilterRibbon: View {
     @FocusState private var isSearchFocused: Bool
     @State private var filterRowsHeight: CGFloat = 240
 
-    /// Cap on the chip area; beyond it the rows scroll internally rather than
-    /// growing the ribbon unbounded — at narrow widths Genre wraps onto many
-    /// rows that would otherwise overrun the layout. Below it the panel sizes to content.
+    /// Cap on the chip area; beyond it the rows scroll internally rather than growing the ribbon unbounded — at narrow widths Genre wraps onto many rows that would otherwise overrun the layout.
     private static let maxRowsHeight: CGFloat = 240
 
     var body: some View {
-        // Plain bar (no glass card / no internal divider) so it reads like the
-        // Installed tab's LibraryFilterBar.
         VStack(spacing: 0) {
             topRow
                 .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
@@ -123,8 +115,6 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            // Height-capped box so the ribbon never grows tall enough to overrun
-            // the layout above it.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     WorkshopFilterRow("Type") {
@@ -192,9 +182,6 @@ struct WorkshopBrowseFilterRibbon: View {
             .frame(height: min(filterRowsHeight, Self.maxRowsHeight))
             .onPreferenceChange(FilterRowsHeightKey.self) { filterRowsHeight = $0 }
 
-            // Chip edits auto-apply (debounced in the view-model), so the panel
-            // carries no Apply control — only this reset, pinned below the scroll
-            // so it stays reachable.
             if activeFilterCount > 0 {
                 Button("Clear filters") { viewModel.resetFilters() }
                     .buttonStyle(.borderless)
@@ -264,8 +251,6 @@ struct WorkshopBrowseFilterRibbon: View {
             maxWidth: DesignTokens.LibraryFilterBar.searchMaxWidth
         )
         .adaptiveGlassSurface(.capsule, interactive: true)
-        // Explicit keyboard-focus ring — the plain field inside the glass
-        // capsule has none of its own.
         .overlay {
             if isSearchFocused {
                 Capsule().strokeBorder(Color.accentColor, lineWidth: 1.5)
@@ -329,12 +314,7 @@ struct WorkshopBrowseFilterRibbon: View {
     }
 }
 
-/// Filter chip in the *deselect-to-hide* model: every option is selected (shown)
-/// by default, and tapping a chip deselects it to exclude that tag. To make that
-/// reverse semantics self-evident WITHOUT a hint line, a deselected chip reads as
-/// "switched off" — dimmed, struck through, faint border — while a selected chip
-/// keeps the solid accent treatment. Internal (not private) so the online ribbon
-/// and the Installed type row (`WorkshopInstalledView`) share it and read identically.
+/// Filter chip in the *deselect-to-hide* model: every option is selected (shown) by default, and tapping a chip deselects it to exclude that tag.
 struct WorkshopFilterChip: View {
     let title: Text
     let isSelected: Bool
@@ -370,9 +350,7 @@ struct WorkshopFilterChip: View {
     }
 }
 
-/// Selected chips get a tinted Liquid Glass capsule with an accent ring (so
-/// selection stays unmistakable); deselected chips keep a quiet flat fill.
-/// Glass replaces only the backing — the chip's footprint is unchanged.
+/// Selected chips get a tinted Liquid Glass capsule with an accent ring (so selection stays unmistakable); deselected chips keep a quiet flat fill.
 private struct WorkshopChipBackground: ViewModifier {
     let isSelected: Bool
 
@@ -398,9 +376,7 @@ private struct FilterRowsHeightKey: PreferenceKey {
     }
 }
 
-/// Minimal flow layout: lays chips left-to-right and wraps to a new line when
-/// the next one would overflow the proposed width, so a long tag list stays
-/// fully visible (vs a horizontal scroll that hides most of it).
+/// Minimal flow layout: lays chips left-to-right and wraps to a new line when the next one would overflow the proposed width, so a long tag list stays fully visible (vs a horizontal scroll that hides most of it).
 private struct WorkshopChipFlow: Layout {
     var spacing: CGFloat = 6
     var lineSpacing: CGFloat = 6

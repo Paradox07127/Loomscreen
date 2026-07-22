@@ -41,17 +41,12 @@ struct SteamWorkshopMetadata: Equatable, Sendable {
     }
 }
 
-/// Failure modes surfaced to the row card's error strip. Each one maps to a
-/// distinct user-facing message in
-/// `docs/2026-05-28-steam-workshop-integration-plan.md` ("Phase 1 — Metadata
-/// fetch errors").
+/// Failure modes surfaced by Workshop metadata requests.
 enum SteamWorkshopMetadataError: Error, Equatable, Sendable {
     case invalidInput(WorkshopURLParser.InvalidReason)
     case networkUnreachable
     case timeout
-    /// HTTP 401 / 403 — Steam refused to serve metadata for this id. Surfaced
-    /// as the plan's "Open in Steam, no preview here" fallback rather than a
-    /// raw status code.
+    /// Steam denied metadata access; callers fall back to opening the item in Steam.
     case unauthorized
     case http(status: Int)
     case rateLimited(retryAfter: TimeInterval?)
@@ -173,10 +168,7 @@ final class SteamWorkshopMetadataService {
             return .failure(.itemBanned)
         }
         let visibility = SteamWorkshopMetadata.Visibility(rawCode: payload.visibility)
-        // Plan invariant: anything that is not explicitly public is treated as
-        // private/restricted. `.unknown` falls under the same bucket because a
-        // future Steam visibility code we don't recognize is almost certainly
-        // *not* a relaxation of the public/friends-only/private axis.
+        // Unknown visibility fails closed because only explicitly public items are safe to display.
         if visibility != .public {
             return .failure(.itemPrivate)
         }
@@ -221,7 +213,7 @@ final class SteamWorkshopMetadataService {
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
         config.httpAdditionalHeaders = [
-            "User-Agent": "Loomscreen/Workshop (LiveWallpaper Pro, +https://loomscreen.app/)"
+            "User-Agent": "Loomscreen/Workshop (+https://loomscreen.app/)"
         ]
         return URLSession(configuration: config)
     }

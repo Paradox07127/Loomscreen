@@ -4,15 +4,7 @@ import LiveWallpaperCore
 import Metal
 import MetalKit
 
-/// Offscreen single-frame renderer for the shader picker grid. Renders the
-/// fragment shader once into a small `MTLTexture` and caches the `NSImage` so
-/// the grid never repaints from the GPU after first appearance.
-///
-/// Two key choices:
-/// 1. Time is fixed at `1.5s` rather than 0 — most procedural shaders look
-///    flat / monochromatic at t=0; 1.5s is enough warmup for each preset
-///    to look visually distinct without drifting into mid-cycle noise.
-/// 2. No MSAA on thumbnails — shown at 88×60pt where supersampling buys nothing.
+/// Offscreen single-frame renderer for the shader picker grid.
 @MainActor
 final class ShaderThumbnailRenderer {
     static let shared = ShaderThumbnailRenderer()
@@ -45,9 +37,7 @@ final class ShaderThumbnailRenderer {
         }
 
         let (pixelWidth, pixelHeight) = pixelDimensions(pointSize: pointSize, scale: scale)
-        // Resolve the custom shader's source on MainActor before detaching;
-        // the helper runs off MainActor and cannot touch the @Observable
-        // store directly.
+        // Resolve the custom shader's source on MainActor before detaching; the helper runs off MainActor and cannot touch the @Observable store directly.
         let customSource = source.customID.flatMap { CustomShaderStore.shared.shader(for: $0)?.source }
 
         let request = ThumbnailRequest(
@@ -95,10 +85,6 @@ final class ShaderThumbnailRenderer {
 // MARK: - ThumbnailRenderHelper (nonisolated)
 
 /// One Metal device + pipeline cache shared across thumbnail renders.
-/// Marked `@unchecked Sendable` because mutation of `pipelineCache` is
-/// serialized through `lock`; everything else is value-typed or already
-/// thread-safe (`MTLDevice`/`MTLLibrary`/`MTLCommandQueue` are Sendable in
-/// the macOS 14+ Metal headers).
 private final class ThumbnailRenderHelper: @unchecked Sendable {
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?

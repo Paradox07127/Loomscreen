@@ -4,10 +4,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 0/6/8 lock: a `ScreenManager` built with `FeatureCatalog(.lite)` must
-/// construct cleanly without exercising Pro-only subsystems. Surface area still
-/// lives in the monolithic target until the SPM split lands (Phase 1+); these
-/// tests pin the capability boundary so the move is file relocation, not surgery.
 @Suite("Lite SKU smoke tests") @MainActor
 struct LiteSKUSmokeTests {
 
@@ -32,7 +28,6 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.enabledFeatures.contains(.inspectorPreview))
         #expect(capabilities.enabledFeatures.contains(.videoEffects))
         #expect(capabilities.enabledFeatures.contains(.weatherReactive))
-        // Monitor wallpaper is in both SKUs; its AI-agent modules (.agentFleet) are Pro-only.
         #expect(capabilities.enabledFeatures.contains(.monitorWallpaper))
         #expect(!capabilities.enabledFeatures.contains(.agentFleet))
         #expect(!capabilities.enabledFeatures.contains(.wpeImport))

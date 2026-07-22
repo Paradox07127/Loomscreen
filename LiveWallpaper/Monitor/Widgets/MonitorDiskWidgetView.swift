@@ -1,32 +1,9 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Disk I/O widget — the same mirrored-scope idiom as Network, hue-separated into
-/// its own family (sage R grows up / violet-steel W grows down). S/M are ported
-/// 1:1 from `.claude/plan/monitor-design/index.html` (`disk_s` / `disk_m`); the
-/// board now hands every size Apple's fixed widget frame (S 170×170, M 364×170,
-/// L 364×376 visible points).
-///
-///   S (1×1 cell): equal-size R/W rate rows (kind carried by hue + order, not
-///            size) over the same mirrored dual-area scope M uses + recent R
-///            peak, under an "ALL DISKS" source label.
-///   M (2×1): a mirrored dual-area scope (`historyWindow` samples, 120 default —
-///            matches the mock's `disk120`) + current R·W + corner R peak +
-///            session Σ + sample freshness.
-///   L (2×2): the mock explicitly cuts Disk's L ("I/O alone can't fill 4×4" —
-///            capacity needs a separate Storage widget over `statfs`, out of scope
-///            here). This is a same-system backfill, not a 1:1 mock port: the S
-///            hero rate pair laid on one line, a taller history scope with both
-///            R/W peaks pinned in its corners (S/M show R only), an R/W
-///            session-split bar (`breakdown` option toggles its byte legend) with
-///            freshness, and a "Top by I/O" per-app list (`topIOProcesses`,
-///            demand-gated by the sampler; `showTopProcesses` option).
 struct MonitorDiskWidgetView: View {
     let context: MonitorWidgetContext
 
-    // Disk hue pair (mock `DISK_UP` / `DISK_DN`). Read = sage (== signalSage),
-    // Write = violet-steel, deliberately distinct from Network's plain steel so
-    // the two scopes never blur together.
     private static let readColor = MonitorDesign.signalSage
     private static let writeColor = MonitorDesign.oklch(0.62, 0.07, 288)
     /// The amber square that rides beside the peak tag (`.peaktag::before`).
@@ -40,10 +17,6 @@ struct MonitorDiskWidgetView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Mock type scale reads `cellH = cardHeight / rows`; S/M span one
-            // board row and L two, so 2·rowSpan yields one near-constant cell
-            // height (85 / 94 pt) — type stays glanceable, never balloons with
-            // the fixed Apple frames (the same convention CPU uses).
             let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
             let cellHeight = geo.size.height / (2 * rowSpan)
             switch context.placement.size {
@@ -126,8 +99,6 @@ struct MonitorDiskWidgetView: View {
                 .frame(maxHeight: .infinity)
                 .frame(minHeight: scale.caption * 3)
                 .overlay(alignment: .topTrailing) {
-                    // R peak pinned into the scope's own corner (mirrors CPU's M
-                    // sparkline peak tag) instead of a separate row.
                     Self.peakTag(label: String(localized: "R peak", comment: "Disk widget: recent read-rate peak label."),
                                  value: MonitorFormat.rate(history.diskReadPeak),
                                  scale: scale)
@@ -187,7 +158,6 @@ struct MonitorDiskWidgetView: View {
         let total = history.diskReadSessionBytes + history.diskWriteSessionBytes
         var s = "Σ " + MonitorFormat.bytes(total)
         if let age = freshnessSeconds {
-            // "ago" is the only word here; the Σ total and age are data/notation.
             s += " · " + MonitorFormat.ago(age) + " "
                 + String(localized: "ago", comment: "Relative-age suffix, e.g. '2m ago'.")
         }
@@ -201,18 +171,7 @@ struct MonitorDiskWidgetView: View {
     }
 
     // MARK: - Settings (placement.options; read-side only)
-    //
-    // The mock has no bespoke Disk settings popover (unlike CPU/Memory/GPU) — these
-    // options are a same-system backfill, keyed to match Memory's already-landed
-    // convention (`historyWindow` seconds, `breakdown` full/compact, boolean
-    // `showTopProcesses`) so the shared popover reads every widget the same way.
-    // Popover UI wiring is NOT part of this file — see
-    // `MonitorWidgetSettingsPopover.swift` / the task report.
 
-    /// `historyWindow` (seconds ≈ samples at the board's ~1Hz cadence) trims the
-    /// mirrored scope's trailing window (every size). Absent/invalid ⇒ 120, matching the
-    /// mock's `disk120` (M already shows the full window, unlike Network's
-    /// shrunk-for-M `net60`) — the setting only narrows, never surprises.
     private var chartWindowSamples: Int {
         Self.historyWindowSamples(
             optionSeconds: context.placement.options["historyWindow"]?.numberValue,
@@ -231,26 +190,13 @@ struct MonitorDiskWidgetView: View {
         Self.showsTopProcesses(context.placement.options["showTopProcesses"]?.boolValue)
     }
 
-    /// L's "Top by I/O" feed: the sampler's per-app, read+write-ranked list, kept
-    /// only when the option allows it. The sampler produces it on demand (Disk
-    /// widget on the board) and rates need one warm-up tick, so nil/empty just
-    /// means "no section yet".
+    /// L's "Top by I/O" feed: the sampler's per-app, read+write-ranked list, kept only when the option allows it.
     private var topIOProcesses: [MonitorProcessSample] {
         guard showsTopProcesses, let procs = sys.topIOProcesses else { return [] }
         return Array(procs.prefix(Self.topIORowCap))
     }
 
     // MARK: - Large (2×2)
-    //
-    // A same-system backfill (see type doc) — not a 1:1 mock port. Leads with the
-    // S hero pair on one line (a 376-pt card whose "now" read is caption-size would
-    // invert the hierarchy), then spends the height on real fields S/M already read
-    // but have no room to show: the W peak (S/M show R only), a session R/W split
-    // rendered as a proportion bar (Memory's Activity-Monitor breakdown bar, sized
-    // down to two segments), and — now that `topIOProcesses` carries real per-app
-    // rusage attribution — a "Top by I/O" list in Memory's L-list idiom. When the
-    // list is present the scope's flexible floor compresses so every fixed row
-    // still fits the 331-pt content budget.
 
     private func large(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
@@ -271,8 +217,6 @@ struct MonitorDiskWidgetView: View {
                 .frame(maxHeight: .infinity)
                 .frame(minHeight: scale.caption * (topIO.isEmpty ? 5 : 3))
                 .overlay(alignment: .topTrailing) {
-                    // R grows up / W grows down in this mirrored scope, so their
-                    // peak tags pin to the matching corner instead of a row below.
                     Self.peakTag(label: String(localized: "R peak", comment: "Disk widget: recent read-rate peak label."),
                                  value: MonitorFormat.rate(history.diskReadPeak), scale: scale)
                         .padding(scale.label * 0.3)
@@ -299,9 +243,7 @@ struct MonitorDiskWidgetView: View {
         }
     }
 
-    /// "Top by I/O" — the sampler's per-app disk ranking in Memory's L-list idiom
-    /// (bullet + truncating name + right-aligned numeric columns). Section label is
-    /// verbatim like this file's other axis labels (ALL DISKS / R peak's chip text).
+    /// "Top by I/O" — the sampler's per-app disk ranking in Memory's L-list idiom (bullet + truncating name + right-aligned numeric columns).
     private func topIOBlock(
         _ procs: [MonitorProcessSample], scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -338,10 +280,7 @@ struct MonitorDiskWidgetView: View {
         }
     }
 
-    /// One hue-lettered rate column (the widget's R/W letter idiom, matching the
-    /// mirrored scope's up/down assignment). The value sits right-aligned in a
-    /// FIXED width sized for `MonitorFormat.rate`'s widest output ("999.9 KB/s"),
-    /// so the rightmost column never clips — the name column truncates instead.
+    /// One hue-lettered rate column (the widget's R/W letter idiom, matching the mirrored scope's up/down assignment).
     private func ioRateColumn(
         letter: String, color: Color, rate: Double, scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -374,8 +313,6 @@ struct MonitorDiskWidgetView: View {
     }
 
     private func historySectionLabel(scale: MonitorDesign.TypeScale) -> some View {
-        // Window length is set silently via settings, not printed here (the board
-        // convention: a section title names the content, not its sample count).
         Text("History", comment: "Disk widget: L card's history-chart section label.")
             .font(MonitorDesign.labelFont(size: scale.label))
             .tracking(MonitorDesign.labelTracking(size: scale.label))
@@ -391,10 +328,7 @@ struct MonitorDiskWidgetView: View {
             .foregroundStyle(MonitorDesign.inkFaint)
     }
 
-    /// Split-bar byte legend + sample freshness merged onto one line, so L's fixed
-    /// 331-pt content budget goes to the scope instead of stacked micro-rows. The
-    /// `breakdown: compact` option drops the legend; the bar alone still carries
-    /// the true proportions.
+    /// Split-bar byte legend + sample freshness merged onto one line, so L's fixed 331-pt content budget goes to the scope instead of stacked micro-rows.
     private func sessionFooterRow(scale: MonitorDesign.TypeScale) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             if !splitLegendCompact {
@@ -447,8 +381,6 @@ struct MonitorDiskWidgetView: View {
 
     // MARK: - Static helpers (testable, chrome-free)
 
-    /// Rate rendered with the value at hero weight and the unit whispered small
-    /// (mock `rateHero` → `.hero .u`).
     static func rateHero(_ bytesPerSec: Double, size: CGFloat) -> some View {
         let text = MonitorFormat.rate(bytesPerSec)
         let parts = text.split(separator: " ", maxSplits: 1)
@@ -495,10 +427,7 @@ struct MonitorDiskWidgetView: View {
         return Array(series.suffix(count))
     }
 
-    /// Resolve the `historyWindow` option (seconds) against a fallback. A non-
-    /// finite/non-positive override is ignored; the sample floor is 2 — same shape
-    /// as `MonitorMemoryWidgetView.historyWindowSamples`, the emerging fleet-wide
-    /// `historyWindow` option convention.
+    /// Resolve the `historyWindow` option (seconds) against a fallback.
     nonisolated static func historyWindowSamples(optionSeconds: Double?, fallbackSeconds: Int) -> Int {
         guard let optionSeconds, optionSeconds.isFinite, optionSeconds > 0 else {
             return fallbackSeconds
@@ -529,10 +458,7 @@ struct MonitorDiskWidgetView: View {
 
 // MARK: - Session split bar
 
-/// Two-segment proportion bar (R left, W right) of the session Σ — the same
-/// track/segment idiom as Memory's Activity-Monitor breakdown bar, sized down to
-/// two series. A segment under the ~0.4% floor is skipped so a near-zero side
-/// doesn't render a stray sliver.
+/// Two-segment proportion bar (R left, W right) of the session Σ — the same track/segment idiom as Memory's Activity-Monitor breakdown bar, sized down to two series.
 private struct DiskSplitBar: View {
     var readFraction: Double
     var writeFraction: Double
@@ -566,8 +492,6 @@ private struct DiskSplitBar: View {
 }
 
 private extension MonitorHistorySnapshot {
-    /// Current read rate — the freshest history sample if present, else the live
-    /// snapshot value (keeps S and M reading identically to the mock's `sys.*`).
     func currentRead(_ sys: MonitorSystemSnapshot) -> Double {
         diskRead.last ?? sys.diskReadBytesPerSec
     }
@@ -620,8 +544,6 @@ private func diskMockContext(size: MonitorWidgetSize) -> MonitorWidgetContext {
     )
 }
 
-// Preview frames are Apple's exact visible widget sizes (HIG Widgets →
-// Specifications), the same frames `MonitorBoardGeometry` renders on the board.
 
 #Preview("Disk · S (170×170)") {
     MonitorDiskWidgetView(context: diskMockContext(size: .small))

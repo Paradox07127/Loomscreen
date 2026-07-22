@@ -292,20 +292,11 @@ public enum WPERenderPassPhase: Equatable, Sendable {
     case effect(file: String)
     case command(file: String)
 
-    /// WPE's builtin full-frame copy command/material asset. The graph builder
-    /// synthesizes a `.command(file:)` pass with this string as both the phase's
-    /// file AND the pass's `shader` when relaying a layer's finished composite to
-    /// the scene target or a composelayer group buffer (`finalizedPasses`). The
-    /// executor's puppet defer-warp effect-chain detector (`hasEffectChain`)
-    /// excludes exactly this file so a synthesized copy-only puppet isn't
-    /// misclassified as "has an effect". Both sides MUST use this exact string —
-    /// ADR-001 appendix A #66.
+    /// Exact built-in copy asset shared by graph construction and effect-chain classification.
     public static let sceneCopyCommandFile = "materials/util/copy.json"
 }
 
-/// WPE's reserved render-target aliases. `_rt_FullFrameBuffer` is "the scene as
-/// rendered so far" — what `genericimage4.frag` binds to `g_Texture4` under
-/// `#if BLENDMODE` to blend a layer against its destination.
+/// WPE render-target aliases that refer to the scene composed so far.
 public enum WPESceneAliasName {
     public static let fullFrameBuffer = "_rt_FullFrameBuffer"
 }
@@ -316,12 +307,8 @@ public enum WPETextureReference: Equatable, Sendable {
     case fbo(String)
     case previous
 
-    /// Canonical classifier for `_rt_*` names WPE's runtime aliases to the LIVE scene
-    /// texture rather than a discrete FBO allocation. Single source of truth shared by the
-    /// graph builder (Infrastructure) and the executor's shader inputs (Runtime) — both
-    /// import this Schema package, so neither crosses the Infra↔Runtime boundary. This list
-    /// was previously hand-copied in both places (ADR-001 B1: "应合一,最高优先" — a drift
-    /// between the two copies causes PiP / shine-white-out regressions).
+    /// Classifies `_rt_*` aliases that refer to the live scene texture rather than a discrete FBO.
+    /// This shared list must stay authoritative for both graph construction and shader input binding.
     public static func isSceneAliasName(_ name: String) -> Bool {
         switch name {
         case WPESceneAliasName.fullFrameBuffer,

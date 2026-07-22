@@ -20,7 +20,7 @@ struct WPEMetalTextureLoadContextError: Error {
 // session, not the renderer, is what consumers depend on. The methods below stay
 // public on the renderer for the adapter to forward into.
 //
-// M2c1b-3c: the renderer is no longer `@MainActor`. It lives inside a single
+// The renderer is not `@MainActor`; it lives inside a single
 // `WPEDisplayRenderActor`'s isolation — the frame path and setters via the
 // actor's `withRenderer` sync entry, the async surfaces (load/reload/…) via
 // methods that take `isolated WPEDisplayRenderActor`. It is non-`Sendable`, so
@@ -71,7 +71,7 @@ final class WPEMetalSceneRenderer: NSObject {
     /// `nil` falls back to `cacheRootURL` (legacy extracted cache).
     let projectManifestRootURL: URL?
     let resolutionTracer: WPEResolutionTracer
-    /// Non-blocking control seam to the surface (M2c1b). Every renderer call site
+    /// Non-blocking control seam to the surface. Every renderer call site
     /// that drove the view goes through this `Sendable` handle. Because it is a
     /// `Sendable` existential, the surface (and the delivery shim + render actor it
     /// transitively references) sit in a **separate** isolation region from the
@@ -95,7 +95,7 @@ final class WPEMetalSceneRenderer: NSObject {
     /// to `.cover` (crop-to-fill), matching the persisted `fitMode` default, so
     /// non-16:9 displays don't distort the scene. Pushed in from the session.
     var presentFitMode: WPEPresentFitMode = .cover
-    /// Phase 2D-L: alive particle systems and the per-system sprite
+    /// Active particle systems and the per-system sprite
     /// texture. Built on load from the scene's `particleObjects`; ticked
     /// + drawn each frame.
     var particleSystems: [WPEParticleSystem] = []
@@ -103,7 +103,7 @@ final class WPEMetalSceneRenderer: NSObject {
     /// Refraction normal map (`g_Texture1`) for REFRACT particle systems, keyed
     /// like `particleTextures`. Absent ⇒ the system renders as a flat sprite.
     var particleNormalTextures: [ObjectIdentifier: MTLTexture] = [:]
-    /// Phase 2D-N: text overlay draws assembled at load time. Each
+    /// Text overlay draws assembled at load time. Each
     /// frame re-rasterizes via the cached WPETextRenderer (cache hits
     /// the common case) and draws atop the scene output.
     var textRenderer: WPETextRenderer?
@@ -115,7 +115,7 @@ final class WPEMetalSceneRenderer: NSObject {
     /// falls back to CoreText every frame and must not flood the log.
     var didLogMSDFTextDrawFailure = false
     var textObjects: [WPESceneTextObject] = []
-    /// Phase 2D-O: audio runtime publishing live FFT bins into the
+    /// Audio runtime publishing live FFT bins into the
     /// runtime uniform that audio-reactive shaders sample. Optional —
     /// scenes without sound objects skip this entirely.
     var soundRuntime: WPESoundRuntime?
@@ -124,7 +124,7 @@ final class WPEMetalSceneRenderer: NSObject {
     /// audio-reactive scenes that don't move.
     let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
     var audioDiagCounter = 0
-    /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
+    /// Per-text-object SceneScript instances. Keyed by
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
     var textScriptInstances: [String: WPESceneScriptInstance] = [:]
@@ -255,7 +255,7 @@ final class WPEMetalSceneRenderer: NSObject {
     var cachedActiveStaticPaths: Set<String> = []
     var cachedActiveStaticSignature: Int?
     var staticTextureRecordsEpoch = 0
-    /// Phase 2E: animated and video texture sources keyed by the same path
+    /// Animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
     /// during `performLoad()`; refreshed each render via
     /// `texturesForCurrentFrame(time:pipeline:)` so the executor sees the live frame.

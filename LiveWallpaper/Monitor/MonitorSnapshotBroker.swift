@@ -1,14 +1,7 @@
 import Foundation
 import os
 
-/// Hand-off point between the `MonitorDataHub` (single writer) and the per-display
-/// renderers (many readers, polling at their own cadence). A monotonically rising
-/// `generation` lets a reader ask "anything newer than what I last drew?" and get
-/// `nil` when there isn't, so an idle board does no work between updates.
-///
-/// Unlike `AudioSpectrumBroker` this never runs on a realtime thread, so a plain
-/// blocking lock is fine — the critical section is a struct copy, uncontended in
-/// practice (one writer at ≤2Hz, readers at frame cadence).
+/// Hand-off point between the `MonitorDataHub` (single writer) and the per-display renderers (many readers, polling at their own cadence).
 final class MonitorSnapshotBroker: Sendable {
     private struct State {
         var latest: MonitorSnapshot?
@@ -24,9 +17,7 @@ final class MonitorSnapshotBroker: Sendable {
         }
     }
 
-    /// Newest snapshot strictly newer than `generation`, or `nil` when the caller
-    /// is already current (or nothing has been published yet). Pass `0` to always
-    /// receive the first available snapshot.
+    /// Newest snapshot strictly newer than `generation`, or `nil` when the caller is already current (or nothing has been published yet).
     func latest(after generation: UInt64) -> (snapshot: MonitorSnapshot, generation: UInt64)? {
         lock.withLock { state in
             guard let snapshot = state.latest, state.generation > generation else {
@@ -42,9 +33,7 @@ final class MonitorSnapshotBroker: Sendable {
         lock.withLock { $0.generation }
     }
 
-    /// Drops the retained snapshot (still bumping the generation) so a renderer
-    /// that attaches after the pipeline stopped or was reconfigured can't replay
-    /// stale module data from the previous run.
+    /// Drops retained data and advances the generation so new renderers cannot replay a stale snapshot.
     func clear() {
         lock.withLock { state in
             state.latest = nil

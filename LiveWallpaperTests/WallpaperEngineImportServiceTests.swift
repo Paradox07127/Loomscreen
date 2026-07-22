@@ -85,7 +85,6 @@ struct WallpaperEngineImportServiceTests {
 
     @Test("Packaged web imports in place from scene.pkg without extracting to wpe-cache")
     func packagedWebImportsInPlaceWithoutExtraction() async throws {
-        // index.html lives only inside scene.pkg (project.json stays loose).
         let fixture = try makeFixture(type: .web, entryFile: "index.html", pkgEntries: [
             PackageEntrySpec("index.html", Array("<html><body>hi</body></html>".utf8)),
             PackageEntrySpec("app.js", Array("console.log(1)".utf8))
@@ -108,7 +107,6 @@ struct WallpaperEngineImportServiceTests {
         }
         #expect(indexFileName == "index.html")
         #expect(config.physicalPixelLayout)
-        // Served in place from the source folder, no cache copy.
         #expect(origin.cacheRelativePath == nil)
         #expect(origin.resourceLocation == .sourceFolder)
         #expect(origin.entryFile == "index.html")
@@ -124,7 +122,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(decoded == packaged)
         #expect(decoded.packageVideoEntryName == "video.mp4")
 
-        // Legacy payload (no packageEntryName key) decodes as a loose video.
         let legacyJSON = #"{"video":{"bookmarkData":"qrs="}}"#
         let legacy = try JSONDecoder().decode(WallpaperContent.self, from: Data(legacyJSON.utf8))
         #expect(legacy.activeVideoBookmarkData != nil)
@@ -139,8 +136,6 @@ struct WallpaperEngineImportServiceTests {
         config.savedVideoBookmarkData = pkgBookmark
         config.savedVideoPackageEntryName = "video.mp4"
 
-        // A bookmark refresh must keep the entry, else the next apply treats the
-        // scene.pkg as a plain video file.
         let refreshed = config.withUpdatedActiveBookmark(Data([0x03, 0x04]))
         #expect(refreshed.activeWallpaper.packageVideoEntryName == "video.mp4")
 
@@ -154,8 +149,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(decoded.savedVideoPackageEntryName == "video.mp4")
         #expect(decoded.activeWallpaper.packageVideoEntryName == "video.mp4")
 
-        // The WPE-import new-config path builds the config from a packaged-video
-        // wallpaper; the saved entry must be derived (not just the active one).
         let fromWallpaper = ScreenConfiguration(
             screenID: 2,
             wallpaper: .video(bookmarkData: Data([0x05]), packageEntryName: "clip.mp4")
@@ -204,7 +197,6 @@ struct WallpaperEngineImportServiceTests {
             Issue.record("Expected .ready, got \(result)")
             return
         }
-        // The video plays in place from the package — entry carried, no copy.
         #expect(content.packageVideoEntryName == "video.mp4")
         #expect(origin.cacheRelativePath == nil)
         #expect(origin.resourceLocation == .sourceFolder)
@@ -317,8 +309,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.assetStorage == .packageSource(fileName: "scene.pkg"))
         #expect(descriptor.capabilityTier == .imageOnly)
 
-        // Read in place, so nothing is written to wpe-cache (assets and
-        // project.json both stay at the source).
         let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }
@@ -368,7 +358,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.assetStorage == .sourceDirectory)
         #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
         #expect(origin.resourceLocation == .cache)
-        // Zero-cache: the folder is read in place, so nothing is mirrored into wpe-cache.
         let sceneCache = fixture.cacheURL.appendingPathComponent(fixture.workshopID, isDirectory: true)
         #expect(!FileManager.default.fileExists(atPath: sceneCache.path))
     }
@@ -420,7 +409,7 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.capabilityTier == .degraded)
     }
 
-    // MARK: - Phase 2.0.1 — Dependency awareness
+    // MARK: - Dependency awareness
 
     @Test("Scene with declared workshop dependencies missing from cache surfaces as unsupported with the missing IDs")
     func sceneWithMissingDependenciesIsUnsupported() async throws {
@@ -560,8 +549,8 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.requiresWindowsPlugin)
     }
 
-    @Test("Phase 2.0 WPEOrigin plist (no dependency metadata fields) decodes lossily")
-    func phase20OriginMigrates() throws {
+    @Test("Legacy WPEOrigin plist without dependency metadata decodes lossily")
+    func legacyOriginWithoutDependencyMetadataMigrates() throws {
         let origin = WPEOrigin(
             workshopID: "legacy",
             title: "Legacy",
@@ -855,7 +844,6 @@ struct WallpaperEngineImportServiceTests {
             return
         }
         #expect(bookmarkData == Data(videoURL.path.utf8))
-        // Extraction-fallback rebuild → loose file, not a package entry.
         #expect(packageEntryName == nil)
     }
 
@@ -910,7 +898,6 @@ struct WallpaperEngineImportServiceTests {
         )
     }
 
-    /// Produces a real (decodable) PNG so `SceneResourceResolver.exists` returns true for image-only capability detection.
     private func makeFixturePNG(width: Int, height: Int) throws -> Data {
         guard let context = CGContext(
             data: nil,

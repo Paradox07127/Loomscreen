@@ -2,17 +2,12 @@ import Foundation
 import Testing
 import os
 
+/// Audits every public OSLog interpolation against a reviewed, occurrence-counted allowlist.
 @Suite("Log privacy source audit")
 struct LogPrivacySourceAuditTests {
     private typealias ReviewedPrivacyAlias = OSLogPrivacy
 
-    /// Direct `os.Logger` public interpolation is deny-by-default. The key is
-    /// the source file, then the whitespace-normalized expression and reviewed
-    /// occurrence count. A new value — even an opaque alias — requires an
-    /// explicit privacy review instead of trying to infer sensitivity by name.
     private static let allowedPublicExpressions: [String: [String: Int]] = [
-        // Frame signpost metadata: workshopID is the wallpaper's public Steam
-        // Workshop ID; the traversal domain ID is an opaque per-renderer token.
         "LiveWallpaper/Runtime/Metal/WPEMetalSceneRenderer+Frame.swift": [
             "self.descriptor.workshopID": 1,
             "self.sceneScriptTraversalDomainID": 1,
@@ -183,10 +178,6 @@ struct LogPrivacySourceAuditTests {
         return scanner.scan()
     }
 
-    /// A small Swift-aware scanner keeps this security gate independent of a
-    /// SwiftSyntax dependency while still handling lexical trivia correctly.
-    /// It only inspects interpolation argument lists inside real string
-    /// literals; comments and ordinary string contents cannot create matches.
     private struct PublicInterpolationScanner {
         private struct StringDelimiter {
             let hashCount: Int
@@ -254,9 +245,6 @@ struct LogPrivacySourceAuditTests {
                     cursor = scanInterpolation(openParenthesis: openParenthesis)
                     continue
                 }
-                // An escape uses the string delimiter's exact hash count. Skip
-                // its escaped scalar so an escaped quote cannot look like the
-                // closing delimiter (including raw and raw-multiline strings).
                 if let escapeEnd = escapedElementEnd(
                     at: cursor,
                     hashCount: delimiter.hashCount,
@@ -356,10 +344,6 @@ struct LogPrivacySourceAuditTests {
                 tokens.removeLast()
             }
 
-            // The compiler accepts aliases and static-member suffixes such as
-            // `PrivacyAlias.public` and `.public.self`. A source-only lexer
-            // cannot resolve aliases, so deny any privacy value containing the
-            // public member instead of maintaining a bypassable type-name list.
             return tokens.indices.dropLast().contains { offset in
                 tokens[offset].kind == .symbol(Self.dot)
                     && tokens[offset + 1].kind == .identifier("public")

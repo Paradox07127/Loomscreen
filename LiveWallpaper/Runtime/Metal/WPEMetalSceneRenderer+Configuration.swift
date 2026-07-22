@@ -94,7 +94,7 @@ extension WPEMetalSceneRenderer {
         UserDefaults.standard.object(forKey: "WPEMetalIntroPhaseAlignEnabled") as? Bool ?? true
     }
 
-    /// ADR-003 step 1 kill-switch: async latest-snapshot script ticks (the frame
+    /// Kill switch for async latest-snapshot script ticks (the frame
     /// path never waits on a script engine queue). Frozen at first use; default
     /// ON. `defaults write <bundle> WPEScriptAsyncTickEnabled -bool NO` restores
     /// the legacy bounded-blocking ticks on the next launch.

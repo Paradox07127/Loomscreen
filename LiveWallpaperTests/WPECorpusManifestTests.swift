@@ -4,10 +4,6 @@ import CryptoKit
 import Foundation
 import Testing
 
-/// RR-03 E1 leaf: inventories the real local WPE corpus without loading renderer
-/// code or reading/copying large wallpaper assets. The resulting manifest is
-/// deterministic and contains no absolute user path, so it can be promoted to a
-/// reviewed fixture when the corpus composition is intentionally locked.
 @Suite("WPE corpus manifest")
 struct WPECorpusManifestTests {
     @Test("Container corpus writes a deterministic path-redacted manifest")
@@ -45,8 +41,6 @@ struct WPECorpusManifestTests {
             selection = CorpusSelection(root: canonicalRoot, label: "canonical-container-431960")
         }
 
-        // A canonical/configured root that exists but cannot be enumerated, or is
-        // unexpectedly empty, is a failed E1 lock rather than a clean skip.
         let first = try WPECorpusManifestBuilder.build(root: selection.root, rootLabel: selection.label)
         try #require(!first.entries.isEmpty, "configured/canonical WPE corpus contains no project directories")
         let firstData = try WPECorpusManifestBuilder.encode(first)

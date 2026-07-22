@@ -20,8 +20,6 @@ struct MonitorDataHubTests {
         )
     }
 
-    /// Polls the broker until it reports a generation strictly greater than `after`,
-    /// or the deadline passes. Returns the newest snapshot seen.
     private func waitForPublish(
         _ broker: MonitorSnapshotBroker,
         after generation: UInt64,
@@ -37,10 +35,6 @@ struct MonitorDataHubTests {
         return broker.latest(after: generation)?.snapshot
     }
 
-    /// The hub publishes a leading snapshot immediately and coalesces follow-up
-    /// updates into a trailing publish — so tests that fire several updates must
-    /// wait for the snapshot that actually satisfies the expectation, not just
-    /// the first publish.
     private func waitForSnapshot(
         _ broker: MonitorSnapshotBroker,
         timeout: TimeInterval = 2.0,
@@ -88,7 +82,6 @@ struct MonitorDataHubTests {
         let snapshot = await waitForSnapshot(broker) { ($0.agents?.count ?? 0) == 4 }
         let ids = snapshot?.agents?.map(\.id)
 
-        // needsInput(4) first, then running(3) by recency (200 > 100), then idle(2).
         #expect(ids == ["codex:c", "codex:d", "claude:a", "claude:b"])
     }
 
@@ -146,8 +139,6 @@ struct MonitorDataHubTests {
         let disabled = await waitForPublish(broker, after: before)
         #expect(disabled?.agents == nil)
 
-        // Re-enabling does not resurrect the old array; it stays nil until a source
-        // reports again.
         await hub.setModuleEnabled(agents: true, usage: true)
         let reEnabled = broker.latest(after: 0)?.snapshot
         #expect(reEnabled?.agents == nil)
@@ -158,18 +149,15 @@ struct MonitorDataHubTests {
         let broker = MonitorSnapshotBroker()
         let hub = MonitorDataHub(broker: broker, throttleInterval: 0.3)
 
-        // Fire many rapid updates well inside one throttle window.
         for index in 0..<20 {
             await hub.updateSystem(MonitorSystemSnapshot(cpuTotal: Double(index) / 100))
         }
 
-        // Give the leading publish a beat to land, then read the generation.
         try? await Task.sleep(nanoseconds: 50_000_000)
         let afterBurst = broker.currentGeneration
         #expect(afterBurst >= 1)
         #expect(afterBurst <= 2)
 
-        // The trailing publish carries the final value once the window elapses.
         let final = await waitForPublish(broker, after: afterBurst, timeout: 1.0)
         #expect(final?.system?.cpuTotal == 0.19)
         #expect(broker.currentGeneration <= afterBurst + 1)

@@ -4,9 +4,6 @@ import LiveWallpaperProWPE
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 2.0 Day 1 lock: Codable contracts for `SceneDescriptor`,
-/// `WallpaperContent.scene`, and the legacy-`.scene` backfill that lets
-/// `ScreenConfiguration` reload data written before the descriptor existed.
 @Suite("SceneDescriptor / WallpaperContent.scene persistence")
 struct SceneDescriptorCodableTests {
 

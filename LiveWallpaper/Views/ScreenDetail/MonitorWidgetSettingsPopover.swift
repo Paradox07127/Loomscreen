@@ -1,29 +1,8 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Per-widget settings popover shown from the inspector's instrument list.
-///
-/// Native chrome (standard AppKit/SwiftUI controls — SPEC §5.0-a) rather than
-/// the board's own matte instrument styling. Every kind gets a size picker (only
-/// the sizes `kind.allowedSizes` permits) and a remove button; kinds with tuning
-/// add their own controls:
-///   • Processes — a row-count stepper (1…12, default 5), key `count` (.number).
-///   • CPU/GPU/Memory/Disk — a `historyWindow` trend picker plus each kind's
-///     toggles (`showHeatmap`/`showComposition`/`showSensors`,
-///     `showLoadBreakdown`, `showTopProcesses`) and the Memory/Disk `breakdown`.
-///   • Usage/Fleet — a `provider` filter, plus Usage's `primaryMetric` and
-///     Fleet's `fleetSort` / `fleetMaxRows`.
-///
-/// Writes follow one rule: a value equal to the widget's default drops the key
-/// so `options` stays minimal.
-///
-/// Edits are applied through `onUpdate`, which the inspector persists via
-/// `ScreenManager`. `MonitorWidgetDraft` holds the pure option encode/decode so
-/// the round-trips are unit-testable without any view.
 struct MonitorWidgetSettingsPopover: View {
-    /// One fixed width for every surface that hosts this popover (inspector
-    /// popover, board settings card) — segmented pickers need the room, and the
-    /// board card's deterministic placement needs the number up front.
+    /// One fixed width for every surface that hosts this popover (inspector popover, board settings card) — segmented pickers need the room, and the board card's deterministic placement needs the number up front.
     static let preferredWidth: CGFloat = 360
 
     let placement: MonitorWidgetPlacement
@@ -31,9 +10,6 @@ struct MonitorWidgetSettingsPopover: View {
     let onRemove: () -> Void
 
     var body: some View {
-        // Flat, single-surface layout (macOS Settings detail pane): the popover's
-        // own material is the only background — no nested cards — so groups read as
-        // clean sections separated by spacing + one divider, not stacked panes.
         VStack(alignment: .leading, spacing: 18) {
             header
 
@@ -307,10 +283,7 @@ struct MonitorWidgetSettingsPopover: View {
 
     // MARK: Shared controls
 
-    /// Segmented history-window control shared by CPU/GPU/Memory/Disk. Always
-    /// 30/60/120s — no "Auto": when the option is unset the segment matching the
-    /// widget's own `defaultWindow` is highlighted, and picking that value again
-    /// drops the key (so it stays on the default across resizes).
+    /// Segmented history-window control shared by CPU/GPU/Memory/Disk.
     @ViewBuilder
     private func historyWindowPicker(defaultWindow: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -350,9 +323,7 @@ struct MonitorWidgetSettingsPopover: View {
         }
     }
 
-    /// All/Claude/Codex provider filter shared by Usage/Fleet (they persist the
-    /// same "all"/"claude"/"codex" values under different keys). Brand names are
-    /// verbatim; only the "All" segment is localized.
+    /// All/Claude/Codex provider filter shared by Usage/Fleet (they persist the same "all"/"claude"/"codex" values under different keys).
     private func providerPicker(key: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Provider")
@@ -391,9 +362,7 @@ struct MonitorWidgetSettingsPopover: View {
         }
     }
 
-    /// Bool toggle binding with the shared "drop the key when it equals the
-    /// default" discipline, so an untouched (or reset-to-default) widget carries
-    /// no option at all.
+    /// Bool toggle binding with the shared "drop the key when it equals the default" discipline, so an untouched (or reset-to-default) widget carries no option at all.
     private func boolBinding(key: String, default def: Bool) -> Binding<Bool> {
         Binding(
             get: { placement.options[key]?.boolValue ?? def },
@@ -428,10 +397,7 @@ struct MonitorWidgetSettingsPopover: View {
 
 // MARK: - Pure draft mutations (unit-tested)
 
-/// Pure encode/decode of a placement's option bag for the settings popover. Kept
-/// free of any view type so the round-trips are unit-testable. Each mutator
-/// returns a NEW placement with the option written under the key the widget
-/// reads (verified against `MonitorProcessesWidgetView`).
+/// Pure encode/decode of a placement's option bag for the settings popover.
 enum MonitorWidgetDraft {
     static let countKey = "count"
 
@@ -451,11 +417,7 @@ enum MonitorWidgetDraft {
     /// Default GPU sampling period (seconds) when a GPU widget doesn't override it.
     static let gpuDefaultSeconds: Double = 6
 
-    /// Board-level read for the runtime lease: the fastest period any GPU
-    /// placement requests. A GPU widget at its default counts as `gpuDefaultSeconds`
-    /// (NOT nil), so the cross-lease MIN can't let another screen's slower explicit
-    /// choice override a default screen's faster cadence. nil only when NO GPU
-    /// widget is placed.
+    /// Board-level read for the runtime lease: the fastest period any GPU placement requests.
     static func gpuSampleSeconds(in widgets: [MonitorWidgetPlacement]) -> Double? {
         widgets.filter { $0.kind == .gpu }
             .map { gpuSampleSeconds($0) ?? gpuDefaultSeconds }
@@ -491,12 +453,7 @@ enum MonitorWidgetDraft {
     }
 
     // MARK: Shared option keys
-    //
-    // These mirror the literal keys the widgets read (`MonitorCPUWidgetView`,
-    // `MonitorGPUWidgetView`, `MonitorMemoryWidgetView`, `MonitorDiskWidgetView`,
-    // `MonitorUsageWidgetView`). Fleet keys reuse `MonitorFleetWidgetView.Option`.
-    // Every write follows one rule: a value equal to the widget's default DROPS
-    // the key (so `options` stays minimal), otherwise it is written explicitly.
+    // These mirror the literal keys the widgets read (`MonitorCPUWidgetView`, `MonitorGPUWidgetView`, `MonitorMemoryWidgetView`, `MonitorDiskWidgetView`, `MonitorUsageWidgetView`).
     static let historyWindowKey = "historyWindow"
     static let showLoadBreakdownKey = "showLoadBreakdown"
     static let showSensorsKey = "showSensors"
@@ -511,9 +468,7 @@ enum MonitorWidgetDraft {
 
     // MARK: History window (CPU/GPU/Memory/Disk)
 
-    /// Segment tag to highlight: an in-catalog persisted value, else `clearValue`
-    /// (the tag standing in for "unset" — Auto for size-defaulting kinds, or the
-    /// fixed default for the others).
+    /// Segment tag to highlight: an in-catalog persisted value, else `clearValue` (the tag standing in for "unset" — Auto for size-defaulting kinds, or the fixed default for the others).
     static func historyWindowTag(_ placement: MonitorWidgetPlacement, clearValue: Int) -> Int {
         guard let raw = placement.options[historyWindowKey]?.numberValue else { return clearValue }
         let value = Int(raw)

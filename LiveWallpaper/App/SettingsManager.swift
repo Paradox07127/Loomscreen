@@ -13,26 +13,17 @@ final class SettingsManager {
     private var cachedConfigurations: [ScreenConfiguration]?
     private var cachedWallpaperBookmarks: [WallpaperBookmark]?
 
-    /// Three big JSON blobs that used to live in `UserDefaults`. Moved to
-    /// `~/Library/Application Support/<bundle-id>/Configuration/` so writes
-    /// are observable, atomic, and independent of `cfprefsd`. Small
-    /// primitives (language, bookmarks for single folders, trusted hosts)
-    /// remain in `UserDefaults` because they're boot-critical and tiny.
+    /// Three big JSON blobs that used to live in `UserDefaults`.
     private let screenConfigStore: AtomicFileStore<[ScreenConfiguration]>
     private let globalSettingsStore: AtomicFileStore<GlobalSettings>
     private let wallpaperBookmarksStore: AtomicFileStore<[WallpaperBookmark]>
     private let bookmarkResolver: SecurityScopedBookmarkResolver
     private let persistWPEBookmarkOwnerRefresh: @MainActor (WPEOrigin, Data) -> Void
 
-    /// Serial off-MainActor writer for all three file stores (configs, global
-    /// settings, bookmarks). Cache mutations remain synchronous on MainActor;
-    /// disk encode/fsync/rename are queued to this actor so toggle/slider/save
-    /// handlers return immediately instead of blocking the UI per write.
+    /// Serial off-MainActor writer for all three file stores (configs, global settings, bookmarks).
     private let configurationPersistenceActor: WallpaperPersistenceActor
 
-    /// Per-store monotonic counters: the actor drops any submission whose
-    /// generation is older than the last it committed, so a stale in-flight
-    /// write can't overwrite a newer MainActor mutation (or resurrect a reset).
+    /// Per-store monotonic counters: the actor drops any submission whose generation is older than the last it committed, so a stale in-flight write can't overwrite a newer MainActor mutation (or resurrect a reset).
     private var configurationWriteGeneration: UInt64 = 0
     private var globalSettingsWriteGeneration: UInt64 = 0
     private var bookmarksWriteGeneration: UInt64 = 0
@@ -47,22 +38,12 @@ final class SettingsManager {
         static let trustedHosts = "TrustedHTMLHosts.v1"
         static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
         static let wpeEngineAssetsRootBookmark = "WPEEngineAssets.RootBookmark.v1"
-        /// Set only when the engine assets came from the in-app SteamCMD download
-        /// (the pruned container install). Presence = the managed install is the
-        /// active engine-assets root; the value is its Steam `buildid` for update
-        /// checks. Cleared when the user forgets/removes or manually links elsewhere.
+        /// Set only when the engine assets came from the in-app SteamCMD download (the pruned container install).
         static let wpeEngineAssetsManagedBuildID = "WPEEngineAssets.ManagedBuildID.v1"
         static let appLanguage = AppLanguagePreference.storageKey
-        /// Bumped each time we successfully migrate a blob out of UserDefaults
-        /// into the file store. Lets us run the migration at most once even
-        /// though we keep the legacy keys for one version as a compatibility
-        /// buffer.
+        /// Bumped each time we successfully migrate a blob out of UserDefaults into the file store.
         static let configMigrationVersion = "Settings.MigrationVersion"
-        /// Separate from `configMigrationVersion` (that one only gates the
-        /// one-time UserDefaults→file move). This tracks the in-blob Codable
-        /// shape of `GlobalSettings`/`ScreenConfiguration` themselves, so a
-        /// future breaking schema change has a real stored baseline to
-        /// compare against instead of assuming every install starts at 0.
+        /// Separate from `configMigrationVersion` (that one only gates the one-time UserDefaults→file move).
         static let blobSchemaVersion = "Settings.BlobSchemaVersion"
     }
 
@@ -70,10 +51,7 @@ final class SettingsManager {
     /// store or schema change so the migration path re-runs on next launch.
     private static let currentMigrationVersion = 1
 
-    /// Current in-blob schema revision. No transform runs today — this only
-    /// stamps the baseline forward each launch — but a future breaking
-    /// `GlobalSettings`/`ScreenConfiguration` change bumps this and adds a
-    /// dispatch in `stampBlobSchemaVersionIfNeeded` keyed off `storedVersion`.
+    /// Current in-blob schema revision.
     private static let currentBlobSchemaVersion = 1
 
     init(
@@ -162,11 +140,7 @@ final class SettingsManager {
         }
     }
 
-    /// Drains every store routed through the persistence actor before exit so the
-    /// last MainActor commits (global settings, bookmarks, screen configs) are
-    /// durable. Re-submitting the latest cached value with a fresh generation
-    /// either commits the final state or is a no-op if an in-flight task already
-    /// wrote it; the actor's per-store generation guard keeps writes ordered.
+    /// Drains every store routed through the persistence actor before exit so the last MainActor commits (global settings, bookmarks, screen configs) are durable.
     func flushPendingConfigurationWrites() async {
         configurationWriteGeneration &+= 1
         let configGeneration = configurationWriteGeneration
@@ -202,9 +176,7 @@ final class SettingsManager {
     
     // MARK: - Global Settings
 
-    /// Updates the in-memory cache (and login-item side effect) synchronously so
-    /// MainActor readers see the new value immediately; the disk write is queued
-    /// to the serial persistence actor so the fsync/rename never blocks the UI.
+    /// Updates memory synchronously and queues the disk write off the main actor.
     func saveGlobalSettings(_ settings: GlobalSettings) {
         let previousStartOnLogin = cachedGlobalSettings?.startOnLogin ?? loadGlobalSettings().startOnLogin
         cachedGlobalSettings = settings
@@ -248,23 +220,12 @@ final class SettingsManager {
 
     // MARK: - Wallpaper Engine History (managed library, LRU-bounded)
 
-    /// Upper bound on the managed library. Each entry embeds a security-scoped
-    /// bookmark (~1–3 KB of JSON) and lives in the single `global-settings.json`
-    /// blob, so this caps that blob's growth rather than guarding a real
-    /// database. 200 covers a large hand-curated library; raise further (or move
-    /// to a dedicated store) if the library is meant to be effectively unbounded.
+    /// Upper bound on the managed library.
     static let maxRecentWPEImports = 200
 
-    /// `clearsDeleteTombstone`: pass `true` ONLY for an explicit user re-acquire
-    /// (Browse re-download / "Import from folder…"). Passive records — applying a
-    /// history entry to a screen, or the auto-import library scan — must leave the
-    /// tombstone in place, or a still-present copy in the user's real
-    /// (out-of-container) Steam library resurrects a deleted item on the next scan.
+    /// `clearsDeleteTombstone`: pass `true` ONLY for an explicit user re-acquire (Browse re-download / "Import from folder…").
     func recordWPEImport(_ entry: WPEHistoryEntry, clearsDeleteTombstone: Bool = false) {
         var settings = loadGlobalSettings()
-        // History activation re-records an entry with `sizeBytes == nil`; carry
-        // the previously measured size forward so it isn't thrown away (and
-        // re-walked) on every apply.
         var entry = entry
         if entry.sizeBytes == nil {
             entry.sizeBytes = settings.recentWPEImports.first {
@@ -286,9 +247,7 @@ final class SettingsManager {
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
-    /// Backfills a single import's measured folder size. Patches only that one
-    /// field on the still-present entry (no whole-blob clobber from a stale
-    /// captured copy), and only when it hasn't been measured yet.
+    /// Backfills a single import's measured folder size.
     func updateWPEImportSize(workshopID: String, sizeBytes: Int64) {
         var settings = loadGlobalSettings()
         guard let index = settings.recentWPEImports.firstIndex(where: {
@@ -298,9 +257,7 @@ final class SettingsManager {
         saveGlobalSettings(settings)
     }
 
-    /// Persists a refreshed source-folder bookmark into every matching WPE
-    /// history row. The original Data is part of the predicate so a delayed
-    /// refresh can never overwrite a newer explicit re-grant.
+    /// Persists a refreshed source-folder bookmark into every matching WPE history row.
     @discardableResult
     func replaceWPEHistorySourceBookmark(
         workshopID: String,
@@ -325,14 +282,10 @@ final class SettingsManager {
         return true
     }
 
-    /// Upper bound on the delete-tombstone list. Each tombstone is just a
-    /// workshop-ID string, but it lives in the single `global-settings.json`
-    /// blob, so cap its growth; the oldest fall off first.
+    /// Upper bound on the delete-tombstone list.
     static let maxDeletedWorkshopTombstones = 500
 
-    /// SKU-neutral equivalent of `WPEPathSafety.isSafeWorkshopID` (which is
-    /// Pro-only): rejects empty, `.`/`..`, and any separator so a persisted
-    /// tombstone can never carry an escape-capable component.
+    /// SKU-neutral equivalent of `WPEPathSafety.isSafeWorkshopID` (which is Pro-only): rejects empty, `.`/`..`, and any separator so a persisted tombstone can never carry an escape-capable component.
     private static func isSafeWorkshopIDComponent(_ value: String) -> Bool {
         !value.isEmpty
             && value != "."
@@ -342,22 +295,15 @@ final class SettingsManager {
             && !value.contains("..")
     }
 
-    /// Records that the user deleted `workshopID`, so the auto-import scan won't
-    /// resurrect it from a still-present SteamCMD download or library-folder
-    /// copy. A later deliberate re-import clears it (see `recordWPEImport`).
+    /// Records that the user deleted `workshopID`, so the auto-import scan won't resurrect it from a still-present SteamCMD download or library-folder copy.
     func recordWPEDeleteTombstone(workshopID: String) {
-        // Tombstones are persisted scan policy, so keep the list clean: reject
-        // any id that isn't a safe path component (mirrors ProWPE's
-        // `WPEPathSafety.isSafeWorkshopID`, inlined here because that type is
-        // Pro-only while this method is compiled into both SKUs).
+        // Validate persisted tombstones here because the Pro-only path validator is unavailable to Lite.
         var settings = loadGlobalSettings()
         guard Self.insertDeleteTombstone(workshopID: workshopID, into: &settings) else { return }
         saveGlobalSettings(settings)
     }
 
-    /// Atomic compare-and-remove for confirmation UIs that captured a concrete
-    /// library entry. A same-ID re-import has a different `importedAt`, so a
-    /// stale confirmation cannot remove it or write a tombstone for it.
+    /// Atomic compare-and-remove for confirmation UIs that captured a concrete library entry.
     @discardableResult
     func removeWPEImport(
         workshopID: String,
@@ -430,9 +376,7 @@ final class SettingsManager {
         NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
     }
 
-    /// Steam `buildid` of the in-app-downloaded engine assets, or nil when no
-    /// managed install is present. Setting it also notifies so the assets
-    /// library re-resolves and the UI flips to "Linked".
+    /// Steam `buildid` of the in-app-downloaded engine assets, or nil when no managed install is present.
     var wpeEngineAssetsManagedBuildID: String? {
         get { UserDefaults.standard.string(forKey: Keys.wpeEngineAssetsManagedBuildID) }
         set {
@@ -551,9 +495,7 @@ final class SettingsManager {
         cachedConfigurations = []
         cachedWallpaperBookmarks = []
 
-        // Route deletes through the same serial actor with bumped generations so
-        // an in-flight async write (older generation) can't resurrect the file
-        // after the reset.
+        // Route deletes through the same serial actor with bumped generations so an in-flight async write (older generation) can't resurrect the file after the reset.
         configurationWriteGeneration &+= 1
         globalSettingsWriteGeneration &+= 1
         bookmarksWriteGeneration &+= 1
@@ -644,12 +586,7 @@ final class SettingsManager {
         }
     }
 
-    /// Reads the last-stamped in-blob schema version and advances it to
-    /// `currentBlobSchemaVersion`. Today there is no transform to run (every
-    /// decoder is `decodeIfPresent`-defensive), so this only establishes a
-    /// real baseline; a future breaking change adds a `storedVersion <
-    /// N` dispatch here before the final stamp, the same shape as
-    /// `migrateLegacyUserDefaultsIfNeeded` above.
+    /// Reads the last-stamped in-blob schema version and advances it to `currentBlobSchemaVersion`.
     private func stampBlobSchemaVersionIfNeeded() {
         let storedVersion = UserDefaults.standard.integer(forKey: Keys.blobSchemaVersion)
         guard storedVersion < Self.currentBlobSchemaVersion else { return }
@@ -678,7 +615,6 @@ final class SettingsManager {
                 && !descriptor.cacheRelativePath.isEmpty
                 && !descriptor.entryFile.isEmpty
         case .monitor:
-            // Native SwiftUI board + self-contained config — always valid.
             return true
         }
     }
@@ -789,9 +725,7 @@ final class SettingsManager {
         }
     }
 
-    /// Actor-safe persistent owner used by validation. This is a normal
-    /// MainActor method rather than an escaping `Target.save` closure, so it
-    /// cannot later be invoked from an arbitrary executor.
+    /// Actor-safe persistent owner used by validation.
     @discardableResult
     func persistRefreshedHTMLBookmark(
         matching original: Data,

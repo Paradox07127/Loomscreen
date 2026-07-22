@@ -6,9 +6,7 @@ import Observation
 @MainActor @Observable
 final class ScreenManager {
     var screens: [Screen] = []
-    /// Master render gate: whether ALL wallpaper pipelines may display. Persisted
-    /// and INDEPENDENT of per-screen play/pause — the menu-bar master switch
-    /// reflects exactly this flag, not whether any screen happens to be playing.
+    /// Master render gate: whether ALL wallpaper pipelines may display.
     var wallpapersGloballyEnabled: Bool = ScreenManager.loadGloballyEnabled()
 
     static let globallyEnabledDefaultsKey = "loomscreen.wallpapers.globallyEnabled.v1"
@@ -16,32 +14,19 @@ final class ScreenManager {
         UserDefaults.standard.object(forKey: globallyEnabledDefaultsKey) as? Bool ?? true
     }
 
-    /// Single observable snapshot of derived wallpaper-session state. Every
-    /// mutation flows through `commitWallpaperSessionState()`, which builds
-    /// a new value, compares it against the current snapshot, and assigns
-    /// only when the diff is real — at most one observation invalidation
-    /// per session change.
+    /// Single observable snapshot of derived wallpaper-session state.
     var wallpaperSessionState = WallpaperSessionState()
     var wallpaperSessionStateVersion: UInt64 { wallpaperSessionState.version }
     var wallpaperSessionSummaryCache: WallpaperSessionSummaryCache { wallpaperSessionState.summaryCache }
     #if !LITE_BUILD
     /// Per-screen WPE import bookkeeping (last error + generation counter).
-    /// Held as an observed property so SwiftUI views reading
-    /// `screenManager.wpeImportError(for:)` re-render when imports succeed
-    /// or fail — the original `lastWPEImportErrors` dict was on this
-    /// `@Observable` class, and we must preserve that invalidation flow.
     let wpeImportTracker = WPEImportTracker()
     #endif
-    /// Display-name cache for security-scoped bookmarks. Held as an observed
-    /// property so views reading `screenManager.bookmarkDisplayName(for:)`
-    /// re-render when entries land — see WPEImportTracker for the same
-    /// pattern.
+    /// Display-name cache for security-scoped bookmarks.
     let bookmarkDisplayNameCache = BookmarkDisplayNameCache()
 
     @ObservationIgnored var cleanupTasks: Set<AnyCancellable> = []
-    /// One-way application-termination latch. Async observer/automation work
-    /// may already be queued when AppKit asks to quit; every route that can
-    /// rebuild a session or overlay checks this before doing more work.
+    /// One-way application-termination latch.
     @ObservationIgnored var isTerminating = false
     @ObservationIgnored let displayRegistry: any DisplayRegistering
     @ObservationIgnored let featureCatalog: FeatureCatalog
@@ -57,33 +42,19 @@ final class ScreenManager {
     @ObservationIgnored let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored var lastScreenSignatures: [CGDirectDisplayID: ScreenConfigurationSignature] = [:]
     @ObservationIgnored var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
-    /// App Nap throttles an `LSUIElement` accessory app's render loop to ~1fps
-    /// the moment another app becomes active, freezing the wallpaper whenever
-    /// the user focuses any other window. Held while a wallpaper is on screen
-    /// to keep the MTKView clock at full rate in the background; released when
-    /// the last session goes away. See `refreshAppNapAssertion()`.
+    /// App Nap throttles an `LSUIElement` accessory app's render loop to ~1fps the moment another app becomes active, freezing the wallpaper whenever the user focuses any other window.
     @ObservationIgnored var renderingActivityToken: (any NSObjectProtocol)?
     enum UserAbsenceReason: Hashable {
         case screenLocked
         case displaySleep
         case systemSleep
     }
-    /// Reasons the user is not watching the desktop. Folded into the effective
-    /// performance profile (`isUserAbsent`) so lock / display-sleep / system
-    /// sleep suspend through the single policy path instead of a parallel
-    /// pause/resume overlay.
+    /// Reasons the user is not watching the desktop.
     @ObservationIgnored var userAbsenceReasons: Set<UserAbsenceReason> = []
     var isUserAbsent: Bool { !userAbsenceReasons.isEmpty }
-    /// System memory pressure, folded into the performance policy so a
-    /// low-memory condition suspends every wallpaper type and **auto-resumes**
-    /// once memory recovers — unlike the old `handleLowMemory` path, which
-    /// cleared video play-intent and never restored it.
+    /// Feeds memory pressure into the performance policy without changing user playback intent.
     @ObservationIgnored var isUnderMemoryPressure = false
-    /// Coordinates per-screen playback configuration mutations + transition
-    /// tokens. Lazy because it captures `self` for the effect-application and
-    /// refresh-rate-lookup callbacks; the stored properties used by those
-    /// callbacks (`videoEffectsApplier`, `refreshRateCache`, etc.) are already
-    /// initialised by the time the lazy var is touched.
+    /// Coordinates per-screen playback configuration mutations + transition tokens.
     @ObservationIgnored lazy var playbackCoordinator = PlaybackCoordinator(
         configurationStore: configurationStore,
         playableVideoLoader: playableVideoLoader,
@@ -143,9 +114,7 @@ final class ScreenManager {
         }
     )
     #endif
-    /// Centralises the write side of ScreenConfiguration persistence (save /
-    /// remove / prune / validate / display-name priming). Lazy because the
-    /// `releaseRuntimeSession` callback resolves a `Screen` by ID via `self`.
+    /// Centralises the write side of ScreenConfiguration persistence (save / remove / prune / validate / display-name priming).
     @ObservationIgnored lazy var persistence = WallpaperPersistenceCoordinator(
         store: configurationStore,
         bookmarkDisplayNameCache: bookmarkDisplayNameCache,
@@ -162,10 +131,7 @@ final class ScreenManager {
     @ObservationIgnored var transitionRegistry: PlaybackTransitionRegistry {
         playbackCoordinator.transition
     }
-    /// Owns playlist + schedule automation, including the
-    /// `WallpaperAutomationCoordinator.start(...)` wiring. Lazy because
-    /// many of the callbacks (saveConfiguration, releaseRuntimeSession,
-    /// setupVideoPlayback) capture self.
+    /// Owns playlist + schedule automation, including the `WallpaperAutomationCoordinator.start(...)` wiring.
     @ObservationIgnored lazy var automationOrchestrator = WallpaperAutomationOrchestrator(
         configurationStore: configurationStore,
         automationCoordinator: automationCoordinator,
@@ -195,10 +161,7 @@ final class ScreenManager {
             self?.isCurrentTransition(generation, for: screenID) ?? false
         }
     )
-    /// Owns HTML wallpaper management (setters + multi-instance audio-leader
-    /// + trust evaluation). Lazy because the saveConfiguration /
-    /// restoreWallpaperSession / notifyWallpaperSessionChanged callbacks
-    /// capture self.
+    /// Owns HTML wallpaper management (setters + multi-instance audio-leader + trust evaluation).
     @ObservationIgnored lazy var htmlCoordinator = HTMLWallpaperCoordinator(
         configurationStore: configurationStore,
         screensProvider: { [weak self] in
@@ -230,12 +193,6 @@ final class ScreenManager {
         }
     )
     /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
-    /// Lazy because the saveConfiguration / applyFrameRateLimit /
-    /// screenRefreshRate / screensProvider callbacks capture self.
-    /// `tearDownForTermination()` must not instantiate WeatherReactiveService
-    /// just to stop an effects coordinator that was never used. The flag is set
-    /// inside the lazy initializer and lets teardown/cancellation remain a no-op
-    /// for the cold path.
     @ObservationIgnored var effectsCoordinatorWasInitialized = false
     @ObservationIgnored lazy var effectsCoordinator: WallpaperEffectsCoordinator = {
         self.effectsCoordinatorWasInitialized = true
@@ -255,16 +212,10 @@ final class ScreenManager {
             }
         )
     }()
-    /// Exposed for the WeatherLocation settings view, which reads
-    /// `currentParticleEffect` / `currentEffectAdjustments` directly and
-    /// triggers `refresh()` on user gestures. The actual instance is owned
-    /// by the effects coordinator.
+    /// Exposed for the WeatherLocation settings view, which reads `currentParticleEffect` / `currentEffectAdjustments` directly and triggers `refresh()` on user gestures.
     var weatherService: WeatherReactiveService {
         let coordinator = effectsCoordinator
-        // SwiftUI may reevaluate a settings/inspector body while AppKit is
-        // waiting for termination. If that is the first weather access, return
-        // a permanently inert service rather than letting the lazy creation
-        // register a fresh preference/network producer after teardown.
+        // SwiftUI may reevaluate a settings/inspector body while AppKit is waiting for termination.
         if isTerminating {
             coordinator.shutdown()
         }
@@ -274,21 +225,11 @@ final class ScreenManager {
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
     /// Bumped each time `observeFullScreenChanges()` registers a new observer.
-    /// The onChange callback short-circuits when its captured generation no
-    /// longer matches the latest value, so accidentally re-registering does
-    /// not cascade into stacked callbacks.
     @ObservationIgnored var fullScreenTrackingGeneration: UInt64 = 0
-    /// Per-display latch for the *occlusion* arm of the adaptive frame-rate
-    /// throttle so the policy can apply hysteresis (avoids flapping as window
-    /// coverage hovers near the enter/exit thresholds). Tracks occlusion alone —
-    /// folding in the battery arm would let unplugging at ~45% coverage stay
-    /// throttled on the lower exit threshold. Cleared on session release.
+    /// Per-display latch for the *occlusion* arm of the adaptive frame-rate throttle so the policy can apply hysteresis (avoids flapping as window coverage hovers near the enter/exit thresholds).
     @ObservationIgnored var adaptiveFrameRateOcclusionThrottled: [CGDirectDisplayID: Bool] = [:]
 
-    /// Screens whose last-resolved profile was `.suspended`. Drives the App Nap
-    /// assertion: a session that is occluded/paused into `.suspended` no longer
-    /// needs the full-rate background clock, so it shouldn't keep the exemption
-    /// alive. Cleared on session release.
+    /// Screens whose last-resolved profile was `.suspended`.
     @ObservationIgnored var suspendedScreenIDs: Set<CGDirectDisplayID> = []
 
     // MARK: - Initialization

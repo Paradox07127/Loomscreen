@@ -150,7 +150,7 @@ enum WPEBuiltinShaderName {
 }
 
 /// Typed identity for the builtin shader names `dispatch` matches by exact
-/// string equality (ADR-001 step 0: typed identity + decomposition, strictly
+/// string equality (typed identity + decomposition, strictly
 /// behavior-preserving). Raw values are fixed-point outputs of
 /// `WPEBuiltinShaderName.normalized`; case order mirrors the legacy switch.
 /// Names matched by pattern rather than exact equality stay string checks on
@@ -160,7 +160,7 @@ enum WPEBuiltinShaderName {
 /// copy case body. `WPEMetalShaderDispatcherTests` pins the exact raw-value
 /// set. Lives here (Infrastructure, beside its normalizer fixed-point source)
 /// so the graph/pipeline builders' judgment sites don't add Infra→Runtime
-/// coupling (ADR-002 boundary guard).
+/// coupling.
 enum WPEBuiltinShaderKind: String, CaseIterable {
     case solidColor = "solidcolor"
     case solidLayer = "solidlayer"
@@ -197,7 +197,7 @@ extension WPEBuiltinShaderKind {
     /// preload: normalize an authored shader name once, then match the typed
     /// builtin identity. `nil` = open-set custom (workshop) shader. Uses the
     /// identity-preserving normalizer variant (`genericImageAsCopy: false`) —
-    /// the same one every judgment site already used (ADR-001 B1). Never write
+    /// the same one every judgment site already used. Never write
     /// the normalized string back into `WPERenderPass.shader`: custom shaders'
     /// disk paths, cache keys, and diagnostics all need the authored string.
     init?(normalizing shaderName: String) {

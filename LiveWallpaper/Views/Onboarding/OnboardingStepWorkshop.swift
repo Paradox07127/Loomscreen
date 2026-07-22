@@ -2,10 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Optional onboarding step (Pro only). Surfaces live
-/// SteamCMD / Web API key status and opens the existing Doctor / key-entry
-/// sheets in-window. Both the "Import a file" and "Steam Workshop" picker
-/// cards lead here, so it is always skippable.
+/// Optional onboarding step (Pro only).
 struct OnboardingStepWorkshop: View {
     let continueStep: () -> Void
     let skip: () -> Void

@@ -63,7 +63,6 @@ struct PlaylistRowMetadataTests {
             duration: nil,
             folder: nil
         )
-        // 100 < 480 falls through to raw `800×100`.
         #expect(meta.subtitle == "800×100")
     }
 

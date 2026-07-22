@@ -25,10 +25,8 @@ struct WPEMSDFAtlasTests {
         let first = try #require(atlas.entry(for: key, generator: generator, font: font))
         let second = try #require(atlas.entry(for: key, generator: generator, font: font))
 
-        // Cached: same page + UV on the repeat lookup.
         #expect(first.page == second.page)
         #expect(first.uvRect == second.uvRect)
-        // UV stays inside the normalized atlas page.
         #expect(first.uvRect.minX >= 0 && first.uvRect.maxX <= 1)
         #expect(first.uvRect.minY >= 0 && first.uvRect.maxY <= 1)
         #expect(atlas.texture(page: first.page) != nil)
@@ -39,8 +37,6 @@ struct WPEMSDFAtlasTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
         let generator = WPEMSDFGlyphGenerator()
-        // A 64px page holds exactly one ~40px glyph cell; maxPages: 1 forces the
-        // second distinct glyph to evict the first.
         let atlas = WPEMSDFAtlas(device: device, pageSize: 64, maxPages: 1)
         let keyA = WPEMSDFGlyphKey(fontID: "Helvetica", glyph: glyph("A", font: font), pixelSize: 32)
         let keyB = WPEMSDFGlyphKey(fontID: "Helvetica", glyph: glyph("B", font: font), pixelSize: 32)
@@ -49,7 +45,6 @@ struct WPEMSDFAtlasTests {
         let b = try #require(atlas.entry(for: keyB, generator: generator, font: font))
         #expect(atlas.livePages().count <= 1)
 
-        // A was evicted; re-requesting it regenerates onto the same single page.
         let aAgain = try #require(atlas.entry(for: keyA, generator: generator, font: font))
         #expect(aAgain.page == b.page)
     }
@@ -65,7 +60,6 @@ struct WPEMSDFAtlasTests {
 
         let before = atlas.generation
         _ = try #require(atlas.entry(for: keyA, generator: generator, font: font))
-        // Filling the same single page with a second glyph forces an eviction.
         _ = try #require(atlas.entry(for: keyB, generator: generator, font: font))
         #expect(atlas.generation > before, "eviction must bump the generation epoch")
     }

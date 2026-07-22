@@ -2,13 +2,6 @@ import Foundation
 import Testing
 @testable import LiveWallpaper
 
-/// Regression: layers with script-driven alpha must never be admitted by the
-/// static-layer cache. `applyingLayerAlpha` bakes the script value into
-/// `geometry.alpha` and clears `alphaAnimation` before classification, so the
-/// classifier alone cannot see them — they must arrive via `dynamicLayerIDs`.
-/// The original bug omitted `layerAlphaScriptInstances` from that union: an
-/// alpha-scripted layer with ≥2 composite passes and builtin-only shaders
-/// classified as static and froze at its first-cached alpha.
 struct WPEStaticCacheExclusionTests {
     @Test("Alpha-script layers are excluded from static caching")
     func alphaScriptLayersExcluded() {
@@ -40,9 +33,6 @@ struct WPEStaticCacheExclusionTests {
 
     @Test("Cross-layer alpha writes exclude the TARGET layer once written")
     func crossLayerAlphaWriteExcludesTarget() {
-        // A layer script can set another named layer's alpha via its `others`
-        // output; the target has no script of its own, so it is only knowable
-        // from the live alpha override map.
         let ids = WPEMetalSceneRenderer.staticCacheExcludedLayerIDs(
             originScriptIDs: [],
             scaleScriptIDs: [],

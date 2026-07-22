@@ -76,7 +76,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
     /// would otherwise saturate VRAM if every frame were pre-uploaded.
     /// See `WPETexLazyAnimatedTextureSource` for the on-demand decode +
     /// sub-rect crop + rotating-texture rationale.
-    // Not `@MainActor` (M2c1b-3c): called on the renderer's actor.
+    // Not `@MainActor`: called on the renderer's actor.
     func makeLazyAnimatedTextureSource(
         from payload: WPETexStreamingPayload,
         label: String
@@ -91,7 +91,7 @@ struct WPEMetalTextureLoader: @unchecked Sendable {
     /// the full atlas. Sub-rect metadata is retained on
     /// `WPETexAnimatedFrame.sourceSubRect` for shader-aware consumers
     /// (sprite-sheet background passes).
-    // Not `@MainActor` (M2c1b-3c): called on the renderer's actor.
+    // Not `@MainActor`: called on the renderer's actor.
     func makeAnimatedTextureSource(
         from payload: WPETexTexturePayload,
         label: String

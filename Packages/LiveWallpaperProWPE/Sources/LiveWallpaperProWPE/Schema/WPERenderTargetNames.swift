@@ -1,12 +1,7 @@
 import Foundation
 
-/// Canonical constructors/parsers/classifiers for the renderer's four internal
-/// `_rt_*` render-target name families. These names are cross-file, character-
-/// exact contracts (graph builder emits, executor/pool judge and reverse-parse);
-/// they were previously built from scattered string literals in both layers —
-/// ADR-001 B1 appendix A#54 / C#93–95. Name FORMATS are frozen: every function
-/// body here is a verbatim move of the pre-existing construction, never a
-/// redesign.
+/// Canonical constructors and parsers for renderer-internal `_rt_*` names.
+/// These names are exact contracts between graph construction, execution, and pooling.
 public enum WPERenderTargetNames {
 
     /// `_rt_imageLayerComposite_<objectID>_{a,b}` / `_rt_createdLayerComposite_<key>_{a,b}` pair.

@@ -1,17 +1,8 @@
 import Foundation
 import QuartzCore
 
-/// A persistent background thread that owns a live `CFRunLoop`, so a per-display
-/// render pipeline can drive frames off the main actor (M2c wires the real
-/// `CADisplayLink` onto this loop). Work is delivered FIFO and runs serially on
-/// this one thread — that single-thread guarantee is what `WPERenderThreadExecutor`
-/// relies on to be a valid `SerialExecutor`.
-///
-/// `@unchecked Sendable`: mutable loop state is published on the render thread and
-/// handed back through a semaphore before `init` returns (so it is fully formed and
-/// never re-written), and `state` is guarded by `stateLock`. CFRunLoop
-/// scheduling/wake calls are documented thread-safe. No field is mutated
-/// concurrently without a lock.
+/// Persistent serial render thread with a live run loop for display-link callbacks.
+/// Initialization handoff and mutable lifecycle state are synchronized before cross-thread access.
 final class WPERenderThread: @unchecked Sendable {
 
     enum State {
@@ -120,9 +111,7 @@ final class WPERenderThread: @unchecked Sendable {
     /// oracle for `checkIsolated()` / `assumeIsolated`.
     var isCurrent: Bool { Thread.current === backingThread }
 
-    /// The run loop that owns this thread. Exposed so M2c can add a main-thread
-    /// created `CADisplayLink` via `displayLink.add(to:forMode:)` (CFRunLoop source
-    /// registration is thread-safe).
+    /// The run loop that accepts main-thread-created display links.
     var runLoop: RunLoop { nsRunLoop }
 
     // MARK: - Work delivery

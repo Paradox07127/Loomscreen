@@ -28,14 +28,6 @@ struct WallpaperSessionSummaryCache: Equatable {
 }
 
 /// Equatable snapshot of the derived wallpaper-session state.
-///
-/// `markWallpaperSessionStateChanged()` and `notifyWallpaperSessionChanged()`
-/// used to drive three independent observable mutations on `ScreenManager`
-/// (version bump + summary-cache rebuild + Combine subject send), forcing
-/// SwiftUI consumers to re-evaluate three times per session change. Folding
-/// them into one `Equatable` struct lets us commit the new state in a single
-/// observable assignment: views invalidate at most once, and the equality
-/// guard skips the assignment entirely when nothing actually changed.
 struct WallpaperSessionState: Equatable {
     var version: UInt64 = 0
     var summaryCache: WallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
@@ -55,19 +47,12 @@ struct ScreenManagerStartupOptions: Equatable {
     /// SKU-driven feature toggles. Every production, test, and preview caller
     /// must explicitly choose Lite, Pro, or the fail-closed unconfigured state.
     var featureCatalog: FeatureCatalog
-    /// Strategy used to keep `ScreenConfiguration.wpeOrigin` in sync with
-    /// the active wallpaper. Defaults to the full Pro behaviour so the
-    /// monolithic app retains its current bookmark-matching semantics; Lite
-    /// will swap in `PreservingOriginReconciler` once Phase 4 splits ProWPE.
     #if LITE_BUILD
     var originReconciler: any OriginReconciler = PreservingOriginReconciler()
     #else
     var originReconciler: any OriginReconciler = WPEOriginReconciler()
     #endif
 
-    // Reference-typed protocol fields are not synthesizable for Equatable.
-    // Compare only the value-typed boolean configuration; injected dependencies
-    // are test-time concerns and equality is irrelevant for them.
     static func == (lhs: ScreenManagerStartupOptions, rhs: ScreenManagerStartupOptions) -> Bool {
         lhs.restoreSavedWallpapers == rhs.restoreSavedWallpapers
             && lhs.startAutomation == rhs.startAutomation
@@ -75,10 +60,7 @@ struct ScreenManagerStartupOptions: Equatable {
     }
 }
 
-/// The activity assertion used while at least one wallpaper is actively
-/// drawing. `userInitiatedAllowingIdleSystemSleep` keeps an LSUIElement app out
-/// of App Nap without adding the idle-system-sleep prevention bit carried by
-/// `.userInitiated`.
+/// The activity assertion used while at least one wallpaper is actively drawing.
 enum WallpaperRenderingActivityPolicy {
     static let options: ProcessInfo.ActivityOptions = .userInitiatedAllowingIdleSystemSleep
 }

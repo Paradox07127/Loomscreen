@@ -2,11 +2,7 @@ import CoreGraphics
 import Foundation
 import LiveWallpaperCore
 
-/// Raw system-state signals that drive the performance policy. Every value is
-/// the *ungated* reading (e.g. the detector's raw "is occluded", not already
-/// ANDed with a user setting) — `WallpaperPolicyEngine` is the single place
-/// that applies the relevant `GlobalSettings` toggle, so callers can't drift
-/// by gating one signal and forgetting another.
+/// Raw system-state signals consumed by the centralized performance policy.
 struct WallpaperPolicyInputs {
     var powerSource: PowerMonitor.PowerSource
     var isHiddenByFullScreen: Bool
@@ -16,14 +12,12 @@ struct WallpaperPolicyInputs {
     var isGameModeActive: Bool
     var isUserAbsent: Bool
     var isUnderMemoryPressure: Bool
-    /// Frontmost app carries a `.neverPause` exception — vetoes the
-    /// discretionary suspends below (but not the safety ones).
+    /// Vetoes discretionary suspension without overriding safety suspension.
     var isFrontmostExcludedByRule: Bool = false
 }
 
 enum WallpaperPolicyEngine {
-    /// `inputs` carries raw signals; `settings` gates them here so the rule
-    /// table lives in exactly one place.
+    /// Resolves raw signals and user settings into a single performance profile.
     static func performanceProfile(
         inputs: WallpaperPolicyInputs,
         settings: GlobalSettings

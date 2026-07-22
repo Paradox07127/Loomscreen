@@ -103,18 +103,11 @@ struct PIISanitizerTests {
         #expect(scrubbed == raw)
     }
 
-    /// Regression: a co-resident account whose name extends the running user's
-    /// (`/Users/al` home vs `/Users/alice/…`) must be fully redacted, not turned
-    /// into a partial-name leak like `~ice/…` by an unbounded HOME substring pass.
     @Test("Does not leak a username that extends the HOME path")
     func doesNotLeakPrefixExtendingUsername() {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
         guard home.hasPrefix("/Users/") else { return }
 
-        // Synthesize a *different* user whose path starts with the real home
-        // string but continues past its component boundary. Under the sandboxed
-        // test runner HOME is the container path, so build the expectation
-        // dynamically; the complete absolute path is reduced to its leaf.
         let neighbor = home + "xyz/Movies/private.mov"
         let scrubbed = PIISanitizer.scrub(neighbor)
 
@@ -122,8 +115,6 @@ struct PIISanitizerTests {
         #expect(scrubbed == "<path>/private.mov")
     }
 
-    /// The running user's own home is still collapsed to `~` at a component
-    /// boundary and leaves no `/Users/<name>` residue behind.
     @Test("Collapses own HOME to ~ at a path boundary")
     func collapsesOwnHomeAtBoundary() {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
@@ -142,7 +133,6 @@ struct PIISanitizerTests {
         #expect(scrubbed.contains("<host-redacted>"))
         #expect(!scrubbed.contains("Johns-MacBook-Pro"))
 
-        // Ordinary DNS hosts are preserved on purpose (triage value).
         let url = PIISanitizer.scrub("GET https://cdn.example.com/a.mp4 failed")
         #expect(url.contains("cdn.example.com"))
     }
@@ -161,10 +151,6 @@ struct PIISanitizerTests {
         #expect(!scrubbed.contains("fe23"))
     }
 
-    /// Regression: the expanded-form rule alone never matched `::` shapes —
-    /// `fe80::1` passed through untouched and `2001:db8::8a2e:370:7334` lost
-    /// only its tail, leaking the routing prefix (the household-identifying
-    /// half) into a publicly-postable report.
     @Test("Redacts compressed IPv6 addresses whole, no prefix remnant")
     func redactsCompressedIPv6() {
         let linkLocal = PIISanitizer.scrub("Route via fe80::1 is down")
@@ -179,8 +165,6 @@ struct PIISanitizerTests {
         #expect(!mixed.contains("db8"))
     }
 
-    /// The compressed rule must not eat scope-resolution operators, bare `::`,
-    /// single-colon diagnostic tags, or the outputs of earlier redaction rules.
     @Test("Compressed IPv6 rule leaves non-address :: shapes alone")
     func preservesNonAddressDoubleColons() {
         #expect(PIISanitizer.scrub("Foo::bar") == "Foo::bar")
@@ -190,7 +174,6 @@ struct PIISanitizerTests {
         let metal = "program_source:1198:24: error: use of undeclared identifier 'v'"
         #expect(PIISanitizer.scrub(metal) == metal)
 
-        // Idempotence: placeholders from prior rules must not re-match.
         let placeholders = "<steamid-redacted> and <ip-redacted> stay put"
         #expect(PIISanitizer.scrub(placeholders) == placeholders)
     }
@@ -200,7 +183,6 @@ struct PIISanitizerTests {
         let scrubbed = PIISanitizer.scrub("Resolved owner 76561198012345678 for item 3226487183")
         #expect(scrubbed.contains("owner <steamid-redacted>"))
         #expect(!scrubbed.contains("76561198012345678"))
-        // Workshop item IDs are not SteamID64-shaped and must survive.
         #expect(scrubbed.contains("3226487183"))
     }
 
@@ -213,8 +195,6 @@ struct PIISanitizerTests {
 
     @Test("Redacts Steam account and persona names mid-line")
     func redactsSteamAccountNames() {
-        // Mid-line, timestamp-prefixed shapes — the Workshop redactor's
-        // `^`-anchored rules would miss these; PIISanitizer must not.
         let account = PIISanitizer.scrub("doctor: Account: gaben_at_home ")
         #expect(account.contains("Account: <redacted>"))
         #expect(!account.contains("gaben_at_home"))
@@ -240,21 +220,12 @@ struct PIISanitizerTests {
         #expect(!scrubbed.contains("ssfn1234567890123456789"))
     }
 
-    /// Version strings, ISO-8601 log timestamps, workshop IDs, and file:line
-    /// tags must survive the new IP/hostname rules. Three-part versions are
-    /// structurally safe (the IPv4 rule requires exactly four groups); the
-    /// timestamp is safe because `T` glues date to time with no word boundary
-    /// ahead of `12:34:56`.
     @Test("New rules do not eat versions, timestamps, or file:line tags")
     func preservesVersionsTimestampsAndLineTags() {
         let raw = "2026-07-07T12:34:56.789Z [WPE] [ERROR] Render.swift:42 — LiveWallpaper 0.2.0 (417) on macOS 15.5.0"
         #expect(PIISanitizer.scrub(raw) == raw)
     }
 
-    /// Documented over-redaction choice: `WorkshopDiagnosticRedactor` does not
-    /// disambiguate 4-part version strings from IPv4 (its comments accept
-    /// false positives), and PIISanitizer mirrors that — for a public bug
-    /// report, over-redaction is the safe direction.
     @Test("Four-part dotted quads are redacted by design")
     func redactsFourPartDottedQuads() {
         let scrubbed = PIISanitizer.scrub("installer 1.2.3.4 finished")

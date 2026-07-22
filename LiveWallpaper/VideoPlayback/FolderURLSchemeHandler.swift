@@ -24,9 +24,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     nonisolated static let host = "wallpaper"
     nonisolated static let responseChunkSize = 64 * 1024
 
-    /// CSP attached to responses while `cspEnforcementEnabled` is on. v2
-    /// baseline from `docs/2026-05-28-steam-workshop-integration-plan.md`
-    /// (Phase 4).
+    /// CSP attached to responses while `cspEnforcementEnabled` is on.
     ///
     /// Hard wins kept regardless of audit outcome:
     /// - `frame-src 'none'` blocks clickjacking and nested document attacks.
@@ -34,7 +32,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// - `form-action 'none'` denies `<form>` exfiltration submits.
     /// - `base-uri 'none'` denies `<base href>` redirect attacks.
     ///
-    /// Compatibility allowances (validated by the Phase 0 step 10 audit):
+    /// Compatibility allowances required by the supported WPE web corpus:
     /// - `unsafe-inline` / `unsafe-eval` are required by the legitimate WPE
     ///   web project corpus (inline `<script>` and dynamic property eval).
     /// - `connect-src https:` allows outbound HTTPS so weather / clock / news

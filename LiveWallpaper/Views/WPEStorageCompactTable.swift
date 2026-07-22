@@ -14,12 +14,7 @@ struct WPEStorageRowItem: Identifiable, Sendable {
     let folderURL: URL?
 }
 
-/// Dense, single-line file list modeled on the macOS "Storage → Documents"
-/// management table: small type icon · Name · Kind · right-aligned Size, fixed
-/// compact row height, alternating row tint, hover-revealed reveal-in-Finder
-/// action, and a fixed-height internal scroll so a large library never floods
-/// the settings page. FLAT per the app's locked visual language (glass is for
-/// floating chrome, not content lists).
+/// Displays WPE files in a compact storage-management table.
 struct WPEStorageCompactTable: View {
     let items: [WPEStorageRowItem]
     /// When true the row area fills the offered height (for a sheet); otherwise
@@ -29,7 +24,6 @@ struct WPEStorageCompactTable: View {
 
     private let rowHeight: CGFloat = 30
     private let maxVisibleRows = 10
-    // Per-column widths — tune here. Name flexes to fill the remainder.
     private let idWidth: CGFloat = 96
     private let kindWidth: CGFloat = 64
     private let sizeWidth: CGFloat = 74
@@ -40,9 +34,6 @@ struct WPEStorageCompactTable: View {
         VStack(spacing: 0) {
             header
             Divider()
-            // Fill mode (sheet): take all offered height. Inline mode: size to
-            // content and only wrap in a ScrollView when it overflows, so an
-            // inner ScrollView in the Form doesn't hijack the wheel for a few rows.
             if fill {
                 ScrollView {
                     LazyVStack(spacing: 0) { rows }
@@ -90,8 +81,6 @@ struct WPEStorageCompactTable: View {
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
             .frame(width: sizeWidth, alignment: .trailing)
-            // Reserve the action column WITHOUT a greedy Color (a width-only
-            // Color.clear expands vertically and stretches the header).
             Spacer().frame(width: actionWidth)
         }
         .font(.caption2)
@@ -146,8 +135,6 @@ private struct WPEStorageTableRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: sizeWidth, alignment: .trailing)
 
-            // Always in the tree (a11y reaches it via the row action below);
-            // opacity only reveals it on hover so the layout never shifts.
             Group {
                 if let url = item.folderURL {
                     Button { onOpen(url) } label: {

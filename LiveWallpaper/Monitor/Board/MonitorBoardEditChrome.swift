@@ -3,11 +3,6 @@ import SwiftUI
 import LiveWallpaperCore
 
 // MARK: - Widget drag gesture
-//
-// Drives the interaction model from a SwiftUI drag. ⌘/⌥ held bypasses snapping
-// (Apple's escape valve) — SwiftUI drags don't carry modifier state, so we read
-// `NSEvent.modifierFlags` live. The gesture only mutates interaction state; no
-// config write happens until drag-end (via the model).
 
 struct WidgetDragModifier: ViewModifier {
     @ObservedObject var model: MonitorBoardInteractionModel
@@ -29,15 +24,11 @@ struct WidgetDragModifier: ViewModifier {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(MonitorBoardCoordinateSpace.name))
             .onChanged { value in
                 if model.drag?.widgetID != placement.id {
-                    // Grab offset = pointer position within the RENDERED rect, so
-                    // the tile tracks the cursor without jumping.
                     let render = geometry.renderRect(forRawRect: restRawRect)
                     let offset = CGSize(
                         width: value.startLocation.x - render.minX,
                         height: value.startLocation.y - render.minY
                     )
-                    // Convert the render-relative grab to a raw-relative grab so
-                    // the model's free-origin math (raw rects) lines up.
                     let rawOffset = CGSize(
                         width: offset.width + geometry.tileInsetX,
                         height: offset.height + geometry.tileInsetY
@@ -60,10 +51,7 @@ enum MonitorBoardCoordinateSpace {
 
 // MARK: - Floating control bar (size toggle + settings + remove)
 
-/// Per-widget edit controls that float around the selected tile: an S/M/L size
-/// segmented control (driven by `kind.allowedSizes`), a settings button, and a
-/// remove button. Restrained styling; the shared library restyles later. The
-/// placement modifier keeps the whole bar inside the board on every edge.
+/// Per-widget edit controls that float around the selected tile: an S/M/L size segmented control (driven by `kind.allowedSizes`), a settings button, and a remove button.
 struct MonitorWidgetControlBar: View {
     @ObservedObject var model: MonitorBoardInteractionModel
     let placement: MonitorWidgetPlacement
@@ -88,8 +76,6 @@ struct MonitorWidgetControlBar: View {
 
     @ViewBuilder
     private var sizeSegment: some View {
-        // Only the kind's allowed sizes (e.g. processes is medium-only). A single
-        // allowed size means no toggle is useful, so the segment is hidden.
         let allowed = placement.kind.allowedSizes
         if allowed.count > 1 {
             HStack(spacing: 2) {
@@ -97,8 +83,6 @@ struct MonitorWidgetControlBar: View {
                     Button {
                         if !model.setSize(placement.id, to: size) { flashDeny() }
                     } label: {
-                        // Size code ("S" / "M" / "L") — technical notation, identical
-                        // in every language, so rendered verbatim (not catalogued).
                         Text(verbatim: size.rawValue.uppercased())
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.8)
@@ -157,11 +141,7 @@ struct MonitorWidgetControlBar: View {
 
 // MARK: - Edit toolbar (add + done)
 
-/// The board's own edit-mode toolbar: a top-centre pill merging an "Add Widget"
-/// button that opens the catalog and a "Done" button that exits edit mode (the
-/// exit affordance the menu-entered edit mode needs). Restrained dark chrome
-/// matching the floating control bar; the shared library restyles later. The Add
-/// button publishes its board-space frame so the catalog can anchor beneath it.
+/// The board's own edit-mode toolbar: a top-centre pill merging an "Add Widget" button that opens the catalog and a "Done" button that exits edit mode (the exit affordance the menu-entered edit mode needs).
 struct MonitorBoardEditToolbar: View {
     @ObservedObject var model: MonitorBoardInteractionModel
 
@@ -220,17 +200,10 @@ struct MonitorBoardEditToolbar: View {
 
 // MARK: - Add-widget catalog
 
-/// Minimal catalog panel listing the available widget kinds (gated kinds hidden
-/// when the fleet feature is off). Clicking a kind places it at the first-fit
-/// free position. The grid scrolls inside a capped height so the panel never
-/// overruns the board; the caller anchors it beneath the Add Widget button.
+/// Minimal catalog panel listing the available widget kinds (gated kinds hidden when the fleet feature is off).
 struct MonitorCatalogView: View {
     @ObservedObject var model: MonitorBoardInteractionModel
-    /// Upper bound on the scrolling grid's height (mock: `max-height: 56vh`); the
-    /// grid takes its natural height up to this, then scrolls.
     let maxScrollHeight: CGFloat
-    // Unmeasured ⇒ cap at maxScrollHeight (never collapse to 0); the measured
-    // content height then shrinks the region to fit sparse grids.
     @State private var contentSize: CGSize?
 
     private let columns = [GridItem(.adaptive(minimum: 140), spacing: 10)]
@@ -296,7 +269,6 @@ struct MonitorCatalogView: View {
                             .foregroundStyle(Color(red: 0.85, green: 0.7, blue: 0.35))
                     }
                 }
-                // Allowed size codes ("S · M · L") — technical notation, verbatim.
                 Text(verbatim: kind.allowedSizes.map { $0.rawValue.uppercased() }.joined(separator: " · "))
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.4))
@@ -316,9 +288,7 @@ struct MonitorCatalogView: View {
 
 // MARK: - Panel size reader
 
-/// Reports the modified view's size into a binding. Refinement only — callers
-/// place from a known/estimated size first, so an unreported size can never
-/// leave a panel invisible or unplaced.
+/// Reports the modified view's size into a binding.
 struct MonitorPanelSizeReader: ViewModifier {
     @Binding var size: CGSize?
 
@@ -335,14 +305,7 @@ struct MonitorPanelSizeReader: ViewModifier {
 
 // MARK: - Settings card
 
-/// The board's inline settings card: the shared `MonitorWidgetSettingsPopover`
-/// (native controls — size picker, kind-specific options, remove) wrapped in a
-/// dark material so it stays legible floating over the wallpaper/overlay. Edits
-/// route back through the interaction model (`updateWidget` handles the resize
-/// refit; the placement command handles removal). Forced dark so the native controls
-/// render light-on-dark regardless of the desktop appearance. Width is fixed
-/// (`cardWidth`, matching the popover's own frame) so the board can place the
-/// card deterministically; content taller than `maxHeight` scrolls internally.
+/// Hosts widget settings in a legible overlay card.
 struct MonitorWidgetSettingsCard: View {
     @ObservedObject var model: MonitorBoardInteractionModel
     let placement: MonitorWidgetPlacement
@@ -379,9 +342,7 @@ struct MonitorWidgetSettingsCard: View {
     }
 }
 
-/// Placement accessibility actions are exposed only while the board is in edit
-/// mode. Each action carries the tile identity directly, so VoiceOver never
-/// changes selection merely to move or delete a different selected sibling.
+/// Placement accessibility actions are exposed only while the board is in edit mode.
 struct MonitorPlacementAccessibilityActions: ViewModifier {
     @ObservedObject var model: MonitorBoardInteractionModel
     let placementID: UUID
@@ -413,9 +374,7 @@ struct MonitorPlacementAccessibilityActions: ViewModifier {
 
 // MARK: - Board-chrome layout preference keys
 
-/// The Add Widget button's frame in the board coordinate space, so the catalog
-/// can anchor directly beneath it. Reduce ignores the `.zero` default siblings
-/// emit, so the real value always wins.
+/// The Add Widget button's frame in the board coordinate space, so the catalog can anchor directly beneath it.
 struct MonitorAddButtonFrameKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
@@ -425,14 +384,8 @@ struct MonitorAddButtonFrameKey: PreferenceKey {
 }
 
 // MARK: - User-facing strings (centralized catalog keys)
-//
-// Every string is a `LocalizedStringKey`, so `Text(key)` / `.help(key)` resolve
-// through the app's string catalog (all four languages). "PRO" reads identically
-// in every language but is catalogued for a uniform, complete table.
 
 enum MonitorBoardStrings {
-    // Computed (not stored) so the enum stays Sendable under strict concurrency —
-    // each access yields a fresh `LocalizedStringKey`.
     static var addWidget: LocalizedStringKey { "Add Widget" }
     static var removeWidget: LocalizedStringKey { "Remove" }
     static var moveLeft: LocalizedStringKey { "Move Left" }

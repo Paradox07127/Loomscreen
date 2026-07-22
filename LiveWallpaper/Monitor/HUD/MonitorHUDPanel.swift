@@ -1,12 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Borderless, non-activating floating panel that hosts the fleet HUD capsule
-/// above every space and full-screen app. Sizes itself to the SwiftUI content
-/// and persists a user-dragged origin so the capsule stays where the user put it.
-///
-/// Not focus-stealing: `.nonactivatingPanel` + `hidesOnDeactivate = false` keep
-/// the panel visible and click-through-friendly while the user works elsewhere.
+/// Borderless, non-activating floating panel that hosts the fleet HUD capsule above every space and full-screen app.
 final class MonitorHUDPanel: NSPanel {
 
     /// Persisted bottom-left origin (screen coordinates). Absent until the user
@@ -49,17 +44,14 @@ final class MonitorHUDPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        // Keep the rounded capsule's corners transparent (no square backing).
         contentView?.wantsLayer = true
 
-        // Don't participate in window cycling / restoration; it's an accessory.
         isExcludedFromWindowsMenu = true
         isRestorable = false
         animationBehavior = .utilityWindow
 
         let hosting = NSHostingView(rootView: AnyView(rootView.appLanguageScoped()))
         hosting.translatesAutoresizingMaskIntoConstraints = false
-        // Let the capsule size the window instead of the reverse.
         if #available(macOS 13.0, *) {
             hosting.sizingOptions = [.preferredContentSize]
         }
@@ -70,9 +62,7 @@ final class MonitorHUDPanel: NSPanel {
 
     // MARK: - Placement
 
-    /// Places the panel at its persisted origin (validated on-screen) or the
-    /// default bottom-right corner of the main screen. Called after the content
-    /// has laid out so the frame size is known.
+    /// Places the panel at its persisted origin (validated on-screen) or the default bottom-right corner of the main screen.
     func applyInitialPlacement() {
         layoutIfNeeded()
         let size = frame.size
@@ -95,8 +85,6 @@ final class MonitorHUDPanel: NSPanel {
             y: CGFloat(defaults.double(forKey: Self.originYKey))
         )
         let candidate = NSRect(origin: point, size: size)
-        // Reject an off-screen origin (display reconfig / unplugged monitor) and
-        // fall back to the default corner rather than stranding the capsule.
         guard Self.isMostlyOnScreen(candidate) else { return nil }
         return point
     }
@@ -143,8 +131,6 @@ final class MonitorHUDPanel: NSPanel {
     }
 
     @objc private func screenParametersChanged() {
-        // Re-validate: if the persisted/default origin is now off-screen (a
-        // display was removed), snap back onto a live screen.
         let candidate = frame
         if !Self.isMostlyOnScreen(candidate) {
             setFrameOrigin(defaultOrigin(for: frame.size))

@@ -8,7 +8,7 @@ import os
 import simd
 
 extension WPEMetalRenderExecutor {
-    /// Phase 2D-N: composite a list of pre-rasterized text overlays on top of the supplied output texture.
+    /// Composites pre-rasterized text overlays onto the supplied output texture.
     func drawTextOverlays(
         overlays: [WPETextOverlayDraw],
         sceneSize: CGSize,

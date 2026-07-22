@@ -1,15 +1,10 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Inspector-header popover for quick-saving the current wallpaper. The full
-/// library list deliberately lives only on the sidebar Bookmarks page —
-/// duplicating it here turned the quick-save flow into a scrollable picker.
+/// Inspector-header popover for quick-saving the current wallpaper.
 struct BookmarksPopover: View {
     let screen: Screen
-    /// Content the inspector is currently showing — passed in so a video
-    /// already bookmarked doesn't light up the button when the user has
-    /// switched to the HTML tab. nil = "no content for this tab yet"
-    /// (renders the guidance message).
+    /// Content the inspector is currently showing — passed in so a video already bookmarked doesn't light up the button when the user has switched to the HTML tab.
     let candidateContent: WallpaperContent?
 
     @Environment(ScreenManager.self) private var screenManager
@@ -146,10 +141,7 @@ struct BookmarksPopover: View {
         dismiss()
     }
 
-    /// Keep the TextField in sync with whichever bookmark (if any) matches
-    /// the current wallpaper. Tracks the bookmark id we last initialized
-    /// against so the user's in-progress edits aren't clobbered by
-    /// `@Observable` updates from elsewhere in the app.
+    /// Keep the TextField in sync with whichever bookmark (if any) matches the current wallpaper.
     private func syncDraft(with existing: WallpaperBookmark?) {
         let key = existing?.id
         guard draftInitializedFor != key else { return }

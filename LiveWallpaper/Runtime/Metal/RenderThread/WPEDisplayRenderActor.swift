@@ -6,21 +6,13 @@ import LiveWallpaperCore
 import LiveWallpaperProWPE
 #endif
 
-/// Per-display render isolation domain. One instance per `NSScreen`. Its isolation
-/// runs either on a dedicated `WPERenderThread` (via a custom `SerialExecutor`,
-/// SE-0392) or on the main run loop, chosen at construction by `Backing` — the
-/// M2c1 `WPEOffMainRenderFlag` picks it. `.renderThread` moves frame work off the
-/// main actor; `.main` keeps it on the main thread through the identical code
-/// path. M2c attaches the display link and moves the draw call here.
+/// Per-display render isolation domain backed by either a dedicated serial render
+/// thread or the main run loop.
 actor WPEDisplayRenderActor {
 
-    /// Which thread this actor's isolation runs on. The M2c1 flag
-    /// (`WPEOffMainRenderFlag`) picks the backing; both modes drive the exact
-    /// same isolated code path, so the backing thread is the only variable.
+    /// Selects the executor backing while preserving one isolated render path.
     enum Backing {
-        /// The main run loop — the flag-off default. The actor is main-isolated
-        /// (its `unownedExecutor` is `MainActor`'s), so every hop into isolation
-        /// stays on the main thread exactly as the pre-migration renderer did.
+        /// Uses `MainActor`'s executor and run loop.
         case main
         /// A dedicated `WPERenderThread`, moving frame work off the main actor.
         case renderThread
@@ -34,12 +26,7 @@ actor WPEDisplayRenderActor {
     nonisolated let unownedExecutor: UnownedSerialExecutor
 
     #if !LITE_BUILD
-    /// The scene renderer this display owns (M2c1b-3c). Held as isolated state:
-    /// the renderer is non-`Sendable` and now lives entirely inside this actor's
-    /// isolation. It is reached only through the `withRenderer*` entries (sync
-    /// frame path / setters / diagnostics) or the renderer's own async methods,
-    /// which take `isolated WPEDisplayRenderActor` so they run on this actor.
-    /// Constructed on the main thread and `sending`-adopted here (see `adopt`).
+    /// Non-`Sendable` renderer owned entirely by this actor's isolation domain.
     private var renderer: WPEMetalSceneRenderer?
 
     /// FIFO delivery channel for fire-and-forget config/geometry setters. Replaces
@@ -93,8 +80,7 @@ actor WPEDisplayRenderActor {
         // End the config consumer so it doesn't outlive the actor.
         configContinuation.finish()
         #endif
-        // Safety net so a dropped actor never leaks its thread. Idempotent with an
-        // explicit M2c `shutdown()`; a no-op if already stopped (or main-backed).
+        // Safety net so a dropped actor never leaks its dedicated thread.
         thread?.shutdown()
     }
 
@@ -107,14 +93,8 @@ actor WPEDisplayRenderActor {
         try body(self)
     }
 
-    /// Synchronous entry for callbacks that are *already* on the render thread
-    /// (M2c's `CADisplayLink` selector fires here because the link is added to this
-    /// thread's run loop). `assumeIsolated` verifies that via the executor's
-    /// `checkIsolated()` and then grants synchronous isolated access without a hop.
-    ///
-    /// Safety: only valid when the current thread is this actor's render thread. If
-    /// it is not, `checkIsolated()` traps rather than corrupting isolated state —
-    /// so a misrouted callback fails loudly instead of racing.
+    /// Grants synchronous actor access to callbacks already executing on this actor's thread.
+    /// Executor isolation checks trap a misrouted callback before it can race state.
     nonisolated func assumeIsolatedOnRenderThread<T: Sendable>(
         _ body: (isolated WPEDisplayRenderActor) throws -> T
     ) rethrows -> T {
@@ -131,15 +111,9 @@ actor WPEDisplayRenderActor {
     /// that `checkIsolated()` would raise.
     nonisolated var isOnRenderThread: Bool { thread?.isCurrent ?? Thread.isMainThread }
 
-    // MARK: - Render-loop wiring (M2c surface)
-    //
-    // M2c creates the `CADisplayLink` on the main thread (NSScreen requires it),
-    // then attaches it here so its selector fires on the render thread — where the
-    // callback enters isolation via `assumeIsolatedOnRenderThread`.
+    // MARK: - Render-loop Wiring
 
-    /// The run loop backing this actor's isolation. M2c may attach a main-thread
-    /// created `CADisplayLink` directly (`displayLink.add(to:forMode:)`). For a
-    /// `.main` backing this is the process main run loop.
+    /// The run loop backing this actor's isolation; `.main` uses the process main loop.
     nonisolated var renderRunLoop: RunLoop { thread?.runLoop ?? .main }
 
     nonisolated func add(_ displayLink: CADisplayLink, forMode mode: RunLoop.Mode = .common) {
@@ -198,7 +172,7 @@ actor WPEDisplayRenderActor {
     #endif
 
     #if !LITE_BUILD
-    // MARK: - Renderer ownership (M2c1b-3c)
+    // MARK: - Renderer Ownership
 
     /// Adopt the main-thread-constructed renderer into this actor's isolation.
     /// `sending` because the renderer leaves the caller's region for good; after
@@ -256,7 +230,7 @@ actor WPEDisplayRenderActor {
         thread.noteFrameDuration(CACurrentMediaTime() - start)
     }
 
-    // MARK: - CADisplayLink frame driver (M2c2, `.renderThread` only)
+    // MARK: - CADisplayLink Frame Driver
     //
     // The link is created on the main thread (the `NSScreen.displayLink` API is
     // main-only) and handed here through a one-shot carrier. From that point ALL
@@ -433,7 +407,7 @@ actor WPEDisplayRenderActor {
         renderer = nil
     }
 
-    // MARK: - Config forwarders (M2c1b-3c)
+    // MARK: - Configuration Forwarders
     //
     // Named methods rather than `withRenderer` closures: the session/adapter are
     // `@MainActor`, so a closure they build is main-isolated and cannot be sent to

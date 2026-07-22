@@ -2,11 +2,7 @@
 import LiveWallpaperCore
 import SwiftUI
 
-/// Pro-only inspector card that mirrors Wallpaper Engine's right-hand
-/// property panel for an imported web project. Hidden in Lite via the
-/// `#if !LITE_BUILD` wrapper (the SPM source-file layout would otherwise
-/// pull this view into the lightweight runtime, even though the Lite
-/// capability catalog has no `wpeImport`).
+/// Pro-only inspector card that mirrors Wallpaper Engine's right-hand property panel for an imported web project.
 struct WPEProjectCustomSettingsCard: View {
     private typealias ValueLogic = WPEProjectPropertyValueLogic
 
@@ -141,19 +137,11 @@ struct WPEProjectCustomSettingsCard: View {
             let optionsCoverCurrent = property.options.contains { $0.value == currentValue }
             WPEProjectSettingRow(title: property.displayText) {
                 if property.options.isEmpty {
-                    // Author shipped a combo with no `options[]`. There is
-                    // nothing the user can switch between — mark as
-                    // unavailable instead of rendering an empty Picker.
                     Text(verbatim: currentValue.stringValue)
                         .font(DesignTokens.Typography.code)
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("", selection: valueBinding(for: property)) {
-                        // If the persisted value lies outside the option
-                        // set, surface it as a synthetic "Custom (…)" tag
-                        // so the Picker still has a matching selection and
-                        // the user can see why their override looks
-                        // foreign.
                         if !optionsCoverCurrent {
                             Text(verbatim: "·  \(currentValue.stringValue)")
                                 .tag(currentValue)
@@ -185,13 +173,7 @@ struct WPEProjectCustomSettingsCard: View {
                     .accessibilityLabel(property.displayText)
             }
         case .file, .directory:
-            // WPE web projects expect to load arbitrary local paths
-            // through `applyUserProperties`, but our `WKWebView` only has
-            // read access scoped to the project folder via
-            // `FolderURLSchemeHandler`. Picking an outside path would
-            // silently fail at the WebKit boundary, so the row is shown
-            // as informational only — no picker — until we ship a
-            // proper sandbox bridge.
+            // WPE web projects expect to load arbitrary local paths through `applyUserProperties`, but our `WKWebView` only has read access scoped to the project folder via `FolderURLSchemeHandler`.
             WPEProjectSettingRow(
                 icon: property.type == .file ? "doc.badge.plus" : "folder.badge.plus",
                 iconColor: .secondary,
@@ -338,6 +320,3 @@ struct WPEProjectCustomSettingsCard: View {
 }
 
 #endif
-// Shared widgets `WPEProjectSettingRow`, `WPEProjectTextBlock`,
-// `WPEProjectNotice` were extracted to `WPEProjectSettingWidgets.swift`
-// so the scene-side `WPESceneCustomSettingsCard` can render the same UI.

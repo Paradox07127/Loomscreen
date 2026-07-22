@@ -5,29 +5,17 @@ import LiveWallpaperCore
 import LiveWallpaperProWPE
 import Metal
 
-/// One pre-uploaded animation frame: a Metal texture sized to the TEXS
-/// sub-rect, plus the source-space sub-rect for debug / asset audit.
-/// `duration` is per-frame so variable-rate TEXS schedules don't get
-/// flattened to the average frame rate at render time.
-///
-/// Not declared `Sendable` because `MTLTexture` isn't `Sendable` either;
-/// instances always live inside `WPETexAnimatedTextureSource`, which is
-/// itself `@MainActor`-isolated, so the frame never crosses an isolation
-/// boundary independently.
+/// A pre-uploaded TEXS animation frame with source bounds and variable-frame duration.
+/// It remains within its renderer isolation domain because `MTLTexture` is not `Sendable`.
 struct WPETexAnimatedFrame {
     let texture: MTLTexture
     let sourceSubRect: CGRect?
     let duration: TimeInterval
 }
 
-/// Phase 2E animated `.tex` source. Per the loader invariant
-/// (`WPEMetalTextureLoader.makeAnimatedTextureSource`), every frame shares the
-/// WHOLE-atlas `MTLTexture` for its source image and carries its TEXS
-/// `sourceSubRect`; `texture(at:)` therefore returns the full atlas and selects
-/// the current frame on a per-frame duration timeline (variable-rate safe).
-/// Shader-aware consumers (particle sprite sheets) slice the atlas via
-/// `spriteSheetFrameRectsNormalized()` instead of relying on per-frame crops.
-// Not `@MainActor` (M2c1b-3c): lives inside the renderer's actor isolation.
+/// Plays variable-duration TEXS frames from shared atlas textures.
+/// Shader consumers use normalized frame rectangles to select atlas regions.
+// Not `@MainActor`: lives inside the renderer's actor isolation.
 final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
     private let frames: [WPETexAnimatedFrame]
     private let frameStartTimes: [TimeInterval]

@@ -23,8 +23,6 @@ struct MenuBarContent: View {
     private var monitor: SystemMonitor { .shared }
 
     private var isWallpaperEnabled: Bool {
-        // The master switch reflects the independent render gate — NOT whether a
-        // screen is currently playing/paused (that's per-screen state).
         screenManager.wallpapersGloballyEnabled
     }
 
@@ -80,9 +78,7 @@ struct MenuBarContent: View {
         monitor.stopMonitoring()
     }
 
-    /// Subtle horizontal rule used between sections inside the single glass
-    /// shell. Slightly more visible than a system `Divider()` because the
-    /// shell already adds material contrast around it.
+    /// Subtle horizontal rule used between sections inside the single glass shell.
     private var sectionDivider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.08))
@@ -172,9 +168,7 @@ struct MenuBarContent: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// "Edit Widgets" entry, shown only while a Monitor wallpaper is live. Taps
-    /// enter board edit mode on every live Monitor board; the board's own Done
-    /// control exits. Mirrors the display row's icon-tile + label layout.
+    /// "Edit Widgets" entry, shown only while a Monitor wallpaper is live.
     private var editWidgetsRow: some View {
         Button(action: invokeEditMonitorWidgets) {
             HStack(spacing: 8) {
@@ -262,9 +256,7 @@ struct MenuBarContent: View {
     private var overlayEnabled: Bool { screenManager.isMonitorOverlayEnabled }
     private var overlayLevel: MonitorOverlayLevel { screenManager.monitorOverlayLevel }
 
-    /// Master toggle for the floating Monitor widget board, plus its layer / edit
-    /// controls when it's on. The board floats over whatever wallpaper each display
-    /// shows — independent of the wallpaper type.
+    /// Master toggle for the floating Monitor widget board, plus its layer / edit controls when it's on.
     @ViewBuilder
     private var monitorOverlaySection: some View {
         monitorOverlayToggleRow
@@ -373,9 +365,7 @@ struct MenuBarContent: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    /// `ProcessInfo.ThermalState` has no numeric percent, so surface a short
-    /// word; the label + tint carry the signal, so over-wide localised values
-    /// truncate gracefully.
+    /// `ProcessInfo.ThermalState` has no numeric percent, so surface a short word; the label + tint carry the signal, so over-wide localised values truncate gracefully.
     private func thermalShortLabel(for state: ProcessInfo.ThermalState) -> String {
         switch state {
         case .nominal:  return String(localized: "OK", defaultValue: "OK", comment: "Menu bar TEMP status: thermal state nominal. Keep short — ideally ≤4 Latin characters or equivalent width.")
@@ -404,9 +394,7 @@ struct MenuBarContent: View {
         return DesignTokens.Colors.Status.active
     }
 
-    /// Semantic colour lives only in the dot so the value can stay high-contrast
-    /// `.primary` — coloured text on the menu's pale glass falls well under the
-    /// 4.5:1 readable ratio (green/orange on near-white).
+    /// Semantic colour lives only in the dot so the value can stay high-contrast `.primary` — coloured text on the menu's pale glass falls well under the 4.5:1 readable ratio (green/orange on near-white).
     private func performanceItem(tint: Color, label: String, value: String) -> some View {
         HStack(spacing: 5) {
             Circle()
@@ -609,9 +597,6 @@ struct MenuBarContent: View {
     }
 
     private func togglePlayback(for screen: Screen) {
-        // Route through ScreenManager so scene/HTML toggles commit the derived
-        // session state (video relies on a player notification; non-video
-        // sessions don't post one).
         screenManager.togglePlayback(for: screen)
     }
 
@@ -648,21 +633,17 @@ struct MenuBarContent: View {
     }
 
     private func invokeEditMonitorWidgets() {
-        // Dismiss the popover so the board's edit chrome is unobstructed.
         dismiss()
         screenManager.setMonitorWidgetsEditing(true)
     }
 
     private func invokeEditMonitorOverlayWidgets() {
-        // Dismiss the popover so the overlay's edit chrome is unobstructed.
         dismiss()
         screenManager.setMonitorOverlayWidgetsEditing(true)
     }
 }
 
-/// Fixed spacing / padding metrics for the menu-bar popover. Tuned for the
-/// single-shell layout where the outer Liquid Glass capsule already provides
-/// breathing room; values match the previous "comfortable" preset.
+/// Fixed spacing / padding metrics for the menu-bar popover.
 private enum MenuBarMetrics {
     static let popoverWidth: CGFloat = 300
     static let outerPadding: CGFloat = 10
@@ -706,9 +687,6 @@ private enum DisplayVisualState: Equatable {
 }
 
 /// Outer Liquid Glass shell wrapping the popover.
-/// macOS 26+: strip system NSVisualEffectView (would block wallpaper refraction)
-/// and replace with one `.glassEffect` capsule. macOS 14/15: keep system chrome
-/// (Liquid Glass unavailable; doubling `.regularMaterial` adds nothing).
 private struct MenuBarOuterShell: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -803,8 +781,6 @@ private struct MenuBarDisplayRow: View {
         .padding(.horizontal, MenuBarMetrics.rowPaddingHorizontal)
         .padding(.vertical, MenuBarMetrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
-        // Glass module on the glass panel (Control-Center style) — an opaque
-        // surfaceRaised fill read as a stark white box in light mode.
         .adaptiveGlassSurface(.roundedRectangle(DesignTokens.Corner.md))
     }
 }
@@ -826,16 +802,7 @@ private struct DisplayIconTile: View {
 private struct VolumeControlRow: View {
     let videoVolume: Binding<Double>
 
-    /// Local mirror of the upstream binding. The icon and the percent text
-    /// read from this @State during a drag so they re-render on every
-    /// continuous Slider commit — relying on the upstream binding alone
-    /// left them stuck at the pre-drag value because the binding setter
-    /// hops through `screenManager → configurationStore → observation`
-    /// before the view's getter re-resolves.
-    ///
-    /// `onChange` re-syncs from the upstream binding so external writes
-    /// (preview-pane slider, mute toggle, persisted state on reopen) keep
-    /// the menubar slider in lockstep.
+    /// Local mirror of the upstream binding.
     @State private var liveValue: Double = 0
 
     var body: some View {
@@ -942,10 +909,7 @@ private struct MenuBarFooterUtility: View {
     }
 }
 
-/// Adds a subtle press cue (scale + dim) to every menu-bar button that
-/// doesn't already go through `.adaptiveGlassButton` (which delivers its
-/// own native press feedback). Currently used only by the master toggle's
-/// custom Capsule track and the whole-row display card.
+/// Adds a subtle press cue (scale + dim) to every menu-bar button that doesn't already go through `.adaptiveGlassButton` (which delivers its own native press feedback).
 private struct MenuBarPressFeedbackStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -955,11 +919,7 @@ private struct MenuBarPressFeedbackStyle: ButtonStyle {
     }
 }
 
-/// Strips the menubar popover chrome (macOS 26+ only) so desktop wallpaper
-/// bleeds through Liquid Glass: clears `NSWindow.isOpaque/backgroundColor`
-/// AND hides the dark-vibrancy `NSVisualEffectView` that `MenuBarExtra(.window)`
-/// plants as a sibling of the SwiftUI host (the window backdrop alone is not
-/// enough). Idempotent across popover open/close cycles.
+/// Removes the macOS 26 menu-bar popover chrome so wallpaper remains visible through Liquid Glass.
 private struct MenuBarWindowChromeClearer: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)

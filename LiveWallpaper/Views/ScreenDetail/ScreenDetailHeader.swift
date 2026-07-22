@@ -103,9 +103,6 @@ struct ScreenDetailHeader: View {
                             .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
                         }
 
-                        // Same circular glass chrome as its sibling icon buttons,
-                        // just red-tinted — NOT destructiveControlTint(), whose
-                        // rounded-rect surface would clash with the circle shape.
                         Button(role: .destructive, action: onClearWallpaper) {
                             Image(systemName: "trash")
                         }
@@ -174,9 +171,7 @@ struct ScreenDetailHeader: View {
         }
     }
 
-    /// Bookmarkable content for the inspector tab currently in view — not the
-    /// committed `activeWallpaper`. A tab with no content (e.g. HTML before a
-    /// source is set) returns nil so the bookmark icon doesn't bleed across types.
+    /// Bookmarkable content for the inspector tab currently in view — not the committed `activeWallpaper`.
     private var inspectorContent: WallpaperContent? {
         let config = screenManager.getConfiguration(for: screen)
         switch draft.selectedWallpaperType {
@@ -199,7 +194,6 @@ struct ScreenDetailHeader: View {
             }
             return nil
         case .monitor:
-            // Monitor wallpapers aren't bookmarkable in v1.
             return nil
         }
     }

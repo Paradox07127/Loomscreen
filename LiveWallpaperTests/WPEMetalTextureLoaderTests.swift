@@ -41,10 +41,6 @@ struct WPEMetalTextureLoaderTests {
 
     @Test("RG88 alpha-channel-priority uploads .rg8Unorm with (R,R,R,G) swizzle")
     func rg88AlphaPrioritySwizzle() async throws {
-        // This is the REAL on-device particle path (payload → .rg8Unorm),
-        // the one that produced the "red square": .rg8Unorm samples as
-        // (R,G,0,1) — opaque. The swizzle must remap it to (R,R,R,G) so the
-        // glow keeps its G-channel alpha falloff.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
         let payload = WPETexTexturePayload(
@@ -56,9 +52,6 @@ struct WPEMetalTextureLoaderTests {
                 textureFormatCode: WPETexFormat.rg88.rawValue,
                 format: .rg88,
                 mipmapCount: 1,
-                // TEXI flag bit 0x80000 = "alpha channel priority" (set on light/beam
-                // glows). NOT the swizzle discriminator — this fixture only asserts the
-                // flag's presence doesn't change the RG88 → (R,R,R,G) result.
                 flags: 0x0008_0000
             ),
             mipmaps: [WPETexTextureMipmap(index: 0, width: 2, height: 2, bytes: bytes)],
@@ -76,9 +69,6 @@ struct WPEMetalTextureLoaderTests {
 
     @Test("RG88 without the 0x80000 flag (fog/smoke glows) still swizzles to (R,R,R,G)")
     func rg88WithoutAlphaPriorityFlagAlsoSwizzles() async throws {
-        // fog3/smoke/snow are RG88 luminance+alpha but lack the
-        // alphachannelpriority flag; they must still swizzle, else their
-        // R-full inter-frame regions render as opaque red lines/blocks.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
         let payload = WPETexTexturePayload(
@@ -107,9 +97,6 @@ struct WPEMetalTextureLoaderTests {
 
     @Test("RG88 shake flow mask keeps raw (R,G) channels — NOT the glow swizzle")
     func rg88FlowMaskIsNotSwizzled() async throws {
-        // shake masks are RG88 too, but R/G are x/y displacement, not luminance/alpha.
-        // The (R,R,R,G) swizzle collapses .g onto .r and destroys the y-flow, smearing
-        // the whole frame (criss-cross tearing). Mask paths must keep identity channels.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
         let payload = WPETexTexturePayload(
@@ -130,7 +117,6 @@ struct WPEMetalTextureLoaderTests {
         let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "masks/shake_mask_d3e38905")
 
         #expect(texture.pixelFormat == .rg8Unorm)
-        // Identity channels: .g must stay .green (the y-flow), not be swizzled to .red.
         #expect(texture.swizzle.red == .red)
         #expect(texture.swizzle.green == .green)
         #expect(texture.swizzle.blue == .blue)
@@ -143,7 +129,6 @@ struct WPEMetalTextureLoaderTests {
         #expect(WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "effects/light_shafts/beam_1"))
         #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "masks/shake_mask_3fab49d9"))
         #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: true, label: "MASKS/Shake_Mask_X"))
-        // Non-RG88 never swizzles regardless of name.
         #expect(!WPEMetalTextureLoader.rg88NeedsLuminanceAlphaSwizzle(isLuminanceAlpha: false, label: "particles/fog3"))
     }
 
@@ -220,12 +205,6 @@ struct WPEMetalTextureLoaderTests {
         #expect(recorder.snapshot() == [false])
     }
 
-    // Eager animated payload returns the source atlas per TEXS frame
-    // and dedups MTLTexture uploads by imageID. Sub-rect data is kept
-    // on `WPETexAnimatedFrame.sourceSubRect` for future shader-aware
-    // consumers — the particle renderer relies on the atlas-sized
-    // texture to recover sprite-sheet `cols/rows` from .tex-json frame
-    // dimensions; per-frame cropping breaks that math (1×1 grid).
     @MainActor
     @Test("Eager animated payload shares one MTLTexture per imageID across frames")
     func eagerAnimatedPayloadSharesOneTexturePerImageID() async throws {
@@ -296,7 +275,6 @@ struct WPEMetalTextureLoaderTests {
         #expect(frame0.height == 4)
         #expect(frame1.width == 4)
         #expect(frame2.width == 4)
-        // imageID=0 frames share the same MTLTexture; imageID=1 gets its own.
         #expect(frame0 === frame1)
         #expect(frame0 !== frame2)
     }
@@ -304,8 +282,8 @@ struct WPEMetalTextureLoaderTests {
     @Test("Mip chain flag: multi-level payload uploads the full chain only when enabled")
     func mipChainUploadRespectsFlag() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        let level0Bytes = Data((0..<64).map { UInt8($0) })          // 4x4 RGBA8888
-        let level1Bytes = Data([9, 8, 7, 255, 6, 5, 4, 255, 3, 2, 1, 255, 0, 9, 8, 255])  // 2x2 RGBA8888
+        let level0Bytes = Data((0..<64).map { UInt8($0) })
+        let level1Bytes = Data([9, 8, 7, 255, 6, 5, 4, 255, 3, 2, 1, 255, 0, 9, 8, 255])
         let multiLevelPayload = WPETexTexturePayload(
             info: WPETexInfo(
                 containerVersion: 5,
@@ -331,13 +309,11 @@ struct WPEMetalTextureLoaderTests {
             if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
 
-        // OFF (default): level-0-only upload, byte-identical to today.
         defaults.set(false, forKey: key)
         let disabledTexture = try await WPEMetalTextureLoader(device: device)
             .makeTexture(from: multiLevelPayload, label: "test-mipchain-off")
         #expect(disabledTexture.mipmapLevelCount == 1)
 
-        // ON: full chain uploaded, and level 1's bytes match the payload (not level 0's).
         defaults.set(true, forKey: key)
         let enabledTexture = try await WPEMetalTextureLoader(device: device)
             .makeTexture(from: multiLevelPayload, label: "test-mipchain-on")
@@ -353,7 +329,6 @@ struct WPEMetalTextureLoaderTests {
         }
         #expect(Data(readBack) == level1Bytes)
 
-        // ON but only one decoded level: eligibility gate keeps the level-0-only path.
         let singleLevelPayload = WPETexTexturePayload(
             info: multiLevelPayload.info,
             mipmaps: [WPETexTextureMipmap(index: 0, width: 4, height: 4, bytes: level0Bytes)],

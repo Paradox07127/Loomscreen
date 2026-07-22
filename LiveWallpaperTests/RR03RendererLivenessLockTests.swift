@@ -9,14 +9,6 @@ import MetalKit
 import Testing
 @testable import LiveWallpaper
 
-/// RR-03 behavior lock before replacing the current conservative liveness
-/// heuristic. These probes exercise the signed Metal host but deliberately do
-/// not change the production decision: dynamic shader/script/video/audio/
-/// particle families remain continuous until the whole-corpus oracle exists.
-///
-/// Metal/GPU-bound: renders real frames and reads them back, so it hangs on the
-/// headless CI runners. Keep it OUT of `fast_app_contract_tests.sh` (the
-/// hardware-free required shard) — it runs in the opt-in Pro Metal job instead.
 @MainActor
 @Suite("RR-03 renderer liveness lock", .serialized)
 struct RR03RendererLivenessLockTests {
@@ -88,9 +80,6 @@ struct RR03RendererLivenessLockTests {
         #expect(stack.surface.mtkView.enableSetNeedsDisplay)
     }
 
-    /// Test stack: the renderer plus the surface it renders into and the actor its
-    /// async load runs on. Built from the surface's Sendable seams (mirroring the
-    /// production builder) so the test can inspect the view's pacing directly.
     private static func makeRenderer(_ fixture: RR03LivenessFixture) throws -> RR03RendererStack {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let surface = WPERenderSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64), device: device)
@@ -125,15 +114,12 @@ struct RR03RendererLivenessLockTests {
     }
 }
 
-/// Renderer + its surface + the render actor its async load runs on.
 @MainActor
 private struct RR03RendererStack {
     let renderer: WPEMetalSceneRenderer
     let surface: WPERenderSurface
     let actor: WPEDisplayRenderActor
 
-    /// Adopt the renderer into the actor (via the one-shot handoff carrier, as the
-    /// production builder does) and run the load on it.
     func load() async throws {
         await actor.adopt(WPERendererHandoff(renderer: renderer).renderer)
         try await actor.load()

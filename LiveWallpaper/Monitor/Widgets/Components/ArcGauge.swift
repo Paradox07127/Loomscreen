@@ -1,14 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// The ONE shared utilisation arc (SPEC §3.0-a): CPU, GPU, ANE power and quota
-/// rings all reuse this so the family reads pixel-identically. Geometry is ported
-/// from the mock's `arcGauge()`: 12 wedges over a 276° sweep starting at −228°,
-/// a 6° gap between wedges, band-coloured lit segments, an em-dash "no reading"
-/// mode, and an optional peak marker.
-/// One coloured segment of a multi-band gauge: `value` is its own 0…1 slice of
-/// the ring, coloured with `color` (e.g. CPU user=amber, system=steel). Bands are
-/// laid down cumulatively from the start of the arc.
 struct ArcBand: Equatable {
     var value: Double
     var color: Color
@@ -26,9 +18,7 @@ struct ArcGauge<Center: View>: View {
     var color: Color?
     /// Optional peak marker fraction 0…1, drawn as a tick on the track.
     var peak: Double?
-    /// When set, lit wedges are coloured per cumulative band (e.g. user then
-    /// system) instead of the single `color`/band colour; `value` still drives how
-    /// many wedges light and the centre readout.
+    /// When set, lit wedges are coloured per cumulative band (e.g.
     var bands: [ArcBand]?
     var lineWidth: CGFloat = 9
     @ViewBuilder var center: () -> Center
@@ -110,7 +100,6 @@ struct ArcGauge<Center: View>: View {
             ctx.stroke(path, with: .color(strokeColor), style: style)
         }
 
-        // Peak marker: a short radial tick just outside the value ring.
         if let peak, !isEmpty {
             let pf = min(1, max(0, peak))
             let angle = (startAngle + pf * sweep) * .pi / 180

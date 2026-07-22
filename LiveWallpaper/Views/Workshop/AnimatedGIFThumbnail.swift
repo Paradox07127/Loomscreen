@@ -10,10 +10,7 @@ enum GIFPlaybackMode {
     case autoPlay
 }
 
-/// Workshop preview tile: static poster by default, plays the GIF/APNG only
-/// while hovered (`.hoverToPlay`) or immediately for detail surfaces
-/// (`.autoPlay`). The hover gate exists so a grid never animates 20 tiles at
-/// once (macOS Photos / Quick Look idiom).
+/// Workshop preview tile: static poster by default, plays the GIF/APNG only while hovered (`.hoverToPlay`) or immediately for detail surfaces (`.autoPlay`).
 struct AnimatedGIFThumbnail: View {
     let url: URL?
     var playbackMode: GIFPlaybackMode = .hoverToPlay
@@ -60,8 +57,6 @@ struct AnimatedGIFThumbnail: View {
                 matureCover
             }
         }
-        // Bottom-leading so it never collides with the top-leading rating pill
-        // the grid card overlays on the same tile.
         .overlay(alignment: .bottomLeading) {
             if controller.isAnimating, !isBlurred {
                 playingBadge
@@ -114,9 +109,6 @@ struct AnimatedGIFThumbnail: View {
                 .clipped()
                 .accessibilityHidden(true)
         } else if phase == .loading, url != nil {
-            // Pure-SwiftUI spinner (not `ProgressView`, whose NSProgressIndicator
-            // bridge spams "max length doesn't satisfy min <= max" layout faults
-            // when 50 tiles load at fractional grid widths).
             LiquidGlassSpinner(size: 20, lineWidth: 2, tint: .secondary)
                 .opacity(0.7)
                 .accessibilityHidden(true)
@@ -169,9 +161,7 @@ struct AnimatedGIFThumbnail: View {
     }
 }
 
-/// Frame-stepping state for one thumbnail. A reference type (not view `@State`)
-/// so the playback `Task` and the coordinator's eviction closure can capture it
-/// weakly and mutate it from outside the SwiftUI update pass.
+/// Frame-stepping state for one thumbnail.
 @MainActor
 @Observable
 final class GIFAnimationController {

@@ -1,22 +1,10 @@
 import AppKit
 import LiveWallpaperCore
 
-/// A borderless, non-activating panel that floats the Monitor widget board over a
-/// single display's wallpaper. Its z-plane is switchable per the config:
-///   • `.desktop` — one level above the wallpaper window (below desktop icons and
-///     app windows). Click-through, so desktop icons stay clickable; a second
-///     ambience layer over the video/scene/HTML wallpaper.
-///   • `.front` — status-bar level, above every app window (the Fleet HUD's plane).
-///
-/// One panel per display; `MonitorOverlayController` owns the lifecycle and sets
-/// the board host as the content view. The panel never activates the app or steals
-/// key focus, and is fully click-through unless the board is being edited.
+/// A borderless, non-activating panel that floats the Monitor widget board over a single display's wallpaper.
 final class MonitorOverlayWindow: NSPanel {
 
-    /// Above the wallpaper window AND desktop icons, but still below every app
-    /// window — the widget board is clearly visible over whatever wallpaper the
-    /// display shows (video/scene/html all sit at ≤ desktop-icon level), while the
-    /// user's app windows still cover it. Click-through keeps icons usable.
+    /// Keeps widgets above desktop content but below application windows.
     private static let desktopLevel = NSWindow.Level(
         rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 2
     )
@@ -40,8 +28,6 @@ final class MonitorOverlayWindow: NSPanel {
         isRestorable = false
         isMovable = false
         animationBehavior = .none
-        // Show on every Space and alongside full-screen apps; don't move with the
-        // active Space or participate in ⌘` window cycling.
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
         contentView?.wantsLayer = true
@@ -59,9 +45,7 @@ final class MonitorOverlayWindow: NSPanel {
         }
     }
 
-    /// Click-through when non-interactive: events pass to the desktop icons / apps
-    /// underneath. Captures events only while the board is being edited (or when
-    /// the board's own mouse-interaction flag is on).
+    /// Click-through when non-interactive: events pass to the desktop icons / apps underneath.
     func setInteractive(_ interactive: Bool) {
         ignoresMouseEvents = !interactive
     }
@@ -71,8 +55,6 @@ final class MonitorOverlayWindow: NSPanel {
         setFrame(frame, display: true)
     }
 
-    // Non-activating: allow key (so edit chrome/hover works) but never main, and
-    // never steal app focus.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }

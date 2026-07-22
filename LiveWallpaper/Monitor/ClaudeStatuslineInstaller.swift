@@ -1,30 +1,11 @@
 import Foundation
 
-/// Produces the copy-paste snippets that let the Monitor read Claude Code's
-/// account rate limits. The app can't install anything itself — its `~/.claude`
-/// bookmark is read-only — so it hands the user strings to run once in their own
-/// terminal. Nothing here executes; every function returns a `String`.
-///
-/// Mechanism: Claude Code's `statusLine` command receives the status JSON on
-/// stdin on every update. The capture script tees that payload atomically to
-/// `livewallpaper-statusline.json` (which `ClaudeRateLimitReader` reads) and then
-/// chains through to any pre-existing statusline command so the user's own
-/// statusline keeps working.
+/// Produces the copy-paste snippets that let the Monitor read Claude Code's account rate limits.
 enum ClaudeStatuslineInstaller {
     static let scriptFileName = "livewallpaper-statusline.sh"
     static let payloadFileName = ClaudeRateLimitReader.payloadFileName
 
     /// The capture script body written to `~/.claude/livewallpaper-statusline.sh`.
-    ///
-    /// It reads stdin once, extracts ONLY the rate-limit fields the Monitor reads
-    /// (`rate_limits.five_hour`/`seven_day` used-percentage + reset time, plus the
-    /// top-level `timestamp`) into a fresh object, and writes that atomically
-    /// (mktemp in the same dir + mv, so a reader never sees a half-written file).
-    /// It never persists the rest of the statusline payload (workspace/account
-    /// metadata, transcript path, etc.). It then either execs a chained statusline
-    /// command passed as `$1` (re-feeding the ORIGINAL payload on its stdin so the
-    /// user's own statusline still gets everything) or prints a minimal fallback
-    /// line (the model name) so the statusline still shows something.
     static var captureScript: String {
         """
         #!/usr/bin/env bash
@@ -83,9 +64,7 @@ enum ClaudeStatuslineInstaller {
         """
     }
 
-    /// One-liner the user pastes into their terminal: writes the capture script,
-    /// makes it executable, and prints guidance. It deliberately does NOT touch
-    /// `settings.json` — that stays a manual merge (see `settingsFragment`).
+    /// One-liner the user pastes into their terminal: writes the capture script, makes it executable, and prints guidance.
     static var installCommand: String {
         let heredoc = captureScript
         return """
@@ -97,17 +76,10 @@ enum ClaudeStatuslineInstaller {
     }
 
     /// The exact JSON block the user should merge into `~/.claude/settings.json`.
-    /// If they already have a `statusLine.command`, pass it here so the generated
-    /// block chains through to it; otherwise the fallback line is used.
-    ///
-    /// - Parameter existingCommand: the user's current `statusLine.command`, if any.
     static func settingsFragment(existingCommand: String? = nil) -> String {
         let scriptPath = "$HOME/.claude/\(scriptFileName)"
         let command: String
         if let existing = existingCommand, !existing.trimmingCharacters(in: .whitespaces).isEmpty {
-            // Chain: our script runs first, then `sh -c`s the user's command,
-            // which travels as ONE single-quoted argument so its own quoting,
-            // pipes and arguments survive the round-trip.
             command = "\(scriptPath) \(shellSingleQuoted(existing))"
         } else {
             command = scriptPath
@@ -138,19 +110,14 @@ enum ClaudeStatuslineInstaller {
         )
     }
 
-    /// Removes the capture script. The payload file and the user's own
-    /// `statusLine` setting are left untouched — the restore note reminds them to
-    /// drop the script from `settings.json` if they wired it in.
+    /// Removes the capture script.
     static var uninstallCommand: String {
         "rm -f ~/.claude/\(scriptFileName) ~/.claude/\(payloadFileName) && echo 'Removed the LiveWallpaper statusline script. If you set statusLine in ~/.claude/settings.json to it, restore your previous statusLine (or remove the block).'"
     }
 
     // MARK: - Escaping
 
-    /// Minimal JSON string escaping for the command value embedded in the
-    /// fragment (backslash and double-quote only; paths never contain controls).
-    /// POSIX single-quote escaping: the only metacharacter inside single quotes
-    /// is the quote itself, closed-escaped-reopened as `'\''`.
+    /// Minimal JSON string escaping for the command value embedded in the fragment (backslash and double-quote only; paths never contain controls).
     private static func shellSingleQuoted(_ raw: String) -> String {
         "'" + raw.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }

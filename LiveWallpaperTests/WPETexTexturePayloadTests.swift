@@ -50,14 +50,6 @@ struct WPETexTexturePayloadTests {
         #expect(firstPixel[3] == 0x80, "A should preserve 0x80 unchanged")
     }
 
-    // P1 contract: encoded animation no longer throws.
-    // - Multi-image + no TEXS schedule: synthesises a default-cadence
-    //   frame per source image (mirrors raw `.tex`'s makeAnimationTrack
-    //   behaviour). Pre-P1 this threw `.unsupportedAnimation`.
-    // - Single-image + no TEXS: degrades to a static payload (covered
-    //   below).
-    // - Multi-image + TEXS schedule: full animation track with per-frame
-    //   sub-rects, covered by `WPETexDecoderTests.encodedPNGWithTEXSExtractsAnimationTrack`.
     @Test("Multi-image encoded TEXB without TEXS synthesises a default-cadence animation track")
     func encodedAnimationWithoutTEXSSynthesisesDefaultCadenceTrack() throws {
         let png = try makeSolidColorPNG(width: 2, height: 2, red: 0, green: 0, blue: 255, alpha: 255)
@@ -76,7 +68,6 @@ struct WPETexTexturePayloadTests {
         #expect(track.frames.count == 2)
         #expect(track.frames[0].imageID == 0)
         #expect(track.frames[1].imageID == 1)
-        // No TEXS sub-rect → frame uses whole atlas (subRect == nil).
         #expect(track.frames[0].subRect == nil)
         #expect(track.frames[1].subRect == nil)
     }

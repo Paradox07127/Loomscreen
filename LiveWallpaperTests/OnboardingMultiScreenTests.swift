@@ -4,15 +4,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Validates the per-screen primitives that the onboarding multi-screen apply
-/// flow depends on: configuration cloning across screen IDs, persistence
-/// round-trips for multiple screens, and the early-exit guard on
-/// `applyConfigurationToAllDisplays` when only one screen is registered.
-///
-/// The full multi-NSScreen apply path is not covered here because `Screen`
-/// derives its `id` from `NSScreen` and CI hosts only expose one display;
-/// instead, the underlying primitives are validated end-to-end so any
-/// regression in the cloning / persistence layer surfaces here first.
 @Suite("Onboarding multi-screen primitives")
 @MainActor
 struct OnboardingMultiScreenTests {

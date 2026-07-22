@@ -3,9 +3,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Locks the targeted delete fix: deleting a downloaded scene must tombstone the
-/// workshop id so the auto-import scan can't resurrect it from a still-present
-/// SteamCMD download, and a later deliberate re-import must clear that tombstone.
 @Suite("WPE delete tombstone lifecycle", .serialized) @MainActor
 struct WPEDeleteTombstoneTests {
     @Test("A legacy settings blob without the key decodes to an empty tombstone list")

@@ -67,12 +67,10 @@ struct ApplicationPerformanceRuleTests {
     @Test("A frontmost neverPause exception vetoes discretionary pauses but not safety ones")
     func neverPauseVetoesDiscretionaryOnly() {
         let settings = GlobalSettings(pauseInGameMode: true)
-        // Game mode would pause, but the exclusion vetoes it.
         #expect(WallpaperPolicyEngine.performanceProfile(
             inputs: .test(isGameModeActive: true, isFrontmostExcludedByRule: true),
             settings: settings
         ) == .quality)
-        // Thermal is a safety pause — the exclusion can't veto it.
         #expect(WallpaperPolicyEngine.performanceProfile(
             inputs: .test(thermalState: .critical, isFrontmostExcludedByRule: true),
             settings: settings

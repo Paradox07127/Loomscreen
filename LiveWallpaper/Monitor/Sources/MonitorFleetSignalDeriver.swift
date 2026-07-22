@@ -1,9 +1,6 @@
 import Foundation
 
-/// Pure, I/O-free derivations for the v2 Fleet signals shared by both the Claude
-/// and Codex session models. Everything here is metadata-only: tool NAMES,
-/// timestamps, token counts, and status — never prompt text, arguments, output,
-/// or paths beyond a display component.
+/// Derives fleet signals shared by the Claude and Codex session models.
 enum MonitorFleetSignalDeriver {
     /// Cap on retained per-session event timestamps (the tick track window).
     static let recentEventCap = 60
@@ -18,24 +15,15 @@ enum MonitorFleetSignalDeriver {
     /// A running+alive session with no new event for longer than this is "stale".
     static let staleAfter: TimeInterval = 5 * 60
 
-    /// Max characters a sanitized tool name may keep. Real tool names are short
-    /// identifiers; anything longer is a smell (or an injection attempt) and gets
-    /// dropped rather than truncated.
+    /// Max characters a sanitized tool name may keep.
     static let toolNameMaxLength = 64
 
-    /// Characters a tool name may contain. Deliberately narrow: identifier letters
-    /// and digits plus the few separators real tool names use (`_ . : -`). Anything
-    /// with whitespace, punctuation, quotes, newlines, or non-ASCII fails.
+    /// Characters a tool name may contain.
     private static let toolNameAllowed = CharacterSet(
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
     )
 
-    /// Sanitize a raw tool name pulled verbatim from a transcript before it is ever
-    /// stored or rendered as a "tool name" in the UI. A malformed / malicious
-    /// transcript could otherwise smuggle prompt-like text into that slot. Applies
-    /// an allowlist charset + length cap and normalizes a dotted-namespace name to
-    /// its last component (`mcp__foo.bar` → `bar`); returns nil (drop) on any
-    /// failure rather than emitting attacker-controlled text.
+    /// Sanitize a raw tool name pulled verbatim from a transcript before it is ever stored or rendered as a "tool name" in the UI.
     static func sanitizedToolName(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= toolNameMaxLength else { return nil }
@@ -75,12 +63,6 @@ enum MonitorFleetSignalDeriver {
     }
 
     /// Derive the anomaly flag.
-    ///
-    /// - `toolLoop` when the last `toolLoopRun` tool events share a name inside
-    ///   `toolLoopWindow` (an agent stuck retrying one tool).
-    /// - `stale` when the session is running + processAlive but has emitted no
-    ///   event for longer than `staleAfter`.
-    /// - nil otherwise. Loop takes precedence over stale.
     static func warning(
         recentTools: [MonitorAgentToolEvent],
         status: MonitorAgentStatus,
@@ -106,16 +88,12 @@ enum MonitorFleetSignalDeriver {
     }
 }
 
-/// Worktree name extraction from a session cwd. Emits the last path component
-/// ONLY when the cwd lives inside a `.claude/worktrees/` directory; otherwise nil.
-/// Never emits the full path (privacy invariant — display names only).
+/// Worktree name extraction from a session cwd.
 enum MonitorWorktree {
     static func name(fromCwd cwd: String?) -> String? {
         guard let cwd, !cwd.isEmpty else { return nil }
         let components = (cwd as NSString).pathComponents
-        // Find the ".../.claude/worktrees/<name>/..." segment and take the segment
-        // immediately after "worktrees". The worktree name is that first segment,
-        // not deeper subpaths, so nested cwds still resolve to the worktree root.
+        // Find the ".../.claude/worktrees/<name>/..." segment and take the segment immediately after "worktrees".
         guard let worktreesIndex = components.firstIndex(where: { $0 == "worktrees" }),
               worktreesIndex >= 1, components[worktreesIndex - 1] == ".claude",
               worktreesIndex + 1 < components.count else {
@@ -126,19 +104,11 @@ enum MonitorWorktree {
     }
 }
 
-/// In-memory tracker of when each session's status last flipped INTO `needsInput`,
-/// keyed by session id. The flip time is captured on the transition and carried
-/// while the session stays blocked, then cleared when it leaves `needsInput`.
-///
-/// Lives outside the pure session models (which are rebuilt on rotation) so the
-/// wait clock survives rescans; the owning source keeps one tracker for its whole
-/// lifetime.
+/// In-memory tracker of when each session's status last flipped INTO `needsInput`, keyed by session id.
 struct MonitorFleetWaitTracker {
     private var waitSince: [String: Double] = [:]
 
-    /// Update the tracked flip time for `sessionId` given its current status and
-    /// the event time to stamp a fresh transition with. Returns the effective
-    /// `waitSince` (nil unless currently blocked).
+    /// Update the tracked flip time for `sessionId` given its current status and the event time to stamp a fresh transition with.
     mutating func waitSince(
         sessionID: String,
         status: MonitorAgentStatus,

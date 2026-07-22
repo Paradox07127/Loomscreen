@@ -1,15 +1,8 @@
 #if !LITE_BUILD
 import Foundation
 
-/// Per-frame pointer inputs `renderCurrentFrame` needs, snapshotted from the
-/// `WPEPointerMailbox` (fed by the surface's publisher + view) plus the
-/// renderer's own effective FPS, passed in as a Sendable snapshot. This is the
-/// seam for moving the render off `@MainActor` (Phase 2): the mailbox read is
-/// already NSView-free, so `makeFrameInputs` no longer touches AppKit.
-///
-/// Renderer-private frame sources (frame clock, camera-parallax smoother, audio
-/// broker, oracle override) are deliberately absent — they migrate with the
-/// renderer, so `sampleFrameContext` still reads them directly.
+/// Sendable snapshot of pointer state and effective frame rate for one render frame.
+/// Renderer-private clocks, smoothing, audio, and diagnostic inputs remain actor-isolated.
 struct WPEFrameInputs: Sendable {
     /// Mailbox `clickCaptureEnabled` — the per-screen Interaction toggle.
     let clickCaptureEnabled: Bool

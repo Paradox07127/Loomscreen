@@ -199,15 +199,12 @@ struct EntitlementAuditTests {
         return EntitlementValue(rawValue)
     }
 
+    /// Accounts for the repository-root exception injected into Xcode's signed debug test host.
     private static func expectedHostValue(
         _ sourceValue: EntitlementValue,
         for key: String
     ) -> EntitlementValue {
         #if DEBUG
-            // Xcode's signed test host adds the repository root ("/") to this
-            // existing entitlement so XCTest can load sources outside the app
-            // container. Release artifacts are still checked against the exact
-            // source fingerprint by scripts/check_entitlements.sh --app.
             if key == "com.apple.security.temporary-exception.files.absolute-path.read-only",
                case let .strings(paths) = sourceValue {
                 return .strings(paths + ["/"])

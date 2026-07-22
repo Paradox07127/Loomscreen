@@ -263,7 +263,6 @@ struct SettingsManagerMigrationTests {
         return url
     }
 
-    /// Creates a directory whose POSIX mode is `0500` (read+execute, no write).
     private func makeUnwritableDirectory() throws -> URL {
         let url = FileManager.default
             .temporaryDirectory

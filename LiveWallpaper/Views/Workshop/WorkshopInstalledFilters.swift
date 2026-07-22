@@ -48,9 +48,7 @@ enum InstalledSource: String, CaseIterable, Identifiable {
     }
 }
 
-/// Storage filter: app-managed cache copy (the usual shape for SteamCMD-
-/// downloaded scenes) vs a link to the user's own folder (manual imports +
-/// unpackaged downloads).
+/// Storage filter: app-managed cache copy (the usual shape for SteamCMD- downloaded scenes) vs a link to the user's own folder (manual imports + unpackaged downloads).
 enum InstalledStorageKind: String, CaseIterable, Identifiable {
     case managed, linked
 

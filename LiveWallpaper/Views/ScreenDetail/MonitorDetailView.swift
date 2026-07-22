@@ -3,19 +3,6 @@ import LiveWallpaperCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Inspector card for the Monitor wallpaper — the side panel for the board
-/// editor (Monitor v2). The board itself is edited in the preview area to the
-/// left (`MonitorBoardPreviewArea`, SPEC §4: preview = editor); this panel holds
-/// the surrounding controls, all funnelling through `ScreenManager`:
-///   • Board-level controls (refresh rate, mouse interaction, reduce-motion).
-///   • A list of placed widgets; selecting one opens its settings popover (size,
-///     remove, kind-specific options) that writes into the placement's options.
-///   • Usage-limit setup + folder authorization (Pro `.agentFleet` only).
-///
-/// It stays in sync with edits made ON the preview by re-reading the persisted
-/// board on `.wallpaperConfigurationDidChange`. The AI-agent surfaces stay gated
-/// on the Pro `.agentFleet` capability, exactly as the wallpaper view gates its
-/// placements.
 struct MonitorDetailView: View {
     let screen: Screen
     let screenManager: ScreenManager
@@ -23,9 +10,7 @@ struct MonitorDetailView: View {
 
     @AppStorage("Inspector.MonitorExpanded") private var isExpanded = true
 
-    /// The board config being edited. Seeded from the persisted config on appear
-    /// and re-seeded when live board edits arrive from the preview; every mutation
-    /// here writes back through `ScreenManager`.
+    /// The board config being edited.
     @State private var draft: MonitorBoardConfiguration = .default
 
     /// Placement currently open in the settings popover (by id), if any.
@@ -36,9 +21,7 @@ struct MonitorDetailView: View {
     @State private var showUsageSetup = false
     @State private var detectedStatusLineCommand: String?
 
-    /// Display-only temperature unit for every sensor readout (app-wide, not
-    /// per-board). Widgets re-read `MonitorTemperature` on each 1 Hz render, so a
-    /// flip shows on the next tick.
+    /// Display-only temperature unit for every sensor readout (app-wide, not per-board).
     @AppStorage(MonitorTemperature.fahrenheitDefaultsKey) private var temperatureFahrenheit = false
 
     private var agentFleetEnabled: Bool {
@@ -107,9 +90,7 @@ struct MonitorDetailView: View {
             info: "How often the instruments sample"
         ) {
             HStack(spacing: DesignTokens.Inspector.sliderValueSpacing) {
-                // Dragging updates only the local draft (live label); the value is
-                // committed ONCE on release. Committing on every tick would fire a
-                // config write per frame — a storm the live board must not endure.
+                // Dragging updates only the local draft (live label); the value is committed ONCE on release.
                 Slider(
                     value: Binding(
                         get: { draft.refreshHz },
@@ -219,9 +200,7 @@ struct MonitorDetailView: View {
         }
     }
 
-    /// True when the board already matches the default preset — same instruments,
-    /// sizes, AND positions — so Reset is a genuine no-op. Position is included so
-    /// a user who only rearranged the default trio can still reset the layout.
+    /// True when the board already matches the default preset — same instruments, sizes, AND positions — so Reset is a genuine no-op.
     private var isDefaultLayout: Bool {
         let defaults = MonitorBoardConfiguration.defaultSystemPlacements()
         let current = draft.widgets
@@ -350,11 +329,7 @@ struct MonitorDetailView: View {
         )
     }
 
-    /// Authorized state carries TWO actions (Revoke + Re-authorize…) that can
-    /// never share `SettingRow`'s trailing slot with the long title at inspector
-    /// width, so they get a full-width trailing row of their own; the ✓ becomes
-    /// a title badge. Buttons are `.fixedSize()` so labels never truncate —
-    /// title/subtitle give way instead.
+    /// Places authorization actions on a full-width row at inspector widths.
     @ViewBuilder
     private func authorizationRow(
         title: LocalizedStringKey,
@@ -444,9 +419,7 @@ struct MonitorDetailView: View {
         commit(next)
     }
 
-    /// Write the whole board config (widgets + board-level settings) as JSON to a
-    /// user-chosen file. Placement ids are regenerated on import, so a file can be
-    /// applied to several machines without collisions.
+    /// Write the whole board config (widgets + board-level settings) as JSON to a user-chosen file.
     private func exportLayout() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
@@ -473,8 +446,6 @@ struct MonitorDetailView: View {
         do {
             let data = try Data(contentsOf: url)
             let imported = try JSONDecoder().decode(MonitorBoardConfiguration.self, from: data)
-            // Fresh ids so an imported file can't collide with live placements, and
-            // keep the current schema version regardless of the file's origin.
             var next = imported
             next.widgets = imported.widgets.map { w in
                 MonitorWidgetPlacement(kind: w.kind, size: w.size, x: w.x, y: w.y, options: w.options)
@@ -502,19 +473,7 @@ struct MonitorDetailView: View {
         }
     }
 
-    /// Board-level edits made in THIS inspector go through the NON-restarting board
-    /// path (`persistMonitorConfigurationFromBoard`): every control here — refresh
-    /// rate, mouse interaction, reduce-motion, per-widget options — applies in place
-    /// on the live board and preview, so a full session rebuild (which would flicker
-    /// the wallpaper and churn its lease/window) is never warranted.
-    ///
-    /// The `draft` write is synchronous (so the control itself doesn't visually
-    /// snap back), but the `ScreenManager` call is deferred to the next runloop
-    /// tick: it reaches `wallpaperSessionState`, an `@Observable` property that
-    /// ancestor views (the toggle's own window) are still mid-update on when a
-    /// Binding's `set` fires (Toggle/Slider/Picker) — committing there synchronously
-    /// trips "Publishing changes from within view updates", the same class of bug
-    /// `scheduleMonitorOverlayReconcile` defers in `ScreenManager`.
+    /// Persists inspector edits through the in-place board update path.
     private func commit(_ config: MonitorBoardConfiguration) {
         draft = config
         Task { @MainActor in
@@ -541,9 +500,7 @@ struct MonitorDetailView: View {
         codexAuthorized = MonitorSourceAuthorization.shared.isAuthorized(.codex)
     }
 
-    /// Reads the user's current `statusLine.command` from settings.json (via the
-    /// read-only grant) so the setup sheet can chain it; nil when absent,
-    /// unreadable, or already our own capture script.
+    /// Reads the user's current `statusLine.command` from settings.json (via the read-only grant) so the setup sheet can chain it; nil when absent, unreadable, or already our own capture script.
     private func detectExistingStatuslineCommand() -> String? {
         let detected: String?? = MonitorSourceAuthorization.shared.withResolvedClaudeRoot { root -> String? in
             let url = root.appendingPathComponent("settings.json")

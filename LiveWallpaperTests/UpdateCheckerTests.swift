@@ -52,8 +52,6 @@ struct UpdateCheckerTests {
         UserDefaults.standard
     }
 
-    /// Wipe every persistence key before each test so throttle and skip state
-    /// never bleed across `@Test` runs.
     private func resetDefaults() {
         defaultsSuite.removeObject(forKey: "loomscreen.update.lastCheckedAt")
         defaultsSuite.removeObject(forKey: "loomscreen.update.nextEligibleAt")
@@ -122,7 +120,7 @@ struct UpdateCheckerTests {
     func ignoresProTags() async {
         resetDefaults()
         let transport = StubTransport(releases: [
-            release(tag: "v3.5.0"),  // hypothetical Pro tag
+            release(tag: "v3.5.0"),
             release(tag: "loomscreen-v1.0.0")
         ])
         let checker = UpdateChecker(
@@ -196,9 +194,6 @@ struct UpdateCheckerTests {
             Issue.record("Expected .failed, got \(String(describing: checker.status))")
             return
         }
-        // Generic user-facing string — the audit flagged surfacing the
-        // raw error.localizedDescription as both noisy and a potential
-        // implementation-detail leak.
         #expect(reason == "Unable to check for updates right now.")
     }
 
@@ -216,10 +211,8 @@ struct UpdateCheckerTests {
 
         await checker.checkNow(force: false)
 
-        // lastCheckedAt stays truthful (UI shows when we actually reached out).
         #expect(checker.lastCheckedAt == attemptInstant)
         #expect(defaultsSuite.object(forKey: "loomscreen.update.lastCheckedAt") as? Date == attemptInstant)
-        // Next eligibility is the SHORT retry window, not the full 12h throttle.
         let expectedNext = attemptInstant.addingTimeInterval(UpdateChecker.failureRetryInterval)
         #expect(defaultsSuite.object(forKey: "loomscreen.update.nextEligibleAt") as? Date == expectedNext)
         guard case .failed = checker.status else {
@@ -242,8 +235,6 @@ struct UpdateCheckerTests {
         await firstChecker.checkNow(force: false)
         #expect(failing.fetchCount == 1)
 
-        // A fresh instance 90 min later (past the 1h failure window, well inside
-        // the 12h success window) must re-attempt automatically.
         let retryInstant = failInstant.addingTimeInterval(90 * 60)
         let succeeding = StubTransport(releases: [
             release(tag: "loomscreen-v2.0.0")
@@ -285,15 +276,14 @@ struct UpdateCheckerTests {
     @Test("Upgraders with only a legacy lastCheckedAt still honor the 12h window")
     func legacyLastCheckedDerivesThrottle() async {
         resetDefaults()
-        // Pre-split install: only the old key is present, no nextEligibleAt.
         let last = Date(timeIntervalSince1970: 1_000_000)
         defaultsSuite.set(last, forKey: "loomscreen.update.lastCheckedAt")
         let transport = StubTransport(releases: [
-            release(tag: "loomscreen-v9.9.9")  // would trigger .available if fetched
+            release(tag: "loomscreen-v9.9.9")
         ])
         let checker = UpdateChecker(
             transport: transport,
-            now: { last.addingTimeInterval(60 * 60) },  // 1h later, inside 12h window
+            now: { last.addingTimeInterval(60 * 60) },
             currentVersionString: "1.0.0"
         )
 
@@ -306,8 +296,6 @@ struct UpdateCheckerTests {
     @Test("Treats backwards-running wall clock as stale (proceeds with the check)")
     func clockSkewTreatedAsStale() async {
         resetDefaults()
-        // Last check is in the future relative to now — i.e. clock moved
-        // backwards. The throttle math should not suppress the check.
         let futureLastCheck = Date(timeIntervalSince1970: 2_000_000)
         defaultsSuite.set(futureLastCheck, forKey: "loomscreen.update.lastCheckedAt")
         let transport = StubTransport(releases: [
@@ -391,11 +379,11 @@ struct UpdateCheckerTests {
         let recent = Date(timeIntervalSince1970: 1_000_000)
         defaultsSuite.set(recent, forKey: "loomscreen.update.lastCheckedAt")
         let transport = StubTransport(releases: [
-            release(tag: "loomscreen-v9.9.9")  // would clearly trigger .available
+            release(tag: "loomscreen-v9.9.9")
         ])
         let checker = UpdateChecker(
             transport: transport,
-            now: { recent.addingTimeInterval(60 * 60) },  // 1 h after last check
+            now: { recent.addingTimeInterval(60 * 60) },
             currentVersionString: "1.0.0"
         )
 
@@ -483,9 +471,6 @@ struct UpdateCheckerTests {
 
     @Test("One malformed release object doesn't fail decoding the rest of the array")
     func lossyArraySalvagesValidReleasesAroundAMalformedOne() throws {
-        // The middle release is otherwise well-formed but has a type-mismatched
-        // `prerelease` (a string where GitHub always sends a bool) — isolating
-        // the failure to a single field, not a missing-required-key shortcut.
         let json = """
         [
           { "tag_name": "loomscreen-v1.0.0", "draft": false, "prerelease": false, "assets": [] },
@@ -535,8 +520,6 @@ struct UpdateCheckerTests {
     }
 }
 
-/// Records every `fetchReleases` invocation so tests can both replay canned
-/// responses and assert on call count (throttle-skip verification).
 private final class StubTransport: UpdateCheckerTransport, @unchecked Sendable {
     private let response: Result<[GitHubRelease], Error>
     private(set) var fetchCount = 0

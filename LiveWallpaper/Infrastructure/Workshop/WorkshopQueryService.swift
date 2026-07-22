@@ -717,7 +717,7 @@ extension URLSession {
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = max(timeout, 30)
         config.httpAdditionalHeaders = [
-            "User-Agent": "Loomscreen/Workshop (LiveWallpaper Pro)"
+            "User-Agent": "Loomscreen/Workshop"
         ]
         return URLSession(configuration: config)
     }

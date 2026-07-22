@@ -48,10 +48,6 @@ struct WPEMetalRuntimeUniformsTests {
 
     @Test("Suspended profile keeps brightness uniform at one")
     func suspendedProfileKeepsBrightnessAtOne() {
-        // g_Brightness multiplies image-shader albedo, so 0 rendered every
-        // genericimage layer as a black silhouette on frames produced while
-        // suspended (859db5b). Suspension saves power via mtkView.isPaused,
-        // not by dimming content — brightness must stay 1.
         let uniforms = WPEMetalRuntimeUniforms(
             time: 4,
             daytime: 0.5,
@@ -73,14 +69,10 @@ struct WPEMetalRuntimeUniformsTests {
         )
         let values = uniforms.uniformValues
 
-        // g_RenderVar0…3 zero ⇒ every optional font effect (outline/blur/shadow)
-        // stays disabled until the MSDF text path overrides them per-draw.
         for name in ["g_RenderVar0", "g_RenderVar1", "g_RenderVar2", "g_RenderVar3"] {
             #expect(values[name]?.vectorValue == [0, 0, 0, 0])
         }
 
-        // g_HDRParams.y = 0.5 ⇒ combine_video_hdr maxHDR = 1.0 ⇒ exact SDR
-        // pass-through. (y = 0 would divide by zero → NaN/black.)
         #expect(values["g_HDRParams"]?.vectorValue == [1, 0.5])
     }
 
@@ -168,8 +160,6 @@ struct WPEMetalRuntimeUniformsTests {
 
     @Test("Perspective projection maps world text/image origins to scene-centered pixels")
     func projectedCenterInScenePixelsMatchesObjectQuadCamera() throws {
-        // Same camera as the perspective object-quad executor test: eye 10 units
-        // back, fov 90, 100×100 scene → focal = 100 / (2·tan45°) = 50.
         let camera = WPEMetalCameraUniforms(
             orthogonalProjection: WPESceneOrthogonalProjection(width: 100, height: 100, auto: true),
             sceneCamera: WPESceneCamera(
@@ -184,8 +174,6 @@ struct WPEMetalRuntimeUniformsTests {
         )
         let sceneSize = CGSize(width: 100, height: 100)
 
-        // On-axis world origin → screen center; depthScale = focal(50)/depth(10) = 5,
-        // matching the object-quad test where a size-10 quad renders 5px wide.
         let onAxis = try #require(camera.projectedCenterInScenePixels(
             worldPoint: SIMD3<Double>(0, 0, 0), sceneSize: sceneSize
         ))
@@ -193,25 +181,18 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(abs(onAxis.center.y) < 0.01)
         #expect(abs(onAxis.depthScale - 5) < 0.01)
 
-        // Off-axis: right/up world offsets project by depthScale, +Y up.
         let offAxis = try #require(camera.projectedCenterInScenePixels(
             worldPoint: SIMD3<Double>(2, 3, 0), sceneSize: sceneSize
         ))
         #expect(abs(offAxis.center.x - 10) < 0.01)
         #expect(abs(offAxis.center.y - 15) < 0.01)
 
-        // Regression: a three-body-style text origin (x≈0, small world units, in
-        // front of the eye) projects to near screen-center — NOT to (origin −
-        // halfExtent), which the old pixel interpretation used to push ~50px
-        // (≈960px at 1080p) off-screen so every label vanished.
         let label = try #require(camera.projectedCenterInScenePixels(
             worldPoint: SIMD3<Double>(0, -0.54, 4), sceneSize: sceneSize
         ))
         #expect(abs(label.center.x) < 50)
         #expect(abs(label.center.y) < 50)
 
-        // Points at/behind the eye plane are unprojectable → the renderer skips
-        // them instead of drawing at a garbage location.
         #expect(camera.projectedCenterInScenePixels(
             worldPoint: SIMD3<Double>(0, 0, 20), sceneSize: sceneSize
         ) == nil)
@@ -285,7 +266,6 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(values["g_Brightness"]?.numberValue == 1)
         #expect(values["g_PointerPosition"]?.vectorValue == [0.2, 0.8])
         #expect(values["g_ViewProjectionMatrix"]?.vectorValue?.count == 16)
-        // `.identity` geometry must inject identity per-object 2.8 transforms.
         #expect(values["g_ModelMatrix"]?.vectorValue == [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
         #expect(values["g_NormalModelMatrix"]?.vectorValue == [1, 0, 0, 0, 1, 0, 0, 0, 1])
     }

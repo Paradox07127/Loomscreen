@@ -45,9 +45,7 @@ struct WPETexSubRectCropperTests {
         #expect(result.height == 2)
         #expect(result.bytesPerRow == 8)
         #expect(Array(result.bytes) == [
-            // row 0 (cols 0,1)
             0x00, 0x00, 0x00, 0xff, 0x01, 0x00, 0x00, 0xff,
-            // row 1 (cols 0,1)
             0x10, 0x00, 0x00, 0xff, 0x11, 0x00, 0x00, 0xff
         ])
     }
@@ -68,9 +66,7 @@ struct WPETexSubRectCropperTests {
         #expect(result.width == 2)
         #expect(result.height == 2)
         #expect(Array(result.bytes) == [
-            // row 2 (cols 2,3)
             0x22, 0x00, 0x00, 0xff, 0x23, 0x00, 0x00, 0xff,
-            // row 3 (cols 2,3)
             0x32, 0x00, 0x00, 0xff, 0x33, 0x00, 0x00, 0xff
         ])
     }
@@ -83,7 +79,6 @@ struct WPETexSubRectCropperTests {
             atlasHeight: 8
         )
 
-        // 0.4999 → 0, 1.5001 → 2, 2.5 → 3 (half-up via toNearestOrAwayFromZero), 2.4999 → 2
         #expect(rect.x == 0)
         #expect(rect.y == 2)
         #expect(rect.width == 3)
@@ -108,7 +103,7 @@ struct WPETexSubRectCropperTests {
 
     @Test("nil sub-rect returns the whole BC3 atlas unchanged")
     func wholeAtlasPassthroughBC3() throws {
-        let atlas = Self.bc3Atlas8x8  // 4 blocks × 16 bytes/block = 64 bytes
+        let atlas = Self.bc3Atlas8x8
         let mapping = WPEMetalTextureFormatMapping(pixelFormat: .bc3_rgba, bytesPerPixel: nil, bytesPerBlock: 16)
 
         let result = try WPETexSubRectCropper.crop(
@@ -121,7 +116,7 @@ struct WPETexSubRectCropperTests {
 
         #expect(result.width == 8)
         #expect(result.height == 8)
-        #expect(result.bytesPerRow == 32)  // 2 blocks per row × 16
+        #expect(result.bytesPerRow == 32)
         #expect(result.bytes == atlas)
     }
 
@@ -134,14 +129,13 @@ struct WPETexSubRectCropperTests {
             atlasBytes: atlas,
             atlasWidth: 8,
             atlasHeight: 8,
-            subRect: CGRect(x: 4, y: 4, width: 4, height: 4),  // bottom-right block
+            subRect: CGRect(x: 4, y: 4, width: 4, height: 4),
             mapping: mapping
         )
 
         #expect(result.width == 4)
         #expect(result.height == 4)
         #expect(result.bytesPerRow == 16)
-        // Bottom-right block is block index (1, 1) in a 2×2 grid → bytes 48..<64
         #expect(Array(result.bytes) == Array(atlas[48..<64]))
     }
 
@@ -155,7 +149,7 @@ struct WPETexSubRectCropperTests {
                 atlasBytes: atlas,
                 atlasWidth: 8,
                 atlasHeight: 8,
-                subRect: CGRect(x: 2, y: 2, width: 4, height: 4),  // 2 is not a 4-block multiple
+                subRect: CGRect(x: 2, y: 2, width: 4, height: 4),
                 mapping: mapping
             )
         }
@@ -165,7 +159,7 @@ struct WPETexSubRectCropperTests {
 
     @Test("Truncated atlas bytes throw truncatedImageBytes")
     func truncatedAtlasThrows() {
-        let truncated = Data(repeating: 0, count: 4)  // 4-byte buffer claiming to be a 4×4 RGBA atlas (needs 64)
+        let truncated = Data(repeating: 0, count: 4)
         let mapping = WPEMetalTextureFormatMapping(pixelFormat: .rgba8Unorm, bytesPerPixel: 4, bytesPerBlock: nil)
 
         #expect(throws: WPETexSubRectCropper.Failure.truncatedImageBytes) {
@@ -181,9 +175,6 @@ struct WPETexSubRectCropperTests {
 
     // MARK: - Fixtures
 
-    /// 4×4 RGBA8 atlas where each pixel encodes its (row, col) in the
-    /// red channel: bits 7..4 = row, bits 3..0 = col. Lets every crop
-    /// assertion check both the geometry and the pixel ordering.
     private static let rgbaAtlas4x4: Data = {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(4 * 4 * 4)
@@ -198,9 +189,6 @@ struct WPETexSubRectCropperTests {
         return Data(bytes)
     }()
 
-    /// 8×8 BC3 atlas: 4 blocks × 16 bytes = 64 bytes. Block i has every
-    /// byte set to `i`. Lets the crop assertion verify that the right
-    /// block bytes land at the right output offset.
     private static let bc3Atlas8x8: Data = {
         var bytes = Data()
         for blockIndex in 0..<4 {

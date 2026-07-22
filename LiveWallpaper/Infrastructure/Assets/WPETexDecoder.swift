@@ -293,9 +293,7 @@ struct WPETexDecoder: Sendable {
         let hasAnimationFrames: Bool
     }
 
-    /// Parsed `TEXS` block. Phase 2E only consumes `frameTime` from the
-    /// frame metadata; the UV crop/rotate fields are recorded for a later
-    /// phase (atlas-driven WPE animation).
+    /// Parsed `TEXS` animation metadata, including frame timing and atlas transforms.
     private struct WPETexFrameInfoBlock {
         let version: Int
         let gifWidth: Int?
@@ -705,17 +703,7 @@ struct WPETexDecoder: Sendable {
         return image
     }
 
-    /// Wraps a TEXB-encoded (PNG/JPEG) payload into a synthetic
-    /// RGBA8888-shaped `WPETexTexturePayload` so the Metal upload path
-    /// need not branch on encoded-vs-raw at every call site.
-    ///
-    /// Animated encoded payloads (PNG/JPEG atlas + TEXS schedule, 3 samples
-    /// in the 431960 corpus) used to throw `.unsupportedAnimation` here.
-    /// Now each source atlas is decoded once via ImageIO (deduped by
-    /// imageID, mirroring raw `.tex`'s `mipmapsByImageID` cache) so the
-    /// eager loader shares one MTLTexture per imageID across frames — the
-    /// particle renderer expects `source.texture(at:)` to return an
-    /// atlas-sized surface for its sprite-sheet UV math.
+    /// Converts encoded TEXB atlases to RGBA payloads while sharing each decoded source image across frames.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
         if parsed.hasAnimationFrames {
             return try bridgeEncodedAnimatedImagePayload(parsed)

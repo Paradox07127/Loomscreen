@@ -1,53 +1,18 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Processes widget — a native replica of the mock's `proc_m` row grammar
-/// (`.claude/plan/monitor-design/index.html`). Top apps as rows — the sampler
-/// aggregates helper/XPC children under their top-level app (parent-PID walk)
-/// and sorts by CPU — each a three-column grid: program name (with a leading
-/// square glyph, truncating) · an inline CPU bar + cpu% readout (one decimal
-/// under 10, whole number from 10 — the CPU widget's formatter) · a
-/// right-aligned memory column. The numeric columns reserve fixed widths so
-/// the rightmost value never clips; only names truncate. The eye ranks by bar
-/// length, not by reading digits, so the bar is normalized to the busiest row
-/// in the shown set (mock `proc_rows`: `clamp(c/max, 0, 1)`), never to a
-/// fixed 100%.
-///
-/// Sizes are Apple's fixed macOS widget frames — M 364×170, L 364×376 visible —
-/// on every display. `MonitorWidgetKind.allowedSizes` returns `[.medium,
-/// .large]` (S is cut — one row is unreadable at 170×170). The mock never
-/// defines an L slot for this card — only `m` (top 5) and a two-column wide
-/// `xl` (top 8 side-by-side) — so L here is a deliberate native composite: the
-/// same single-column grammar as M (same width; the board only grows this card
-/// taller, never wider), with the `xl` slot's density idea folded into row
-/// COUNT. When the row-count `count` option (SPEC §7) is unset, M keeps the
-/// mock's fixed 5; L auto-fills to the settings stepper's ceiling of 12. Every
-/// path is then clamped to `rowCapacity` — the rows that physically fit — so
-/// the final row never clips at exactly 170/376 pt (L's capacity of 19 clears
-/// the 12 ceiling; an M stepper override of 12 shows the 7 that fit). If
-/// handed `.small` defensively, the same content renders compacted rather
-/// than crashing.
-///
-/// Privacy: only the app display name is ever shown — never pid, path, or
-/// bundle id. Pure function of `MonitorWidgetContext`.
 struct MonitorProcessesWidgetView: View {
     let context: MonitorWidgetContext
 
     private var snapshot: MonitorSnapshot { context.snapshot }
     private var system: MonitorSystemSnapshot? { snapshot.system }
 
-    // Header column labels — LISTed for i18n.
     private static let colProgram = "Program"
     private static let colCPU = "CPU"
     private static let colMEM = "MEM"
 
     var body: some View {
         GeometryReader { geo in
-            // The mock derives type from the PER-ROW cell height (`d.h / d.rows`):
-            // M spans one board row and L two, so dividing by 2·rowSpan yields a
-            // near-constant type reference (85/94 pt at the fixed frames) — L
-            // holds more rows, not bigger text. Row capacity, by contrast, needs
-            // the FULL frame height; the two are passed separately below.
             let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
             let scaleHeight = geo.size.height / (2 * rowSpan)
             let scale = MonitorDesign.TypeScale(cellHeight: scaleHeight)
@@ -71,7 +36,6 @@ struct MonitorProcessesWidgetView: View {
         rows: [MonitorProcessSample], scale: MonitorDesign.TypeScale
     ) -> some View {
         if !rows.isEmpty {
-            // "top 5" — the emphasis word is the count, whispered around it.
             HStack(spacing: 3) {
                 Text("top")
                     .foregroundStyle(MonitorDesign.inkFaint)
@@ -98,9 +62,7 @@ struct MonitorProcessesWidgetView: View {
         }
     }
 
-    /// Honest empty treatment: the top-process sampler only runs when enabled, so
-    /// an absent/empty list means "not sampling", not "no processes". A single
-    /// whisper line, never fabricated rows.
+    /// Honest empty treatment: the top-process sampler only runs when enabled, so an absent/empty list means "not sampling", not "no processes".
     private func quietState(scale: MonitorDesign.TypeScale) -> some View {
         VStack(alignment: .leading) {
             Spacer(minLength: 0)
@@ -115,12 +77,7 @@ struct MonitorProcessesWidgetView: View {
     private func processTable(
         rows: [MonitorProcessSample], scale: MonitorDesign.TypeScale, compact: Bool
     ) -> some View {
-        // Bars normalize to the busiest shown row (mock `proc_rows`); guard 0.
         let maxCPU = max(rows.map(\.cpuPercent).max() ?? 0, .ulpOfOne)
-        // Numeric columns reserve fixed caption-em widths sized to their widest
-        // realistic value, so the rightmost cell never clips and only names
-        // truncate: CPU = 2.6em bar (the CPU widget's procRows width) + gap +
-        // 2.2em readout ("9.4"/"100"-wide); MEM = 4em ("1023 MB"-wide).
         let base = scale.caption
         let cpuBarWidth = base * 2.6
         let cpuValueWidth = base * 2.2
@@ -129,8 +86,6 @@ struct MonitorProcessesWidgetView: View {
         let colGap = base * 0.7
         let rowGap = base * (compact ? 0.24 : 0.34)
 
-        // Top-aligned, no trailing spacer: the outer frame already pins the
-        // table up, and `rowCapacity` budgets exactly header + N×(row+gap).
         return VStack(alignment: .leading, spacing: rowGap) {
             headerRow(
                 scale: scale, cpuColWidth: cpuColWidth,
@@ -153,7 +108,6 @@ struct MonitorProcessesWidgetView: View {
         cpuColWidth: CGFloat, memColWidth: CGFloat, colGap: CGFloat
     ) -> some View {
         HStack(spacing: colGap) {
-            // "Program" is a word (localized); "CPU"/"MEM" are acronyms (verbatim).
             localizedColumnLabel(Self.colProgram, scale: scale)
                 .frame(maxWidth: .infinity, alignment: .leading)
             columnHeader(Self.colCPU, systemImage: "cpu", columnWidth: cpuColWidth, scale: scale)
@@ -169,14 +123,7 @@ struct MonitorProcessesWidgetView: View {
         }
     }
 
-    /// A CPU/MEM header cell: the acronym, or — Apple-widget-style contingency
-    /// for a column too narrow to set it — an SF Symbol standing in for the
-    /// word instead of shrinking or clipping it (runtime contract: header text
-    /// never truncates/overlaps). Dormant at the fixed M/L frames: both
-    /// columns (≥4× the SAME caption base the label size clamps from) always
-    /// clear `headerFitsText`'s threshold, since only cellHeight — never
-    /// column width — changes between them. Kept real (not decorative) so a
-    /// future host with a genuinely narrow column still degrades cleanly.
+    /// Uses an SF Symbol when a metric header is too narrow for its acronym.
     @ViewBuilder
     private func columnHeader(
         _ text: String, systemImage: String, columnWidth: CGFloat, scale: MonitorDesign.TypeScale
@@ -210,9 +157,6 @@ struct MonitorProcessesWidgetView: View {
     }
 
     /// `.pr` — one process: name cell (1fr) · CPU cell (bar + value) · MEM cell.
-    /// Rows are strictly single-line; the numeric cells sit in widths reserved
-    /// for their widest realistic value, with compression (min scale .7) only
-    /// as an outlier backstop (a 4-digit cpu%, a "102.4 GB" footprint).
     private func processRow(
         _ proc: MonitorProcessSample, maxCPU: Double,
         scale: MonitorDesign.TypeScale,
@@ -252,9 +196,7 @@ struct MonitorProcessesWidgetView: View {
         }
     }
 
-    /// `.pcpu` — the inline bar (fills to its share of the busiest row; the CPU
-    /// widget's procRows track-plus-overlay idiom at its 2.6em width) + the
-    /// cpu% readout (amber, tabular, fixed-width slot so digits align).
+    /// `.pcpu` — the inline bar (fills to its share of the busiest row; the CPU widget's procRows track-plus-overlay idiom at its 2.6em width) + the cpu% readout (amber, tabular, fixed-width slot so digits align).
     private func cpuCell(
         _ cpuPercent: Double, maxCPU: Double, scale: MonitorDesign.TypeScale,
         barWidth: CGFloat, valueWidth: CGFloat
@@ -297,16 +239,6 @@ struct MonitorProcessesWidgetView: View {
         )
     }
 
-    /// Requested rows: the `count` widget option (SPEC §7 `Processes{count}`,
-    /// `MonitorWidgetDraft` key/range) if the user set one — applied uniformly
-    /// to whichever size is current, same as the settings popover's stepper.
-    /// Absent that override, M keeps the mock's fixed default (`proc_m`'s
-    /// "top 5") and L auto-fills to the stepper ceiling of 12 (also the
-    /// sampler's list depth; L's physical capacity of 19 clears it). EVERY
-    /// path is then clamped to `rowCapacity` — never draw a row the fixed
-    /// frame can't finish (at M's 170 pt a stepper 12 shows the 7 that fit;
-    /// the header count stays honest because it reads the displayed list's
-    /// length).
     private func rowLimit(frameHeight: CGFloat, scaleHeight: CGFloat) -> Int {
         let capacity = max(
             Self.rowCapacity(frameHeight: frameHeight, scaleHeight: scaleHeight), 1
@@ -342,10 +274,7 @@ struct MonitorProcessesWidgetView: View {
         return Array(sorted.prefix(max(0, limit)))
     }
 
-    /// The cpu% readout, no percent sign: one decimal under 10 (where tenths
-    /// still carry signal), whole number from 10 up — the CPU widget's
-    /// formatter convention. Rounds to tenths FIRST so 9.97 lands as "10",
-    /// never "10.0".
+    /// The cpu% readout, no percent sign: one decimal under 10 (where tenths still carry signal), whole number from 10 up — the CPU widget's formatter convention.
     nonisolated static func cpuText(_ cpuPercent: Double) -> String {
         let v = cpuPercent.isFinite ? max(cpuPercent, 0) : 0
         let tenths = (v * 10).rounded() / 10
@@ -359,36 +288,20 @@ struct MonitorProcessesWidgetView: View {
         return min(max(cpuPercent / denom, 0), 1)
     }
 
-    /// Whole `.pr` rows that physically fit in a tile `frameHeight` pt tall:
-    /// subtract the widget-shell chrome (content insets + header line +
-    /// spacing) and the in-card column header, then divide by the row pitch
-    /// (one row + the VStack gap that precedes every row). The constants
-    /// mirror `processTable`'s actual layout — `.proc .ph`'s padding +
-    /// hairline, `.proc`'s .34em row gap — and the 1.25 line factor slightly
-    /// over-budgets SF's real ~1.19–1.23× line heights, so a row this counts
-    /// as fitting can never clip. At the fixed Apple frames: M 170 pt
-    /// (scale 85) → 7; L 376 pt (scale 94) → 19, where the stepper/sampler
-    /// cap of 8 binds first. 0 when chrome alone overflows the frame.
+    /// Calculates the number of whole process rows that fit the tile height.
     nonisolated static func rowCapacity(frameHeight: CGFloat, scaleHeight: CGFloat) -> Int {
         let scale = MonitorDesign.TypeScale(cellHeight: scaleHeight)
         let line: CGFloat = 1.25
-        // MonitorWidgetContainer: content insets + its own header line + spacing.
         let shellChrome = MonitorDesign.contentInsetV * 2
             + scale.label * line + scale.label * 0.5
-        // `.proc .ph` — the column-header row, its bottom padding, its hairline.
         let tableHeader = scale.label * line + scale.caption * 0.3 + MonitorDesign.hairlineWidth
-        // `.proc .pr` row + `.proc`'s inter-row gap (.34em, non-compact).
         let rowPitch = scale.caption * line + scale.caption * 0.34
         let available = frameHeight - shellChrome - tableHeader
         guard rowPitch > 0, available > 0 else { return 0 }
         return Int((available / rowPitch).rounded(.down))
     }
 
-    /// Whether a CPU/MEM header column is wide enough to set its 3-letter
-    /// acronym at `labelSize` without truncating — the threshold the
-    /// icon-fallback contingency switches on. Modeled as ~0.62em average
-    /// glyph advance (SF Rounded semibold, uppercase) × 3 characters, plus the
-    /// label's own tracking (`MonitorDesign.labelTracking`) on both sides.
+    /// Whether a CPU/MEM header column is wide enough to set its 3-letter acronym at `labelSize` without truncating — the threshold the icon-fallback contingency switches on.
     nonisolated static func headerFitsText(columnWidth: CGFloat, labelSize: CGFloat) -> Bool {
         let glyphWidth = labelSize * 0.62 * 3
         let tracking = MonitorDesign.labelTracking(size: labelSize) * 2
@@ -404,11 +317,6 @@ private func processesMockContext(
 ) -> MonitorWidgetContext {
     var system = MonitorSystemSnapshot()
     if !empty {
-        // The mock's DATA.processes (name · cpu · mem), extended to the
-        // sampler's 12-row depth so the L preview exercises its full auto-fill
-        // ceiling; sub-10% rows carry tenths to show the decimal readout.
-        // Each size's own capping (`rowLimit`) slices this down, exactly like
-        // `proc_m`/`proc_xl` both slicing the same source array.
         system.topProcesses = [
             MonitorProcessSample(name: "Xcode", cpuPercent: 52, memBytes: UInt64(3.4 * 1_073_741_824)),
             MonitorProcessSample(name: "kernel_task", cpuPercent: 31, memBytes: UInt64(1.2 * 1_073_741_824)),
@@ -437,9 +345,6 @@ private func processesMockContext(
     )
 }
 
-// Frames are Apple's exact visible widget tiles (HIG Widgets → Specifications),
-// the size the board's render inset hands this view on EVERY display:
-// M 364×170, L 364×376.
 #Preview("Processes M") {
     MonitorProcessesWidgetView(context: processesMockContext(size: .medium))
         .frame(width: 364, height: 170)

@@ -262,7 +262,6 @@ struct SceneResourceResolverTests {
         return Fixture(root: root, cacheRoot: cacheRoot)
     }
 
-    /// Writes a synthetic 4×4 RGBA8888 `.tex` file matching the RePKG / linux-wallpaperengine layout (TEXV0005 / TEXI0001 / TEXB0003).
     private func writeRGBA8888Tex(
         at url: URL,
         width: Int = 4,

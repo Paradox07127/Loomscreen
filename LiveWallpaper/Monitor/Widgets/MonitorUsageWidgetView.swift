@@ -1,50 +1,24 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Usage widget — a native replica of the mock's `usage_s` / `usage_m`
-/// (`.claude/plan/monitor-design/index.html`, §3.2.6 density directive) plus a
-/// real L "ledger-lite" panel (the mock cut L to the Usage Ledger §3.2.8; here L
-/// is a glance-sized instrument stack grounded in the same snapshot fields).
-/// The #1 glance: "will I hit the limit?" QUOTA-FORWARD. The 5h quota ring is the
-/// hero (the ONE shared `ArcGauge`), the week meter and today $/tokens frame it,
-/// and M densifies into a CodexBar-popover-class cockpit: dual 5h/week meters +
-/// dual reset countdowns + provider split + a client-derived burn ETA + a
-/// one-line four-segment cache row + a 7-day mini sparkline. L adds the two things M has
-/// no room for — the client burn-rate readouts ($/h, tok/h) and a per-model
-/// breakdown (share bar + valued rows from `perModel`) — over the same quota
-/// hero, cache strip and 7-day trend.
-///
-/// SPEC §3.4 honesty: `fiveHour/weekUsedPercent` + resets come from the statusline
-/// rate-limit capture; `tokensToday/costTodayUSD` are the free local JSONL tail;
-/// the burn ETA is client-derived from the sparse `history.usageFiveHourUsed`
-/// slope and is shown ONLY when honestly derivable. `limitsStale` dims the quota
-/// block (numbers stay visible); missing 5h fields drop the quota blocks entirely
-/// while today-consumption still shows; a nil `usage` is a quiet setup-needed state.
 struct MonitorUsageWidgetView: View {
     let context: MonitorWidgetContext
 
     private var usage: MonitorUsageSnapshot? { context.snapshot.usage }
     private var history: MonitorHistorySnapshot { context.history }
 
-    /// `provider` (placement.options): scopes perProvider/perModel/today totals
-    /// to a single provider. Invalid/missing ⇒ "all" (unfiltered — the widget's
-    /// pre-existing rendering, unchanged).
+    /// `provider` (placement.options): scopes perProvider/perModel/today totals to a single provider.
     private var provider: String {
         MonitorUsagePresentationPolicy.resolvedProvider(context.placement.options["provider"]?.stringValue)
     }
 
-    /// `primaryMetric` (placement.options): which of cost/tokens leads the
-    /// hero-summary and per-model rows. Invalid/missing ⇒ "tokens" (default —
-    /// today's rendering, unchanged).
+    /// `primaryMetric` (placement.options): which of cost/tokens leads the hero-summary and per-model rows.
     private var primaryMetric: String {
         MonitorUsagePresentationPolicy.resolvedPrimaryMetric(context.placement.options["primaryMetric"]?.stringValue)
     }
 
     var body: some View {
         GeometryReader { geo in
-            // Board convention (see CPU): S/M span one board row and L two, so
-            // dividing by 2·rowSpan yields the mock's near-constant cell height
-            // (85/94) — one type scale across all sizes.
             let rowSpan: CGFloat = context.placement.size == .large ? 2 : 1
             let cellHeight = geo.size.height / (2 * rowSpan)
             MonitorWidgetContainer(
@@ -78,7 +52,6 @@ struct MonitorUsageWidgetView: View {
             case .small:
                 if let resets = usage.fiveHourResetsAt, MonitorUsagePresentationPolicy.hasQuota(usage), MonitorUsagePresentationPolicy.quotaVisible(provider),
                    !MonitorUsagePresentationPolicy.isLimitsStale(usage) {
-                    // "5H RESETS <time>" — localized whole, the countdown a placeholder.
                     Text(verbatim: String(localized: "5H RESETS \(MonitorUsagePresentationPolicy.fiveHourResetText(secondsRemaining: resets - nowEpoch))",
                                           comment: "Usage widget S header: when the 5-hour quota resets; %@ is a countdown."))
                         .font(MonitorDesign.labelFont(size: scale.label))
@@ -98,8 +71,6 @@ struct MonitorUsageWidgetView: View {
     }
 
     /// The provider status dot + optional word ("live" / "stale" / "degraded").
-    /// Labelled (M/L header) it reads as a contained status chip; dot-only (S)
-    /// stays bare — a lone dot needs no capsule.
     @ViewBuilder
     private func providerStatusPill(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale, showLabel: Bool
@@ -128,9 +99,7 @@ struct MonitorUsageWidgetView: View {
 
     // MARK: - S (170×170 — content ≈ 138×125)
 
-    /// S content budget ≈ 138×125 pt: ring 76 + week meter (~20) + today row
-    /// (~13) + two gaps. Staleness reads via the dimmed quota + the amber status
-    /// dots (header + today row) — a dedicated marker row no longer fits.
+    /// S content budget ≈ 138×125 pt: ring 76 + week meter (~20) + today row (~13) + two gaps.
     @ViewBuilder
     private func smallBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
@@ -149,9 +118,7 @@ struct MonitorUsageWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    /// The 5h quota ring hero: shared `ArcGauge(fiveHourUsedPercent)` with the
-    /// used% woven into the hub + a "5H" label. Band colour follows the near-limit
-    /// escalation so >85% goes coral.
+    /// The 5h quota ring hero: shared `ArcGauge(fiveHourUsedPercent)` with the used% woven into the hub + a "5H" label.
     private func quotaRingHero(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale, hubHeroScale: CGFloat
     ) -> some View {
@@ -169,7 +136,6 @@ struct MonitorUsageWidgetView: View {
                             .font(MonitorDesign.microFont(size: scale.hero * hubHeroScale * 0.42))
                             .foregroundStyle(MonitorDesign.inkFaint)
                     }
-                    // "100%" is hub-width at the new ring sizes; shrink, not clip.
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     Text(verbatim: "5H")
@@ -178,8 +144,6 @@ struct MonitorUsageWidgetView: View {
                         .foregroundStyle(MonitorDesign.inkFaint)
                 }
             }
-            // 76 pt is the vertical budget left in the fixed 170 pt S tile once
-            // the week meter and today row take their share.
             .frame(width: 76, height: 76)
             Spacer(minLength: 0)
         }
@@ -199,9 +163,6 @@ struct MonitorUsageWidgetView: View {
     }
 
     /// today $ AND tokens (both, compact) + provider status dot pushed right.
-    /// Both readouts are provider-scoped (`filteredCostTodayUSD`/
-    /// `filteredTokensToday`); under `primaryMetric == "cost"` the tokens figure
-    /// recedes an extra step (inkFaint instead of inkMuted).
     private func todayRowCompact(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -260,8 +221,6 @@ struct MonitorUsageWidgetView: View {
     }
 
     /// LEFT COLUMN: 5h ring hero + today $/tokens, provider split, cache row.
-    /// Budget ≈ 159×125 pt: ring 60 + split (~20) + one-line cache (~16) + two
-    /// hairline blocks — the L strip's separate bar/legend rows don't fit here.
     @ViewBuilder
     private func leftColumn(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
@@ -295,8 +254,6 @@ struct MonitorUsageWidgetView: View {
                 }
                 todayStack(usage, scale: scale)
             }
-            // The Claude/Codex split is meaningless once scoped to one provider —
-            // hidden alongside the other cross-provider aggregates (§ aggregatesVisible).
             if MonitorUsagePresentationPolicy.aggregatesVisible(provider), let split = MonitorUsagePresentationPolicy.providerSplit(usage) {
                 hairline
                 providerSplitBar(split, scale: scale)
@@ -308,9 +265,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// M-only merged cache read: label · four-segment bar · hit% chip on ONE
-    /// line. The segments stay legible unlabelled at this width; the labelled
-    /// three-row strip remains an L luxury (`cacheStrip`).
+    /// M-only merged cache read: label · four-segment bar · hit% chip on ONE line.
     private func cacheRowCompact(
         _ tokens: MonitorTokenTotals, scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -334,8 +289,6 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// today $ + tokens as a two-line stat stack (mock's `.todayrow` column),
-    /// provider-scoped; TOKENS recedes to inkFaint when cost leads.
     private func todayStack(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -350,9 +303,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// `muted` recedes the value to `inkFaint` — used for the non-primary metric
-    /// when `primaryMetric == "cost"` (default `false` keeps every pre-existing
-    /// call site's rendering unchanged).
+    /// `muted` recedes the value to `inkFaint` — used for the non-primary metric when `primaryMetric == "cost"` (default `false` keeps every pre-existing call site's rendering unchanged).
     private func statLine(
         key: String, value: String, scale: MonitorDesign.TypeScale, muted: Bool = false
     ) -> some View {
@@ -399,15 +350,10 @@ struct MonitorUsageWidgetView: View {
             }
             .opacity(stale ? 0.5 : 1)
 
-            // Burn-rate ETA chip — ONLY when honestly derivable (§3.4). Also
-            // suppressed while stale (a stale quota can't feed a live slope) or
-            // provider-filtered (the slope isn't attributable to one provider).
             if MonitorUsagePresentationPolicy.aggregatesVisible(provider), !stale, let eta = burnETA {
                 burnETAChip(seconds: eta, scale: scale)
             }
 
-            // 7-day mini sparkline of daily tokens — cross-provider (no per-day
-            // provider split in the schema), so hidden under a provider filter.
             if MonitorUsagePresentationPolicy.aggregatesVisible(provider), let week7 = MonitorUsagePresentationPolicy.week7Tokens(usage) {
                 week7Sparkline(week7, scale: scale)
             }
@@ -418,9 +364,6 @@ struct MonitorUsageWidgetView: View {
         let critical = MonitorUsagePresentationPolicy.isETACritical(seconds)
         let accent = critical ? MonitorDesign.signalCoral : MonitorDesign.signalAmber
         return HStack(spacing: 6) {
-            // The mock's teardrop `.burnicon` — a rotated rounded square; its
-            // accent (coral when critical) now carries the near-limit escalation
-            // that the old bespoke coral capsule used to.
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(accent)
                 .frame(width: scale.label * 0.55, height: scale.label * 0.55)
@@ -449,8 +392,6 @@ struct MonitorUsageWidgetView: View {
                     .minimumScaleFactor(0.7)
                 Spacer(minLength: 4)
                 if let today = week7.last {
-                    // Token count is data (verbatim); "today" reuses the localized
-                    // TODAY key, lowercased for this inline caption.
                     (Text(verbatim: "\(MonitorFormat.tokens(Int(today))) ")
                      + Text(verbatim: String(localized: "TODAY").lowercased()))
                         .font(MonitorDesign.captionFont(size: scale.label))
@@ -469,12 +410,6 @@ struct MonitorUsageWidgetView: View {
 
     // MARK: - L (364×376 — content ≈ 332×331) — the "ledger-lite" glance panel
 
-    /// L is a taller instrument stack that surfaces the two things M has no room
-    /// for: the client burn-rate readouts and the per-model breakdown (both come
-    /// straight from `MonitorUsageSnapshot`, never re-sampled). Zone order echoes
-    /// the Usage Ledger (§3.2.8) while staying quota-forward: hero ring + summary →
-    /// 5h/week meters + burn-ETA → per-model share → cache + 7-day trend. Every
-    /// zone degrades independently (no quota / no models / no cache each drop out).
     @ViewBuilder
     private func largeBody(_ usage: MonitorUsageSnapshot, cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
@@ -499,8 +434,6 @@ struct MonitorUsageWidgetView: View {
                 largeFootRow(usage, scale: scale)
             }
 
-            // Staleness reads from the header pill + the dimmed quota block (as in
-            // M); no extra bottom marker so the panel doesn't repeat itself.
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -541,11 +474,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// A 2×2 grid of quiet readouts (the ledger's summary strip, condensed):
-    /// TODAY $ · TOKENS on the first row (provider-scoped; TOKENS recedes when
-    /// cost leads), BURN $/h · BURN tok/h on the second (cross-provider, so
-    /// hidden under a provider filter — the burn window has no per-provider
-    /// attribution in the schema).
+    /// Presents current totals and burn rates in a compact summary grid.
     @ViewBuilder
     private func largeSummaryGrid(
         _ usage: MonitorUsageSnapshot, scale: MonitorDesign.TypeScale
@@ -638,9 +567,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// Per-model breakdown — the one thing M can't fit: a stacked share bar over a
-    /// compact valued list (model-id · tokens · cost · share bar). Model-ids only
-    /// (privacy-safe); costs are nil for unpriced models and render as a dash.
+    /// Per-model breakdown — the one thing M can't fit: a stacked share bar over a compact valued list (model-id · tokens · cost · share bar).
     private func perModelSection(
         _ models: [MonitorUsageModelBreakdown], scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -667,10 +594,7 @@ struct MonitorUsageWidgetView: View {
         }
     }
 
-    /// Under `primaryMetric == "cost"` the cost/tokens cells swap places (cost
-    /// leads) and tokens recedes to `inkMuted`→`inkFaint`; default order/tone is
-    /// untouched. Cost is always `MonitorFormat.usd(nil)` → "—" for unpriced
-    /// models (never fabricated).
+    /// Under `primaryMetric == "cost"` the cost/tokens cells swap places (cost leads) and tokens recedes to `inkMuted`→`inkFaint`; default order/tone is untouched.
     private func modelRow(
         _ model: MonitorUsageModelBreakdown, total: Int, scale: MonitorDesign.TypeScale
     ) -> some View {
@@ -743,7 +667,6 @@ struct MonitorUsageWidgetView: View {
                     .foregroundStyle(MonitorDesign.inkFaint)
                 Spacer(minLength: 4)
                 if let hit = MonitorUsagePresentationPolicy.cacheHitRate(tokens) {
-                    // The percentage is data (verbatim); "hit" is a word (localized).
                     (Text(verbatim: "\(MonitorUsagePresentationPolicy.wholePercent(hit)) ") + Text("hit"))
                         .font(MonitorDesign.subFont(size: scale.label))
                         .monospacedDigit()
@@ -830,8 +753,6 @@ struct MonitorUsageWidgetView: View {
     }
 
     /// Quiet setup-needed state when `usage == nil` (module off / no source yet).
-    /// A missing folder grant (runtime-synthesized `unauthorized` health) names
-    /// the real fix instead of implying data will arrive on its own.
     private func setupNeeded(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
         let unauthorized = (context.snapshot.health ?? []).contains {
@@ -871,8 +792,6 @@ struct MonitorUsageWidgetView: View {
 
     // MARK: - SwiftUI rendering helpers
 
-    /// Ring/hero colour: reuse the shared load-band steel/amber, but escalate to
-    /// coral in the near-limit `crit` band (mirrors the mock's ring treatment).
     nonisolated static func quotaBandColor(_ fraction: Double) -> Color {
         switch MonitorUsagePresentationPolicy.quotaBand(fraction) {
         case .normal: return MonitorDesign.loadSteel
@@ -932,7 +851,6 @@ struct MonitorUsageWidgetView: View {
         enum Kind: String, CaseIterable {
             case input, output, cacheRead, cacheWrite
 
-            /// Legend abbreviations from the mock's `.cacheleg` (in/out/c-r/c-w).
             var legendLabel: String {
                 switch self {
                 case .input: return "in"
@@ -963,8 +881,6 @@ struct MonitorUsageWidgetView: View {
 
 // MARK: - QuotaMeter (one labelled meter: NAME · used% · reset, then a thin bar)
 
-/// Ported from the mock's `qmeter`: the density comes from repetition + alignment.
-/// Several stack with identical rhythm. Bar fill escalates warn→crit per used%.
 private struct QuotaMeter: View {
     var name: String
     var fraction: Double
@@ -975,8 +891,6 @@ private struct QuotaMeter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: scale.label * 0.32) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                // Meter name ("Week" / "5H limit") — localized via its catalog key,
-                // uppercased for display (a no-op for non-Latin scripts).
                 Text(LocalizedStringKey(name))
                     .font(MonitorDesign.labelFont(size: scale.label))
                     .tracking(MonitorDesign.labelTracking(size: scale.label))
@@ -993,7 +907,6 @@ private struct QuotaMeter: View {
                 }
                 Spacer(minLength: 4)
                 if let resetText {
-                    // "resets" is a word (localized); the countdown is data (verbatim).
                     (showResetPrefix
                         ? Text("resets") + Text(verbatim: " \(resetText)")
                         : Text(verbatim: resetText))
@@ -1076,8 +989,6 @@ private struct CacheSegmentBar: View {
 
 // MARK: - Week7Bars (7-day daily-token mini bars + connecting polyline)
 
-/// Ported from the mock's `wk7Spark`: per-day bars with today highlighted, framed
-/// by a thin connecting polyline across the bar tops. Honest empty days sit flat.
 private struct Week7Bars: View {
     var values: [Double]
 
@@ -1127,9 +1038,7 @@ private struct Week7Bars: View {
 
 // MARK: - ModelShareBar (per-model token share, one segment per model)
 
-/// The Ledger's `.mstack` share bar, condensed: each model contributes a segment
-/// proportional to its token share, coloured by family. A thin dark seam keeps
-/// adjacent segments legible.
+/// The Ledger's `.mstack` share bar, condensed: each model contributes a segment proportional to its token share, coloured by family.
 private struct ModelShareBar: View {
     var models: [MonitorUsageModelBreakdown]
     var total: Int
@@ -1249,7 +1158,6 @@ private func hotUsage() -> MonitorUsageSnapshot {
 private func risingHistory(current: Double) -> MonitorHistorySnapshot {
     var h = MonitorHistorySnapshot()
     let base = Date().timeIntervalSince1970 - 600
-    // +~0.0067/min → from `current`, remaining reaches 1.0 in a live window.
     let step = 0.011
     for i in 0..<6 {
         h.usageQuotaTimes.append(base + Double(i) * 120)

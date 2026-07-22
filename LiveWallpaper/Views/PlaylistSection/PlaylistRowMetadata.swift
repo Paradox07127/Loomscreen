@@ -29,8 +29,6 @@ struct PlaylistRowMetadata: Equatable, Sendable {
     private static func formatResolution(_ size: CGSize) -> String {
         let w = Int(size.width.rounded())
         let h = Int(size.height.rounded())
-        // Bucket on the short side so portrait clips (e.g. 1080×1920 from
-        // a vertical monitor) don't get mislabelled as 1440p.
         let shortSide = min(w, h)
         switch shortSide {
         case 4320...: return "8K"

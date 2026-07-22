@@ -2,10 +2,7 @@ import AppKit
 import LiveWallpaperCore
 import SwiftUI
 
-/// Lists every `GlobalShortcutAction` with a capture button so the user can
-/// rebind, clear, or reset to default. Persists into
-/// `GlobalSettings.globalShortcuts`; broadcast via
-/// `.globalShortcutsDidChange` so `GlobalShortcutManager` re-registers.
+/// Lists every `GlobalShortcutAction` with a capture button so the user can rebind, clear, or reset to default.
 struct ShortcutsSettingsView: View {
     @State private var bindings: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:]
     @State private var rejectionMessage: String?
@@ -56,9 +53,7 @@ struct ShortcutsSettingsView: View {
             ]
         )
         .onReceive(NotificationCenter.default.publisher(for: .globalShortcutsDidChange)) { _ in
-            // Pick up reset / import side-effects fired from elsewhere in
-            // the app so neither the toggle nor the row bindings get
-            // overwritten by a stale local @State on the next save.
+            // Pick up reset / import side-effects fired from elsewhere in the app so neither the toggle nor the row bindings get overwritten by a stale local @State on the next save.
             let latest = SettingsManager.shared.loadGlobalSettings()
             var didResync = false
             if globalShortcutsEnabled != latest.globalShortcutsEnabled {
@@ -133,8 +128,6 @@ struct ShortcutsSettingsView: View {
     }
 
     private func updateBinding(_ newBinding: GlobalShortcutBinding?, for action: GlobalShortcutAction) {
-        // If the master switch flipped off mid-capture, drop the result
-        // rather than persisting a binding the user can no longer trigger.
         guard globalShortcutsEnabled else { return }
         if let newBinding {
             switch validate(newBinding, for: action) {
@@ -168,10 +161,7 @@ struct ShortcutsSettingsView: View {
         persistSettings()
     }
 
-    /// Writes the bindings dictionary AND the master enable flag in a
-    /// single save so a toggle flip can never race with a binding edit.
-    /// `GlobalShortcutManager` re-evaluates both on
-    /// `.globalShortcutsDidChange`.
+    /// Writes the bindings dictionary AND the master enable flag in a single save so a toggle flip can never race with a binding edit.
     private func persistSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         settings.globalShortcuts = bindings
@@ -200,9 +190,7 @@ struct ShortcutsSettingsView: View {
 private struct ShortcutRow: View {
     let action: GlobalShortcutAction
     let binding: GlobalShortcutBinding?
-    /// Driven by the master enable toggle. When false the capture field
-    /// and per-row menu are dimmed and unclickable, but the row stays
-    /// visible so the user sees their saved combinations.
+    /// Driven by the master enable toggle.
     let isEnabled: Bool
     let onCapture: (GlobalShortcutBinding) -> Void
     let onClear: () -> Void
@@ -232,8 +220,6 @@ private struct ShortcutRow: View {
                 .disabled(!isEnabled)
                 .opacity(isEnabled ? 1 : 0.55)
                 .onChange(of: isEnabled) { _, enabled in
-                    // If the master switch flips off mid-capture, drop
-                    // the listener so we don't trap the next key event.
                     if !enabled { isCapturing = false }
                 }
 
@@ -254,9 +240,7 @@ private struct ShortcutRow: View {
     }
 }
 
-/// A small click-to-capture field. When tapped, it switches into capture
-/// mode and listens for the next key-down via a local NSEvent monitor —
-/// same approach Apple uses in System Settings → Keyboard → Shortcuts.
+/// A small click-to-capture field.
 private struct ShortcutCaptureField: View {
     let binding: GlobalShortcutBinding?
     @Binding var isCapturing: Bool
@@ -313,10 +297,7 @@ private struct ShortcutCaptureField: View {
     }
 }
 
-/// Hidden NSView that runs a local key-down monitor for the duration of
-/// `isActive == true`. SwiftUI cannot trap raw key codes + modifier flags
-/// without dropping into AppKit — `onKeyPress` only sees the resolved
-/// character string, which loses the keycode we need for Carbon.
+/// Hidden NSView that runs a local key-down monitor for the duration of `isActive == true`.
 private struct KeyCaptureMonitor: NSViewRepresentable {
     @Binding var isActive: Bool
     let onCapture: (GlobalShortcutBinding) -> Void

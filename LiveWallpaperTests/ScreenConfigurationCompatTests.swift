@@ -3,9 +3,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Phase 1.x §A16 lock: Day 1 added `wpeOrigin` and `recentWPEImports` to
-/// existing persisted blobs. Both must round-trip cleanly AND survive when
-/// the blob is missing or malformed (lossy decode).
 @Suite("ScreenConfiguration / GlobalSettings persistence compatibility")
 struct ScreenConfigurationCompatTests {
 
@@ -188,11 +185,6 @@ struct ScreenConfigurationCompatTests {
         #expect(settings.pauseOnFullScreen == true)
     }
 
-    // Type-aware default: a brand-new ScreenConfiguration picks the
-    // per-type natural frame rate so the picker (which reads this
-    // value) and the runtime (which the picker drives) start out
-    // agreeing. Pre-fix the picker said "60 FPS" while WPE scenes
-    // wanted 30 — the contradiction that prompted this change.
     @Test("New scene ScreenConfiguration defaults to fps30 (WPE parity)")
     func newSceneConfigurationDefaultsToThirty() throws {
         let descriptor = SceneDescriptor(

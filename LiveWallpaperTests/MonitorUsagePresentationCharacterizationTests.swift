@@ -4,13 +4,8 @@ import SwiftUI
 import Testing
 @testable import LiveWallpaper
 
-/// E1 characterization for AF-18. These tests deliberately describe the
-/// current Usage widget presentation without asserting pixels, fonts, colors,
-/// or private SwiftUI runtime reflection. Value assertions pin the derivations
-/// owned by the presentation policy; an AppKit accessibility smoke mounts each
-/// size tier and validates its AX tree whenever the XCTest host exposes one.
-/// The latter is intentionally conditional: this process has no accessibility
-/// server, so semantic VoiceOver verification remains a real-device gate.
+/// Characterizes usage presentation through value policy and conditional accessibility-tree checks.
+/// Pixel styling and private SwiftUI reflection are outside this suite's contract.
 @Suite("Monitor Usage presentation characterization", .serialized) @MainActor
 struct MonitorUsagePresentationCharacterizationTests {
     @Test("snapshot policy is SwiftUI-free and owns the quota decisions")
@@ -145,8 +140,6 @@ struct MonitorUsagePresentationCharacterizationTests {
         #expect(MonitorUsagePresentationPolicy.quotaFill(0.90) == .warn)
         #expect(MonitorUsagePresentationPolicy.quotaFill(0.90 + epsilon) == .crit)
 
-        // The helper owns the complete user-facing percent token. A separate
-        // glyph at the call site would therefore duplicate the unit.
         #expect(MonitorUsagePresentationPolicy.wholePercent(-1) == "0%")
         #expect(MonitorUsagePresentationPolicy.wholePercent(0.58) == "58%")
         #expect(MonitorUsagePresentationPolicy.wholePercent(2) == "100%")
@@ -203,8 +196,6 @@ struct MonitorUsagePresentationCharacterizationTests {
             quotaVisible: MonitorUsagePresentationPolicy.quotaVisible(provider),
             aggregatesVisible: MonitorUsagePresentationPolicy.aggregatesVisible(provider),
             costTodayUSD: MonitorUsagePresentationPolicy.filteredCostTodayUSD(usage, provider: provider),
-            // The presentation's TOKENS readout intentionally excludes cache
-            // traffic; keep this policy snapshot aligned with that visible sum.
             tokenTotal: tokens.map { $0.input + $0.output },
             modelNames: MonitorUsagePresentationPolicy.filteredPerModel(usage, provider: provider)?.map(\.model),
             hasCache: MonitorUsagePresentationPolicy.hasCache(usage, provider: provider)
@@ -322,9 +313,6 @@ struct MonitorUsagePresentationCharacterizationTests {
         sourceLocation: SourceLocation = #_sourceLocation
     ) {
         #expect(probe.mounted, "Usage widget did not mount into its NSHostingView")
-        // XCTest hosts frequently have no AX server, which makes AppKit expose an
-        // empty tree. A real VoiceOver run exercises the same assertions; do not
-        // convert this reliable mount smoke back into brittle source matching.
         guard !probe.text.isEmpty else { return }
         for fragment in fragments {
             #expect(

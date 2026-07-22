@@ -1,15 +1,6 @@
 import Foundation
 
 /// Monitor data source for Claude Code sessions.
-///
-/// Discovers `~/.claude/projects/*/*.jsonl` transcripts, tails each with a
-/// `JSONLTailReader`, folds lines through a per-session `ClaudeSessionModel`,
-/// and pushes normalized, privacy-redacted `MonitorAgentSessionState`s into the
-/// hub sink. Process liveness comes from `ClaudeSessionScanner`.
-///
-/// The type is a `final class` (immutable stored state) whose mutable working
-/// set lives entirely inside an internal `actor`, so it is `Sendable` and free
-/// of data races without locks.
 final class ClaudeAgentSource: MonitorDataSource {
     let sourceID = "claude"
 
@@ -24,9 +15,7 @@ final class ClaudeAgentSource: MonitorDataSource {
         self.engine = Engine(rootURL: rootURL, cursorStore: cursorStore)
     }
 
-    /// Reconnects the scanner-owned session identity to a privacy-minimized
-    /// durable aggregate. Cursor resume is enabled only when both halves of the
-    /// same persisted generation can restore a model.
+    /// Reconnects the scanner-owned session identity to a privacy-minimized durable aggregate.
     static func makeTailBootstrap(
         url: URL,
         candidateSessionID: String,
@@ -55,26 +44,18 @@ final class ClaudeAgentSource: MonitorDataSource {
         await engine.stop()
     }
 
-    /// Claude-only usage for today. The integrator composes this into the shared
-    /// `MonitorUsageSnapshot`; this source deliberately never calls
-    /// `sink.updateUsage`.
+    /// Claude-only usage for today.
     func currentUsage() async -> MonitorProviderUsage {
         await engine.currentUsage()
     }
 
-    /// Claude-only usage-ledger fragment (per-model + per-day history over the
-    /// trailing 14-day window, plus burn rates). The integrator merges this with
-    /// the Codex fragment into `MonitorUsageSnapshot.perModel/.dailyActivity/…`.
-    /// Kept separate from `currentUsage()` because `MonitorProviderUsage` has no
-    /// slot for the ledger (see integration notes / contract gap).
+    /// Claude-only usage-ledger fragment (per-model + per-day history over the trailing 14-day window, plus burn rates).
     func currentUsageLedger() async -> MonitorUsageLedgerFragment {
         await engine.currentUsageLedger()
     }
 }
 
-/// Cross-provider usage-ledger fragment a source contributes: per-file daily
-/// buckets (already extracted, ready to roll up) plus its windowed burn rates.
-/// Merged by the integrator across providers so the rollup covers Claude+Codex.
+/// Cross-provider usage-ledger fragment a source contributes: per-file daily buckets (already extracted, ready to roll up) plus its windowed burn rates.
 struct MonitorUsageLedgerFragment: Sendable, Equatable {
     var fileBuckets: [MonitorFileUsageBuckets] = []
     var tokensPerHour: Double?
@@ -91,7 +72,6 @@ private actor Engine {
     private var sink: (any MonitorSnapshotSink)?
     private var pollTask: Task<Void, Never>?
 
-    // Per-session working set, keyed by sessionId.
     private var readers: [String: JSONLTailReader] = [:]
     private var models: [String: ClaudeSessionModel] = [:]
     private var sourceURLs: [String: URL] = [:]
@@ -99,7 +79,6 @@ private actor Engine {
     private var lastScan: Date = .distantPast
     private var consecutiveIOFailures = 0
 
-    // v2 Fleet + usage-ledger state (survives rescans, not per-model rotation).
     private var waitTracker = MonitorFleetWaitTracker()
     private let backfill = MonitorUsageBackfillCache()
     private var burnWindow = MonitorBurnRateWindow()
@@ -130,9 +109,7 @@ private actor Engine {
         let task = pollTask
         pollTask = nil
         task?.cancel()
-        // No producer may mutate the cursor generation after the termination
-        // flush snapshots it. Actor reentrancy lets the cancelled loop finish
-        // its in-flight tick before we clear state and persist the final pair.
+        // No producer may mutate the cursor generation after the termination flush snapshots it.
         if let task { await task.value }
         sink = nil
         readers.removeAll()
@@ -173,7 +150,6 @@ private actor Engine {
             do {
                 let outcome = try reader.poll()
                 if outcome.fileVanished {
-                    // Keep the model for its final ended snapshot; drop the reader.
                     readers[sessionId] = nil
                     if let url = sourceURLs[sessionId] {
                         cursorStore?.remove(for: url)
@@ -181,7 +157,6 @@ private actor Engine {
                     continue
                 }
                 if outcome.didRotate {
-                    // Byte stream restarted: rebuild the accumulator from scratch.
                     models[sessionId] = ClaudeSessionModel(sessionId: sessionId)
                     if let url = sourceURLs[sessionId] {
                         cursorStore?.removeAggregate(for: url)
@@ -252,8 +227,6 @@ private actor Engine {
             sourceURLs[candidate.sessionId] = candidate.url
         }
 
-        // Forget sessions that aged out of the discovery window entirely, so the
-        // working set doesn't grow without bound across a long-lived app.
         for sessionId in Array(models.keys) where !discovered.contains(sessionId) {
             let lastEvent = models[sessionId]?.lastEventAt ?? .distantPast
             if now.timeIntervalSince(lastEvent) > Self.endedRetention {
@@ -276,7 +249,6 @@ private actor Engine {
                 status: state.status,
                 eventTime: state.lastEventAt
             )
-            // Drop long-dead sessions from the surfaced list.
             if state.status == .ended,
                now.timeIntervalSince1970 - state.lastEventAt > Self.endedRetention {
                 continue
@@ -288,9 +260,7 @@ private actor Engine {
         return states
     }
 
-    /// Roll the trailing-14-day per-model/per-day history + burn rates for the
-    /// Claude root. Uses the memoized backfill cache (bounded rescan ≤ every 5 min)
-    /// so no full-history re-read happens per tick.
+    /// Roll the trailing-14-day per-model/per-day history + burn rates for the Claude root.
     func currentUsageLedger() -> MonitorUsageLedgerFragment {
         let now = Date()
         let buckets: [MonitorFileUsageBuckets]
@@ -301,7 +271,6 @@ private actor Engine {
             buckets = backfill.cachedBuckets()
         }
 
-        // Burn-rate window rides on today's live token/cost totals.
         let today = currentUsage()
         let todayTokens = today.tokensToday ?? .zero
         let cumulative = todayTokens.input + todayTokens.output + todayTokens.cacheRead + todayTokens.cacheWrite

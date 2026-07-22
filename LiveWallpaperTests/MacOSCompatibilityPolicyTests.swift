@@ -64,9 +64,6 @@ struct MacOSCompatibilityPolicyTests {
         #expect(offenders.isEmpty, Comment(rawValue: offenders.joined(separator: "\n")))
     }
 
-    // MARK: - Helpers
-
-    /// Strip `// …` line comments so explanatory notes like `// macOS 26 Liquid Glass` don't false-positive.
     private func stripLineComments(_ source: String) -> String {
         source
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -77,7 +74,6 @@ struct MacOSCompatibilityPolicyTests {
             .joined(separator: "\n")
     }
 
-    /// Returns the first `//` that begins a real line comment, skipping `//` nested inside `"…"` string literals.
     private func lineCommentStart(in line: Substring) -> Substring.Index? {
         var inString = false
         var escaped = false

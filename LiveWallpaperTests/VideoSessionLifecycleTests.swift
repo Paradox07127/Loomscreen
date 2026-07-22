@@ -5,11 +5,6 @@ import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
-/// Validates the policy-side of the video lifecycle: WallpaperPolicyEngine
-/// pure-function decisions and the `VideoWallpaperSession` intent state
-/// machine. The runtime-side (real AVPlayer playback) is exercised manually;
-/// these tests guarantee the decision layer that ScreenManager +
-/// PlaybackCoordinator rely on cannot regress silently.
 @Suite("Video session lifecycle policy")
 @MainActor
 struct VideoSessionLifecycleTests {
@@ -87,10 +82,6 @@ struct VideoSessionLifecycleTests {
 
     // MARK: - VideoWallpaperSession intent state machine (single authority)
 
-    /// Asserts the core safety invariant: a performance-policy profile NEVER
-    /// mutates `userIntendsToPlay`; only manual play/pause do. Uses a player
-    /// built with `loadImmediately: false` so no AVPlayer/window is created —
-    /// the intent flag is synchronous and independent of real playback.
     @Test("Policy profiles never mutate intent; manual play/pause own it")
     func videoIntentStateMachine() {
         let player = WallpaperVideoPlayer(
@@ -111,7 +102,6 @@ struct VideoSessionLifecycleTests {
         session.pause()
         #expect(!session.userIntendsToPlay)
 
-        // A policy `.quality` must NOT resume a manually-paused video.
         session.applyPerformanceProfile(.suspended)
         #expect(!session.userIntendsToPlay)
         session.applyPerformanceProfile(.quality)

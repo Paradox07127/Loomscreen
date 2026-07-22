@@ -4,11 +4,7 @@ import IOKit
 import IOKit.ps
 import Metal
 
-/// Stateless C-API plumbing behind `SystemMetricsSource`. Every reading is a
-/// read-only kernel / IOKit / sysctl query that works inside the App Sandbox; a
-/// sampler that finds nothing returns `nil`/`0` rather than throwing, so one dead
-/// probe never sinks the whole snapshot. Rate-style samplers take the previous raw
-/// counters and the elapsed interval and return a per-second rate.
+/// Stateless C-API plumbing behind `SystemMetricsSource`.
 enum SystemMetricsSamplers {
 
     // MARK: - CPU (total + per-core)
@@ -34,9 +30,7 @@ enum SystemMetricsSamplers {
         var perCore: [CPUTicks]
     }
 
-    /// Reads `host_processor_info(PROCESSOR_CPU_LOAD_INFO)` and diffs against the
-    /// previous read to get busy-fraction total + per-core. First call (no `previous`)
-    /// returns zeros but captures the baseline counters for the next interval.
+    /// Reads `host_processor_info(PROCESSOR_CPU_LOAD_INFO)` and diffs against the previous read to get busy-fraction total + per-core.
     static func sampleCPU(previous: CPURawCounters?) -> (sample: CPUSample, counters: CPURawCounters) {
         var cpuCount: natural_t = 0
         var infoArray: processor_info_array_t?
@@ -115,13 +109,7 @@ enum SystemMetricsSamplers {
 
     // MARK: - CPU identity (sampled once; topology is fixed for the boot)
 
-    /// Reads `machdep.cpu.brand_string` + `hw.physicalcpu` + the `hw.perflevelN.*`
-    /// topology. Each of `hw.nperflevels` levels contributes a group named by its
-    /// real `hw.perflevelN.name` string — these vary by chip generation (M5 Pro:
-    /// "Super"/"Performance"; older: "Performance"/"Efficiency") so the name is stored
-    /// verbatim rather than forced into a "P"/"E" binary. If the name sysctl is
-    /// unavailable (e.g. Intel) a single "CPU" group holds `hw.physicalcpu`. Never
-    /// throws — a missing field just drops out.
+    /// Reads `machdep.cpu.brand_string` + `hw.physicalcpu` + the `hw.perflevelN.*` topology.
     static func sampleCPUInfo() -> MonitorCPUInfo {
         let deviceName = sysctlString("machdep.cpu.brand_string")
         let coreCount = sysctlInt("hw.physicalcpu")
@@ -161,13 +149,7 @@ enum SystemMetricsSamplers {
         var breakdown: MonitorMemoryBreakdown?
     }
 
-    /// Derives the Activity-Monitor breakdown from a `vm_statistics64` struct + page
-    /// size. Extracted so the (page-arithmetic) logic is unit-testable without a live
-    /// `host_statistics64` call. All arithmetic is saturating on the page counts.
-    ///
-    /// - App = internal − purgeable, Wired = wire, Compressed = compressor,
-    ///   Cached Files = external + purgeable. "Memory Used" (Activity Monitor) =
-    ///   App + Wired + Compressed.
+    /// Derives the Activity-Monitor breakdown from a `vm_statistics64` struct + page size.
     static func memoryBreakdown(from stats: vm_statistics64_data_t, pageSize: UInt64) -> MonitorMemoryBreakdown {
         let internalPages = UInt64(stats.internal_page_count)
         let purgeablePages = UInt64(stats.purgeable_count)
@@ -201,8 +183,6 @@ enum SystemMetricsSamplers {
             return MemorySample(usedBytes: 0, totalBytes: total, breakdown: nil)
         }
         let breakdown = memoryBreakdown(from: stats, pageSize: UInt64(pageSize))
-        // Activity Monitor's "Memory Used" = App + Wired + Compressed (was previously
-        // active + wire + compressor, which never matched the value users see).
         let used = breakdown.appBytes &+ breakdown.wiredBytes &+ breakdown.compressedBytes
         return MemorySample(usedBytes: used, totalBytes: total, breakdown: breakdown)
     }
@@ -234,10 +214,7 @@ enum SystemMetricsSamplers {
         sampleGPU().deviceUtil
     }
 
-    /// One IOAccelerator registry walk yields device/renderer/tiler utilization
-    /// (all three keys live in the same `PerformanceStatistics` dictionary) plus the
-    /// `gpu-core-count` property. Each utilization is scaled to 0…1; absent keys stay
-    /// `nil` (best-effort — key names shift across driver / chip generations).
+    /// One IOAccelerator registry walk yields device/renderer/tiler utilization (all three keys live in the same `PerformanceStatistics` dictionary) plus the `gpu-core-count` property.
     static func sampleGPU() -> GPUSample {
         var iterator: io_iterator_t = 0
         let matchDict = IOServiceMatching("IOAccelerator")
@@ -319,10 +296,7 @@ enum SystemMetricsSamplers {
         var interfaces: [InterfaceCounters]
     }
 
-    /// Single getifaddrs walk. AF_LINK rows carry the `if_data` byte/packet/error
-    /// counters (summed into the aggregate and retained per-interface); AF_INET /
-    /// AF_INET6 rows contribute the interface's private textual addresses. Loopback is
-    /// skipped. The aggregate rx/tx matches the previous summed-only behavior exactly.
+    /// Single getifaddrs walk.
     static func sampleNetworkCounters() -> NetworkCountersSample {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0, let first = head else {
@@ -379,9 +353,7 @@ enum SystemMetricsSamplers {
         return NetworkCountersSample(rx: rx, tx: tx, interfaces: interfaces)
     }
 
-    /// Numeric textual form of an AF_INET / AF_INET6 sockaddr (getnameinfo,
-    /// NI_NUMERICHOST). IPv6 link-local scope suffixes (`%en0`) are trimmed for a
-    /// cleaner display value; nil on any resolution failure.
+    /// Numeric textual form of an AF_INET / AF_INET6 sockaddr (getnameinfo, NI_NUMERICHOST).
     private static func interfaceAddressText(_ addr: UnsafeMutablePointer<sockaddr>, family: UInt8) -> String? {
         let length = family == UInt8(AF_INET)
             ? socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -398,11 +370,6 @@ enum SystemMetricsSamplers {
     }
 
     /// Builds `MonitorNetworkInterface` rows from a previous/current counter pair.
-    /// Rates come from byte/packet deltas over the interval; errors/drops are surfaced
-    /// cumulatively. Interfaces with no traffic *and* no cumulative counters *and* no
-    /// address are dropped (dormant), so the list stays to real, interesting links.
-    /// `activeName` (from NWPath) marks `isActive`; when absent the highest-rx-rate
-    /// interface is chosen as a fallback.
     static func networkInterfaces(
         previous: [String: InterfaceCounters],
         current: [InterfaceCounters],
@@ -588,24 +555,14 @@ enum SystemMetricsSamplers {
         var counters: [Int32: ProcessCPUCounters]
     }
 
-    /// Best-effort: enumerates PIDs via `proc_listallpids`, reads task CPU time +
-    /// resident size via `proc_pidinfo(PROC_PIDTASKINFO)`, diffs CPU time against the
-    /// previous counters, then AGGREGATES each process's usage under its top-level
-    /// app (walking the parent chain up to launchd) so a browser's dozen helpers
-    /// read as one "Chrome" row, not a dozen "…Helper" rows. Returns the top `limit`
-    /// apps by summed CPU; with `includeIO` the same walk also diffs each PID's
-    /// `proc_pid_rusage` disk counters (needs the `process-info-rusage` sbpl
-    /// exception) and returns a second list ranked by read+write rate. Any failure
-    /// path yields fewer/no rows, never a crash.
+    /// Samples process CPU, memory, and optional I/O metrics, grouped by top-level application.
     static func sampleTopProcesses(
         previous: [Int32: ProcessCPUCounters],
         interval: TimeInterval,
         limit: Int,
         includeIO: Bool = false
     ) -> TopProcessesResult {
-        // NOTE: under the plain App Sandbox `proc_listallpids` returns 0 (the
-        // `process-info-*` operations are denied); the `temporary-exception.sbpl`
-        // entitlement (process-info-listpids/pidinfo) unblocks this walk.
+        // NOTE: under the plain App Sandbox `proc_listallpids` returns 0 (the `process-info-*` operations are denied); the `temporary-exception.sbpl` entitlement (process-info-listpids/pidinfo) unblocks this walk.
         let capacity = proc_listallpids(nil, 0)
         guard capacity > 0 else { return TopProcessesResult(samples: [], ioSamples: [], counters: [:]) }
 
@@ -619,7 +576,6 @@ enum SystemMetricsSamplers {
         let seconds = max(interval, 0.001)
         let intervalNanos = seconds * 1_000_000_000
 
-        // Per-PID metrics + parent link, for every readable process.
         var ppidOf: [Int32: Int32] = [:]
         var cpuOf: [Int32: Double] = [:]
         var memOf: [Int32: UInt64] = [:]
@@ -637,7 +593,6 @@ enum SystemMetricsSamplers {
             let totalTime = info.pti_total_user &+ info.pti_total_system
             var counter = ProcessCPUCounters(totalTimeNanos: totalTime)
 
-            // Parent PID (for app aggregation) via the short BSD info record.
             var bsd = proc_bsdshortinfo()
             let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.stride)
             if proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsd, bsdSize) == bsdSize {
@@ -645,10 +600,7 @@ enum SystemMetricsSamplers {
             }
 
             memOf[pid] = info.pti_resident_size
-            // Only a monotonic increase is a real delta: a decrease means the PID
-            // was reused by a new process, so skip it and re-baseline off the value
-            // stored in `counter` this tick (a `&-` underflow would report a bogus
-            // ~100% spike).
+            // A counter decrease indicates PID reuse; re-baseline instead of underflowing.
             if let prev = previous[pid], totalTime >= prev.totalTimeNanos {
                 let delta = totalTime - prev.totalTimeNanos
                 cpuOf[pid] = clamp01(Double(delta) / intervalNanos) * 100.0
@@ -664,9 +616,6 @@ enum SystemMetricsSamplers {
                 if ok == 0 {
                     counter.diskReadBytes = usage.ri_diskio_bytesread
                     counter.diskWrittenBytes = usage.ri_diskio_byteswritten
-                    // A prior sample existing (includeIO is constant for a pipeline's
-                    // life) is the baseline — a 0/0 prev is valid, so don't gate on
-                    // it. Guard monotonicity to skip a reused PID's counter reset.
                     if let prev = previous[pid],
                        usage.ri_diskio_bytesread >= prev.diskReadBytes,
                        usage.ri_diskio_byteswritten >= prev.diskWrittenBytes {
@@ -678,9 +627,6 @@ enum SystemMetricsSamplers {
             counters[pid] = counter
         }
 
-        // Aggregate CPU + memory under each process's top-level app, over ALL
-        // readable PIDs (not just CPU-active ones) so an idle memory hog still
-        // contributes its RSS to its app total.
         var appCPU: [Int32: Double] = [:]
         var appMem: [Int32: UInt64] = [:]
         for pid in memOf.keys {
@@ -689,9 +635,6 @@ enum SystemMetricsSamplers {
             appMem[root, default: 0] += memOf[pid] ?? 0
         }
 
-        // `topProcesses` feeds three widgets that re-rank it: CPU / Processes by
-        // CPU, Memory by RSS. Return the union of the top-by-CPU and top-by-memory
-        // apps so an idle memory hog (0% CPU) still reaches the Memory widget.
         let topCPUKeys = appCPU.filter { $0.value > 0 }
             .sorted { $0.value > $1.value }.prefix(limit).map(\.key)
         let topMemKeys = appMem.sorted { $0.value > $1.value }.prefix(limit).map(\.key)
@@ -705,9 +648,6 @@ enum SystemMetricsSamplers {
             )
         }
 
-        // Disk I/O ranking: same per-app roll-up, ordered by read+write rate.
-        // `ioReadOf`/`ioWriteOf` are populated as a pair (both set inside the same
-        // guard), so iterating the read keys covers every I/O-active PID.
         var ioSamples: [MonitorProcessSample] = []
         if includeIO {
             var appRead: [Int32: Double] = [:]
@@ -735,10 +675,7 @@ enum SystemMetricsSamplers {
         return TopProcessesResult(samples: samples, ioSamples: ioSamples, counters: counters)
     }
 
-    /// The top-level app PID a process rolls up to: walk the parent chain until the
-    /// parent is launchd (1), unknown, or self — so an app's helpers/XPC children
-    /// aggregate under it, while a launchd-parented process stays itself. Bounded to
-    /// guard against pathological/cyclic parent links.
+    /// Finds the application PID used to aggregate helper-process metrics.
     static func topLevelPID(_ pid: Int32, parents: [Int32: Int32]) -> Int32 {
         var current = pid
         var hops = 0
@@ -750,8 +687,6 @@ enum SystemMetricsSamplers {
     }
 
     private static func processName(pid: Int32) -> String {
-        // `PROC_PIDPATHINFO_MAXSIZE` isn't importable into Swift (macro marked
-        // unavailable); a process name fits comfortably in MAXPATHLEN bytes.
         var buffer = [UInt8](repeating: 0, count: 1024)
         let length = proc_name(pid, &buffer, UInt32(buffer.count))
         if length > 0 {
@@ -763,10 +698,7 @@ enum SystemMetricsSamplers {
 
     // MARK: - Accessory batteries (IORegistry HID)
 
-    /// Walks `AppleDeviceManagementHIDEventService` registry entries for a
-    /// `BatteryPercent` property (Magic Mouse / Keyboard / Trackpad). Only real
-    /// readings are returned — never fabricated. AirPods report through a different
-    /// path and simply won't appear here (acceptable).
+    /// Walks `AppleDeviceManagementHIDEventService` registry entries for a `BatteryPercent` property (Magic Mouse / Keyboard / Trackpad).
     static func sampleAccessoryBatteries() -> [MonitorAccessoryBattery] {
         var iterator: io_iterator_t = 0
         let match = IOServiceMatching("AppleDeviceManagementHIDEventService")
@@ -813,10 +745,7 @@ enum SystemMetricsSamplers {
         var active: Bool
     }
 
-    /// Enumerates PIDs and reads `ri_neural_footprint` via
-    /// `proc_pid_rusage(RUSAGE_INFO_V6)` (public, no root, sandbox-safe). Keeps the top
-    /// `limit` processes with footprint > 0; `active` is true if any footprint > 0.
-    /// This walk is not free — call at a ≥5s cadence and only when demanded.
+    /// Enumerates PIDs and reads `ri_neural_footprint` via `proc_pid_rusage(RUSAGE_INFO_V6)` (public, no root, sandbox-safe).
     static func sampleANE(limit: Int = 5) -> ANESample {
         let capacity = proc_listallpids(nil, 0)
         guard capacity > 0 else { return ANESample(processes: [], active: false) }

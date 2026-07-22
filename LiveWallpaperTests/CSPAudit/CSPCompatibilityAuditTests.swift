@@ -2,29 +2,15 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Long-running compatibility audit (~30 s × N projects × M candidates).
-/// Disabled by default — run on demand by passing the
-/// `LW_RUN_CSP_AUDIT=1` environment variable to `swift test` /
-/// `xcodebuild test`.
-///
-/// Plan reference: `docs/2026-05-28-steam-workshop-integration-plan.md`
-/// Phase 0 step 10 ("CSP compatibility audit against real WE web wallpapers").
-///
-/// Output: a structured report dumped to stdout (and to a JSON file under
-/// `~/Library/Logs/Loomscreen/csp-audit-<timestamp>.json` if writable).
-/// The `assertV2PassRate` test asserts ≥ 95 % of corpus projects emit zero
-/// CSP violations under the v2 (currently-shipped) policy.
+/// Runs the opt-in CSP compatibility audit against a local web-wallpaper corpus.
+/// Enable it with `LW_RUN_CSP_AUDIT=1`; the shipping policy must remain violation-free for at least 95% of projects.
 @Suite("CSP compatibility audit (long-running)", .disabled(if: !CSPAuditEnvironment.isEnabled))
 @MainActor
 struct CSPCompatibilityAuditTests {
 
-    /// Default dwell. Plan says 30 s; we keep that for the on-demand full
-    /// corpus pass and let the smoke test override to 3 s.
     static let dwellSeconds: TimeInterval = 30
 
-    /// Skip projects above this size — Steam CDN backed wallpapers can be
-    /// >3 GB and the audit doesn't need fully-rendered output to capture
-    /// CSP violations.
+    /// Caps corpus cost without affecting CSP violation collection.
     static let maxProjectBytes: Int64 = 200 * 1024 * 1024
 
     @Test("v2 (ship config) passes the ≥95 % zero-violation threshold")
@@ -56,11 +42,8 @@ struct CSPCompatibilityAuditTests {
         )
         try? result.writeJSONReport()
         print(result.formatTable())
-        // No assertion — this is a survey, not a gate. The gate is
-        // `assertV2PassRate`.
+        // This matrix is diagnostic; assertV2PassRate is the shipping gate.
     }
-
-    // MARK: - Core runner
 
     private func runAudit(
         corpus: [CSPAuditProject],
@@ -86,11 +69,8 @@ struct CSPCompatibilityAuditTests {
     }
 }
 
-// MARK: - Corpus discovery
-
 enum CSPAuditCorpus {
-    /// Scans `~/Documents/Live Wallpapers/431960/` for `type: web` projects.
-    /// Skips bundles above `maxBytes` to keep the audit tractable.
+    /// Finds web projects in the user's Wallpaper Engine library, excluding bundles above `maxBytes`.
     static func discoverFromUserLibrary(maxBytes: Int64) throws -> [CSPAuditProject] {
         let docs = try FileManager.default.url(
             for: .documentDirectory,
@@ -150,15 +130,11 @@ enum AuditCorpusError: Error {
     case libraryNotFound(String)
 }
 
-// MARK: - Environment toggle
-
 enum CSPAuditEnvironment {
     static var isEnabled: Bool {
         ProcessInfo.processInfo.environment["LW_RUN_CSP_AUDIT"] == "1"
     }
 }
-
-// MARK: - Report
 
 struct CSPAuditReport: Sendable {
     struct PerProject: Sendable {
@@ -253,7 +229,6 @@ struct CSPAuditReport: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// Best-effort — failures are swallowed; the table already went to stdout.
     func writeJSONReport() throws {
         let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let logsDir = FileManager.default

@@ -2,15 +2,7 @@ import Testing
 import Foundation
 @testable import LiveWallpaper
 
-/// Pure-logic tests for the GPU widget: the compute-gap estimate (Device −
-/// Renderer), GPU freshness bucketing (age + stale threshold), the
-/// temperature word band, the Renderer/Tiler history compaction (real
-/// samples only, nil-gaps dropped, absent below 2 points), and the
-/// `historyWindow` settings-option resolver (§3.1 GPU Settings). View
-/// composition is not exercised here.
 struct MonitorGPUWidgetTests {
-
-    // MARK: - historyWindow settings resolution
 
     @Test("a supported historyWindow value (30/60/120) passes through unchanged")
     func historyWindowSupportedValues() {
@@ -32,8 +24,6 @@ struct MonitorGPUWidgetTests {
         #expect(MonitorGPUWidgetView.resolvedHistoryWindowSeconds(9999) == 60)
     }
 
-    // MARK: - compute ≈ Device − Renderer
-
     @Test("compute gap is Device − Renderer as a whole percent")
     func computeGapBasic() {
         #expect(MonitorGPUWidgetView.computePercent(device: 0.52, renderer: 0.41) == 11)
@@ -49,8 +39,6 @@ struct MonitorGPUWidgetTests {
         #expect(MonitorGPUWidgetView.computePercent(device: 0.52, renderer: nil) == nil)
         #expect(MonitorGPUWidgetView.computePercent(device: nil, renderer: 0.41) == nil)
     }
-
-    // MARK: - Freshness bucketing
 
     @Test("freshness age is now − sampledAt in whole seconds")
     func freshnessAge() {
@@ -71,12 +59,9 @@ struct MonitorGPUWidgetTests {
     func freshnessStale() {
         let now = Date(timeIntervalSince1970: 3_000_000)
         #expect(MonitorGPUWidgetView.isStale(sampledAt: 3_000_000 - 20, now: now) == true)
-        // Exactly at the boundary is still fresh; just past it flips to stale.
         #expect(MonitorGPUWidgetView.isStale(sampledAt: 3_000_000 - 15, now: now) == false)
         #expect(MonitorGPUWidgetView.isStale(sampledAt: 3_000_000 - 16, now: now) == true)
     }
-
-    // MARK: - Temperature band
 
     @Test("temperature word band: cool < 48 ≤ warm < 58 ≤ hot")
     func temperatureBand() {
@@ -86,8 +71,6 @@ struct MonitorGPUWidgetTests {
         #expect(MonitorGPUWidgetView.tempLabel(58) == "hot")
         #expect(MonitorGPUWidgetView.tempLabel(72) == "hot")
     }
-
-    // MARK: - Renderer/Tiler history compaction
 
     @Test("all-real series passes through unchanged, in sample order")
     func compactedSeriesAllReal() {
@@ -118,7 +101,6 @@ struct MonitorGPUWidgetTests {
 
     @Test("samples older than the window cutoff are excluded before compaction")
     func compactedSeriesWindowCutoff() {
-        // last = 100; a 30s window keeps only samples with t ≥ 70.
         let times: [Double] = [0, 40, 72, 90, 100]
         let series: [Double?] = [0.9, 0.9, 0.1, 0.2, 0.3]
         #expect(MonitorGPUWidgetView.compactedSeries(series, times: times, windowSeconds: 30) == [0.1, 0.2, 0.3])

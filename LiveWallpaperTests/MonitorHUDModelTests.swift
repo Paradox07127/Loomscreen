@@ -4,8 +4,6 @@ import Testing
 @Suite("Monitor HUD model")
 struct MonitorHUDModelTests {
 
-    // MARK: - Builders
-
     private func session(
         id: String,
         provider: MonitorAgentProvider = .claude,
@@ -38,8 +36,6 @@ struct MonitorHUDModelTests {
         return snap
     }
 
-    // MARK: - Empty / no-sessions
-
     @Test("nil snapshot yields the empty model")
     func nilSnapshotIsEmpty() {
         let model = MonitorHUDModel.make(from: nil, now: 1000, lastPublishAt: nil)
@@ -67,8 +63,6 @@ struct MonitorHUDModelTests {
         #expect(model.providerDots.isEmpty)
         #expect(model.presentation == .collapsed)
     }
-
-    // MARK: - Aggregate selection
 
     @Test("needsInput dominates running in the aggregate")
     func needsInputDominates() {
@@ -127,8 +121,6 @@ struct MonitorHUDModelTests {
         #expect(model.presentation == .collapsed)
     }
 
-    // MARK: - Blocked selection (priority then recency)
-
     @Test("blocked selection picks the most recent among blocked sessions")
     func blockedPicksMostRecent() {
         let model = MonitorHUDModel.make(
@@ -167,8 +159,6 @@ struct MonitorHUDModelTests {
         #expect(model.blocked == nil)
     }
 
-    // MARK: - Provider dots
-
     @Test("one dot per provider present, coloured by highest-priority status")
     func providerDotsDedupePerProvider() {
         let model = MonitorHUDModel.make(
@@ -183,12 +173,9 @@ struct MonitorHUDModelTests {
         #expect(model.providerDots.count == 2)
         let claude = model.providerDots.first { $0.provider == .claude }
         let codex = model.providerDots.first { $0.provider == .codex }
-        // Claude's most urgent live session is running (beats idle).
         #expect(claude?.status == .running)
         #expect(codex?.status == .needsInput)
     }
-
-    // MARK: - Stale detection
 
     @Test("fresh publish is not stale")
     func freshIsNotStale() {
@@ -226,8 +213,6 @@ struct MonitorHUDModelTests {
         #expect(model.isStale == true)
     }
 
-    // MARK: - Glow decay
-
     @Test("glow stays full before the decay threshold")
     func glowFullEarly() {
         let model = MonitorHUDModel.make(
@@ -248,12 +233,8 @@ struct MonitorHUDModelTests {
         #expect(model.blocked?.glowIntensity == 0.5)
     }
 
-    // MARK: - Wait duration (waitSince clock)
-
     @Test("waiting seconds derive from waitSince, not lastEventAt")
     func waitingSecondsUsesWaitSince() {
-        // waitSince is far older than lastEventAt; the wait clock must win so the
-        // HUD shows how long the session has actually been blocked.
         let model = MonitorHUDModel.make(
             from: snapshot([
                 session(id: "a", status: .needsInput, lastEventAt: 1180, waitSince: 1000)
@@ -276,12 +257,8 @@ struct MonitorHUDModelTests {
         #expect(model.blocked?.waitingSeconds == 150)
     }
 
-    // MARK: - Blocked selection: oldest wait first
-
     @Test("blocked selection prefers the oldest wait when waitSince present")
     func blockedPrefersOldestWait() {
-        // Two blocked sessions with wait clocks: the one waiting LONGEST (older
-        // waitSince) is the most urgent, regardless of lastEventAt recency.
         let model = MonitorHUDModel.make(
             from: snapshot([
                 session(id: "recent", project: "recent-proj", status: .needsInput,
@@ -301,10 +278,8 @@ struct MonitorHUDModelTests {
     func waitClockOutranksMissingClock() {
         let model = MonitorHUDModel.make(
             from: snapshot([
-                // No clock but very recent — under the OLD rule this would win.
                 session(id: "noclock", project: "noclock", status: .needsInput,
                         lastEventAt: 1199, waitSince: nil),
-                // Has a clock (older wait) — the authoritative signal wins.
                 session(id: "clock", project: "clock", status: .needsInput,
                         lastEventAt: 1100, waitSince: 1050)
             ]),
@@ -313,8 +288,6 @@ struct MonitorHUDModelTests {
         )
         #expect(model.blocked?.sessionID == "clock")
     }
-
-    // MARK: - Warning surfacing + priority
 
     @Test("fleet warning surfaces from a warned running session (no block)")
     func fleetWarningFromRunning() {
@@ -326,7 +299,6 @@ struct MonitorHUDModelTests {
             now: 1000,
             lastPublishAt: 1000
         )
-        // A warned-but-running fleet flags itself even though nothing is blocked.
         #expect(model.warning == .stale)
         #expect(model.presentation == .collapsed)
         #expect(model.blocked == nil)
@@ -380,8 +352,6 @@ struct MonitorHUDModelTests {
         #expect(model.blocked?.warning == .toolLoop)
     }
 
-    // MARK: - Context pressure threshold gate
-
     @Test("context pressure hint hidden below the threshold")
     func contextPressureBelowThreshold() {
         let model = MonitorHUDModel.make(
@@ -429,8 +399,6 @@ struct MonitorHUDModelTests {
         #expect(model.blocked?.showsContextPressure == false)
     }
 
-    // MARK: - Priority ordering with mixed states
-
     @Test("mixed fleet: needsInput selected, warning surfaced, oldest wait wins")
     func mixedStatesPriority() {
         let model = MonitorHUDModel.make(
@@ -445,13 +413,10 @@ struct MonitorHUDModelTests {
             now: 1200,
             lastPublishAt: 1200
         )
-        // needsInput dominates the aggregate/presentation.
         #expect(model.aggregate == .needsInput(2))
         #expect(model.presentation == .needsInput)
-        // Oldest wait is surfaced, with its own context pressure.
         #expect(model.blocked?.sessionID == "wait-old")
         #expect(model.blocked?.showsContextPressure == true)
-        // The running session's tool-loop still flags the collapsed row.
         #expect(model.warning == .toolLoop)
     }
 }

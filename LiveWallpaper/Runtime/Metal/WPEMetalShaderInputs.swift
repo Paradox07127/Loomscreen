@@ -107,7 +107,7 @@ enum WPEMetalShaderInputs {
 
     /// True for `_rt_*` names that WPE's runtime aliases to the live scene texture rather
     /// than a discrete FBO allocation. Forwards to the canonical single source of truth in
-    /// the Schema package (shared with the graph builder — ADR-001 B1 list unification).
+    /// the Schema package shared with the graph builder.
     static func isSceneAliasName(_ name: String) -> Bool {
         WPETextureReference.isSceneAliasName(name)
     }

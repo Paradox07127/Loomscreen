@@ -1,19 +1,6 @@
 import SwiftUI
 import LiveWallpaperCore
 
-/// Power widget — a native port of the mock's Power section (index.html §7),
-/// re-laid for Apple's fixed widget frames (S 170×170, M 364×170 → content box
-/// ≈ 138×125 / 332×125 at cellHeight 85). The battery GLYPH is the reading: it
-/// fills to charge level so the shape is legible before the number. A desktop
-/// (no battery) renders a plug badge and an "AC" hero — never a fabricated
-/// 100%. M rides the status word on the hero baseline (the mock's separate
-/// status line doesn't fit the 125pt budget), then a time-to-full / remaining
-/// line (hidden when unknown), Low-Power / thermal chips (only when serious),
-/// and a quiet connected-accessory battery row capped at two rows.
-///
-/// Data honesty (SPEC §3.4): every field is read straight from the snapshot;
-/// missing sensors degrade (no battery → plug, unknown time → line hidden,
-/// no accessories → row absent). No uptime / load / package power.
 struct MonitorPowerWidgetView: View {
     let context: MonitorWidgetContext
 
@@ -66,16 +53,10 @@ struct MonitorPowerWidgetView: View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
         VStack(spacing: max(6, cellHeight * 0.06)) {
             Spacer(minLength: 0)
-            // Glyph sized for the fixed 138pt S content box (mock proportions:
-            // battery aspect 3:1, plug 0.72×) — the old 118×40 left 10pt margins.
             glyph(width: model.hasBattery ? 100 : 72, height: 32)
                 .frame(maxWidth: .infinity)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 hero(size: model.hasBattery ? scale.hero * 0.86 : scale.hero * 0.7)
-                // Status word (Battery/Charging/…) — mock `.klbl`: label-sized,
-                // tracked, uppercase (localized via its catalog key). The longest
-                // word ("Power Adapter") can outrun the 138pt content box; shrink
-                // rather than wrap/clip so it never overlaps the glyph above it.
                 Text(LocalizedStringKey(model.status))
                     .font(MonitorDesign.labelFont(size: scale.label))
                     .tracking(MonitorDesign.labelTracking(size: scale.label))
@@ -95,9 +76,6 @@ struct MonitorPowerWidgetView: View {
     private func mediumBody(cellHeight: CGFloat) -> some View {
         let scale = MonitorDesign.TypeScale(cellHeight: cellHeight)
         let accessories = model.displayAccessories()
-        // Budget vs the fixed 125pt content box: hero row ~53 + chips ~16 +
-        // two accessory rows ~35 + 2×6 spacing ≈ 116. The mock's 3-line stat
-        // column (hero / status / time) was ~15pt taller and overflowed.
         VStack(alignment: .leading, spacing: max(6, cellHeight * 0.05)) {
             Spacer(minLength: 0)   // mock `.body` justify-content:center
             HStack(alignment: .center, spacing: 10) {
@@ -137,9 +115,7 @@ struct MonitorPowerWidgetView: View {
 
     // MARK: - Pieces
 
-    /// Compact SoC-temperature chip (thermometer glyph + the user's temperature
-    /// unit, band-coloured), shown in the M header's trailing corner when a reading
-    /// is present. Pure data — no new localized strings.
+    /// Compact SoC-temperature chip (thermometer glyph + the user's temperature unit, band-coloured), shown in the M header's trailing corner when a reading is present.
     @ViewBuilder
     private func temperatureChip(scale: MonitorDesign.TypeScale) -> some View {
         if let temp = socTempC {
@@ -200,7 +176,6 @@ struct MonitorPowerWidgetView: View {
                 .font(.system(size: size, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(MonitorDesign.inkPrimary)
-            // "to full" / "remaining" — a word, localized via its catalog key.
             Text(LocalizedStringKey(time.suffix))
                 .font(.system(size: size, weight: .regular, design: .rounded))
                 .foregroundStyle(MonitorDesign.inkMuted)
@@ -209,11 +184,6 @@ struct MonitorPowerWidgetView: View {
         .minimumScaleFactor(0.7)
     }
 
-    /// Mock `.pill.warn` — the same chip Network's `constrained`/`expensive`
-    /// pills use, plus the `.pdot` (mock `--run`, i.e. amber, not coral: LPM/
-    /// thermal are cautions, not failures). Padding matches `.monitorChip`'s
-    /// proportions (board-wide chip shape) but keeps its own amber tint since
-    /// the fill/stroke carry the warning semantics.
     @ViewBuilder
     private func warnChip(_ chip: MonitorPowerModel.WarnChip, size: CGFloat) -> some View {
         HStack(spacing: 5) {
@@ -300,10 +270,6 @@ struct MonitorPowerWidgetView: View {
 
 // MARK: - View-model (pure logic; unit-tested)
 
-/// Pure derivation of the Power widget's presentation from a system snapshot.
-/// Mirrors the mock JS (`battClass` / `powStatus` / `powTimeLine` / `accRow`),
-/// adapted to the Swift contract where `powerSource` is `battery|ac|ups` and a
-/// desktop reports `batteryLevel == nil` (mock's `powerSource:"none"`).
 struct MonitorPowerModel {
     let level: Double?
     let charging: Bool
@@ -337,7 +303,6 @@ struct MonitorPowerModel {
         return Int((min(1, max(0, level)) * 100).rounded())
     }
 
-    /// Status word (mock `powStatus`): Battery / Power Adapter / Charging / Charged.
     var status: String {
         if !hasBattery { return "Power Adapter" }
         if charged { return "Charged" }
@@ -348,10 +313,6 @@ struct MonitorPowerModel {
 
     struct TimeLine { let value: String; let suffix: String }
 
-    /// The time line (mock `powTimeLine`): "Xh Ym to full" while charging,
-    /// "Xh Ym remaining" while discharging, or nil (hidden) when unknown.
-    /// Minutes are converted to seconds so the shared `MonitorFormat.countdown`
-    /// port produces the SPEC §3.1 wording.
     var timeLine: TimeLine? {
         if charging, let m = minutesToFull, m > 0 {
             return TimeLine(value: MonitorFormat.countdown(m * 60), suffix: "to full")
@@ -402,10 +363,7 @@ struct MonitorPowerModel {
 
     // MARK: Accessories
 
-    /// M's fixed 125pt content box fits two accessory rows beside the hero row
-    /// and warn chips. When more accessories report, keep the LOWEST-percent
-    /// ones (the rows that need attention), in their original order — dropping
-    /// a critical trackpad to show a healthy mouse would defeat the row.
+    /// M's fixed 125pt content box fits two accessory rows beside the hero row and warn chips.
     func displayAccessories(limit: Int = 2) -> [MonitorAccessoryBattery] {
         guard accessories.count > limit else { return accessories }
         let kept = accessories.enumerated()
@@ -416,8 +374,6 @@ struct MonitorPowerModel {
         return kept.map { accessories[$0] }
     }
 
-    /// SF Symbol for an accessory kind (`mouse|keyboard|trackpad|other`), the
-    /// native stand-in for the mock's 🖱️/⌨️ emoji.
     nonisolated static func accessorySymbol(_ kind: String?) -> String {
         switch kind {
         case "mouse":    return "magicmouse"
@@ -429,9 +385,6 @@ struct MonitorPowerModel {
 
     struct AccessoryTint { let barGradient: [Color]; let label: Color }
 
-    /// Accessory battery tint: healthy flat sage, low(<20) amber-ramp, crit(<10)
-    /// run→need ramp — mirrors mock `.accrow.low/.crit .abar i` gradients exactly
-    /// (and their `.ap` label colours).
     nonisolated static func accessoryTint(_ percent: Double) -> AccessoryTint {
         if percent < 10 {
             return AccessoryTint(barGradient: [MonitorDesign.signalAmber, MonitorDesign.signalCoral],
@@ -500,7 +453,6 @@ private func desktopSystem() -> MonitorSystemSnapshot {
     return s
 }
 
-// Preview frames are Apple's official visible widget frames: S 170×170, M 364×170.
 
 #Preview("Power · S") {
     HStack(spacing: 24) {

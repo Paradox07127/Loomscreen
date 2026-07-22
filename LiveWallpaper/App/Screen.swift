@@ -95,7 +95,6 @@ final class Screen: Identifiable, Hashable {
         return runtimeSession?.summary ?? .notConfigured
     }
 
-    /// Install a new session, cleaning up the previous one immediately.
     func installRuntimeSession(_ session: any WallpaperRuntimeSession) {
         guard !isSameSession(runtimeSession, session) else { return }
         let old = runtimeSession
